@@ -1,0 +1,118 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  firmware:
+    name: firmware (PlatformIO build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Provide example secrets header
+        run: cp firmware/include/secrets.h.example firmware/include/secrets.h
+
+      - name: Build esp32dev
+        run: pio run -e esp32dev
+
+  app:
+    name: app + daemon (Xcode build + self-test)
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install build tools
+        run: brew install xcodegen xcbeautify
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Swift format lint
+        working-directory: ${{ github.workspace }}
+        run: |
+          xcrun swift-format lint --recursive --strict \
+            app/Sissy app/SissyServer app/SissyTests
+
+      - name: Build daemon
+        run: |
+          set -o pipefail
+          xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+            -configuration Debug build CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Daemon self-test
+        run: |
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+            -configuration Debug -showBuildSettings 2>/dev/null \
+            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
+          "$DD/sissy-serverd" --self-test
+
+      - name: Codex parser smoke (--scan against fixture)
+        run: |
+          # End-to-end check that the daemon's Codex parser produces a
+          # deterministic token total on a known fixture. The fixture is
+          # generated inline with a fresh timestamp so it never ages out of
+          # the retain window. Asserts the field-mapping math (uncached =
+          # input - cached, output += reasoning) one more time at the CLI
+          # surface — pure unit coverage already lives in --self-test.
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+            -configuration Debug -showBuildSettings 2>/dev/null \
+            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
+          FIXTURE_HOME="$RUNNER_TEMP/codex-home"
+          mkdir -p "$FIXTURE_HOME/sessions/2026/05/25"
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          cat > "$FIXTURE_HOME/sessions/2026/05/25/rollout-fixture.jsonl" <<JSONL
+          {"type":"session_meta","timestamp":"$NOW","payload":{"id":"fixture","timestamp":"$NOW","model_provider":"openai"}}
+          {"type":"turn_context","timestamp":"$NOW","payload":{"turn_id":"t1","model":"gpt-5-codex"}}
+          {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":0,"total_tokens":14658},"total_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":0,"total_tokens":14658}}}}
+          {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":28035,"cached_input_tokens":9600,"output_tokens":546,"reasoning_output_tokens":66,"total_tokens":28581},"total_token_usage":{"input_tokens":42332,"cached_input_tokens":19200,"output_tokens":907,"reasoning_output_tokens":66,"total_tokens":43239}}}}
+          JSONL
+          # Sum: event1 (4697+361+9600) + event2 (18435+612+9600) = 43_305
+          EXPECTED=43305
+          OUT=$(CODEX_HOME="$FIXTURE_HOME" "$DD/sissy-serverd" --scan --scan-provider codex)
+          echo "$OUT"
+          GOT=$(echo "$OUT" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['codex']['tokens'])")
+          if [ "$GOT" != "$EXPECTED" ]; then
+            echo "Codex parser drift: expected $EXPECTED, got $GOT" >&2
+            exit 1
+          fi
+
+      - name: Build app
+        run: |
+          set -o pipefail
+          xcodebuild -project Sissy.xcodeproj -scheme Sissy \
+            -configuration Debug build CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          xcodebuild -project Sissy.xcodeproj -scheme Sissy \
+            -configuration Debug -destination 'platform=macOS' \
+            test CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions

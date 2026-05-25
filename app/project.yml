@@ -1,0 +1,136 @@
+name: Sissy
+options:
+  bundleIdPrefix: com.radonforge
+  deploymentTarget:
+    macOS: "26.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: AS75YRKL95
+    # Swift 6 with complete strict concurrency. Project targets macOS 26+
+    # so there's no toolchain reason to stay on Swift 5; making the
+    # Sendable / isolation checks errors at compile time is what catches
+    # the data races that a runtime smoke test would miss.
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+packages:
+  SwiftNIO:
+    url: https://github.com/apple/swift-nio
+    exactVersion: "2.65.0"
+
+targets:
+  Sissy:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - Sissy
+      - path: ServiceManagement/com.radonforge.sissy.server.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
+      # Dev plist bundled alongside release plist. Both ship in every build;
+      # the app picks the right one at runtime via Bundle.main.bundleIdentifier
+      # so the Debug bundle (`.dev` suffix) registers its own LaunchAgent
+      # without colliding with a release Sissy.app on the same machine.
+      - path: ServiceManagement/com.radonforge.sissy.server.dev.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
+    dependencies:
+      - target: sissy-serverd
+        copy:
+          destination: executables
+    info:
+      path: Sissy/Info.plist
+      properties:
+        CFBundleDisplayName: Sissy
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "26.0"
+        LSUIElement: true
+        NSHumanReadableCopyright: "Copyright © 2026 Smyile. MIT licensed."
+        NSLocalNetworkUsageDescription: "Sissy connects to the paired Sissy device on your local network to mirror token usage to the OLED."
+        NSLocationUsageDescription: "Sissy uses your location to read nearby Wi-Fi network names so you can pick one when pairing a device. No location data leaves your Mac."
+        NSLocationWhenInUseUsageDescription: "Sissy uses your location to read nearby Wi-Fi network names so you can pick one when pairing a device. No location data leaves your Mac."
+    entitlements:
+      path: Sissy/Sissy.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.device.usb: true
+        com.apple.security.network.client: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy
+        PRODUCT_NAME: Sissy
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+      configs:
+        # `.dev` bundle id on Debug so a release Sissy.app and a locally
+        # built dev Sissy.app can coexist — different LaunchAgent label,
+        # different Application Support subdir, different default port.
+        # Release keeps the canonical bundle id so existing installs
+        # upgrade cleanly.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.dev
+
+  SissyTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - SissyTests
+    dependencies:
+      - target: Sissy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.tests
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Sissy.app/Contents/MacOS/Sissy"
+
+  sissy-serverd:
+    type: tool
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - SissyServer
+    dependencies:
+      - package: SwiftNIO
+        product: NIOCore
+      - package: SwiftNIO
+        product: NIOPosix
+      - package: SwiftNIO
+        product: NIOHTTP1
+      - package: SwiftNIO
+        product: NIOWebSocket
+      - package: SwiftNIO
+        product: NIOFoundationCompat
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.server
+        PRODUCT_NAME: sissy-serverd
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: SissyServer/Info.plist
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        SKIP_INSTALL: NO
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+      configs:
+        # Mirror the app target so a Debug daemon bundled into the dev app
+        # carries its own bundle id. The daemon reads
+        # `Bundle.main.bundleIdentifier` from the embedded `__info_plist`
+        # section and uses it to pick the `Sissy-Dev/` support dir.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.server.dev

@@ -1,0 +1,286 @@
+name: release
+
+# Triggers:
+#   - push tag matching v* (e.g. v0.3.0)  → build + notarize + publish GitHub Release
+#   - manual dispatch                     → same flow, lets you smoke-test without tagging
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   APPLE_CERT_P12_BASE64   Developer ID Application cert + private key exported as .p12,
+#                           then `base64 -i cert.p12 | pbcopy` → paste as secret.
+#   APPLE_CERT_PASSWORD     Password used when exporting the .p12.
+#   KEYCHAIN_PASSWORD       Any string — used to lock the throwaway runner keychain.
+#   APPLE_ID                Apple ID email of the account that owns the RadonForge team.
+#   APPLE_TEAM_ID           AS75YRKL95
+#   APPLE_APP_PASSWORD      App-specific password from appleid.apple.com → Sign-In and
+#                           Security → App-Specific Passwords. (Tied to APPLE_ID.)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (without leading v). Defaults to project.yml MARKETING_VERSION."
+        required: false
+        default: ""
+      dry_run:
+        description: "Skip notarization + release upload (cert import + build + sign only)."
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # macos-26 matches the deployment target in app/project.yml and the
+    # CI workflow's lane so the release binary is exercised on the same
+    # OS/toolchain combo we test against.
+    runs-on: macos-26
+    env:
+      SCHEME: Sissy
+      SIGN_IDENTITY: "Developer ID Application"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            v="${{ inputs.version }}"
+          else
+            v="$(awk '/MARKETING_VERSION/ {gsub(/"/, "", $2); print $2; exit}' app/project.yml)"
+          fi
+          [[ -n "$v" ]] || { echo "could not determine version" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $v"
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install build tools
+        run: brew install xcodegen create-dmg xcbeautify
+
+      - name: Import signing certificate
+        env:
+          CERT_P12_B64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/sissy-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          echo -n "$CERT_P12_B64" | base64 --decode --output "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 7200 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          # Allow codesign to use the key non-interactively
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # Put our keychain first in the search list (login keychain still present)
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | tr -d '"')
+          rm -f "$CERT_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep -q "$SIGN_IDENTITY" \
+            || { echo "imported keychain has no Developer ID cert" >&2; exit 1; }
+
+      - name: Generate Xcode project
+        working-directory: app
+        run: xcodegen generate
+
+      - name: Swift format lint
+        run: |
+          xcrun swift-format lint --recursive --strict \
+            app/Sissy app/SissyServer app/SissyTests
+
+      # Test gates duplicated from ci.yml so a release tag can never
+      # ship behind a green CI run that didn't include the latest
+      # commit. Cheap (<5 min) compared to the cost of shipping a DMG
+      # that fails its own --self-test.
+      - name: Build daemon (Debug)
+        working-directory: app
+        run: |
+          set -o pipefail
+          xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+            -configuration Debug build CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Daemon self-test
+        working-directory: app
+        run: |
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+            -configuration Debug -showBuildSettings 2>/dev/null \
+            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
+          "$DD/sissy-serverd" --self-test
+
+      - name: Codex parser smoke (--scan against fixture)
+        working-directory: app
+        run: |
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+            -configuration Debug -showBuildSettings 2>/dev/null \
+            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
+          FIXTURE_HOME="$RUNNER_TEMP/codex-home"
+          mkdir -p "$FIXTURE_HOME/sessions/2026/05/25"
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          cat > "$FIXTURE_HOME/sessions/2026/05/25/rollout-fixture.jsonl" <<JSONL
+          {"type":"session_meta","timestamp":"$NOW","payload":{"id":"fixture","timestamp":"$NOW","model_provider":"openai"}}
+          {"type":"turn_context","timestamp":"$NOW","payload":{"turn_id":"t1","model":"gpt-5-codex"}}
+          {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":0,"total_tokens":14658},"total_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":0,"total_tokens":14658}}}}
+          {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":28035,"cached_input_tokens":9600,"output_tokens":546,"reasoning_output_tokens":66,"total_tokens":28581},"total_token_usage":{"input_tokens":42332,"cached_input_tokens":19200,"output_tokens":907,"reasoning_output_tokens":66,"total_tokens":43239}}}}
+          JSONL
+          EXPECTED=43305
+          OUT=$(CODEX_HOME="$FIXTURE_HOME" "$DD/sissy-serverd" --scan --scan-provider codex)
+          echo "$OUT"
+          GOT=$(echo "$OUT" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['codex']['tokens'])")
+          [ "$GOT" = "$EXPECTED" ] || { echo "Codex parser drift: expected $EXPECTED, got $GOT" >&2; exit 1; }
+
+      - name: Unit tests (Debug)
+        working-directory: app
+        run: |
+          set -o pipefail
+          xcodebuild -project Sissy.xcodeproj -scheme Sissy \
+            -configuration Debug -destination 'platform=macOS' \
+            test CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Firmware build (PlatformIO)
+        run: |
+          python -m pip install --upgrade platformio
+          cp firmware/include/secrets.h.example firmware/include/secrets.h
+          pio run -e esp32dev
+
+      - name: Build Release
+        working-directory: app
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Sissy.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
+            MARKETING_VERSION="$VERSION" \
+            build | xcbeautify --renderer github-actions
+
+      - name: Verify code signature
+        working-directory: app
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release/Sissy.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # Authority check beats team-id alone — a Mac Development cert
+          # also carries the team id but cannot be notarized.
+          codesign -dvvv "$APP" 2>&1 | tee /tmp/sign-app.txt >/dev/null
+          grep -q "Authority=$SIGN_IDENTITY" /tmp/sign-app.txt \
+            || { echo "app not signed with '$SIGN_IDENTITY' authority" >&2; exit 1; }
+          codesign -dv --verbose=2 "$APP/Contents/MacOS/sissy-serverd" 2>&1 \
+            | tee /tmp/sign-daemon.txt >/dev/null
+          grep -q "$TEAM_ID" /tmp/sign-daemon.txt \
+            || { echo "embedded daemon not signed with team $TEAM_ID" >&2; exit 1; }
+
+      - name: Notarize app
+        if: ${{ inputs.dry_run != 'true' }}
+        working-directory: app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release/Sissy.app"
+          ZIP="$RUNNER_TEMP/Sissy-$VERSION.zip"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          xcrun notarytool submit "$ZIP" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple "$APP"
+          spctl --assess --type execute --verbose=4 "$APP"
+
+      - name: Create DMG
+        working-directory: app
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release/Sissy.app"
+          mkdir -p ../dist
+          DMG="../dist/Sissy-$VERSION.dmg"
+          create-dmg \
+            --volname "Sissy $VERSION" \
+            --window-pos 200 120 \
+            --window-size 540 320 \
+            --icon-size 96 \
+            --icon "Sissy.app" 140 160 \
+            --hide-extension "Sissy.app" \
+            --app-drop-link 400 160 \
+            --no-internet-enable \
+            "$DMG" "$APP"
+
+      - name: Notarize DMG
+        if: ${{ inputs.dry_run != 'true' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          DMG="dist/Sissy-$VERSION.dmg"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple "$DMG"
+
+      - name: Generate checksum
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd dist
+          shasum -a 256 "Sissy-$VERSION.dmg" > "Sissy-$VERSION.dmg.sha256"
+          cat "Sissy-$VERSION.dmg.sha256"
+
+      - name: Upload artifacts (always, even on dry-run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sissy-${{ steps.version.outputs.version }}
+          path: |
+            dist/Sissy-*.dmg
+            dist/Sissy-*.dmg.sha256
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" \
+            "dist/Sissy-$VERSION.dmg" \
+            "dist/Sissy-$VERSION.dmg.sha256" \
+            --title "Sissy $VERSION" \
+            --generate-notes
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/sissy-signing.keychain-db" || true
