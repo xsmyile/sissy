@@ -122,6 +122,7 @@ jobs:
 
       - name: Codex parser smoke (--scan against fixture)
         working-directory: app
+        timeout-minutes: 3
         run: |
           DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
             -configuration Debug -showBuildSettings 2>/dev/null \
@@ -135,7 +136,9 @@ jobs:
           {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":0,"total_tokens":14658},"total_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":0,"total_tokens":14658}}}}
           {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":28035,"cached_input_tokens":9600,"output_tokens":546,"reasoning_output_tokens":66,"total_tokens":28581},"total_token_usage":{"input_tokens":42332,"cached_input_tokens":19200,"output_tokens":907,"reasoning_output_tokens":66,"total_tokens":43239}}}}
           JSONL
-          EXPECTED=43305
+          # `output` is already gross (includes reasoning); we never re-add it.
+          # Sum: event1 (4697+361+9600) + event2 (18435+546+9600) = 43_239
+          EXPECTED=43239
           OUT=$(CODEX_HOME="$FIXTURE_HOME" "$DD/sissy-serverd" --scan --scan-provider codex)
           echo "$OUT"
           GOT=$(echo "$OUT" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['codex']['tokens'])")
