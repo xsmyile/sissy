@@ -6,12 +6,8 @@ struct StateMapping {
 };
 
 static const StateMapping STATE_MAP[] = {
-    {"code",  MS_CODING},
-    {"sleep", MS_SLEEPING},
-    {"trend", MS_TRENDING},
-    {"think", MS_THINKING},
-    {"glow",  MS_GLOWING},
-    {"angry", MS_ANGRY_COFFEE},
+    {"code", MS_CODING},    {"sleep", MS_SLEEPING}, {"trend", MS_TRENDING},
+    {"think", MS_THINKING}, {"glow", MS_GLOWING},   {"angry", MS_ANGRY_COFFEE},
 };
 static const uint8_t STATE_MAP_LEN = sizeof(STATE_MAP) / sizeof(STATE_MAP[0]);
 

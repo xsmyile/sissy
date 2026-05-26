@@ -9,17 +9,10 @@ static constexpr int SCREEN_H = 64;
 // sprite ships — keeps the array dense (indexable by enum) without a new
 // PNG round-trip.
 static const uint8_t* const SPRITES[MS_COUNT] = {
-    coding,
-    sleeping,
-    trending,
-    thinking,
-    glowing,
-    angry_coffee,
-    sleeping,
+    coding, sleeping, trending, thinking, glowing, angry_coffee, sleeping,
 };
 
-SSD1306Display::SSD1306Display(uint8_t i2cAddr)
-    : _display(SCREEN_W, SCREEN_H, &Wire, -1), _addr(i2cAddr) {}
+SSD1306Display::SSD1306Display(uint8_t i2cAddr) : _display(SCREEN_W, SCREEN_H, &Wire, -1), _addr(i2cAddr) {}
 
 bool SSD1306Display::begin() {
 #if defined(OLED_SDA) && defined(OLED_SCL)

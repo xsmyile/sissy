@@ -44,13 +44,13 @@ static void apply(const String& json) {
     }
 
     RuntimeConfig cfg = ConfigStore::load();
-    cfg.wifiSsid    = String((const char*)(doc["ssid"]    | cfg.wifiSsid.c_str()));
-    cfg.wifiPass    = String((const char*)(doc["pwd"]     | cfg.wifiPass.c_str()));
-    cfg.serverHost  = String((const char*)(doc["server"]["host"]  | cfg.serverHost.c_str()));
+    cfg.wifiSsid = String((const char*)(doc["ssid"] | cfg.wifiSsid.c_str()));
+    cfg.wifiPass = String((const char*)(doc["pwd"] | cfg.wifiPass.c_str()));
+    cfg.serverHost = String((const char*)(doc["server"]["host"] | cfg.serverHost.c_str()));
     long port = doc["server"]["port"] | (long)cfg.serverPort;
     if (port > 0 && port < 65536) cfg.serverPort = static_cast<uint16_t>(port);
-    cfg.serverPath  = String((const char*)(doc["server"]["path"]  | cfg.serverPath.c_str()));
-    cfg.authToken   = String((const char*)(doc["server"]["token"] | cfg.authToken.c_str()));
+    cfg.serverPath = String((const char*)(doc["server"]["path"] | cfg.serverPath.c_str()));
+    cfg.authToken = String((const char*)(doc["server"]["token"] | cfg.authToken.c_str()));
     cfg.otaPassword = String((const char*)(doc["ota"]["password"] | cfg.otaPassword.c_str()));
 
     ConfigStore::save(cfg);

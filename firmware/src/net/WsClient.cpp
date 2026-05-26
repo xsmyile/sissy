@@ -92,8 +92,8 @@ void WsClient::handleText(const String& payload) {
 // Short ceiling keeps the OLED's "back from offline" window predictable —
 // worst-case 10s after the daemon is reachable again, even from deep backoff.
 static constexpr uint32_t WS_BACKOFF_BASE_MS = 1000;
-static constexpr uint32_t WS_BACKOFF_MAX_MS  = 10000;
-static constexpr uint8_t  WS_BACKOFF_MAX_STEPS = 4;  // 1s * 2^4 = 16s, clamp to 10s
+static constexpr uint32_t WS_BACKOFF_MAX_MS = 10000;
+static constexpr uint8_t WS_BACKOFF_MAX_STEPS = 4;  // 1s * 2^4 = 16s, clamp to 10s
 
 uint32_t WsClient::nextBackoffMs() {
     uint32_t shifted = WS_BACKOFF_BASE_MS << _reconnectFailures;
@@ -119,5 +119,9 @@ void WsClient::onDisconnectedInternal() {
     if (_statusCb) _statusCb(false);
 }
 
-void WsClient::sendHelloInternal() { sendHello(); }
-void WsClient::handleTextInternal(const String& s) { handleText(s); }
+void WsClient::sendHelloInternal() {
+    sendHello();
+}
+void WsClient::handleTextInternal(const String& s) {
+    handleText(s);
+}

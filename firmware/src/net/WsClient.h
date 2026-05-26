@@ -6,7 +6,7 @@
 #include "../state/Frame.h"
 
 class WsClient {
-public:
+ public:
     using FrameCallback = std::function<void(const Frame&)>;
     using StatusCallback = std::function<void(bool connected)>;
 
@@ -26,7 +26,7 @@ public:
     void sendHelloInternal();
     void handleTextInternal(const String& s);
 
-private:
+ private:
     void sendHello();
     void handleText(const String& payload);
     uint32_t nextBackoffMs();
