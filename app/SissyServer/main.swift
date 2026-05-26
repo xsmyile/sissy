@@ -58,7 +58,11 @@ if args.contains("--scan") {
         return args[idx + 1]
     }()
     let sem = DispatchSemaphore(value: 0)
-    Task {
+    // `Task.detached` keeps the body off the main actor so `sem.wait()` below
+    // does not block the actor that the body needs to make progress on. Under
+    // Swift 6 strict concurrency, top-level `Task { … }` inherits the main
+    // actor and deadlocks against the semaphore.
+    Task.detached {
         var providers: [any UsageProvider] = []
         if scanFilter == "all" || scanFilter == "claude-code" {
             providers.append(ClaudeCodeUsageReader())
