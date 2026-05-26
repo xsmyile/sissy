@@ -7,6 +7,18 @@ on:
     branches: [main, master]
 
 jobs:
+  lint:
+    name: lint (shellcheck + actionlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+      - name: actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
   firmware:
     name: firmware (PlatformIO build)
     runs-on: ubuntu-latest

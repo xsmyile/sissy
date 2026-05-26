@@ -85,7 +85,8 @@ jobs:
             -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           # Put our keychain first in the search list (login keychain still present)
-          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | tr -d '"')
+          mapfile -t existing_keychains < <(security list-keychain -d user | tr -d '"')
+          security list-keychain -d user -s "$KEYCHAIN_PATH" "${existing_keychains[@]}"
           rm -f "$CERT_PATH"
           security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
             | grep -q "$SIGN_IDENTITY" \
