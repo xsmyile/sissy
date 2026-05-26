@@ -42,7 +42,7 @@ jobs:
       SIGN_IDENTITY: "Developer ID Application"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Determine version
         id: version
@@ -266,7 +266,7 @@ jobs:
           cat "Sissy-$VERSION.dmg.sha256"
 
       - name: Upload artifacts (always, even on dry-run)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Sissy-${{ steps.version.outputs.version }}
           path: |
