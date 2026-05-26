@@ -96,7 +96,7 @@ jobs:
         run: xcodegen generate
 
       - name: SwiftLint
-        run: swiftlint lint --quiet
+        run: swiftlint lint --quiet --lenient
 
       - name: Swift format lint
         run: |

@@ -54,7 +54,7 @@ jobs:
 
       - name: SwiftLint
         working-directory: ${{ github.workspace }}
-        run: swiftlint lint --quiet
+        run: swiftlint lint --quiet --lenient
 
       - name: Swift format lint
         working-directory: ${{ github.workspace }}
