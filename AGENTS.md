@@ -119,6 +119,12 @@ The app drives the bundled daemon's lifecycle via `Server/ServerServiceControlle
 - **Codex token convention.** `CodexUsageReader` uses `last_token_usage` as the per-turn delta (verified against real rollout files — summing `last_token_usage` across events equals the final `total_token_usage` cumulative). `output_tokens` is treated as **gross** (it already includes reasoning); `reasoning_output_tokens` is a sub-breakdown surfaced for observability only, never added to output before pricing. Verified on real rollouts: `total_tokens == input_tokens + output_tokens` regardless of `reasoning_output_tokens`. Same convention ccusage uses, so the two should agree within rounding.
 - **Per-provider persistence.** `ClaudeCodeUsageReader` writes `usage-state.json` (legacy path) for upgrade smoothness; `CodexUsageReader` writes `usage-state-codex.json` via `UsageStatePersistence.forProvider("codex")`. A schema change in one provider can quarantine its snapshot without invalidating the other.
 
+## Local fast feedback (pre-commit)
+
+`pip install pre-commit && pre-commit install` once per clone. Subsequent `git commit` automatically runs `swift-format`, `swiftlint`, `clang-format`, `shellcheck`, `ruff` (check+format), and `actionlint` against changed files. Same tools as CI, no version drift.
+
+`pre-commit run --all-files` runs the full sweep.
+
 ## Quality gates
 
 Consumed by the `/commit` skill. Run before each commit; `--no-checks` to skip.

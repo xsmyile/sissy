@@ -1,0 +1,51 @@
+# Local hooks call tools already on PATH (matches CI exactly: no version drift).
+# Install once per clone:  pre-commit install
+# Run on full tree:        pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      - id: swift-format
+        name: swift-format
+        entry: xcrun swift-format lint --recursive --strict
+        language: system
+        files: ^app/(Sissy|SissyServer|SissyTests)/.*\.swift$
+        pass_filenames: false
+        args: [app/Sissy, app/SissyServer, app/SissyTests]
+
+      - id: swiftlint
+        name: swiftlint
+        entry: swiftlint lint --quiet --lenient
+        language: system
+        files: ^app/(Sissy|SissyServer)/.*\.swift$
+        pass_filenames: false
+
+      - id: clang-format
+        name: clang-format
+        entry: clang-format --dry-run --Werror
+        language: system
+        files: ^firmware/src/.*\.(cpp|h)$
+        exclude: ^firmware/src/sprites_mono\.h$
+
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        files: ^scripts/.*\.sh$
+
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check
+        language: system
+        files: ^scripts/.*\.py$
+
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format --check
+        language: system
+        files: ^scripts/.*\.py$
+
+      - id: actionlint
+        name: actionlint
+        entry: actionlint
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
