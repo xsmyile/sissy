@@ -291,3 +291,88 @@ jobs:
         if: always()
         run: |
           security delete-keychain "$RUNNER_TEMP/sissy-signing.keychain-db" || true
+
+  update-homebrew:
+    name: Update Homebrew tap
+    needs: release
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download DMG and compute SHA
+        id: sha
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "v${VERSION}" \
+            --repo xsmyile/sissy \
+            --pattern "Sissy-${VERSION}.dmg" \
+            --dir assets
+          SHA=$(sha256sum "assets/Sissy-${VERSION}.dmg" | awk '{print $1}')
+          echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew tap
+        uses: actions/checkout@v6
+        with:
+          repository: xsmyile/homebrew-sissy
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Regenerate Casks/sissy.rb
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p Casks
+          rm -f Casks/.gitkeep
+          cat > Casks/sissy.rb << 'CASK'
+          cask "sissy" do
+            version "__VERSION__"
+            sha256 "__SHA256__"
+
+            url "https://github.com/xsmyile/sissy/releases/download/v#{version}/Sissy-#{version}.dmg"
+            name "Sissy"
+            desc "Menubar token usage mascot for Claude Code and Codex"
+            homepage "https://github.com/xsmyile/sissy"
+
+            depends_on macos: ">= :tahoe"
+
+            app "Sissy.app"
+
+            uninstall launchctl: "com.radonforge.sissy.server",
+                      quit:      "com.radonforge.sissy"
+
+            zap trash: [
+              "~/Library/Application Support/Sissy",
+              "~/Library/Preferences/com.radonforge.sissy.plist",
+              "~/Library/Caches/com.radonforge.sissy",
+              "~/Library/LaunchAgents/com.radonforge.sissy.server.plist",
+            ]
+          end
+          CASK
+          sed -i "s/__VERSION__/${VERSION}/g" Casks/sissy.rb
+          sed -i "s/__SHA256__/${SHA256}/g" Casks/sissy.rb
+          cat Casks/sissy.rb
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/sissy.rb
+          if git diff --cached --quiet; then
+            echo "no cask changes — already up to date"
+            exit 0
+          fi
+          git commit -m "sissy ${VERSION}"
+          git push
