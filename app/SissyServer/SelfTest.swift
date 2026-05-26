@@ -102,6 +102,41 @@ func runSelfTest() {
     expect("burn primary", frameBurn.primary, "500K")
     expect("burn label", frameBurn.primaryLabel, "BURN/H")
 
+    // ProviderSlice path: build() passes the array through verbatim and
+    // sortProviders enforces the canonical wire order (claude-code, codex,
+    // alphabetical). This is the contract `rebuildAndBroadcast` and the
+    // app's `headerSubtitle` both depend on.
+    let unordered = [
+        ProviderSlice(id: "codex", tokens: 200, cost: Decimal(string: "1.50")!),
+        ProviderSlice(id: "zzz", tokens: 1, cost: 0),
+        ProviderSlice(id: "claude-code", tokens: 100, cost: Decimal(string: "2.00")!),
+    ]
+    let sorted = FrameBuilder.sortProviders(unordered)
+    expect("provider order [0]", sorted[0].id, "claude-code")
+    expect("provider order [1]", sorted[1].id, "codex")
+    expect("provider order [2]", sorted[2].id, "zzz")
+    let frameWithProviders = FrameBuilder.build(
+        today: DayTotals(totalTokens: 301, totalCost: Decimal(string: "3.50")!),
+        prev: nil,
+        hoursElapsed: 1,
+        primaryMetric: .tokens,
+        providers: sorted
+    )
+    expect("frame providers count", frameWithProviders.providers.count, 3)
+    expect("frame providers head id", frameWithProviders.providers.first?.id, "claude-code")
+    expect("frame providers head tokens", frameWithProviders.providers.first?.tokens, 100)
+    expect("frame providers head cost", frameWithProviders.providers.first?.cost, Decimal(string: "2.00")!)
+    let frameNoProviders = FrameBuilder.build(
+        today: DayTotals(totalTokens: 0, totalCost: 0),
+        prev: nil,
+        hoursElapsed: 1,
+        primaryMetric: .tokens
+    )
+    expect("frame providers empty default", frameNoProviders.providers.isEmpty, true)
+
+    print("=== Hub.encode ===")
+    runHubEncodeTests()
+
     print("=== Pricing ===")
 
     // claude-opus-4 (deprecated) bills at $15/$75 — the row we ship matches
@@ -216,6 +251,63 @@ func runSelfTest() {
         for f in failures { print("  - \(f)") }
         exit(1)
     }
+}
+
+/// Round-trip a `FrameData` through `Hub.broadcast` and inspect the encoded
+/// payload via a captive sink. Guarantees the wire shape app + firmware both
+/// parse against stays in lock-step with what `FrameBuilder` produces.
+private func runHubEncodeTests() {
+    final class CapturingSink: FrameSink, @unchecked Sendable {
+        let lock = NSLock()
+        var payload: Data?
+        func deliver(_ data: Data) async {
+            lock.withLock { self.payload = data }
+        }
+        func close() async {}
+    }
+    let sink = CapturingSink()
+    let frame = FrameBuilder.build(
+        today: DayTotals(totalTokens: 33_121_400, totalCost: Decimal(string: "23.99")!),
+        prev: nil,
+        hoursElapsed: 1,
+        primaryMetric: .tokens,
+        providers: [
+            ProviderSlice(id: "claude-code", tokens: 33_121_400, cost: Decimal(string: "23.99")!),
+            ProviderSlice(id: "codex", tokens: 0, cost: 0),
+        ]
+    )
+    let sem = DispatchSemaphore(value: 0)
+    Task {
+        let hub = Hub()
+        await hub.register(sink)
+        await hub.broadcast(frame)
+        sem.signal()
+    }
+    sem.wait()
+    let data = sink.lock.withLock { sink.payload } ?? Data()
+    expect("hub encoded payload non-empty", !data.isEmpty, true)
+    guard
+        let any = try? JSONSerialization.jsonObject(with: data),
+        let dict = any as? [String: Any]
+    else {
+        expect("hub payload decodes as dict", false, true)
+        return
+    }
+    expect("hub payload type", dict["type"] as? String, "frame")
+    guard let providers = dict["providers"] as? [[String: Any]] else {
+        expect("hub payload providers is array", false, true)
+        return
+    }
+    expect("hub payload providers count", providers.count, 2)
+    expect("hub payload providers[0].id", providers[0]["id"] as? String, "claude-code")
+    expect("hub payload providers[0].tokens", providers[0]["tokens"] as? Int, 33_121_400)
+    // Cost round-trips lossless: stringValue on the daemon, Decimal(string:)
+    // on the consumer. Drift here would re-introduce the bug this refactor
+    // exists to fix.
+    let costStr = providers[0]["cost"] as? String ?? ""
+    expect("hub payload providers[0].cost roundtrip", Decimal(string: costStr), Decimal(string: "23.99")!)
+    expect("hub payload providers[1].id", providers[1]["id"] as? String, "codex")
+    expect("hub payload providers[1].tokens", providers[1]["tokens"] as? Int, 0)
 }
 
 private func runServerConfigTests() {

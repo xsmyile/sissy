@@ -64,7 +64,8 @@ actor Hub {
                 state: frame.state,
                 primary: frame.primary,
                 primaryLabel: frame.primaryLabel,
-                milestone: nil
+                milestone: nil,
+                providers: frame.providers
             )
             lastFrame = cached
             lastFramePayload = encode(cached, devicePresent: hasDevice())
@@ -102,6 +103,18 @@ actor Hub {
     func lastFrameTimestamp() -> Date? { lastFrameAt }
 
     private func encode(_ frame: FrameData, devicePresent: Bool) -> Data {
+        // Per-provider slices land on the wire as raw `{id, tokens, cost}`
+        // dicts; cost goes through `NSDecimalNumber.stringValue` so the app
+        // can `Decimal(string:)` it back lossless. Always emitted, even when
+        // empty, so a fallback-using client can distinguish "no providers
+        // yet" from "field absent on an older daemon".
+        let providers: [[String: Any]] = frame.providers.map { slice in
+            [
+                "id": slice.id,
+                "tokens": slice.tokens,
+                "cost": NSDecimalNumber(decimal: slice.cost).stringValue,
+            ]
+        }
         var dict: [String: Any] = [
             "type": "frame",
             "tokens": frame.tokens,
@@ -112,6 +125,7 @@ actor Hub {
             "primary_label": frame.primaryLabel,
             "device_present": devicePresent,
             "ts": Int(Date().timeIntervalSince1970),
+            "providers": providers,
         ]
         // Emit the field only when set so a sink that doesn't care (firmware)
         // never sees an extra key with `null`. Same wire weight as before on

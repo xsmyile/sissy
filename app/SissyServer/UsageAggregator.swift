@@ -20,7 +20,7 @@ actor UsageAggregator {
     /// mutated; each provider's own counter is itself nonisolated.
     nonisolated private let providers: [any UsageProvider]
     private var perProvider: [String: Snapshot] = [:]
-    private var onChange: (@Sendable (DayTotals, DayTotals?) async -> Void)?
+    private var onChange: (@Sendable (DayTotals, DayTotals?, [ProviderSlice]) async -> Void)?
 
     init(providers: [any UsageProvider]) {
         self.providers = providers
@@ -28,8 +28,12 @@ actor UsageAggregator {
 
     /// Boots every provider in parallel. Each provider's `onChange` routes
     /// through `handleProviderEmit` which updates the per-provider snapshot
-    /// and re-emits the aggregated `(today, prev)` to the outer callback.
-    func start(onChange: @escaping @Sendable (DayTotals, DayTotals?) async -> Void) async {
+    /// and re-emits the aggregated `(today, prev, slices)` to the outer
+    /// callback. `slices` is captured against the **same** `perProvider`
+    /// snapshot as `today`/`prev` so a concurrent emit racing through actor
+    /// reentrancy can't desync the aggregate scalars from the per-provider
+    /// breakdown.
+    func start(onChange: @escaping @Sendable (DayTotals, DayTotals?, [ProviderSlice]) async -> Void) async {
         self.onChange = onChange
         // Strong-self capture is intentional: provider callbacks must fire
         // for the daemon's full lifetime, and the aggregator outlives both
@@ -80,22 +84,29 @@ actor UsageAggregator {
         return true
     }
 
-    /// Per-provider snapshot exposed to /stats. Includes only providers that
-    /// have emitted at least one frame; a still-warming provider is omitted
-    /// so the consumer can't accidentally render its 0s as a real total.
-    func perProviderTotals() -> [(id: String, today: DayTotals, prev: DayTotals?, filesWatched: Int)] {
-        providers.compactMap { p in
-            guard let s = perProvider[p.id] else { return nil }
-            return (p.id, s.today, s.prev, p.filesWatched())
-        }
-    }
-
     private func handleProviderEmit(id: String, today: DayTotals, prev: DayTotals?) async {
         perProvider[id] = Snapshot(today: today, prev: prev)
         let (combinedToday, combinedPrev) = aggregate()
+        // Build slices from the same `perProvider` map that just produced
+        // `combinedToday` — both before the upcoming `await`. A concurrent
+        // emit can re-enter the actor at the suspension below, but it
+        // can't retroactively rewrite the local `slices` we already
+        // captured, so the outgoing frame stays internally consistent.
+        let slices = currentProviderSlices()
         if let cb = onChange {
-            await cb(combinedToday, combinedPrev)
+            await cb(combinedToday, combinedPrev, slices)
         }
+    }
+
+    /// Snapshot of every provider that has emitted at least one frame,
+    /// pre-sorted into the canonical wire order. Still-warming providers are
+    /// omitted so the app can't accidentally render their 0s as a real total.
+    private func currentProviderSlices() -> [ProviderSlice] {
+        let raw = providers.compactMap { p -> ProviderSlice? in
+            guard let s = perProvider[p.id] else { return nil }
+            return ProviderSlice(id: p.id, tokens: s.today.totalTokens, cost: s.today.totalCost)
+        }
+        return FrameBuilder.sortProviders(raw)
     }
 
     private func aggregate() -> (today: DayTotals, prev: DayTotals?) {

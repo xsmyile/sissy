@@ -17,6 +17,17 @@ struct StateThresholds: Sendable, Codable {
     var trendRatio: Decimal = 1.3
 }
 
+/// Raw per-provider slice carried on the WS frame so the app can derive both
+/// the menubar header total and the Breakdown submenu rows from a single
+/// payload. Firmware ignores the field. Cost is a `Decimal` here; the wire
+/// representation is `NSDecimalNumber.stringValue` so it round-trips lossless
+/// through `Decimal(string:)` on the app side.
+struct ProviderSlice: Sendable, Equatable, Codable {
+    let id: String
+    let tokens: Int
+    let cost: Decimal
+}
+
 struct FrameData: Sendable, Equatable, Codable {
     let tokens: String
     let cost: String
@@ -29,6 +40,10 @@ struct FrameData: Sendable, Equatable, Codable {
     /// `"cost:225"`). The app parses this into a `MilestoneDescriptor` to
     /// render the matching catchphrase; firmware ignores the field.
     let milestone: String?
+    /// Per-provider totals (raw tokens + Decimal cost). Stable order: claude-code,
+    /// codex, then alphabetical. Empty array when no provider has emitted yet.
+    /// App-only; firmware ignores it.
+    let providers: [ProviderSlice]
 }
 
 enum FrameBuilder {
@@ -93,7 +108,8 @@ enum FrameBuilder {
         hoursElapsed: Double,
         primaryMetric: PrimaryMetric,
         thresholds: StateThresholds = StateThresholds(),
-        milestone: String? = nil
+        milestone: String? = nil,
+        providers: [ProviderSlice] = []
     ) -> FrameData {
         let tokens = fmtTokens(today.totalTokens)
         let burn = fmtBurn(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
@@ -105,7 +121,28 @@ enum FrameBuilder {
             state: pickState(today: today, prev: prev, thresholds: thresholds),
             primary: primary,
             primaryLabel: primaryLabel,
-            milestone: milestone
+            milestone: milestone,
+            providers: providers
         )
+    }
+
+    /// Stable order for the wire: claude-code first (v0.1.0 baseline), then
+    /// codex, then anything else alphabetically. App + daemon use the same
+    /// rule so a freshly-connected client never sees rows shuffle.
+    static func providerSortOrder(_ id: String) -> Int {
+        switch id {
+        case "claude-code": return 0
+        case "codex": return 1
+        default: return 2
+        }
+    }
+
+    static func sortProviders(_ slices: [ProviderSlice]) -> [ProviderSlice] {
+        slices.sorted { lhs, rhs in
+            let lp = providerSortOrder(lhs.id)
+            let rp = providerSortOrder(rhs.id)
+            if lp != rp { return lp < rp }
+            return lhs.id < rhs.id
+        }
     }
 }

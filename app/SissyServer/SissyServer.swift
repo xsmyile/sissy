@@ -29,8 +29,12 @@ actor SissyServer {
     /// Cached input to the last `rebuildAndBroadcast`. Lets pure config
     /// changes (pin, primary metric) re-broadcast immediately without
     /// hopping into the aggregator actor — which can queue behind a
-    /// running poll/cold scan and add 50–200 ms of perceived lag.
-    private var lastTotals: (today: DayTotals, prev: DayTotals?)?
+    /// running poll/cold scan and add 50–200 ms of perceived lag. Slices
+    /// are cached alongside totals so a pin/metric replay can't desync
+    /// the aggregate scalars from the per-provider breakdown — a fresh
+    /// `aggregator.perProviderTotals()` call could race a concurrent
+    /// provider emit through actor reentrancy.
+    private var lastTotals: (today: DayTotals, prev: DayTotals?, slices: [ProviderSlice])?
     /// Tracks whole-dollar cost crossings so the menubar pop-up can celebrate
     /// them. Owned here so it sees the same `today` totals
     /// `rebuildAndBroadcast` does and lives independent of the JSONL state
@@ -155,7 +159,7 @@ actor SissyServer {
     /// on the first real poll.
     private func rebroadcastFromCache() async {
         guard let totals = lastTotals else { return }
-        await rebuildAndBroadcast(today: totals.today, prev: totals.prev)
+        await rebuildAndBroadcast(today: totals.today, prev: totals.prev, slices: totals.slices)
     }
 
     func currentPinnedState() -> String? { pinnedState }
@@ -179,8 +183,8 @@ actor SissyServer {
         try await bootstrap()
         let server = self
         bootTask = Task.detached { [aggregator] in
-            await aggregator.start { today, prev in
-                await server.rebuildAndBroadcast(today: today, prev: prev)
+            await aggregator.start { today, prev, slices in
+                await server.rebuildAndBroadcast(today: today, prev: prev, slices: slices)
             }
         }
     }
@@ -217,25 +221,19 @@ actor SissyServer {
         let lastAt = await hub.lastFrameTimestamp()
         let files = aggregator.filesWatched()
         let iso = ISO8601DateFormatter()
-        let breakdown = await aggregator.perProviderTotals()
-        var providersOut: [String: StatsResponse.ProviderStats] = [:]
-        for entry in breakdown {
-            providersOut[entry.id] = StatsResponse.ProviderStats(
-                tokens: entry.today.totalTokens,
-                cost: NSDecimalNumber(decimal: entry.today.totalCost).stringValue,
-                filesWatched: entry.filesWatched
-            )
-        }
         return StatsResponse(
             connectedClients: count,
             filesWatched: files,
-            lastFrameAt: lastAt.map { iso.string(from: $0) },
-            providers: providersOut.isEmpty ? nil : providersOut
+            lastFrameAt: lastAt.map { iso.string(from: $0) }
         )
     }
 
-    private func rebuildAndBroadcast(today: DayTotals, prev: DayTotals?) async {
-        lastTotals = (today, prev)
+    private func rebuildAndBroadcast(
+        today: DayTotals,
+        prev: DayTotals?,
+        slices: [ProviderSlice]
+    ) async {
+        lastTotals = (today, prev, slices)
         let now = Date()
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: now)
@@ -256,13 +254,19 @@ actor SissyServer {
                 milestones.save()
             }
         }
+        // Slices arrive captured against the same `perProvider` snapshot the
+        // aggregator used to compute `today`/`prev` (or replayed from
+        // `lastTotals` on a pin/metric-toggle rebuild). A fresh
+        // `perProviderTotals()` call here would race actor reentrancy and
+        // could ship a frame whose scalars and breakdown disagree.
         var frame = FrameBuilder.build(
             today: today,
             prev: prev,
             hoursElapsed: hoursElapsed,
             primaryMetric: primaryMetric,
             thresholds: config.stateThresholds,
-            milestone: milestone
+            milestone: milestone,
+            providers: slices
         )
         if let pin = pinnedState {
             frame = FrameData(
@@ -272,7 +276,8 @@ actor SissyServer {
                 state: pin,
                 primary: frame.primary,
                 primaryLabel: frame.primaryLabel,
-                milestone: frame.milestone
+                milestone: frame.milestone,
+                providers: frame.providers
             )
         }
         await hub.broadcast(frame)

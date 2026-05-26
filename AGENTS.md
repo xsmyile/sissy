@@ -63,13 +63,14 @@ Adding/removing Swift files requires re-running `xcodegen generate` — the proj
                                                                                         └───────── hello frame ────────┘
 ```
 
-`UsageAggregator` sums per-day totals across N `UsageProvider` instances and emits a single combined frame; the wire protocol and firmware stay unaware of multi-provider. Per-provider breakdown is exposed via `/stats` and the menubar **Breakdown** submenu, but never on the WS frame.
+`UsageAggregator` sums per-day totals across N `UsageProvider` instances and emits a single combined frame. The combined `tokens`/`cost`/`state` scalars are pre-formatted by the daemon for the OLED; alongside them the frame carries a raw `providers: [{id, tokens, cost}]` array so the menubar app derives both the header subtitle and the **Breakdown** submenu rows from one push-based payload. Firmware ignores `providers`. `/stats` is now diagnostic-only (`connectedClients`, `filesWatched`, `lastFrameAt`).
 
-The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client gets it replayed on connect so the OLED never shows `--` after a reconnect. Any change to the frame contract (`tokens`, `cost`, `state`) must be made in **three** places that have no shared schema:
+The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client gets it replayed on connect so the OLED never shows `--` after a reconnect. Any change to the frame contract (`tokens`, `cost`, `state`, `providers`) must be made in **four** places that have no shared schema:
 
-1. `app/SissyServer/FrameBuilder.swift` — formats fields, picks `state`.
-2. `firmware/src/net/WsClient.cpp` — parses JSON into `Frame`.
-3. `app/Sissy/Server/WebSocketClient.swift` — parses for the menubar mirror.
+1. `app/SissyServer/FrameBuilder.swift` — `FrameData` shape, scalar formatters, picks `state`, owns `ProviderSlice`.
+2. `app/SissyServer/Hub.swift` — `encode(_:devicePresent:)` is where `FrameData` becomes JSON on the wire.
+3. `firmware/src/net/WsClient.cpp` — parses JSON into `Frame` (ignores `providers`).
+4. `app/Sissy/Server/WebSocketClient.swift` — parses for the menubar mirror; decodes `providers` into `DisplayFrame.providers`.
 
 `state` enum values (`sleep|think|code|trend|glow|angry`) are coupled to (a) the mascot bitmap order in `firmware/src/display/SSD1306Display.cpp`, (b) thresholds in `app/SissyServer/FrameBuilder.swift` (`StateThresholds`), (c) `MascotState` in `firmware/src/state/`. Renaming a wire state means updating all three plus regenerating sprites.
 
@@ -81,7 +82,7 @@ Firmware additionally owns an `MS_OFFLINE` state that is **not** sent over the w
 |---|---|
 | `main.swift`                    | Entry point, signal handling, `--self-test` / `--scan` / `--scan-provider` flags |
 | `SissyServer.swift`             | Actor that owns Hub + UsageAggregator and bootstraps NIO server. Auto-detects Codex provider at boot. |
-| `HTTPRequestHandler.swift`      | `/health`, `/stats` (incl. per-provider breakdown); Bearer auth |
+| `HTTPRequestHandler.swift`      | `/health`, `/stats` (diagnostic: connectedClients, filesWatched, lastFrameAt); Bearer auth |
 | `WebSocketSinkHandler.swift`    | Per-connection NIO WS handler; conforms to `FrameSink` |
 | `Hub.swift`                     | Actor — fan-out + last-frame replay |
 | `UsageProvider.swift`           | Protocol shared by every CLI tail (id, start/stop, current, isWarm) |

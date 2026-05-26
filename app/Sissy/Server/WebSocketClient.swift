@@ -238,6 +238,21 @@ final class WebSocketClient: ObservableObject {
         // otherwise. The notifier filters non-crossing frames out via
         // `compactMap` and dedupes on `(milestone, ts)`.
         let milestone = dict["milestone"] as? String
+        // Per-provider slices: header total + Breakdown rows derive from this.
+        // Empty when the daemon hasn't emitted any provider yet, or when an
+        // older daemon predates the field — `headerSubtitle` then falls back
+        // to the daemon-formatted `tokens`/`cost` strings.
+        var providers: [DisplayFrame.ProviderSlice] = []
+        if let rawProviders = dict["providers"] as? [[String: Any]] {
+            for raw in rawProviders {
+                guard let id = raw["id"] as? String,
+                    let tokensRaw = raw["tokens"] as? Int,
+                    let costRaw = raw["cost"] as? String,
+                    let costDec = Decimal(string: costRaw)
+                else { continue }
+                providers.append(.init(id: id, tokens: tokensRaw, cost: costDec))
+            }
+        }
         model?.currentFrame = DisplayFrame(
             tokens: tokens,
             cost: cost,
@@ -247,7 +262,8 @@ final class WebSocketClient: ObservableObject {
             primary: primary,
             primaryLabel: primaryLabel,
             devicePresent: devicePresent,
-            milestone: milestone
+            milestone: milestone,
+            providers: providers
         )
     }
 

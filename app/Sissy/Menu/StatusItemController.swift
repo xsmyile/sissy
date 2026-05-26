@@ -240,16 +240,43 @@ final class StatusItemController: NSObject {
     /// Keep these two formatters separate — unifying would force one
     /// surface to compromise.
     private static func formatBreakdownSubtitle(tokens: Int, cost: Decimal) -> String {
-        let tok: String
-        if tokens >= 1_000_000 {
-            tok = String(format: "%.1fM", Double(tokens) / 1_000_000)
-        } else if tokens >= 1_000 {
-            tok = String(format: "%.1fK", Double(tokens) / 1_000)
-        } else {
-            tok = "\(tokens)"
-        }
         let dollars = NSDecimalNumber(decimal: cost).doubleValue
-        return String(format: "%@ tok · $%.2f", tok, dollars)
+        return String(format: "%@ tok · $%.2f", formatTokens(tokens), dollars)
+    }
+
+    private static func formatTokens(_ tokens: Int) -> String {
+        if tokens >= 1_000_000 {
+            return String(format: "%.1fM", Double(tokens) / 1_000_000)
+        }
+        if tokens >= 1_000 {
+            return String(format: "%.1fK", Double(tokens) / 1_000)
+        }
+        return "\(tokens)"
+    }
+
+    /// Header subtitle for the menubar pull-down. Sums the provider slices
+    /// the daemon shipped on the WS frame so the total here matches the sum
+    /// of the Breakdown rows to the penny — same token formatter, same `%.2f`
+    /// cost precision. Burn rate isn't per-provider so it passes through
+    /// daemon-formatted.
+    static func formatHeaderSubtitle(
+        providers: [DisplayFrame.ProviderSlice],
+        burn: String
+    ) -> String? {
+        var parts: [String] = []
+        let totalTokens = providers.reduce(0) { $0 + $1.tokens }
+        let totalCost = providers.reduce(Decimal(0)) { $0 + $1.cost }
+        if totalTokens > 0 {
+            parts.append("\(formatTokens(totalTokens)) tok")
+        }
+        let dollars = NSDecimalNumber(decimal: totalCost).doubleValue
+        if totalCost > 0 || !providers.isEmpty {
+            parts.append(String(format: "$%.2f", dollars))
+        }
+        if burn != "..." {
+            parts.append("\(burn)/h")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private func rebuildMascotSubmenu(_ submenu: NSMenu) {

@@ -21,12 +21,18 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
   "burn": "47K",
   "state": "glow",
   "primary": "233M",
-  "primary_label": "TOKENS"
+  "primary_label": "TOKENS",
+  "providers": [
+    {"id": "claude-code", "tokens": 217000000, "cost": "138.42"},
+    {"id": "codex",       "tokens":  16000000, "cost":  "10.58"}
+  ]
 }
 ```
 
 `state` is one of `sleep`, `think`, `code`, `trend`, `glow`, `angry`.
 The firmware has an additional local-only `MS_OFFLINE` state it renders when the WS has been disconnected for more than 15 s. The server never sends `offline` over the wire.
+
+`providers` carries the raw per-provider token + cost slices (cost as a canonical decimal string so it round-trips lossless through `Decimal(string:)`). The macOS app sums it to derive both the menubar header subtitle and the "Breakdown" submenu rows from a single payload — eliminating drift between the WS-pushed header and what used to be a polled `/stats` breakdown. Firmware ignores the field; older firmware builds parse the rest of the frame unchanged. Stable order: `claude-code`, `codex`, then alphabetical. Always emitted (empty array before any provider has reported).
 
 ### Client → server
 
@@ -49,7 +55,7 @@ Reserved for V2: `input` events when the enclosure grows a button.
 |---|---|
 | `main.swift`                    | Entry point, signal handling, `--self-test` / `--scan` / `--scan-provider` / `--config` modes |
 | `SissyServer.swift`             | Actor that owns Hub + `UsageAggregator` and bootstraps the NIO server; auto-detects Codex provider at boot |
-| `HTTPRequestHandler.swift`      | `/health`, `/stats` (incl. per-provider breakdown); Bearer auth; 401/404 paths |
+| `HTTPRequestHandler.swift`      | `/health`, `/stats` (diagnostic-only: connectedClients, filesWatched, lastFrameAt); Bearer auth; 401/404 paths |
 | `WebSocketSinkHandler.swift`    | Per-connection WS handler, conforms to `FrameSink` |
 | `Hub.swift`                     | Actor — fan-out to all connected WS clients + last-frame replay |
 | `UsageProvider.swift`           | Protocol shared by each CLI log reader (id, start/stop, current, isWarm) |

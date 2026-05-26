@@ -25,15 +25,4 @@ struct StatsResponse: Codable, Sendable, Equatable {
     /// ISO-8601 string for the last Hub.broadcast emit, nil if no frame
     /// has been broadcast yet (cold-start before any provider emit).
     let lastFrameAt: String?
-    /// Per-provider breakdown, keyed by provider id (`claude-code`, `codex`).
-    /// Absent when no provider has emitted yet so the consumer can
-    /// distinguish "daemon predates the breakdown feature" from "no data
-    /// yet".
-    let providers: [String: ProviderStats]?
-
-    struct ProviderStats: Codable, Sendable, Equatable {
-        let tokens: Int
-        let cost: String
-        let filesWatched: Int
-    }
 }

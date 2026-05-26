@@ -92,7 +92,7 @@ final class SissyModel: ObservableObject {
         /// single-entry lists are suppressed by the menu builder — only
         /// shown when at least two providers are active so a single-CLI
         /// install never sees a useless one-row submenu.
-        let providerBreakdown: [ServerHealthMonitor.ProviderUsageSnapshot]
+        let providerBreakdown: [DisplayFrame.ProviderSlice]
     }
 
     struct HeaderSnapshot {
@@ -140,7 +140,7 @@ final class SissyModel: ObservableObject {
             canPickMascot: webSocketClient.isConnected,
             notifyOnMascotChange: preferences.notifyOnMascotChange,
             showMetric: currentFrame?.devicePresent ?? true,
-            providerBreakdown: serverHealth.providerBreakdown
+            providerBreakdown: linkUp ? (currentFrame?.providers ?? []) : []
         )
     }
 
@@ -387,6 +387,17 @@ final class SissyModel: ObservableObject {
     private func headerSubtitle(linkUp: Bool) -> String? {
         if !linkUp { return "Waiting for the daemon" }
         guard let frame = currentFrame else { return nil }
+        // Single source of truth: when the daemon ships the providers array
+        // (current build), sum it through the same formatter the Breakdown
+        // submenu rows use so the header and the rows match to the penny.
+        // Fallback path covers a newer-app/older-daemon dev rebuild skew and
+        // the cold-start window before the first provider has emitted.
+        if !frame.providers.isEmpty {
+            return StatusItemController.formatHeaderSubtitle(
+                providers: frame.providers,
+                burn: frame.burn
+            )
+        }
         var parts: [String] = []
         if frame.tokens != "..." { parts.append("\(frame.tokens) tok") }
         if frame.cost != "..." { parts.append("$\(frame.cost)") }
@@ -441,6 +452,18 @@ struct DisplayFrame: Codable, Equatable {
     /// The notifier diffs on this and pops a milestone celebration when it
     /// goes from nil to a value.
     var milestone: String?
+    /// Per-provider totals carried on the WS frame so the menubar can derive
+    /// the header subtitle and the Breakdown submenu rows from the same
+    /// payload. Empty when no provider has emitted yet (or daemon predates
+    /// the field) — `headerSubtitle` falls back to the daemon-formatted
+    /// scalars; Breakdown stays hidden by its `>= 2 sources` gate.
+    var providers: [ProviderSlice]
+
+    struct ProviderSlice: Codable, Equatable, Identifiable {
+        let id: String
+        let tokens: Int
+        let cost: Decimal
+    }
 
     static let empty = DisplayFrame(
         tokens: "...",
@@ -451,7 +474,8 @@ struct DisplayFrame: Codable, Equatable {
         primary: "...",
         primaryLabel: "TOKENS",
         devicePresent: false,
-        milestone: nil
+        milestone: nil,
+        providers: []
     )
 }
 

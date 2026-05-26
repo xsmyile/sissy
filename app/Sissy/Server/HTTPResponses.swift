@@ -9,16 +9,3 @@ struct HealthResponse: Codable, Sendable, Equatable {
     let usageReader: String
     let uptimeSeconds: Int
 }
-
-struct StatsResponse: Codable, Sendable, Equatable {
-    let connectedClients: Int
-    let filesWatched: Int
-    let lastFrameAt: String?
-    let providers: [String: ProviderStats]?
-
-    struct ProviderStats: Codable, Sendable, Equatable {
-        let tokens: Int
-        let cost: String
-        let filesWatched: Int
-    }
-}
