@@ -47,10 +47,14 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode.app
 
       - name: Install build tools
-        run: brew install xcodegen xcbeautify
+        run: brew install xcodegen xcbeautify swiftlint
 
       - name: Generate project
         run: xcodegen generate
+
+      - name: SwiftLint
+        working-directory: ${{ github.workspace }}
+        run: swiftlint lint --quiet
 
       - name: Swift format lint
         working-directory: ${{ github.workspace }}
