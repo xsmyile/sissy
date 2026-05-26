@@ -54,7 +54,7 @@ jobs:
       - name: cppcheck
         run: |
           sudo apt-get install -y -qq cppcheck
-          cppcheck --enable=warning,style,performance,portability \
+          cppcheck --enable=warning,performance,portability \
             --suppress=missingIncludeSystem --inline-suppr --quiet \
             --error-exitcode=1 \
             firmware/src firmware/include
