@@ -10,6 +10,7 @@ Usage:
       --out app/Sissy/Resources/Assets.xcassets \\
       sleep code think trend glow angry
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,10 +51,16 @@ def _draw_head(d: ImageDraw.ImageDraw, size: int) -> tuple[float, float, float, 
 def _eyes_closed(d, size, cx, cy, rw, rh):
     eye_y = cy
     t = max(1, int(size * 0.055 * SS))
-    d.line([((cx - rw * 0.60) * SS, eye_y * SS), ((cx - rw * 0.15) * SS, eye_y * SS)],
-           fill=0, width=t)
-    d.line([((cx + rw * 0.15) * SS, eye_y * SS), ((cx + rw * 0.60) * SS, eye_y * SS)],
-           fill=0, width=t)
+    d.line(
+        [((cx - rw * 0.60) * SS, eye_y * SS), ((cx - rw * 0.15) * SS, eye_y * SS)],
+        fill=0,
+        width=t,
+    )
+    d.line(
+        [((cx + rw * 0.15) * SS, eye_y * SS), ((cx + rw * 0.60) * SS, eye_y * SS)],
+        fill=0,
+        width=t,
+    )
 
 
 def _eyes_open(d, size, cx, cy, rw, rh):
@@ -71,14 +78,20 @@ def _eyes_narrow(d, size, cx, cy, rw, rh):
     dy = size * 0.04
     # Furrowed brows: outer-high, inner-low (slants converging toward nose)
     d.line(
-        [((cx - rw * 0.65) * SS, (cy - dy) * SS),
-         ((cx - rw * 0.15) * SS, (cy + dy) * SS)],
-        fill=0, width=t,
+        [
+            ((cx - rw * 0.65) * SS, (cy - dy) * SS),
+            ((cx - rw * 0.15) * SS, (cy + dy) * SS),
+        ],
+        fill=0,
+        width=t,
     )
     d.line(
-        [((cx + rw * 0.15) * SS, (cy + dy) * SS),
-         ((cx + rw * 0.65) * SS, (cy - dy) * SS)],
-        fill=0, width=t,
+        [
+            ((cx + rw * 0.15) * SS, (cy + dy) * SS),
+            ((cx + rw * 0.65) * SS, (cy - dy) * SS),
+        ],
+        fill=0,
+        width=t,
     )
 
 
@@ -98,19 +111,39 @@ def _eyes_smile(d, size, cx, cy, rw, rh):
 
 def _draw_z(d, left, top, side):
     thick = max(1.0, side * 0.26)
-    coords = lambda pts: [(p[0] * SS, p[1] * SS) for p in pts]
-    d.polygon(coords([
-        (left, top), (left + side, top),
-        (left + side, top + thick), (left, top + thick),
-    ]), fill=255)
-    d.polygon(coords([
-        (left, top + side - thick), (left + side, top + side - thick),
-        (left + side, top + side), (left, top + side),
-    ]), fill=255)
+
+    def coords(pts):
+        return [(p[0] * SS, p[1] * SS) for p in pts]
+
+    d.polygon(
+        coords(
+            [
+                (left, top),
+                (left + side, top),
+                (left + side, top + thick),
+                (left, top + thick),
+            ]
+        ),
+        fill=255,
+    )
+    d.polygon(
+        coords(
+            [
+                (left, top + side - thick),
+                (left + side, top + side - thick),
+                (left + side, top + side),
+                (left, top + side),
+            ]
+        ),
+        fill=255,
+    )
     d.line(
-        [((left + side) * SS, (top + thick) * SS),
-         (left * SS, (top + side - thick) * SS)],
-        fill=255, width=int(thick * SS * 0.9),
+        [
+            ((left + side) * SS, (top + thick) * SS),
+            (left * SS, (top + side - thick) * SS),
+        ],
+        fill=255,
+        width=int(thick * SS * 0.9),
     )
 
 
@@ -149,18 +182,28 @@ def render_code(size: int) -> Image.Image:
     half_w = size * 0.06
     # left chevron <, pointing inward (tip on right)
     lx_tip = size * 0.70
-    d.line([
-        ((lx_tip + half_w) * SS, (cy_b - half_h) * SS),
-        (lx_tip * SS, cy_b * SS),
-        ((lx_tip + half_w) * SS, (cy_b + half_h) * SS),
-    ], fill=255, width=t, joint="curve")
+    d.line(
+        [
+            ((lx_tip + half_w) * SS, (cy_b - half_h) * SS),
+            (lx_tip * SS, cy_b * SS),
+            ((lx_tip + half_w) * SS, (cy_b + half_h) * SS),
+        ],
+        fill=255,
+        width=t,
+        joint="curve",
+    )
     # right chevron >, pointing inward (tip on left)
     rx_tip = size * 0.94
-    d.line([
-        ((rx_tip - half_w) * SS, (cy_b - half_h) * SS),
-        (rx_tip * SS, cy_b * SS),
-        ((rx_tip - half_w) * SS, (cy_b + half_h) * SS),
-    ], fill=255, width=t, joint="curve")
+    d.line(
+        [
+            ((rx_tip - half_w) * SS, (cy_b - half_h) * SS),
+            (rx_tip * SS, cy_b * SS),
+            ((rx_tip - half_w) * SS, (cy_b + half_h) * SS),
+        ],
+        fill=255,
+        width=t,
+        joint="curve",
+    )
     return _finalize(mask, size)
 
 
@@ -172,9 +215,13 @@ def render_think(size: int) -> Image.Image:
     _eyes_open(d, size, cx, cy, rw, rh)
     # Thought bubble: solid filled circle + small dot tail
     bx, by, br = size * 0.84, size * 0.18, size * 0.12
-    d.ellipse([(bx - br) * SS, (by - br) * SS, (bx + br) * SS, (by + br) * SS], fill=255)
+    d.ellipse(
+        [(bx - br) * SS, (by - br) * SS, (bx + br) * SS, (by + br) * SS], fill=255
+    )
     dx, dy, dr = size * 0.72, size * 0.34, size * 0.035
-    d.ellipse([(dx - dr) * SS, (dy - dr) * SS, (dx + dr) * SS, (dy + dr) * SS], fill=255)
+    d.ellipse(
+        [(dx - dr) * SS, (dy - dr) * SS, (dx + dr) * SS, (dy + dr) * SS], fill=255
+    )
     return _finalize(mask, size)
 
 
@@ -269,12 +316,19 @@ def write_imageset(name: str, out_root: Path) -> None:
     for scale, size in zip([1, 2, 3], SIZES):
         path = imageset / f"mascot-{name}@{scale}x.png"
         render(size).save(path)
-        images.append({"idiom": "universal", "filename": path.name, "scale": f"{scale}x"})
-    (imageset / "Contents.json").write_text(json.dumps({
-        "images": images,
-        "info": {"author": "sissy", "version": 1},
-        "properties": {"template-rendering-intent": "template"},
-    }, indent=2))
+        images.append(
+            {"idiom": "universal", "filename": path.name, "scale": f"{scale}x"}
+        )
+    (imageset / "Contents.json").write_text(
+        json.dumps(
+            {
+                "images": images,
+                "info": {"author": "sissy", "version": 1},
+                "properties": {"template-rendering-intent": "template"},
+            },
+            indent=2,
+        )
+    )
     print(f"wrote {imageset.name}/")
 
 

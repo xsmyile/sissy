@@ -8,6 +8,7 @@ Strategy:
   4. Threshold by alpha + luminance: pixel ON if opaque AND not near-white background.
   5. Emit MSB-first packed bytes, padded to multiple of 8 cols per row.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,7 +18,9 @@ from pathlib import Path
 from PIL import Image
 
 
-def png_to_mono(path: Path, size: int, alpha_thresh: int = 64, lum_thresh: int = 230) -> list[int]:
+def png_to_mono(
+    path: Path, size: int, alpha_thresh: int = 64, lum_thresh: int = 230
+) -> list[int]:
     img = Image.open(path).convert("RGBA")
     alpha = img.split()[3]
     bbox = alpha.getbbox()
@@ -67,7 +70,9 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--size", type=int, default=48)
     p.add_argument("--out", type=Path, default=Path("firmware/src/sprites_mono.h"))
-    p.add_argument("--lum", type=int, default=200, help="luminance threshold; lower = pickier")
+    p.add_argument(
+        "--lum", type=int, default=200, help="luminance threshold; lower = pickier"
+    )
     p.add_argument("inputs", nargs="+", help="name=path.png pairs")
     args = p.parse_args()
 
@@ -82,7 +87,14 @@ def main() -> int:
         blocks.append(emit_c(name, args.size, data))
         names.append(name)
 
-    header = ["#pragma once", "#include <Arduino.h>", "", f"#define SPRITE_W {args.size}", f"#define SPRITE_H {args.size}", ""]
+    header = [
+        "#pragma once",
+        "#include <Arduino.h>",
+        "",
+        f"#define SPRITE_W {args.size}",
+        f"#define SPRITE_H {args.size}",
+        "",
+    ]
     header.append("\n\n".join(blocks))
     args.out.write_text("\n".join(header) + "\n")
     print(f"wrote {args.out} ({len(names)} sprites)")
