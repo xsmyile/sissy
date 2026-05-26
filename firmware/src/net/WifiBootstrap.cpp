@@ -38,8 +38,7 @@ static bool directConnect(const String& ssid, const String& pwd, uint32_t timeou
 #endif
 
 static String randomSecret(size_t length = 32) {
-    static constexpr const char* alphabet =
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    static constexpr const char* alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     static constexpr size_t alphabetLen = 62;
     String out;
     out.reserve(length);
@@ -61,9 +60,9 @@ RuntimeConfig connect(IDisplay& display) {
     bool cfgChanged = false;
 
     if (cfg.serverHost.length() == 0) cfg.serverHost = DEFAULT_SERVER_HOST;
-    if (cfg.serverPort == 0)          cfg.serverPort = DEFAULT_SERVER_PORT;
+    if (cfg.serverPort == 0) cfg.serverPort = DEFAULT_SERVER_PORT;
     if (cfg.serverPath.length() == 0) cfg.serverPath = DEFAULT_SERVER_PATH;
-    if (cfg.authToken.length() == 0)  cfg.authToken = DEFAULT_AUTH_TOKEN;
+    if (cfg.authToken.length() == 0) cfg.authToken = DEFAULT_AUTH_TOKEN;
     if (cfg.otaPassword.length() == 0) {
         cfg.otaPassword = DEFAULT_OTA_PASSWORD;
         cfgChanged = true;
@@ -109,9 +108,7 @@ RuntimeConfig connect(IDisplay& display) {
     wm.addParameter(&pTok);
     wm.addParameter(&pOta);
 
-    wm.setAPCallback([&display](WiFiManager* m) {
-        display.showPortalHint(AP_NAME, AP_PASS);
-    });
+    wm.setAPCallback([&display](WiFiManager* m) { display.showPortalHint(AP_NAME, AP_PASS); });
 
     // Kick the portal off. In non-blocking mode WiFiManager returns the
     // initial `connect` flag (always false here) regardless of whether the
@@ -149,9 +146,9 @@ RuntimeConfig connect(IDisplay& display) {
         delay(20);
     }
 
-    cfg.serverHost  = pHost.getValue();
-    cfg.serverPath  = pPath.getValue();
-    cfg.authToken   = pTok.getValue();
+    cfg.serverHost = pHost.getValue();
+    cfg.serverPath = pPath.getValue();
+    cfg.authToken = pTok.getValue();
     cfg.otaPassword = pOta.getValue();
 
     long parsedPort = strtol(pPort.getValue(), nullptr, 10);

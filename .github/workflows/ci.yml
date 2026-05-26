@@ -43,6 +43,22 @@ jobs:
       - name: Provide example secrets header
         run: cp firmware/include/secrets.h.example firmware/include/secrets.h
 
+      - name: clang-format check
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-format
+          find firmware/src -name "*.cpp" -o -name "*.h" \
+            | grep -v sprites_mono.h \
+            | xargs clang-format --dry-run --Werror
+
+      - name: cppcheck
+        run: |
+          sudo apt-get install -y -qq cppcheck
+          cppcheck --enable=warning,performance,portability \
+            --suppress=missingIncludeSystem --inline-suppr --quiet \
+            --error-exitcode=1 \
+            firmware/src firmware/include
+
       - name: Build esp32dev
         run: pio run -e esp32dev
 

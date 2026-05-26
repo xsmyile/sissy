@@ -7,7 +7,7 @@
 // ST7735Display (color TFT) plugs in here without touching the rest of the
 // firmware.
 class IDisplay {
-public:
+ public:
     virtual ~IDisplay() = default;
 
     virtual bool begin() = 0;

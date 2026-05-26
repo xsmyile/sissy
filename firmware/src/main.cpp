@@ -66,7 +66,9 @@ void setup() {
 
     if (!gDisplay.begin()) {
         // No display means no UX — stall instead of silently running headless.
-        while (true) { delay(1000); }
+        while (true) {
+            delay(1000);
+        }
     }
     gDisplay.showBootMessage("booting", SISSY_FW_VERSION);
     SerialProvisioning::announce(SISSY_FW_VERSION);
@@ -122,9 +124,8 @@ void loop() {
     if (now - lastRender > 80) {
         lastRender = now;
         if (gWs.isConnected() || gLastFrameAt > 0) {
-            const bool offline = !gWs.isConnected() &&
-                                 gDisconnectedAt > 0 &&
-                                 (now - gDisconnectedAt) > OFFLINE_THRESHOLD_MS;
+            const bool offline =
+                !gWs.isConnected() && gDisconnectedAt > 0 && (now - gDisconnectedAt) > OFFLINE_THRESHOLD_MS;
             if (offline) {
                 Frame f = gFrame;
                 f.state = MS_OFFLINE;
