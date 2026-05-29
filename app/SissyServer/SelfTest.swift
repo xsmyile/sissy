@@ -159,6 +159,14 @@ func runSelfTest() {
         ModelPricing(
             inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5,
             cacheCreationPerMTok: 6.25))
+    // Regression: a current Opus minor without its own row falls through
+    // longest-prefix to `claude-opus-4` (deprecated $15/$75) and triple-bills.
+    // The date-suffixed name is what `message.model` actually carries.
+    expect(
+        "opus 4.8 current rate", Pricing.price(for: "claude-opus-4-8-20260515"),
+        ModelPricing(
+            inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5,
+            cacheCreationPerMTok: 6.25))
     expect(
         "sonnet family", Pricing.price(for: "claude-sonnet-4-6"),
         ModelPricing(inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheCreationPerMTok: 3.75))

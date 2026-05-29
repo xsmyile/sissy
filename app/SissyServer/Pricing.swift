@@ -29,6 +29,9 @@ enum Pricing {
         // version gets its own exact row so a future Opus 4.8 doesn't
         // accidentally fall to the deprecated 4.0/4.1 rate via the
         // `claude-opus-4` longest-prefix bucket.
+        "claude-opus-4-8": .init(
+            inputPerMTok: 5.00, outputPerMTok: 25.00, cacheReadPerMTok: 0.50,
+            cacheCreationPerMTok: 6.25),
         "claude-opus-4-7": .init(
             inputPerMTok: 5.00, outputPerMTok: 25.00, cacheReadPerMTok: 0.50,
             cacheCreationPerMTok: 6.25),
