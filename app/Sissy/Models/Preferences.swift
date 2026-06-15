@@ -114,16 +114,29 @@ struct Preferences: Codable, Equatable {
     static func makeSecret(length: Int = 32) -> String {
         guard length > 0 else { return "" }
         let alphabet = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-        var bytes = [UInt8](repeating: 0, count: length)
-        let status = bytes.withUnsafeMutableBytes {
-            SecRandomCopyBytes(kSecRandomDefault, length, $0.baseAddress!)
-        }
-        if status == errSecSuccess {
-            return String(bytes.map { alphabet[Int($0) % alphabet.count] })
+        let count = alphabet.count
+        // Rejection sampling: discard bytes in the unevenly-mapped tail so each
+        // symbol is equiprobable. `256 % 62 == 8`, so a plain `byte % count`
+        // would over-represent the first 8 symbols and shave entropy.
+        let limit = (256 / count) * count
+
+        func randomByte(_ rng: inout SystemRandomNumberGenerator) -> Int {
+            var byte: UInt8 = 0
+            let status = withUnsafeMutablePointer(to: &byte) {
+                SecRandomCopyBytes(kSecRandomDefault, 1, $0)
+            }
+            return status == errSecSuccess ? Int(byte) : Int(UInt8.random(in: 0...255, using: &rng))
         }
 
         var rng = SystemRandomNumberGenerator()
-        return String((0..<length).map { _ in alphabet.randomElement(using: &rng) ?? "a" })
+        var out = String()
+        out.reserveCapacity(length)
+        while out.count < length {
+            let value = randomByte(&rng)
+            if value >= limit { continue }
+            out.append(alphabet[value % count])
+        }
+        return out
     }
 
     static func appSupportDir() -> URL {
@@ -158,14 +171,28 @@ struct Preferences: Codable, Equatable {
         // server.json (see `writeServerConfig`), which is written with
         // 0600 perms so a same-user process is still the only thing that
         // can read it.
-        if !authToken.isEmpty {
-            _ = KeychainStore.setBearerToken(authToken)
-        }
         var copy = self
-        copy.authToken = ""
+        if !authToken.isEmpty {
+            // Only drop the plaintext disk copy once the Keychain actually holds
+            // the token. If the Keychain is locked/unavailable, keep the disk
+            // fallback (KeychainStore documents this) so the app can still load
+            // its own token next launch instead of silently losing it.
+            if KeychainStore.setBearerToken(authToken) {
+                copy.authToken = ""
+            } else {
+                NSLog("sissy: keychain write failed; retaining token in preferences.json as fallback")
+            }
+        }
         let url = Self.appSupportDir().appendingPathComponent(Self.fileName)
-        guard let data = try? JSONEncoder().encode(copy) else { return }
-        try? data.write(to: url, options: .atomic)
+        guard let data = try? JSONEncoder().encode(copy) else {
+            NSLog("sissy: failed to encode %@", Self.fileName)
+            return
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            NSLog("sissy: failed to write %@: %@", Self.fileName, error.localizedDescription)
+        }
     }
 
     /// Write the daemon-facing `server.json` next to `preferences.json`.
@@ -209,8 +236,19 @@ struct Preferences: Codable, Equatable {
                 withJSONObject: dict,
                 options: [.prettyPrinted, .sortedKeys]
             )
-        else { return }
-        try? data.write(to: url, options: .atomic)
+        else {
+            NSLog("sissy: failed to encode %@", Self.serverConfigFileName)
+            return
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            // A dropped write leaves the daemon on stale config (old port/token)
+            // after a metric switch or pairing save — surface it instead of
+            // failing silently.
+            NSLog("sissy: failed to write %@: %@", Self.serverConfigFileName, error.localizedDescription)
+            return
+        }
         // server.json carries the bearer token in plaintext for the daemon
         // to read. Lock it down to owner-read/write so a same-user
         // unprivileged process is the only thing that can see it; cross-

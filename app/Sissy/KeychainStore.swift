@@ -26,6 +26,10 @@ enum KeychainStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            // Keep the daemon token local to this Mac — never let it ride
+            // iCloud Keychain to the user's other devices. This is the default,
+            // but pinning it makes the intent explicit and audit-proof.
+            kSecAttrSynchronizable as String: false,
         ]
         let update: [String: Any] = [
             kSecValueData as String: data,
@@ -47,6 +51,7 @@ enum KeychainStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: false,
             kSecReturnData as String: kCFBooleanTrue as Any,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
@@ -64,6 +69,7 @@ enum KeychainStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: false,
         ]
         let status = SecItemDelete(query as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
