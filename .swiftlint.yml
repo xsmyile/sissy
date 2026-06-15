@@ -13,6 +13,11 @@ disabled_rules:
   - type_body_length
   - function_body_length
   - implicit_optional_initialization
+  # Codebase intentionally uses non-failable lossy String(decoding:as:) for
+  # WS frames, serial replies, and hostname/IP display where U+FFFD is fine;
+  # the failable conversion this rule prefers would drop whole payloads on a
+  # single invalid byte.
+  - optional_data_string_conversion
 
 excluded:
   - app/SissyTests
