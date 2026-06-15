@@ -82,7 +82,7 @@ actor Provisioner {
             throw ProvisioningError.configFailed(errnoString())
         }
         cfmakeraw(&tio)
-        var speed: speed_t = speed_t(B115200)
+        let speed = speed_t(B115200)
         if cfsetspeed(&tio, speed) != 0 {
             throw ProvisioningError.configFailed(errnoString())
         }
