@@ -121,16 +121,6 @@ for bin in "$APP_PATH" "$APP_PATH/Contents/MacOS/sissy-serverd"; do
   fi
 done
 
-# Notarize app via zip
-log "notarize app"
-ZIP_PATH="$DIST_DIR/Sissy-$VERSION.zip"
-rm -f "$ZIP_PATH"
-ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
-xcrun notarytool submit "$ZIP_PATH" \
-  --keychain-profile "$NOTARY_PROFILE" --wait
-xcrun stapler staple "$APP_PATH"
-spctl --assess --type execute --verbose=4 "$APP_PATH" || die "Gatekeeper rejected app"
-
 # Package DMG
 log "create DMG"
 DMG_PATH="$DIST_DIR/Sissy-$VERSION.dmg"
@@ -146,7 +136,8 @@ create-dmg \
   --no-internet-enable \
   "$DMG_PATH" "$APP_PATH"
 
-# Notarize DMG (so Gatekeeper trusts the downloaded file too)
+# Notarize the DMG: submits the nested Sissy.app in the same pass, so one
+# round-trip covers both (Gatekeeper trusts the downloaded file too).
 log "notarize DMG"
 xcrun notarytool submit "$DMG_PATH" \
   --keychain-profile "$NOTARY_PROFILE" --wait
@@ -158,7 +149,7 @@ spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG
 ( cd "$DIST_DIR" && shasum -a 256 "Sissy-$VERSION.dmg" > "Sissy-$VERSION.dmg.sha256" )
 
 log "artifacts:"
-ls -lh "$DIST_DIR/Sissy-$VERSION".{dmg,dmg.sha256,zip}
+ls -lh "$DIST_DIR/Sissy-$VERSION".{dmg,dmg.sha256}
 
 if [[ "$PUBLISH" == 1 ]]; then
   command -v gh >/dev/null || die "gh CLI required for --publish"
