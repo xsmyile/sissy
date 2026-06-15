@@ -130,6 +130,11 @@ actor Provisioner {
         }
     }
 
+    /// Firmware `OK:`/`ERR:` replies are short; cap the in-progress line so a
+    /// device that never frames a newline can't grow the buffer without bound
+    /// before the deadline fires.
+    private static let maxLineBytes = 4096
+
     private static func readLine(fd: Int32, timeout: TimeInterval) throws -> String {
         var buffer = [UInt8]()
         let deadline = Date().addingTimeInterval(timeout)
@@ -156,6 +161,9 @@ actor Provisioner {
                     continue
                 }
                 buffer.append(byte)
+                if buffer.count > maxLineBytes {
+                    buffer.removeAll(keepingCapacity: true)
+                }
             }
         }
         throw ProvisioningError.ackTimeout
