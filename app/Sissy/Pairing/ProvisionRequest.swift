@@ -31,8 +31,8 @@ struct ProvisionRequest: Codable, Equatable {
         path: String = "/ws",
         token: String,
         otaPassword: String
-    ) -> ProvisionRequest {
-        ProvisionRequest(
+    ) -> Self {
+        Self(
             v: 1,
             type: "config",
             ssid: ssid,
