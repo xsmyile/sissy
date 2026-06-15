@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/sissy.png" alt="Sissy" width="200" />
+<img src="assets/sissy.png" alt="Sissy" width="200" />
 
 # Sissy
 
@@ -10,7 +10,7 @@ A pixel-art cat watches your token meter and gets moodier the more you spend.
 
 Named after my cat — she naps, judges, demands cuddles (A LOT of cuddles), and is, objectively, fabulous.
 
-[Install](#install) • [How it works](#how-it-works) • [Build from source](#build-from-source) • [Desk companion](#desk-companion)
+[Install](#install) • [Demo](#demo) • [How it works](#how-it-works) • [Build from source](#build-from-source) • [Desk companion](#desk-companion)
 
 </div>
 
@@ -18,12 +18,39 @@ Named after my cat — she naps, judges, demands cuddles (A LOT of cuddles), and
 
 macOS 26+ on Apple Silicon or Intel.
 
-1. Grab the latest `Sissy-x.y.z.dmg` from [Releases](../../releases/latest).
-2. Open the DMG and drag **Sissy** into Applications.
-3. Launch Sissy. The cat lives in the menubar.
-4. Menubar → **Start Server** to begin tailing token usage.
+### Homebrew (recommended)
 
-The DMG is Developer ID signed and notarized — no `xattr` workaround, no right-click → Open.
+```bash
+brew install --cask xsmyile/sissy/sissy
+```
+
+`brew upgrade` keeps it current.
+
+### Manual
+
+Grab the latest `Sissy-x.y.z.dmg` from [Releases](../../releases/latest), open it, and drag **Sissy** into Applications.
+
+Either way: launch Sissy — it lives in the menubar — then **Start Server** to begin tailing token usage. The build is Developer ID signed and notarized, so there's no `xattr` workaround and no right-click → Open.
+
+## Demo
+
+A pixel-art cat sits in your menubar and shifts mood as the day's spend climbs — from **Sleeping** when idle, through **Thinking**, **Coding**, **Trending up** and **Glowing**, up to **Angry coffee** when you're redlining.
+
+<p align="center">
+  <img src="assets/states.png" alt="Sissy's six moods, from sleeping to angry" width="640" />
+</p>
+
+Click the icon for the running total and burn rate — plus a per-CLI **Breakdown** when more than one tool is active, and controls for milestone cadence and mascot mood:
+
+<p align="center">
+  <img src="assets/menu-bar.png" alt="Sissy menubar dropdown" width="300" />
+</p>
+
+When the mood shifts, a small popover slides in with Sissy's current vibe:
+
+<p align="center">
+  <img src="assets/pop-up.png" alt="Sissy mood popover" width="300" />
+</p>
 
 ## How it works
 

@@ -18,7 +18,7 @@ build/
 dist/
 *.egg-info/
 
-# Mascot PNGs are pulled from getillustrations.com — see docs/HARDWARE.md
+# Raw mascot source PNGs — png_to_bitmap.py generates firmware/src/sprites_mono.h from these
 sprites/raw/
 
 # Secrets (compile-time defaults for ESP32 + runtime server config)
