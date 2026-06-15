@@ -27,6 +27,13 @@ final class WebSocketClient: ObservableObject {
     /// Without dedupe, reconnectAttempt double-increments per disconnect and
     /// the backoff jumps 1s → 4s → 16s → 30s instead of 1s → 2s → 4s → 8s.
     private var reconnectScheduled: Bool = false
+    /// Fires if a freshly-resumed task hasn't completed its handshake within
+    /// `connectTimeout`. Without it a half-open TCP (SYN sent, no reply) leaves
+    /// the ping callback pending until the OS times out the socket (~60s),
+    /// freezing the menubar on `--`. Cancelled the moment the connection goes
+    /// live, so a healthy idle connection between sparse frames is never cut.
+    private var connectTimeoutTask: Task<Void, Never>?
+    private static let connectTimeout: TimeInterval = 8
 
     init() {}
 
@@ -43,6 +50,8 @@ final class WebSocketClient: ObservableObject {
         stopped = true
         reconnectTask?.cancel()
         reconnectTask = nil
+        connectTimeoutTask?.cancel()
+        connectTimeoutTask = nil
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
         isConnected = false
@@ -53,6 +62,8 @@ final class WebSocketClient: ObservableObject {
     func reconnect() {
         reconnectTask?.cancel()
         reconnectTask = nil
+        connectTimeoutTask?.cancel()
+        connectTimeoutTask = nil
         reconnectAttempt = 0
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
@@ -79,12 +90,37 @@ final class WebSocketClient: ObservableObject {
         let newTask = session.webSocketTask(with: req)
         task = newTask
         newTask.resume()
+        startConnectTimeout(for: newTask)
         // Defer the hello until probeConnection confirms the handshake is up.
         // Sending it eagerly here would race against the connect and either
         // queue a wasted frame (if connect succeeds) or produce a duplicate
         // hello when probeConnection sends its own after the ping returns.
         probeConnection(newTask)
         receive()
+    }
+
+    private func startConnectTimeout(for candidate: URLSessionWebSocketTask) {
+        connectTimeoutTask?.cancel()
+        connectTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.connectTimeout * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.isCurrentTask(candidate),
+                !self.stopped, !self.isConnected
+            else { return }
+            NSLog("sissy websocket handshake timed out after %.0fs; reconnecting", Self.connectTimeout)
+            self.connectTimeoutTask = nil
+            candidate.cancel(with: .goingAway, reason: nil)
+            self.scheduleReconnect()
+        }
+    }
+
+    /// Promote a task to connected exactly once. Cancels the handshake
+    /// watchdog and resets the backoff so the next drop starts fresh.
+    private func markConnected() {
+        connectTimeoutTask?.cancel()
+        connectTimeoutTask = nil
+        isConnected = true
+        hasEverConnected = true
+        reconnectAttempt = 0
     }
 
     /// Push the current primary-metric preference to the server. Used both on
@@ -172,9 +208,7 @@ final class WebSocketClient: ObservableObject {
                     self.scheduleReconnect()
                     return
                 }
-                self.isConnected = true
-                self.hasEverConnected = true
-                self.reconnectAttempt = 0
+                self.markConnected()
                 self.sendHello()
             }
         }
@@ -199,9 +233,7 @@ final class WebSocketClient: ObservableObject {
                 guard self.isCurrentTask(candidate), !self.stopped else { return }
                 switch result {
                 case .success(let message):
-                    self.isConnected = true
-                    self.hasEverConnected = true
-                    self.reconnectAttempt = 0
+                    self.markConnected()
                     self.handle(message)
                     self.receive()
                 case .failure:
@@ -271,7 +303,11 @@ final class WebSocketClient: ObservableObject {
         if stopped { return }
         if reconnectScheduled { return }
         reconnectScheduled = true
-        let delaySeconds = min(pow(2.0, Double(reconnectAttempt)), 30.0)
+        // Equal-jitter backoff: half the capped exponential delay plus a random
+        // point in the other half. Keeps a sensible floor while preventing
+        // several clients from reconnecting in lock-step after a daemon restart.
+        let cap = min(pow(2.0, Double(reconnectAttempt)), 30.0)
+        let delaySeconds = cap / 2 + Double.random(in: 0...(cap / 2))
         reconnectAttempt += 1
         reconnectTask?.cancel()
         reconnectTask = Task { @MainActor [weak self] in

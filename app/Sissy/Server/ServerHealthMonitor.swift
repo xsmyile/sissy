@@ -45,7 +45,7 @@ final class ServerHealthMonitor: ObservableObject {
     func waitUntilReachable(timeoutSeconds: Double = 6) async -> Status {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         var latest = await refreshNow()
-        while !latest.isReachable && Date() < deadline {
+        while !latest.isReachable && Date() < deadline && !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(250))
             latest = await refreshNow()
         }
