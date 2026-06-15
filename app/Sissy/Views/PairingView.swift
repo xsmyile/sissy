@@ -40,6 +40,9 @@ struct PairingView: View {
         .onAppear {
             viewModel.applyPreferences(model.preferences)
         }
+        .onDisappear {
+            viewModel.cancelProvisioning()
+        }
         .alert("Location access is off", isPresented: $showLocationDeniedAlert) {
             Button("Open System Settings") {
                 WiFiScanner.openSystemLocationSettings()
@@ -217,10 +220,18 @@ struct PairingView: View {
                 }
             }
 
-            pairingRow("Port", alignment: .center) {
-                TextField("Port", value: $viewModel.serverPort, format: .number.grouping(.never))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 90, alignment: .leading)
+            pairingRow("Port", alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Port", value: $viewModel.serverPort, format: .number.grouping(.never))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90, alignment: .leading)
+
+                    if !viewModel.isPortValid {
+                        Text("Port must be between 1 and 65535.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
             }
 
             pairingRow("Auth token", alignment: .top) {

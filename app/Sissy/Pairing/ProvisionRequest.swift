@@ -30,7 +30,7 @@ struct ProvisionRequest: Codable, Equatable {
         port: Int = 8787,
         path: String = "/ws",
         token: String,
-        otaPassword: String = "sissy"
+        otaPassword: String
     ) -> ProvisionRequest {
         ProvisionRequest(
             v: 1,

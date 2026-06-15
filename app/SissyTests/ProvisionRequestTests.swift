@@ -30,7 +30,7 @@ final class ProvisionRequestTests: XCTestCase {
 
     func testEncodedLineHasCFGPrefixAndTerminator() throws {
         let req = ProvisionRequest.make(
-            ssid: "S", password: "P", host: "H", token: "T"
+            ssid: "S", password: "P", host: "H", token: "T", otaPassword: "otap"
         )
         let bytes = try req.encodedLine()
         let str = String(decoding: bytes, as: UTF8.self)

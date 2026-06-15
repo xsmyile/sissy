@@ -21,6 +21,7 @@ final class PairingViewModel: ObservableObject {
     let wifiScanner = WiFiScanner()
 
     private var wifiScannerCancellable: AnyCancellable?
+    private var provisioningTask: Task<Void, Never>?
 
     enum Status: Equatable {
         case idle
@@ -96,8 +97,13 @@ final class PairingViewModel: ObservableObject {
             && !ssid.isEmpty
             && !wifiPassword.isEmpty
             && isHostValid
+            && isPortValid
             && !authToken.isEmpty
             && isOtaPasswordValid
+    }
+
+    var isPortValid: Bool {
+        (1...65535).contains(serverPort)
     }
 
     var isOtaPasswordValid: Bool {
@@ -174,9 +180,14 @@ final class PairingViewModel: ObservableObject {
     }
 
     func send(serverConfigurationChanged: Bool) {
+        if case .sendingConfiguration = status { return }
         guard let port = selectedPort else { return }
         guard isOtaPasswordValid else {
             status = .failure("OTA password must be at least \(Preferences.minimumSecretLength) characters.")
+            return
+        }
+        guard isPortValid else {
+            status = .failure("Port must be between 1 and 65535.")
             return
         }
         if let hostErr = hostValidationMessage {
@@ -196,20 +207,27 @@ final class PairingViewModel: ObservableObject {
             otaPassword: otaPassword
         )
 
-        Task {
+        provisioningTask?.cancel()
+        provisioningTask = Task { [weak self] in
             do {
                 try await Provisioner.shared.send(request, to: port)
-                await MainActor.run {
-                    self.status = .waitingForDevice(
-                        serverConfigurationChanged: serverConfigurationChanged
-                    )
-                }
+                guard !Task.isCancelled, let self else { return }
+                self.status = .waitingForDevice(
+                    serverConfigurationChanged: serverConfigurationChanged
+                )
             } catch {
-                await MainActor.run {
-                    self.status = .failure(error.localizedDescription)
-                }
+                guard !Task.isCancelled, let self else { return }
+                self.status = .failure(error.localizedDescription)
             }
         }
+    }
+
+    /// Cancel an in-flight provisioning send. Called when the Pair window
+    /// closes so the result isn't applied to a torn-down view model and the
+    /// task doesn't outlive its owner.
+    func cancelProvisioning() {
+        provisioningTask?.cancel()
+        provisioningTask = nil
     }
 }
 
