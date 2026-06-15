@@ -185,6 +185,24 @@ jobs:
             MARKETING_VERSION="$VERSION" \
             build | xcbeautify --renderer github-actions
 
+      - name: Re-sign for Developer ID distribution
+        working-directory: app
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release/Sissy.app"
+          # `xcodebuild build` signs products for local run/debug: it injects
+          # com.apple.security.get-task-allow and omits a secure timestamp,
+          # both of which the notary service rejects. Re-sign inner-to-outer
+          # with --timestamp and without the debug entitlement. The notary log
+          # confirmed these two Mach-Os are the only signable code in the bundle.
+          codesign --force --timestamp --options runtime \
+            --sign "$SIGN_IDENTITY" \
+            "$APP/Contents/MacOS/sissy-serverd"
+          codesign --force --timestamp --options runtime \
+            --sign "$SIGN_IDENTITY" \
+            --entitlements Sissy/Sissy.entitlements \
+            "$APP"
+
       - name: Verify code signature
         working-directory: app
         env:
@@ -202,6 +220,18 @@ jobs:
             | tee /tmp/sign-daemon.txt >/dev/null
           grep -q "$TEAM_ID" /tmp/sign-daemon.txt \
             || { echo "embedded daemon not signed with team $TEAM_ID" >&2; exit 1; }
+          # Notarization preflight: every signed Mach-O must carry a secure
+          # timestamp and must NOT request get-task-allow. Asserting here lets
+          # the un-notarized dry-run catch a non-distributable signature before
+          # a tag triggers the real notary submission.
+          for bin in "$APP" "$APP/Contents/MacOS/sissy-serverd"; do
+            codesign -dvv "$bin" 2>&1 | grep -q "Timestamp=" \
+              || { echo "no secure timestamp on $bin" >&2; exit 1; }
+            if codesign -d --entitlements - "$bin" 2>/dev/null | grep -q "get-task-allow"; then
+              echo "get-task-allow present on $bin" >&2
+              exit 1
+            fi
+          done
 
       - name: Notarize app
         if: ${{ inputs.dry_run != 'true' }}

@@ -88,6 +88,18 @@ xcodebuild \
 APP_PATH="$BUILD_DIR/Build/Products/Release/Sissy.app"
 [[ -d "$APP_PATH" ]] || die "build did not produce $APP_PATH"
 
+# `xcodebuild build` signs for local run/debug: it injects get-task-allow and
+# omits a secure timestamp, both rejected by notarization. Re-sign inner-to-outer
+# with --timestamp and without the debug entitlement.
+log "re-sign for Developer ID distribution"
+codesign --force --timestamp --options runtime \
+  --sign "$SIGN_IDENTITY" \
+  "$APP_PATH/Contents/MacOS/sissy-serverd"
+codesign --force --timestamp --options runtime \
+  --sign "$SIGN_IDENTITY" \
+  --entitlements "$APP_DIR/Sissy/Sissy.entitlements" \
+  "$APP_PATH"
+
 # Verify signature. Both --deep verify and authority parse — the
 # previous "grep team id" was satisfied even by a Mac Development cert,
 # which notarizes but doesn't ship.
@@ -100,6 +112,14 @@ codesign -dv --verbose=2 "$APP_PATH/Contents/MacOS/sissy-serverd" 2>&1 \
   | tee /tmp/sign-daemon.txt >/dev/null
 grep -q "$TEAM_ID" /tmp/sign-daemon.txt \
   || die "sissy-serverd not signed with team $TEAM_ID"
+# Notarization preflight: secure timestamp present, no get-task-allow.
+for bin in "$APP_PATH" "$APP_PATH/Contents/MacOS/sissy-serverd"; do
+  codesign -dvv "$bin" 2>&1 | grep -q "Timestamp=" \
+    || die "no secure timestamp on $bin"
+  if codesign -d --entitlements - "$bin" 2>/dev/null | grep -q "get-task-allow"; then
+    die "get-task-allow present on $bin"
+  fi
+done
 
 # Notarize app via zip
 log "notarize app"
