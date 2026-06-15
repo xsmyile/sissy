@@ -8,7 +8,7 @@ A menubar companion for **Claude Code** and **Codex**.
 
 A pixel-art cat watches your token meter and gets moodier the more you spend.
 
-Named after my cat — she naps, judges, demands cuddles (A LOT of cuddles), and is, objectively, fabulous.
+Named after my cat: she naps, judges, demands cuddles (A LOT of cuddles), and is, objectively, fabulous.
 
 [Install](#install) • [Demo](#demo) • [How it works](#how-it-works) • [Build from source](#build-from-source) • [Desk companion](#desk-companion)
 
@@ -30,17 +30,17 @@ brew install --cask xsmyile/sissy/sissy
 
 Grab the latest `Sissy-x.y.z.dmg` from [Releases](../../releases/latest), open it, and drag **Sissy** into Applications.
 
-Either way: launch Sissy — it lives in the menubar — then **Start Server** to begin tailing token usage. The build is Developer ID signed and notarized, so there's no `xattr` workaround and no right-click → Open.
+Either way: launch Sissy (it lives in the menubar), then **Start Server** to begin tailing token usage. The build is Developer ID signed and notarized, so there's no `xattr` workaround and no right-click → Open.
 
 ## Demo
 
-A pixel-art cat sits in your menubar and shifts mood as the day's spend climbs — from **Sleeping** when idle, through **Thinking**, **Coding**, **Trending up** and **Glowing**, up to **Angry coffee** when you're redlining.
+A pixel-art cat sits in your menubar and shifts mood as the day's spend climbs: from **Sleeping** when idle, through **Thinking**, **Coding**, **Trending up** and **Glowing**, up to **Angry coffee** when you're redlining.
 
 <p align="center">
   <img src="assets/states.png" alt="Sissy's six moods, from sleeping to angry" width="640" />
 </p>
 
-Click the icon for the running total and burn rate — plus a per-CLI **Breakdown** when more than one tool is active, and controls for milestone cadence and mascot mood:
+Click the icon for the running total and burn rate, plus a per-CLI **Breakdown** when more than one tool is active, and controls for milestone cadence and mascot mood:
 
 <p align="center">
   <img src="assets/menu-bar.png" alt="Sissy menubar dropdown" width="300" />
@@ -65,15 +65,15 @@ scripts/dev-build-app.sh
 open app/build-dev/Build/Products/Debug/Sissy.app
 ```
 
-Menubar → **Server** toggles the bundled LaunchAgent. When switched on it registers the daemon so it restarts on login; turning it off unregisters the agent. That control requires a normally signed app build — `CODE_SIGNING_ALLOWED=NO` is fine for CI but not for testing Server start/stop locally.
+Menubar → **Server** toggles the bundled LaunchAgent. When switched on it registers the daemon so it restarts on login; turning it off unregisters the agent. That control requires a normally signed app build. `CODE_SIGNING_ALLOWED=NO` is fine for CI but not for testing Server start/stop locally.
 
 ## Desk companion
 
-A hardware companion — a tiny pixel-art cat on an OLED that mirrors the menubar — is in development. Code lives in [`firmware/`](firmware) and is not built into the release. Watch this repo for updates.
+A hardware companion (a tiny pixel-art cat on an OLED that mirrors the menubar) is in development. Code lives in [`firmware/`](firmware) and is not built into the release. Watch this repo for updates.
 
 ## Credits
 
-Usage parsing follows [`ccusage`](https://github.com/ryoppippi/ccusage) — both the JSONL schemas (Claude Code and Codex rollouts) and per-model pricing come from there. The daemon's WebSocket server is [SwiftNIO](https://github.com/apple/swift-nio).
+Usage parsing follows [`ccusage`](https://github.com/ryoppippi/ccusage): both the JSONL schemas (Claude Code and Codex rollouts) and per-model pricing come from there. The daemon's WebSocket server is [SwiftNIO](https://github.com/apple/swift-nio).
 
 Status: alpha.
 
