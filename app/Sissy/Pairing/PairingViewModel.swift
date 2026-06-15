@@ -62,9 +62,10 @@ final class PairingViewModel: ObservableObject {
 
     func refreshPorts() {
         availablePorts = SerialPortDiscovery.list()
-        if selectedPort == nil || availablePorts.contains(selectedPort!) == false {
-            selectedPort = availablePorts.first
+        if let selected = selectedPort, availablePorts.contains(selected) {
+            return
         }
+        selectedPort = availablePorts.first
     }
 
     private func prefillFromHostAsync() async {

@@ -145,15 +145,15 @@ struct Preferences: Codable, Equatable {
         return base
     }
 
-    static func load() -> Preferences {
+    static func load() -> Self {
         let url = appSupportDir().appendingPathComponent(fileName)
-        var prefs: Preferences
+        var prefs: Self
         if let data = try? Data(contentsOf: url),
-            let decoded = try? JSONDecoder().decode(Preferences.self, from: data)
+            let decoded = try? JSONDecoder().decode(Self.self, from: data)
         {
             prefs = decoded
         } else {
-            prefs = Preferences()
+            prefs = Self()
         }
         // Keychain is the source of truth for the bearer token. If it's
         // populated, it overrides whatever's on disk; if it's empty and

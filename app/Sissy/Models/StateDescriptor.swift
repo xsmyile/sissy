@@ -104,7 +104,7 @@ enum MilestoneDescriptor: Equatable {
 
     /// Parse the wire string. Returns nil for unknown kinds or malformed
     /// values so a future server-side schema bump can't crash older clients.
-    static func parse(_ raw: String) -> MilestoneDescriptor? {
+    static func parse(_ raw: String) -> Self? {
         let parts = raw.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2, let value = Int(parts[1]) else { return nil }
         switch String(parts[0]) {
