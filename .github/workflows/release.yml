@@ -84,8 +84,12 @@ jobs:
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          # Put our keychain first in the search list (login keychain still present)
-          mapfile -t existing_keychains < <(security list-keychain -d user | tr -d '"')
+          # Put our keychain first in the search list (login keychain still present).
+          # `mapfile` is bash 4+; macOS runners run steps under bash 3.2, so read
+          # the existing list with a loop that works on both.
+          existing_keychains=()
+          while IFS= read -r kc; do existing_keychains+=("$kc"); done \
+            < <(security list-keychain -d user | tr -d '"')
           security list-keychain -d user -s "$KEYCHAIN_PATH" "${existing_keychains[@]}"
           rm -f "$CERT_PATH"
           security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
