@@ -126,6 +126,8 @@ The app drives the bundled daemon's lifecycle via `Server/ServerServiceControlle
 
 `pre-commit run --all-files` runs the full sweep.
 
+CI lints against a recorded backlog in `.swiftlint-baseline`, so only **new** violations annotate a PR. Regenerate it from the repo root when the backlog legitimately changes (e.g. after a refactor that adds or clears violations): `swiftlint lint --write-baseline .swiftlint-baseline`.
+
 ## Quality gates
 
 Consumed by the `/commit` skill. Run before each commit; `--no-checks` to skip.
