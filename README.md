@@ -56,7 +56,7 @@ When the mood shifts, a small popover slides in with Sissy's current vibe:
 
 A small daemon on your Mac tails each supported CLI's session log, sums the day's spend across all of them, and shows the combined total in the menubar.
 
-Currently supports Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`, also honors `CODEX_HOME`). Codex auto-enables when the rollout directory has activity in the last 7 days; force it on or off via `providers` in `~/Library/Application Support/Sissy/server.json`. When two or more providers are active the menubar grows a **Breakdown** submenu with the per-CLI split.
+Currently supports Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`, also honors `CODEX_HOME`). Codex is tracked whenever its session directory exists; force it on or off via `providers` in `~/Library/Application Support/Sissy/server.json`. When two or more CLIs have spent something today, the menubar grows a **Breakdown** submenu with that day's per-CLI split.
 
 ## Build from source
 

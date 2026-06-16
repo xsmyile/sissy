@@ -125,27 +125,6 @@ actor CodexUsageReader: UsageProvider {
         return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/sessions")
     }
 
-    /// True when the configured rollout dir exists and contains at least one
-    /// `.jsonl` with mtime within the last `withinDays`. Used by the daemon
-    /// at boot to auto-detect Codex without forcing config edits.
-    static func hasRecentRollouts(in dir: URL, withinDays: Int = 7) -> Bool {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: dir.path),
-            let it = fm.enumerator(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])
-        else { return false }
-        let cutoff = Date().addingTimeInterval(Double(-withinDays * 86400))
-        while let u = it.nextObject() as? URL {
-            guard u.pathExtension == "jsonl" else { continue }
-            if let attrs = try? fm.attributesOfItem(atPath: u.path),
-                let mtime = attrs[.modificationDate] as? Date,
-                mtime >= cutoff
-            {
-                return true
-            }
-        }
-        return false
-    }
-
     func start(onChange: @escaping @Sendable (DayTotals, DayTotals?) async -> Void) async {
         self.onChange = onChange
         let loaded = loadAndApplyPersistedState()

@@ -115,6 +115,12 @@ func runSelfTest() {
     expect("provider order [0]", sorted[0].id, "claude-code")
     expect("provider order [1]", sorted[1].id, "codex")
     expect("provider order [2]", sorted[2].id, "zzz")
+    let active = FrameBuilder.activeSlices([
+        ProviderSlice(id: "codex", tokens: 0, cost: 0),
+        ProviderSlice(id: "claude-code", tokens: 100, cost: Decimal(string: "2.00")!),
+    ])
+    expect("activeSlices drops zero-token CLI", active.count, 1)
+    expect("activeSlices keeps used CLI", active.first?.id, "claude-code")
     let frameWithProviders = FrameBuilder.build(
         today: DayTotals(totalTokens: 301, totalCost: Decimal(string: "3.50")!),
         prev: nil,
