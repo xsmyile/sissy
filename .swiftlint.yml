@@ -40,7 +40,6 @@ opt_in_rules:
   - prefer_self_in_static_references
   - prefer_zero_over_explicit_init
   - redundant_nil_coalescing
-  - redundant_optional_initialization
   - redundant_string_enum_value
   - redundant_void_return
   - unneeded_parentheses_in_closure_argument
