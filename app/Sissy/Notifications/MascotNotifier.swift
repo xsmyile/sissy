@@ -1,6 +1,6 @@
 import AppKit
-import Combine
 import Foundation
+import Observation
 import SwiftUI
 
 /// Transient menubar pop-ups for mood changes and cost milestones. Uses
@@ -22,12 +22,17 @@ final class MascotNotifier {
     private weak var model: SissyModel?
     private let statusButtonProvider: () -> NSStatusBarButton?
     private let menuIsOpenProvider: () -> Bool
-    private var stateCancellable: AnyCancellable?
-    private var milestoneCancellable: AnyCancellable?
     private var lastNotifiedState: String?
+    private var lastMilestoneKey: MilestoneKey?
+    private var isStopped = false
     private let popover = NSPopover()
     private var dismissWork: DispatchWorkItem?
     private var milestoneClearWork: DispatchWorkItem?
+
+    private struct MilestoneKey: Equatable {
+        let milestone: String
+        let ts: Int
+    }
 
     /// Wall-clock the pop-up stays visible before auto-dismiss. Matches the
     /// macOS notification banner default (5 s) so it reads as native banner
@@ -49,44 +54,55 @@ final class MascotNotifier {
     }
 
     func start() {
-        guard let model else { return }
-        // Pass the frame through the closure rather than reading
-        // `model.currentFrame` inside the sink: `@Published` emits in
-        // `willSet`, so the stored property is still the previous frame when
-        // subscribers run. Reading it inside the handler would mix the new
-        // frame's milestone/state with the previous frame's `cost`/`tokens`.
-        stateCancellable = model.$currentFrame
-            .map { frame -> (DisplayFrame?, String?) in (frame, frame?.state) }
-            .removeDuplicates { $0.1 == $1.1 }
-            .sink { [weak self] frame, state in
-                self?.handle(state: state, frame: frame)
-            }
-        // Daemon emits a non-nil `milestone` only on the single frame that
-        // crosses a threshold. Dedupe on `(milestone, ts)` so the same cost
-        // bucket crossed again on a later day still fires — distinct crossings
-        // have distinct frame timestamps, while daemon replays of the same
-        // crossing carry the same ts.
-        milestoneCancellable = model.$currentFrame
-            .compactMap { frame -> (DisplayFrame, String, Int)? in
-                guard let frame, let ms = frame.milestone, !ms.isEmpty else { return nil }
-                return (frame, ms, frame.ts)
-            }
-            .removeDuplicates { $0.1 == $1.1 && $0.2 == $1.2 }
-            .sink { [weak self] frame, milestone, _ in
-                self?.handleMilestone(milestone, frame: frame)
-            }
+        guard model != nil else { return }
+        isStopped = false
+        observeFrame()
     }
 
     func stop() {
-        stateCancellable?.cancel()
-        stateCancellable = nil
-        milestoneCancellable?.cancel()
-        milestoneCancellable = nil
+        isStopped = true
         dismissWork?.cancel()
         dismissWork = nil
         milestoneClearWork?.cancel()
         milestoneClearWork = nil
         if popover.isShown { popover.performClose(nil) }
+    }
+
+    /// Re-arming observation of `model.currentFrame`. `@Observable` exposes no
+    /// Combine publisher, so the two former pipelines become explicit stateful
+    /// dedupes: the mood pop-up fires only when `state` changes (mirrors the
+    /// old `removeDuplicates` on state), and the milestone pop-up fires once
+    /// per `(milestone, ts)` crossing — distinct crossings carry distinct
+    /// frame timestamps, while daemon replays of the same crossing repeat the
+    /// ts. Reading the committed frame on the next main-actor turn also
+    /// removes the `willSet` staleness the publisher version had to work
+    /// around (state and cost/tokens now always come from the same frame).
+    private func observeFrame() {
+        guard !isStopped else { return }
+        withObservationTracking {
+            _ = model?.currentFrame
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self, !self.isStopped else { return }
+                self.processFrameChange()
+                self.observeFrame()
+            }
+        }
+    }
+
+    private func processFrameChange() {
+        let frame = model?.currentFrame
+        let state = frame?.state
+        if state != lastNotifiedState {
+            handle(state: state, frame: frame)
+        }
+        if let frame, let milestone = frame.milestone, !milestone.isEmpty {
+            let key = MilestoneKey(milestone: milestone, ts: frame.ts)
+            if key != lastMilestoneKey {
+                lastMilestoneKey = key
+                handleMilestone(milestone, frame: frame)
+            }
+        }
     }
 
     private func handle(state: String?, frame: DisplayFrame?) {

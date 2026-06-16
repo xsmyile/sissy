@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Security
 import ServiceManagement
 
@@ -8,7 +9,8 @@ import ServiceManagement
 /// registration survives app relocation without writing plist files into
 /// ~/Library/LaunchAgents.
 @MainActor
-final class ServerServiceController: ObservableObject {
+@Observable
+final class ServerServiceController {
     /// LaunchAgent label. `com.radonforge.sissy.server` for release;
     /// `com.radonforge.sissy.server.dev` for Debug. Derived from the app's
     /// own bundle id so the right plist is registered with launchd — a
@@ -22,11 +24,11 @@ final class ServerServiceController: ObservableObject {
     nonisolated static let daemonRelativePath = "Contents/MacOS/sissy-serverd"
     nonisolated static let agentRelativePath = "Contents/Library/LaunchAgents/\(plistName)"
 
-    @Published private(set) var status: SMAppService.Status = .notRegistered
-    @Published var isTransitioning: Bool = false
-    @Published var transitionLabel: String = ""
+    private(set) var status: SMAppService.Status = .notRegistered
+    var isTransitioning: Bool = false
+    var transitionLabel: String = ""
 
-    private let service: SMAppService
+    @ObservationIgnored private let service: SMAppService
     private let logsURL: URL = ServerServiceController.defaultLogsURL
 
     init(service: SMAppService = .agent(plistName: ServerServiceController.plistName)) {

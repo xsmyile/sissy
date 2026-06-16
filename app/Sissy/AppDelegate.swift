@@ -6,7 +6,7 @@ import Foundation
 /// `StatusItemController` owns the native menu, and `WindowCoordinator` owns
 /// Pair/About windows.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     let model: SissyModel
     let windowCoordinator: WindowCoordinator
 

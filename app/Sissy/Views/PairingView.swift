@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct PairingView: View {
-    @EnvironmentObject var model: SissyModel
-    @StateObject private var viewModel = PairingViewModel()
+    @Environment(SissyModel.self) private var model
+    @State private var viewModel = PairingViewModel()
     @State private var showOtherNetworkField: Bool = false
     @State private var showLocationDeniedAlert: Bool = false
 

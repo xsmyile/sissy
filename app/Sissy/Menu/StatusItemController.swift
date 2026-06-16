@@ -1,5 +1,5 @@
 import AppKit
-import Combine
+import Observation
 import SwiftUI
 
 /// Owns the app's native status item and root pull-down menu. Interactive
@@ -24,7 +24,6 @@ final class StatusItemController: NSObject {
     private let pairItem = NSMenuItem(title: "Pair Device...", action: nil, keyEquivalent: "p")
 
     private var headerView: NSHostingView<HeaderRowView>?
-    private var cancellables: Set<AnyCancellable> = []
 
     private static let rowWidth: CGFloat = 260
 
@@ -113,13 +112,27 @@ final class StatusItemController: NSObject {
     }
 
     private func startObservers() {
-        model.objectWillChange
-            .sink { [weak self] _ in
-                DispatchQueue.main.async {
-                    self?.refreshFromModel()
-                }
+        observeModel()
+    }
+
+    /// Re-arming observation bridge. `@Observable` exposes no
+    /// `objectWillChange`, so to keep the status-bar icon live while the menu
+    /// is closed we track the snapshot's inputs and refresh on each change,
+    /// re-registering the tracker every fire (`withObservationTracking` is
+    /// one-shot). The async hop preserves the previous `objectWillChange`
+    /// behaviour — the callback runs at `willSet` time, so the committed value
+    /// is read on the next main-actor turn. Menu rows refresh independently
+    /// through `NSMenuDelegate`.
+    private func observeModel() {
+        withObservationTracking {
+            _ = model.menuSnapshot
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.refreshFromModel()
+                self.observeModel()
             }
-            .store(in: &cancellables)
+        }
     }
 
     private func refreshFromModel() {

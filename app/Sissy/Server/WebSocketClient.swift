@@ -1,5 +1,5 @@
 import Foundation
-import SwiftUI
+import Observation
 
 /// Connects to the local Sissy server's `/ws` and feeds incoming frames
 /// into `SissyModel.currentFrame`. Keeps the menu bar icon in sync with the
@@ -8,31 +8,32 @@ import SwiftUI
 /// Auto-reconnects on disconnect with a bounded exponential backoff so a
 /// missing or restarting server doesn't permanently break the UI.
 @MainActor
-final class WebSocketClient: ObservableObject {
-    @Published var isConnected: Bool = false
+@Observable
+final class WebSocketClient {
+    var isConnected: Bool = false
     /// Becomes true after the first successful WS handshake and never resets.
     /// Lets the menubar suppress the "offline" badge during the launch window
     /// before WS has had a chance to connect — otherwise the icon flickers
     /// offline → online → frame-state in the first second of app launch.
-    @Published private(set) var hasEverConnected: Bool = false
+    private(set) var hasEverConnected: Bool = false
 
-    private weak var model: SissyModel?
-    private var task: URLSessionWebSocketTask?
-    private var session: URLSession = URLSession(configuration: .default)
-    private var reconnectAttempt: Int = 0
-    private var stopped: Bool = true
-    private var reconnectTask: Task<Void, Never>?
+    @ObservationIgnored private weak var model: SissyModel?
+    @ObservationIgnored private var task: URLSessionWebSocketTask?
+    @ObservationIgnored private var session: URLSession = URLSession(configuration: .default)
+    @ObservationIgnored private var reconnectAttempt: Int = 0
+    @ObservationIgnored private var stopped: Bool = true
+    @ObservationIgnored private var reconnectTask: Task<Void, Never>?
     /// Prevents duplicate reconnect scheduling when both probeConnection and
     /// receive fail for the same task (which both happen on a real TCP drop).
     /// Without dedupe, reconnectAttempt double-increments per disconnect and
     /// the backoff jumps 1s → 4s → 16s → 30s instead of 1s → 2s → 4s → 8s.
-    private var reconnectScheduled: Bool = false
+    @ObservationIgnored private var reconnectScheduled: Bool = false
     /// Fires if a freshly-resumed task hasn't completed its handshake within
     /// `connectTimeout`. Without it a half-open TCP (SYN sent, no reply) leaves
     /// the ping callback pending until the OS times out the socket (~60s),
     /// freezing the menubar on `--`. Cancelled the moment the connection goes
     /// live, so a healthy idle connection between sparse frames is never cut.
-    private var connectTimeoutTask: Task<Void, Never>?
+    @ObservationIgnored private var connectTimeoutTask: Task<Void, Never>?
     private static let connectTimeout: TimeInterval = 8
 
     init() {}

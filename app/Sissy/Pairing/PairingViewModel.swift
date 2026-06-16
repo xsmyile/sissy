@@ -1,27 +1,27 @@
-import Combine
+import AppKit
 import Foundation
-import SwiftUI
+import Observation
 
 @MainActor
-final class PairingViewModel: ObservableObject {
-    @Published var availablePorts: [SerialPort] = []
-    @Published var selectedPort: SerialPort? = nil
+@Observable
+final class PairingViewModel {
+    var availablePorts: [SerialPort] = []
+    var selectedPort: SerialPort? = nil
 
-    @Published var ssid: String = ""
-    @Published var wifiPassword: String = ""
-    @Published var serverHost: String = ""
-    @Published var serverPort: Int = 8787
-    @Published var authToken: String = ""
-    @Published var revealToken: Bool = false
-    @Published var otaPassword: String = Preferences.makeSecret()
+    var ssid: String = ""
+    var wifiPassword: String = ""
+    var serverHost: String = ""
+    var serverPort: Int = 8787
+    var authToken: String = ""
+    var revealToken: Bool = false
+    var otaPassword: String = Preferences.makeSecret()
 
-    @Published var status: Status = .idle
-    @Published var lastInfo: String? = nil
+    var status: Status = .idle
+    var lastInfo: String? = nil
 
     let wifiScanner = WiFiScanner()
 
-    private var wifiScannerCancellable: AnyCancellable?
-    private var provisioningTask: Task<Void, Never>?
+    @ObservationIgnored private var provisioningTask: Task<Void, Never>?
 
     enum Status: Equatable {
         case idle
@@ -31,13 +31,9 @@ final class PairingViewModel: ObservableObject {
     }
 
     init() {
-        // Forward WiFiScanner updates so SwiftUI views observing this view
-        // model re-render when the scanner's @Published values change. Without
-        // this bridge, nested ObservableObjects don't propagate change
-        // notifications past the immediate parent.
-        wifiScannerCancellable = wifiScanner.objectWillChange.sink { [weak self] in
-            self?.objectWillChange.send()
-        }
+        // WiFiScanner is `@Observable`; SwiftUI views reading
+        // `viewModel.wifiScanner.*` track its properties transitively, so no
+        // manual change-forwarding bridge is needed.
         refreshPorts()
         // `prefillFromHost` shells out to `/usr/sbin/networksetup` twice
         // (once for the hardware port list, once per Wi-Fi interface for the
