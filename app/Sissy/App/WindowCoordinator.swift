@@ -56,7 +56,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             return
         }
         let root = PairingView()
-            .environmentObject(model)
+            .environment(model)
         let window = makeManagedWindow(
             title: "Pair Device",
             size: NSSize(width: 620, height: 640),

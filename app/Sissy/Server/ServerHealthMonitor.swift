@@ -1,8 +1,9 @@
-import Combine
 import Foundation
+import Observation
 
 @MainActor
-final class ServerHealthMonitor: ObservableObject {
+@Observable
+final class ServerHealthMonitor {
     enum Status: Equatable {
         case unknown
         case up
@@ -10,11 +11,11 @@ final class ServerHealthMonitor: ObservableObject {
         case usageReaderEmpty
     }
 
-    @Published var status: Status = .unknown
-    @Published var uptimeSeconds: Int = 0
+    var status: Status = .unknown
+    var uptimeSeconds: Int = 0
 
-    private let prefsProvider: @MainActor () -> Preferences
-    private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private let prefsProvider: @MainActor () -> Preferences
+    @ObservationIgnored private var pollTask: Task<Void, Never>?
     private let pollInterval: Duration = .seconds(3)
 
     init(prefsProvider: @escaping @MainActor () -> Preferences) {

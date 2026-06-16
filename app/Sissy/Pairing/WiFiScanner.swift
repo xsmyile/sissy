@@ -1,7 +1,8 @@
+import AppKit
 import CoreLocation
 import CoreWLAN
 import Foundation
-import SwiftUI
+import Observation
 
 /// Async wrapper around CoreWLAN. On macOS 11+, both `scanForNetworks` and
 /// even reading a `CWNetwork.ssid` return nil/throw unless the app holds
@@ -9,13 +10,14 @@ import SwiftUI
 /// gatekeeper. The Pair window asks the user once on first scan; subsequent
 /// scans skip the prompt.
 @MainActor
-final class WiFiScanner: NSObject, ObservableObject {
-    @Published var networks: [String] = []
-    @Published var currentSSID: String? = nil
-    @Published var isScanning: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var locationAuthorized: Bool = false
-    @Published var permissionState: PermissionState = .unknown
+@Observable
+final class WiFiScanner: NSObject {
+    var networks: [String] = []
+    var currentSSID: String? = nil
+    var isScanning: Bool = false
+    var errorMessage: String? = nil
+    var locationAuthorized: Bool = false
+    var permissionState: PermissionState = .unknown
 
     enum PermissionState {
         case unknown  // never asked
@@ -24,8 +26,8 @@ final class WiFiScanner: NSObject, ObservableObject {
         case awaitingUser  // request fired, waiting for the prompt result
     }
 
-    private let locationManager = CLLocationManager()
-    private var pendingAuthContinuation: CheckedContinuation<Bool, Never>? = nil
+    @ObservationIgnored private let locationManager = CLLocationManager()
+    @ObservationIgnored private var pendingAuthContinuation: CheckedContinuation<Bool, Never>? = nil
 
     override init() {
         super.init()

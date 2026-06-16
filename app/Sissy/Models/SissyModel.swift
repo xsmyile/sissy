@@ -1,42 +1,48 @@
 import AppKit
-import Combine
 import Foundation
-import SwiftUI
+import Observation
 
 /// Main runtime owner for the menubar app. UI surfaces observe this object,
 /// while server/service/WebSocket adapters stay as leaf implementation
 /// details behind it.
 @MainActor
-final class SissyModel: ObservableObject {
-    @Published var currentFrame: DisplayFrame? = nil
-    @Published var preferences: Preferences = .load()
+@Observable
+final class SissyModel {
+    var currentFrame: DisplayFrame? = nil
+    var preferences: Preferences = .load()
     /// Optimistic mirror of the daemon's mascot pin. nil = Auto (computed
     /// state). The daemon is authoritative — this is just what the menu
     /// most recently asked for, used to flag the active row with a checkmark
     /// without waiting for the next frame to confirm.
-    @Published var pinnedMascot: String? = nil
+    var pinnedMascot: String? = nil
     /// Mood line picked at the last mascot state-change. Both the menubar
     /// header and the mood pop-up read this so they show the same catchphrase
     /// for the same transition (the pool offers 4 lines per state — without
     /// this, each surface would roll independently and disagree). Stays nil
     /// until the first transition is observed; the header then falls back to
     /// `StateDescriptor.voice(for:)` for its canonical line.
-    @Published var currentMoodPhrase: String? = nil
+    var currentMoodPhrase: String? = nil
     /// Celebration line for the most recent milestone crossing. Set by the
     /// notifier alongside the pop-up so the menubar header can mirror what
     /// the user just saw flash. Held verbatim (full sentence — no "Sissy is"
     /// prefix at render) and auto-cleared after the pop-up dismisses so the
     /// header returns to the canonical mood line.
-    @Published var currentMilestonePhrase: String? = nil
-    @Published private var serverToggleInFlight: Bool = false
-    @Published private var serverToggleLabel: String = ""
-    @Published private var serverToggleTargetIsOn: Bool?
+    var currentMilestonePhrase: String? = nil
+    private var serverToggleInFlight: Bool = false
+    private var serverToggleLabel: String = ""
+    private var serverToggleTarget: ServerToggleTarget?
+
+    /// Optimistic target for an in-flight Server start/stop. `nil` when no
+    /// toggle is pending, so the menu derives the row state from the live
+    /// service/health status instead.
+    private enum ServerToggleTarget {
+        case on
+        case off
+    }
 
     let serverService: ServerServiceController
     let serverHealth: ServerHealthMonitor
     let webSocketClient: WebSocketClient
-
-    private var cancellables: Set<AnyCancellable> = []
 
     init() {
         self.serverService = ServerServiceController()
@@ -51,7 +57,6 @@ final class SissyModel: ObservableObject {
         self.serverHealth = ServerHealthMonitor(prefsProvider: { holder.preferences() })
         holder.model = self
         self.webSocketClient.attach(model: self)
-        bridgeLeafObjectChanges()
     }
 
     func start() {
@@ -157,14 +162,14 @@ final class SissyModel: ObservableObject {
         let shouldStop = serverService.isRegistered || serverHealth.status.isReachable
         serverToggleInFlight = true
         serverToggleLabel = shouldStop ? "Stopping..." : "Starting..."
-        serverToggleTargetIsOn = !shouldStop
+        serverToggleTarget = shouldStop ? .off : .on
 
         Task { [weak self] in
             guard let self else { return }
             defer {
                 self.serverToggleInFlight = false
                 self.serverToggleLabel = ""
-                self.serverToggleTargetIsOn = nil
+                self.serverToggleTarget = nil
             }
             do {
                 if shouldStop {
@@ -249,14 +254,14 @@ final class SissyModel: ObservableObject {
         let shouldRestart = serverService.isRegistered || serverHealth.status.isReachable
         serverToggleInFlight = true
         serverToggleLabel = shouldRestart ? "Restarting..." : "Starting..."
-        serverToggleTargetIsOn = true
+        serverToggleTarget = .on
 
         Task { [weak self] in
             guard let self else { return }
             defer {
                 self.serverToggleInFlight = false
                 self.serverToggleLabel = ""
-                self.serverToggleTargetIsOn = nil
+                self.serverToggleTarget = nil
             }
 
             let bookmark = serverService.errorLogBookmark()
@@ -329,7 +334,7 @@ final class SissyModel: ObservableObject {
     private var serverItemSnapshot: ServerItemSnapshot {
         let busy = serverToggleInFlight || serverService.isTransitioning
         let serverIsOn =
-            serverToggleTargetIsOn
+            serverToggleTarget.map { $0 == .on }
             ?? (serverService.isRegistered || serverHealth.status.isReachable)
 
         let title: String
@@ -405,16 +410,6 @@ final class SissyModel: ObservableObject {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private func bridgeLeafObjectChanges() {
-        Publishers.MergeMany([
-            serverService.objectWillChange.eraseToVoid(),
-            serverHealth.objectWillChange.eraseToVoid(),
-            webSocketClient.objectWillChange.eraseToVoid(),
-        ])
-        .sink { [weak self] _ in self?.objectWillChange.send() }
-        .store(in: &cancellables)
-    }
-
     private func showError(title: String, message: String) async {
         let alert = NSAlert()
         alert.messageText = title
@@ -477,12 +472,6 @@ struct DisplayFrame: Codable, Equatable {
         milestone: nil,
         providers: []
     )
-}
-
-extension Publisher where Failure == Never {
-    fileprivate func eraseToVoid() -> AnyPublisher<Void, Never> {
-        map { _ in () }.eraseToAnyPublisher()
-    }
 }
 
 /// Lets `SissyModel.init` hand `ServerHealthMonitor` a closure that reads
