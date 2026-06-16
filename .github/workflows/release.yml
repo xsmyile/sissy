@@ -354,7 +354,7 @@ jobs:
             desc "Menubar token usage mascot for Claude Code and Codex"
             homepage "https://github.com/xsmyile/sissy"
 
-            depends_on macos: ">= :tahoe"
+            depends_on macos: :tahoe
 
             app "Sissy.app"
 
