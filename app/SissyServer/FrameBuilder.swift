@@ -145,4 +145,12 @@ enum FrameBuilder {
             return lhs.id < rhs.id
         }
     }
+
+    /// Breakdown slices for the wire: only CLIs with spend today, in canonical
+    /// order. A provider with zero tokens today is omitted so the menubar
+    /// Breakdown reflects that day's actual per-CLI split rather than every
+    /// warm reader.
+    static func activeSlices(_ slices: [ProviderSlice]) -> [ProviderSlice] {
+        sortProviders(slices.filter { $0.tokens > 0 })
+    }
 }

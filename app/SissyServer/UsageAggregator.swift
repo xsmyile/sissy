@@ -98,15 +98,16 @@ actor UsageAggregator {
         }
     }
 
-    /// Snapshot of every provider that has emitted at least one frame,
-    /// pre-sorted into the canonical wire order. Still-warming providers are
-    /// omitted so the app can't accidentally render their 0s as a real total.
+    /// Breakdown slices for the wire: every provider that spent tokens today,
+    /// in canonical order. Providers with no usage today (still-warming or
+    /// simply unused) are omitted so the menubar Breakdown shows the day's
+    /// actual per-CLI split instead of stale `$0` rows.
     private func currentProviderSlices() -> [ProviderSlice] {
         let raw = providers.compactMap { p -> ProviderSlice? in
             guard let s = perProvider[p.id] else { return nil }
             return ProviderSlice(id: p.id, tokens: s.today.totalTokens, cost: s.today.totalCost)
         }
-        return FrameBuilder.sortProviders(raw)
+        return FrameBuilder.activeSlices(raw)
     }
 
     private func aggregate() -> (today: DayTotals, prev: DayTotals?) {

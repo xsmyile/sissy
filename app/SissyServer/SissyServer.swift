@@ -55,13 +55,14 @@ actor SissyServer {
 
         // Resolve provider toggles. Unset (nil) means "let the daemon
         // decide": ClaudeCodeUsageReader is the v0.1.0 baseline (always on);
-        // Codex auto-enables when the rollout dir shows activity in the
-        // last 7 days. Explicit `false` forces off even when data exists.
+        // Codex is tailed whenever its rollout dir exists (the cold scan is
+        // already 48h-bounded, so an idle reader is cheap). Explicit `false`
+        // forces off even when data exists; explicit `true` forces on.
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
         let claudeOn = config.providers.claudeCode ?? true
         let codexOn =
             config.providers.codex
-            ?? CodexUsageReader.hasRecentRollouts(in: config.resolvedCodexDataDir)
+            ?? FileManager.default.fileExists(atPath: config.resolvedCodexDataDir.path)
         var providers: [any UsageProvider] = []
         if claudeOn {
             // Legacy persistence URL on purpose: existing installs already
