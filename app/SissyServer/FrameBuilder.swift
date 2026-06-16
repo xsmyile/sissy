@@ -40,8 +40,9 @@ struct FrameData: Sendable, Equatable, Codable {
     /// `"cost:225"`). The app parses this into a `MilestoneDescriptor` to
     /// render the matching catchphrase; firmware ignores the field.
     let milestone: String?
-    /// Per-provider totals (raw tokens + Decimal cost). Stable order: claude-code,
-    /// codex, then alphabetical. Empty array when no provider has emitted yet.
+    /// Per-provider totals (raw tokens + Decimal cost) for every provider with
+    /// spend today. Stable order: claude-code, codex, then alphabetical. Empty
+    /// when no provider has tokens today (none active yet, or all idle today).
     /// App-only; firmware ignores it.
     let providers: [ProviderSlice]
 }
