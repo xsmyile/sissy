@@ -30,7 +30,15 @@ final class SissyModel {
     var currentMilestonePhrase: String? = nil
     private var serverToggleInFlight: Bool = false
     private var serverToggleLabel: String = ""
-    private var serverToggleTargetIsOn: Bool?
+    private var serverToggleTarget: ServerToggleTarget?
+
+    /// Optimistic target for an in-flight Server start/stop. `nil` when no
+    /// toggle is pending, so the menu derives the row state from the live
+    /// service/health status instead.
+    private enum ServerToggleTarget {
+        case on
+        case off
+    }
 
     let serverService: ServerServiceController
     let serverHealth: ServerHealthMonitor
@@ -154,14 +162,14 @@ final class SissyModel {
         let shouldStop = serverService.isRegistered || serverHealth.status.isReachable
         serverToggleInFlight = true
         serverToggleLabel = shouldStop ? "Stopping..." : "Starting..."
-        serverToggleTargetIsOn = !shouldStop
+        serverToggleTarget = shouldStop ? .off : .on
 
         Task { [weak self] in
             guard let self else { return }
             defer {
                 self.serverToggleInFlight = false
                 self.serverToggleLabel = ""
-                self.serverToggleTargetIsOn = nil
+                self.serverToggleTarget = nil
             }
             do {
                 if shouldStop {
@@ -246,14 +254,14 @@ final class SissyModel {
         let shouldRestart = serverService.isRegistered || serverHealth.status.isReachable
         serverToggleInFlight = true
         serverToggleLabel = shouldRestart ? "Restarting..." : "Starting..."
-        serverToggleTargetIsOn = true
+        serverToggleTarget = .on
 
         Task { [weak self] in
             guard let self else { return }
             defer {
                 self.serverToggleInFlight = false
                 self.serverToggleLabel = ""
-                self.serverToggleTargetIsOn = nil
+                self.serverToggleTarget = nil
             }
 
             let bookmark = serverService.errorLogBookmark()
@@ -326,7 +334,7 @@ final class SissyModel {
     private var serverItemSnapshot: ServerItemSnapshot {
         let busy = serverToggleInFlight || serverService.isTransitioning
         let serverIsOn =
-            serverToggleTargetIsOn
+            serverToggleTarget.map { $0 == .on }
             ?? (serverService.isRegistered || serverHealth.status.isReachable)
 
         let title: String
