@@ -6,11 +6,13 @@
 
 A menubar companion for **Claude Code** and **Codex**.
 
-A pixel-art cat watches your token meter and gets moodier the more you spend.
+Sissy watches your token meter and gets moodier the more you spend.
 
 Named after my cat: she naps, judges, demands cuddles (A LOT of cuddles), and is, objectively, fabulous.
 
 [Install](#install) • [Demo](#demo) • [How it works](#how-it-works) • [Build from source](#build-from-source) • [Desk companion](#desk-companion)
+
+_Status: alpha._
 
 </div>
 
@@ -74,8 +76,6 @@ A hardware companion (a tiny pixel-art cat on an OLED that mirrors the menubar) 
 ## Credits
 
 Usage parsing follows [`ccusage`](https://github.com/ryoppippi/ccusage): both the JSONL schemas (Claude Code and Codex rollouts) and per-model pricing come from there. The daemon's WebSocket server is [SwiftNIO](https://github.com/apple/swift-nio).
-
-Status: alpha.
 
 ## License
 
