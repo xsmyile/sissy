@@ -87,10 +87,11 @@ actor SissyServer {
                 ))
         }
         self.aggregator = UsageAggregator(providers: providers)
+        let codexResolution = config.providers.codex == nil ? " (auto)" : ""
         daemonLog(
             "sissy-serverd: providers — "
                 + "claude-code=\(claudeOn ? "on" : "off"), "
-                + "codex=\(codexOn ? "on (auto)" : "off")"
+                + "codex=\(codexOn ? "on" : "off")\(codexResolution)"
         )
     }
 
