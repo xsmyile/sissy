@@ -11,7 +11,7 @@ final class PairingViewModel {
     var ssid: String = ""
     var wifiPassword: String = ""
     var serverHost: String = ""
-    var serverPort: Int = 8787
+    var serverPort: Int = SissyPaths.defaultServerPort
     var authToken: String = ""
     var revealToken: Bool = false
     var otaPassword: String = Preferences.makeSecret()

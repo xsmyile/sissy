@@ -27,7 +27,7 @@ struct ProvisionRequest: Codable, Equatable {
         ssid: String,
         password: String,
         host: String,
-        port: Int = 8787,
+        port: Int = SissyPaths.defaultServerPort,
         path: String = "/ws",
         token: String,
         otaPassword: String
