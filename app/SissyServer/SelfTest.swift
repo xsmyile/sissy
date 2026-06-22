@@ -186,14 +186,28 @@ func runSelfTest() {
 
     // 1M input + 100k output on Sonnet = 1*3 + 0.1*15 = 4.50
     let cost = Pricing.cost(
-        model: "claude-sonnet-4-6", input: 1_000_000, output: 100_000, cacheRead: 0, cacheCreation: 0)
+        model: "claude-sonnet-4-6", input: 1_000_000, output: 100_000, cacheRead: 0,
+        cacheCreation: (fiveMinute: 0, oneHour: 0))
     expect("sonnet 1M+100k", cost, Decimal(string: "4.50")!)
 
     // input 6*5/M = 0.00003, output 411*25/M = 0.010275,
     // cache_creation 36582*6.25/M = 0.2286375; total raw = 0.2389425
     let cacheCost = Pricing.cost(
-        model: "claude-opus-4-7", input: 6, output: 411, cacheRead: 0, cacheCreation: 36582)
+        model: "claude-opus-4-7", input: 6, output: 411, cacheRead: 0,
+        cacheCreation: (fiveMinute: 36582, oneHour: 0))
     expect("opus cached", cacheCost, Decimal(string: "0.238942")!)
+
+    // 1h cache writes bill at 2× base input (opus 5.00 → 10.00/M), not the
+    // 5m rate (6.25/M). 1M tokens at each tier: 6.25 (5m) + 10.00 (1h) = 16.25.
+    // Regression guard for the v0.1.4 cache-tier split.
+    let tieredCache = Pricing.cost(
+        model: "claude-opus-4-7", input: 0, output: 0, cacheRead: 0,
+        cacheCreation: (fiveMinute: 1_000_000, oneHour: 1_000_000))
+    expect("opus 5m+1h cache tiers", tieredCache, Decimal(string: "16.25")!)
+    let oneHourOnly = Pricing.cost(
+        model: "claude-opus-4-7", input: 0, output: 0, cacheRead: 0,
+        cacheCreation: (fiveMinute: 0, oneHour: 1_000_000))
+    expect("opus 1h cache at 2x input", oneHourOnly, Decimal(string: "10.00")!)
 
     // pricingOverride shadows the built-in table — exact key wins.
     let exactOverride: [String: ModelPricing] = [
@@ -201,7 +215,8 @@ func runSelfTest() {
             inputPerMTok: 10, outputPerMTok: 20, cacheReadPerMTok: 1, cacheCreationPerMTok: 2)
     ]
     let overriddenExact = Pricing.cost(
-        model: "claude-sonnet-4-6", input: 1_000_000, output: 0, cacheRead: 0, cacheCreation: 0,
+        model: "claude-sonnet-4-6", input: 1_000_000, output: 0, cacheRead: 0,
+        cacheCreation: (fiveMinute: 0, oneHour: 0),
         override: exactOverride)
     expect("override exact wins", overriddenExact, Decimal(string: "10.00")!)
     // Override entries match by longest-prefix the same way the built-in
@@ -211,7 +226,8 @@ func runSelfTest() {
             inputPerMTok: 100, outputPerMTok: 100, cacheReadPerMTok: 100, cacheCreationPerMTok: 100)
     ]
     let overriddenPrefix = Pricing.cost(
-        model: "claude-opus-4-7", input: 1_000_000, output: 0, cacheRead: 0, cacheCreation: 0,
+        model: "claude-opus-4-7", input: 1_000_000, output: 0, cacheRead: 0,
+        cacheCreation: (fiveMinute: 0, oneHour: 0),
         override: prefixOverride)
     expect("override prefix wins", overriddenPrefix, Decimal(string: "100.00")!)
     // Unmatched models fall back to the built-in table.
@@ -220,14 +236,54 @@ func runSelfTest() {
             inputPerMTok: 999, outputPerMTok: 999, cacheReadPerMTok: 999, cacheCreationPerMTok: 999)
     ]
     let fallback = Pricing.cost(
-        model: "claude-sonnet-4-6", input: 1_000_000, output: 100_000, cacheRead: 0, cacheCreation: 0,
+        model: "claude-sonnet-4-6", input: 1_000_000, output: 100_000, cacheRead: 0,
+        cacheCreation: (fiveMinute: 0, oneHour: 0),
         override: unrelatedOverride)
     expect("override miss falls back", fallback, Decimal(string: "4.50")!)
     // Empty override map must not poison the fallback.
     let emptyOverride = Pricing.cost(
-        model: "claude-sonnet-4-6", input: 1_000_000, output: 100_000, cacheRead: 0, cacheCreation: 0,
+        model: "claude-sonnet-4-6", input: 1_000_000, output: 100_000, cacheRead: 0,
+        cacheCreation: (fiveMinute: 0, oneHour: 0),
         override: [:])
     expect("empty override falls back", emptyOverride, Decimal(string: "4.50")!)
+    // An override without an explicit 1h rate derives it from the override's
+    // own input rate (10 × 2 = 20/M), not the built-in table. 1M 1h tokens → 20.
+    let overrideDerived1h: [String: ModelPricing] = [
+        "claude-sonnet-4-6": .init(
+            inputPerMTok: 10, outputPerMTok: 20, cacheReadPerMTok: 1, cacheCreationPerMTok: 2)
+    ]
+    let derived1h = Pricing.cost(
+        model: "claude-sonnet-4-6", input: 0, output: 0, cacheRead: 0,
+        cacheCreation: (fiveMinute: 0, oneHour: 1_000_000),
+        override: overrideDerived1h)
+    expect("override 1h derived from override input", derived1h, Decimal(string: "20.00")!)
+    // An override that sets `cacheCreation1hPerMTok` explicitly bypasses the
+    // 2× derivation entirely — 1M 1h tokens at the literal 7/M → 7.
+    let overrideExplicit1h: [String: ModelPricing] = [
+        "claude-sonnet-4-6": .init(
+            inputPerMTok: 10, outputPerMTok: 20, cacheReadPerMTok: 1, cacheCreationPerMTok: 2,
+            cacheCreation1hPerMTok: 7)
+    ]
+    let explicit1h = Pricing.cost(
+        model: "claude-sonnet-4-6", input: 0, output: 0, cacheRead: 0,
+        cacheCreation: (fiveMinute: 0, oneHour: 1_000_000),
+        override: overrideExplicit1h)
+    expect("override 1h explicit bypasses derivation", explicit1h, Decimal(string: "7.00")!)
+    // Decode guard: `cacheCreation1hPerMTok` must survive JSON round-trip
+    // (regression for the let-vs-var Decodable-synthesis trap). A server.json
+    // override omitting it decodes to nil; one providing it decodes the value.
+    let legacyJSON = Data(
+        #"{"inputPerMTok":10,"outputPerMTok":20,"cacheReadPerMTok":1,"cacheCreationPerMTok":2}"#.utf8)
+    let withJSON = Data(
+        #"{"inputPerMTok":10,"outputPerMTok":20,"cacheReadPerMTok":1,"cacheCreationPerMTok":2,"cacheCreation1hPerMTok":7}"#
+            .utf8)
+    let legacyDecoded = try? JSONDecoder().decode(ModelPricing.self, from: legacyJSON)
+    let withDecoded = try? JSONDecoder().decode(ModelPricing.self, from: withJSON)
+    let legacy1h: Decimal? = legacyDecoded.flatMap(\.cacheCreation1hPerMTok)
+    let with1h: Decimal? = withDecoded.flatMap(\.cacheCreation1hPerMTok)
+    expect("legacy override decodes ok", legacyDecoded?.inputPerMTok, Decimal(10))
+    expect("legacy override 1h is nil", legacy1h, nil)
+    expect("override decodes explicit 1h", with1h, Decimal(7))
 
     print("=== ServerConfig ===")
     runServerConfigTests()
