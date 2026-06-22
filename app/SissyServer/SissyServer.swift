@@ -139,22 +139,14 @@ actor SissyServer {
             // Log once so the user can correlate the lost preference next
             // boot; don't fail the call because the runtime change is still
             // useful even without persistence.
-            FileHandle.standardError.write(
-                Data(
-                    "sissy-serverd: failed to persist milestoneFrequency to \(configURL.path): \(error)\n"
-                        .utf8))
+            daemonLog(
+                "sissy-serverd: failed to persist milestoneFrequency to \(configURL.path): \(error)")
         }
         let costStep = MilestoneFrequency.costStep(for: raw)
         milestones.applyPreset(presetKey: raw, costStep: costStep)
         milestones.save()
         await rebroadcastFromCache()
     }
-
-    /// Read-only accessor for control handlers that need to echo the current
-    /// preset back to a connecting client (so the menubar picker shows the
-    /// right item checked when a new app instance connects to a long-running
-    /// daemon that was set elsewhere).
-    func currentMilestoneFrequency() -> String { config.milestoneFrequency }
 
     /// Re-emit a frame using the most recently observed totals. No-op if the
     /// reader hasn't produced a frame yet — the pending pin will take effect
@@ -163,8 +155,6 @@ actor SissyServer {
         guard let totals = lastTotals else { return }
         await rebuildAndBroadcast(today: totals.today, prev: totals.prev, slices: totals.slices)
     }
-
-    func currentPinnedState() -> String? { pinnedState }
 
     func start() async throws {
         startedAt = Date()
@@ -218,15 +208,16 @@ actor SissyServer {
         )
     }
 
+    private let isoFormatter = ISO8601DateFormatter()
+
     func statsSnapshot() async -> StatsResponse {
         let count = await hub.connectedCount()
         let lastAt = await hub.lastFrameTimestamp()
         let files = aggregator.filesWatched()
-        let iso = ISO8601DateFormatter()
         return StatsResponse(
             connectedClients: count,
             filesWatched: files,
-            lastFrameAt: lastAt.map { iso.string(from: $0) }
+            lastFrameAt: lastAt.map { isoFormatter.string(from: $0) }
         )
     }
 

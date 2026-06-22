@@ -56,19 +56,25 @@ actor CodexUsageReader: UsageProvider {
     /// JSON-parse cost.
     private static let tokenCountMarker: [UInt8] = Array("\"token_count\"".utf8)
 
-    static func bufferContainsTokenCountMarker(
-        _ buf: UnsafePointer<UInt8>, from: Int, to: Int
+    /// `turn_context` lines also matter (they update the per-file model). The
+    /// marker keeps the slow path bounded — we walk both prefilters on each
+    /// candidate line.
+    private static let turnContextMarker: [UInt8] = Array("\"turn_context\"".utf8)
+
+    /// Linear scan for `marker` within `buf[from..<to]`. Cheap substring
+    /// prefilter run before paying the JSON-parse cost on a candidate line.
+    private static func bufferContainsMarker(
+        _ buf: UnsafePointer<UInt8>, from: Int, to: Int, marker: [UInt8]
     ) -> Bool {
-        let pat = tokenCountMarker
-        let m = pat.count
+        let m = marker.count
         let n = to - from
         if m > n { return false }
         let limit = to - m
         var i = from
         while i <= limit {
-            if buf[i] == pat[0] {
+            if buf[i] == marker[0] {
                 var j = 1
-                while j < m && buf[i + j] == pat[j] { j += 1 }
+                while j < m && buf[i + j] == marker[j] { j += 1 }
                 if j == m { return true }
             }
             i += 1
@@ -76,29 +82,16 @@ actor CodexUsageReader: UsageProvider {
         return false
     }
 
-    /// `turn_context` lines also matter (they update the per-file model). The
-    /// marker keeps the slow path bounded — we walk both prefilters on each
-    /// candidate line.
-    private static let turnContextMarker: [UInt8] = Array("\"turn_context\"".utf8)
+    static func bufferContainsTokenCountMarker(
+        _ buf: UnsafePointer<UInt8>, from: Int, to: Int
+    ) -> Bool {
+        bufferContainsMarker(buf, from: from, to: to, marker: tokenCountMarker)
+    }
 
     static func bufferContainsTurnContextMarker(
         _ buf: UnsafePointer<UInt8>, from: Int, to: Int
     ) -> Bool {
-        let pat = turnContextMarker
-        let m = pat.count
-        let n = to - from
-        if m > n { return false }
-        let limit = to - m
-        var i = from
-        while i <= limit {
-            if buf[i] == pat[0] {
-                var j = 1
-                while j < m && buf[i + j] == pat[j] { j += 1 }
-                if j == m { return true }
-            }
-            i += 1
-        }
-        return false
+        bufferContainsMarker(buf, from: from, to: to, marker: turnContextMarker)
     }
 
     init(
@@ -233,7 +226,7 @@ actor CodexUsageReader: UsageProvider {
         let todayKey = Calendar.current.startOfDay(for: Date())
         var dirtySinceEmit = false
         var lastEmitAt = Date.distantPast
-        let emitThrottle: TimeInterval = 0.2
+        let emitThrottle = UsageReaderShared.pollEmitThrottle
         for (i, url) in files.enumerated() {
             if ingestNewLines(in: url) { dirtySinceEmit = true }
             // Same cooperative-cancellation pattern as ClaudeCodeUsageReader:
@@ -367,7 +360,6 @@ actor CodexUsageReader: UsageProvider {
         )
         return UsageEvent(
             timestamp: ts,
-            model: model,
             inputTokens: uncached,
             outputTokens: output,
             cacheReadTokens: cached,
@@ -396,8 +388,6 @@ actor CodexUsageReader: UsageProvider {
         seenLineKeys = seenLineKeys.filter { $0.value >= cutoff }
     }
 
-    private static let ingestChunkSize = 64 * 1024
-
     private func ingestNewLines(in url: URL) -> Bool {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
             let mtimeDate = attrs[.modificationDate] as? Date,
@@ -425,7 +415,7 @@ actor CodexUsageReader: UsageProvider {
         while true {
             let chunk: Data
             do {
-                chunk = try fh.read(upToCount: Self.ingestChunkSize) ?? Data()
+                chunk = try fh.read(upToCount: UsageReaderShared.ingestChunkSize) ?? Data()
             } catch { break }
             if chunk.isEmpty { break }
             totalRead += UInt64(chunk.count)
@@ -518,7 +508,7 @@ actor CodexUsageReader: UsageProvider {
             }
             if mtimeDate < cutoffDate { continue }
             let diskMTime = mtimeDate.timeIntervalSince1970
-            if diskMTime + 0.0005 < entry.mtimeUnix || size < entry.offset {
+            if diskMTime + UsageReaderShared.mtimeTolerance < entry.mtimeUnix || size < entry.offset {
                 stale = true
                 break
             }
@@ -528,7 +518,7 @@ actor CodexUsageReader: UsageProvider {
         if stale { return false }
 
         let cal = Calendar.current
-        let dayFmt = Self.dayFormatter
+        let dayFmt = UsageReaderShared.dayFormatter
         let cutoffDay = cal.startOfDay(for: cutoffDate)
         var newDaily: [Date: DayTotals] = [:]
         for t in snapshot.dailyTotals {
@@ -576,7 +566,7 @@ actor CodexUsageReader: UsageProvider {
         var carry = Data()
         var latest: String? = nil
         while remaining > 0 {
-            let want = min(remaining, UInt64(Self.ingestChunkSize))
+            let want = min(remaining, UInt64(UsageReaderShared.ingestChunkSize))
             let chunk: Data
             do {
                 chunk = try fh.read(upToCount: Int(want)) ?? Data()
@@ -625,7 +615,7 @@ actor CodexUsageReader: UsageProvider {
         if fileOffsets.isEmpty && dailyTotals.isEmpty { return }
 
         let cal = Calendar.current
-        let dayFmt = Self.dayFormatter
+        let dayFmt = UsageReaderShared.dayFormatter
         let todayKey = cal.startOfDay(for: now)
 
         let files: [UsageStateSnapshot.FileEntry] = fileOffsets.map { (k, v) in
@@ -665,13 +655,4 @@ actor CodexUsageReader: UsageProvider {
             // Same swallow-and-retry policy as ClaudeCodeUsageReader.
         }
     }
-
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        return f
-    }()
 }

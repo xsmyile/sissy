@@ -42,6 +42,16 @@ func daemonLog(_ message: String) {
     logFile?.write(data)
 }
 
+/// One provider's totals as emitted by `--scan`. Optional previous-day fields
+/// are omitted from the JSON when the provider has no prior-day data.
+struct ScanEntry: Encodable {
+    let tokens: Int
+    let cost: String
+    let filesWatched: Int
+    let prevTokens: Int?
+    let prevCost: String?
+}
+
 let args = CommandLine.arguments
 if args.contains("--self-test") {
     runSelfTest()
@@ -70,26 +80,23 @@ if args.contains("--scan") {
         if scanFilter == "all" || scanFilter == "codex" {
             providers.append(CodexUsageReader())
         }
-        var out: [String: Any] = [:]
+        var out: [String: ScanEntry] = [:]
         for p in providers {
             await p.start { _, _ in }
             try? await Task.sleep(for: .seconds(1))
             let (today, prev) = await p.current()
-            var entry: [String: Any] = [
-                "tokens": today.totalTokens,
-                "cost": NSDecimalNumber(decimal: today.totalCost).stringValue,
-                "filesWatched": p.filesWatched(),
-            ]
-            if let prev {
-                entry["prevTokens"] = prev.totalTokens
-                entry["prevCost"] = NSDecimalNumber(decimal: prev.totalCost).stringValue
-            }
-            out[p.id] = entry
+            out[p.id] = ScanEntry(
+                tokens: today.totalTokens,
+                cost: NSDecimalNumber(decimal: today.totalCost).stringValue,
+                filesWatched: p.filesWatched(),
+                prevTokens: prev?.totalTokens,
+                prevCost: prev.map { NSDecimalNumber(decimal: $0.totalCost).stringValue }
+            )
             await p.stop()
         }
-        let json = try? JSONSerialization.data(
-            withJSONObject: out, options: [.prettyPrinted, .sortedKeys])
-        if let data = json, let s = String(data: data, encoding: .utf8) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(out), let s = String(data: data, encoding: .utf8) {
             print(s)
         }
         sem.signal()

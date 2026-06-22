@@ -6,7 +6,6 @@ import Darwin
 
 struct UsageEvent: Sendable, Equatable {
     let timestamp: Date
-    let model: String
     let inputTokens: Int
     let outputTokens: Int
     let cacheReadTokens: Int
@@ -387,7 +386,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         let todayKey = Calendar.current.startOfDay(for: Date())
         var dirtySinceEmit = false
         var lastEmitAt = Date.distantPast
-        let emitThrottle: TimeInterval = 0.2
+        let emitThrottle = UsageReaderShared.pollEmitThrottle
         for (i, url) in files.enumerated() {
             if ingestNewLines(in: url) { dirtySinceEmit = true }
             // Cooperative concurrency: without these yields the actor pins
@@ -521,7 +520,6 @@ actor ClaudeCodeUsageReader: UsageProvider {
         )
         return UsageEvent(
             timestamp: ts,
-            model: model,
             inputTokens: input,
             outputTokens: output,
             cacheReadTokens: cacheRead,
@@ -552,13 +550,6 @@ actor ClaudeCodeUsageReader: UsageProvider {
         // footprint stays bounded across long-running daemon sessions.
         seenRequestKeys = seenRequestKeys.filter { $0.value >= cutoff }
     }
-
-    /// Chunk size for the streaming reader. Big enough to fit ~10 average
-    /// assistant lines (most are 1-4 KB) so the per-chunk overhead stays low,
-    /// small enough that peak resident set during cold backfill is bounded:
-    /// 64 KB × concurrent file ingest ≪ the multi-MB spikes the old
-    /// `readDataToEndOfFile()` path produced on big daily JSONL deltas.
-    private static let ingestChunkSize = 64 * 1024
 
     private func ingestNewLines(in url: URL) -> Bool {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
@@ -601,7 +592,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         while true {
             let chunk: Data
             do {
-                chunk = try fh.read(upToCount: Self.ingestChunkSize) ?? Data()
+                chunk = try fh.read(upToCount: UsageReaderShared.ingestChunkSize) ?? Data()
             } catch {
                 break
             }
@@ -698,7 +689,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
                 continue
             }
             let diskMTime = mtimeDate.timeIntervalSince1970
-            if diskMTime + 0.0005 < entry.mtimeUnix || size < entry.offset {
+            if diskMTime + UsageReaderShared.mtimeTolerance < entry.mtimeUnix || size < entry.offset {
                 // Rotated or truncated since save.
                 stale = true
                 break
@@ -709,7 +700,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         if stale { return false }
 
         let cal = Calendar.current
-        let dayFmt = Self.dayFormatter
+        let dayFmt = UsageReaderShared.dayFormatter
         let cutoffDay = cal.startOfDay(for: cutoffDate)
         var newDaily: [Date: DayTotals] = [:]
         for t in snapshot.dailyTotals {
@@ -749,7 +740,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         if fileOffsets.isEmpty && dailyTotals.isEmpty { return }
 
         let cal = Calendar.current
-        let dayFmt = Self.dayFormatter
+        let dayFmt = UsageReaderShared.dayFormatter
         let todayKey = cal.startOfDay(for: now)
 
         let files: [UsageStateSnapshot.FileEntry] = fileOffsets.map { (k, v) in
@@ -795,17 +786,4 @@ actor ClaudeCodeUsageReader: UsageProvider {
             // log spam; rare and recoverable.
         }
     }
-
-    /// Shared formatter for the `YYYY-MM-DD` day keys used in the persisted
-    /// snapshot. POSIX locale + Gregorian calendar so the key is stable
-    /// across locale changes that would otherwise shift digit shaping or
-    /// day-of-week assumptions.
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        return f
-    }()
 }

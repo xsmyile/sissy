@@ -2,6 +2,24 @@ import Foundation
 import NIOCore
 import NIOWebSocket
 
+/// Decoded form of a control message from a connected client (mac app or
+/// firmware). Closed set; unknown keys are ignored by `JSONDecoder` and
+/// missing optionals decode to nil.
+private struct ClientMessage: Decodable {
+    let type: String
+    let primaryMetric: String?
+    let milestoneFrequency: String?
+    let client: String?
+    let state: String?
+    let value: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type, client, state, value
+        case primaryMetric = "primary_metric"
+        case milestoneFrequency = "milestone_frequency"
+    }
+}
+
 /// Per-connection WebSocket handler that also acts as a `FrameSink`. Two
 /// isolation domains touch the same state: NIO's channel event loop
 /// (`handlerAdded`, `channelRead`, `heartbeatTick`, `channelInactive`,
@@ -121,30 +139,22 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
     }
 
     private func handleClientMessage(_ data: Data) {
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let type = obj["type"] as? String
-        else { return }
-        switch type {
+        guard let msg = try? JSONDecoder().decode(ClientMessage.self, from: data) else { return }
+        switch msg.type {
         case "hello":
-            if let metric = obj["primary_metric"] as? String {
+            if let metric = msg.primaryMetric {
                 let server = self.server
                 Task { await server.setPrimaryMetric(metric) }
             }
-            if let freq = obj["milestone_frequency"] as? String {
+            if let freq = msg.milestoneFrequency {
                 let server = self.server
                 Task { await server.setMilestoneFrequency(freq) }
             }
             // Tag this sink as app vs device so the Hub can flip
             // `device_present` in broadcast frames. Mac app sends
-            // `client: "mac-app"`; firmware sends `device`/`fw` and no
-            // `client` key. Default unknown → device covers any future
-            // hardware client without a code change.
-            let kind: SinkKind
-            if let client = obj["client"] as? String, client == "mac-app" {
-                kind = .app
-            } else {
-                kind = .device
-            }
+            // `client: "mac-app"`; firmware sends no `client` key, so any
+            // non-app client (current or future hardware) maps to device.
+            let kind: SinkKind = (msg.client == "mac-app") ? .app : .device
             let me: any FrameSink = self
             let hub = self.hub
             Task {
@@ -153,13 +163,12 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
             }
         case "set_state":
             // `state` absent or "auto" → clear pin and resume computed state.
-            let raw = obj["state"] as? String
             let server = self.server
-            Task { await server.setPinnedState(raw) }
+            Task { await server.setPinnedState(msg.state) }
         case "set_milestone_frequency":
             // Invalid keys (typos, future values) are dropped by the actor's
             // `MilestoneFrequency.isValid` guard; no error path needed here.
-            guard let raw = obj["value"] as? String else { return }
+            guard let raw = msg.value else { return }
             let server = self.server
             Task { await server.setMilestoneFrequency(raw) }
         default:
@@ -175,11 +184,6 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
         buf.writeBytes(payload)
         let frame = WebSocketFrame(fin: true, opcode: .text, data: buf)
         try? await channel.writeAndFlush(frame)
-    }
-
-    func close() async {
-        let channel = state.lock.withLock { state.channel }
-        try? await channel?.close()
     }
 
     private func unregister(rebroadcastAfter: Bool = false) {

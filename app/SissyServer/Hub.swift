@@ -2,7 +2,6 @@ import Foundation
 
 protocol FrameSink: Sendable, AnyObject {
     func deliver(_ payload: Data) async
-    func close() async
 }
 
 enum SinkKind: Sendable {
@@ -133,6 +132,11 @@ actor Hub {
         if let milestone = frame.milestone {
             dict["milestone"] = milestone
         }
-        return (try? JSONSerialization.data(withJSONObject: dict)) ?? Data()
+        do {
+            return try JSONSerialization.data(withJSONObject: dict)
+        } catch {
+            daemonLog("sissy-serverd: frame encode failed for state \(frame.state): \(error)")
+            return Data()
+        }
     }
 }

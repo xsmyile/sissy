@@ -96,17 +96,9 @@ enum OpenAIPricing {
     /// `pricingOverride` map in `server.json` shadows OpenAI rates the same
     /// way it shadows Anthropic's.
     static func price(for model: String, override: [String: ModelPricing]? = nil) -> ModelPricing? {
-        if let override, let p = matchOverride(override, model: model) { return p }
+        if let override, let p = matchPricingOverride(override, model: model) { return p }
         if let p = table[model] { return p }
         for (prefix, p) in sortedBuiltinPrefixes {
-            if model.hasPrefix(prefix) { return p }
-        }
-        return nil
-    }
-
-    private static func matchOverride(_ table: [String: ModelPricing], model: String) -> ModelPricing? {
-        if let p = table[model] { return p }
-        for (prefix, p) in table.sorted(by: { $0.key.count > $1.key.count }) {
             if model.hasPrefix(prefix) { return p }
         }
         return nil
