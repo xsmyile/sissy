@@ -5,6 +5,9 @@
 
 class SSD1306Display : public IDisplay {
  public:
+    static constexpr uint8_t BRIGHTNESS_NORMAL = 0x40;
+    static constexpr uint8_t BRIGHTNESS_DIM = 0x10;
+
     SSD1306Display(uint8_t i2cAddr = 0x3C);
 
     bool begin() override;

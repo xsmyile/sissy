@@ -4,6 +4,9 @@
 static constexpr int SCREEN_W = 128;
 static constexpr int SCREEN_H = 64;
 
+// WiFiManager's default captive-portal gateway address shown to the user.
+static constexpr const char* PORTAL_IP = "192.168.4.1";
+
 // Order must match the MS_* enum in state/MascotState. The trailing entry
 // covers MS_OFFLINE and aliases `sleeping` until a dedicated "no signal"
 // sprite ships — keeps the array dense (indexable by enum) without a new
@@ -23,7 +26,7 @@ bool SSD1306Display::begin() {
     if (!_display.begin(SSD1306_SWITCHCAPVCC, _addr)) {
         return false;
     }
-    setBrightness(0x40);
+    setBrightness(BRIGHTNESS_NORMAL);
     clear();
     return true;
 }
@@ -80,7 +83,8 @@ void SSD1306Display::showPortalHint(const char* apName, const char* apPassword) 
     _display.println(apPassword);
 
     _display.setCursor(0, 56);
-    _display.print(F("then 192.168.4.1"));
+    _display.print(F("then "));
+    _display.print(PORTAL_IP);
 
     _display.display();
 }
@@ -95,11 +99,11 @@ void SSD1306Display::render(const Frame& frame, uint32_t nowMs) {
 
     const int mx = 0;
     const int my = (SCREEN_H - SPRITE_H) / 2;
+    const int rx = SPRITE_W + 6;
 
     if (frame.state == MS_OFFLINE) {
         _display.drawBitmap(mx, my, SPRITES[MS_OFFLINE], SPRITE_W, SPRITE_H, SSD1306_WHITE);
         drawOfflineGlyph(SCREEN_W - 14, 2);
-        const int rx = SPRITE_W + 6;
         _display.setTextSize(1);
         _display.setCursor(rx, 28);
         _display.print(F("offline"));
@@ -113,8 +117,6 @@ void SSD1306Display::render(const Frame& frame, uint32_t nowMs) {
     static const int BOB_STEPS[4] = {0, 1, 0, -1};
     const int bob = BOB_STEPS[(nowMs / 1000UL) & 3];
     _display.drawBitmap(mx, my + bob, SPRITES[frame.state], SPRITE_W, SPRITE_H, SSD1306_WHITE);
-
-    const int rx = SPRITE_W + 6;
 
     _display.setTextSize(1);
     _display.setCursor(rx, 0);
