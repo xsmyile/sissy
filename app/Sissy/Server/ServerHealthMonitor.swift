@@ -12,7 +12,6 @@ final class ServerHealthMonitor {
     }
 
     var status: Status = .unknown
-    var uptimeSeconds: Int = 0
 
     @ObservationIgnored private let prefsProvider: @MainActor () -> Preferences
     @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -42,17 +41,6 @@ final class ServerHealthMonitor {
         await updateStatus()
     }
 
-    @discardableResult
-    func waitUntilReachable(timeoutSeconds: Double = 6) async -> Status {
-        let deadline = Date().addingTimeInterval(timeoutSeconds)
-        var latest = await refreshNow()
-        while !latest.isReachable && Date() < deadline && !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(250))
-            latest = await refreshNow()
-        }
-        return latest
-    }
-
     private func updateStatus() async -> Status {
         let prefs = prefsProvider()
         var comps = URLComponents()
@@ -76,7 +64,6 @@ final class ServerHealthMonitor {
             }
             if let body = try? JSONDecoder().decode(HealthResponse.self, from: data) {
                 status = body.usageReader == "no-jsonl-found" ? .usageReaderEmpty : .up
-                uptimeSeconds = body.uptimeSeconds
             } else {
                 status = .up
             }

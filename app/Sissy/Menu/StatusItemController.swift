@@ -154,7 +154,6 @@ final class StatusItemController: NSObject {
 
         serverItem.title = snapshot.server.title
         serverItem.subtitle = snapshot.server.subtitle
-        serverItem.state = .off
         serverItem.isEnabled = snapshot.server.isEnabled
 
         metricItem.subtitle = snapshot.primaryMetric.label

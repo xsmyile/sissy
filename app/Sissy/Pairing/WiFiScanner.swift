@@ -47,6 +47,8 @@ final class WiFiScanner: NSObject {
         }
     }
 
+    private static let minScanVisibleNanoseconds: UInt64 = 700_000_000
+
     func scan() async {
         isScanning = true
         defer { isScanning = false }
@@ -56,7 +58,7 @@ final class WiFiScanner: NSObject {
         // recently joined the network — too fast for SwiftUI to even render
         // the spinner. Hold the indicator visible for at least this long so
         // the user can tell a scan actually happened.
-        let minVisible: UInt64 = 700_000_000  // 700 ms
+        let minVisible = Self.minScanVisibleNanoseconds
         let started = DispatchTime.now().uptimeNanoseconds
 
         if !locationAuthorized {

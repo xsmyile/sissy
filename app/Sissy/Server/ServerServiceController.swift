@@ -40,7 +40,6 @@ final class ServerServiceController {
 
     var isAvailable: Bool { Self.bundledLaunchAgentIsPresent() }
     var isRegistered: Bool { status == .enabled || status == .requiresApproval }
-    var isEnabled: Bool { status == .enabled }
     var requiresApproval: Bool { status == .requiresApproval }
     var openableLogsURL: URL { logsURL }
 
@@ -235,7 +234,7 @@ final class ServerServiceController {
     }
 
     nonisolated static func isCodesignFailure(_ error: NSError) -> Bool {
-        error.code == -67056
+        error.code == Int(errSecCSResourcesNotFound)
             || error.localizedDescription.localizedCaseInsensitiveContains("codesigning failure")
     }
 

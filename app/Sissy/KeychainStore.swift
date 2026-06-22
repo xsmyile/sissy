@@ -63,25 +63,10 @@ enum KeychainStore {
         return value
     }
 
-    @discardableResult
-    static func delete(account: String) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecAttrSynchronizable as String: false,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
-    }
-
     // MARK: bearer-token convenience
 
     static var bearerToken: String? { Self.get(account: bearerAccount) }
 
     @discardableResult
     static func setBearerToken(_ value: String) -> Bool { set(value, account: bearerAccount) }
-
-    @discardableResult
-    static func deleteBearerToken() -> Bool { delete(account: bearerAccount) }
 }
