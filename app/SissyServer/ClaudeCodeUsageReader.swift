@@ -509,13 +509,28 @@ actor ClaudeCodeUsageReader: UsageProvider {
         let input = (usage["input_tokens"] as? Int) ?? 0
         let output = (usage["output_tokens"] as? Int) ?? 0
         let cacheRead = (usage["cache_read_input_tokens"] as? Int) ?? 0
-        let cacheCreation = (usage["cache_creation_input_tokens"] as? Int) ?? 0
+
+        // Cache writes bill at two rates: 5-minute (1.25× input) and 1-hour
+        // (2× input). Prefer the nested `cache_creation` split; fall back to
+        // the aggregate `cache_creation_input_tokens` priced entirely at the
+        // 5m rate for pre-split logs. The nested sum equals the aggregate on
+        // every Claude Code line observed, so token totals are unaffected.
+        let cacheCreation5m: Int
+        let cacheCreation1h: Int
+        if let split = usage["cache_creation"] as? [String: Any] {
+            cacheCreation5m = (split["ephemeral_5m_input_tokens"] as? Int) ?? 0
+            cacheCreation1h = (split["ephemeral_1h_input_tokens"] as? Int) ?? 0
+        } else {
+            cacheCreation5m = (usage["cache_creation_input_tokens"] as? Int) ?? 0
+            cacheCreation1h = 0
+        }
+        let cacheCreation = cacheCreation5m + cacheCreation1h
         let cost = Pricing.cost(
             model: model,
             input: input,
             output: output,
             cacheRead: cacheRead,
-            cacheCreation: cacheCreation,
+            cacheCreation: (fiveMinute: cacheCreation5m, oneHour: cacheCreation1h),
             override: pricingOverride
         )
         return UsageEvent(

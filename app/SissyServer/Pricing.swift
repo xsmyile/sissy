@@ -4,7 +4,17 @@ struct ModelPricing: Sendable, Equatable, Codable {
     let inputPerMTok: Decimal
     let outputPerMTok: Decimal
     let cacheReadPerMTok: Decimal
+    /// 5-minute cache-write rate (Anthropic: 1.25× base input).
     let cacheCreationPerMTok: Decimal
+    /// 1-hour cache-write rate (Anthropic: 2× base input). Optional so a
+    /// `pricingOverride` can set it independently of `inputPerMTok`; when nil
+    /// (the built-in table and most overrides) it's derived as
+    /// `inputPerMTok × Pricing.cacheCreation1hInputMultiplier` at cost time.
+    /// Defaulted so existing initializers and `server.json` overrides that
+    /// predate the field stay source- and decode-compatible. Must be `var`,
+    /// not `let`: a `let` with an initial value is dropped from Decodable
+    /// synthesis, which would silently pin every override's 1h rate to nil.
+    var cacheCreation1hPerMTok: Decimal? = nil
 }
 
 /// Exact-then-longest-prefix lookup against a price-override table. Shared by
@@ -24,12 +34,16 @@ func matchPricingOverride(_ table: [String: ModelPricing], model: String) -> Mod
 /// Anthropic Claude API pricing per million tokens (USD). Cross-checked
 /// against platform.claude.com/docs/en/about-claude/pricing on 2026-05-25.
 ///
-/// Cache creation is the **5-minute** write rate (1.25× base input). Claude
-/// Code JSONL doesn't surface the 5m-vs-1h distinction so we always bill at
-/// 5m; the 1h rate (2× base input) is rare in real traffic and would
-/// underbill by at most a few percent. The `pricingOverride` map in
-/// `server.json` is the user-facing escape hatch when Anthropic publishes a
-/// change.
+/// `cacheCreationPerMTok` is the **5-minute** cache-write rate (1.25× base
+/// input). The **1-hour** tier bills at 2× base input and is derived from
+/// `inputPerMTok` at cost time (see `cacheCreation1hInputMultiplier`) rather
+/// than carried per row — exact for every current model and it rides along
+/// automatically with a `pricingOverride` input-rate change. Claude Code
+/// JSONL splits the two tiers in `usage.cache_creation`
+/// (`ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`); 1h volume
+/// dominates real traffic, so collapsing both onto the 5m rate underbilled
+/// by ~7%. The `pricingOverride` map in `server.json` is the user-facing
+/// escape hatch when Anthropic publishes a change.
 ///
 /// Naming maps the Anthropic model names that appear in `~/.claude/projects`
 /// JSONL `message.model`, e.g. `claude-opus-4-7-20260101`. Longest-prefix
@@ -119,21 +133,38 @@ enum Pricing {
         return nil
     }
 
+    /// Default 1-hour cache-write multiplier over base input (Anthropic: 2×,
+    /// versus the 5-minute tier's 1.25× stored per-model in
+    /// `cacheCreationPerMTok`). Used only when a model's
+    /// `cacheCreation1hPerMTok` is nil — exact for every current model, so the
+    /// built-in table carries no per-row 1h literal and a `pricingOverride`
+    /// input-rate change rides along automatically. An override that sets
+    /// `cacheCreation1hPerMTok` explicitly bypasses this multiplier.
+    static let cacheCreation1hInputMultiplier = Decimal(2)
+
+    /// Cache creation is split by write duration: `fiveMinute` bills at the
+    /// per-model 5-minute rate (`cacheCreationPerMTok`), `oneHour` at 2× base
+    /// input. Callers that can't distinguish the tiers (pre-split logs) should
+    /// pass the aggregate as `fiveMinute` with `oneHour: 0` — the historical
+    /// behaviour.
     static func cost(
         model: String,
         input: Int,
         output: Int,
         cacheRead: Int,
-        cacheCreation: Int,
+        cacheCreation: (fiveMinute: Int, oneHour: Int),
         override: [String: ModelPricing]? = nil
     ) -> Decimal {
         guard let p = price(for: model, override: override) else { return 0 }
         let million = Decimal(1_000_000)
+        let cache1hPerMTok =
+            p.cacheCreation1hPerMTok ?? (p.inputPerMTok * cacheCreation1hInputMultiplier)
         let raw =
             Decimal(input) * p.inputPerMTok
             + Decimal(output) * p.outputPerMTok
             + Decimal(cacheRead) * p.cacheReadPerMTok
-            + Decimal(cacheCreation) * p.cacheCreationPerMTok
+            + Decimal(cacheCreation.fiveMinute) * p.cacheCreationPerMTok
+            + Decimal(cacheCreation.oneHour) * cache1hPerMTok
         var result = raw / million
         var rounded = Decimal()
         NSDecimalRound(&rounded, &result, 6, .bankers)
