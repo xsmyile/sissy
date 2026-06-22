@@ -277,7 +277,6 @@ private func runHubEncodeTests() {
         func deliver(_ data: Data) async {
             lock.withLock { self.payload = data }
         }
-        func close() async {}
     }
     let sink = CapturingSink()
     let frame = FrameBuilder.build(

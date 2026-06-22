@@ -14,14 +14,10 @@ enum MascotState : uint8_t {
 };
 
 struct Frame {
-    String tokens = "...";
     String cost = "...";
-    String burn = "...";
     MascotState state = MS_SLEEPING;
-    uint32_t ts = 0;
     String primary = "...";
     String primaryLabel = "TOKENS";
 };
 
 MascotState stateFromName(const String& s);
-const char* stateToName(MascotState s);

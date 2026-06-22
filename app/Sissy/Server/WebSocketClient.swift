@@ -141,14 +141,7 @@ final class WebSocketClient {
             "type": "set_milestone_frequency",
             "value": value,
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-            let text = String(data: data, encoding: .utf8)
-        else { return }
-        task.send(.string(text)) { error in
-            if let error {
-                NSLog("sissy set_milestone_frequency send failed: %@", error.localizedDescription)
-            }
-        }
+        send(payload, label: "set_milestone_frequency", on: task)
     }
 
     /// Pin the mascot to `state` on the daemon (sticky until cleared).
@@ -161,14 +154,7 @@ final class WebSocketClient {
         } else {
             payload["state"] = "auto"
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-            let text = String(data: data, encoding: .utf8)
-        else { return }
-        task.send(.string(text)) { error in
-            if let error {
-                NSLog("sissy set_state send failed: %@", error.localizedDescription)
-            }
-        }
+        send(payload, label: "set_state", on: task)
     }
 
     private func sendHello() {
@@ -187,14 +173,22 @@ final class WebSocketClient {
             "primary_metric": metric,
             "milestone_frequency": model.preferences.milestoneFrequency.rawValue,
         ]
+        // Connection might be mid-handshake; the next reconnect re-sends.
+        send(payload, label: "hello", on: task)
+    }
+
+    /// Encode `payload` as JSON text and push it over the socket, logging a
+    /// send failure to stderr so the UI stays quiet. Shared by the
+    /// control-message senders so the encode-and-send shape lives in one place.
+    private func send(
+        _ payload: [String: Any], label: String, on task: URLSessionWebSocketTask
+    ) {
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
             let text = String(data: data, encoding: .utf8)
         else { return }
         task.send(.string(text)) { error in
             if let error {
-                // Connection might be mid-handshake; the next reconnect will
-                // re-send. Log via stderr only so the UI stays quiet.
-                NSLog("sissy hello send failed: %@", error.localizedDescription)
+                NSLog("sissy %@ send failed: %@", label, error.localizedDescription)
             }
         }
     }

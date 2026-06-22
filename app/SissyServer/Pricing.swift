@@ -7,6 +7,20 @@ struct ModelPricing: Sendable, Equatable, Codable {
     let cacheCreationPerMTok: Decimal
 }
 
+/// Exact-then-longest-prefix lookup against a price-override table. Shared by
+/// `Pricing` and `OpenAIPricing` so the override-matching precedence can't
+/// drift between providers. The override path is hit at most once per unique
+/// model seen and the table is typically empty or tiny, so the per-call sort
+/// is acceptable.
+func matchPricingOverride(_ table: [String: ModelPricing], model: String) -> ModelPricing? {
+    if let p = table[model] { return p }
+    let byLength = table.sorted(by: { $0.key.count > $1.key.count })
+    for (prefix, p) in byLength where model.hasPrefix(prefix) {
+        return p
+    }
+    return nil
+}
+
 /// Anthropic Claude API pricing per million tokens (USD). Cross-checked
 /// against platform.claude.com/docs/en/about-claude/pricing on 2026-05-25.
 ///
@@ -93,25 +107,13 @@ enum Pricing {
     /// entries follow the same exact-then-prefix precedence. Returns nil
     /// for unknown models.
     static func price(for model: String, override: [String: ModelPricing]? = nil) -> ModelPricing? {
-        if let override, let p = matchOverride(override, model: model) { return p }
+        if let override, let p = matchPricingOverride(override, model: model) { return p }
         return matchBuiltin(model: model)
     }
 
     private static func matchBuiltin(model: String) -> ModelPricing? {
         if let p = table[model] { return p }
         for (prefix, p) in sortedBuiltinPrefixes {
-            if model.hasPrefix(prefix) { return p }
-        }
-        return nil
-    }
-
-    /// Override path is hit at most once per unique model seen and the table
-    /// is typically empty or tiny, so a per-call sort is acceptable here.
-    private static func matchOverride(
-        _ table: [String: ModelPricing], model: String
-    ) -> ModelPricing? {
-        if let p = table[model] { return p }
-        for (prefix, p) in table.sorted(by: { $0.key.count > $1.key.count }) {
             if model.hasPrefix(prefix) { return p }
         }
         return nil

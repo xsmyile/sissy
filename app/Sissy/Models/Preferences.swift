@@ -215,13 +215,13 @@ struct Preferences: Codable, Equatable {
         // 0.0.0.0 so the ESP32 on the LAN can reach the daemon. The app
         // itself connects via 127.0.0.1 (serverHost above) so we don't
         // need to expose anything beyond the local subnet.
-        dict["host"] = "0.0.0.0"
+        dict["host"] = Self.serverBindHost
         dict["port"] = serverPort
         dict["authToken"] = authToken
-        dict["claudeDataDir"] = "~/.claude/projects"
+        dict["claudeDataDir"] = Self.claudeDataDirDefault
         // 60 s is a safety-net only — FSEvents drives ingest in the
         // common path. Keep this in sync with `ServerConfig.defaults`.
-        dict["pollIntervalSeconds"] = 60.0
+        dict["pollIntervalSeconds"] = Self.pollIntervalSecondsDefault
         dict["primaryMetric"] = primaryMetric.rawValue
         dict["milestoneFrequency"] = milestoneFrequency.rawValue
         dict["stateThresholds"] =
@@ -258,4 +258,11 @@ struct Preferences: Codable, Equatable {
     }
 
     static let serverConfigFileName = "server.json"
+
+    /// Wire-config defaults written into `server.json`. These mirror the
+    /// daemon's `ServerConfig.defaults`; the app and daemon don't share a
+    /// module, so they're kept in sync by hand.
+    private static let serverBindHost = "0.0.0.0"
+    private static let claudeDataDirDefault = "~/.claude/projects"
+    private static let pollIntervalSecondsDefault = 60.0
 }

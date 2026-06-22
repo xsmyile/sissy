@@ -137,12 +137,13 @@ void loop() {
     }
 
     // Dim OLED after 5 min of no fresh frame to save the panel.
+    static constexpr uint32_t DIM_THRESHOLD_MS = 5UL * 60UL * 1000UL;
     static bool dimmed = false;
-    if (!dimmed && gLastFrameAt > 0 && now - gLastFrameAt > 5UL * 60UL * 1000UL) {
-        gDisplay.setBrightness(0x10);
+    if (!dimmed && gLastFrameAt > 0 && now - gLastFrameAt > DIM_THRESHOLD_MS) {
+        gDisplay.setBrightness(SSD1306Display::BRIGHTNESS_DIM);
         dimmed = true;
-    } else if (dimmed && now - gLastFrameAt < 5UL * 60UL * 1000UL) {
-        gDisplay.setBrightness(0x40);
+    } else if (dimmed && now - gLastFrameAt < DIM_THRESHOLD_MS) {
+        gDisplay.setBrightness(SSD1306Display::BRIGHTNESS_NORMAL);
         dimmed = false;
     }
 }

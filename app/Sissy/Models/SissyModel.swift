@@ -459,19 +459,6 @@ struct DisplayFrame: Codable, Equatable {
         let tokens: Int
         let cost: Decimal
     }
-
-    static let empty = DisplayFrame(
-        tokens: "...",
-        cost: "...",
-        burn: "...",
-        state: "sleep",
-        ts: 0,
-        primary: "...",
-        primaryLabel: "TOKENS",
-        devicePresent: false,
-        milestone: nil,
-        providers: []
-    )
 }
 
 /// Lets `SissyModel.init` hand `ServerHealthMonitor` a closure that reads

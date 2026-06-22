@@ -6,6 +6,10 @@
 static WebSocketsClient gWs;
 static WsClient* gOwner = nullptr;
 
+// Cap inbound WS text frames so a malformed or hostile push can't exhaust the
+// ESP32 heap before deserialization. Any real frame is well under 1 KB.
+static constexpr size_t MAX_WS_FRAME = 4096;
+
 static void onEvent(WStype_t type, uint8_t* payload, size_t length) {
     if (!gOwner) return;
     switch (type) {
@@ -16,13 +20,10 @@ static void onEvent(WStype_t type, uint8_t* payload, size_t length) {
         case WStype_DISCONNECTED:
             gOwner->onDisconnectedInternal();
             break;
-        case WStype_TEXT: {
-            String s;
-            s.reserve(length);
-            for (size_t i = 0; i < length; i++) s += static_cast<char>(payload[i]);
-            gOwner->handleTextInternal(s);
+        case WStype_TEXT:
+            if (length == 0 || length > MAX_WS_FRAME) break;
+            gOwner->handleTextInternal(reinterpret_cast<const char*>(payload), length);
             break;
-        }
         default:
             break;
     }
@@ -65,20 +66,17 @@ void WsClient::sendHello() {
     gWs.sendTXT(out);
 }
 
-void WsClient::handleText(const String& payload) {
+void WsClient::handleText(const char* data, size_t len) {
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, payload);
+    DeserializationError err = deserializeJson(doc, data, len);
     if (err) return;
 
     const char* type = doc["type"] | "";
     if (strcmp(type, "frame") != 0) return;
 
     Frame f;
-    f.tokens = String((const char*)(doc["tokens"] | "..."));
     f.cost = String((const char*)(doc["cost"] | "..."));
-    f.burn = String((const char*)(doc["burn"] | "..."));
     f.state = stateFromName(String((const char*)(doc["state"] | "think")));
-    f.ts = doc["ts"] | 0;
     // Back-compat: pre-burn-rate servers send only `tokens`. Fall back so
     // older deployments keep rendering instead of going blank.
     f.primary = String((const char*)(doc["primary"] | doc["tokens"] | "..."));
@@ -122,6 +120,6 @@ void WsClient::onDisconnectedInternal() {
 void WsClient::sendHelloInternal() {
     sendHello();
 }
-void WsClient::handleTextInternal(const String& s) {
-    handleText(s);
+void WsClient::handleTextInternal(const char* data, size_t len) {
+    handleText(data, len);
 }
