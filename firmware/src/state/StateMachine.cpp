@@ -17,10 +17,3 @@ MascotState stateFromName(const String& s) {
     }
     return MS_THINKING;
 }
-
-const char* stateToName(MascotState s) {
-    for (uint8_t i = 0; i < STATE_MAP_LEN; i++) {
-        if (STATE_MAP[i].id == s) return STATE_MAP[i].name;
-    }
-    return "think";
-}

@@ -24,11 +24,11 @@ class WsClient {
     void onConnectedInternal();
     void onDisconnectedInternal();
     void sendHelloInternal();
-    void handleTextInternal(const String& s);
+    void handleTextInternal(const char* data, size_t len);
 
  private:
     void sendHello();
-    void handleText(const String& payload);
+    void handleText(const char* data, size_t len);
     uint32_t nextBackoffMs();
 
     RuntimeConfig _cfg;
@@ -39,7 +39,6 @@ class WsClient {
     // alive for the lifetime of the client.
     String _authHeader;
     bool _connected = false;
-    uint32_t _lastReconnect = 0;
     uint8_t _reconnectFailures = 0;
     FrameCallback _frameCb;
     StatusCallback _statusCb;
