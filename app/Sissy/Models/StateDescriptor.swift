@@ -10,30 +10,6 @@ enum StateDescriptor {
         return "Mascot" + key.capitalized
     }
 
-    static func label(for state: String?) -> String {
-        switch state {
-        case "sleep": return "Sleeping"
-        case "think": return "Thinking"
-        case "code": return "Coding"
-        case "trend": return "Trending up"
-        case "glow": return "Glowing"
-        case "angry": return "Angry coffee"
-        default: return state ?? "..."
-        }
-    }
-
-    static func symbol(for state: String?) -> String {
-        switch state {
-        case "sleep": return "moon.zzz"
-        case "think": return "brain"
-        case "code": return "chevron.left.forwardslash.chevron.right"
-        case "trend": return "chart.line.uptrend.xyaxis"
-        case "glow": return "sparkles"
-        case "angry": return "flame"
-        default: return "circle.dotted"
-        }
-    }
-
     /// Canonical mood line for the menubar header. Deterministic so the header
     /// text doesn't jitter across menu refreshes — returns the first entry of
     /// the per-state pool, which matches the pre-pool behavior 1:1.
@@ -65,31 +41,31 @@ enum StateDescriptor {
             ]
         case "think":
             return [
-                "thinking...", "warming up", "stretching", "easing in",
-                "loading thoughts", "tokenizing vibes", "scratching chin",
-                "doing math in head",
+                "thinking it over", "warming up", "stretching", "easing in",
+                "loading thoughts", "tokenizing vibes", "scratching its chin",
+                "doing math in its head",
             ]
         case "code":
             return [
-                "in the zone", "locked in", "deep in it", "hands on keys",
-                "shipping bytes", "compiler whispering", "one with the AST",
+                "in the zone", "locked in", "deep in it", "pounding the keys",
+                "shipping bytes", "whispering to the compiler", "one with the AST",
             ]
         case "trend":
             return [
-                "on a roll", "picking up speed", "hot streak", "shipping fast",
-                "velocity unlocked", "green lights all the way", "tab key on fire",
+                "on a roll", "picking up speed", "on a hot streak", "shipping fast",
+                "at full velocity", "hitting green lights all the way", "setting the tab key on fire",
             ]
         case "glow":
             return [
                 "feeling great", "absolutely cooking", "lit up", "purring",
-                "living the dream", "flow state achieved", "radiating productivity",
+                "living the dream", "in flow state", "radiating productivity",
             ]
         case "angry":
             return [
-                "burning hot", "running hot", "needs a break", "redlining",
-                "fan screaming", "thermal throttling",
+                "burning hot", "running hot", "ready for a break", "redlining",
+                "screaming under load", "throttling hard",
             ]
-        default: return ["warming up", "booting brain", "yawning"]
+        default: return ["warming up", "booting up", "yawning"]
         }
     }
 }
