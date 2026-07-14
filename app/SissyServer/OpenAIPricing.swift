@@ -1,10 +1,11 @@
 import Foundation
 
 /// OpenAI pricing per million tokens (USD). Cross-checked against
-/// LiteLLM's `model_prices_and_context_window.json` mirror (the same source
-/// ccusage uses) on 2026-05-25. Override via `server.json.pricingOverride`
-/// when OpenAI publishes a change; the CI drift job pins known fixtures so
-/// a silent regression here trips a test.
+/// LiteLLM's `model_prices_and_context_window.json` (the same source ccusage
+/// uses) on 2026-05-25. Override via `server.json.pricingOverride` when OpenAI
+/// publishes a change; the weekly `pricing-drift` workflow
+/// (`scripts/check_pricing_drift.py`) re-checks every emittable model against
+/// LiteLLM and fails when this table drifts.
 ///
 /// Codex emits `reasoning_output_tokens` alongside `output_tokens`, but
 /// `output_tokens` is already gross (it includes the reasoning portion);
@@ -40,6 +41,9 @@ enum OpenAIPricing {
         "gpt-5.1-codex": .init(
             inputPerMTok: 1.25, outputPerMTok: 10.00, cacheReadPerMTok: 0.125,
             cacheCreationPerMTok: 0),
+        "gpt-5.1-codex-mini": .init(
+            inputPerMTok: 0.25, outputPerMTok: 2.00, cacheReadPerMTok: 0.025,
+            cacheCreationPerMTok: 0),
         "gpt-5.2": .init(
             inputPerMTok: 1.75, outputPerMTok: 14.00, cacheReadPerMTok: 0.175,
             cacheCreationPerMTok: 0),
@@ -49,11 +53,44 @@ enum OpenAIPricing {
         "gpt-5.2-pro": .init(
             inputPerMTok: 21.00, outputPerMTok: 168.00, cacheReadPerMTok: 0,
             cacheCreationPerMTok: 0),
+        // gpt-5.3: bare row covers `-codex` and `-chat-latest` (same rate).
+        "gpt-5.3": .init(
+            inputPerMTok: 1.75, outputPerMTok: 14.00, cacheReadPerMTok: 0.175,
+            cacheCreationPerMTok: 0),
+        // gpt-5.4 tiers price separately; longest-prefix routes each `-mini`/
+        // `-nano`/`-pro` (and dated suffixes) onto its own row over bare 5.4.
+        "gpt-5.4": .init(
+            inputPerMTok: 2.50, outputPerMTok: 15.00, cacheReadPerMTok: 0.25,
+            cacheCreationPerMTok: 0),
+        "gpt-5.4-mini": .init(
+            inputPerMTok: 0.75, outputPerMTok: 4.50, cacheReadPerMTok: 0.075,
+            cacheCreationPerMTok: 0),
+        "gpt-5.4-nano": .init(
+            inputPerMTok: 0.20, outputPerMTok: 1.25, cacheReadPerMTok: 0.02,
+            cacheCreationPerMTok: 0),
+        "gpt-5.4-pro": .init(
+            inputPerMTok: 30.00, outputPerMTok: 180.00, cacheReadPerMTok: 3.00,
+            cacheCreationPerMTok: 0),
         "gpt-5.5": .init(
             inputPerMTok: 5.00, outputPerMTok: 30.00, cacheReadPerMTok: 0.50,
             cacheCreationPerMTok: 0),
         "gpt-5.5-pro": .init(
             inputPerMTok: 30.00, outputPerMTok: 180.00, cacheReadPerMTok: 3.00,
+            cacheCreationPerMTok: 0),
+        // gpt-5.6 covers its `-codex`/`-chat-latest` siblings via prefix match;
+        // the `-luna`/`-sol`/`-terra` variant tiers price separately (`-sol`
+        // equals bare 5.6 and rides the prefix).
+        "gpt-5.6": .init(
+            inputPerMTok: 5.00, outputPerMTok: 30.00, cacheReadPerMTok: 0.50,
+            cacheCreationPerMTok: 0),
+        "gpt-5.6-luna": .init(
+            inputPerMTok: 1.00, outputPerMTok: 6.00, cacheReadPerMTok: 0.10,
+            cacheCreationPerMTok: 0),
+        "gpt-5.6-terra": .init(
+            inputPerMTok: 2.50, outputPerMTok: 15.00, cacheReadPerMTok: 0.25,
+            cacheCreationPerMTok: 0),
+        "codex-mini-latest": .init(
+            inputPerMTok: 1.50, outputPerMTok: 6.00, cacheReadPerMTok: 0.375,
             cacheCreationPerMTok: 0),
         // o-series reasoning models. o3-mini cache_read is half input rate
         // (LiteLLM's published value); kept verbatim.
