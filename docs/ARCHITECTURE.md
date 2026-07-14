@@ -151,7 +151,7 @@ The menubar app's `ServerServiceController` uses `SMAppService.agent(plistName:)
 
 ## Operational notes
 
-- **Pricing drift**: `Pricing.swift` (Anthropic) and `OpenAIPricing.swift` (OpenAI) reflect each vendor's public prices at the time of writing. Override via `server.json.pricingOverride` if rates change. The OpenAI table is provisional pending a ccusage drift CI job.
+- **Pricing drift**: `Pricing.swift` (Anthropic) and `OpenAIPricing.swift` (OpenAI) reflect each vendor's public prices at the time of writing. Override via `server.json.pricingOverride` if rates change. A weekly `pricing-drift` CI job (`scripts/check_pricing_drift.py`) diffs both tables against LiteLLM and flags new or repriced models.
 - **Network changes**: the easiest reset is to wipe NVS via `WifiBootstrap::forgetAndReboot()` or a long BOOT-button hold.
 - **Cert pinning / TLS**: out of scope for V1. Run on LAN only.
 - **Replay**: every WS client gets the last broadcast frame on connect, so reboots don't show stale `--`.
