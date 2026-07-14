@@ -43,7 +43,9 @@ func matchPricingOverride(_ table: [String: ModelPricing], model: String) -> Mod
 /// (`ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`); 1h volume
 /// dominates real traffic, so collapsing both onto the 5m rate underbilled
 /// by ~7%. The `pricingOverride` map in `server.json` is the user-facing
-/// escape hatch when Anthropic publishes a change.
+/// escape hatch when Anthropic publishes a change; the weekly `pricing-drift`
+/// workflow (`scripts/check_pricing_drift.py`) re-checks every emittable model
+/// against LiteLLM and fails when this table drifts.
 ///
 /// Naming maps the Anthropic model names that appear in `~/.claude/projects`
 /// JSONL `message.model`, e.g. `claude-opus-4-7-20260101`. Longest-prefix
@@ -53,6 +55,16 @@ func matchPricingOverride(_ table: [String: ModelPricing], model: String) -> Mod
 /// and have their own exact rows.
 enum Pricing {
     static let table: [String: ModelPricing] = [
+        // Claude 5 family (current). Sonnet 5 is the $2 / $10 tier; Fable 5 the
+        // premium $10 / $50 tier. Dated/point releases roll onto these rows via
+        // longest-prefix match. `cacheCreationPerMTok` is the 5-minute rate
+        // (1.25× input); the 1-hour tier derives as 2× input at cost time.
+        "claude-sonnet-5": .init(
+            inputPerMTok: 2.00, outputPerMTok: 10.00, cacheReadPerMTok: 0.20,
+            cacheCreationPerMTok: 2.50),
+        "claude-fable-5": .init(
+            inputPerMTok: 10.00, outputPerMTok: 50.00, cacheReadPerMTok: 1.00,
+            cacheCreationPerMTok: 12.50),
         // Opus 4.5+ (current). $5 / $25 with $0.50 cache hit. Each minor
         // version gets its own exact row so a future Opus 4.8 doesn't
         // accidentally fall to the deprecated 4.0/4.1 rate via the

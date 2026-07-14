@@ -182,6 +182,14 @@ func runSelfTest() {
     expect(
         "3-5-sonnet", Pricing.price(for: "claude-3-5-sonnet-20241022"),
         ModelPricing(inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheCreationPerMTok: 3.75))
+    // Claude 5 family (current). Dated `message.model` names route onto the
+    // family row via longest-prefix; Sonnet 5 and Fable 5 are separate tiers.
+    expect(
+        "sonnet 5 current rate", Pricing.price(for: "claude-sonnet-5-20260601"),
+        ModelPricing(inputPerMTok: 2, outputPerMTok: 10, cacheReadPerMTok: 0.2, cacheCreationPerMTok: 2.50))
+    expect(
+        "fable 5 current rate", Pricing.price(for: "claude-fable-5"),
+        ModelPricing(inputPerMTok: 10, outputPerMTok: 50, cacheReadPerMTok: 1, cacheCreationPerMTok: 12.50))
     expect("unknown", Pricing.price(for: "gpt-4"), nil)
 
     // 1M input + 100k output on Sonnet = 1*3 + 0.1*15 = 4.50
@@ -836,6 +844,75 @@ private func runOpenAIPricingTests() {
         OpenAIPricing.price(for: "gpt-5.5"),
         ModelPricing(
             inputPerMTok: 5.00, outputPerMTok: 30, cacheReadPerMTok: 0.50,
+            cacheCreationPerMTok: 0))
+    // gpt-5.6 ($5/$30) and its `-codex` sibling via prefix. Without this row
+    // both fall to gpt-5 ($1.25/$10) and under-bill 4×.
+    expect(
+        "gpt-5.6 exact",
+        OpenAIPricing.price(for: "gpt-5.6"),
+        ModelPricing(
+            inputPerMTok: 5.00, outputPerMTok: 30, cacheReadPerMTok: 0.50,
+            cacheCreationPerMTok: 0))
+    expect(
+        "gpt-5.6-codex prefix", OpenAIPricing.price(for: "gpt-5.6-codex"),
+        ModelPricing(
+            inputPerMTok: 5.00, outputPerMTok: 30, cacheReadPerMTok: 0.50,
+            cacheCreationPerMTok: 0))
+    // gpt-5.6 variant tiers. `-sol` matches bare 5.6 via prefix; `-luna` and
+    // `-terra` price lower and need their own rows to win longest-prefix.
+    expect(
+        "gpt-5.6-sol prefix", OpenAIPricing.price(for: "gpt-5.6-sol"),
+        ModelPricing(
+            inputPerMTok: 5.00, outputPerMTok: 30, cacheReadPerMTok: 0.50,
+            cacheCreationPerMTok: 0))
+    expect(
+        "gpt-5.6-luna exact", OpenAIPricing.price(for: "gpt-5.6-luna"),
+        ModelPricing(
+            inputPerMTok: 1.00, outputPerMTok: 6.00, cacheReadPerMTok: 0.10,
+            cacheCreationPerMTok: 0))
+    expect(
+        "gpt-5.6-terra exact", OpenAIPricing.price(for: "gpt-5.6-terra"),
+        ModelPricing(
+            inputPerMTok: 2.50, outputPerMTok: 15.00, cacheReadPerMTok: 0.25,
+            cacheCreationPerMTok: 0))
+    // gpt-5.3/5.4 generations. Bare 5.3 covers `-codex`/`-chat-latest`; 5.4
+    // tiers price separately and each must win longest-prefix over bare 5.4.
+    expect(
+        "gpt-5.3-codex prefix", OpenAIPricing.price(for: "gpt-5.3-codex"),
+        ModelPricing(
+            inputPerMTok: 1.75, outputPerMTok: 14, cacheReadPerMTok: 0.175,
+            cacheCreationPerMTok: 0))
+    expect(
+        "gpt-5.4 exact", OpenAIPricing.price(for: "gpt-5.4"),
+        ModelPricing(
+            inputPerMTok: 2.50, outputPerMTok: 15, cacheReadPerMTok: 0.25,
+            cacheCreationPerMTok: 0))
+    expect(
+        "gpt-5.4-mini wins over gpt-5.4",
+        OpenAIPricing.price(for: "gpt-5.4-mini-2026-03-17"),
+        ModelPricing(
+            inputPerMTok: 0.75, outputPerMTok: 4.50, cacheReadPerMTok: 0.075,
+            cacheCreationPerMTok: 0))
+    expect(
+        "gpt-5.4-nano exact", OpenAIPricing.price(for: "gpt-5.4-nano"),
+        ModelPricing(
+            inputPerMTok: 0.20, outputPerMTok: 1.25, cacheReadPerMTok: 0.02,
+            cacheCreationPerMTok: 0))
+    expect(
+        "gpt-5.4-pro exact", OpenAIPricing.price(for: "gpt-5.4-pro"),
+        ModelPricing(
+            inputPerMTok: 30.00, outputPerMTok: 180, cacheReadPerMTok: 3.00,
+            cacheCreationPerMTok: 0))
+    expect(
+        "gpt-5.1-codex-mini wins over gpt-5.1-codex",
+        OpenAIPricing.price(for: "gpt-5.1-codex-mini"),
+        ModelPricing(
+            inputPerMTok: 0.25, outputPerMTok: 2.00, cacheReadPerMTok: 0.025,
+            cacheCreationPerMTok: 0))
+    expect(
+        "codex-mini-latest exact", OpenAIPricing.price(for: "codex-mini-latest"),
+        ModelPricing(
+            inputPerMTok: 1.50, outputPerMTok: 6.00, cacheReadPerMTok: 0.375,
             cacheCreationPerMTok: 0))
 
     // Longest-prefix family match — `gpt-5-codex-experimental` → `gpt-5-codex`,
