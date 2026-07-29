@@ -21,8 +21,12 @@ struct UsageStateSnapshot: Codable, Equatable {
     /// fix, channel remap, etc. Persisted cost is opaque-to-the-load-path, so
     /// the only way to force a recompute under new rules is to invalidate
     /// the snapshot. v2 covers the Codex reasoning double-count fix +
-    /// 2026-05-25 pricing refresh.
-    static let currentSchemaVersion = 2
+    /// 2026-05-25 pricing refresh. v3 covers v0.1.6 replacing the
+    /// hand-maintained rate tables with the LiteLLM catalog: a v2 snapshot
+    /// carries costs from a table that could not price models released after
+    /// the build that wrote it, so inheriting it would pin a wrong total for
+    /// the whole retain window.
+    static let currentSchemaVersion = 3
 
     var schemaVersion: Int
     var savedAt: Date
