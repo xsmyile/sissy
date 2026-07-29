@@ -17,10 +17,10 @@ import argparse
 import json
 import math
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 from PIL import Image, ImageDraw
-
 
 SIZES = [22, 44, 66]
 SS = 8
@@ -239,7 +239,7 @@ def render_trend(size: int) -> Image.Image:
         (size * 0.78, size * 0.30),
         (size * 0.94, size * 0.08),
     ]
-    for (x1, y1), (x2, y2) in zip(points[:-1], points[1:]):
+    for (x1, y1), (x2, y2) in pairwise(points):
         d.line([(x1 * SS, y1 * SS), (x2 * SS, y2 * SS)], fill=255, width=t)
     tx, ty = points[-1]
     px, py = points[-2]
