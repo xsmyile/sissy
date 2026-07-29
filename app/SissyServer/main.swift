@@ -57,6 +57,44 @@ if args.contains("--self-test") {
     runSelfTest()
     exit(0)
 }
+if args.contains("--dump-seed") {
+    // Regenerates `PricingSeed.swift` from a live LiteLLM fetch, using the same
+    // parser that validates the runtime refresh. Release-time tool; see
+    // AGENTS.md. Writes the Swift source to stdout.
+    let sem = DispatchSemaphore(value: 0)
+    var status: Int32 = 0
+    Task.detached {
+        do {
+            let catalog = try await PriceCatalogSource.fetch()
+            print(try PriceCatalogSource.swiftSeedSource(for: catalog))
+        } catch {
+            daemonLog("sissy-serverd: --dump-seed failed: \(error)")
+            status = 1
+        }
+        sem.signal()
+    }
+    sem.wait()
+    exit(status)
+}
+// Optional `--config <path>` override. Lets smoke tests / integration runs
+// point the daemon at an isolated config + JSONL tree without touching the
+// user's real `~/Library/Application Support/Sissy/server.json`.
+let configURL: URL = {
+    guard let idx = args.firstIndex(of: "--config") else { return ServerConfig.defaultURL }
+    guard idx + 1 < args.count else {
+        daemonLog("sissy-serverd: --config requires a path argument")
+        exit(2)
+    }
+    return URL(fileURLWithPath: args[idx + 1])
+}()
+let config: ServerConfig
+do {
+    config = try ServerConfig.load(from: configURL)
+} catch {
+    daemonLog("sissy-serverd: config load failed: \(error)")
+    exit(1)
+}
+
 if args.contains("--scan") {
     // Optional provider filter (`--scan-provider claude-code|codex|all`,
     // default all). Lets the ccusage drift CI job dump just the Codex
@@ -73,12 +111,32 @@ if args.contains("--scan") {
     // Swift 6 strict concurrency, top-level `Task { … }` inherits the main
     // actor and deadlocks against the semaphore.
     Task.detached {
+        // Same directories, overrides and pricing policy as the daemon, so
+        // comparing this output against `ccusage` measures the daemon's real
+        // behaviour rather than a set of defaults nobody runs.
         var providers: [any UsageProvider] = []
         if scanFilter == "all" || scanFilter == "claude-code" {
-            providers.append(ClaudeCodeUsageReader())
+            providers.append(
+                ClaudeCodeUsageReader(
+                    claudeDir: config.resolvedClaudeDataDir,
+                    pricingOverride: config.pricingOverride))
         }
         if scanFilter == "all" || scanFilter == "codex" {
-            providers.append(CodexUsageReader())
+            providers.append(
+                CodexUsageReader(
+                    codexDir: config.resolvedCodexDataDir,
+                    pricingOverride: config.pricingOverride))
+        }
+        // No fetch here — `--scan` stays offline and fast. The cached catalog
+        // only exists once a daemon has refreshed it; otherwise the embedded
+        // seed prices, which is also what the daemon would do.
+        if config.remotePricingEnabled, let cached = PriceCatalogSource.loadCache() {
+            for p in providers { await p.applyPriceCatalog(cached) }
+            daemonLog(
+                "sissy-serverd: --scan pricing from cached catalog "
+                    + "(fetched \(ISO8601DateFormatter().string(from: cached.fetchedAt)))")
+        } else {
+            daemonLog("sissy-serverd: --scan pricing from the embedded rate seed")
         }
         var out: [String: ScanEntry] = [:]
         for p in providers {
@@ -103,25 +161,6 @@ if args.contains("--scan") {
     }
     sem.wait()
     exit(0)
-}
-
-// Optional `--config <path>` override. Lets smoke tests / integration runs
-// point the daemon at an isolated config + JSONL tree without touching the
-// user's real `~/Library/Application Support/Sissy/server.json`.
-let configURL: URL = {
-    guard let idx = args.firstIndex(of: "--config") else { return ServerConfig.defaultURL }
-    guard idx + 1 < args.count else {
-        daemonLog("sissy-serverd: --config requires a path argument")
-        exit(2)
-    }
-    return URL(fileURLWithPath: args[idx + 1])
-}()
-let config: ServerConfig
-do {
-    config = try ServerConfig.load(from: configURL)
-} catch {
-    daemonLog("sissy-serverd: config load failed: \(error)")
-    exit(1)
 }
 
 let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)

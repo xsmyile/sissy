@@ -44,9 +44,17 @@ actor ClaudeCodeUsageReader: UsageProvider {
     private let persistenceURL: URL?
     /// Per-model price overrides from `ServerConfig.pricingOverride`. When a
     /// model matches an override entry (exact or longest-prefix) the override
-    /// shadows the built-in `Pricing.table` — so a published rate change can
-    /// land without rebuilding the daemon.
+    /// outranks both the runtime catalog and the embedded seed.
     private let pricingOverride: [String: ModelPricing]?
+    /// Anthropic slice of the runtime `PriceCatalog`. Sits between the user's
+    /// override and the embedded generated seed, so a model that launched after
+    /// this daemon was built still prices correctly. Refreshed in place by
+    /// `applyPriceCatalog`; a refresh applies to events ingested from then on
+    /// and does not reprice accumulated totals.
+    private var priceCatalog: PricingTable?
+    /// Models already reported as unpriced. Keeps the warning to one line per
+    /// model per daemon run instead of one per ingested event.
+    private var loggedUnpricedModels: Set<String> = []
     private var fileOffsets: [URL: UInt64] = [:]
     private var fileMTimes: [URL: TimeInterval] = [:]
     private var dailyTotals: [Date: DayTotals] = [:]
@@ -228,6 +236,32 @@ actor ClaudeCodeUsageReader: UsageProvider {
         self.pollInterval = pollInterval
         self.persistenceURL = persistenceURL
         self.pricingOverride = pricingOverride
+    }
+
+    func applyPriceCatalog(_ catalog: PriceCatalog) {
+        priceCatalog = catalog.table(for: .anthropic)
+        // Re-arm the log: a model the previous catalog lacked may now resolve,
+        // and the operator wants to see that it healed.
+        loggedUnpricedModels.removeAll()
+    }
+
+    /// Claude Code writes `<synthetic>` as the model for assistant turns it
+    /// produced locally (interrupts, error notices). Every such event carries
+    /// all-zero usage, so it is legitimately unpriced — warning about it would
+    /// fire on every run and train the operator to ignore the real warnings.
+    private static let nonBillableModels: Set<String> = ["<synthetic>"]
+
+    /// Reports an unpriced model once per model: its tokens contribute $0 to the
+    /// day's cost, which is otherwise indistinguishable from a quiet day.
+    private func logUnpricedModelOnce(for model: String) {
+        guard !Self.nonBillableModels.contains(model) else { return }
+        guard !loggedUnpricedModels.contains(model) else { return }
+        guard Pricing.price(for: model, override: pricingOverride, catalog: priceCatalog) == nil
+        else { return }
+        loggedUnpricedModels.insert(model)
+        daemonLog(
+            "sissy-serverd: no rate for '\(model)' in any pricing source — its tokens "
+                + "bill at $0; add a `pricingOverride` entry in server.json")
     }
 
     func start(onChange: @escaping @Sendable (DayTotals, DayTotals?) async -> Void) async {
@@ -525,13 +559,15 @@ actor ClaudeCodeUsageReader: UsageProvider {
             cacheCreation1h = 0
         }
         let cacheCreation = cacheCreation5m + cacheCreation1h
+        logUnpricedModelOnce(for: model)
         let cost = Pricing.cost(
             model: model,
             input: input,
             output: output,
             cacheRead: cacheRead,
             cacheCreation: (fiveMinute: cacheCreation5m, oneHour: cacheCreation1h),
-            override: pricingOverride
+            override: pricingOverride,
+            catalog: priceCatalog
         )
         return UsageEvent(
             timestamp: ts,

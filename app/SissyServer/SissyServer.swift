@@ -20,6 +20,10 @@ actor SissyServer {
     /// `~/.claude/projects` after the NIO channel had closed and only
     /// drained when every provider finished its scan organically.
     private var bootTask: Task<Void, Never>?
+    /// Handle on the pricing-catalog refresh loop so `stop()` can cancel an
+    /// in-flight fetch instead of leaving it to finish against a torn-down
+    /// daemon.
+    private var priceCatalogTask: Task<Void, Never>?
     private var startedAt: Date = .distantPast
     private var primaryMetric: PrimaryMetric
     /// Client-imposed mascot override. When non-nil, every outgoing frame
@@ -173,10 +177,62 @@ actor SissyServer {
         // log tree (`~/.claude/projects`, `~/.codex/sessions`, …); we let
         // them run after the socket is open.
         try await bootstrap()
+        // Settle on one catalog before the cold scan starts, so the backfill
+        // prices historical events against the same rates the live tail will
+        // use. A refresh does not reprice what it already counted, so a catalog
+        // that lands mid-scan would leave the day split across two rate sets.
+        if config.remotePricingEnabled {
+            await resolveInitialPriceCatalog()
+        } else {
+            daemonLog("sissy-serverd: remote pricing disabled — using the embedded rate seed")
+        }
         let server = self
         bootTask = Task.detached { [aggregator] in
             await aggregator.start { today, prev, slices in
                 await server.rebuildAndBroadcast(today: today, prev: prev, slices: slices)
+            }
+        }
+    }
+
+    /// Picks the rate catalog the cold backfill will run against, then starts
+    /// the background refresh loop.
+    ///
+    /// Order matters: a usable cache is applied synchronously, and when there
+    /// is none the first fetch is awaited under a short budget rather than left
+    /// to race the backfill. Either way the scan sees one catalog for its whole
+    /// run. Falling through to the seed is a deliberate outcome, not a failure
+    /// — the refresh loop keeps retrying behind it.
+    private func resolveInitialPriceCatalog() async {
+        var resolved: PriceCatalog?
+        var initialDelay: Duration = .zero
+        if let cached = PriceCatalogSource.loadCache() {
+            resolved = cached
+            let age = Date().timeIntervalSince(cached.fetchedAt)
+            initialDelay = PriceCatalogSource.refreshDelay(forCacheAge: age)
+            daemonLog("sissy-serverd: pricing from cached catalog, \(Int(age / 3600))h old")
+        } else if let fetched = await PriceCatalogSource.fetchForColdStart() {
+            resolved = fetched
+            initialDelay = PriceCatalogSource.refreshInterval
+            PriceCatalogSource.saveCache(fetched)
+            daemonLog(
+                "sissy-serverd: pricing catalog fetched before backfill — "
+                    + "anthropic=\(fetched.anthropic.count), openai=\(fetched.openai.count)")
+        } else {
+            daemonLog(
+                "sissy-serverd: no usable pricing cache and no catalog within "
+                    + "\(PriceCatalogSource.coldStartBudget) — backfilling from the embedded "
+                    + "seed, refresh continues in the background")
+        }
+        if let resolved {
+            await aggregator.applyPriceCatalog(resolved)
+        }
+        let aggregator = self.aggregator
+        priceCatalogTask = Task.detached {
+            await PriceCatalogSource.refreshLoop(
+                initialDelay: initialDelay,
+                initialPrevious: resolved
+            ) { catalog in
+                await aggregator.applyPriceCatalog(catalog)
             }
         }
     }
@@ -186,9 +242,11 @@ actor SissyServer {
         // cancellation and bails out of its file enumeration loops before
         // the channel close handshake even starts.
         bootTask?.cancel()
+        priceCatalogTask?.cancel()
         try? await channel?.close().get()
         await aggregator.stop()
         bootTask = nil
+        priceCatalogTask = nil
     }
 
     func healthSnapshot() async -> HealthResponse {

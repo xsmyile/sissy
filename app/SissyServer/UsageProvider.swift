@@ -38,4 +38,12 @@ protocol UsageProvider: AnyObject, Sendable {
 
     /// True once the cold backfill scan has completed.
     func isWarm() async -> Bool
+
+    /// Swap in a freshly fetched rate catalog. Each provider takes the slice
+    /// matching its upstream vendor and consults it between the user's
+    /// `pricingOverride` and the embedded generated seed. Called once before
+    /// the cold backfill and again on every successful refresh; a refresh
+    /// applies to subsequently ingested events and does not reprice
+    /// accumulated totals.
+    func applyPriceCatalog(_ catalog: PriceCatalog) async
 }

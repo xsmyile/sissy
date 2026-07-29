@@ -22,6 +22,10 @@ actor CodexUsageReader: UsageProvider {
     private let pollInterval: Duration
     private let persistenceURL: URL?
     private let pricingOverride: [String: ModelPricing]?
+    /// OpenAI slice of the runtime `PriceCatalog`. See the twin property on
+    /// `ClaudeCodeUsageReader` for the precedence rationale.
+    private var priceCatalog: PricingTable?
+    private var loggedUnpricedModels: Set<String> = []
 
     private var fileOffsets: [URL: UInt64] = [:]
     private var fileMTimes: [URL: TimeInterval] = [:]
@@ -106,6 +110,25 @@ actor CodexUsageReader: UsageProvider {
         self.pollInterval = pollInterval
         self.persistenceURL = persistenceURL
         self.pricingOverride = pricingOverride
+    }
+
+    func applyPriceCatalog(_ catalog: PriceCatalog) {
+        priceCatalog = catalog.table(for: .openai)
+        loggedUnpricedModels.removeAll()
+    }
+
+    /// Reports an unpriced model once per model. See the twin on
+    /// `ClaudeCodeUsageReader`.
+    private func logUnpricedModelOnce(for model: String) {
+        guard !loggedUnpricedModels.contains(model) else { return }
+        guard
+            OpenAIPricing.price(for: model, override: pricingOverride, catalog: priceCatalog)
+                == nil
+        else { return }
+        loggedUnpricedModels.insert(model)
+        daemonLog(
+            "sissy-serverd: no rate for '\(model)' in any pricing source — its tokens "
+                + "bill at $0; add a `pricingOverride` entry in server.json")
     }
 
     /// Resolves the default rollout directory. Honors `CODEX_HOME` if set
@@ -351,12 +374,14 @@ actor CodexUsageReader: UsageProvider {
         // uses `output_tokens` alone for the same reason.
 
         let model = fileModels[url] ?? Self.defaultModel
+        logUnpricedModelOnce(for: model)
         let cost = OpenAIPricing.cost(
             model: model,
             input: uncached,
             output: output,
             cacheRead: cached,
-            override: pricingOverride
+            override: pricingOverride,
+            catalog: priceCatalog
         )
         return UsageEvent(
             timestamp: ts,

@@ -145,51 +145,47 @@ func runSelfTest() {
 
     print("=== Pricing ===")
 
-    // claude-opus-4 (deprecated) bills at $15/$75 — the row we ship matches
-    // platform.claude.com's deprecated tier. A user-facing regression here
-    // historically caused 3x under-billing on opus 4.0/4.1 sessions.
+    // Rates come from `PricingSeed` (a generated LiteLLM snapshot), so these
+    // assert the *rate* a model resolves to rather than the struct shape — the
+    // seed carries an explicit 1-hour rate where the old hand-written table left
+    // it nil for derivation, and both produce the same cost.
+    func rate(_ model: String) -> (input: Decimal, output: Decimal, read: Decimal, write5m: Decimal)? {
+        guard let p = Pricing.price(for: model) else { return nil }
+        return (p.inputPerMTok, p.outputPerMTok, p.cacheReadPerMTok, p.cacheCreationPerMTok)
+    }
+
+    // Opus 4.0/4.1 are the deprecated $15/$75 tier. A regression here
+    // historically caused 3x under-billing on those sessions. The date-suffixed
+    // form is what `message.model` actually carries.
+    expect("opus 4.0 deprecated rate", rate("claude-opus-4-20250514")?.input, Decimal(15))
+    expect("opus 4.1 deprecated rate", rate("claude-opus-4-1")?.output, Decimal(75))
+    // Opus 4.5+ is the current $5/$25 tier. The inverse regression matters more:
+    // a current Opus minor must never resolve to the deprecated rate.
+    expect("opus 4.7 current rate", rate("claude-opus-4-7")?.input, Decimal(5))
     expect(
-        "opus deprecated exact", Pricing.price(for: "claude-opus-4"),
-        ModelPricing(
-            inputPerMTok: 15, outputPerMTok: 75, cacheReadPerMTok: 1.50,
-            cacheCreationPerMTok: 18.75))
-    expect(
-        "opus 4.1 exact", Pricing.price(for: "claude-opus-4-1"),
-        ModelPricing(
-            inputPerMTok: 15, outputPerMTok: 75, cacheReadPerMTok: 1.50,
-            cacheCreationPerMTok: 18.75))
-    // Opus 4.5+ is the current $5/$25 tier; longest-prefix routes
-    // `claude-opus-4-7-<dateversion>` onto the matching family row.
-    expect(
-        "opus 4.5+ family", Pricing.price(for: "claude-opus-4-7"),
-        ModelPricing(
-            inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5,
-            cacheCreationPerMTok: 6.25))
-    // Regression: a current Opus minor without its own row falls through
-    // longest-prefix to `claude-opus-4` (deprecated $15/$75) and triple-bills.
-    // The date-suffixed name is what `message.model` actually carries.
-    expect(
-        "opus 4.8 current rate", Pricing.price(for: "claude-opus-4-8-20260515"),
-        ModelPricing(
-            inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5,
-            cacheCreationPerMTok: 6.25))
-    expect(
-        "sonnet family", Pricing.price(for: "claude-sonnet-4-6"),
-        ModelPricing(inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheCreationPerMTok: 3.75))
-    expect(
-        "haiku family", Pricing.price(for: "claude-haiku-4-5"),
-        ModelPricing(inputPerMTok: 1, outputPerMTok: 5, cacheReadPerMTok: 0.1, cacheCreationPerMTok: 1.25))
-    expect(
-        "3-5-sonnet", Pricing.price(for: "claude-3-5-sonnet-20241022"),
-        ModelPricing(inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheCreationPerMTok: 3.75))
-    // Claude 5 family (current). Dated `message.model` names route onto the
-    // family row via longest-prefix; Sonnet 5 and Fable 5 are separate tiers.
-    expect(
-        "sonnet 5 current rate", Pricing.price(for: "claude-sonnet-5-20260601"),
-        ModelPricing(inputPerMTok: 2, outputPerMTok: 10, cacheReadPerMTok: 0.2, cacheCreationPerMTok: 2.50))
-    expect(
-        "fable 5 current rate", Pricing.price(for: "claude-fable-5"),
-        ModelPricing(inputPerMTok: 10, outputPerMTok: 50, cacheReadPerMTok: 1, cacheCreationPerMTok: 12.50))
+        "opus 4.8 dated name current rate", rate("claude-opus-4-8-20260515")?.input, Decimal(5))
+    expect("opus 4.8 dated name output", rate("claude-opus-4-8-20260515")?.output, Decimal(25))
+    // Opus 5 shares no prefix with any `claude-opus-4*` key, so a seed missing it
+    // resolves to nil and bills the whole session at $0.
+    expect("opus 5 current rate", rate("claude-opus-5-20260701")?.input, Decimal(5))
+    expect("opus 5 cache write 5m", rate("claude-opus-5")?.write5m, Decimal(string: "6.25"))
+    expect("sonnet 4.6", rate("claude-sonnet-4-6")?.input, Decimal(3))
+    expect("haiku 4.5", rate("claude-haiku-4-5")?.input, Decimal(1))
+    expect("sonnet 5 current rate", rate("claude-sonnet-5-20260601")?.input, Decimal(2))
+    expect("fable 5 current rate", rate("claude-fable-5")?.input, Decimal(10))
+    expect("cache read is a tenth of input", rate("claude-opus-5")?.read, Decimal(string: "0.5"))
+
+    // Every model name the readers can actually emit must resolve. Retired
+    // `claude-3-5-*` names are deliberately absent from the seed (upstream
+    // dropped them) and unreachable anyway: the readers retain 2 days, so a
+    // model retired in 2024 can never appear in today's or yesterday's logs.
+    for model in [
+        "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-5",
+        "claude-sonnet-4-6", "claude-fable-5", "claude-haiku-4-5-20251001",
+    ] {
+        expect("seed covers \(model)", Pricing.price(for: model) != nil, true)
+    }
+
     expect("unknown", Pricing.price(for: "gpt-4"), nil)
 
     // 1M input + 100k output on Sonnet = 1*3 + 0.1*15 = 4.50
@@ -217,7 +213,7 @@ func runSelfTest() {
         cacheCreation: (fiveMinute: 0, oneHour: 1_000_000))
     expect("opus 1h cache at 2x input", oneHourOnly, Decimal(string: "10.00")!)
 
-    // pricingOverride shadows the built-in table — exact key wins.
+    // pricingOverride shadows the embedded seed — exact key wins.
     let exactOverride: [String: ModelPricing] = [
         "claude-sonnet-4-6": .init(
             inputPerMTok: 10, outputPerMTok: 20, cacheReadPerMTok: 1, cacheCreationPerMTok: 2)
@@ -238,7 +234,7 @@ func runSelfTest() {
         cacheCreation: (fiveMinute: 0, oneHour: 0),
         override: prefixOverride)
     expect("override prefix wins", overriddenPrefix, Decimal(string: "100.00")!)
-    // Unmatched models fall back to the built-in table.
+    // Unmatched models fall back to the embedded seed.
     let unrelatedOverride: [String: ModelPricing] = [
         "claude-haiku-4": .init(
             inputPerMTok: 999, outputPerMTok: 999, cacheReadPerMTok: 999, cacheCreationPerMTok: 999)
@@ -255,7 +251,7 @@ func runSelfTest() {
         override: [:])
     expect("empty override falls back", emptyOverride, Decimal(string: "4.50")!)
     // An override without an explicit 1h rate derives it from the override's
-    // own input rate (10 × 2 = 20/M), not the built-in table. 1M 1h tokens → 20.
+    // own input rate (10 × 2 = 20/M), not the embedded seed. 1M 1h tokens → 20.
     let overrideDerived1h: [String: ModelPricing] = [
         "claude-sonnet-4-6": .init(
             inputPerMTok: 10, outputPerMTok: 20, cacheReadPerMTok: 1, cacheCreationPerMTok: 2)
@@ -292,6 +288,12 @@ func runSelfTest() {
     expect("legacy override decodes ok", legacyDecoded?.inputPerMTok, Decimal(10))
     expect("legacy override 1h is nil", legacy1h, nil)
     expect("override decodes explicit 1h", with1h, Decimal(7))
+
+    print("=== PricingTable ===")
+    runPricingTableTests()
+
+    print("=== PriceCatalog ===")
+    runPriceCatalogTests()
 
     print("=== ServerConfig ===")
     runServerConfigTests()
@@ -1118,4 +1120,253 @@ func runCodexModelBackfillTest() {
         OpenAIPricing.cost(model: "o3", input: 2000, output: 1000, cacheRead: 0)
         + OpenAIPricing.cost(model: "o3", input: 4000, output: 2000, cacheRead: 0)
     expect("codex model backfill", observed.value, expected)
+}
+
+private func litellmEntry(
+    provider: String,
+    input: Double,
+    output: Double,
+    cacheRead: Double? = nil,
+    cacheWrite5m: Double? = nil,
+    cacheWrite1h: Double? = nil,
+    mode: String = "chat"
+) -> [String: Any] {
+    var entry: [String: Any] = [
+        "litellm_provider": provider,
+        "mode": mode,
+        "input_cost_per_token": input,
+        "output_cost_per_token": output,
+    ]
+    if let cacheRead { entry["cache_read_input_token_cost"] = cacheRead }
+    if let cacheWrite5m { entry["cache_creation_input_token_cost"] = cacheWrite5m }
+    if let cacheWrite1h { entry["cache_creation_input_token_cost_above_1hr"] = cacheWrite1h }
+    return entry
+}
+
+private func syntheticCatalog() -> PriceCatalog? {
+    var payload: [String: Any] = [:]
+    for i in 0..<10 {
+        payload["claude-test-\(i)"] = litellmEntry(
+            provider: "anthropic", input: 5e-06, output: 2.5e-05, cacheWrite5m: 6.25e-06)
+        payload["gpt-test-\(i)"] = litellmEntry(provider: "openai", input: 1e-06, output: 8e-06)
+    }
+    // Filtered out: non-text mode, vendor-scoped alias, untracked provider.
+    payload["tts-1"] = litellmEntry(
+        provider: "openai", input: 1e-06, output: 8e-06, mode: "audio_speech")
+    payload["bedrock/claude-x"] = litellmEntry(
+        provider: "anthropic", input: 5e-06, output: 2.5e-05, cacheWrite5m: 6.25e-06)
+    payload["gemini-3"] = litellmEntry(provider: "vertex_ai", input: 1e-06, output: 8e-06)
+    return PriceCatalogSource.parse(litellm: payload, fetchedAt: Date(timeIntervalSince1970: 0))
+}
+
+private func runPricingTableTests() {
+    let table = PricingTable([
+        "claude-opus-5": ModelPricing(
+            inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheCreationPerMTok: 6.25),
+        "claude-opus-4-8": ModelPricing(
+            inputPerMTok: 9, outputPerMTok: 9, cacheReadPerMTok: 0, cacheCreationPerMTok: 0),
+        "claude-opus-4": ModelPricing(
+            inputPerMTok: 15, outputPerMTok: 75, cacheReadPerMTok: 1.5, cacheCreationPerMTok: 18.75),
+    ])
+    expect("table exact match", table.match("claude-opus-5")?.inputPerMTok, Decimal(5))
+    // Longest prefix must win, or a dated 4.8 name falls to the deprecated
+    // `claude-opus-4` row and triple-bills.
+    expect(
+        "table longest prefix wins", table.match("claude-opus-4-8-20260515")?.inputPerMTok,
+        Decimal(9))
+    expect("table shorter prefix still matches", table.match("claude-opus-4-1")?.inputPerMTok, Decimal(15))
+    expect("table miss", table.match("gpt-5"), nil)
+    expect("empty table matches nothing", PricingTable([:]).match("claude-opus-5"), nil)
+}
+
+private func runPriceCatalogTests() {
+    // Per-token → per-million must stay exact; a `Decimal(_: Double)` bridge
+    // would carry a binary-float artifact into every cost sum.
+    let opus5 = PriceCatalogSource.rates(
+        from: litellmEntry(
+            provider: "anthropic", input: 5e-06, output: 2.5e-05, cacheRead: 5e-07,
+            cacheWrite5m: 6.25e-06, cacheWrite1h: 1e-05),
+        provider: .anthropic)
+    expect("catalog input scaled", opus5?.inputPerMTok, Decimal(5))
+    expect("catalog output scaled", opus5?.outputPerMTok, Decimal(25))
+    expect("catalog cache read scaled", opus5?.cacheReadPerMTok, Decimal(string: "0.5"))
+    expect("catalog 5m write scaled", opus5?.cacheCreationPerMTok, Decimal(string: "6.25"))
+    expect("catalog adopts in-band 1h", opus5?.cacheCreation1hPerMTok, Decimal(10))
+
+    // Some retired `claude-3-*` rows upstream carry a copy-pasted 1h value
+    // (24× input). Adopting it would over-bill by an order of magnitude, so an
+    // out-of-band value is dropped and the 2× derivation applies instead.
+    let bogus1h = PriceCatalogSource.rates(
+        from: litellmEntry(
+            provider: "anthropic", input: 2.5e-07, output: 1.25e-06, cacheRead: 3e-08,
+            cacheWrite5m: 3e-07, cacheWrite1h: 6e-06),
+        provider: .anthropic)
+    expect("catalog rejects out-of-band 1h", bogus1h?.cacheCreation1hPerMTok, nil)
+    expect("catalog keeps the rest of the row", bogus1h?.inputPerMTok, Decimal(string: "0.25"))
+
+    // Codex rollouts carry no cache-creation token count, so the OpenAI side
+    // stays 0 by convention regardless of what upstream publishes.
+    let gpt = PriceCatalogSource.rates(
+        from: litellmEntry(
+            provider: "openai", input: 1.25e-06, output: 1e-05, cacheRead: 1.25e-07,
+            cacheWrite5m: 9e-06),
+        provider: .openai)
+    expect("catalog openai cache write stays 0", gpt?.cacheCreationPerMTok, Decimal(0))
+    expect("catalog openai no 1h", gpt?.cacheCreation1hPerMTok, nil)
+
+    expect(
+        "catalog rejects zero input",
+        PriceCatalogSource.rates(
+            from: litellmEntry(provider: "openai", input: 0, output: 1e-05), provider: .openai),
+        nil)
+    expect(
+        "catalog rejects cache read above input",
+        PriceCatalogSource.rates(
+            from: litellmEntry(provider: "openai", input: 1e-06, output: 1e-05, cacheRead: 5e-06),
+            provider: .openai),
+        nil)
+    expect(
+        "catalog rejects anthropic row without 5m write",
+        PriceCatalogSource.rates(
+            from: litellmEntry(provider: "anthropic", input: 5e-06, output: 2.5e-05),
+            provider: .anthropic),
+        nil)
+
+    // A payload that parses as JSON but prices almost nothing means the upstream
+    // shape changed; adopting it would price almost nothing.
+    expect(
+        "catalog rejects thin payload",
+        PriceCatalogSource.parse(
+            litellm: [
+                "claude-x": litellmEntry(
+                    provider: "anthropic", input: 5e-06, output: 2.5e-05,
+                    cacheWrite5m: 6.25e-06)
+            ],
+            fetchedAt: Date()) == nil,
+        true)
+
+    guard let catalog = syntheticCatalog() else {
+        expect("catalog parses synthetic payload", false, true)
+        return
+    }
+    expect("catalog anthropic count", catalog.anthropic.count, 10)
+    expect("catalog openai count", catalog.openai.count, 10)
+    expect("catalog excludes vendor-scoped key", catalog.anthropic["bedrock/claude-x"], nil)
+    expect("catalog excludes non-text mode", catalog.openai["tts-1"], nil)
+    expect("catalog excludes untracked provider", catalog.openai["gemini-3"], nil)
+    expect("catalog slice is lookup-ready", catalog.table(for: .openai).count, 10)
+
+    let fm = FileManager.default
+    let tempDir = fm.temporaryDirectory.appendingPathComponent("sissy-catalog-\(UUID().uuidString)")
+    try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tempDir) }
+    let cacheURL = tempDir.appendingPathComponent("pricing-catalog.json")
+    // `syntheticCatalog` is stamped at the epoch for determinism elsewhere, but
+    // the cache path also compares against the seed's own date, so anything
+    // meant to load must carry a current one.
+    func withRows(
+        _ anthropic: [String: ModelPricing], _ openai: [String: ModelPricing]
+    ) -> PriceCatalog {
+        PriceCatalog(fetchedAt: Date(), anthropic: anthropic, openai: openai)
+    }
+    func rejects(_ label: String, _ candidate: PriceCatalog) {
+        PriceCatalogSource.saveCache(candidate, to: cacheURL)
+        expect(label, PriceCatalogSource.loadCache(from: cacheURL) == nil, true)
+    }
+    PriceCatalogSource.saveCache(withRows(catalog.anthropic, catalog.openai), to: cacheURL)
+    expect(
+        "catalog cache round-trips",
+        PriceCatalogSource.loadCache(from: cacheURL)?.anthropic.count, 10)
+    // A cache written by a different schema, or one that is semantically wrong,
+    // must be discarded rather than shadowing the embedded seed.
+    try? Data(#"{"schemaVersion":99,"fetchedAt":0,"anthropic":{},"openai":{}}"#.utf8)
+        .write(to: cacheURL)
+    expect(
+        "catalog rejects foreign schema", PriceCatalogSource.loadCache(from: cacheURL) == nil, true)
+    // A cache written before this binary's seed is not an upgrade over it.
+    rejects(
+        "catalog rejects cache older than the seed",
+        PriceCatalog(
+            fetchedAt: Date(timeIntervalSince1970: 0), anthropic: catalog.anthropic,
+            openai: catalog.openai))
+
+    // The cache is re-validated with the same rules as a fresh download, or a
+    // hand-edited file could outrank the seed with inflated rates. Every case
+    // below keeps 10 rows per provider, so it is the semantic check that fires
+    // and not the `minimumEntriesPerProvider` guard — the trap the previous
+    // single-row fixture fell into.
+    func anthropicRow(
+        input: Decimal = 5, cacheRead: Decimal = 0, write5m: Decimal = 6.25, write1h: Decimal? = nil
+    ) -> PriceCatalog {
+        var rows = catalog.anthropic
+        rows["claude-test-0"] = ModelPricing(
+            inputPerMTok: input, outputPerMTok: 25, cacheReadPerMTok: cacheRead,
+            cacheCreationPerMTok: write5m, cacheCreation1hPerMTok: write1h)
+        return withRows(rows, catalog.openai)
+    }
+    PriceCatalogSource.saveCache(anthropicRow(write1h: 10), to: cacheURL)
+    expect(
+        "catalog accepts a coherent hand-built row",
+        PriceCatalogSource.loadCache(from: cacheURL) != nil, true)
+    rejects("catalog rejects cached zero input", anthropicRow(input: 0))
+    rejects("catalog rejects cached cache-read above input", anthropicRow(cacheRead: 99))
+    rejects("catalog rejects cached negative cache-read", anthropicRow(cacheRead: -1))
+    // 3× input is the ceiling; the published tier is 1.25×.
+    rejects("catalog rejects cached 5m write above the ceiling", anthropicRow(write5m: 99))
+    rejects("catalog rejects cached 5m write of zero", anthropicRow(write5m: 0))
+    // The 1h band is 1.5–2.5× input. A stored value outside it was never
+    // produced by the parser, which nils it instead.
+    rejects("catalog rejects cached 1h write above the band", anthropicRow(write1h: 120))
+    rejects("catalog rejects cached negative 1h write", anthropicRow(write1h: -1))
+    var openaiRows = catalog.openai
+    openaiRows["gpt-test-0"] = ModelPricing(
+        inputPerMTok: 1, outputPerMTok: 8, cacheReadPerMTok: 0, cacheCreationPerMTok: 2)
+    rejects("catalog rejects cached openai cache-write", withRows(catalog.anthropic, openaiRows))
+
+    // Precedence: override beats catalog beats seed.
+    let catalogRate = ModelPricing(
+        inputPerMTok: 99, outputPerMTok: 99, cacheReadPerMTok: 0, cacheCreationPerMTok: 0)
+    let overrideRate = ModelPricing(
+        inputPerMTok: 11, outputPerMTok: 11, cacheReadPerMTok: 0, cacheCreationPerMTok: 0)
+    let live = PricingTable(["claude-opus-5": catalogRate])
+    expect("catalog shadows seed", Pricing.price(for: "claude-opus-5", catalog: live), catalogRate)
+    expect(
+        "override shadows catalog",
+        Pricing.price(
+            for: "claude-opus-5", override: ["claude-opus-5": overrideRate], catalog: live),
+        overrideRate)
+    expect(
+        "seed applies when catalog misses",
+        Pricing.price(for: "claude-sonnet-5", catalog: live)?.inputPerMTok, Decimal(2))
+    expect(
+        "openai precedence matches anthropic",
+        OpenAIPricing.price(for: "gpt-5.6", catalog: PricingTable(["gpt-5.6": catalogRate])),
+        catalogRate)
+
+    // A refresh that changes nothing must not be announced as a change, or the
+    // log cries wolf every day.
+    expect("no change against nil previous", PriceCatalogSource.changedModelCount(from: nil, to: catalog), 0)
+    expect(
+        "no change against identical catalog",
+        PriceCatalogSource.changedModelCount(from: catalog, to: catalog), 0)
+    var bumped = catalog.anthropic
+    bumped["claude-test-0"] = catalogRate
+    bumped["claude-test-new"] = catalogRate
+    let changed = PriceCatalog(
+        fetchedAt: Date(), anthropic: bumped, openai: catalog.openai)
+    expect(
+        "counts repriced and added models",
+        PriceCatalogSource.changedModelCount(from: catalog, to: changed), 2)
+
+    // A restart that just loaded a recent cache must not refetch immediately.
+    expect(
+        "fresh cache defers the refresh",
+        PriceCatalogSource.refreshDelay(forCacheAge: 0), PriceCatalogSource.refreshInterval)
+    expect(
+        "stale cache refreshes at once",
+        PriceCatalogSource.refreshDelay(forCacheAge: 60 * 60 * 48), .zero)
+
+    // The embedded seed must be a usable catalog, not the bootstrap stub.
+    expect("seed is usable", PricingSeed.anthropic.isEmpty, false)
+    expect("seed carries openai rates", PricingSeed.openai.isEmpty, false)
 }

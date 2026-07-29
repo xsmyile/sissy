@@ -53,7 +53,7 @@ Reserved for V2: `input` events when the enclosure grows a button.
 
 | File | Job |
 |---|---|
-| `main.swift`                    | Entry point, signal handling, `--self-test` / `--scan` / `--scan-provider` / `--config` modes |
+| `main.swift`                    | Entry point, signal handling, `--self-test` / `--scan` / `--scan-provider` / `--config` / `--dump-seed` modes |
 | `SissyServer.swift`             | Actor that owns Hub + `UsageAggregator` and bootstraps the NIO server; auto-detects Codex provider at boot |
 | `HTTPRequestHandler.swift`      | `/health`, `/stats` (diagnostic-only: connectedClients, filesWatched, lastFrameAt); Bearer auth; 401/404 paths |
 | `WebSocketSinkHandler.swift`    | Per-connection WS handler, conforms to `FrameSink` |
@@ -63,11 +63,13 @@ Reserved for V2: `input` events when the enclosure grows a button.
 | `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`; dedupes by `requestId` |
 | `CodexUsageReader.swift`        | Tails `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`); uses `last_token_usage` as per-turn delta |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
-| `Pricing.swift`                 | Anthropic per-model token rates (Opus / Sonnet / Haiku 4.x families) |
-| `OpenAIPricing.swift`           | OpenAI per-model token rates (gpt-5 / gpt-5-codex / o-series / gpt-4o) — provisional |
+| `Pricing.swift`                 | Anthropic cost math, `ModelPricing`, `PricingTable`; no rate table of its own |
+| `OpenAIPricing.swift`           | OpenAI cost math, same override → catalog → seed precedence |
+| `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM rates at runtime; renders the seed for `--dump-seed` |
+| `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — offline / first-run floor |
 | `FrameBuilder.swift`            | Token/cost/burn formatters + state picker |
 | `Auth.swift`                    | Constant-time bearer compare |
-| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles + `codexDataDir` |
+| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing` |
 | `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude reader stays on legacy `usage-state.json` for upgrade smoothness |
 
 The daemon binds first and lets each active provider's initial JSONL backfill finish in detached tasks — clients can connect within ~1 s even on a multi-GB Claude Code or Codex history. Steady-state CPU is near zero: provider-specific `FSEventStream`s (rooted at `~/.claude/projects` for Claude Code and `~/.codex/sessions` for Codex) wake their readers only when JSONL actually changes (kernel-level coalesced events at ~1 s latency). A low-frequency safety-net poll (default 60 s, configurable via `server.json.pollIntervalSeconds`) catches missed-event flags (`MustScanSubDirs`/`UserDropped`/`KernelDropped`) and midnight day rollover when no JSONL activity straddles the boundary. Claude Code entries are deduplicated by `requestId` because Claude Code logs each assistant turn 2-3 times as the message streams; Codex turns are deduplicated implicitly because `last_token_usage` arrives once per turn.
@@ -151,7 +153,7 @@ The menubar app's `ServerServiceController` uses `SMAppService.agent(plistName:)
 
 ## Operational notes
 
-- **Pricing drift**: `Pricing.swift` (Anthropic) and `OpenAIPricing.swift` (OpenAI) reflect each vendor's public prices at the time of writing. Override via `server.json.pricingOverride` if rates change. A weekly `pricing-drift` CI job (`scripts/check_pricing_drift.py`) diffs both tables against LiteLLM and flags new or repriced models.
+- **Pricing**: there is no hand-maintained rate table. Rates resolve `server.json` `pricingOverride` → the LiteLLM catalog fetched at runtime (`PriceCatalog.swift`, refreshed every 24 h, cached in Application Support) → `PricingSeed.swift`, a generated snapshot embedded at build time for the offline / first-run case. A new model therefore needs no Sissy release. The cold backfill runs against exactly one catalog: a cache newer than the seed is applied before the scan starts, otherwise the first fetch is awaited under `PriceCatalogSource.coldStartBudget` and the seed prices the scan if it doesn't land. A refresh never reprices what it already counted, so letting a catalog arrive mid-scan would split a single day across two rate sets. `remotePricing: false` pins the daemon to the seed and stops all outbound requests. Regenerate the seed when cutting a release: `sissy-serverd --dump-seed > app/SissyServer/PricingSeed.swift`. The `pricing-oracle` CI job asserts exact agreement with `ccusage`, which prices from the same LiteLLM data.
 - **Network changes**: the easiest reset is to wipe NVS via `WifiBootstrap::forgetAndReboot()` or a long BOOT-button hold.
 - **Cert pinning / TLS**: out of scope for V1. Run on LAN only.
 - **Replay**: every WS client gets the last broadcast frame on connect, so reboots don't show stale `--`.

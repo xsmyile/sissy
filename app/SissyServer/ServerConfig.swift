@@ -22,6 +22,12 @@ struct ServerConfig: Sendable, Codable {
     var primaryMetric: String
     var stateThresholds: StateThresholds
     var pricingOverride: [String: ModelPricing]?
+    /// Whether the daemon fetches LiteLLM's rate table at runtime
+    /// (`PriceCatalog`). `nil` means on — it's what keeps a newly launched
+    /// model from mispricing until the next Sissy release. Set `false` to pin
+    /// pricing to the tables compiled into the binary and make the daemon fully
+    /// offline; `pricingOverride` still applies either way.
+    var remotePricing: Bool?
     /// `MilestoneFrequency` preset key. Drives the whole-dollar cost step;
     /// see `MilestoneFrequency.presets`. Unknown values fall back to
     /// `"normal"` at lookup time, so a hand-edited typo degrades gracefully.
@@ -41,6 +47,7 @@ struct ServerConfig: Sendable, Codable {
         primaryMetric: "tokens",
         stateThresholds: StateThresholds(),
         pricingOverride: nil,
+        remotePricing: nil,
         milestoneFrequency: "normal",
         providers: .defaults
     )
@@ -76,6 +83,7 @@ struct ServerConfig: Sendable, Codable {
         if let v = obj["codexDataDir"] as? String { merged.codexDataDir = v }
         if let v = obj["pollIntervalSeconds"] as? Double { merged.pollIntervalSeconds = v }
         if let v = obj["primaryMetric"] as? String { merged.primaryMetric = v }
+        if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
         if let v = obj["milestoneFrequency"] as? String { merged.milestoneFrequency = v }
         if let prov = obj["providers"] as? [String: Any] {
             var toggles = ProviderToggles.defaults
@@ -151,5 +159,9 @@ struct ServerConfig: Sendable, Codable {
 
     var resolvedPrimaryMetric: PrimaryMetric {
         PrimaryMetric(rawValue: primaryMetric) ?? .tokens
+    }
+
+    var remotePricingEnabled: Bool {
+        remotePricing ?? true
     }
 }

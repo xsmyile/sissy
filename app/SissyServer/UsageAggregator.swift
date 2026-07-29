@@ -59,6 +59,12 @@ actor UsageAggregator {
         for p in providers { await p.stop() }
     }
 
+    /// Fans a refreshed rate catalog out to every provider. Each takes the
+    /// slice for its own vendor.
+    func applyPriceCatalog(_ catalog: PriceCatalog) async {
+        for p in providers { await p.applyPriceCatalog(catalog) }
+    }
+
     func current() -> (today: DayTotals, prev: DayTotals?) {
         aggregate()
     }

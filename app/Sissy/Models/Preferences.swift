@@ -200,7 +200,7 @@ struct Preferences: Codable, Equatable {
     /// configure its bind address, token, pricing, and state thresholds.
     ///
     /// Preserves any keys we don't manage here — `providers`, `codexDataDir`,
-    /// `pricingOverride`, and any hand-edited entries — by reading the
+    /// `pricingOverride`, `remotePricing`, and any hand-edited entries — by reading the
     /// existing file first and merging our values over it. Without that
     /// merge, a metric switch or a pairing run would silently drop a
     /// user's `providers.codex = false` override.
