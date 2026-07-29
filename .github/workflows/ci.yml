@@ -20,7 +20,9 @@ jobs:
           ./actionlint -color
       - name: ruff check + format
         run: |
-          pipx install ruff
+          # Pinned: an unpinned install turns master red whenever upstream
+          # widens the default rule set, with no change on our side.
+          pipx install ruff==0.16.0
           ruff check scripts/
           ruff format --check scripts/
 
