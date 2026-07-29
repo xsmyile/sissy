@@ -42,6 +42,7 @@ DerivedData/
 
 # Local review/audit notes
 docs/review-*.md
+docs/DIFF-REVIEW-*.md
 
 # Master AppIcon source — Xcode bundles its own copy under AppIcon.icon/Assets/
 /icon.png
