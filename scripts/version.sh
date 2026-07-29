@@ -5,9 +5,8 @@
 #   build      commit count — monotonic, reproducible, independent of CI state
 #
 # Usage:
-#   scripts/version.sh            # MARKETING_VERSION=… / CURRENT_PROJECT_VERSION=… lines
-#   scripts/version.sh marketing  # just the marketing version
-#   scripts/version.sh build      # just the build number
+#   scripts/version.sh marketing  # the marketing version
+#   scripts/version.sh build      # the build number
 #
 # Override the marketing version with SISSY_VERSION=x.y.z (smoke builds,
 # workflow_dispatch). On a tag push GITHUB_REF_NAME supplies it instead.
@@ -36,15 +35,11 @@ build_number() {
   git -C "$REPO_ROOT" rev-list --count HEAD
 }
 
-case "${1:-both}" in
+case "${1:-}" in
   marketing) marketing_version ;;
   build) build_number ;;
-  both)
-    printf 'MARKETING_VERSION=%s\n' "$(marketing_version)"
-    printf 'CURRENT_PROJECT_VERSION=%s\n' "$(build_number)"
-    ;;
   *)
-    printf 'usage: %s [marketing|build|both]\n' "$0" >&2
+    printf 'usage: %s <marketing|build>\n' "$0" >&2
     exit 2
     ;;
 esac
