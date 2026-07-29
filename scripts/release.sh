@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build, sign, notarize, staple Sissy.app and package as DMG.
 # Usage: scripts/release.sh [version]
-#   version defaults to MARKETING_VERSION read from app/project.yml
+#   version defaults to the latest git tag (scripts/version.sh); the build
+#   number is always the commit count and is not overridable
 #
 # Prerequisites (one-time):
 #   - "Developer ID Application: ... (AS75YRKL95)" cert in login keychain
@@ -26,15 +27,16 @@ for arg in "$@"; do
   case "$arg" in
     --publish) PUBLISH=1 ;;
     -h|--help)
-      sed -n '2,12p' "$0"; exit 0 ;;
+      sed -n '2,13p' "$0"; exit 0 ;;
   esac
 done
 
-VERSION="${1:-}"
-if [[ -z "$VERSION" || "$VERSION" == --* ]]; then
-  VERSION="$(awk '/MARKETING_VERSION/ {gsub(/"/, "", $2); print $2; exit}' "$APP_DIR/project.yml")"
+VERSION="$("$REPO_ROOT/scripts/version.sh" marketing)"
+BUILD="$("$REPO_ROOT/scripts/version.sh" build)"
+if [[ -n "${1:-}" && "${1:-}" != --* ]]; then
+  VERSION="$1"
 fi
-if [[ -z "$VERSION" ]]; then
+if [[ -z "$VERSION" || -z "$BUILD" ]]; then
   echo "error: could not determine version" >&2; exit 1
 fi
 
@@ -49,7 +51,7 @@ security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY" \
 xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
   || die "notarytool profile '$NOTARY_PROFILE' missing — see header of this script"
 
-log "version: $VERSION"
+log "version: $VERSION (build $BUILD)"
 mkdir -p "$DIST_DIR"
 BUILD_DIR="$APP_DIR/build"
 rm -rf "$BUILD_DIR"
@@ -73,6 +75,7 @@ xcodebuild \
   CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   MARKETING_VERSION="$VERSION" \
+  CURRENT_PROJECT_VERSION="$BUILD" \
   build | xcbeautify 2>/dev/null || \
 xcodebuild \
   -project "$APP_DIR/Sissy.xcodeproj" \
@@ -83,10 +86,22 @@ xcodebuild \
   CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   MARKETING_VERSION="$VERSION" \
+  CURRENT_PROJECT_VERSION="$BUILD" \
   build
 
 APP_PATH="$BUILD_DIR/Build/Products/Release/Sissy.app"
 [[ -d "$APP_PATH" ]] || die "build did not produce $APP_PATH"
+
+# The plists carry only $(MARKETING_VERSION) / $(CURRENT_PROJECT_VERSION), so a
+# literal reintroduced into either one would silently ship a bundle whose About
+# window disagrees with the DMG, the cask and the tag.
+log "verify bundle version"
+for pair in "CFBundleShortVersionString:$VERSION" "CFBundleVersion:$BUILD"; do
+  key="${pair%%:*}"
+  want="${pair#*:}"
+  got="$(/usr/libexec/PlistBuddy -c "Print :$key" "$APP_PATH/Contents/Info.plist")"
+  [[ "$got" == "$want" ]] || die "$key is '$got', expected '$want'"
+done
 
 # `xcodebuild build` signs for local run/debug: it injects get-task-allow and
 # omits a secure timestamp, both rejected by notarization. Re-sign inner-to-outer

@@ -20,10 +20,14 @@ command -v xcodegen >/dev/null || die "xcodegen not found. Install it with: brew
 command -v xcodebuild >/dev/null || die "xcodebuild not found. Install Xcode and select it with xcode-select."
 command -v codesign >/dev/null || die "codesign not found."
 
+MARKETING_VERSION="$("$REPO_ROOT/scripts/version.sh" marketing)"
+CURRENT_PROJECT_VERSION="$("$REPO_ROOT/scripts/version.sh" build)"
+
 printf '==> xcodegen generate\n'
 (cd "$APP_DIR" && xcodegen generate)
 
-printf '==> xcodebuild %s signed build\n' "$CONFIGURATION"
+printf '==> xcodebuild %s signed build (%s build %s)\n' \
+  "$CONFIGURATION" "$MARKETING_VERSION" "$CURRENT_PROJECT_VERSION"
 xcodebuild \
   -project "$APP_DIR/Sissy.xcodeproj" \
   -scheme Sissy \
@@ -32,6 +36,8 @@ xcodebuild \
   CODE_SIGN_STYLE=Automatic \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGNING_ALLOWED=YES \
+  MARKETING_VERSION="$MARKETING_VERSION" \
+  CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION" \
   clean build
 
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/Sissy.app"

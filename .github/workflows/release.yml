@@ -43,20 +43,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          # scripts/version.sh derives the build number from the commit
+          # count. The default shallow fetch would make it 1 on every run.
+          fetch-depth: 0
 
       - name: Determine version
         id: version
+        env:
+          SISSY_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            v="${GITHUB_REF_NAME#v}"
-          elif [[ -n "${{ inputs.version }}" ]]; then
-            v="${{ inputs.version }}"
-          else
-            v="$(awk '/MARKETING_VERSION/ {gsub(/"/, "", $2); print $2; exit}' app/project.yml)"
-          fi
-          [[ -n "$v" ]] || { echo "could not determine version" >&2; exit 1; }
+          v="$(scripts/version.sh marketing)"
+          b="$(scripts/version.sh build)"
+          [[ -n "$v" && -n "$b" ]] || { echo "could not determine version" >&2; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "Resolved version: $v"
+          echo "build=$b" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $v (build $b)"
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
@@ -166,6 +168,7 @@ jobs:
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
         run: |
           set -o pipefail
           xcodebuild \
@@ -177,7 +180,28 @@ jobs:
             DEVELOPMENT_TEAM="$TEAM_ID" \
             CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
             MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD" \
             build | xcbeautify --renderer github-actions
+
+      - name: Verify bundle version
+        working-directory: app
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          set -euo pipefail
+          # The plists carry only $(MARKETING_VERSION) / $(CURRENT_PROJECT_VERSION),
+          # so a literal reintroduced into either one would silently ship a
+          # bundle whose About window disagrees with the DMG, the cask and the
+          # tag. Assert before notarization, which costs minutes.
+          PLIST="build/Build/Products/Release/Sissy.app/Contents/Info.plist"
+          for pair in "CFBundleShortVersionString:$VERSION" "CFBundleVersion:$BUILD"; do
+            key="${pair%%:*}"
+            want="${pair#*:}"
+            got="$(/usr/libexec/PlistBuddy -c "Print :$key" "$PLIST")"
+            [[ "$got" == "$want" ]] \
+              || { echo "$key is '$got', expected '$want'" >&2; exit 1; }
+          done
 
       - name: Re-sign for Developer ID distribution
         working-directory: app
