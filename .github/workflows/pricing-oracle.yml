@@ -82,17 +82,21 @@ jobs:
           echo "DD=$DD" >> "$GITHUB_ENV"
           "$DD/sissy-serverd" --config "$RUNNER_TEMP/oracle.json" > "$RUNNER_TEMP/boot.log" 2>&1 &
           pid=$!
+          # Either line means a live catalog reached the cache: the daemon
+          # fetches synchronously before the backfill when it starts cold, and
+          # only falls back to the periodic refresh when a cache already existed.
+          READY="pricing catalog (refreshed|fetched before backfill)"
           # Must outlast the client's own retry budget (3 attempts x 20s request
           # timeout + ~7s of backoff), or a transient upstream slowdown that the
           # daemon is designed to absorb turns into a red oracle instead.
           for _ in $(seq 1 120); do
-            grep -q "pricing catalog refreshed" "$RUNNER_TEMP/boot.log" && break
+            grep -qE "$READY" "$RUNNER_TEMP/boot.log" && break
             sleep 1
           done
           kill -TERM "$pid" 2>/dev/null || true
           wait "$pid" 2>/dev/null || true
           cat "$RUNNER_TEMP/boot.log"
-          grep -q "pricing catalog refreshed" "$RUNNER_TEMP/boot.log"
+          grep -qE "$READY" "$RUNNER_TEMP/boot.log"
 
       - name: Compare against ccusage
         run: |
