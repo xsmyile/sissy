@@ -15,6 +15,8 @@ struct DeviceSettingsView: View {
     @State private var showLocationDeniedAlert = false
     @State private var showRepair = false
 
+    private static let portFieldWidth: CGFloat = 72
+
     private var isConnected: Bool { model.currentFrame?.devicePresent ?? false }
 
     var body: some View {
@@ -41,12 +43,12 @@ struct DeviceSettingsView: View {
             Section(isExpanded: $showRepair) {
                 serialRow
                 networkRow
-                LabeledContent("Wi-Fi password") {
+                settingsRow("Password") {
                     SecureField("Wi-Fi password", text: $viewModel.wifiPassword)
+                        .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                 }
-                hostRow
-                portRow
+                serverRow
                 otaDisclosure
                 pairFooter
             } header: {
@@ -103,16 +105,18 @@ struct DeviceSettingsView: View {
     // MARK: Token
 
     private var tokenRow: some View {
-        LabeledContent("Token") {
-            HStack(spacing: 8) {
-                if viewModel.revealToken {
-                    TextField("Token", text: $viewModel.authToken)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12, design: .monospaced))
-                } else {
-                    SecureField("Token", text: $viewModel.authToken)
-                        .textFieldStyle(.roundedBorder)
+        settingsRow("Token") {
+            HStack(spacing: 6) {
+                Group {
+                    if viewModel.revealToken {
+                        TextField("Token", text: $viewModel.authToken)
+                            .font(.system(size: 12, design: .monospaced))
+                    } else {
+                        SecureField("Token", text: $viewModel.authToken)
+                    }
                 }
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
 
                 iconButton(
                     viewModel.revealToken ? "eye.slash" : "eye",
@@ -126,7 +130,7 @@ struct DeviceSettingsView: View {
                 }
                 .disabled(viewModel.authToken.isEmpty)
 
-                iconButton("wand.and.sparkles", help: "Generate a new token") {
+                iconButton("arrow.trianglehead.2.clockwise", help: "Generate a new token") {
                     viewModel.generateToken()
                 }
             }
@@ -136,10 +140,10 @@ struct DeviceSettingsView: View {
     // MARK: Provisioning rows
 
     private var serialRow: some View {
-        LabeledContent("Serial port") {
-            HStack(spacing: 8) {
+        settingsRow("Serial port") {
+            HStack(spacing: 6) {
                 if viewModel.availablePorts.isEmpty {
-                    Text("Plug in the ESP32, then refresh")
+                    Text("No ESP32 detected")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
@@ -159,9 +163,9 @@ struct DeviceSettingsView: View {
     }
 
     private var networkRow: some View {
-        LabeledContent("Wi-Fi network") {
+        settingsRow("Wi-Fi") {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     if showsNetworkPicker {
                         Picker("Network", selection: networkBinding) {
                             ForEach(viewModel.wifiScanner.networks, id: \.self) { ssid in
@@ -173,6 +177,7 @@ struct DeviceSettingsView: View {
                         .labelsHidden()
                     } else {
                         TextField("Network name", text: $viewModel.ssid)
+                            .labelsHidden()
                             .textFieldStyle(.roundedBorder)
                     }
 
@@ -181,6 +186,7 @@ struct DeviceSettingsView: View {
 
                 if showsManualNetworkField && showsNetworkPicker {
                     TextField("Network name", text: $viewModel.ssid)
+                        .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                 }
 
@@ -202,7 +208,8 @@ struct DeviceSettingsView: View {
                 Label("Scan", systemImage: "wifi")
             }
         }
-        .frame(minWidth: 92)
+        .labelStyle(.iconOnly)
+        .help("Scan for Wi-Fi networks")
         .disabled(viewModel.wifiScanner.isScanning)
     }
 
@@ -232,26 +239,25 @@ struct DeviceSettingsView: View {
         }
     }
 
-    private var hostRow: some View {
-        LabeledContent("Server host") {
+    private var serverRow: some View {
+        settingsRow("Server") {
             VStack(alignment: .leading, spacing: 4) {
-                TextField("Host or IP", text: $viewModel.serverHost)
-                    .textFieldStyle(.roundedBorder)
+                HStack(spacing: 6) {
+                    TextField("Host or IP", text: $viewModel.serverHost)
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                    Text(":")
+                        .foregroundStyle(.secondary)
+                    TextField("Port", value: $viewModel.serverPort, format: .number.grouping(.never))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: Self.portFieldWidth)
+                }
                 if let hostErr = viewModel.hostValidationMessage, !viewModel.serverHost.isEmpty {
                     Text(hostErr)
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
-            }
-        }
-    }
-
-    private var portRow: some View {
-        LabeledContent("Server port") {
-            VStack(alignment: .leading, spacing: 4) {
-                TextField("Port", value: $viewModel.serverPort, format: .number.grouping(.never))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 90, alignment: .leading)
                 if !viewModel.isPortValid {
                     Text("Port must be between 1 and 65535.")
                         .font(.caption)
@@ -264,11 +270,15 @@ struct DeviceSettingsView: View {
     private var otaDisclosure: some View {
         DisclosureGroup("OTA firmware updates") {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     TextField("OTA password", text: $viewModel.otaPassword)
+                        .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12, design: .monospaced))
-                    iconButton("arrow.clockwise", help: "Generate a new OTA password") {
+                    iconButton(
+                        "arrow.trianglehead.2.clockwise",
+                        help: "Generate a new OTA password"
+                    ) {
                         viewModel.generateOTAPassword()
                     }
                 }
@@ -297,13 +307,9 @@ struct DeviceSettingsView: View {
 
             HStack {
                 Spacer(minLength: 0)
-                Button {
-                    pair()
-                } label: {
-                    Label("Pair Device", systemImage: "bolt.horizontal")
-                }
-                .buttonStyle(.glassProminent)
-                .disabled(!viewModel.canSend)
+                Button("Pair Device") { pair() }
+                    .buttonStyle(.glassProminent)
+                    .disabled(!viewModel.canSend)
             }
         }
     }
@@ -388,6 +394,19 @@ struct DeviceSettingsView: View {
             return
         }
         await viewModel.scanWiFi()
+    }
+
+    /// Every control column starts at the same x and runs to the trailing
+    /// edge. `LabeledContent` on its own right-aligns each control to its own
+    /// width, which is what left the provisioning fields in a ragged column.
+    private func settingsRow<Content: View>(
+        _ label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        LabeledContent(label) {
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func iconButton(

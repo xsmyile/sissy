@@ -34,9 +34,11 @@ struct SettingsRootView: View {
     @Bindable var model: SissyModel
 
     private static let width: CGFloat = 560
-    private static let minHeight: CGFloat = 340
     private static let tabSize = CGSize(width: 78, height: 48)
 
+    /// `fixedSize` is what makes the window follow the selected tab: without a
+    /// definite ideal height the settings window keeps whatever height the
+    /// tallest tab established, and About then floats in the leftover space.
     var body: some View {
         VStack(spacing: 0) {
             tabStrip
@@ -44,7 +46,7 @@ struct SettingsRootView: View {
             selectedTab
         }
         .frame(width: Self.width)
-        .frame(minHeight: Self.minHeight)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
@@ -67,6 +69,7 @@ struct SettingsRootView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
+        .background(.bar)
     }
 
     private func tabButton(_ tab: SettingsTab) -> some View {
