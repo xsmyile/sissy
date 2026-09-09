@@ -8,6 +8,7 @@ struct UsagePanelView: View {
     let model: SissyModel
 
     private static let width: CGFloat = 340
+    private static let footerTick: TimeInterval = 1
 
     private static var dateLine: String {
         "Today · "
@@ -177,7 +178,10 @@ struct UsagePanelView: View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(rows) { row in
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(ProviderPalette.tint(for: row.id))
+                            .frame(width: 7, height: 7)
                         Text(row.name)
                             .font(.system(size: 12, weight: .medium))
                         Spacer(minLength: 0)
@@ -185,7 +189,7 @@ struct UsagePanelView: View {
                             .font(.system(size: 12))
                             .monospacedDigit()
                     }
-                    shareBar(row.share)
+                    shareBar(row.share, tint: ProviderPalette.tint(for: row.id))
                     Text("\(Int((row.share * 100).rounded()))% · \(row.tokens) tokens")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -197,13 +201,13 @@ struct UsagePanelView: View {
         .padding(.vertical, 12)
     }
 
-    private func shareBar(_ share: Double) -> some View {
+    private func shareBar(_ share: Double, tint: Color) -> some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(.quaternary)
                 Capsule()
-                    .fill(.secondary)
+                    .fill(tint.gradient)
                     .frame(width: max(geometry.size.width * share, share > 0 ? 3 : 0))
             }
         }
@@ -231,29 +235,23 @@ struct UsagePanelView: View {
 
     private var footer: some View {
         HStack(spacing: 6) {
+            TimelineView(.periodic(from: .now, by: Self.footerTick)) { context in
+                Text(updatedLine(now: context.date))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
             Spacer(minLength: 0)
 
-            settingsLink("cpu", help: "Device", tab: .device)
-            iconButton("doc.text", help: "Open Logs") {
-                model.openLogs()
-            }
             settingsLink("gearshape", help: "Settings", tab: .general)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
-    private func iconButton(
-        _ symbol: String,
-        help: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            footerIcon(symbol)
-        }
-        .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .help(help)
+    private func updatedLine(now: Date) -> String {
+        guard let last = model.lastFrameAt else { return "waiting for the daemon" }
+        return "updated " + UsageFormat.age(now.timeIntervalSince(last))
     }
 
     /// `SettingsLink` is the only public way to open the `Settings` scene, and

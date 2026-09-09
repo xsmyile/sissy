@@ -248,6 +248,7 @@ final class WebSocketClient {
         }
         guard let frame else { return }
         model?.currentFrame = frame
+        model?.lastFrameAt = Date()
     }
 
     private func scheduleReconnect() {

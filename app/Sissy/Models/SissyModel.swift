@@ -9,6 +9,7 @@ import Observation
 @Observable
 final class SissyModel {
     var currentFrame: DisplayFrame? = nil
+    var lastFrameAt: Date? = nil
     var preferences: Preferences = .load()
     /// Optimistic mirror of the daemon's mascot pin. nil = Auto (computed
     /// state). The daemon is authoritative — this is just what the menu

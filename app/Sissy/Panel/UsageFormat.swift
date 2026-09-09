@@ -23,6 +23,18 @@ enum UsageFormat {
         String(format: "$%.2f", NSDecimalNumber(decimal: cost).doubleValue)
     }
 
+    /// Coarse age of the last frame, for the panel's footer. Deliberately
+    /// one unit and no seconds past a minute: the footer is a reassurance that
+    /// the daemon is alive, not a stopwatch.
+    static func age(_ interval: TimeInterval) -> String {
+        let seconds = Int(interval.rounded())
+        if seconds < 5 { return "just now" }
+        if seconds < 60 { return "\(seconds)s ago" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m ago" }
+        return "\(minutes / 60)h ago"
+    }
+
     static func providerName(_ id: String) -> String {
         switch id {
         case "claude-code": return "Claude Code"
