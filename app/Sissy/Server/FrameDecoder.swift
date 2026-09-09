@@ -45,8 +45,33 @@ enum FrameDecoder {
                 let costRaw = row["cost"] as? String,
                 let cost = Decimal(string: costRaw)
             else { return nil }
-            return DisplayFrame.ProviderSlice(id: id, tokens: tokens, cost: cost)
+            return DisplayFrame.ProviderSlice(
+                id: id,
+                tokens: tokens,
+                cost: cost,
+                windows: decodeWindows(row["windows"])
+            )
         }
+    }
+
+    /// Sorted shortest-window-first so the panel can render the tightest
+    /// limit as the row's primary gauge without re-deriving the order.
+    private static func decodeWindows(_ raw: Any?) -> [DisplayFrame.UsageWindow] {
+        guard let rows = raw as? [[String: Any]] else { return [] }
+        return
+            rows
+            .compactMap { row -> DisplayFrame.UsageWindow? in
+                guard let minutes = row["minutes"] as? Int, minutes > 0,
+                    let used = row["used_percent"] as? Double,
+                    let resets = row["resets_at"] as? Double
+                else { return nil }
+                return DisplayFrame.UsageWindow(
+                    minutes: minutes,
+                    usedPercent: used,
+                    resetsAt: Date(timeIntervalSince1970: resets)
+                )
+            }
+            .sorted { $0.minutes < $1.minutes }
     }
 
     /// Both keys travel together or not at all; a half-present or malformed

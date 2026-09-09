@@ -35,6 +35,27 @@ enum UsageFormat {
         return "\(minutes / 60)h ago"
     }
 
+    /// Compact name for a rate-limit window, derived from its length so a
+    /// vendor that ships a bucket Sissy has never seen still gets a label.
+    static func windowLabel(minutes: Int) -> String {
+        if minutes % minutesPerDay == 0 { return "\(minutes / minutesPerDay)d" }
+        if minutes % minutesPerHour == 0 { return "\(minutes / minutesPerHour)h" }
+        return "\(minutes)m"
+    }
+
+    /// When a window rolls over. A clock time while that is unambiguous, the
+    /// weekday once it is not — a bare "13:00" three days out reads as today.
+    static func resetLabel(_ resetsAt: Date, now: Date = Date()) -> String {
+        let horizon = TimeInterval(minutesPerDay * 60)
+        if resetsAt.timeIntervalSince(now) < horizon {
+            return resetsAt.formatted(.dateTime.hour().minute())
+        }
+        return resetsAt.formatted(.dateTime.weekday(.abbreviated))
+    }
+
+    private static let minutesPerHour = 60
+    private static let minutesPerDay = 1440
+
     static func providerName(_ id: String) -> String {
         switch id {
         case "claude-code": return "Claude Code"

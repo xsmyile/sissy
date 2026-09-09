@@ -30,6 +30,28 @@ final class FrameDecoderTests: XCTestCase {
         XCTAssertEqual(frame.providers.first?.cost, Decimal(string: "0.0914"))
     }
 
+    /// Vendors ship their buckets in whatever order they like; the panel
+    /// renders the tightest limit first, so the decoder is what sorts.
+    func testDecodesProviderWindowsShortestFirst() throws {
+        let payload = """
+            {"type":"frame","tokens":"26K","cost":"0.09","burn":"1.5K","state":"code",
+             "primary":"26K","primary_label":"TOKENS","device_present":true,"ts":1,
+             "providers":[{"id":"codex","tokens":26000,"cost":"0.0914","windows":[
+               {"minutes":10080,"used_percent":8.0,"resets_at":1789549854},
+               {"minutes":300,"used_percent":25.5,"resets_at":1789006037}]}]}
+            """
+        let frame = try XCTUnwrap(FrameDecoder.decode(payload))
+        let windows = try XCTUnwrap(frame.providers.first?.windows)
+        XCTAssertEqual(windows.map(\.minutes), [300, 10080])
+        XCTAssertEqual(windows.first?.usedPercent, 25.5)
+        XCTAssertEqual(windows.first?.resetsAt, Date(timeIntervalSince1970: 1_789_006_037))
+    }
+
+    func testProviderWithoutWindowsDecodesToNone() throws {
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        XCTAssertEqual(frame.providers.first?.windows, [])
+    }
+
     /// Cost crosses the wire as a canonical decimal string precisely so a
     /// sub-cent total survives; a `Double` hop here would drop precision.
     func testPrevCostRoundTripsLossless() throws {

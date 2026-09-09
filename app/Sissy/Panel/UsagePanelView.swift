@@ -9,6 +9,7 @@ struct UsagePanelView: View {
 
     private static let width: CGFloat = 340
     private static let footerTick: TimeInterval = 1
+    private static let secondaryWindowOpacity: Double = 0.55
 
     private static var dateLine: String {
         "Today · "
@@ -175,30 +176,66 @@ struct UsagePanelView: View {
     // MARK: Providers
 
     private func providers(_ rows: [UsagePanelSnapshot.ProviderRow]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(rows) { row in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(ProviderPalette.tint(for: row.id))
-                            .frame(width: 7, height: 7)
-                        Text(row.name)
-                            .font(.system(size: 12, weight: .medium))
-                        Spacer(minLength: 0)
-                        Text(row.cost)
-                            .font(.system(size: 12))
-                            .monospacedDigit()
-                    }
-                    shareBar(row.share, tint: ProviderPalette.tint(for: row.id))
-                    Text("\(Int((row.share * 100).rounded()))% · \(row.tokens) tokens")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
+                providerRow(row)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    /// A provider shows its subscription windows when the CLI reports them,
+    /// and its share of the day when it does not. Never both: the two bars
+    /// carry percentages of different things, and side by side neither reads.
+    private func providerRow(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
+        let tint = ProviderPalette.tint(for: row.id)
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(tint)
+                    .frame(width: 7, height: 7)
+                Text(row.name)
+                    .font(.system(size: 12, weight: .medium))
+                Spacer(minLength: 0)
+                Text("\(row.tokens) · \(row.cost)")
+                    .font(.system(size: 12))
+                    .monospacedDigit()
+            }
+
+            if row.windows.isEmpty {
+                shareBar(row.share, tint: tint)
+                Text("\(Int((row.share * 100).rounded()))% of today")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            } else {
+                ForEach(Array(row.windows.enumerated()), id: \.element.id) { index, window in
+                    windowRow(window, tint: tint)
+                        .opacity(index == 0 ? 1 : Self.secondaryWindowOpacity)
+                }
+            }
+        }
+    }
+
+    private func windowRow(
+        _ window: UsagePanelSnapshot.WindowRow,
+        tint: Color
+    ) -> some View {
+        HStack(spacing: 8) {
+            shareBar(window.fraction, tint: tint)
+
+            Text("\(window.percent)%")
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .frame(width: 32, alignment: .trailing)
+
+            Text("\(window.label) · \(UsageFormat.resetLabel(window.resetsAt))")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 74, alignment: .trailing)
+        }
     }
 
     private func shareBar(_ share: Double, tint: Color) -> some View {

@@ -25,8 +25,56 @@ final class UsagePanelSnapshotTests: XCTestCase {
         )
     }
 
-    private func slice(_ id: String, _ tokens: Int, _ cost: String) -> DisplayFrame.ProviderSlice {
-        DisplayFrame.ProviderSlice(id: id, tokens: tokens, cost: Decimal(string: cost)!)
+    private func slice(
+        _ id: String,
+        _ tokens: Int,
+        _ cost: String,
+        windows: [DisplayFrame.UsageWindow] = []
+    ) -> DisplayFrame.ProviderSlice {
+        DisplayFrame.ProviderSlice(
+            id: id,
+            tokens: tokens,
+            cost: Decimal(string: cost)!,
+            windows: windows
+        )
+    }
+
+    private func window(_ minutes: Int, _ usedPercent: Double) -> DisplayFrame.UsageWindow {
+        DisplayFrame.UsageWindow(
+            minutes: minutes,
+            usedPercent: usedPercent,
+            resetsAt: Date(timeIntervalSince1970: 1_789_006_037)
+        )
+    }
+
+    // MARK: Rate-limit windows
+
+    func testProviderRowCarriesALabelledWindowPerLimit() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice("codex", 1000, "1.00", windows: [window(300, 25), window(10080, 8)])
+            ]),
+            milestoneFrequency: .normal
+        )
+        XCTAssertEqual(snapshot.providers.first?.windows.map(\.label), ["5h", "7d"])
+    }
+
+    func testWindowPercentRoundsWhileTheBarStaysClamped() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window(300, 104.6)])]),
+            milestoneFrequency: .normal
+        )
+        let row = snapshot.providers.first?.windows.first
+        XCTAssertEqual(row?.percent, 105)
+        XCTAssertEqual(row?.fraction, 1)
+    }
+
+    func testProviderWithoutLimitsReportsNoWindows() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("claude-code", 1000, "1.00")]),
+            milestoneFrequency: .normal
+        )
+        XCTAssertEqual(snapshot.providers.first?.windows, [])
     }
 
     // MARK: Totals

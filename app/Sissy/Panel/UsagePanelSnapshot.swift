@@ -43,6 +43,18 @@ struct UsagePanelSnapshot: Equatable {
         let tokens: String
         let cost: String
         let share: Double
+        /// Shortest window first. Empty puts the row back on `share`.
+        let windows: [WindowRow]
+    }
+
+    /// One rate-limit gauge. `fraction` is clamped for the bar while
+    /// `percent` is not, so a window past 100% still reads as what it is.
+    struct WindowRow: Equatable, Identifiable {
+        let id: Int
+        let label: String
+        let percent: Int
+        let fraction: Double
+        let resetsAt: Date
     }
 
     static func make(
@@ -98,8 +110,19 @@ struct UsagePanelSnapshot: Equatable {
                 name: UsageFormat.providerName(slice.id),
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
-                share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0
+                share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0,
+                windows: slice.windows.map(makeWindow)
             )
         }
+    }
+
+    private static func makeWindow(_ window: DisplayFrame.UsageWindow) -> WindowRow {
+        WindowRow(
+            id: window.minutes,
+            label: UsageFormat.windowLabel(minutes: window.minutes),
+            percent: Int(window.usedPercent.rounded()),
+            fraction: min(max(window.usedPercent / 100, 0), 1),
+            resetsAt: window.resetsAt
+        )
     }
 }

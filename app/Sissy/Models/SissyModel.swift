@@ -425,10 +425,9 @@ struct DisplayFrame: Codable, Equatable {
     /// goes from nil to a value.
     var milestone: String?
     /// Per-provider totals carried on the WS frame so the menubar can derive
-    /// the header subtitle and the Breakdown submenu rows from the same
-    /// payload. Empty when no provider has emitted yet (or daemon predates
-    /// the field) — `headerSubtitle` falls back to the daemon-formatted
-    /// scalars; Breakdown stays hidden by its `>= 2 sources` gate.
+    /// the header subtitle and the panel's rows from the same payload. Empty
+    /// when no provider has emitted yet (or daemon predates the field) —
+    /// `headerSubtitle` falls back to the daemon-formatted scalars.
     var providers: [ProviderSlice]
     /// Yesterday's raw combined totals, for the day-over-day delta. nil until
     /// every active provider has a previous-day snapshot — the daemon omits
@@ -440,6 +439,28 @@ struct DisplayFrame: Codable, Equatable {
         let id: String
         let tokens: Int
         let cost: Decimal
+        /// Subscription windows the CLI reported, shortest first. Empty for a
+        /// provider that publishes none, which is what puts the row back on
+        /// its share-of-today bar.
+        let windows: [UsageWindow]
+
+        init(id: String, tokens: Int, cost: Decimal, windows: [UsageWindow] = []) {
+            self.id = id
+            self.tokens = tokens
+            self.cost = cost
+            self.windows = windows
+        }
+    }
+
+    /// One rate-limit window as the vendor reported it. `minutes` is the
+    /// identity: vendors do not agree on an ordering, so the label comes from
+    /// the length and never from the position in the payload.
+    struct UsageWindow: Codable, Equatable, Identifiable {
+        let minutes: Int
+        let usedPercent: Double
+        let resetsAt: Date
+
+        var id: Int { minutes }
     }
 
     struct PrevTotals: Codable, Equatable {
