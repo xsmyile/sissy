@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var mascotNotifier: MascotNotifier?
     private var statusController: StatusItemController?
+    private var panelController: UsagePanelController?
 
     override init() {
         let model = SissyModel()
@@ -29,10 +30,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.statusController = statusController
 
+        let panelController = UsagePanelController(
+            model: model,
+            onPairDevice: { [weak self] in self?.windowCoordinator.openPairingWindow() },
+            onShowMenu: { [weak statusController] in statusController?.showMenu() }
+        )
+        self.panelController = panelController
+        statusController.onPrimaryClick = { [weak statusController, weak panelController] in
+            guard let button = statusController?.statusButton else { return }
+            panelController?.toggle(relativeTo: button)
+        }
+
+        // Both surfaces anchor to the same status button, so a mood pop-up
+        // while either is open would fight it for the anchor.
         let notifier = MascotNotifier(
             model: model,
             statusButtonProvider: { [weak statusController] in statusController?.statusButton },
-            menuIsOpenProvider: { [weak statusController] in statusController?.isMenuOpen ?? false }
+            menuIsOpenProvider: { [weak statusController, weak panelController] in
+                (statusController?.isMenuOpen ?? false) || (panelController?.isOpen ?? false)
+            }
         )
         notifier.start()
         mascotNotifier = notifier

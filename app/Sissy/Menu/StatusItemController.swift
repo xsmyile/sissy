@@ -29,6 +29,10 @@ final class StatusItemController: NSObject {
 
     private(set) var isMenuOpen: Bool = false
     var statusButton: NSStatusBarButton? { statusItem.button }
+    /// Invoked on a plain left-click. The panel is owned by `AppDelegate`, so
+    /// the status item only reports the gesture; a right- or control-click
+    /// pops the configuration menu instead.
+    var onPrimaryClick: (() -> Void)?
 
     init(model: SissyModel, windowCoordinator: WindowCoordinator) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -49,6 +53,9 @@ final class StatusItemController: NSObject {
         button.imagePosition = .imageOnly
         button.toolTip = "Sissy"
         button.wantsLayer = true
+        button.target = self
+        button.action = #selector(handleStatusButtonClick)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     private func configureHeaderItem() {
@@ -74,8 +81,6 @@ final class StatusItemController: NSObject {
         menu.autoenablesItems = false
         menu.delegate = self
         menu.removeAllItems()
-
-        statusItem.menu = menu
 
         menu.addItem(headerItem)
         menu.addItem(.separator())
@@ -279,6 +284,26 @@ final class StatusItemController: NSObject {
     }
 
     // MARK: Actions
+
+    @objc private func handleStatusButtonClick() {
+        guard let event = NSApp.currentEvent else { return }
+        let wantsMenu = event.type == .rightMouseUp || event.modifierFlags.contains(.control)
+        if wantsMenu {
+            showMenu()
+        } else {
+            onPrimaryClick?()
+        }
+    }
+
+    /// Pops the configuration menu under the status item. Assigning
+    /// `statusItem.menu` for the duration of the click is what keeps the
+    /// menu's native placement and highlight; leaving it assigned would make
+    /// every left-click open the menu too.
+    func showMenu() {
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
 
     @objc private func handleServer() {
         model.toggleServerFromMenu()
