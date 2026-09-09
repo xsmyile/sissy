@@ -75,6 +75,17 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Toggle("OLED companion", isOn: deviceSupportBinding)
+                Text(
+                    "Sissy can drive a small ESP32 + OLED that keeps the day's spend on your "
+                        + "desk. Experimental, and you flash the firmware yourself — turning "
+                        + "this on adds a Device tab."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 LabeledContent("Files") {
                     HStack(spacing: 14) {
                         Button("Open logs") { model.openLogs() }
@@ -129,6 +140,13 @@ struct GeneralSettingsView: View {
         Binding(
             get: { model.preferences.claudeLimits },
             set: { _ in model.toggleClaudeLimits() }
+        )
+    }
+
+    private var deviceSupportBinding: Binding<Bool> {
+        Binding(
+            get: { model.preferences.deviceSupport },
+            set: { _ in model.toggleDeviceSupport() }
         )
     }
 

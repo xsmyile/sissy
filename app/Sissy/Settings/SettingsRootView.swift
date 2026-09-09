@@ -39,6 +39,18 @@ struct SettingsRootView: View {
     /// `fixedSize` is what makes the window follow the selected tab: without a
     /// definite ideal height the settings window keeps whatever height the
     /// tallest tab established, and About then floats in the leftover space.
+    /// The OLED companion is opt-in hardware, so its tab is absent until the
+    /// user asks for it — or until one is actually reporting, which keeps an
+    /// already-paired device reachable without hunting for the switch.
+    private var visibleTabs: [SettingsTab] {
+        var tabs: [SettingsTab] = [.general]
+        if model.preferences.deviceSupport || model.currentFrame?.devicePresent == true {
+            tabs.append(.device)
+        }
+        tabs.append(.about)
+        return tabs
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             tabStrip
@@ -63,7 +75,7 @@ struct SettingsRootView: View {
 
     private var tabStrip: some View {
         HStack(spacing: 4) {
-            ForEach(SettingsTab.allCases, id: \.self) { tab in
+            ForEach(visibleTabs, id: \.self) { tab in
                 tabButton(tab)
             }
         }

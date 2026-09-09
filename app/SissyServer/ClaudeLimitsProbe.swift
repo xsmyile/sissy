@@ -59,7 +59,7 @@ actor ClaudeLimitsProbe {
     /// One poll. Returns how long to wait before the next one.
     private func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
         let credentials: ClaudeCredentials
-        switch ClaudeCredentialsStore.load() {
+        switch await ClaudeCredentialsStore.loadOffPool() {
         case .found(let found):
             credentials = found
         case .absent:

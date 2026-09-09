@@ -36,6 +36,18 @@ enum ClaudeCredentialsStore {
     /// keeps the parse correct if that ever changes.
     private static let secondsUpperBound: Double = 4_102_444_800
 
+    /// `SecItemCopyMatching` blocks for as long as the macOS authorization
+    /// dialog is on screen — minutes, if the user walks away. Off the
+    /// cooperative pool it is a parked dispatch thread; on it, it would pin a
+    /// thread the whole runtime shares.
+    static func loadOffPool() async -> ClaudeCredentialsLookup {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(returning: load())
+            }
+        }
+    }
+
     static func load() -> ClaudeCredentialsLookup {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

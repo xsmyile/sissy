@@ -68,25 +68,11 @@ struct UsagePanelView: View {
 
             Spacer(minLength: 0)
 
-            HStack(spacing: 8) {
-                statusPill(label: "device", isOn: model.currentFrame?.devicePresent ?? false)
-                powerButton
-            }
+            powerButton
         }
         .opacity(menuHeader.isDimmed ? 0.6 : 1)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-    }
-
-    private func statusPill(label: String, isOn: Bool) -> some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(isOn ? Color.green : Color.secondary.opacity(0.4))
-                .frame(width: 6, height: 6)
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-        }
     }
 
     /// Starts and stops the background daemon. It replaces the old "server"
@@ -312,12 +298,29 @@ struct UsagePanelView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if model.currentFrame?.devicePresent == true {
+                deviceChip
+            }
+
             Spacer(minLength: 0)
 
             settingsLink("gearshape", help: "Settings", tab: .general)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    /// The OLED companion is a build-it-yourself add-on, so its indicator
+    /// appears only once one is actually reporting. A permanently grey dot
+    /// would advertise hardware most installs will never have.
+    private var deviceChip: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "cpu")
+                .font(.system(size: 9))
+            Text("device")
+                .font(.system(size: 11))
+        }
+        .foregroundStyle(.secondary)
     }
 
     /// Empty until the first frame lands: the panel body already says what it

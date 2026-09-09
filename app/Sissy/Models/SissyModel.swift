@@ -113,19 +113,20 @@ final class SissyModel {
         let healthOffline = !serverHealth.status.isReachable
         let offline = droppedAfterConnect || healthOffline
         let iconState = offline ? nil : (pinnedMascot ?? currentFrame?.state)
+        let server = serverItemSnapshot
 
         return MenuSnapshot(
             header: HeaderSnapshot(
                 imageName: StateDescriptor.mascotImageName(for: spriteState),
-                title: headerTitle(linkUp: linkUp),
-                subtitle: headerSubtitle(linkUp: linkUp),
+                title: headerTitle(linkUp: linkUp, serverIsOn: server.isOn),
+                subtitle: headerSubtitle(linkUp: linkUp, serverIsOn: server.isOn),
                 isDimmed: !linkUp
             ),
             statusIcon: StatusIconSnapshot(
                 imageName: StateDescriptor.mascotImageName(for: iconState),
                 alpha: offline ? 0.4 : 1.0
             ),
-            server: serverItemSnapshot,
+            server: server,
             canPickMascot: webSocketClient.isConnected
         )
     }
@@ -301,6 +302,14 @@ final class SissyModel {
         webSocketClient.setMascotPin(state: nil)
     }
 
+    func toggleDeviceSupport() {
+        preferences.deviceSupport.toggle()
+        savePreferences()
+        if !preferences.deviceSupport, settingsTab == .device {
+            settingsTab = .general
+        }
+    }
+
     func toggleClaudeLimits() {
         preferences.claudeLimits.toggle()
         savePreferences()
@@ -363,7 +372,11 @@ final class SissyModel {
         )
     }
 
-    private func headerTitle(linkUp: Bool) -> String {
+    /// With the server off the headline reports that rather than a mood: the
+    /// panel's only control is the switch beside it, and a header still
+    /// talking about spend would leave the switch's meaning to guesswork.
+    private func headerTitle(linkUp: Bool, serverIsOn: Bool) -> String {
+        if !serverIsOn { return "Server is off" }
         if !linkUp { return "Looking for Sissy..." }
         let state = pinnedMascot ?? currentFrame?.state
         if let phrase = currentMilestonePhrase, pinnedMascot == nil {
@@ -375,7 +388,8 @@ final class SissyModel {
         return StateDescriptor.moodHeadline(voice: StateDescriptor.voice(for: state))
     }
 
-    private func headerSubtitle(linkUp: Bool) -> String? {
+    private func headerSubtitle(linkUp: Bool, serverIsOn: Bool) -> String? {
+        if !serverIsOn { return "Nothing is being counted" }
         if !linkUp { return "Waiting for the daemon" }
         guard let frame = currentFrame else { return nil }
         // Single source of truth: when the daemon ships the providers array
