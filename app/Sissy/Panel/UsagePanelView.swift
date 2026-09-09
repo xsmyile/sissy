@@ -232,11 +232,6 @@ struct UsagePanelView: View {
 
     private var footer: some View {
         HStack(spacing: 6) {
-            Button(model.menuSnapshot.server.title) {
-                model.toggleServerFromMenu()
-            }
-            .disabled(!model.menuSnapshot.server.isEnabled)
-
             Spacer(minLength: 0)
 
             iconButton("cable.connector.horizontal", help: "Pair Device", action: onPairDevice)
