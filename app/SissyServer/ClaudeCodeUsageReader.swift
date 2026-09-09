@@ -27,6 +27,24 @@ final class AtomicIntCounter: @unchecked Sendable {
     func store(_ v: Int) { lock.withLock { value = v } }
 }
 
+/// Lock-protected window snapshot, read without entering the owning actor.
+///
+/// The aggregator reads these while a provider is mid-emit — that is, while
+/// the provider holds its own actor waiting on the emit callback. An `await`
+/// back into the provider there deadlocks both sides, so the read has to be
+/// synchronous, the same reason `filesWatched()` is nonisolated.
+final class AtomicWindows: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: [UsageWindow] = []
+    func load() -> [UsageWindow] { lock.withLock { value } }
+    func store(_ v: [UsageWindow]) { lock.withLock { value = v } }
+    /// Drops buckets whose reset has passed: a window past its reset
+    /// describes a period that no longer exists.
+    func live(now: Date = Date()) -> [UsageWindow] {
+        lock.withLock { value.filter { $0.resetsAt > now } }
+    }
+}
+
 actor ClaudeCodeUsageReader: UsageProvider {
     /// Stable provider id surfaced via `/stats`. The persistence URL is
     /// injected; this reader still writes the legacy `usage-state.json` path
@@ -244,9 +262,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
 
     /// Claude Code keeps no limit state on disk, so the windows come from the
     /// probe rather than from anything this reader parsed.
-    func currentWindows() async -> [UsageWindow] {
-        guard let limitsProbe else { return [] }
-        return await limitsProbe.currentWindows()
+    nonisolated func currentWindows() -> [UsageWindow] {
+        limitsProbe?.currentWindows() ?? []
     }
 
     func applyPriceCatalog(_ catalog: PriceCatalog) {

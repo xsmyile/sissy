@@ -36,7 +36,7 @@ actor CodexUsageReader: UsageProvider {
     /// Newest rate-limit observation and the event timestamp it came from.
     /// A cold scan walks files in no particular order, so an older rollout
     /// must not overwrite a fresher window.
-    private var latestWindows: [UsageWindow] = []
+    nonisolated private let latestWindows = AtomicWindows()
     private var latestWindowsAt: Date?
 
     /// Per-file "last seen model id" so a `token_count` event resolves to the
@@ -337,13 +337,7 @@ actor CodexUsageReader: UsageProvider {
         fileModels[url] = model
     }
 
-    /// Expired windows are dropped rather than reported as spent: once
-    /// `resetsAt` passes, the bucket has rolled over and the last percentage
-    /// the CLI reported describes a window that no longer exists.
-    func currentWindows() async -> [UsageWindow] {
-        let now = Date()
-        return latestWindows.filter { $0.resetsAt > now }
-    }
+    nonisolated func currentWindows() -> [UsageWindow] { latestWindows.live() }
 
     private func captureWindows(_ raw: Any?, observedAt: Date) {
         guard let dict = raw as? [String: Any] else { return }
@@ -361,7 +355,7 @@ actor CodexUsageReader: UsageProvider {
             )
         }
         if windows.isEmpty { return }
-        latestWindows = windows
+        latestWindows.store(windows)
         latestWindowsAt = observedAt
     }
 

@@ -98,9 +98,7 @@ actor UsageAggregator {
         // emit can re-enter the actor at the suspension below, but it
         // can't retroactively rewrite the local `slices` we already
         // captured, so the outgoing frame stays internally consistent.
-        let captured = perProvider
-        let windows = await currentWindows()
-        let slices = providerSlices(from: captured, windows: windows)
+        let slices = currentProviderSlices()
         if let cb = onChange {
             await cb(combinedToday, combinedPrev, slices)
         }
@@ -111,33 +109,20 @@ actor UsageAggregator {
     /// simply unused) are omitted so the panel shows the day's actual per-CLI
     /// split instead of stale `$0` rows.
     ///
-    /// Totals come from a caller-captured `perProvider` copy rather than the
-    /// live map: gathering windows suspends, and a concurrent emit resuming
-    /// at that suspension would otherwise pair one provider's fresh totals
-    /// with an aggregate computed before them.
-    private func providerSlices(
-        from snapshot: [String: Snapshot],
-        windows: [String: [UsageWindow]]
-    ) -> [ProviderSlice] {
+    /// Rate-limit windows are read through each provider's nonisolated
+    /// accessor. Awaiting the provider here would deadlock: the emit that
+    /// leads here runs while the provider still holds its own actor.
+    private func currentProviderSlices() -> [ProviderSlice] {
         let raw = providers.compactMap { p -> ProviderSlice? in
-            guard let s = snapshot[p.id] else { return nil }
+            guard let s = perProvider[p.id] else { return nil }
             return ProviderSlice(
                 id: p.id,
                 tokens: s.today.totalTokens,
                 cost: s.today.totalCost,
-                windows: windows[p.id] ?? []
+                windows: p.currentWindows()
             )
         }
         return FrameBuilder.activeSlices(raw)
-    }
-
-    private func currentWindows() async -> [String: [UsageWindow]] {
-        var result: [String: [UsageWindow]] = [:]
-        for p in providers {
-            let windows = await p.currentWindows()
-            if !windows.isEmpty { result[p.id] = windows }
-        }
-        return result
     }
 
     private func aggregate() -> (today: DayTotals, prev: DayTotals?) {

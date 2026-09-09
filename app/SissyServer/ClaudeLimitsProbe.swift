@@ -24,7 +24,7 @@ actor ClaudeLimitsProbe {
         ("seven_day", 10_080),
     ]
 
-    private var windows: [UsageWindow] = []
+    nonisolated private let windows = AtomicWindows()
     private var pollTask: Task<Void, Never>?
     private var reportedDenial = false
     private var reportedRateLimit = false
@@ -32,10 +32,7 @@ actor ClaudeLimitsProbe {
     /// Live windows, expired buckets dropped — a window past its reset
     /// describes a period that no longer exists, same rule the Codex reader
     /// applies to its own.
-    func currentWindows() -> [UsageWindow] {
-        let now = Date()
-        return windows.filter { $0.resetsAt > now }
-    }
+    nonisolated func currentWindows() -> [UsageWindow] { windows.live() }
 
     /// Starts the poll loop. `onRefresh` fires only when the windows actually
     /// changed, so a steady state costs no broadcasts. Idempotent.
@@ -87,8 +84,8 @@ actor ClaudeLimitsProbe {
         do {
             let fetched = try await fetch(token: credentials.accessToken)
             reportedRateLimit = false
-            if fetched != windows {
-                windows = fetched
+            if fetched != windows.load() {
+                windows.store(fetched)
                 await onRefresh()
             }
             return Self.refreshInterval

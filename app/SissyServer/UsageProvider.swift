@@ -43,7 +43,11 @@ protocol UsageProvider: AnyObject, Sendable {
     /// observation wins. Empty for a provider that surfaces none — the
     /// default implementation covers those, so a reader only overrides it
     /// when its session log actually carries limits.
-    func currentWindows() async -> [UsageWindow]
+    ///
+    /// Nonisolated on purpose: the aggregator reads this while the emitting
+    /// provider still holds its actor, so an actor hop here would deadlock
+    /// the pair.
+    nonisolated func currentWindows() -> [UsageWindow]
 
     /// Swap in a freshly fetched rate catalog. Each provider takes the slice
     /// matching its upstream vendor and consults it between the user's
@@ -55,5 +59,5 @@ protocol UsageProvider: AnyObject, Sendable {
 }
 
 extension UsageProvider {
-    func currentWindows() async -> [UsageWindow] { [] }
+    nonisolated func currentWindows() -> [UsageWindow] { [] }
 }

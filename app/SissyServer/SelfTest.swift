@@ -332,6 +332,7 @@ func runSelfTest() {
     runCodexModelBackfillTest()
     runCodexRateLimitTest()
     runClaudeLimitsParseTests()
+    runAggregatorEmitTest()
 
     print("=== FSWatcher ===")
     runFSWatcherTests()
@@ -1051,6 +1052,54 @@ private func runCodexParserTests() {
     }
     sem2.wait()
     expect("codex re-ingest matches first pass", replay.value, box.value.tokens)
+}
+
+/// A provider emits from inside its own actor, so anything the aggregator
+/// awaits on that provider while handling the emit deadlocks the pair: the
+/// provider waits for the callback, the callback waits for the provider, the
+/// cold scan never finishes and the daemon serves frames that never arrive.
+/// It shipped once. The guard is a provider that emits exactly that way.
+func runAggregatorEmitTest() {
+    print("=== UsageAggregator.emit ===")
+
+    actor EmittingProvider: UsageProvider {
+        nonisolated let id = "emitter"
+        nonisolated private let box = AtomicWindows()
+
+        init() {
+            box.store([
+                UsageWindow(minutes: 300, usedPercent: 12, resetsAt: .distantFuture)
+            ])
+        }
+
+        func start(onChange: @Sendable @escaping (DayTotals, DayTotals?) async -> Void) async {
+            // Deliberately awaited while this actor is held, which is what
+            // every real reader does at the end of its cold scan.
+            await onChange(DayTotals(totalTokens: 10, totalCost: 1), nil)
+        }
+
+        func stop() async {}
+        func current() async -> (today: DayTotals, prev: DayTotals?) {
+            (DayTotals(totalTokens: 10, totalCost: 1), nil)
+        }
+        nonisolated func filesWatched() -> Int { 1 }
+        func isWarm() async -> Bool { true }
+        nonisolated func currentWindows() -> [UsageWindow] { box.live() }
+        func applyPriceCatalog(_ catalog: PriceCatalog) async {}
+    }
+
+    let sem = DispatchSemaphore(value: 0)
+    let received = TestBox<[ProviderSlice]>([])
+    Task {
+        let aggregator = UsageAggregator(providers: [EmittingProvider()])
+        await aggregator.start { _, _, slices in
+            received.value = slices
+            sem.signal()
+        }
+    }
+    let timedOut = sem.wait(timeout: .now() + 5) == .timedOut
+    expect("aggregator completes a provider emit", !timedOut, true)
+    expect("emitted slice carries the provider window", received.value.first?.windows.count, 1)
 }
 
 /// Claude Code publishes no limit state on disk, so both halves of that path
