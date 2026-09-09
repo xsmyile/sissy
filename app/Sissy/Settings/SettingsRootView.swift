@@ -3,38 +3,93 @@ import SwiftUI
 /// Tab the settings window shows. Held on `SissyModel` rather than in local
 /// `@State` so a surface that opens the window can aim it — the panel's device
 /// button lands on `.device` instead of dropping the user on General.
-enum SettingsTab: Hashable {
+enum SettingsTab: Hashable, CaseIterable {
     case general
     case device
     case about
+
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .device: return "Device"
+        case .about: return "About"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: return "gearshape"
+        case .device: return "cpu"
+        case .about: return "info.circle"
+        }
+    }
 }
 
 /// Root of the `Settings` scene: one window, one tab per concern.
 ///
-/// Uses the native settings scene rather than a hand-built `NSWindow` so the
-/// window gets the system toolbar-tab chrome, the ⌘, shortcut, and frame
-/// persistence without reimplementing any of it.
+/// The tab strip is drawn here rather than by a `TabView`, whose toolbar
+/// items darken under the pointer with no way to opt out. Only the selected
+/// tab carries a chip; hovering an unselected one changes nothing.
 struct SettingsRootView: View {
     @Bindable var model: SissyModel
 
     private static let width: CGFloat = 560
     private static let minHeight: CGFloat = 340
+    private static let tabSize = CGSize(width: 78, height: 48)
 
     var body: some View {
-        TabView(selection: $model.settingsTab) {
-            GeneralSettingsView(model: model)
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(SettingsTab.general)
-
-            DeviceSettingsView(model: model)
-                .tabItem { Label("Device", systemImage: "cpu") }
-                .tag(SettingsTab.device)
-
-            AboutView()
-                .tabItem { Label("About", systemImage: "info.circle") }
-                .tag(SettingsTab.about)
+        VStack(spacing: 0) {
+            tabStrip
+            Divider()
+            selectedTab
         }
         .frame(width: Self.width)
         .frame(minHeight: Self.minHeight)
+    }
+
+    @ViewBuilder
+    private var selectedTab: some View {
+        switch model.settingsTab {
+        case .general:
+            GeneralSettingsView(model: model)
+        case .device:
+            DeviceSettingsView(model: model)
+        case .about:
+            AboutView()
+        }
+    }
+
+    private var tabStrip: some View {
+        HStack(spacing: 4) {
+            ForEach(SettingsTab.allCases, id: \.self) { tab in
+                tabButton(tab)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
+    private func tabButton(_ tab: SettingsTab) -> some View {
+        let isSelected = model.settingsTab == tab
+        return Button {
+            model.settingsTab = tab
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: tab.symbol)
+                    .font(.system(size: 15))
+                Text(tab.title)
+                    .font(.system(size: 11))
+            }
+            .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            .frame(width: Self.tabSize.width, height: Self.tabSize.height)
+            .background {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.quaternary)
+                    .opacity(isSelected ? 1 : 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }
