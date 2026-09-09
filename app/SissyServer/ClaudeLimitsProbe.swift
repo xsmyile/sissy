@@ -145,7 +145,15 @@ actor ClaudeLimitsProbe {
         guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ClaudeLimitsError.malformedPayload
         }
-        return Self.parse(payload)
+        let windows = Self.parse(payload)
+        if windows.isEmpty {
+            // The endpoint is undocumented: naming the keys it did send is the
+            // only way to tell "no limits on this plan" from "the shape moved".
+            report(
+                "Claude usage payload carried none of the expected buckets; keys: "
+                    + payload.keys.sorted().joined(separator: ", "))
+        }
+        return windows
     }
 
     static func parse(_ payload: [String: Any]) -> [UsageWindow] {
