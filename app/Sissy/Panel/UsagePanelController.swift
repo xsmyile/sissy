@@ -17,11 +17,7 @@ final class UsagePanelController {
 
     var isOpen: Bool { popover.isShown }
 
-    init(
-        model: SissyModel,
-        onPairDevice: @escaping () -> Void,
-        onShowMenu: @escaping () -> Void
-    ) {
+    init(model: SissyModel, onPairDevice: @escaping () -> Void) {
         popover.behavior = .transient
         popover.animates = true
         popover.hasFullSizeContent = true
@@ -31,10 +27,6 @@ final class UsagePanelController {
             onPairDevice: { [weak self] in
                 self?.close()
                 onPairDevice()
-            },
-            onShowMenu: { [weak self] in
-                self?.close()
-                onShowMenu()
             }
         )
         let controller = NSHostingController(rootView: root)

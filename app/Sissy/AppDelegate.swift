@@ -32,8 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let panelController = UsagePanelController(
             model: model,
-            onPairDevice: { [weak self] in self?.windowCoordinator.openPairingWindow() },
-            onShowMenu: { [weak statusController] in statusController?.showMenu() }
+            onPairDevice: { [weak self] in self?.windowCoordinator.openPairingWindow() }
         )
         self.panelController = panelController
         statusController.onPrimaryClick = { [weak statusController, weak panelController] in

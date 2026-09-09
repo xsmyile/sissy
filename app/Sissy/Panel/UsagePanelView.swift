@@ -7,7 +7,6 @@ import SwiftUI
 struct UsagePanelView: View {
     let model: SissyModel
     let onPairDevice: () -> Void
-    let onShowMenu: () -> Void
 
     private static let width: CGFloat = 340
 
@@ -244,7 +243,14 @@ struct UsagePanelView: View {
             iconButton("doc.text", help: "Open Logs") {
                 model.openLogs()
             }
-            iconButton("ellipsis", help: "More", action: onShowMenu)
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12))
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Settings")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
