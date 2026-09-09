@@ -398,10 +398,7 @@ final class SissyModel {
         // Fallback path covers a newer-app/older-daemon dev rebuild skew and
         // the cold-start window before the first provider has emitted.
         if !frame.providers.isEmpty {
-            return StatusItemController.formatHeaderSubtitle(
-                providers: frame.providers,
-                burn: frame.burn
-            )
+            return UsageFormat.headerSubtitle(providers: frame.providers, burn: frame.burn)
         }
         var parts: [String] = []
         if frame.tokens != "..." { parts.append("\(frame.tokens) tok") }

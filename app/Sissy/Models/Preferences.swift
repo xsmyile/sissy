@@ -53,16 +53,20 @@ struct Preferences: Codable, Equatable {
             }
         }
 
-        /// Trailing parenthetical shown next to the label, e.g. "($25)".
-        var detail: String {
+        /// Whole-dollar spacing between milestone celebrations. Mirrors
+        /// `MilestoneFrequency.presets` in the daemon.
+        var costStep: Int {
             switch self {
-            case .veryFrequent: return "$5"
-            case .frequent: return "$10"
-            case .normal: return "$25"
-            case .sparse: return "$50"
-            case .rare: return "$100"
+            case .veryFrequent: return 5
+            case .frequent: return 10
+            case .normal: return 25
+            case .sparse: return 50
+            case .rare: return 100
             }
         }
+
+        /// Trailing parenthetical shown next to the label, e.g. "($25)".
+        var detail: String { "$\(costStep)" }
     }
 
     init(
