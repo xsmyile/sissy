@@ -209,7 +209,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func handleServer() {
-        model.toggleServerFromMenu()
+        model.toggleServer()
         refreshTopLevelItems(model.menuSnapshot)
     }
 

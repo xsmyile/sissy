@@ -220,7 +220,7 @@ struct UsagePanelView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
             Button(model.menuSnapshot.server.title) {
-                model.toggleServerFromMenu()
+                model.toggleServer()
             }
             .disabled(!model.menuSnapshot.server.isEnabled)
         }

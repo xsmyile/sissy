@@ -107,6 +107,8 @@ final class SissyModel {
         let title: String
         let subtitle: String
         let isEnabled: Bool
+        let isOn: Bool
+        let requiresApproval: Bool
     }
 
     var menuSnapshot: MenuSnapshot {
@@ -137,7 +139,9 @@ final class SissyModel {
 
     // MARK: Menu actions
 
-    func toggleServerFromMenu() {
+    var serverIsBusy: Bool { serverToggleInFlight || serverService.isTransitioning }
+
+    func toggleServer() {
         if serverToggleInFlight || serverService.isTransitioning { return }
         if serverService.requiresApproval && serverService.isAvailable {
             serverService.openLoginItemsSettings()
@@ -354,7 +358,9 @@ final class SissyModel {
         return ServerItemSnapshot(
             title: title,
             subtitle: subtitle,
-            isEnabled: serverService.isAvailable && !busy
+            isEnabled: serverService.isAvailable && !busy,
+            isOn: serverIsOn,
+            requiresApproval: serverService.requiresApproval
         )
     }
 

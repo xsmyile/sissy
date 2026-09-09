@@ -1,35 +1,33 @@
+import AppKit
 import SwiftUI
 
 /// Settings that change what the menubar and the device show.
 struct GeneralSettingsView: View {
     let model: SissyModel
 
-    private var mascotSelection: String {
-        model.pinnedMascot ?? Self.autoMascotTag
-    }
-
     private static let autoMascotTag = "auto"
+
+    private var server: SissyModel.ServerItemSnapshot { model.menuSnapshot.server }
 
     var body: some View {
         Form {
             Section {
                 LabeledContent("Server") {
                     HStack(spacing: 8) {
-                        Circle()
-                            .fill(
-                                model.serverHealth.status.isReachable
-                                    ? Color.green : Color.secondary.opacity(0.4)
-                            )
-                            .frame(width: 7, height: 7)
-                        Text(model.menuSnapshot.server.subtitle)
-                        Spacer(minLength: 0)
-                        Button(model.menuSnapshot.server.title) {
-                            model.toggleServerFromMenu()
+                        if !server.isEnabled && model.serverIsBusy {
+                            ProgressView().controlSize(.small)
                         }
-                        .disabled(!model.menuSnapshot.server.isEnabled)
+                        if server.requiresApproval {
+                            Button("Approve in Login Items") { model.toggleServer() }
+                        } else {
+                            Toggle("Server", isOn: serverBinding)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .disabled(!server.isEnabled)
+                        }
                     }
                 }
-                Text("The server runs as a background agent and keeps counting after you quit Sissy.")
+                Text(serverCaption)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -64,8 +62,36 @@ struct GeneralSettingsView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             }
+
+            Section {
+                LabeledContent("Files") {
+                    HStack(spacing: 14) {
+                        Button("Open logs") { model.openLogs() }
+                            .buttonStyle(.link)
+                        Button("Show in Finder") { revealConfig() }
+                            .buttonStyle(.link)
+                    }
+                }
+                Text(verbatim: (SissyPaths.appSupportDir.path as NSString).abbreviatingWithTildeInPath)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private var serverCaption: String {
+        let endpoint = "\(model.preferences.serverHost):\(model.preferences.serverPort)"
+        return "\(server.subtitle) · \(endpoint). Runs as a background agent and keeps counting "
+            + "after you quit Sissy."
+    }
+
+    private var serverBinding: Binding<Bool> {
+        Binding(
+            get: { server.isOn },
+            set: { _ in model.toggleServer() }
+        )
     }
 
     private var milestoneBinding: Binding<Preferences.MilestoneFrequency> {
@@ -77,7 +103,7 @@ struct GeneralSettingsView: View {
 
     private var mascotBinding: Binding<String> {
         Binding(
-            get: { mascotSelection },
+            get: { model.pinnedMascot ?? Self.autoMascotTag },
             set: { wire in
                 if wire == Self.autoMascotTag {
                     model.clearMascotPin()
@@ -93,5 +119,9 @@ struct GeneralSettingsView: View {
             get: { model.preferences.notifyOnMascotChange },
             set: { _ in model.toggleNotifications() }
         )
+    }
+
+    private func revealConfig() {
+        NSWorkspace.shared.activateFileViewerSelecting([SissyPaths.appSupportDir])
     }
 }
