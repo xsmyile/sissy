@@ -34,7 +34,7 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
 `state` is one of `sleep`, `think`, `code`, `trend`, `glow`, `angry`.
 The firmware has an additional local-only `MS_OFFLINE` state it renders when the WS has been disconnected for more than 15 s. The server never sends `offline` over the wire.
 
-`providers` carries the raw per-provider token + cost slices (cost as a canonical decimal string so it round-trips lossless through `Decimal(string:)`). The macOS app sums it to derive both the menubar header subtitle and the "Breakdown" submenu rows from a single payload — eliminating drift between the WS-pushed header and what used to be a polled `/stats` breakdown. Firmware ignores the field; older firmware builds parse the rest of the frame unchanged. Stable order: `claude-code`, `codex`, then alphabetical. Always emitted (empty array before any provider has reported).
+`providers` carries the raw per-provider token + cost slices (cost as a canonical decimal string so it round-trips lossless through `Decimal(string:)`). The macOS app sums it to derive both the menubar header subtitle and the panel's per-provider rows from a single payload — eliminating drift between the WS-pushed header and what used to be a polled `/stats` breakdown. Firmware ignores the field; older firmware builds parse the rest of the frame unchanged. Stable order: `claude-code`, `codex`, then alphabetical. Always emitted (empty array before any provider has reported).
 
 `prev_tokens` / `prev_cost` carry yesterday's raw combined totals so the macOS app can render a day-over-day delta without a second data path. Both keys are omitted together until every active provider has produced a `prev` snapshot — the same condition that suppresses the `trend` state — so the app renders no delta rather than a false 0%. App-only; firmware ignores them.
 
@@ -122,7 +122,7 @@ Thresholds in `server.json.stateThresholds`; logic in `FrameBuilder.pickState`. 
 
 ## Milestone presets
 
-Milestone notifications (e.g. *"You crossed $25"*) fire on every whole-dollar step the user crosses during the day. Cost is the only axis — tokens were dropped because they aren't comparable across models or agents (1M Opus ≠ 1M Haiku ≠ 1M GPT-5), and `Pricing.swift` already normalizes everything to USD so a cost-only milestone scales to ccusage imports and multi-provider futures without per-model weights. The cadence is user-tunable from the menubar's **Milestone frequency** submenu; the preset key is persisted in `server.json.milestoneFrequency` and the bucket counter lives in `~/Library/Application Support/Sissy/milestones.json` next to the usage snapshot.
+Milestone notifications (e.g. *"You crossed $25"*) fire on every whole-dollar step the user crosses during the day. Cost is the only axis — tokens were dropped because they aren't comparable across models or agents (1M Opus ≠ 1M Haiku ≠ 1M GPT-5), and `Pricing.swift` already normalizes everything to USD so a cost-only milestone scales to ccusage imports and multi-provider futures without per-model weights. The cadence is user-tunable from **Settings › General › Milestones**; the preset key is persisted in `server.json.milestoneFrequency` and the bucket counter lives in `~/Library/Application Support/Sissy/milestones.json` next to the usage snapshot.
 
 | Preset key       | Cost step |
 |------------------|-----------|
