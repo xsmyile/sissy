@@ -453,9 +453,19 @@ struct DisplayFrame: Codable, Equatable {
     /// the field) — `headerSubtitle` falls back to the daemon-formatted
     /// scalars; Breakdown stays hidden by its `>= 2 sources` gate.
     var providers: [ProviderSlice]
+    /// Yesterday's raw combined totals, for the day-over-day delta. nil until
+    /// every active provider has a previous-day snapshot — the daemon omits
+    /// both wire keys together in that window, and nil renders as "no
+    /// comparison" rather than a 0% that was never measured.
+    var prev: PrevTotals?
 
     struct ProviderSlice: Codable, Equatable, Identifiable {
         let id: String
+        let tokens: Int
+        let cost: Decimal
+    }
+
+    struct PrevTotals: Codable, Equatable {
         let tokens: Int
         let cost: Decimal
     }
