@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override init() {
         let model = SissyModel()
         self.model = model
-        self.windowCoordinator = WindowCoordinator(model: model)
+        self.windowCoordinator = WindowCoordinator()
         super.init()
     }
 
@@ -30,10 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.statusController = statusController
 
-        let panelController = UsagePanelController(
-            model: model,
-            onPairDevice: { [weak self] in self?.windowCoordinator.openPairingWindow() }
-        )
+        let panelController = UsagePanelController(model: model)
         self.panelController = panelController
         statusController.onPrimaryClick = { [weak statusController, weak panelController] in
             guard let button = statusController?.statusButton else { return }

@@ -17,18 +17,12 @@ final class UsagePanelController {
 
     var isOpen: Bool { popover.isShown }
 
-    init(model: SissyModel, onPairDevice: @escaping () -> Void) {
+    init(model: SissyModel) {
         popover.behavior = .transient
         popover.animates = true
         popover.hasFullSizeContent = true
 
-        let root = UsagePanelView(
-            model: model,
-            onPairDevice: { [weak self] in
-                self?.close()
-                onPairDevice()
-            }
-        )
+        let root = UsagePanelView(model: model)
         let controller = NSHostingController(rootView: root)
         controller.sizingOptions = [.preferredContentSize]
         popover.contentViewController = controller

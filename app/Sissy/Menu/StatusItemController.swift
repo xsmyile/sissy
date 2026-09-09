@@ -15,8 +15,6 @@ final class StatusItemController: NSObject {
 
     private let headerItem = NSMenuItem()
     private let serverItem = NSMenuItem(title: "Server", action: nil, keyEquivalent: "")
-    private let metricItem = NSMenuItem(title: "Metric", action: nil, keyEquivalent: "")
-    private let pairItem = NSMenuItem(title: "Pair Device...", action: nil, keyEquivalent: "p")
 
     private var headerView: NSHostingView<HeaderRowView>?
 
@@ -36,7 +34,6 @@ final class StatusItemController: NSObject {
         super.init()
 
         configureHeaderItem()
-        configureSubmenus()
         buildMenu()
         configureButton()
         startObservers()
@@ -61,11 +58,6 @@ final class StatusItemController: NSObject {
         headerItem.isEnabled = false
     }
 
-    private func configureSubmenus() {
-        metricItem.submenu = NSMenu()
-        metricItem.submenu?.delegate = self
-    }
-
     private func buildMenu() {
         menu.autoenablesItems = false
         menu.delegate = self
@@ -79,11 +71,6 @@ final class StatusItemController: NSObject {
         menu.addItem(serverItem)
 
         menu.addItem(.separator())
-
-        pairItem.target = self
-        pairItem.action = #selector(handlePair)
-        pairItem.keyEquivalentModifierMask = [.command]
-        menu.addItem(pairItem)
 
         let openLogs = NSMenuItem(title: "Open Logs", action: #selector(handleOpenLogs), keyEquivalent: "l")
         openLogs.target = self
@@ -146,44 +133,6 @@ final class StatusItemController: NSObject {
         serverItem.title = snapshot.server.title
         serverItem.subtitle = snapshot.server.subtitle
         serverItem.isEnabled = snapshot.server.isEnabled
-
-        metricItem.subtitle = snapshot.primaryMetric.label
-        setItemPresent(metricItem, present: snapshot.showMetric, after: serverItem)
-    }
-
-    /// Insert or remove `item` so it sits directly after `anchor`. Visibility
-    /// is driven by structural mutation instead of `NSMenuItem.isHidden`
-    /// because NSMenu re-flows on `insertItem`/`removeItem` mid-tracking but
-    /// caches item rects across an `isHidden` flip — the latter produced a
-    /// clipped row when the device connected while the menu was already on
-    /// screen.
-    private func setItemPresent(_ item: NSMenuItem, present: Bool, after anchor: NSMenuItem) {
-        let containsItem = menu.items.contains(item)
-        if present, !containsItem {
-            let anchorIdx = menu.index(of: anchor)
-            guard anchorIdx >= 0 else { return }
-            menu.insertItem(item, at: anchorIdx + 1)
-        } else if !present, containsItem {
-            menu.removeItem(item)
-        }
-    }
-
-    // MARK: Submenus
-
-    private func rebuildMetricSubmenu(_ submenu: NSMenu) {
-        let snapshot = model.menuSnapshot
-        submenu.removeAllItems()
-        for metric in Preferences.PrimaryMetric.allCases {
-            let item = NSMenuItem(
-                title: metric.label,
-                action: #selector(pickMetric(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = metric.rawValue
-            item.state = (metric == snapshot.primaryMetric) ? .on : .off
-            submenu.addItem(item)
-        }
     }
 
     // MARK: Actions
@@ -211,17 +160,6 @@ final class StatusItemController: NSObject {
     @objc private func handleServer() {
         model.toggleServer()
         refreshTopLevelItems(model.menuSnapshot)
-    }
-
-    @objc private func pickMetric(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-            let value = Preferences.PrimaryMetric(rawValue: raw)
-        else { return }
-        model.selectMetric(value)
-    }
-
-    @objc private func handlePair() {
-        windowCoordinator.openPairingWindow()
     }
 
     @objc private func handleOpenLogs() {
@@ -258,8 +196,6 @@ extension StatusItemController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         if menu === self.menu {
             self.refreshTopLevelItems(self.model.menuSnapshot)
-        } else if menu === self.metricItem.submenu {
-            self.rebuildMetricSubmenu(menu)
         }
     }
 }

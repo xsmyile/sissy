@@ -4,16 +4,11 @@ import SwiftUI
 
 /// Owns app-window presentation for the menubar app. The status menu forwards
 /// window commands here; the application delegate only bootstraps this object.
+/// Settings is not one of these windows — it is a SwiftUI `Settings` scene
+/// opened by `SettingsLink`.
 @MainActor
 final class WindowCoordinator: NSObject, NSWindowDelegate {
-    private let model: SissyModel
-    private var pairingWindow: NSWindow?
     private var aboutWindow: NSWindow?
-
-    init(model: SissyModel) {
-        self.model = model
-        super.init()
-    }
 
     // MARK: Activation policy
 
@@ -49,25 +44,6 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     // MARK: Window openers
 
-    func openPairingWindow() {
-        activate(withPolicy: .regular)
-        if let existing = pairingWindow {
-            present(existing)
-            return
-        }
-        let root = PairingView()
-            .environment(model)
-        let window = makeManagedWindow(
-            title: "Pair Device",
-            size: NSSize(width: 620, height: 640),
-            minSize: NSSize(width: 540, height: 520),
-            resizable: true,
-            root: root
-        )
-        present(window)
-        pairingWindow = window
-    }
-
     func openAboutWindow() {
         activate(withPolicy: .regular)
         if let existing = aboutWindow {
@@ -83,38 +59,6 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
         window.orderFrontRegardless()
-    }
-
-    private func makeManagedWindow<Root: View>(
-        title: String,
-        size: NSSize,
-        minSize: NSSize? = nil,
-        resizable: Bool = true,
-        root: Root
-    ) -> NSWindow {
-        let host = NSHostingController(rootView: root)
-        host.sizingOptions = [.preferredContentSize]
-
-        var styleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable]
-        if resizable {
-            styleMask.insert(.resizable)
-        }
-
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: styleMask,
-            backing: .buffered,
-            defer: false
-        )
-
-        window.contentViewController = host
-        window.title = title
-        window.isReleasedWhenClosed = false
-        window.contentMinSize = minSize ?? size
-        window.setContentSize(size)
-        window.center()
-        window.delegate = self
-        return window
     }
 
     private func makeAboutWindow() -> NSWindow {
@@ -162,9 +106,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         guard let closing = notification.object as? NSWindow else { return }
-        if closing === pairingWindow {
-            pairingWindow = nil
-        } else if closing === aboutWindow {
+        if closing === aboutWindow {
             aboutWindow = nil
         }
     }

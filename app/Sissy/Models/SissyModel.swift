@@ -15,6 +15,7 @@ final class SissyModel {
     /// most recently asked for, used to flag the active row with a checkmark
     /// without waiting for the next frame to confirm.
     var pinnedMascot: String? = nil
+    var settingsTab: SettingsTab = .general
     /// Mood line picked at the last mascot state-change. Both the menubar
     /// header and the mood pop-up read this so they show the same catchphrase
     /// for the same transition (the pool offers 4 lines per state — without
@@ -81,14 +82,7 @@ final class SissyModel {
         let header: HeaderSnapshot
         let statusIcon: StatusIconSnapshot
         let server: ServerItemSnapshot
-        let primaryMetric: Preferences.PrimaryMetric
         let canPickMascot: Bool
-        /// Hide the "Metric" submenu when no firmware companion is attached.
-        /// The setting only affects the OLED's primary-slot render — the
-        /// menubar header already prints tokens · cost · burn unconditionally,
-        /// so without a device the row is a dead option. Pre-first-frame this
-        /// stays true so the row doesn't flicker hidden→visible on connect.
-        let showMetric: Bool
     }
 
     struct HeaderSnapshot {
@@ -131,9 +125,7 @@ final class SissyModel {
                 alpha: offline ? 0.4 : 1.0
             ),
             server: serverItemSnapshot,
-            primaryMetric: preferences.primaryMetric,
-            canPickMascot: webSocketClient.isConnected,
-            showMetric: currentFrame?.devicePresent ?? true
+            canPickMascot: webSocketClient.isConnected
         )
     }
 

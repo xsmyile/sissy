@@ -6,7 +6,6 @@ import SwiftUI
 /// `UsagePanelSnapshot` so the panel and the pull-down menu cannot disagree.
 struct UsagePanelView: View {
     let model: SissyModel
-    let onPairDevice: () -> Void
 
     private static let width: CGFloat = 340
 
@@ -234,18 +233,11 @@ struct UsagePanelView: View {
         HStack(spacing: 6) {
             Spacer(minLength: 0)
 
-            iconButton("cable.connector.horizontal", help: "Pair Device", action: onPairDevice)
+            settingsLink("cpu", help: "Device", tab: .device)
             iconButton("doc.text", help: "Open Logs") {
                 model.openLogs()
             }
-            SettingsLink {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12))
-                    .frame(width: 16, height: 16)
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .help("Settings")
+            settingsLink("gearshape", help: "Settings", tab: .general)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -257,12 +249,29 @@ struct UsagePanelView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12))
-                .frame(width: 16, height: 16)
+            footerIcon(symbol)
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
         .help(help)
+    }
+
+    /// `SettingsLink` is the only public way to open the `Settings` scene, and
+    /// it takes no action closure — the simultaneous gesture is what lets a
+    /// footer button aim the window at its own tab.
+    private func settingsLink(_ symbol: String, help: String, tab: SettingsTab) -> some View {
+        SettingsLink {
+            footerIcon(symbol)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .help(help)
+        .simultaneousGesture(TapGesture().onEnded { model.settingsTab = tab })
+    }
+
+    private func footerIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 12))
+            .frame(width: 16, height: 16)
     }
 }
