@@ -11,7 +11,6 @@ final class StatusItemController: NSObject {
     private let menu = NSMenu()
 
     private let model: SissyModel
-    private let windowCoordinator: WindowCoordinator
 
     private let headerItem = NSMenuItem()
     private let serverItem = NSMenuItem(title: "Server", action: nil, keyEquivalent: "")
@@ -27,10 +26,9 @@ final class StatusItemController: NSObject {
     /// pops the configuration menu instead.
     var onPrimaryClick: (() -> Void)?
 
-    init(model: SissyModel, windowCoordinator: WindowCoordinator) {
+    init(model: SissyModel) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.model = model
-        self.windowCoordinator = windowCoordinator
         super.init()
 
         configureHeaderItem()
@@ -78,10 +76,6 @@ final class StatusItemController: NSObject {
         menu.addItem(openLogs)
 
         menu.addItem(.separator())
-
-        let about = NSMenuItem(title: "About", action: #selector(handleAbout), keyEquivalent: "")
-        about.target = self
-        menu.addItem(about)
 
         let quit = NSMenuItem(title: "Quit", action: #selector(handleQuit), keyEquivalent: "q")
         quit.target = self
@@ -164,10 +158,6 @@ final class StatusItemController: NSObject {
 
     @objc private func handleOpenLogs() {
         model.openLogs()
-    }
-
-    @objc private func handleAbout() {
-        windowCoordinator.openAboutWindow()
     }
 
     @objc private func handleQuit() {

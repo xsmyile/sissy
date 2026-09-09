@@ -2,32 +2,26 @@ import AppKit
 import Foundation
 
 /// Bootstraps the menubar app and leaves runtime ownership to dedicated
-/// coordinators. `SissyModel` owns app state and server actions,
-/// `StatusItemController` owns the native menu, and `WindowCoordinator` owns
-/// Pair/About windows.
+/// coordinators: `SissyModel` owns app state and server actions,
+/// `StatusItemController` the native menu, `UsagePanelController` the popover.
+/// The only window is the SwiftUI `Settings` scene, which opens itself.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model: SissyModel
-    let windowCoordinator: WindowCoordinator
 
     private var mascotNotifier: MascotNotifier?
     private var statusController: StatusItemController?
     private var panelController: UsagePanelController?
 
     override init() {
-        let model = SissyModel()
-        self.model = model
-        self.windowCoordinator = WindowCoordinator()
+        self.model = SissyModel()
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         model.start()
 
-        let statusController = StatusItemController(
-            model: model,
-            windowCoordinator: windowCoordinator
-        )
+        let statusController = StatusItemController(model: model)
         self.statusController = statusController
 
         let panelController = UsagePanelController(model: model)
@@ -50,7 +44,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mascotNotifier = notifier
     }
 
+    /// Closing the settings window must not take the menubar app with it, and
+    /// an accessory app that keeps activation after its last window closes
+    /// leaves the previous app without focus.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        windowCoordinator.applicationShouldTerminateAfterLastWindowClosed()
+        let nextApp = NSWorkspace.shared.runningApplications.first { app in
+            app != .current && app.activationPolicy == .regular && !app.isTerminated
+        }
+        if let nextApp {
+            NSApp.yieldActivation(to: nextApp)
+        } else {
+            NSApp.deactivate()
+        }
+        return false
     }
 }
