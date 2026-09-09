@@ -10,6 +10,7 @@ struct UsagePanelView: View {
     private static let width: CGFloat = 340
     private static let footerTick: TimeInterval = 1
     private static let secondaryWindowOpacity: Double = 0.55
+    private static let powerButtonSize: CGFloat = 26
 
     private static var dateLine: String {
         "Today · "
@@ -67,9 +68,9 @@ struct UsagePanelView: View {
 
             Spacer(minLength: 0)
 
-            VStack(alignment: .trailing, spacing: 3) {
-                statusPill(label: "server", isOn: model.serverHealth.status.isReachable)
+            HStack(spacing: 8) {
                 statusPill(label: "device", isOn: model.currentFrame?.devicePresent ?? false)
+                powerButton
             }
         }
         .opacity(menuHeader.isDimmed ? 0.6 : 1)
@@ -86,6 +87,35 @@ struct UsagePanelView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Starts and stops the background daemon. It replaces the old "server"
+    /// dot: the state it reported was the same state this button now shows,
+    /// and one control beats an indicator plus a button hidden in a
+    /// placeholder that only appeared when the daemon was already missing.
+    private var powerButton: some View {
+        let server = model.menuSnapshot.server
+        return Button {
+            model.toggleServer()
+        } label: {
+            Group {
+                if model.serverIsBusy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "power")
+                        .font(.system(size: 12, weight: .bold))
+                }
+            }
+            .frame(width: Self.powerButtonSize, height: Self.powerButtonSize)
+            .foregroundStyle(server.isOn ? Color.green : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(
+            server.isOn ? .regular.tint(.green.opacity(0.22)) : .regular,
+            in: .circle
+        )
+        .disabled(!server.isEnabled)
+        .help(server.isOn ? "Stop the server" : "Start the server")
     }
 
     // MARK: Headline
@@ -255,15 +285,19 @@ struct UsagePanelView: View {
     // MARK: Placeholder
 
     private var placeholder: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Waiting for the daemon")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-            Button(model.menuSnapshot.server.title) {
-                model.toggleServer()
-            }
-            .disabled(!model.menuSnapshot.server.isEnabled)
+        let isOn = model.menuSnapshot.server.isOn
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(isOn ? "Waiting for the daemon" : "Server is off")
+                .font(.system(size: 12, weight: .medium))
+            Text(
+                isOn
+                    ? "It reports the day's first frame within a few seconds."
+                    : "Switch it on with the power button above."
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
     }
@@ -286,8 +320,10 @@ struct UsagePanelView: View {
         .padding(.vertical, 10)
     }
 
+    /// Empty until the first frame lands: the panel body already says what it
+    /// is waiting for, and repeating it in the footer read as two problems.
     private func updatedLine(now: Date) -> String {
-        guard let last = model.lastFrameAt else { return "waiting for the daemon" }
+        guard let last = model.lastFrameAt else { return "" }
         return "updated " + UsageFormat.age(now.timeIntervalSince(last))
     }
 

@@ -2,9 +2,9 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Owns the app's native status item and root pull-down menu. Interactive
-/// rows are native `NSMenuItem`s; the only hosted SwiftUI row is the
-/// non-interactive header.
+/// Owns the app's status item: the icon, the left-click that opens the usage
+/// panel, and a right-click menu that holds nothing the panel or the settings
+/// window already own.
 @MainActor
 final class StatusItemController: NSObject {
     let statusItem: NSStatusItem
@@ -12,18 +12,11 @@ final class StatusItemController: NSObject {
 
     private let model: SissyModel
 
-    private let headerItem = NSMenuItem()
-    private let serverItem = NSMenuItem(title: "Server", action: nil, keyEquivalent: "")
-
-    private var headerView: NSHostingView<HeaderRowView>?
-
-    private static let rowWidth: CGFloat = 260
-
     private(set) var isMenuOpen: Bool = false
     var statusButton: NSStatusBarButton? { statusItem.button }
     /// Invoked on a plain left-click. The panel is owned by `AppDelegate`, so
     /// the status item only reports the gesture; a right- or control-click
-    /// pops the configuration menu instead.
+    /// pops the menu instead.
     var onPrimaryClick: (() -> Void)?
 
     init(model: SissyModel) {
@@ -31,11 +24,10 @@ final class StatusItemController: NSObject {
         self.model = model
         super.init()
 
-        configureHeaderItem()
         buildMenu()
         configureButton()
-        startObservers()
-        refreshFromModel()
+        observeModel()
+        refreshIcon(model.menuSnapshot.statusIcon)
     }
 
     private func configureButton() {
@@ -48,69 +40,33 @@ final class StatusItemController: NSObject {
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
-    private func configureHeaderItem() {
-        let view = NSHostingView(rootView: HeaderRowView(header: model.menuSnapshot.header))
-        view.frame = NSRect(x: 0, y: 0, width: Self.rowWidth, height: 52)
-        headerView = view
-        headerItem.view = view
-        headerItem.isEnabled = false
-    }
-
     private func buildMenu() {
         menu.autoenablesItems = false
         menu.delegate = self
-        menu.removeAllItems()
 
-        menu.addItem(headerItem)
-        menu.addItem(.separator())
-
-        serverItem.target = self
-        serverItem.action = #selector(handleServer)
-        menu.addItem(serverItem)
-
-        menu.addItem(.separator())
-
-        let openLogs = NSMenuItem(title: "Open Logs", action: #selector(handleOpenLogs), keyEquivalent: "l")
-        openLogs.target = self
-        openLogs.keyEquivalentModifierMask = [.command]
-        menu.addItem(openLogs)
-
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(title: "Quit", action: #selector(handleQuit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Sissy", action: #selector(handleQuit), keyEquivalent: "q")
         quit.target = self
         quit.keyEquivalentModifierMask = [.command]
         menu.addItem(quit)
     }
 
-    private func startObservers() {
-        observeModel()
-    }
-
     /// Re-arming observation bridge. `@Observable` exposes no
-    /// `objectWillChange`, so to keep the status-bar icon live while the menu
-    /// is closed we track the snapshot's inputs and refresh on each change,
-    /// re-registering the tracker every fire (`withObservationTracking` is
-    /// one-shot). The async hop preserves the previous `objectWillChange`
-    /// behaviour — the callback runs at `willSet` time, so the committed value
-    /// is read on the next main-actor turn. Menu rows refresh independently
-    /// through `NSMenuDelegate`.
+    /// `objectWillChange`, so to keep the status-bar icon live we track the
+    /// snapshot and refresh on each change, re-registering the tracker every
+    /// fire (`withObservationTracking` is one-shot). The async hop preserves
+    /// the previous `objectWillChange` behaviour — the callback runs at
+    /// `willSet` time, so the committed value is read on the next
+    /// main-actor turn.
     private func observeModel() {
         withObservationTracking {
             _ = model.menuSnapshot
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.refreshFromModel()
+                self.refreshIcon(self.model.menuSnapshot.statusIcon)
                 self.observeModel()
             }
         }
-    }
-
-    private func refreshFromModel() {
-        let snapshot = model.menuSnapshot
-        refreshIcon(snapshot.statusIcon)
-        refreshTopLevelItems(snapshot)
     }
 
     private func refreshIcon(_ icon: SissyModel.StatusIconSnapshot) {
@@ -119,14 +75,6 @@ final class StatusItemController: NSObject {
         image?.isTemplate = true
         button.image = image
         button.alphaValue = icon.alpha
-    }
-
-    private func refreshTopLevelItems(_ snapshot: SissyModel.MenuSnapshot) {
-        headerView?.rootView = HeaderRowView(header: snapshot.header)
-
-        serverItem.title = snapshot.server.title
-        serverItem.subtitle = snapshot.server.subtitle
-        serverItem.isEnabled = snapshot.server.isEnabled
     }
 
     // MARK: Actions
@@ -141,23 +89,14 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// Pops the configuration menu under the status item. Assigning
-    /// `statusItem.menu` for the duration of the click is what keeps the
-    /// menu's native placement and highlight; leaving it assigned would make
-    /// every left-click open the menu too.
+    /// Pops the menu under the status item. Assigning `statusItem.menu` for
+    /// the duration of the click is what keeps the menu's native placement
+    /// and highlight; leaving it assigned would make every left-click open
+    /// the menu too.
     func showMenu() {
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
-    }
-
-    @objc private func handleServer() {
-        model.toggleServer()
-        refreshTopLevelItems(model.menuSnapshot)
-    }
-
-    @objc private func handleOpenLogs() {
-        model.openLogs()
     }
 
     @objc private func handleQuit() {
@@ -167,57 +106,12 @@ final class StatusItemController: NSObject {
 
 extension StatusItemController: NSMenuDelegate {
     // NSMenuDelegate is `@MainActor` on macOS 26's Swift 6 AppKit so the
-    // methods can be implemented as MainActor-isolated directly — no
-    // `nonisolated` + `MainActor.assumeIsolated` ceremony needed, and no
-    // Sendable warnings on the NSMenu parameter.
+    // methods can be implemented as MainActor-isolated directly.
     func menuWillOpen(_ menu: NSMenu) {
-        if menu === self.menu {
-            self.isMenuOpen = true
-            self.refreshTopLevelItems(self.model.menuSnapshot)
-        }
+        isMenuOpen = true
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        if menu === self.menu {
-            self.isMenuOpen = false
-        }
-    }
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        if menu === self.menu {
-            self.refreshTopLevelItems(self.model.menuSnapshot)
-        }
-    }
-}
-
-private struct HeaderRowView: View {
-    let header: SissyModel.HeaderSnapshot
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(header.imageName)
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 20, height: 20)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(header.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                if let subtitle = header.subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .opacity(header.isDimmed ? 0.55 : 1.0)
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        isMenuOpen = false
     }
 }
