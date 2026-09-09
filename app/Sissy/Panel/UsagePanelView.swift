@@ -11,6 +11,11 @@ struct UsagePanelView: View {
 
     private static let width: CGFloat = 340
 
+    private static var dateLine: String {
+        "Today · "
+            + Date.now.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
+
     private var snapshot: UsagePanelSnapshot? {
         model.currentFrame.map {
             UsagePanelSnapshot.make(frame: $0, milestoneFrequency: model.preferences.milestoneFrequency)
@@ -55,7 +60,7 @@ struct UsagePanelView: View {
                 Text(menuHeader.title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
-                Text(Date.now, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                Text(Self.dateLine)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -150,17 +155,18 @@ struct UsagePanelView: View {
     private func milestoneBar(_ milestone: UsagePanelSnapshot.MilestoneProgress) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text("next $\(milestone.nextDollars)")
+                Text("next milestone $\(milestone.nextDollars)")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
-                Text("\(Int((milestone.fraction * 100).rounded()))%")
+                Text("\(UsageFormat.cost(milestone.remaining)) to go")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
             ProgressView(value: milestone.fraction)
                 .progressViewStyle(.linear)
+                .tint(.accentColor)
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 12)
@@ -199,7 +205,7 @@ struct UsagePanelView: View {
                 Capsule()
                     .fill(.quaternary)
                 Capsule()
-                    .fill(.tint)
+                    .fill(.secondary)
                     .frame(width: max(geometry.size.width * share, share > 0 ? 3 : 0))
             }
         }
@@ -234,7 +240,7 @@ struct UsagePanelView: View {
 
             Spacer(minLength: 0)
 
-            iconButton("cable.connector", help: "Pair Device", action: onPairDevice)
+            iconButton("cable.connector.horizontal", help: "Pair Device", action: onPairDevice)
             iconButton("doc.text", help: "Open Logs") {
                 model.openLogs()
             }

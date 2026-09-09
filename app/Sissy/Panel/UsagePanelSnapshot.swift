@@ -34,6 +34,7 @@ struct UsagePanelSnapshot: Equatable {
     struct MilestoneProgress: Equatable {
         let nextDollars: Int
         let fraction: Double
+        let remaining: Decimal
     }
 
     struct ProviderRow: Equatable, Identifiable {
@@ -79,9 +80,11 @@ struct UsagePanelSnapshot: Equatable {
         guard dollars >= 0 else { return nil }
         let crossed = Int(dollars) / step
         let floor = Double(crossed * step)
+        let next = (crossed + 1) * step
         return MilestoneProgress(
-            nextDollars: (crossed + 1) * step,
-            fraction: (dollars - floor) / Double(step)
+            nextDollars: next,
+            fraction: (dollars - floor) / Double(step),
+            remaining: Decimal(next) - cost
         )
     }
 

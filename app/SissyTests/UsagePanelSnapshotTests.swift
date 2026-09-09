@@ -120,6 +120,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         let milestone = try XCTUnwrap(snapshot.milestone)
         XCTAssertEqual(milestone.nextDollars, 500)
         XCTAssertEqual(milestone.fraction, 0.7024, accuracy: 0.0001)
+        XCTAssertEqual(milestone.remaining, Decimal(string: "7.44"))
     }
 
     func testMilestoneFollowsTheSelectedPreset() throws {
@@ -140,6 +141,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         let milestone = try XCTUnwrap(snapshot.milestone)
         XCTAssertEqual(milestone.nextDollars, 50)
         XCTAssertEqual(milestone.fraction, 0, accuracy: 0.0001)
+        XCTAssertEqual(milestone.remaining, Decimal(string: "25.00"))
     }
 
     func testZeroSpendTargetsTheFirstStep() throws {
