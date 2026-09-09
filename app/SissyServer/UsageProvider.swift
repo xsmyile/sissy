@@ -39,6 +39,12 @@ protocol UsageProvider: AnyObject, Sendable {
     /// True once the cold backfill scan has completed.
     func isWarm() async -> Bool
 
+    /// Subscription rate-limit windows the CLI last reported, newest
+    /// observation wins. Empty for a provider that surfaces none — the
+    /// default implementation covers those, so a reader only overrides it
+    /// when its session log actually carries limits.
+    func currentWindows() async -> [UsageWindow]
+
     /// Swap in a freshly fetched rate catalog. Each provider takes the slice
     /// matching its upstream vendor and consults it between the user's
     /// `pricingOverride` and the embedded generated seed. Called once before
@@ -46,4 +52,8 @@ protocol UsageProvider: AnyObject, Sendable {
     /// applies to subsequently ingested events and does not reprice
     /// accumulated totals.
     func applyPriceCatalog(_ catalog: PriceCatalog) async
+}
+
+extension UsageProvider {
+    func currentWindows() async -> [UsageWindow] { [] }
 }

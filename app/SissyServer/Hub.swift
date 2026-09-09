@@ -114,6 +114,13 @@ actor Hub {
                 "id": slice.id,
                 "tokens": slice.tokens,
                 "cost": NSDecimalNumber(decimal: slice.cost).stringValue,
+                "windows": slice.windows.map { window in
+                    [
+                        "minutes": window.minutes,
+                        "used_percent": window.usedPercent,
+                        "resets_at": Int(window.resetsAt.timeIntervalSince1970),
+                    ] as [String: Any]
+                },
             ]
         }
         var dict: [String: Any] = [

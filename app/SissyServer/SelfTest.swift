@@ -330,6 +330,7 @@ func runSelfTest() {
     print("=== CodexUsageReader.streamingIngest ===")
     runCodexParserTests()
     runCodexModelBackfillTest()
+    runCodexRateLimitTest()
 
     print("=== FSWatcher ===")
     runFSWatcherTests()
@@ -1049,6 +1050,68 @@ private func runCodexParserTests() {
     }
     sem2.wait()
     expect("codex re-ingest matches first pass", replay.value, box.value.tokens)
+}
+
+/// Codex ships its subscription limits on the same `token_count` event the
+/// reader already parses. Two properties matter and neither is obvious from
+/// the payload: a bucket is identified by `window_minutes` and not by its
+/// `primary`/`secondary` key, and a bucket whose `resets_at` has passed
+/// describes a window that no longer exists.
+func runCodexRateLimitTest() {
+    print("=== CodexUsageReader.rateLimits ===")
+    let fm = FileManager.default
+    let tempDir = fm.temporaryDirectory.appendingPathComponent(
+        "sissy-codex-limits-\(UUID().uuidString)"
+    )
+    let subdir = tempDir.appendingPathComponent("2026/05/25", isDirectory: true)
+    try? fm.createDirectory(at: subdir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tempDir) }
+
+    let isoFmt = ISO8601DateFormatter()
+    isoFmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let nowStr = isoFmt.string(from: Date())
+    let liveReset = Int(Date().addingTimeInterval(3_600).timeIntervalSince1970)
+    let staleReset = Int(Date().addingTimeInterval(-60).timeIntervalSince1970)
+
+    // `primary` is the weekly bucket here on purpose: real rollouts do ship
+    // that arrangement, and a reader keying off the position would label it
+    // as the session window.
+    let usage =
+        #"{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"#
+        + #""output_tokens":10,"total_tokens":110}}"#
+    let limits =
+        #"{"primary":{"used_percent":8.0,"window_minutes":10080,"#
+        + #""resets_at":\#(liveReset)},"secondary":{"used_percent":25.0,"#
+        + #""window_minutes":300,"resets_at":\#(staleReset)}}"#
+    let payload = """
+        {"type":"turn_context","timestamp":"\(nowStr)","payload":{"turn_id":"t1","model":"gpt-5-codex"}}
+        {"type":"event_msg","timestamp":"\(nowStr)","payload":{"type":"token_count","info":\(usage),"rate_limits":\(limits)}}
+        """ + "\n"
+    try? payload.write(
+        to: subdir.appendingPathComponent("rollout-2026-05-25T10-12-05-limits.jsonl"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let sem = DispatchSemaphore(value: 0)
+    let box = TestBox<[UsageWindow]>([])
+    Task {
+        let reader = CodexUsageReader(
+            codexDir: tempDir,
+            retainDays: 2,
+            pollInterval: .seconds(60),
+            persistenceURL: nil
+        )
+        await reader.start { _, _ in }
+        box.value = await reader.currentWindows()
+        await reader.stop()
+        sem.signal()
+    }
+    sem.wait()
+
+    expect("codex keeps only unexpired windows", box.value.count, 1)
+    expect("codex window keyed by minutes", box.value.first?.minutes, 10_080)
+    expect("codex window percentage", box.value.first?.usedPercent, 8.0)
 }
 
 /// Verifies the Codex reader recovers its per-file model state across a

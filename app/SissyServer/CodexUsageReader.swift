@@ -29,6 +29,16 @@ actor CodexUsageReader: UsageProvider {
 
     private var fileOffsets: [URL: UInt64] = [:]
     private var fileMTimes: [URL: TimeInterval] = [:]
+    /// Rate-limit buckets Codex ships on a `token_count` event. Position is
+    /// not meaning: each bucket carries its own `window_minutes`.
+    private static let rateLimitBuckets = ["primary", "secondary"]
+
+    /// Newest rate-limit observation and the event timestamp it came from.
+    /// A cold scan walks files in no particular order, so an older rollout
+    /// must not overwrite a fresher window.
+    private var latestWindows: [UsageWindow] = []
+    private var latestWindowsAt: Date?
+
     /// Per-file "last seen model id" so a `token_count` event resolves to the
     /// `turn_context.payload.model` that immediately preceded it in the same
     /// rollout. Codex bumps the model mid-session if the user reassigns the
@@ -327,6 +337,34 @@ actor CodexUsageReader: UsageProvider {
         fileModels[url] = model
     }
 
+    /// Expired windows are dropped rather than reported as spent: once
+    /// `resetsAt` passes, the bucket has rolled over and the last percentage
+    /// the CLI reported describes a window that no longer exists.
+    func currentWindows() async -> [UsageWindow] {
+        let now = Date()
+        return latestWindows.filter { $0.resetsAt > now }
+    }
+
+    private func captureWindows(_ raw: Any?, observedAt: Date) {
+        guard let dict = raw as? [String: Any] else { return }
+        if let seen = latestWindowsAt, seen >= observedAt { return }
+        let windows = Self.rateLimitBuckets.compactMap { key -> UsageWindow? in
+            guard let bucket = dict[key] as? [String: Any],
+                let minutes = bucket["window_minutes"] as? Int,
+                let used = bucket["used_percent"] as? Double,
+                let resets = bucket["resets_at"] as? Double
+            else { return nil }
+            return UsageWindow(
+                minutes: minutes,
+                usedPercent: used,
+                resetsAt: Date(timeIntervalSince1970: resets)
+            )
+        }
+        if windows.isEmpty { return }
+        latestWindows = windows
+        latestWindowsAt = observedAt
+    }
+
     /// Parses a `token_count` event line. Returns nil for any non-billable
     /// shape, dedup hit, or event outside the retain window.
     private func parseTokenCount(_ data: Data, url: URL, byteOffset: UInt64) -> UsageEvent? {
@@ -353,6 +391,8 @@ actor CodexUsageReader: UsageProvider {
             // retain window below.
             ts = Date()
         }
+
+        captureWindows(payload["rate_limits"], observedAt: ts)
 
         let cutoff = Date().addingTimeInterval(Double(-retainDays * 86400))
         if ts < cutoff { return nil }

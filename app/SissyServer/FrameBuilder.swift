@@ -17,8 +17,20 @@ struct StateThresholds: Sendable, Codable {
     var trendRatio: Decimal = 1.3
 }
 
+/// One subscription rate-limit window exactly as the vendor reports it.
+///
+/// `minutes` identifies the window rather than its position in the payload:
+/// Codex labels its buckets `primary`/`secondary` but a `primary` bucket is
+/// not always the 5-hour one, so anything that keys off position eventually
+/// mislabels a weekly window as a session window.
+struct UsageWindow: Sendable, Equatable, Codable {
+    let minutes: Int
+    let usedPercent: Double
+    let resetsAt: Date
+}
+
 /// Raw per-provider slice carried on the WS frame so the app can derive both
-/// the menubar header total and the Breakdown submenu rows from a single
+/// the menubar header total and the panel's per-provider rows from a single
 /// payload. Firmware ignores the field. Cost is a `Decimal` here; the wire
 /// representation is `NSDecimalNumber.stringValue` so it round-trips lossless
 /// through `Decimal(string:)` on the app side.
@@ -26,6 +38,17 @@ struct ProviderSlice: Sendable, Equatable, Codable {
     let id: String
     let tokens: Int
     let cost: Decimal
+    /// Empty whenever the provider reports no limits — an API-key user, or a
+    /// CLI that has not surfaced a window yet. The panel falls back to the
+    /// share-of-today bar rather than rendering an empty gauge.
+    let windows: [UsageWindow]
+
+    init(id: String, tokens: Int, cost: Decimal, windows: [UsageWindow] = []) {
+        self.id = id
+        self.tokens = tokens
+        self.cost = cost
+        self.windows = windows
+    }
 }
 
 struct FrameData: Sendable, Equatable, Codable {
