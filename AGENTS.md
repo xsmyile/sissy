@@ -65,7 +65,7 @@ Adding/removing Swift files requires re-running `xcodegen generate` — the proj
 
 `UsageAggregator` sums per-day totals across N `UsageProvider` instances and emits a single combined frame. The combined `tokens`/`cost`/`state` scalars are pre-formatted by the daemon for the OLED; alongside them the frame carries a raw `providers: [{id, tokens, cost}]` array so the menubar app derives both the header subtitle and the **Breakdown** submenu rows from one push-based payload. Firmware ignores `providers`. `/stats` is now diagnostic-only (`connectedClients`, `filesWatched`, `lastFrameAt`).
 
-The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client gets it replayed on connect so the OLED never shows `--` after a reconnect. Any change to the frame contract (`tokens`, `cost`, `state`, `providers`) must be made in **four** places that have no shared schema:
+The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client gets it replayed on connect so the OLED never shows `--` after a reconnect. Any change to the frame contract (`tokens`, `cost`, `state`, `providers`, `prev_tokens`/`prev_cost`) must be made in **four** places that have no shared schema — three when the field is app-only, since firmware ignores unknown keys:
 
 1. `app/SissyServer/FrameBuilder.swift` — `FrameData` shape, scalar formatters, picks `state`, owns `ProviderSlice`.
 2. `app/SissyServer/Hub.swift` — `encode(_:devicePresent:)` is where `FrameData` becomes JSON on the wire.

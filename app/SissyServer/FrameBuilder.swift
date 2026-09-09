@@ -45,6 +45,13 @@ struct FrameData: Sendable, Equatable, Codable {
     /// when no provider has tokens today (none active yet, or all idle today).
     /// App-only; firmware ignores it.
     let providers: [ProviderSlice]
+    /// Yesterday's raw totals, carried so the menubar can render a
+    /// day-over-day delta. Both nil until every active provider has produced
+    /// a `prev` snapshot — the same condition that suppresses the `trend`
+    /// state — so the app shows no delta instead of a false 0%. App-only;
+    /// firmware ignores them.
+    let prevTokens: Int?
+    let prevCost: Decimal?
 }
 
 enum FrameBuilder {
@@ -123,7 +130,9 @@ enum FrameBuilder {
             primary: primary,
             primaryLabel: primaryLabel,
             milestone: milestone,
-            providers: providers
+            providers: providers,
+            prevTokens: prev?.totalTokens,
+            prevCost: prev?.totalCost
         )
     }
 

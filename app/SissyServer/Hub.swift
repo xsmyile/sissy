@@ -64,7 +64,9 @@ actor Hub {
                 primary: frame.primary,
                 primaryLabel: frame.primaryLabel,
                 milestone: nil,
-                providers: frame.providers
+                providers: frame.providers,
+                prevTokens: frame.prevTokens,
+                prevCost: frame.prevCost
             )
             lastFrame = cached
             lastFramePayload = encode(cached, devicePresent: hasDevice())
@@ -131,6 +133,10 @@ actor Hub {
         // the steady-state frames, which is most of them.
         if let milestone = frame.milestone {
             dict["milestone"] = milestone
+        }
+        if let prevTokens = frame.prevTokens, let prevCost = frame.prevCost {
+            dict["prev_tokens"] = prevTokens
+            dict["prev_cost"] = NSDecimalNumber(decimal: prevCost).stringValue
         }
         do {
             return try JSONSerialization.data(withJSONObject: dict)

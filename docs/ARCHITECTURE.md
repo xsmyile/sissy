@@ -25,7 +25,9 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
   "providers": [
     {"id": "claude-code", "tokens": 217000000, "cost": "138.42"},
     {"id": "codex",       "tokens":  16000000, "cost":  "10.58"}
-  ]
+  ],
+  "prev_tokens": 191000000,
+  "prev_cost": "121.44"
 }
 ```
 
@@ -33,6 +35,8 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
 The firmware has an additional local-only `MS_OFFLINE` state it renders when the WS has been disconnected for more than 15 s. The server never sends `offline` over the wire.
 
 `providers` carries the raw per-provider token + cost slices (cost as a canonical decimal string so it round-trips lossless through `Decimal(string:)`). The macOS app sums it to derive both the menubar header subtitle and the "Breakdown" submenu rows from a single payload — eliminating drift between the WS-pushed header and what used to be a polled `/stats` breakdown. Firmware ignores the field; older firmware builds parse the rest of the frame unchanged. Stable order: `claude-code`, `codex`, then alphabetical. Always emitted (empty array before any provider has reported).
+
+`prev_tokens` / `prev_cost` carry yesterday's raw combined totals so the macOS app can render a day-over-day delta without a second data path. Both keys are omitted together until every active provider has produced a `prev` snapshot — the same condition that suppresses the `trend` state — so the app renders no delta rather than a false 0%. App-only; firmware ignores them.
 
 ### Client → server
 

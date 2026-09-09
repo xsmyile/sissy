@@ -92,6 +92,17 @@ func runSelfTest() {
     expect("frame state", frame.state, "code")
     expect("frame primary", frame.primary, "2.5M")
     expect("frame label", frame.primaryLabel, "TOKENS")
+    expect("frame prev tokens absent", frame.prevTokens, nil)
+    expect("frame prev cost absent", frame.prevCost, nil)
+
+    let framePrev = FrameBuilder.build(
+        today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
+        prev: DayTotals(totalTokens: 2_000_000, totalCost: Decimal(string: "31.00")!),
+        hoursElapsed: 5,
+        primaryMetric: .tokens
+    )
+    expect("frame prev tokens", framePrev.prevTokens, 2_000_000)
+    expect("frame prev cost", framePrev.prevCost, Decimal(string: "31.00")!)
 
     let frameBurn = FrameBuilder.build(
         today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),

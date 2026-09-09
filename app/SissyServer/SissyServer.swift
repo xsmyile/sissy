@@ -328,7 +328,9 @@ actor SissyServer {
                 primary: frame.primary,
                 primaryLabel: frame.primaryLabel,
                 milestone: frame.milestone,
-                providers: frame.providers
+                providers: frame.providers,
+                prevTokens: frame.prevTokens,
+                prevCost: frame.prevCost
             )
         }
         await hub.broadcast(frame)
