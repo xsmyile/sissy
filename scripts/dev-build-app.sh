@@ -9,7 +9,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$REPO_ROOT/app"
 TEAM_ID="${DEVELOPMENT_TEAM:-AS75YRKL95}"
 CONFIGURATION="${CONFIGURATION:-Debug}"
-DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$APP_DIR/build-dev}"
+# Fixed, worktree-independent build location. Two properties matter:
+# it is shared by every worktree, so exactly one dev bundle can exist no
+# matter which branch you build; and it lives under a dot-directory, which
+# Spotlight does not index, so the dev bundle never shows up next to the
+# release app in a launcher search.
+DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$HOME/.cache/sissy/build-dev}"
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -19,6 +24,41 @@ die() {
 command -v xcodegen >/dev/null || die "xcodegen not found. Install it with: brew install xcodegen"
 command -v xcodebuild >/dev/null || die "xcodebuild not found. Install Xcode and select it with xcode-select."
 command -v codesign >/dev/null || die "codesign not found."
+
+# Sweep bundles left by the legacy per-worktree path and by a plain
+# `xcodebuild` run that forgot `-derivedDataPath`. Without this, every
+# worktree and every stray build adds another indexed "Sissy" launcher.
+sweep_stray_bundles() {
+  local wt
+  while read -r wt; do
+    [[ -n "$wt" ]] || continue
+    [[ "$wt/app/build-dev" == "$DERIVED_DATA_PATH" ]] && continue
+    if [[ -d "$wt/app/build-dev" ]]; then
+      printf '==> removing stray dev build: %s\n' "$wt/app/build-dev"
+      rm -rf "$wt/app/build-dev"
+    fi
+  done < <(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree /{print $2}')
+
+  local stray
+  while read -r stray; do
+    [[ -n "$stray" ]] || continue
+    printf '==> removing stray dev build: %s\n' "$stray"
+    rm -rf "$stray"
+  done < <(
+    find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 \
+      -path '*/Sissy-*/Build/Products/*/Sissy.app' -type d 2>/dev/null
+  )
+
+  # A dev instance launched from a path we just deleted keeps running and
+  # keeps owning a status item, so the menubar shows two Sissys. The pattern
+  # cannot match /Applications/Sissy.app, so the release app is never hit.
+  if pkill -f 'build-dev/Build/Products/[^/]*/Sissy\.app/Contents/MacOS/Sissy' 2>/dev/null; then
+    printf '==> stopped a dev instance from a removed build\n'
+    sleep 1
+  fi
+}
+
+sweep_stray_bundles
 
 MARKETING_VERSION="$("$REPO_ROOT/scripts/version.sh" marketing)"
 CURRENT_PROJECT_VERSION="$("$REPO_ROOT/scripts/version.sh" build)"
@@ -66,4 +106,17 @@ if ! VERIFY_OUTPUT="$(codesign --verify --deep --strict --verbose=2 "$APP_PATH" 
 fi
 
 printf 'Built signed app: %s\n' "$APP_PATH"
-printf 'Open it with: open "%s"\n' "$APP_PATH"
+
+if [[ "${RELAUNCH:-1}" == "1" ]]; then
+  # The running instance owns the status item, so a relaunch is the only way
+  # to see the new build. Matching on the bundle path leaves the release app
+  # in /Applications untouched.
+  if pkill -f "$APP_PATH/Contents/MacOS/Sissy" 2>/dev/null; then
+    printf '==> stopped the previous dev instance\n'
+    sleep 1
+  fi
+  open "$APP_PATH"
+  printf '==> relaunched %s\n' "$APP_PATH"
+else
+  printf 'Open it with: open "%s"\n' "$APP_PATH"
+fi

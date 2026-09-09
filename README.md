@@ -64,8 +64,12 @@ Currently supports Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sess
 
 ```bash
 scripts/dev-build-app.sh
-open app/build-dev/Build/Products/Debug/Sissy.app
 ```
+
+The script builds into `~/.cache/sissy/build-dev`, removes dev bundles left by
+other worktrees or by a plain `xcodebuild`, and relaunches the result — so
+exactly one dev app exists no matter which branch you build. Pass
+`RELAUNCH=0` to skip the relaunch.
 
 Menubar → **Server** toggles the bundled LaunchAgent. When switched on it registers the daemon so it restarts on login; turning it off unregisters the agent. That control requires a normally signed app build. `CODE_SIGNING_ALLOWED=NO` is fine for CI but not for testing Server start/stop locally.
 
