@@ -149,9 +149,15 @@ actor ClaudeLimitsProbe {
         if windows.isEmpty {
             // The endpoint is undocumented: naming the keys it did send is the
             // only way to tell "no limits on this plan" from "the shape moved".
+            let shapes = Self.buckets.map { bucket -> String in
+                guard let raw = payload[bucket.key] as? [String: Any] else {
+                    return "\(bucket.key)=<missing>"
+                }
+                return "\(bucket.key)={\(raw.keys.sorted().joined(separator: "|"))}"
+            }
             report(
-                "Claude usage payload carried none of the expected buckets; keys: "
-                    + payload.keys.sorted().joined(separator: ", "))
+                "Claude usage buckets did not parse; shapes: "
+                    + shapes.joined(separator: ", "))
         }
         return windows
     }
@@ -159,15 +165,29 @@ actor ClaudeLimitsProbe {
     static func parse(_ payload: [String: Any]) -> [UsageWindow] {
         buckets.compactMap { bucket in
             guard let raw = payload[bucket.key] as? [String: Any],
-                let utilization = raw["utilization"] as? Double,
-                let resetsAt = parseReset(raw["resets_at"])
+                let resetsAt = parseReset(raw["resets_at"]),
+                let usedPercent = utilization(of: raw)
             else { return nil }
             return UsageWindow(
                 minutes: bucket.minutes,
-                usedPercent: utilization,
+                usedPercent: usedPercent,
                 resetsAt: resetsAt
             )
         }
+    }
+
+    /// How much of the window is gone, as a percentage.
+    ///
+    /// A bucket reports either a ready-made `utilization` or a dollar budget,
+    /// depending on the plan — and a dollar-metered bucket sends `utilization`
+    /// as JSON null, which is why the percentage cannot simply be read.
+    private static func utilization(of bucket: [String: Any]) -> Double? {
+        if let direct = bucket["utilization"] as? Double { return direct }
+        guard let used = bucket["used_dollars"] as? Double,
+            let limit = bucket["limit_dollars"] as? Double,
+            limit > 0
+        else { return nil }
+        return used / limit * 100
     }
 
     /// `resets_at` is accepted both as epoch seconds and as an ISO-8601

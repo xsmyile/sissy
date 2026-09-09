@@ -1149,6 +1149,22 @@ func runClaudeLimitsParseTests() {
         true
     )
 
+    // A dollar-metered plan sends `utilization` as JSON null and budgets in
+    // dollars instead; reading the percentage alone yields nothing.
+    let dollarPayload: [String: Any] = [
+        "five_hour": [
+            "utilization": NSNull(),
+            "used_dollars": 12.5,
+            "limit_dollars": 50.0,
+            "resets_at": 1_789_006_037.0,
+        ]
+    ]
+    expect(
+        "dollar-metered bucket becomes a percentage",
+        ClaudeLimitsProbe.parse(dollarPayload).first?.usedPercent,
+        25.0
+    )
+
     let partial: [String: Any] = ["five_hour": ["utilization": 5.0]]
     expect("a bucket without a reset is dropped", ClaudeLimitsProbe.parse(partial).count, 0)
 }
