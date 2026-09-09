@@ -280,9 +280,16 @@ actor ClaudeCodeUsageReader: UsageProvider {
         await poll()
         // Cold backfill done: from here on `prev` is consistent with the
         // full in-window JSONL state, safe to expose to `pickState`. Order
-        // matters — set this before any further emit so the first
-        // post-backfill frame is the one that introduces `prev` to the UI.
+        // matters — set this before the emit below so that frame is the one
+        // that introduces `prev` to the UI.
         coldScanComplete = true
+        // Every backfill emit ran with `prev` still suppressed, and `poll()`
+        // re-emits only when JSONL actually changed. Without this emit an
+        // idle CLI leaves `Hub`'s cached frame built from a nil `prev`, so
+        // `pickState` cannot reach `trend` until the next turn writes a line.
+        let (warmToday, warmPrev) = current()
+        lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
+        await onChange(warmToday, warmPrev)
         startFSWatcher()
         let interval = pollInterval
         pollTask = Task { [weak self] in

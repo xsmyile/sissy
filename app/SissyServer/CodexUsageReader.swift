@@ -151,6 +151,11 @@ actor CodexUsageReader: UsageProvider {
         }
         await poll()
         coldScanComplete = true
+        // See ClaudeCodeUsageReader.start for why the post-backfill emit is
+        // explicit rather than left to the next `poll()`.
+        let (warmToday, warmPrev) = current()
+        lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
+        await onChange(warmToday, warmPrev)
         startFSWatcher()
         let interval = pollInterval
         pollTask = Task { [weak self] in
