@@ -224,18 +224,29 @@ actor ClaudeCodeUsageReader: UsageProvider {
         return Date(timeIntervalSince1970: TimeInterval(epoch) + frac)
     }
 
+    private let limitsProbe: ClaudeLimitsProbe?
+
     init(
         claudeDir: URL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/projects"),
         retainDays: Int = 2,
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
-        pricingOverride: [String: ModelPricing]? = nil
+        pricingOverride: [String: ModelPricing]? = nil,
+        limitsProbe: ClaudeLimitsProbe? = nil
     ) {
         self.claudeDir = claudeDir
         self.retainDays = retainDays
         self.pollInterval = pollInterval
         self.persistenceURL = persistenceURL
         self.pricingOverride = pricingOverride
+        self.limitsProbe = limitsProbe
+    }
+
+    /// Claude Code keeps no limit state on disk, so the windows come from the
+    /// probe rather than from anything this reader parsed.
+    func currentWindows() async -> [UsageWindow] {
+        guard let limitsProbe else { return [] }
+        return await limitsProbe.currentWindows()
     }
 
     func applyPriceCatalog(_ catalog: PriceCatalog) {

@@ -13,6 +13,7 @@ struct Preferences: Codable, Equatable {
     var costThresholdGlow: Double = 100
     var costThresholdAngry: Double = 200
     var costThresholdTrendRatio: Double = 1.3
+    var claudeLimits: Bool = false
     var notifyOnMascotChange: Bool = true
     var milestoneFrequency: MilestoneFrequency = .normal
 
@@ -78,6 +79,7 @@ struct Preferences: Codable, Equatable {
         costThresholdGlow: Double = 100,
         costThresholdAngry: Double = 200,
         costThresholdTrendRatio: Double = 1.3,
+        claudeLimits: Bool = false,
         notifyOnMascotChange: Bool = true,
         milestoneFrequency: MilestoneFrequency = .normal
     ) {
@@ -89,6 +91,7 @@ struct Preferences: Codable, Equatable {
         self.costThresholdGlow = costThresholdGlow
         self.costThresholdAngry = costThresholdAngry
         self.costThresholdTrendRatio = costThresholdTrendRatio
+        self.claudeLimits = claudeLimits
         self.notifyOnMascotChange = notifyOnMascotChange
         self.milestoneFrequency = milestoneFrequency
     }
@@ -106,6 +109,7 @@ struct Preferences: Codable, Equatable {
         costThresholdGlow = (try? c.decode(Double.self, forKey: .costThresholdGlow)) ?? 100
         costThresholdAngry = (try? c.decode(Double.self, forKey: .costThresholdAngry)) ?? 200
         costThresholdTrendRatio = (try? c.decode(Double.self, forKey: .costThresholdTrendRatio)) ?? 1.3
+        claudeLimits = (try? c.decode(Bool.self, forKey: .claudeLimits)) ?? false
         notifyOnMascotChange = (try? c.decode(Bool.self, forKey: .notifyOnMascotChange)) ?? true
         milestoneFrequency = (try? c.decode(MilestoneFrequency.self, forKey: .milestoneFrequency)) ?? .normal
     }

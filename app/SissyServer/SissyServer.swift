@@ -45,6 +45,10 @@ actor SissyServer {
     /// the readers persist. Snapshot on disk lives next to
     /// `usage-state.json`.
     private var milestones: MilestoneTracker = MilestoneTracker()
+    /// Polls Claude Code's subscription windows. Constructed unconditionally
+    /// so the toggle can start it later without rebuilding the provider list;
+    /// it does nothing until `start` is called.
+    private let claudeLimitsProbe: ClaudeLimitsProbe
 
     init(
         config: ServerConfig,
@@ -67,6 +71,8 @@ actor SissyServer {
         let codexOn =
             config.providers.codex
             ?? FileManager.default.fileExists(atPath: config.resolvedCodexDataDir.path)
+        let limitsProbe = ClaudeLimitsProbe()
+        self.claudeLimitsProbe = limitsProbe
         var providers: [any UsageProvider] = []
         if claudeOn {
             // Legacy persistence URL on purpose: existing installs already
@@ -78,7 +84,8 @@ actor SissyServer {
                     claudeDir: config.resolvedClaudeDataDir,
                     pollInterval: pollInterval,
                     persistenceURL: UsageStatePersistence.defaultURL,
-                    pricingOverride: config.pricingOverride
+                    pricingOverride: config.pricingOverride,
+                    limitsProbe: limitsProbe
                 ))
         }
         if codexOn {
@@ -152,10 +159,37 @@ actor SissyServer {
         await rebroadcastFromCache()
     }
 
+    /// Turn the Claude Code limit probe on or off and persist the choice.
+    /// Starting it is what triggers the one-time keychain prompt, so this is
+    /// only ever reached from an explicit user action.
+    func setClaudeLimits(enabled: Bool) async {
+        if enabled == config.claudeLimits { return }
+        config.claudeLimits = enabled
+        do {
+            try ServerConfig.save(config, to: configURL)
+        } catch {
+            daemonLog(
+                "sissy-serverd: failed to persist claudeLimits to \(configURL.path): \(error)")
+        }
+        if enabled {
+            await startClaudeLimitsProbe()
+        } else {
+            await claudeLimitsProbe.stop()
+        }
+        await rebroadcastFromCache()
+    }
+
+    private func startClaudeLimitsProbe() async {
+        let me = self
+        await claudeLimitsProbe.start {
+            await me.rebroadcastFromCache()
+        }
+    }
+
     /// Re-emit a frame using the most recently observed totals. No-op if the
     /// reader hasn't produced a frame yet — the pending pin will take effect
     /// on the first real poll.
-    private func rebroadcastFromCache() async {
+    func rebroadcastFromCache() async {
         guard let totals = lastTotals else { return }
         await rebuildAndBroadcast(today: totals.today, prev: totals.prev, slices: totals.slices)
     }
@@ -185,6 +219,9 @@ actor SissyServer {
             await resolveInitialPriceCatalog()
         } else {
             daemonLog("sissy-serverd: remote pricing disabled — using the embedded rate seed")
+        }
+        if config.claudeLimits {
+            await startClaudeLimitsProbe()
         }
         let server = self
         bootTask = Task.detached { [aggregator] in
@@ -244,6 +281,7 @@ actor SissyServer {
         bootTask?.cancel()
         priceCatalogTask?.cancel()
         try? await channel?.close().get()
+        await claudeLimitsProbe.stop()
         await aggregator.stop()
         bootTask = nil
         priceCatalogTask = nil

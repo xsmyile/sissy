@@ -301,6 +301,12 @@ final class SissyModel {
         webSocketClient.setMascotPin(state: nil)
     }
 
+    func toggleClaudeLimits() {
+        preferences.claudeLimits.toggle()
+        savePreferences()
+        webSocketClient.setClaudeLimits(preferences.claudeLimits)
+    }
+
     func toggleNotifications() {
         preferences.notifyOnMascotChange.toggle()
         savePreferences()

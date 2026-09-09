@@ -12,9 +12,11 @@ private struct ClientMessage: Decodable {
     let client: String?
     let state: String?
     let value: String?
+    let claudeLimits: Bool?
 
     enum CodingKeys: String, CodingKey {
         case type, client, state, value
+        case claudeLimits = "claude_limits"
         case primaryMetric = "primary_metric"
         case milestoneFrequency = "milestone_frequency"
     }
@@ -150,6 +152,10 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
                 let server = self.server
                 Task { await server.setMilestoneFrequency(freq) }
             }
+            if let claudeLimits = msg.claudeLimits {
+                let server = self.server
+                Task { await server.setClaudeLimits(enabled: claudeLimits) }
+            }
             // Tag this sink as app vs device so the Hub can flip
             // `device_present` in broadcast frames. Mac app sends
             // `client: "mac-app"`; firmware sends no `client` key, so any
@@ -165,6 +171,10 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
             // `state` absent or "auto" → clear pin and resume computed state.
             let server = self.server
             Task { await server.setPinnedState(msg.state) }
+        case "set_claude_limits":
+            guard let enabled = msg.claudeLimits else { return }
+            let server = self.server
+            Task { await server.setClaudeLimits(enabled: enabled) }
         case "set_milestone_frequency":
             // Invalid keys (typos, future values) are dropped by the actor's
             // `MilestoneFrequency.isValid` guard; no error path needed here.

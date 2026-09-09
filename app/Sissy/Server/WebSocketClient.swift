@@ -144,6 +144,18 @@ final class WebSocketClient {
         send(payload, label: "set_milestone_frequency", on: task)
     }
 
+    /// Ask the daemon to read (or stop reading) Claude Code's OAuth token so
+    /// it can publish that CLI's subscription windows. Also carried on
+    /// `hello`, so a reconnect re-asserts the user's choice.
+    func setClaudeLimits(_ enabled: Bool) {
+        guard let task else { return }
+        let payload: [String: Any] = [
+            "type": "set_claude_limits",
+            "claude_limits": enabled,
+        ]
+        send(payload, label: "set_claude_limits", on: task)
+    }
+
     /// Pin the mascot to `state` on the daemon (sticky until cleared).
     /// Passing nil clears the pin so the daemon resumes the computed state.
     func setMascotPin(state: String?) {
@@ -172,6 +184,7 @@ final class WebSocketClient {
             "client": "mac-app",
             "primary_metric": metric,
             "milestone_frequency": model.preferences.milestoneFrequency.rawValue,
+            "claude_limits": model.preferences.claudeLimits,
         ]
         // Connection might be mid-handshake; the next reconnect re-sends.
         send(payload, label: "hello", on: task)

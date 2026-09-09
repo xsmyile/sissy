@@ -11,6 +11,7 @@ final class PreferencesTests: XCTestCase {
         // release daemon on 8787 without preferences hand-edit.
         XCTAssertEqual(prefs.serverPort, SissyPaths.defaultServerPort)
         XCTAssertEqual(prefs.costThresholdTrendRatio, 1.3)
+        XCTAssertFalse(prefs.claudeLimits)
     }
 
     func testGeneratedSecretShape() {

@@ -331,6 +331,7 @@ func runSelfTest() {
     runCodexParserTests()
     runCodexModelBackfillTest()
     runCodexRateLimitTest()
+    runClaudeLimitsParseTests()
 
     print("=== FSWatcher ===")
     runFSWatcherTests()
@@ -1050,6 +1051,57 @@ private func runCodexParserTests() {
     }
     sem2.wait()
     expect("codex re-ingest matches first pass", replay.value, box.value.tokens)
+}
+
+/// Claude Code publishes no limit state on disk, so both halves of that path
+/// are parsers over shapes Sissy does not own: the credential blob in the
+/// login keychain and the undocumented usage payload. Neither touches the
+/// keychain or the network here.
+func runClaudeLimitsParseTests() {
+    print("=== ClaudeLimits.parse ===")
+
+    let credentialBlob = Data(
+        #"{"claudeAiOauth":{"accessToken":"tok","refreshToken":"r","expiresAt":1789006037000}}"#
+            .utf8
+    )
+    let credentials = ClaudeCredentialsStore.parse(credentialBlob)
+    expect("credentials access token", credentials?.accessToken, "tok")
+    // Claude Code writes the expiry in milliseconds; read as seconds it would
+    // land in the year 58,000 and every token would look valid forever.
+    expect(
+        "credentials expiry normalised to seconds",
+        credentials?.expiresAt,
+        Date(timeIntervalSince1970: 1_789_006_037)
+    )
+
+    let noToken = Data(#"{"claudeAiOauth":{"refreshToken":"r","expiresAt":1}}"#.utf8)
+    expect(
+        "credentials without an access token are unusable",
+        ClaudeCredentialsStore.parse(noToken) == nil,
+        true
+    )
+
+    let epochPayload: [String: Any] = [
+        "five_hour": ["utilization": 25.0, "resets_at": 1_789_006_037.0],
+        "seven_day": ["utilization": 62.0, "resets_at": 1_789_549_854.0],
+    ]
+    let windows = ClaudeLimitsProbe.parse(epochPayload)
+    expect("usage payload yields both windows", windows.count, 2)
+    expect("session window length", windows.first?.minutes, 300)
+    expect("weekly window length", windows.last?.minutes, 10_080)
+    expect("session utilization", windows.first?.usedPercent, 25.0)
+
+    let isoPayload: [String: Any] = [
+        "five_hour": ["utilization": 5.0, "resets_at": "2026-09-09T21:27:17.000Z"]
+    ]
+    expect(
+        "reset accepted as an ISO timestamp",
+        ClaudeLimitsProbe.parse(isoPayload).first?.resetsAt != nil,
+        true
+    )
+
+    let partial: [String: Any] = ["five_hour": ["utilization": 5.0]]
+    expect("a bucket without a reset is dropped", ClaudeLimitsProbe.parse(partial).count, 0)
 }
 
 /// Codex ships its subscription limits on the same `token_count` event the

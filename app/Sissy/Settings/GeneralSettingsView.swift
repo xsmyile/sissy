@@ -64,6 +64,17 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Toggle("Show Claude Code limits", isOn: claudeLimitsBinding)
+                Text(
+                    "Reads the token Claude Code already keeps in your keychain to show its "
+                        + "5-hour and weekly windows next to Codex's. macOS asks once; Sissy "
+                        + "only ever reads it."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 LabeledContent("Files") {
                     HStack(spacing: 14) {
                         Button("Open logs") { model.openLogs() }
@@ -111,6 +122,13 @@ struct GeneralSettingsView: View {
                     model.pinMascot(wire)
                 }
             }
+        )
+    }
+
+    private var claudeLimitsBinding: Binding<Bool> {
+        Binding(
+            get: { model.preferences.claudeLimits },
+            set: { _ in model.toggleClaudeLimits() }
         )
     }
 
