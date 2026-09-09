@@ -15,6 +15,7 @@ actor ClaudeLimitsProbe {
     private static let requestTimeout: TimeInterval = 10
     private static let refreshInterval: Duration = .seconds(300)
     private static let rateLimitedBackoff: Duration = .seconds(1800)
+    private static let keychainTimeout: Duration = .seconds(20)
 
     /// Wire key to window length. Anthropic publishes finer buckets
     /// (`seven_day_opus`, `seven_day_sonnet`); the panel shows the two that
@@ -26,8 +27,10 @@ actor ClaudeLimitsProbe {
 
     nonisolated private let windows = AtomicWindows()
     private var pollTask: Task<Void, Never>?
-    private var reportedDenial = false
-    private var reportedRateLimit = false
+    /// Last condition logged, so a poll that keeps failing the same way says
+    /// so once instead of every five minutes — and a *different* failure
+    /// still gets through.
+    private var lastReported: String?
 
     /// Live windows, expired buckets dropped — a window past its reset
     /// describes a period that no longer exists, same rule the Codex reader
@@ -56,48 +59,70 @@ actor ClaudeLimitsProbe {
         pollTask = nil
     }
 
+    /// Logs `message` the first time this condition is seen, and again only
+    /// once something else has happened in between.
+    private func report(_ message: String) {
+        if lastReported == message { return }
+        lastReported = message
+        daemonLog("sissy-serverd: \(message)")
+    }
+
     /// One poll. Returns how long to wait before the next one.
     private func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
         let credentials: ClaudeCredentials
-        switch await ClaudeCredentialsStore.loadOffPool() {
+        switch await ClaudeCredentialsStore.loadOffPool(timeout: Self.keychainTimeout) {
         case .found(let found):
             credentials = found
         case .absent:
+            report(
+                "no Claude Code credentials in the keychain under "
+                    + "\(ClaudeCredentialsStore.keychainService); limits stay hidden until you "
+                    + "sign into the CLI")
             return Self.refreshInterval
         case .denied:
-            if !reportedDenial {
-                reportedDenial = true
-                daemonLog(
-                    "sissy-serverd: keychain access to \(ClaudeCredentialsStore.keychainService) "
-                        + "was refused; Claude Code limits stay hidden. Re-enable it in "
-                        + "Keychain Access, or turn the setting off.")
-            }
+            report(
+                "keychain access to \(ClaudeCredentialsStore.keychainService) was refused; "
+                    + "Claude Code limits stay hidden. Grant it in Keychain Access, or turn "
+                    + "the setting off")
             stop()
             return Self.refreshInterval
         case .unreadable(let status):
-            daemonLog("sissy-serverd: could not read Claude credentials (OSStatus \(status))")
+            report("could not read Claude credentials (OSStatus \(status))")
+            return Self.refreshInterval
+        case .timedOut:
+            report(
+                "the keychain did not answer within \(Self.keychainTimeout); Claude limits are "
+                    + "waiting on an authorization prompt")
             return Self.refreshInterval
         }
 
-        guard credentials.isValid() else { return Self.refreshInterval }
+        guard credentials.isValid() else {
+            report(
+                "the Claude Code access token expired at \(credentials.expiresAt); waiting for "
+                    + "the CLI to renew it")
+            return Self.refreshInterval
+        }
 
         do {
             let fetched = try await fetch(token: credentials.accessToken)
-            reportedRateLimit = false
+            let summary =
+                fetched
+                .map { "\($0.minutes)m \(Int($0.usedPercent.rounded()))%" }
+                .joined(separator: ", ")
+            report("Claude limits — " + (summary.isEmpty ? "endpoint returned no window" : summary))
             if fetched != windows.load() {
                 windows.store(fetched)
                 await onRefresh()
             }
             return Self.refreshInterval
         } catch ClaudeLimitsError.rateLimited {
-            if !reportedRateLimit {
-                reportedRateLimit = true
-                daemonLog(
-                    "sissy-serverd: Claude usage endpoint returned 429; backing off for "
-                        + "\(Self.rateLimitedBackoff)")
-            }
+            report("Claude usage endpoint returned 429; backing off for \(Self.rateLimitedBackoff)")
             return Self.rateLimitedBackoff
+        } catch ClaudeLimitsError.badStatus(let code) {
+            report("Claude usage endpoint returned HTTP \(code)")
+            return Self.refreshInterval
         } catch {
+            report("Claude usage request failed: \(error.localizedDescription)")
             return Self.refreshInterval
         }
     }

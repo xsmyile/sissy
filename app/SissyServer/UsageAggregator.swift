@@ -69,6 +69,14 @@ actor UsageAggregator {
         aggregate()
     }
 
+    /// Slices rebuilt against each provider's *current* windows. A rate-limit
+    /// refresh changes no token total, so a rebroadcast that replayed the
+    /// cached slices would keep shipping the windows captured at the last
+    /// ingest — invisible until the CLI happened to write another event.
+    func currentSlices() -> [ProviderSlice] {
+        currentProviderSlices()
+    }
+
     /// Live sum of each provider's `filesWatched()`. Computed on demand
     /// because providers' own counters update during cold-scan / poll even
     /// when no `onChange` fires (e.g. restart from a persisted snapshot

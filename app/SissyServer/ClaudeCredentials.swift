@@ -23,6 +23,11 @@ enum ClaudeCredentialsLookup: Sendable {
     case absent
     case denied
     case unreadable(OSStatus)
+    /// The lookup outlived its budget. `SecItemCopyMatching` blocks while
+    /// macOS decides whether to authorize, and that decision can wait on a
+    /// dialog nobody answers — or, from a process with no way to show one,
+    /// never resolve at all.
+    case timedOut
 }
 
 enum ClaudeCredentialsStore {
@@ -36,15 +41,30 @@ enum ClaudeCredentialsStore {
     /// keeps the parse correct if that ever changes.
     private static let secondsUpperBound: Double = 4_102_444_800
 
-    /// `SecItemCopyMatching` blocks for as long as the macOS authorization
-    /// dialog is on screen — minutes, if the user walks away. Off the
-    /// cooperative pool it is a parked dispatch thread; on it, it would pin a
-    /// thread the whole runtime shares.
-    static func loadOffPool() async -> ClaudeCredentialsLookup {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                continuation.resume(returning: load())
+    /// `SecItemCopyMatching` blocks for as long as macOS takes to authorize,
+    /// which is unbounded: it can sit behind a dialog nobody answers. The call
+    /// runs off the cooperative pool so it parks a dispatch thread rather than
+    /// one the whole runtime shares, and the caller gives up after `timeout`
+    /// instead of leaving a poll loop stopped forever with nothing logged.
+    ///
+    /// The abandoned lookup is left to finish on its own; its result is
+    /// discarded rather than resumed into a continuation nobody holds.
+    static func loadOffPool(timeout: Duration) async -> ClaudeCredentialsLookup {
+        await withTaskGroup(of: ClaudeCredentialsLookup?.self) { group in
+            group.addTask {
+                await withCheckedContinuation { continuation in
+                    DispatchQueue.global(qos: .utility).async {
+                        continuation.resume(returning: load())
+                    }
+                }
             }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? .timedOut
         }
     }
 

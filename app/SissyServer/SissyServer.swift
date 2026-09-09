@@ -191,7 +191,8 @@ actor SissyServer {
     /// on the first real poll.
     func rebroadcastFromCache() async {
         guard let totals = lastTotals else { return }
-        await rebuildAndBroadcast(today: totals.today, prev: totals.prev, slices: totals.slices)
+        let slices = await aggregator.currentSlices()
+        await rebuildAndBroadcast(today: totals.today, prev: totals.prev, slices: slices)
     }
 
     func start() async throws {
@@ -220,6 +221,8 @@ actor SissyServer {
         } else {
             daemonLog("sissy-serverd: remote pricing disabled — using the embedded rate seed")
         }
+        daemonLog(
+            "sissy-serverd: claude limits — \(config.claudeLimits ? "on" : "off")")
         if config.claudeLimits {
             await startClaudeLimitsProbe()
         }
