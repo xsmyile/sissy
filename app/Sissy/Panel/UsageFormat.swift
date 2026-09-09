@@ -31,12 +31,8 @@ enum UsageFormat {
         }
     }
 
-    static func breakdownSubtitle(tokens: Int, cost: Decimal) -> String {
-        "\(self.tokens(tokens)) tok · \(self.cost(cost))"
-    }
-
     /// Header subtitle for the menubar pull-down. Sums the provider slices the
-    /// daemon shipped so the total matches the sum of the Breakdown rows to
+    /// daemon shipped so the total matches the panel's per-provider rows to
     /// the penny. Burn rate isn't per-provider, so it passes through
     /// daemon-formatted.
     static func headerSubtitle(

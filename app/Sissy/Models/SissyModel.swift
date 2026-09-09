@@ -82,22 +82,13 @@ final class SissyModel {
         let statusIcon: StatusIconSnapshot
         let server: ServerItemSnapshot
         let primaryMetric: Preferences.PrimaryMetric
-        let milestoneFrequency: Preferences.MilestoneFrequency
-        let mascotLabel: String
-        let pinnedMascot: String?
         let canPickMascot: Bool
-        let notifyOnMascotChange: Bool
         /// Hide the "Metric" submenu when no firmware companion is attached.
         /// The setting only affects the OLED's primary-slot render — the
         /// menubar header already prints tokens · cost · burn unconditionally,
         /// so without a device the row is a dead option. Pre-first-frame this
         /// stays true so the row doesn't flicker hidden→visible on connect.
         let showMetric: Bool
-        /// Per-provider usage rows for the "Breakdown" submenu. Empty or
-        /// single-entry lists are suppressed by the menu builder — only
-        /// shown when at least two providers are active so a single-CLI
-        /// install never sees a useless one-row submenu.
-        let providerBreakdown: [DisplayFrame.ProviderSlice]
     }
 
     struct HeaderSnapshot {
@@ -139,13 +130,8 @@ final class SissyModel {
             ),
             server: serverItemSnapshot,
             primaryMetric: preferences.primaryMetric,
-            milestoneFrequency: preferences.milestoneFrequency,
-            mascotLabel: currentMascotLabel,
-            pinnedMascot: pinnedMascot,
             canPickMascot: webSocketClient.isConnected,
-            notifyOnMascotChange: preferences.notifyOnMascotChange,
-            showMetric: currentFrame?.devicePresent ?? true,
-            providerBreakdown: linkUp ? (currentFrame?.providers ?? []) : []
+            showMetric: currentFrame?.devicePresent ?? true
         )
     }
 
@@ -370,11 +356,6 @@ final class SissyModel {
             subtitle: subtitle,
             isEnabled: serverService.isAvailable && !busy
         )
-    }
-
-    private var currentMascotLabel: String {
-        guard let wire = pinnedMascot else { return "Auto" }
-        return Self.mascotStates.first(where: { $0.wire == wire })?.label ?? "Auto"
     }
 
     private func headerTitle(linkUp: Bool) -> String {

@@ -16,11 +16,6 @@ final class StatusItemController: NSObject {
     private let headerItem = NSMenuItem()
     private let serverItem = NSMenuItem(title: "Server", action: nil, keyEquivalent: "")
     private let metricItem = NSMenuItem(title: "Metric", action: nil, keyEquivalent: "")
-    private let milestonesItem = NSMenuItem(title: "Milestones", action: nil, keyEquivalent: "")
-    private let mascotItem = NSMenuItem(title: "Mascot", action: nil, keyEquivalent: "")
-    /// "Breakdown" submenu shown only when the daemon reports two or more
-    /// active providers. A single-CLI install never sees a one-row submenu.
-    private let breakdownItem = NSMenuItem(title: "Breakdown", action: nil, keyEquivalent: "")
     private let pairItem = NSMenuItem(title: "Pair Device...", action: nil, keyEquivalent: "p")
 
     private var headerView: NSHostingView<HeaderRowView>?
@@ -69,12 +64,6 @@ final class StatusItemController: NSObject {
     private func configureSubmenus() {
         metricItem.submenu = NSMenu()
         metricItem.submenu?.delegate = self
-        milestonesItem.submenu = NSMenu()
-        milestonesItem.submenu?.delegate = self
-        mascotItem.submenu = NSMenu()
-        mascotItem.submenu?.delegate = self
-        breakdownItem.submenu = NSMenu()
-        breakdownItem.submenu?.delegate = self
     }
 
     private func buildMenu() {
@@ -88,9 +77,6 @@ final class StatusItemController: NSObject {
         serverItem.target = self
         serverItem.action = #selector(handleServer)
         menu.addItem(serverItem)
-
-        menu.addItem(milestonesItem)
-        menu.addItem(mascotItem)
 
         menu.addItem(.separator())
 
@@ -163,22 +149,14 @@ final class StatusItemController: NSObject {
 
         metricItem.subtitle = snapshot.primaryMetric.label
         setItemPresent(metricItem, present: snapshot.showMetric, after: serverItem)
-        milestonesItem.subtitle = "every \(snapshot.milestoneFrequency.detail)"
-        mascotItem.subtitle = snapshot.mascotLabel
-
-        let showBreakdown = snapshot.providerBreakdown.count >= 2
-        breakdownItem.subtitle =
-            showBreakdown
-            ? "\(snapshot.providerBreakdown.count) sources" : ""
-        setItemPresent(breakdownItem, present: showBreakdown, after: mascotItem)
     }
 
     /// Insert or remove `item` so it sits directly after `anchor`. Visibility
     /// is driven by structural mutation instead of `NSMenuItem.isHidden`
     /// because NSMenu re-flows on `insertItem`/`removeItem` mid-tracking but
-    /// caches item rects across an `isHidden` flip — the latter produced the
-    /// clipped-row glitch when `providerBreakdown` crossed the ≥2 threshold
-    /// while the menu was already on screen.
+    /// caches item rects across an `isHidden` flip — the latter produced a
+    /// clipped row when the device connected while the menu was already on
+    /// screen.
     private func setItemPresent(_ item: NSMenuItem, present: Bool, after anchor: NSMenuItem) {
         let containsItem = menu.items.contains(item)
         if present, !containsItem {
@@ -206,81 +184,6 @@ final class StatusItemController: NSObject {
             item.state = (metric == snapshot.primaryMetric) ? .on : .off
             submenu.addItem(item)
         }
-    }
-
-    private func rebuildMilestonesSubmenu(_ submenu: NSMenu) {
-        let snapshot = model.menuSnapshot
-        submenu.removeAllItems()
-        for preset in Preferences.MilestoneFrequency.allCases {
-            let item = NSMenuItem(
-                title: preset.label,
-                action: #selector(pickMilestone(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.subtitle = preset.detail
-            item.representedObject = preset.rawValue
-            item.state = (preset == snapshot.milestoneFrequency) ? .on : .off
-            submenu.addItem(item)
-        }
-    }
-
-    private func rebuildBreakdownSubmenu(_ submenu: NSMenu) {
-        let rows = model.menuSnapshot.providerBreakdown
-        submenu.removeAllItems()
-        for row in rows {
-            let item = NSMenuItem(
-                title: UsageFormat.providerName(row.id),
-                action: nil,
-                keyEquivalent: ""
-            )
-            item.isEnabled = false
-            item.subtitle = UsageFormat.breakdownSubtitle(tokens: row.tokens, cost: row.cost)
-            submenu.addItem(item)
-        }
-        if rows.isEmpty {
-            let empty = NSMenuItem(title: "No data yet", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            submenu.addItem(empty)
-        }
-    }
-
-    private func rebuildMascotSubmenu(_ submenu: NSMenu) {
-        let snapshot = model.menuSnapshot
-        submenu.removeAllItems()
-
-        let autoActive = snapshot.pinnedMascot == nil
-        let auto = NSMenuItem(title: "Auto", action: #selector(pickMascotAuto), keyEquivalent: "")
-        auto.target = self
-        auto.state = autoActive ? .on : .off
-        auto.isEnabled = snapshot.canPickMascot || autoActive
-        submenu.addItem(auto)
-
-        submenu.addItem(.separator())
-
-        for entry in SissyModel.mascotStates {
-            let item = NSMenuItem(
-                title: entry.label,
-                action: #selector(pickMascot(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = entry.wire
-            item.state = (snapshot.pinnedMascot == entry.wire) ? .on : .off
-            item.isEnabled = snapshot.canPickMascot
-            submenu.addItem(item)
-        }
-
-        submenu.addItem(.separator())
-
-        let notify = NSMenuItem(
-            title: "Show mood pop-up",
-            action: #selector(toggleNotify),
-            keyEquivalent: ""
-        )
-        notify.target = self
-        notify.state = snapshot.notifyOnMascotChange ? .on : .off
-        submenu.addItem(notify)
     }
 
     // MARK: Actions
@@ -315,26 +218,6 @@ final class StatusItemController: NSObject {
             let value = Preferences.PrimaryMetric(rawValue: raw)
         else { return }
         model.selectMetric(value)
-    }
-
-    @objc private func pickMilestone(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-            let value = Preferences.MilestoneFrequency(rawValue: raw)
-        else { return }
-        model.selectMilestoneFrequency(value)
-    }
-
-    @objc private func pickMascotAuto() {
-        model.clearMascotPin()
-    }
-
-    @objc private func pickMascot(_ sender: NSMenuItem) {
-        guard let wire = sender.representedObject as? String else { return }
-        model.pinMascot(wire)
-    }
-
-    @objc private func toggleNotify() {
-        model.toggleNotifications()
     }
 
     @objc private func handlePair() {
@@ -377,12 +260,6 @@ extension StatusItemController: NSMenuDelegate {
             self.refreshTopLevelItems(self.model.menuSnapshot)
         } else if menu === self.metricItem.submenu {
             self.rebuildMetricSubmenu(menu)
-        } else if menu === self.milestonesItem.submenu {
-            self.rebuildMilestonesSubmenu(menu)
-        } else if menu === self.mascotItem.submenu {
-            self.rebuildMascotSubmenu(menu)
-        } else if menu === self.breakdownItem.submenu {
-            self.rebuildBreakdownSubmenu(menu)
         }
     }
 }
