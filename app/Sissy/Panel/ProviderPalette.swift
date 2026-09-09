@@ -7,8 +7,10 @@ import SwiftUI
 enum ProviderPalette {
     /// Claude's coral, `#D97757`.
     static let claudeCode = Color(red: 0.851, green: 0.467, blue: 0.341)
-    /// OpenAI's green, `#10A37F`.
-    static let codex = Color(red: 0.063, green: 0.639, blue: 0.498)
+    /// OpenAI's monochrome mark. `.primary` rather than a literal white so it
+    /// stays the brand's own colour in dark mode and does not vanish into the
+    /// popover in light mode.
+    static let codex = Color.primary
 
     static func tint(for id: String) -> Color {
         switch id {
