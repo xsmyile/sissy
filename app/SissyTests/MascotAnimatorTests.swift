@@ -14,6 +14,37 @@ final class MascotAnimatorTests: XCTestCase {
         try SissyMenuBarAnimator(button: button, iconSize: iconSize, reduceMotion: { reduceMotion })
     }
 
+    /// Hands the main actor over until the gesture has drawn something.
+    ///
+    /// `play` only enqueues its playback task, so anything asserted straight
+    /// after it is asserted against the resting image the animator has not
+    /// left yet — which is how an assertion about playback passes without any
+    /// playback happening.
+    private func waitForFirstFrame(
+        on button: NSButton,
+        leaving resting: NSImage?,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<Self.yieldBudget where button.image === resting {
+            await Task.yield()
+        }
+        XCTAssertNotIdentical(button.image, resting, "the gesture drew no frame", line: line)
+    }
+
+    /// Waits for a gesture to end by itself. A blink is 380 ms of real time,
+    /// so this yields rather than sleeps, and fails on the deadline instead of
+    /// hanging the suite if playback never finishes.
+    private func waitUntilIdle(_ animator: SissyMenuBarAnimator, line: UInt = #line) async {
+        let deadline = ContinuousClock.now + Self.playbackDeadline
+        while animator.isPlaying, ContinuousClock.now < deadline {
+            await Task.yield()
+        }
+        XCTAssertFalse(animator.isPlaying, "the gesture never finished", line: line)
+    }
+
+    private static let yieldBudget = 10_000
+    private static let playbackDeadline: Duration = .seconds(3)
+
     /// The frames are addressed by name, so nothing but loading them catches a
     /// catalogue that was regenerated with a different set.
     func testEveryFrameOfEveryGestureLoadsFromTheCatalogue() throws {
@@ -33,23 +64,42 @@ final class MascotAnimatorTests: XCTestCase {
         XCTAssertEqual(button.image?.isTemplate, true)
     }
 
-    func testStopRestoresTheExactRestingImage() throws {
+    func testStopRestoresTheExactRestingImage() async throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
-        let idle = button.image
+        let resting = button.image
 
         XCTAssertTrue(animator.play(.blink))
+        await waitForFirstFrame(on: button, leaving: resting)
+
         animator.stop()
 
         XCTAssertFalse(animator.isPlaying)
-        XCTAssertIdentical(button.image, idle)
+        XCTAssertIdentical(button.image, resting)
     }
 
-    func testAGestureRequestedDuringPlaybackIsDropped() throws {
+    func testAGestureFinishesOnItsOwnAndLeavesTheAnimatorFree() async throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
+        let resting = button.image
 
         XCTAssertTrue(animator.play(.blink))
+        await waitForFirstFrame(on: button, leaving: resting)
+        await waitUntilIdle(animator)
+
+        XCTAssertIdentical(button.image, resting)
+        XCTAssertTrue(animator.play(.earTwitch), "a finished gesture left the animator busy")
+        animator.stop()
+    }
+
+    func testAGestureRequestedDuringPlaybackIsDropped() async throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        let resting = button.image
+
+        XCTAssertTrue(animator.play(.blink))
+        await waitForFirstFrame(on: button, leaving: resting)
+
         XCTAssertFalse(animator.play(.earTwitch))
         XCTAssertFalse(animator.play(.blink))
     }
@@ -89,14 +139,18 @@ final class MascotAnimatorTests: XCTestCase {
         XCTAssertTrue(animator.play(.blink))
     }
 
-    func testFallingAsleepInterruptsARunningGesture() throws {
+    func testFallingAsleepInterruptsARunningGesture() async throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
+        let awake = button.image
 
         XCTAssertTrue(animator.play(.blink))
+        await waitForFirstFrame(on: button, leaving: awake)
+
         animator.setPose(.asleep)
 
         XCTAssertFalse(animator.isPlaying)
+        XCTAssertNotIdentical(button.image, awake)
     }
 
     func testTheOccasionalSchedulerReportsAndClearsItself() throws {
