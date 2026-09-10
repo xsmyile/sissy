@@ -36,11 +36,7 @@ Either way: launch Sissy (it lives in the menubar), then **Start Server** to beg
 
 ## Demo
 
-A pixel-art cat sits in your menubar and shifts mood as the day's spend climbs: from **Sleeping** when idle, through **Thinking**, **Coding**, **Trending up** and **Glowing**, up to **Angry coffee** when you're redlining.
-
-<p align="center">
-  <img src="assets/states.png" alt="Sissy's six moods, from sleeping to angry" width="640" />
-</p>
+A cat sits in your menubar and keeps the day's spend one click away.
 
 Click the icon for a panel with the running total, the day-over-day delta, the next milestone, and a per-CLI split in each vendor's own colour:
 
@@ -72,10 +68,6 @@ exactly one dev app exists no matter which branch you build. Pass
 `RELAUNCH=0` to skip the relaunch.
 
 Menubar → **Server** toggles the bundled LaunchAgent. When switched on it registers the daemon so it restarts on login; turning it off unregisters the agent. That control requires a normally signed app build. `CODE_SIGNING_ALLOWED=NO` is fine for CI but not for testing Server start/stop locally.
-
-## Desk companion
-
-A hardware companion (a tiny pixel-art cat on an OLED that mirrors the menubar) is in development. Code lives in [`firmware/`](firmware) and is not built into the release. Watch this repo for updates.
 
 ## Credits
 
