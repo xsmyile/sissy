@@ -301,6 +301,7 @@ func runSelfTest() {
     runCodexLegacySnapshotTest()
     runCodexWindowPersistenceTest()
     runCodexRateLimitTest()
+    runCodexAuthFallbackTest()
     runClaudeLimitsParseTests()
     runKeychainTimeoutTests()
     runAggregatorEmitTest()
@@ -1087,6 +1088,34 @@ func runClaudeLimitsParseTests() {
         true
     )
 
+    // Measured shape of `~/.codex/auth.json`: the plan is a claim inside the
+    // id_token, under a namespace key spelled as a URL. The fixture's payload
+    // is `{"https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}`, and
+    // the signature is deliberately nonsense — nothing here verifies one.
+    let authPayload = Data(
+        #"{"https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}"#.utf8
+    )
+    .base64EncodedString()
+    .replacingOccurrences(of: "+", with: "-")
+    .replacingOccurrences(of: "/", with: "_")
+    .replacingOccurrences(of: "=", with: "")
+    let authBlob = Data(#"{"tokens":{"id_token":"header.\#(authPayload).signature"}}"#.utf8)
+    expect("codex plan read from the auth file", CodexAuthSource.parsePlan(authBlob), "plus")
+
+    let apiKeyAuth = Data(#"{"OPENAI_API_KEY":"sk-test","auth_mode":"apikey"}"#.utf8)
+    expect(
+        "an auth file with no id_token names no plan",
+        CodexAuthSource.parsePlan(apiKeyAuth) == nil,
+        true
+    )
+
+    let truncatedAuth = Data(#"{"tokens":{"id_token":"header.payload"}}"#.utf8)
+    expect(
+        "a token that is not three parts names no plan",
+        CodexAuthSource.parsePlan(truncatedAuth) == nil,
+        true
+    )
+
     let epochPayload: [String: Any] = [
         "five_hour": ["utilization": 25.0, "resets_at": 1_789_006_037.0],
         "seven_day": ["utilization": 62.0, "resets_at": 1_789_549_854.0],
@@ -1180,6 +1209,63 @@ func runKeychainTimeoutTests() {
     abandoned.wait()
     expect("a lookup that parks is abandoned", gaveUp.value, true)
     expect("abandoning does not wait for the lookup", elapsed.value < 1.0, true)
+}
+
+/// A rollout tree Codex has already been read to the end of names no plan —
+/// `plan_type` rides events the reader consumed on an earlier boot — which is
+/// how a resumed daemon ended up showing the Codex row with no badge. The
+/// auth file is what answers before the next turn.
+func runCodexAuthFallbackTest() {
+    print("=== CodexUsageReader.authFallback ===")
+    let fm = FileManager.default
+    let tempDir = fm.temporaryDirectory.appendingPathComponent(
+        "sissy-codex-auth-\(UUID().uuidString)"
+    )
+    let sessionsDir = tempDir.appendingPathComponent("sessions", isDirectory: true)
+    let subdir = sessionsDir.appendingPathComponent("2026/05/25", isDirectory: true)
+    try? fm.createDirectory(at: subdir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tempDir) }
+
+    let payload = Data(#"{"https://api.openai.com/auth":{"chatgpt_plan_type":"pro"}}"#.utf8)
+        .base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
+    try? #"{"tokens":{"id_token":"header.\#(payload).signature"}}"#.write(
+        to: tempDir.appendingPathComponent("auth.json"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let isoFmt = ISO8601DateFormatter()
+    isoFmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let ts = isoFmt.string(from: Date())
+    let usage =
+        #"{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"#
+        + #""output_tokens":10,"total_tokens":110}}"#
+    let line = """
+        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":\(usage)}}
+        """ + "\n"
+    try? line.write(
+        to: subdir.appendingPathComponent("rollout-no-limits.jsonl"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let sem = DispatchSemaphore(value: 0)
+    let box = TestBox<String?>(nil)
+    Task {
+        let reader = CodexUsageReader(
+            codexDir: sessionsDir, retainDays: 2, pollInterval: .seconds(60),
+            persistenceURL: nil)
+        await reader.start { _, _ in }
+        box.value = reader.currentPlan()
+        await reader.stop()
+        sem.signal()
+    }
+    sem.wait()
+
+    expect("codex plan falls back to the auth file", box.value, "pro")
 }
 
 /// Codex ships its subscription limits on the same `token_count` event the
