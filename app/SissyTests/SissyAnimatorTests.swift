@@ -4,7 +4,7 @@ import XCTest
 @testable import Sissy
 
 @MainActor
-final class MascotAnimatorTests: XCTestCase {
+final class SissyAnimatorTests: XCTestCase {
     private let iconSize: CGFloat = 17
 
     private func makeAnimator(
@@ -114,7 +114,7 @@ final class MascotAnimatorTests: XCTestCase {
         await waitUntilIdle(animator)
         let afterClosing = button.image
 
-        XCTAssertFalse(animator.blink(), "a sleeping mascot blinked")
+        XCTAssertFalse(animator.blink(), "a sleeping Sissy blinked")
         // Identity against the same animator's snapped pose: an animated
         // transition that ended on a frame instead of the pose would differ.
         animator.setPose(.awake, animated: false)

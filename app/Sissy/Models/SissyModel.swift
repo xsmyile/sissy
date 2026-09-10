@@ -87,7 +87,7 @@ final class SissyModel {
     }
 
     /// The glyph is fixed and drawn at full opacity, so all the menu bar icon
-    /// reports is whether the mascot is awake: the eye is shut while nothing is
+    /// reports is whether Sissy is awake: the eye is shut while nothing is
     /// reaching the app.
     struct StatusIconSnapshot {
         let isAsleep: Bool
@@ -107,13 +107,13 @@ final class SissyModel {
         let at: Date
     }
 
-    /// Sissy's one mascot asset, template-rendered by the catalogue so every
+    /// Sissy's one resting asset, template-rendered by the catalogue so every
     /// surface tints it for its own context.
-    static let mascotAssetName = "SissyMenuBarTemplate"
+    static let sissyAssetName = "SissyMenuBarTemplate"
 
     /// The same silhouette with its eye shut. Both the menu bar and the
     /// panel's header rest on this one while nothing is reaching the app.
-    static let mascotSleepingAssetName = "SissyMenuBarSleepingTemplate"
+    static let sissySleepingAssetName = "SissyMenuBarSleepingTemplate"
 
     var menuSnapshot: MenuSnapshot {
         let linkUp = webSocketClient.isConnected && currentFrame != nil
@@ -203,9 +203,9 @@ final class SissyModel {
         webSocketClient.setClaudeLimits(enabled)
     }
 
-    func setMascotMotion(_ enabled: Bool) {
-        guard enabled != preferences.mascotMotion else { return }
-        preferences.mascotMotion = enabled
+    func setSissyMotion(_ enabled: Bool) {
+        guard enabled != preferences.sissyMotion else { return }
+        preferences.sissyMotion = enabled
         savePreferences()
     }
 
@@ -305,7 +305,7 @@ final class SissyModel {
     /// one: the panel's only control is the switch beside this text, and a
     /// header that stayed silent would leave the switch's meaning to
     /// guesswork.
-    /// Says what the mascot's face already shows, so the two can't disagree:
+    /// Says what Sissy's face already shows, so the two can't disagree:
     /// the eye is shut exactly when nothing is reaching the app.
     private func headerTitle(isAsleep: Bool, linkUp: Bool) -> String {
         if isAsleep { return "Sissy is sleeping" }
@@ -313,7 +313,7 @@ final class SissyModel {
         return "Sissy"
     }
 
-    /// Why the mascot is asleep, or nil while she is awake — the panel shows
+    /// Why Sissy is asleep, or nil while she is awake — the panel shows
     /// today's date in that case. `serverIsOn` is what separates "you turned
     /// it off" from "it should be running and isn't".
     private func headerSubtitle(isAsleep: Bool, serverIsOn: Bool) -> String? {

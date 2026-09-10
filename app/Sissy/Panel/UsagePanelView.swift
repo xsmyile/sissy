@@ -11,7 +11,7 @@ struct UsagePanelView: View {
     private static let footerTick: TimeInterval = 1
     private static let secondaryWindowOpacity: Double = 0.55
     private static let powerButtonSize: CGFloat = 26
-    private static let mascotSize: CGFloat = 24
+    private static let sissySize: CGFloat = 24
 
     private static var dateLine: String {
         "Today · "
@@ -48,11 +48,11 @@ struct UsagePanelView: View {
     private var header: some View {
         let menuHeader = model.menuSnapshot.header
         return HStack(spacing: 10) {
-            PanelMascot(
+            PanelSissy(
                 isAsleep: menuHeader.isAsleep,
                 lastFrameAt: model.lastFrameAt,
-                motionEnabled: model.preferences.mascotMotion,
-                size: Self.mascotSize
+                motionEnabled: model.preferences.sissyMotion,
+                size: Self.sissySize
             )
 
             VStack(alignment: .leading, spacing: 1) {

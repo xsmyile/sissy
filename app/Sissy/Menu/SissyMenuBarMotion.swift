@@ -1,6 +1,6 @@
 import Foundation
 
-/// The mascot's eye movements, as index ranges into one rendered sequence.
+/// Sissy's eye movements, as index ranges into one rendered sequence.
 ///
 /// The sequence is a full blink: 24 frames at 60 fps, traced from the same
 /// silhouette as the resting icon, with frame 0 and frame 23 *being* that
@@ -9,7 +9,7 @@ import Foundation
 /// hold, and it is why the closing half stops at 6 and the opening half starts
 /// at 9 instead of replaying it.
 enum SissyMenuBarMotion: Sendable {
-    /// Shut and open again: the mascot noticing new numbers.
+    /// Shut and open again: Sissy noticing new numbers.
     case blink
     /// The closing half alone, left resting on the shut eye.
     case eyeClose
@@ -41,7 +41,7 @@ enum SissyMenuBarMotion: Sendable {
     ///
     /// The index is absolute, into `frameAssetNames`, so a caller holding the
     /// whole sequence needs no range arithmetic of its own. Both surfaces that
-    /// play the mascot go through here: the timing is the one thing they must
+    /// play Sissy go through here: the timing is the one thing they must
     /// not each reinvent.
     func step(at elapsed: Duration) -> Step? {
         let components = elapsed.components
@@ -77,7 +77,7 @@ enum SissyMenuBarMotion: Sendable {
     /// The readers coalesce emits only down to
     /// `UsageReaderShared.pollEmitThrottle` (0.2 s), so a turn appending JSONL
     /// in bursts can push a frame a second — and a 380 ms gesture that often
-    /// never lets the mascot settle reads as a twitch.
+    /// never lets her settle reads as a twitch.
     static let dataBlinkCooldown: TimeInterval = 3
 
     /// Every frame of the sequence, in order, as asset catalogue names.

@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Whether a landing frame blinks the panel's mascot, kept out of the view so
+/// Whether a landing frame blinks Sissy in the panel, kept out of the view so
 /// the rules can be asserted without rendering one.
-struct PanelMascotBlinkGate {
+struct PanelSissyBlinkGate {
     let motionEnabled: Bool
     let reduceMotion: Bool
     let isAsleep: Bool
 
-    /// A sleeping mascot never blinks: it would claim something is arriving
+    /// Asleep she never blinks: it would claim something is arriving
     /// while the daemon is unreachable. The cooldown is the animator's, so both
     /// surfaces pace their blinks the same way — each still keeps its own
     /// clock, and a panel opened mid-cooldown is not in phase with the menu
@@ -18,14 +18,14 @@ struct PanelMascotBlinkGate {
     }
 }
 
-/// The mascot in the panel header: the two resting poses cross-faded, with a
+/// Sissy in the panel header: the two resting poses cross-faded, with a
 /// blink played over the awake one when a frame lands.
 ///
 /// It replays `SissyMenuBarMotion.blink` — the sequence the status button's
 /// animator draws — so the two surfaces move to the same timing instead of each
 /// inventing one. Nothing here writes `button.image`: the menu bar's animator
 /// stays its only writer.
-struct PanelMascot: View {
+struct PanelSissy: View {
     let isAsleep: Bool
     /// When the last frame landed. A change is the blink's trigger; the value
     /// itself is never drawn.
@@ -51,7 +51,7 @@ struct PanelMascot: View {
     /// power button the pose change follows.
     private static let poseFadeDuration: TimeInterval = 0.25
 
-    /// A catalogue that lost a frame would render the mascot blank mid-gesture.
+    /// A catalogue that lost a frame would render her blank mid-gesture.
     /// Resolved once, and the panel rests on the static silhouette instead —
     /// the same way `SissyMenuBarAnimator` degrades rather than draw nothing.
     private static let framesAreAvailable: Bool = SissyMenuBarMotion.frameAssetNames.allSatisfy {
@@ -62,7 +62,7 @@ struct PanelMascot: View {
         ZStack {
             image(awakeAssetName)
                 .opacity(isAsleep ? 0 : 1)
-            image(SissyModel.mascotSleepingAssetName)
+            image(SissyModel.sissySleepingAssetName)
                 .opacity(isAsleep ? 1 : 0)
         }
         .animation(.easeInOut(duration: Self.poseFadeDuration), value: isAsleep)
@@ -81,7 +81,7 @@ struct PanelMascot: View {
     /// resting silhouette otherwise. Frame 0 and frame 23 *are* that
     /// silhouette, so the handover in and out of a gesture is invisible.
     private var awakeAssetName: String {
-        guard let blinkFrame else { return SissyModel.mascotAssetName }
+        guard let blinkFrame else { return SissyModel.sissyAssetName }
         return SissyMenuBarMotion.frameAssetNames[blinkFrame]
     }
 
@@ -100,7 +100,7 @@ struct PanelMascot: View {
     private func scheduleBlink() {
         guard Self.framesAreAvailable else { return }
         let now = Date()
-        let gate = PanelMascotBlinkGate(
+        let gate = PanelSissyBlinkGate(
             motionEnabled: motionEnabled,
             reduceMotion: reduceMotion,
             isAsleep: isAsleep

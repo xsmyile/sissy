@@ -3,10 +3,10 @@ import XCTest
 
 @testable import Sissy
 
-/// `step(at:)` is the timing both mascot surfaces play from — the status
+/// `step(at:)` is the timing both Sissy surfaces play from — the status
 /// button's animator and the panel header — so the frame it picks is asserted
 /// here rather than through either of them.
-final class MascotMotionTests: XCTestCase {
+final class SissyMotionTests: XCTestCase {
     func testABlinkStartsOnTheRestingSilhouette() {
         XCTAssertEqual(SissyMenuBarMotion.blink.step(at: .zero)?.index, 0)
     }
@@ -68,7 +68,7 @@ final class MascotMotionTests: XCTestCase {
         }
     }
 
-    /// `PanelMascot` leans on this: its `.task(id:)` is only safe from being
+    /// `PanelSissy` leans on this: its `.task(id:)` is only safe from being
     /// restarted mid-gesture because a second blink cannot come due before the
     /// first has finished.
     func testTheCooldownOutlastsTheBlinkItPaces() {
@@ -78,7 +78,7 @@ final class MascotMotionTests: XCTestCase {
         )
     }
 
-    /// `PanelMascot` withholds the blink when a frame will not resolve, so
+    /// `PanelSissy` withholds the blink when a frame will not resolve, so
     /// this is the predicate that decides whether the panel animates at all.
     func testEveryFrameNameResolvesFromTheCatalogue() {
         let missing = SissyMenuBarMotion.frameAssetNames.filter { NSImage(named: $0) == nil }

@@ -846,7 +846,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         // Don't write a useless empty snapshot. If SIGTERM hits before the
         // first poll has ingested anything, in-memory state is empty —
         // persisting it would make the next boot load an empty snapshot and
-        // briefly show the "sleep" mascot with 0 tokens before the cold
+        // briefly show the "sleep" pose with 0 tokens before the cold
         // rescan rebuilds totals. Leaving the file absent forces a clean
         // cold path instead.
         if fileOffsets.isEmpty && dailyTotals.isEmpty { return }

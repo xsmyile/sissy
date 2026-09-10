@@ -375,7 +375,7 @@ jobs:
 
             url "https://github.com/xsmyile/sissy/releases/download/v#{version}/Sissy-#{version}.dmg"
             name "Sissy"
-            desc "Menubar token usage mascot for Claude Code and Codex"
+            desc "Menubar token usage meter for Claude Code and Codex"
             homepage "https://github.com/xsmyile/sissy"
 
             depends_on macos: :tahoe
