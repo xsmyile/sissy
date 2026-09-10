@@ -8,6 +8,12 @@ import AppKit
 /// whichever one happened to be showing.
 @MainActor
 final class SissyMenuBarAnimator {
+    /// The pose the button rests in between gestures.
+    enum Pose {
+        case awake
+        case asleep
+    }
+
     enum AssetError: LocalizedError {
         case missingImage(String)
 
@@ -27,17 +33,19 @@ final class SissyMenuBarAnimator {
     var isSchedulingOccasionalAnimations: Bool { occasionalTask != nil }
 
     private weak var button: NSButton?
-    private let idleImage: NSImage
+    private let awakeImage: NSImage
+    private let asleepImage: NSImage
     private let frames: [SissyMenuBarMotion: [NSImage]]
+    private var pose: Pose = .awake
     private var playbackTask: Task<Void, Never>?
     private var occasionalTask: Task<Void, Never>?
     private var generation: UInt = 0
     private let reduceMotion: () -> Bool
 
     private static let occasionalInterval: ClosedRange<TimeInterval> = 120...240
-    /// One gesture in this many is the ear twitch; the rest are blinks.
-    private static let earTwitchOneIn = 4
     private static let frameTolerance: Duration = .milliseconds(1)
+
+    private var restingImage: NSImage { pose == .awake ? awakeImage : asleepImage }
 
     /// Loads every frame before touching the button, so a catalogue missing a
     /// frame leaves the caller's static icon exactly as it was.
@@ -59,7 +67,8 @@ final class SissyMenuBarAnimator {
             image.isTemplate = true
             return image
         }
-        idleImage = try load(SissyModel.mascotAssetName)
+        awakeImage = try load(SissyModel.mascotAssetName)
+        asleepImage = try load(SissyModel.mascotSleepingAssetName)
         frames = try Dictionary(
             uniqueKeysWithValues: SissyMenuBarMotion.allCases.map { motion in
                 (motion, try motion.assetNames.map(load))
@@ -67,20 +76,28 @@ final class SissyMenuBarAnimator {
         )
         self.button = button
         self.reduceMotion = reduceMotion
-        button.image = idleImage
+        button.image = awakeImage
     }
 
     isolated deinit {
         playbackTask?.cancel()
         occasionalTask?.cancel()
-        button?.image = idleImage
+        button?.image = restingImage
+    }
+
+    /// Swaps the resting pose. Asleep also blocks gestures: a mascot that
+    /// blinks while the daemon is unreachable claims something is arriving.
+    func setPose(_ newPose: Pose) {
+        guard newPose != pose else { return }
+        pose = newPose
+        stop()
     }
 
     /// Requests one gesture. A request that arrives during playback is
     /// dropped, never queued: a backlog of gestures reads as a twitching icon.
     @discardableResult
     func play(_ motion: SissyMenuBarMotion) -> Bool {
-        guard !isPlaying, button != nil, !reduceMotion(), canAnimate(),
+        guard pose == .awake, !isPlaying, button != nil, !reduceMotion(), canAnimate(),
             let images = frames[motion]
         else { return false }
 
@@ -124,21 +141,20 @@ final class SissyMenuBarAnimator {
         playbackTask?.cancel()
         playbackTask = nil
         isPlaying = false
-        button?.image = idleImage
+        button?.image = restingImage
     }
 
-    /// Schedules one gesture every few minutes. Nothing animates in between —
+    /// Schedules `motion` every few minutes. Nothing animates in between —
     /// this is character, not an indicator, so a blocked trigger is skipped
     /// rather than replayed later.
-    func startOccasionalAnimations() {
+    func startOccasionalAnimations(_ motion: SissyMenuBarMotion) {
         stopOccasionalAnimations()
         occasionalTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 let delay = TimeInterval.random(in: Self.occasionalInterval)
                 do { try await Task.sleep(for: .seconds(delay)) } catch { return }
                 guard !Task.isCancelled else { return }
-                let twitches = Int.random(in: 0..<Self.earTwitchOneIn) == 0
-                self?.play(twitches ? .earTwitch : .blink)
+                self?.play(motion)
             }
         }
     }
@@ -156,6 +172,6 @@ final class SissyMenuBarAnimator {
         guard generation == token else { return }
         playbackTask = nil
         isPlaying = false
-        button?.image = idleImage
+        button?.image = restingImage
     }
 }
