@@ -29,6 +29,7 @@ command -v codesign >/dev/null || die "codesign not found."
 # `xcodebuild` run that forgot `-derivedDataPath`. Without this, every
 # worktree and every stray build adds another indexed "Sissy" launcher.
 sweep_stray_bundles() {
+  local removed=0
   local wt
   while read -r wt; do
     [[ -n "$wt" ]] || continue
@@ -36,6 +37,7 @@ sweep_stray_bundles() {
     if [[ -d "$wt/app/build-dev" ]]; then
       printf '==> removing stray dev build: %s\n' "$wt/app/build-dev"
       rm -rf "$wt/app/build-dev"
+      removed=1
     fi
   done < <(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree /{print $2}')
 
@@ -44,15 +46,21 @@ sweep_stray_bundles() {
     [[ -n "$stray" ]] || continue
     printf '==> removing stray dev build: %s\n' "$stray"
     rm -rf "$stray"
+    removed=1
   done < <(
     find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 \
       -path '*/Sissy-*/Build/Products/*/Sissy.app' -type d 2>/dev/null
   )
 
   # A dev instance launched from a path we just deleted keeps running and
-  # keeps owning a status item, so the menubar shows two Sissys. The pattern
-  # cannot match /Applications/Sissy.app, so the release app is never hit.
-  if pkill -f 'build-dev/Build/Products/[^/]*/Sissy\.app/Contents/MacOS/Sissy' 2>/dev/null; then
+  # keeps owning a status item, so the menubar shows two Sissys. Only when
+  # something was actually removed: killing it unconditionally here, before
+  # the build, leaves a failed build with no menubar app at all — the
+  # relaunch at the end of this script is what stops the current instance.
+  # The pattern cannot match /Applications/Sissy.app, so the release app is
+  # never hit.
+  if [[ "$removed" == 1 ]] \
+    && pkill -f 'build-dev/Build/Products/[^/]*/Sissy\.app/Contents/MacOS/Sissy' 2>/dev/null; then
     printf '==> stopped a dev instance from a removed build\n'
     sleep 1
   fi
