@@ -99,16 +99,16 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
     }
 
     func handlerRemoved(context: ChannelHandlerContext) {
-        unregister(rebroadcastAfter: true)
+        unregister()
     }
 
     func channelInactive(context: ChannelHandlerContext) {
-        unregister(rebroadcastAfter: true)
+        unregister()
     }
 
     func errorCaught(context: ChannelHandlerContext, error: any Error) {
         context.close(promise: nil)
-        unregister(rebroadcastAfter: true)
+        unregister()
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -156,17 +156,6 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
                 let server = self.server
                 Task { await server.setClaudeLimits(enabled: claudeLimits) }
             }
-            // Tag this sink as app vs device so the Hub can flip
-            // `device_present` in broadcast frames. Mac app sends
-            // `client: "mac-app"`; firmware sends no `client` key, so any
-            // non-app client (current or future hardware) maps to device.
-            let kind: SinkKind = (msg.client == "mac-app") ? .app : .device
-            let me: any FrameSink = self
-            let hub = self.hub
-            Task {
-                await hub.setKind(me, kind: kind)
-                await hub.rebroadcastPresence()
-            }
         case "set_state":
             // `state` absent or "auto" → clear pin and resume computed state.
             let server = self.server
@@ -196,7 +185,7 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
         try? await channel.writeAndFlush(frame)
     }
 
-    private func unregister(rebroadcastAfter: Bool = false) {
+    private func unregister() {
         let proceed: Bool = state.lock.withLock {
             if !state.registered { return false }
             state.registered = false
@@ -208,19 +197,13 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
         if !proceed { return }
         let me: any FrameSink = self
         let hub = self.hub
-        Task {
-            await hub.unregister(me)
-            if rebroadcastAfter {
-                await hub.rebroadcastPresence()
-            }
-        }
+        Task { await hub.unregister(me) }
     }
 
     /// Runs every `heartbeatInterval` on the channel's event loop. Sends a
     /// WS ping frame for the peer to pong; if `heartbeatTimeout` has elapsed
     /// without any inbound traffic, declares the socket dead and closes it.
-    /// The close triggers `channelInactive` -> `unregister(rebroadcastAfter:)`
-    /// which is what actually flips `device_present` for the menubar.
+    /// The close triggers `channelInactive` -> `unregister()`.
     private func heartbeatTick() {
         let snapshot: (channel: (any Channel)?, last: NIODeadline) = state.lock.withLock {
             (state.channel, state.lastInboundAt)

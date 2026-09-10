@@ -14,7 +14,6 @@ struct Preferences: Codable, Equatable {
     var costThresholdAngry: Double = 200
     var costThresholdTrendRatio: Double = 1.3
     var claudeLimits: Bool = false
-    var deviceSupport: Bool = false
     var notifyOnMascotChange: Bool = true
     var milestoneFrequency: MilestoneFrequency = .normal
 
@@ -81,7 +80,6 @@ struct Preferences: Codable, Equatable {
         costThresholdAngry: Double = 200,
         costThresholdTrendRatio: Double = 1.3,
         claudeLimits: Bool = false,
-        deviceSupport: Bool = false,
         notifyOnMascotChange: Bool = true,
         milestoneFrequency: MilestoneFrequency = .normal
     ) {
@@ -94,7 +92,6 @@ struct Preferences: Codable, Equatable {
         self.costThresholdAngry = costThresholdAngry
         self.costThresholdTrendRatio = costThresholdTrendRatio
         self.claudeLimits = claudeLimits
-        self.deviceSupport = deviceSupport
         self.notifyOnMascotChange = notifyOnMascotChange
         self.milestoneFrequency = milestoneFrequency
     }
@@ -113,7 +110,6 @@ struct Preferences: Codable, Equatable {
         costThresholdAngry = (try? c.decode(Double.self, forKey: .costThresholdAngry)) ?? 200
         costThresholdTrendRatio = (try? c.decode(Double.self, forKey: .costThresholdTrendRatio)) ?? 1.3
         claudeLimits = (try? c.decode(Bool.self, forKey: .claudeLimits)) ?? false
-        deviceSupport = (try? c.decode(Bool.self, forKey: .deviceSupport)) ?? false
         notifyOnMascotChange = (try? c.decode(Bool.self, forKey: .notifyOnMascotChange)) ?? true
         milestoneFrequency = (try? c.decode(MilestoneFrequency.self, forKey: .milestoneFrequency)) ?? .normal
     }
@@ -238,9 +234,10 @@ struct Preferences: Codable, Equatable {
         {
             dict = existing
         }
-        // 0.0.0.0 so the ESP32 on the LAN can reach the daemon. The app
-        // itself connects via 127.0.0.1 (serverHost above) so we don't
-        // need to expose anything beyond the local subnet.
+        // Loopback: the app is the only client, and it connects over
+        // 127.0.0.1. Binding the wildcard put the daemon on the LAN behind
+        // nothing but a bearer token, which was the price of reaching an
+        // ESP32 on the same network and buys nothing now.
         dict["host"] = Self.serverBindHost
         dict["port"] = serverPort
         dict["authToken"] = authToken
@@ -289,7 +286,7 @@ struct Preferences: Codable, Equatable {
     /// Wire-config defaults written into `server.json`. These mirror the
     /// daemon's `ServerConfig.defaults`; the app and daemon don't share a
     /// module, so they're kept in sync by hand.
-    private static let serverBindHost = "0.0.0.0"
+    private static let serverBindHost = "127.0.0.1"
     private static let claudeDataDirDefault = "~/.claude/projects"
     private static let pollIntervalSecondsDefault = 60.0
 }

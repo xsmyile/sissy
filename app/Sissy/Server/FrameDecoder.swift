@@ -26,7 +26,6 @@ enum FrameDecoder {
             ts: dict["ts"] as? Int ?? 0,
             primary: dict["primary"] as? String ?? tokens,
             primaryLabel: dict["primary_label"] as? String ?? defaultPrimaryLabel,
-            devicePresent: dict["device_present"] as? Bool ?? false,
             milestone: dict["milestone"] as? String,
             providers: decodeProviders(dict["providers"]),
             prev: decodePrev(dict)

@@ -63,14 +63,10 @@ targets:
         LSMinimumSystemVersion: "26.0"
         LSUIElement: true
         NSHumanReadableCopyright: "Copyright © 2026 Smyile. MIT licensed."
-        NSLocalNetworkUsageDescription: "Sissy connects to the paired Sissy device on your local network to mirror token usage to the OLED."
-        NSLocationUsageDescription: "Sissy uses your location to read nearby Wi-Fi network names so you can pick one when pairing a device. No location data leaves your Mac."
-        NSLocationWhenInUseUsageDescription: "Sissy uses your location to read nearby Wi-Fi network names so you can pick one when pairing a device. No location data leaves your Mac."
     entitlements:
       path: Sissy/Sissy.entitlements
       properties:
         com.apple.security.app-sandbox: false
-        com.apple.security.device.usb: true
         com.apple.security.network.client: true
     settings:
       base:

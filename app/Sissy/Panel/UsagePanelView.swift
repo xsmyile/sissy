@@ -304,10 +304,6 @@ struct UsagePanelView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
-
-                if live.frame.devicePresent {
-                    deviceChip
-                }
             }
 
             Spacer(minLength: 0)
@@ -316,19 +312,6 @@ struct UsagePanelView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-    }
-
-    /// The OLED companion is a build-it-yourself add-on, so its indicator
-    /// appears only once one is actually reporting. A permanently grey dot
-    /// would advertise hardware most installs will never have.
-    private var deviceChip: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "cpu")
-                .font(.system(size: 9))
-            Text("device")
-                .font(.system(size: 11))
-        }
-        .foregroundStyle(.secondary)
     }
 
     /// `SettingsLink` is the only public way to open the `Settings` scene, and

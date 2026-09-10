@@ -19,13 +19,6 @@ repos:
         files: ^app/(Sissy|SissyServer)/.*\.swift$
         pass_filenames: false
 
-      - id: clang-format
-        name: clang-format
-        entry: clang-format --dry-run --Werror
-        language: system
-        files: ^firmware/src/.*\.(cpp|h)$
-        exclude: ^firmware/src/sprites_mono\.h$
-
       - id: shellcheck
         name: shellcheck
         entry: shellcheck
