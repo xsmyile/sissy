@@ -61,8 +61,12 @@ actor Hub {
                 },
             ]
             // Absent rather than null for a provider that names no plan, same
-            // rule the `prev_*` pair below follows.
-            if let plan = slice.plan { row["plan"] = plan }
+            // rule the `prev_*` pair below follows. The tier rides inside the
+            // plan's branch: on its own it names nothing the app could place.
+            if let plan = slice.plan {
+                row["plan"] = plan
+                if let tier = slice.planTier { row["plan_tier"] = tier }
+            }
             return row
         }
         var dict: [String: Any] = [

@@ -29,6 +29,12 @@ final class ClaudeProfileSource: @unchecked Sendable {
     /// pro / max / team / enterprise.
     private static let planPrefix = "claude_"
 
+    /// `oauthAccount.userRateLimitTier` prefixes the tier the same way:
+    /// `default_claude_max_5x` for the account metered at Max 5x. Only the
+    /// two `max` multipliers appear in 2.1.267, which is why the tier is
+    /// treated as a decoration on the plan and never as the plan itself.
+    private static let tierPrefix = "default_claude_"
+
     /// Claude Code's config file, in the config home the CLI resolves for
     /// itself: `CLAUDE_CONFIG_DIR` when set, `$HOME` otherwise — the same
     /// env-var deference `ServerConfig.resolvedCodexDataDir` pays `CODEX_HOME`.
@@ -44,9 +50,16 @@ final class ClaudeProfileSource: @unchecked Sendable {
 
     private let url: URL
     private let lock = NSLock()
-    private var plan: String?
+    private var profile: Profile?
     private var lastParsedAt: Date = .distantPast
     private var lastMTime: TimeInterval = 0
+
+    /// Plan and its limit tier, held together so a tier can never outlive the
+    /// plan it decorates.
+    struct Profile: Sendable, Equatable {
+        let plan: String
+        let tier: String?
+    }
 
     init(url: URL = ClaudeProfileSource.defaultURL) {
         self.url = url
@@ -56,7 +69,11 @@ final class ClaudeProfileSource: @unchecked Sendable {
     /// refresh finds one, and nil for good for an API-key user or a config
     /// file with no `oauthAccount` — which leaves the panel row without a
     /// plan rather than guessing at one.
-    func currentPlan() -> String? { lock.withLock { plan } }
+    func currentPlan() -> String? { lock.withLock { profile?.plan } }
+
+    /// Limit tier the account is metered at (`max_5x`), when the CLI names one
+    /// and a plan came with it.
+    func currentPlanTier() -> String? { lock.withLock { profile?.tier } }
 
     /// Re-reads the file when it has changed on disk and the floor has
     /// passed. A file that has stopped naming a plan clears the held one: a
@@ -71,26 +88,32 @@ final class ClaudeProfileSource: @unchecked Sendable {
         else { return }
         if parsedBefore && abs(mtime - knownMTime) < UsageReaderShared.mtimeTolerance { return }
         guard let data = try? Data(contentsOf: url) else { return }
-        let parsed = Self.parsePlan(data)
+        let parsed = Self.parseProfile(data)
         lock.withLock {
-            plan = parsed
+            profile = parsed
             lastParsedAt = now
             lastMTime = mtime
         }
     }
 
-    /// Pulls the plan out of a `.claude.json` payload. Returns nil for every
-    /// shape that does not name one, so a config file the CLI reorganises
-    /// costs the panel a plan rather than showing a wrong one.
-    static func parsePlan(_ data: Data) -> String? {
+    /// Pulls the plan and its tier out of a `.claude.json` payload. Returns
+    /// nil for every shape that does not name a plan, so a config file the CLI
+    /// reorganises costs the panel a badge rather than showing a wrong one.
+    static func parseProfile(_ data: Data) -> Profile? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let account = root["oauthAccount"] as? [String: Any],
-            let organizationType = account["organizationType"] as? String
+            let plan = UsageReaderShared.sanitizedPlanToken(
+                stripping(planPrefix, from: account["organizationType"] as? String)
+            )
         else { return nil }
-        let token =
-            organizationType.hasPrefix(planPrefix)
-            ? String(organizationType.dropFirst(planPrefix.count))
-            : organizationType
-        return UsageReaderShared.sanitizedPlanToken(token)
+        let tier = UsageReaderShared.sanitizedPlanToken(
+            stripping(tierPrefix, from: account["userRateLimitTier"] as? String)
+        )
+        return Profile(plan: plan, tier: tier)
+    }
+
+    private static func stripping(_ prefix: String, from raw: String?) -> String? {
+        guard let raw else { return nil }
+        return raw.hasPrefix(prefix) ? String(raw.dropFirst(prefix.count)) : raw
     }
 }

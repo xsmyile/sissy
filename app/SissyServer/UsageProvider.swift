@@ -60,6 +60,12 @@ protocol UsageProvider: AnyObject, Sendable {
     /// reads this while the emitting provider still holds its actor.
     nonisolated func currentPlan() -> String?
 
+    /// Limit tier the plan is metered at, as the vendor's own token
+    /// (`max_5x`). Nil for every provider that publishes no such thing, which
+    /// is all of them but Claude Code. Never set without a plan: a tier alone
+    /// names nothing a reader could place.
+    nonisolated func currentPlanTier() -> String?
+
     /// Swap in a freshly fetched rate catalog. Each provider takes the slice
     /// matching its upstream vendor and consults it between the user's
     /// `pricingOverride` and the embedded generated seed. Called once before
@@ -72,4 +78,5 @@ protocol UsageProvider: AnyObject, Sendable {
 extension UsageProvider {
     nonisolated func currentWindows() -> [UsageWindow] { [] }
     nonisolated func currentPlan() -> String? { nil }
+    nonisolated func currentPlanTier() -> String? { nil }
 }
