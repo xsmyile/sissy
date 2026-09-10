@@ -73,12 +73,38 @@ final class MascotAnimatorTests: XCTestCase {
         XCTAssertFalse(animator.isPlaying)
     }
 
+    func testSleepingSwapsTheRestingImageAndRefusesGestures() throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        let awake = button.image
+
+        animator.setPose(.asleep)
+        XCTAssertNotIdentical(button.image, awake)
+        for motion in SissyMenuBarMotion.allCases {
+            XCTAssertFalse(animator.play(motion), "\(motion) played while asleep")
+        }
+
+        animator.setPose(.awake)
+        XCTAssertIdentical(button.image, awake)
+        XCTAssertTrue(animator.play(.blink))
+    }
+
+    func testFallingAsleepInterruptsARunningGesture() throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+
+        XCTAssertTrue(animator.play(.blink))
+        animator.setPose(.asleep)
+
+        XCTAssertFalse(animator.isPlaying)
+    }
+
     func testTheOccasionalSchedulerReportsAndClearsItself() throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
         XCTAssertFalse(animator.isSchedulingOccasionalAnimations)
 
-        animator.startOccasionalAnimations()
+        animator.startOccasionalAnimations(.earTwitch)
         XCTAssertTrue(animator.isSchedulingOccasionalAnimations)
 
         animator.stopOccasionalAnimations()
