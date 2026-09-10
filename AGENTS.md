@@ -63,14 +63,14 @@ Adding/removing Swift files requires re-running `xcodegen generate` — the proj
                                                                                         └───────── hello frame ────────┘
 ```
 
-`UsageAggregator` sums per-day totals across N `UsageProvider` instances and emits a single combined frame. The combined `tokens`/`cost`/`state` scalars are pre-formatted by the daemon for the OLED; alongside them the frame carries a raw `providers: [{id, tokens, cost}]` array so the menubar app derives both the header subtitle and the usage panel's per-provider rows from one push-based payload. Firmware ignores `providers`. `/stats` is now diagnostic-only (`connectedClients`, `filesWatched`, `lastFrameAt`).
+`UsageAggregator` sums per-day totals across N `UsageProvider` instances and emits a single combined frame. The combined `tokens`/`cost`/`state` scalars are pre-formatted by the daemon for the OLED; alongside them the frame carries a raw `providers: [{id, tokens, cost, windows}]` array so the menubar app derives the header subtitle, the usage panel's per-provider rows and each provider's rate-limit gauges from one push-based payload. Firmware ignores `providers`. `/stats` is now diagnostic-only (`connectedClients`, `filesWatched`, `lastFrameAt`).
 
-The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client gets it replayed on connect so the OLED never shows `--` after a reconnect. Any change to the frame contract (`tokens`, `cost`, `state`, `providers`, `prev_tokens`/`prev_cost`) must be made in **four** places that have no shared schema — three when the field is app-only, since firmware ignores unknown keys:
+The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client gets it replayed on connect so the OLED never shows `--` after a reconnect. Any change to the frame contract (`tokens`, `cost`, `state`, `providers` — including each slice's `windows` — `prev_tokens`/`prev_cost`) must be made in **four** places that have no shared schema — three when the field is app-only, since firmware ignores unknown keys:
 
 1. `app/SissyServer/FrameBuilder.swift` — `FrameData` shape, scalar formatters, picks `state`, owns `ProviderSlice`.
 2. `app/SissyServer/Hub.swift` — `encode(_:devicePresent:)` is where `FrameData` becomes JSON on the wire.
 3. `firmware/src/net/WsClient.cpp` — parses JSON into `Frame` (ignores `providers`).
-4. `app/Sissy/Server/WebSocketClient.swift` — parses for the menubar mirror; decodes `providers` into `DisplayFrame.providers`.
+4. `app/Sissy/Server/FrameDecoder.swift` — parses for the menubar mirror into `DisplayFrame` (`WebSocketClient` only hands it the message).
 
 `state` enum values (`sleep|think|code|trend|glow|angry`) are coupled to (a) the mascot bitmap order in `firmware/src/display/SSD1306Display.cpp`, (b) thresholds in `app/SissyServer/FrameBuilder.swift` (`StateThresholds`), (c) `MascotState` in `firmware/src/state/`. Renaming a wire state means updating all three plus regenerating sprites.
 
@@ -87,7 +87,9 @@ Firmware additionally owns an `MS_OFFLINE` state that is **not** sent over the w
 | `Hub.swift`                     | Actor — fan-out + last-frame replay |
 | `UsageProvider.swift`           | Protocol shared by every CLI tail (id, start/stop, current, isWarm) |
 | `UsageAggregator.swift`         | Sums `DayTotals` across providers; emits combined frame to Hub |
-| `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`. Dedupes by `requestId`. |
+| `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`. Dedupes by `requestId`. Owns `parseTimestamp`, the one timestamp parser every reader and the probe share. |
+| `ClaudeLimitsProbe.swift`       | Polls `api.anthropic.com/api/oauth/usage` for the 5-hour and weekly windows. Off unless `claudeLimits` is set. |
+| `ClaudeCredentials.swift`       | Reads Claude Code's OAuth token from the login keychain, never writes and never refreshes it. |
 | `CodexUsageReader.swift`        | Tails `~/.codex/sessions/**/rollout-*.jsonl`. Uses `last_token_usage` as per-turn delta; model from `turn_context.payload.model` (fallback `gpt-5-codex`). |
 | `Pricing.swift`                 | Anthropic cost math + `ModelPricing` / `PricingTable`. No rate table — rates come from the catalog or the seed |
 | `OpenAIPricing.swift`           | OpenAI cost math, same three-source precedence |
@@ -95,7 +97,7 @@ Firmware additionally owns an `MS_OFFLINE` state that is **not** sent over the w
 | `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — the offline / first-run floor. Never hand-edit |
 | `FrameBuilder.swift`            | `fmtTokens`, `fmtBurn`, `fmtCost`, `pickState` |
 | `Auth.swift`                    | Constant-time bearer compare. Empty token = open mode (dev only) |
-| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`. Carries `providers: { claudeCode, codex }` toggles, `codexDataDir`, `remotePricing`. |
+| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`. Carries `providers: { claudeCode, codex }` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`. |
 | `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude reader stays on legacy `usage-state.json` for upgrade smoothness. |
 
 ### Firmware modules
@@ -110,7 +112,7 @@ Firmware additionally owns an `MS_OFFLINE` state that is **not** sent over the w
 
 Menubar-only (`LSUIElement: true`). Sandbox disabled, USB + network entitlements on — it talks to ESP32 over serial during pairing (`Pairing/SerialPort.swift`, `Provisioner.swift`) and over WebSocket once paired (`Server/WebSocketClient.swift`). Uses CoreLocation only to read nearby SSIDs for the pairing picker (`Pairing/WiFiScanner.swift`); the Info.plist usage strings explain this — keep them accurate if you touch location code.
 
-The app drives the bundled daemon's lifecycle via `Server/ServerServiceController.swift` and `SMAppService.agent(plistName:)`. The LaunchAgent plist is bundled at `Sissy.app/Contents/Library/LaunchAgents/com.radonforge.sissy.server.plist` and points at `Contents/MacOS/sissy-serverd` with `BundleProgram`; the app no longer writes plists into `~/Library/LaunchAgents` or parses `launchctl print` for UI state. `Server/ServerHealthMonitor.swift` polls `/health` every 3 s so the menubar surfaces `Running / Stopped / No JSONL detected`. The app has three surfaces and no windows of its own: a left-click usage panel (`Panel/`, an `NSPopover`), a short right-click `NSMenu` (`Menu/StatusItemController.swift`), and the SwiftUI `Settings` scene (`Settings/`, tabs General/Device/About) — the only public way to open the latter is `SettingsLink`, which is why the panel footer aims it at a tab through `SissyModel.settingsTab`. Quitting the app does not stop the daemon — that's the whole point of the agent split.
+The app drives the bundled daemon's lifecycle via `Server/ServerServiceController.swift` and `SMAppService.agent(plistName:)`. The LaunchAgent plist is bundled at `Sissy.app/Contents/Library/LaunchAgents/com.radonforge.sissy.server.plist` and points at `Contents/MacOS/sissy-serverd` with `BundleProgram`; the app no longer writes plists into `~/Library/LaunchAgents` or parses `launchctl print` for UI state. `Server/ServerHealthMonitor.swift` polls `/health` every 3 s so the menubar surfaces `Running / Stopped / No JSONL detected`. The app has three surfaces and no windows of its own: a left-click usage panel (`Panel/`, an `NSPopover`), a short right-click `NSMenu` (`Menu/StatusItemController.swift`), and the SwiftUI `Settings` scene (`Settings/`, tabs General/Device/About) — reachable from the app menu's Settings… item (⌘,) and, in code, only through `SettingsLink`, which takes no action closure and is why the panel footer aims the window at a tab through `SissyModel.settingsTab`. Quitting the app does not stop the daemon — that's the whole point of the agent split.
 
 ## Conventions specific to this repo
 

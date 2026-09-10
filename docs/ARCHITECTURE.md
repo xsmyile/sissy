@@ -23,8 +23,11 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
   "primary": "233M",
   "primary_label": "TOKENS",
   "providers": [
-    {"id": "claude-code", "tokens": 217000000, "cost": "138.42"},
-    {"id": "codex",       "tokens":  16000000, "cost":  "10.58"}
+    {"id": "claude-code", "tokens": 217000000, "cost": "138.42", "windows": [
+      {"minutes": 300, "used_percent": 12, "resets_at": 1789042799},
+      {"minutes": 10080, "used_percent": 27, "resets_at": 1789523999}
+    ]},
+    {"id": "codex",       "tokens":  16000000, "cost":  "10.58", "windows": []}
   ],
   "prev_tokens": 191000000,
   "prev_cost": "121.44"
@@ -36,20 +39,27 @@ The firmware has an additional local-only `MS_OFFLINE` state it renders when the
 
 `providers` carries the raw per-provider token + cost slices (cost as a canonical decimal string so it round-trips lossless through `Decimal(string:)`). The macOS app sums it to derive both the menubar header subtitle and the panel's per-provider rows from a single payload — eliminating drift between the WS-pushed header and what used to be a polled `/stats` breakdown. Firmware ignores the field; older firmware builds parse the rest of the frame unchanged. Stable order: `claude-code`, `codex`, then alphabetical. Always emitted (empty array before any provider has reported).
 
+`providers[].windows` carries that CLI's subscription rate-limit windows, shortest first, each identified by its `minutes` rather than by its position — vendors do not agree on an order, and Codex's own `primary` bucket is not always the session one. `used_percent` is a percentage of the window's allowance and `resets_at` is epoch seconds; a bucket whose reset has passed is dropped before the frame is built. Empty for a provider that publishes no limits — an API-key user, a CLI that has not surfaced a window yet, or Claude Code with the `claudeLimits` setting off — which is what puts the panel row back on its share-of-today bar. App-only; firmware ignores it.
+
+Claude Code publishes no limit state on disk, so its windows come from `ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the login keychain and polls the endpoint Claude Code's `/usage` reads. That costs a one-time macOS keychain authorization, so it stays off until the user asks for it in Settings.
+
 `prev_tokens` / `prev_cost` carry yesterday's raw combined totals so the macOS app can render a day-over-day delta without a second data path. Both keys are omitted together until every active provider has produced a `prev` snapshot — the same condition that suppresses the `trend` state — so the app renders no delta rather than a false 0%. App-only; firmware ignores them.
 
 ### Client → server
 
-`hello` — sent immediately on connect. The macOS app uses it to identify itself, push the selected primary metric, and sync the current milestone preset.
+`hello` — sent immediately on connect. The macOS app uses it to identify itself, push the selected primary metric, sync the current milestone preset, and state whether the Claude Code limit probe should run.
 
 ```json
 {
   "type": "hello",
   "client": "mac-app",
   "primary_metric": "tokens",
-  "milestone_frequency": "normal"
+  "milestone_frequency": "normal",
+  "claude_limits": false
 }
 ```
+
+`claude_limits` is the app's stored preference, resent on every reconnect, and the daemon persists it to `server.json` — so the setting survives a daemon restart the app was not around for. It also travels on its own as `set_claude_limits` when the user flips the switch mid-session.
 
 Reserved for V2: `input` events when the enclosure grows a button.
 
@@ -64,7 +74,9 @@ Reserved for V2: `input` events when the enclosure grows a button.
 | `Hub.swift`                     | Actor — fan-out to all connected WS clients + last-frame replay |
 | `UsageProvider.swift`           | Protocol shared by each CLI log reader (id, start/stop, current, isWarm) |
 | `UsageAggregator.swift`         | Sums per-day totals across active providers; emits the combined frame to `Hub` |
-| `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`; dedupes by `requestId` |
+| `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`; dedupes by `requestId`; forwards the limit probe's windows |
+| `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429 |
+| `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token, bounded so an unanswered authorization dialog cannot park the probe |
 | `CodexUsageReader.swift`        | Tails `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`); uses `last_token_usage` as per-turn delta |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `Pricing.swift`                 | Anthropic cost math, `ModelPricing`, `PricingTable`; no rate table of its own |
@@ -73,7 +85,7 @@ Reserved for V2: `input` events when the enclosure grows a button.
 | `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — offline / first-run floor |
 | `FrameBuilder.swift`            | Token/cost/burn formatters + state picker |
 | `Auth.swift`                    | Constant-time bearer compare |
-| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing` |
+| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits` |
 | `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude reader stays on legacy `usage-state.json` for upgrade smoothness |
 
 The daemon binds first and lets each active provider's initial JSONL backfill finish in detached tasks — clients can connect within ~1 s even on a multi-GB Claude Code or Codex history. Steady-state CPU is near zero: provider-specific `FSEventStream`s (rooted at `~/.claude/projects` for Claude Code and `~/.codex/sessions` for Codex) wake their readers only when JSONL actually changes (kernel-level coalesced events at ~1 s latency). A low-frequency safety-net poll (default 60 s, configurable via `server.json.pollIntervalSeconds`) catches missed-event flags (`MustScanSubDirs`/`UserDropped`/`KernelDropped`) and midnight day rollover when no JSONL activity straddles the boundary. Claude Code entries are deduplicated by `requestId` because Claude Code logs each assistant turn 2-3 times as the message streams; Codex turns are deduplicated implicitly because `last_token_usage` arrives once per turn.
