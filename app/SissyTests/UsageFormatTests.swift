@@ -41,21 +41,45 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.windowLabel(minutes: 90), "90m")
     }
 
-    func testResetLabelUsesAClockTimeWithinADay() {
-        let now = Date()
-        let soon = now.addingTimeInterval(3600)
+    func testResetLabelUsesAClockTimeLaterToday() throws {
+        let clock = try fixedClock()
+        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .hour, value: 4, to: clock.now))
         XCTAssertEqual(
-            UsageFormat.resetLabel(soon, now: now),
-            soon.formatted(.dateTime.hour().minute())
+            UsageFormat.resetLabel(reset, now: clock.now, calendar: clock.calendar),
+            reset.formatted(.dateTime.hour().minute())
         )
     }
 
-    func testResetLabelUsesAWeekdayBeyondADay() {
-        let now = Date()
-        let later = now.addingTimeInterval(3 * 86400)
+    /// The window that exposed the 24-hour horizon: three hours out, but on
+    /// tomorrow's page of the calendar, where a bare clock time reads as a
+    /// time this morning that has already passed.
+    func testResetLabelUsesAWeekdayOnceTheResetIsNotToday() throws {
+        let clock = try fixedClock(hour: 22)
+        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .hour, value: 3, to: clock.now))
         XCTAssertEqual(
-            UsageFormat.resetLabel(later, now: now),
-            later.formatted(.dateTime.weekday(.abbreviated))
+            UsageFormat.resetLabel(reset, now: clock.now, calendar: clock.calendar),
+            reset.formatted(.dateTime.weekday(.abbreviated))
         )
+    }
+
+    func testResetLabelUsesAWeekdayDaysOut() throws {
+        let clock = try fixedClock()
+        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .day, value: 3, to: clock.now))
+        XCTAssertEqual(
+            UsageFormat.resetLabel(reset, now: clock.now, calendar: clock.calendar),
+            reset.formatted(.dateTime.weekday(.abbreviated))
+        )
+    }
+
+    /// A fixed instant in a fixed zone: "same calendar day" is a question the
+    /// answer to which depends on both, so neither can come from the machine
+    /// running the test.
+    private func fixedClock(hour: Int = 10) throws -> (now: Date, calendar: Calendar) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 9, day: 10, hour: hour))
+        )
+        return (now, calendar)
     }
 }

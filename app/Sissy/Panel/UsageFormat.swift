@@ -45,9 +45,18 @@ enum UsageFormat {
 
     /// When a window rolls over. A clock time while that is unambiguous, the
     /// weekday once it is not — a bare "13:00" three days out reads as today.
-    static func resetLabel(_ resetsAt: Date, now: Date = Date()) -> String {
-        let horizon = TimeInterval(minutesPerDay * 60)
-        if resetsAt.timeIntervalSince(now) < horizon {
+    ///
+    /// The cut is the calendar day rather than a 24-hour horizon: at 22:00 a
+    /// five-hour window resetting at 01:00 is three hours away, and "01:00"
+    /// there reads as this morning, already past. The weekday carries no
+    /// clock time because the panel gives this column 74 points and the
+    /// window's own label shares them.
+    static func resetLabel(
+        _ resetsAt: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        if calendar.isDate(resetsAt, inSameDayAs: now) {
             return resetsAt.formatted(.dateTime.hour().minute())
         }
         return resetsAt.formatted(.dateTime.weekday(.abbreviated))
