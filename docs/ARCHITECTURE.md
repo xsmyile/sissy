@@ -1,6 +1,6 @@
 # Architecture
 
-Two halves: a native Swift daemon on the host machine, and ESP32 firmware that pulls frames from it over WebSocket.
+A native Swift daemon that meters usage, and a menubar app that renders it. They are separate processes so the daemon keeps counting after the app quits.
 
 ## Wire protocol
 
@@ -8,9 +8,9 @@ Transport: WebSocket, plain JSON text frames. Path `/ws` on the daemon.
 
 Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket handshake. Empty `authToken` in `server.json` disables the check (local dev only).
 
-### Server → device
+### Server → app
 
-`frame` — emitted whenever any usage provider detects new data; per-provider totals are summed by `UsageAggregator` before broadcast. The daemon also re-sends the last known frame to any newly-connected client so the OLED can update on reconnect without waiting for the next change.
+`frame` — emitted whenever any usage provider detects new data; per-provider totals are summed by `UsageAggregator` before broadcast. The daemon also re-sends the last known frame to any newly-connected client, so a reconnecting app renders the real last reading instead of placeholders.
 
 ```json
 {
@@ -35,15 +35,14 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
 ```
 
 `state` is one of `sleep`, `think`, `code`, `trend`, `glow`, `angry`.
-The firmware has an additional local-only `MS_OFFLINE` state it renders when the WS has been disconnected for more than 15 s. The server never sends `offline` over the wire.
 
-`providers` carries the raw per-provider token + cost slices (cost as a canonical decimal string so it round-trips lossless through `Decimal(string:)`). The macOS app sums it to derive both the menubar header subtitle and the panel's per-provider rows from a single payload — eliminating drift between the WS-pushed header and what used to be a polled `/stats` breakdown. Firmware ignores the field; older firmware builds parse the rest of the frame unchanged. Stable order: `claude-code`, `codex`, then alphabetical. Always emitted (empty array before any provider has reported).
+`providers` carries the raw per-provider token + cost slices (cost as a canonical decimal string so it round-trips lossless through `Decimal(string:)`). The macOS app sums it to derive both the menubar header subtitle and the panel's per-provider rows from a single payload — eliminating drift between the WS-pushed header and what used to be a polled `/stats` breakdown. Stable order: `claude-code`, `codex`, then alphabetical. Always emitted (empty array before any provider has reported).
 
-`providers[].windows` carries that CLI's subscription rate-limit windows, shortest first, each identified by its `minutes` rather than by its position — vendors do not agree on an order, and Codex's own `primary` bucket is not always the session one. `used_percent` is a percentage of the window's allowance and `resets_at` is epoch seconds; a bucket whose reset has passed is dropped before the frame is built. Empty for a provider that publishes no limits — an API-key user, a CLI that has not surfaced a window yet, or Claude Code with the `claudeLimits` setting off — which is what puts the panel row back on its share-of-today bar. App-only; firmware ignores it.
+`providers[].windows` carries that CLI's subscription rate-limit windows, shortest first, each identified by its `minutes` rather than by its position — vendors do not agree on an order, and Codex's own `primary` bucket is not always the session one. `used_percent` is a percentage of the window's allowance and `resets_at` is epoch seconds; a bucket whose reset has passed is dropped before the frame is built. Empty for a provider that publishes no limits — an API-key user, a CLI that has not surfaced a window yet, or Claude Code with the `claudeLimits` setting off — which is what puts the panel row back on its share-of-today bar.
 
 Claude Code publishes no limit state on disk, so its windows come from `ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the login keychain and polls the endpoint Claude Code's `/usage` reads. That costs a one-time macOS keychain authorization, so it stays off until the user asks for it in Settings.
 
-`prev_tokens` / `prev_cost` carry yesterday's raw combined totals so the macOS app can render a day-over-day delta without a second data path. Both keys are omitted together until every active provider has produced a `prev` snapshot — the same condition that suppresses the `trend` state — so the app renders no delta rather than a false 0%. App-only; firmware ignores them.
+`prev_tokens` / `prev_cost` carry yesterday's raw combined totals so the macOS app can render a day-over-day delta without a second data path. Both keys are omitted together until every active provider has produced a `prev` snapshot — the same condition that suppresses the `trend` state — so the app renders no delta rather than a false 0%.
 
 ### Client → server
 
@@ -60,8 +59,6 @@ Claude Code publishes no limit state on disk, so its windows come from `ClaudeLi
 ```
 
 `claude_limits` is the app's stored preference, resent on every reconnect, and the daemon persists it to `server.json` — so the setting survives a daemon restart the app was not around for. It also travels on its own as `set_claude_limits` when the user flips the switch mid-session.
-
-Reserved for V2: `input` events when the enclosure grows a button.
 
 ## Daemon modules (`app/SissyServer/`)
 
@@ -92,45 +89,22 @@ The daemon binds first and lets each active provider's initial JSONL backfill fi
 
 Each provider reader retains a 2-day window on disk (today + yesterday). The daemon only ever surfaces today + yesterday — the latter feeds `FrameBuilder.pickState`'s `trend` heuristic — so the retention window is sized to match. Cold scans skip every file with `mtime < now-48h`, which on real-world trees (~500 MB across hundreds of projects) parses ~10-20% of the bytes and finishes in low seconds. Bumping this requires every consumer of `dailyTotals` to actually use the extra history; today nothing does.
 
-## Firmware modules
-
-| File | Job |
-|---|---|
-| `main.cpp`                          | Boot sequence + render/render loop |
-| `display/IDisplay.h`                | Display interface (V2 hardware swaps in here) |
-| `display/SSD1306Display.{h,cpp}`    | 128×64 mono OLED implementation |
-| `net/Config.{h,cpp}`                | `RuntimeConfig` struct + NVS persistence (`Preferences`) |
-| `net/SerialProvisioning.{h,cpp}`    | USB serial `CFG:` config receiver used by Pair Device |
-| `net/WifiBootstrap.{h,cpp}`         | Saved-credential connect path, WiFiManager portal fallback, auto-reconnect |
-| `net/WsClient.{h,cpp}`              | WebSocketsClient bridge, JSON parse → Frame |
-| `net/Ota.{h,cpp}`                   | ArduinoOTA wrapper |
-| `state/Frame.h`, `StateMachine.cpp` | `MascotState` enum + name ↔ id helpers |
-| `sprites_mono.h`                    | Generated by `scripts/png_to_bitmap.py` |
-
-The static C-style `WebSocketsClient` callback in `WsClient.cpp` trampolines through a single global pointer (`gOwner`) into the live instance. This is the same pattern the upstream library uses in its own examples — the alternative (`std::function` capturing `this`) is not supported by `WebSocketsClient::onEvent` on Arduino.
-
-## Boot flow
-
-1. `Serial.begin(115200)` then OLED init. If the OLED fails to come up the firmware halts; there is no point in running headless when the device's only output is a screen.
-2. `ConfigStore::begin()` + `WifiBootstrap::connect()` — pulls saved creds from NVS and connects directly when the app has provisioned WiFi/server settings over USB. If config is missing or WiFi fails, firmware raises the non-blocking captive portal AP `Sissy-Setup`, shows pairing instructions on the OLED, and continues polling `SerialProvisioning::tick()` so the app's **Pair Device...** flow can still provision the device without using the browser portal.
-3. `Ota::begin(deviceId, otaPassword)` — registers the device on the LAN as `esp-XXXXXX.local` for wireless flashes.
-4. `WsClient::begin(cfg, deviceId)` — opens the WebSocket. Bearer header is set from `cfg.authToken`.
-5. `loop()` runs `Ota::loop()` + `WsClient::loop()` and renders the last received `Frame` at ~12 fps. If the WS has been down for more than 15 s and at least one frame was received before, the firmware overrides `state` to `MS_OFFLINE` and draws a small "no signal" glyph over the mascot. After 5 min without a fresh frame, the panel additionally dims to `0x10` to spare the OLED phosphor.
-
 ## Mascot state machine
 
 Daemon picks `state` from the current cost vs. yesterday's:
 
-| Condition | `state` | Mascot |
-|---|---|---|
-| `tokens == 0`               | `sleep` | sleeping — day off |
-| `cost ≥ $200`               | `angry` | angry-coffee — problem |
-| `cost ≥ $100`               | `glow`  | glowing-aura — heavy use |
-| `cost ≥ 1.3 × yesterday`    | `trend` | trending-up — escalating |
-| `cost ≥ $20`                | `code`  | coding — productive |
-| otherwise                   | `think` | thinking — light use |
+| Condition | `state` |
+|---|---|
+| `tokens == 0`               | `sleep` |
+| `cost ≥ $200`               | `angry` |
+| `cost ≥ $100`               | `glow`  |
+| `cost ≥ 1.3 × yesterday`    | `trend` |
+| `cost ≥ $20`                | `code`  |
+| otherwise                   | `think` |
 
-Thresholds in `server.json.stateThresholds`; logic in `FrameBuilder.pickState`. Renaming a wire `state` value means updating (a) the mascot bitmap order in `SSD1306Display.cpp`, (b) `MascotState` in `firmware/src/state/`, (c) the app mirror in `WebSocketClient.swift`, (d) the picker in `FrameBuilder.swift`. Between frames the firmware briefly flips to `think` every 4 s as an idle breath animation.
+Thresholds in `server.json.stateThresholds`; logic in `FrameBuilder.pickState`.
+
+The menu bar no longer renders `state` — one fixed portrait replaced the per-mood sprites — so the only surviving consumer is the mood pop-up. The thresholds are absolute dollar amounts, which makes them meaningless for anyone whose daily spend sits far from them; `state` is expected to go when the frame contract is reworked.
 
 ## Milestone presets
 
@@ -165,15 +139,13 @@ Invalid preset keys are dropped silently (`MilestoneFrequency.isValid` guard) �
 
 The daemon binary lives at `Sissy.app/Contents/MacOS/sissy-serverd`. Its LaunchAgent plist is bundled at `Sissy.app/Contents/Library/LaunchAgents/com.radonforge.sissy.server.plist` and uses `BundleProgram` so it remains app-bundle relative if the app is moved.
 
-The menubar app's `ServerServiceController` uses `SMAppService.agent(plistName:)` to register/unregister the LaunchAgent. Registering starts the daemon and enables it for future logins; unregistering stops it and removes the login item registration. Runtime state in the UI comes from `/health`, not from parsing `launchctl` output. Quitting the menubar app does not stop the daemon — the OLED feed survives.
+The menubar app's `ServerServiceController` uses `SMAppService.agent(plistName:)` to register/unregister the LaunchAgent. Registering starts the daemon and enables it for future logins; unregistering stops it and removes the login item registration. Runtime state in the UI comes from `/health`, not from parsing `launchctl` output. Quitting the menubar app does not stop the daemon, which is the point of the split: the day keeps being counted either way.
 
 ## Operational notes
 
 - **Pricing**: there is no hand-maintained rate table. Rates resolve `server.json` `pricingOverride` → the LiteLLM catalog fetched at runtime (`PriceCatalog.swift`, refreshed every 24 h, cached in Application Support) → `PricingSeed.swift`, a generated snapshot embedded at build time for the offline / first-run case. A new model therefore needs no Sissy release. The cold backfill runs against exactly one catalog: a cache newer than the seed is applied before the scan starts, otherwise the first fetch is awaited under `PriceCatalogSource.coldStartBudget` and the seed prices the scan if it doesn't land. A refresh never reprices what it already counted, so letting a catalog arrive mid-scan would split a single day across two rate sets. `remotePricing: false` pins the daemon to the seed and stops all outbound requests. Regenerate the seed when cutting a release: `sissy-serverd --dump-seed > app/SissyServer/PricingSeed.swift`. The `pricing-oracle` CI job asserts exact agreement with `ccusage`, which prices from the same LiteLLM data.
-- **Network changes**: the easiest reset is to wipe NVS via `WifiBootstrap::forgetAndReboot()` or a long BOOT-button hold.
-- **Cert pinning / TLS**: out of scope for V1. Run on LAN only.
-- **Replay**: every WS client gets the last broadcast frame on connect, so reboots don't show stale `--`.
+- **Binding**: the daemon listens on `127.0.0.1` only. The app is its sole client.
+- **Replay**: every WS client gets the last broadcast frame on connect, so a restart doesn't show stale placeholders.
 - **Failure modes**:
   - No JSONL files for any active provider (empty `~/.claude/projects` and/or empty `~/.codex/sessions`) → `/health.usageReader = "no-jsonl-found"`, no frames broadcast
-  - WiFi drop → WiFiManager attempts auto-reconnect; OLED shows "ws down retrying..."
-  - Server unreachable → `WebSocketsClient::setReconnectInterval(3000)` retries forever; after 15 s the firmware switches to the offline mascot
+  - Daemon unreachable → the app reconnects with equal-jitter backoff capped at 30 s, and the menu bar dims until a frame lands
