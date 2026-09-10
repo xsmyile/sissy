@@ -8,7 +8,8 @@ final class DiagnosticsReportTests: XCTestCase {
         serverState: String = "Running",
         linkIsConnected: Bool = true,
         claudeLimits: Bool = true,
-        systemVersion: String = "Version 26.0 (Build 25A354)"
+        systemVersion: String = "Version 26.0 (Build 25A354)",
+        ccusage: [CcusageProbe.Install] = []
     ) -> DiagnosticsReport.Snapshot {
         DiagnosticsReport.Snapshot(
             version: "0.1.9",
@@ -18,7 +19,8 @@ final class DiagnosticsReportTests: XCTestCase {
             serverState: serverState,
             linkIsConnected: linkIsConnected,
             claudeLimits: claudeLimits,
-            providers: providers
+            providers: providers,
+            ccusage: ccusage
         )
     }
 
@@ -73,6 +75,66 @@ final class DiagnosticsReportTests: XCTestCase {
 
     func testNoFrameYetReportsNoProviders() {
         XCTAssertTrue(DiagnosticsReport.text(snapshot()).contains("Providers: none reported"))
+    }
+
+    func testNpmCcusageIsReportedWithoutACaveat() {
+        let text = DiagnosticsReport.text(
+            snapshot(ccusage: [
+                CcusageProbe.Install(path: "~/.bun/bin/ccusage", kind: .npm, version: "20.0.20")
+            ])
+        )
+
+        XCTAssertTrue(text.contains("ccusage: npm 20.0.20 at ~/.bun/bin/ccusage"), text)
+        XCTAssertFalse(text.contains("not the oracle"))
+    }
+
+    func testNonNpmCcusageIsFlaggedAsNotTheOracle() {
+        let text = DiagnosticsReport.text(
+            snapshot(ccusage: [
+                CcusageProbe.Install(
+                    path: "/opt/homebrew/bin/ccusage", kind: .homebrew, version: "20.1.0")
+            ])
+        )
+
+        XCTAssertTrue(
+            text.contains(
+                "ccusage: homebrew 20.1.0 (not the oracle) at /opt/homebrew/bin/ccusage"),
+            text
+        )
+    }
+
+    func testBothCcusageInstallsAreReportedWhenTheMachineHasTwo() {
+        let text = DiagnosticsReport.text(
+            snapshot(ccusage: [
+                CcusageProbe.Install(path: "~/.bun/bin/ccusage", kind: .npm, version: "20.0.20"),
+                CcusageProbe.Install(
+                    path: "/opt/homebrew/bin/ccusage", kind: .homebrew, version: "20.1.0"),
+            ])
+        )
+
+        XCTAssertTrue(
+            text.contains(
+                "ccusage: npm 20.0.20 at ~/.bun/bin/ccusage; "
+                    + "homebrew 20.1.0 (not the oracle) at /opt/homebrew/bin/ccusage"),
+            text
+        )
+    }
+
+    func testVersionlessCcusageStillNamesItsPath() {
+        let text = DiagnosticsReport.text(
+            snapshot(ccusage: [
+                CcusageProbe.Install(path: "~/.cargo/bin/ccusage", kind: .other, version: nil)
+            ])
+        )
+
+        XCTAssertTrue(
+            text.contains("ccusage: unknown build (not the oracle) at ~/.cargo/bin/ccusage"),
+            text
+        )
+    }
+
+    func testMissingCcusageIsStated() {
+        XCTAssertTrue(DiagnosticsReport.text(snapshot()).contains("ccusage: not found"))
     }
 
     func testReportCarriesNoCostFigures() {
