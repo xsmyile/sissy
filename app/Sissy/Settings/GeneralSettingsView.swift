@@ -31,6 +31,24 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                LabeledContent("Start at login") {
+                    if model.loginItem.requiresApproval {
+                        Button("Approve in Login Items") { model.loginItem.openLoginItemsSettings() }
+                    } else {
+                        Toggle("Start at login", isOn: launchAtLoginBinding)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                    }
+                }
+                Text(
+                    "Puts the menu bar icon back after a restart. The server starts at login on "
+                        + "its own once it's on, so usage keeps counting either way."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Show Claude Code limits", isOn: claudeLimitsBinding)
                 Text(
                     "Reads the token Claude Code already keeps in your keychain to show its "
@@ -68,6 +86,10 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        // `SMAppService` is the only record of the login item, so the switch
+        // reads it whenever the window appears rather than trusting what it
+        // last set: the user can undo it from System Settings.
+        .task { model.loginItem.refresh() }
     }
 
     private var serverCaption: String {
@@ -87,6 +109,13 @@ struct GeneralSettingsView: View {
         Binding(
             get: { model.preferences.claudeLimits },
             set: { model.setClaudeLimits($0) }
+        )
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { model.loginItem.isEnabled },
+            set: { model.setLaunchAtLogin($0) }
         )
     }
 
