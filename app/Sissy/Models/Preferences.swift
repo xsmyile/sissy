@@ -116,8 +116,12 @@ struct Preferences: Codable, Equatable {
         return base
     }
 
-    static func load() -> Self {
-        let url = appSupportDir().appendingPathComponent(fileName)
+    /// `directory` is a required argument, not a defaulted one: the app host
+    /// `xcodebuild test` launches would otherwise persist onto the machine's
+    /// own install whenever a caller forgot it. `SissyModel` holds the only
+    /// production value.
+    static func load(from directory: URL) -> Self {
+        let url = directory.appendingPathComponent(fileName)
         var prefs: Self
         if let data = try? Data(contentsOf: url),
             let decoded = try? JSONDecoder().decode(Self.self, from: data)
@@ -129,7 +133,7 @@ struct Preferences: Codable, Equatable {
         // `server.json` is the source of truth for the bearer token. When it
         // has one it wins; when it doesn't, a legacy plaintext value here is
         // kept and lands there on the next `writeServerConfig()`.
-        if let token = Self.serverConfigToken(), !token.isEmpty {
+        if let token = Self.serverConfigToken(in: directory), !token.isEmpty {
             prefs.authToken = token
         }
         return prefs
@@ -144,24 +148,26 @@ struct Preferences: Codable, Equatable {
     /// nothing: whoever can read a 0600 file owned by this user is the same
     /// principal whose keychain is already unlocked, and the per-item ACL it
     /// needed made macOS re-prompt whenever the app's code signature changed.
-    private static func serverConfigToken() -> String? {
-        let url = appSupportDir().appendingPathComponent(serverConfigFileName)
-        guard let data = try? Data(contentsOf: url),
-            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return obj["authToken"] as? String
+    private static func serverConfigToken(in directory: URL) -> String? {
+        serverConfig(in: directory)?["authToken"] as? String
     }
 
-    func save() {
+    private static func serverConfig(in directory: URL) -> [String: Any]? {
+        let url = directory.appendingPathComponent(serverConfigFileName)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    func save(to directory: URL) {
         // This file is 0644; `server.json` is 0600. Keep the token out of
         // here, but only once the 0600 file actually holds it — a `save()`
         // that runs before its paired `writeServerConfig()` would otherwise
         // drop a freshly generated token on the floor.
         var copy = self
-        if !authToken.isEmpty, Self.serverConfigToken() == authToken {
+        if !authToken.isEmpty, Self.serverConfigToken(in: directory) == authToken {
             copy.authToken = ""
         }
-        let url = Self.appSupportDir().appendingPathComponent(Self.fileName)
+        let url = directory.appendingPathComponent(Self.fileName)
         guard let data = try? JSONEncoder().encode(copy) else {
             NSLog("sissy: failed to encode %@", Self.fileName)
             return
@@ -189,8 +195,8 @@ struct Preferences: Codable, Equatable {
     /// down otherwise leaves the old value on disk, and the next daemon start
     /// prompts for a keychain the user had just opted out of — the app's
     /// `hello` only corrects it once the probe is already running.
-    func writeServerConfig() {
-        let url = Self.appSupportDir().appendingPathComponent(Self.serverConfigFileName)
+    func writeServerConfig(to directory: URL) {
+        let url = directory.appendingPathComponent(Self.serverConfigFileName)
         var dict: [String: Any] = [:]
         if let data = try? Data(contentsOf: url),
             let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any]

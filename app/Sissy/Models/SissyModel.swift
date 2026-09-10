@@ -10,7 +10,7 @@ import Observation
 final class SissyModel {
     var currentFrame: DisplayFrame? = nil
     var lastFrameAt: Date? = nil
-    var preferences: Preferences = .load()
+    var preferences: Preferences
     var settingsTab: SettingsTab = .general
     private var serverToggleInFlight: Bool = false
     private var serverToggleLabel: String = ""
@@ -24,6 +24,7 @@ final class SissyModel {
         case off
     }
 
+    private let supportDirectory: URL
     let serverService: ServerServiceController
     let serverHealth: ServerHealthMonitor
     let webSocketClient: WebSocketClient
@@ -33,11 +34,18 @@ final class SissyModel {
     /// a plist that is not in the bundle. Left to its default it asks
     /// `SMAppService` about the real agent, and whether a dev daemon happens
     /// to be registered on the machine would decide what the model reports.
-    /// `loginItem` is injected for the same reason.
+    /// `loginItem` is injected for the same reason, and `supportDirectory`
+    /// for the other half of that problem: `xcodebuild test` launches the real
+    /// app host, which builds this model against the machine's own install, so
+    /// a test covering a path that persists preferences needs somewhere else
+    /// to write.
     init(
         serverService: ServerServiceController = ServerServiceController(),
-        loginItem: LoginItemController = LoginItemController()
+        loginItem: LoginItemController = LoginItemController(),
+        supportDirectory: URL = Preferences.appSupportDir()
     ) {
+        self.supportDirectory = supportDirectory
+        self.preferences = .load(from: supportDirectory)
         self.serverService = serverService
         self.loginItem = loginItem
         self.webSocketClient = WebSocketClient()
@@ -59,8 +67,8 @@ final class SissyModel {
     }
 
     func savePreferences() {
-        preferences.save()
-        preferences.writeServerConfig()
+        preferences.save(to: supportDirectory)
+        preferences.writeServerConfig(to: supportDirectory)
     }
 
     func ensureAuthToken() {
