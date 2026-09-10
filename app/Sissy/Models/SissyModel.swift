@@ -72,7 +72,9 @@ final class SissyModel {
     }
 
     struct HeaderSnapshot {
-        let imageName: String
+        /// Carried as the pose rather than an asset name so the panel can
+        /// cross-fade between the two, which needs both of them at once.
+        let isAsleep: Bool
         let title: String
         let subtitle: String?
         let isDimmed: Bool
@@ -116,7 +118,7 @@ final class SissyModel {
 
         return MenuSnapshot(
             header: HeaderSnapshot(
-                imageName: offline ? Self.mascotSleepingAssetName : Self.mascotAssetName,
+                isAsleep: offline,
                 title: headerTitle(linkUp: linkUp, serverIsOn: server.isOn),
                 subtitle: headerSubtitle(linkUp: linkUp, serverIsOn: server.isOn),
                 isDimmed: !linkUp
