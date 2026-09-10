@@ -19,6 +19,10 @@ struct DiagnosticsReport {
         let linkIsConnected: Bool
         let claudeLimits: Bool
         let providers: [DisplayFrame.ProviderSlice]
+        /// Every `ccusage` found on disk. A gap between Sissy's cost and
+        /// "what ccusage says" cannot be triaged without knowing which of the
+        /// two programs by that name produced the number.
+        let ccusage: [CcusageProbe.Install]
     }
 
     static func text(_ snapshot: Snapshot) -> String {
@@ -29,6 +33,7 @@ struct DiagnosticsReport {
             "Link: \(snapshot.linkIsConnected ? "connected" : "disconnected")",
             "Claude limits: \(snapshot.claudeLimits ? "on" : "off")",
             "Providers: \(describe(snapshot.providers))",
+            "ccusage: \(describe(snapshot.ccusage))",
         ].joined(separator: "\n")
     }
 
@@ -48,7 +53,8 @@ struct DiagnosticsReport {
                 serverState: model.menuSnapshot.server.subtitle,
                 linkIsConnected: model.webSocketClient.isConnected,
                 claudeLimits: prefs.claudeLimits,
-                providers: model.currentFrame?.providers ?? []
+                providers: model.currentFrame?.providers ?? [],
+                ccusage: CcusageProbe.installs()
             )
         )
     }
@@ -74,6 +80,30 @@ struct DiagnosticsReport {
             "\(slice.id) \(slice.tokens) tokens, \(describe(slice.windows))"
         }
         .joined(separator: "; ")
+    }
+
+    /// Names every `ccusage` on the machine, flagging the ones that are not
+    /// the oracle. The npm build is left unmarked because it is the expected
+    /// answer; a marked line is the finding, and two lines is a finding of its
+    /// own — the shell resolves one of them and the user's expectation follows
+    /// whichever they installed last.
+    private static func describe(_ installs: [CcusageProbe.Install]) -> String {
+        guard !installs.isEmpty else { return "not found" }
+        return installs.map { install in
+            let name = describe(install.kind)
+            let version = install.version.map { " \($0)" } ?? ""
+            let caveat = install.kind == .npm ? "" : " (not the oracle)"
+            return "\(name)\(version)\(caveat) at \(install.path)"
+        }
+        .joined(separator: "; ")
+    }
+
+    private static func describe(_ kind: CcusageProbe.Kind) -> String {
+        switch kind {
+        case .npm: return "npm"
+        case .homebrew: return "homebrew"
+        case .other: return "unknown build"
+        }
     }
 
     private static func describe(_ windows: [DisplayFrame.UsageWindow]) -> String {
