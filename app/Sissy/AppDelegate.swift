@@ -42,6 +42,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         notifier.start()
         mascotNotifier = notifier
+
+        let center = NotificationCenter.default
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                // A turn late on purpose: a closing window is still listed and
+                // still visible while `willClose` is being delivered, so
+                // reading the window list now would keep the Dock icon.
+                Task { @MainActor in self?.syncActivationPolicy() }
+            }
+        }
+    }
+
+    /// Keeps the Dock icon in step with whether the app currently has a real
+    /// window, rather than leaving it absent for the process's whole life.
+    ///
+    /// `LSUIElement` keeps Sissy out of the Dock, which is right for a menubar
+    /// app — but an accessory app is missing from ⌘-Tab too, so once another
+    /// window covers the Settings window there is no way back to it beyond the
+    /// panel's gear. Promoting to `.regular` while a window is up and dropping
+    /// back when it goes is what `setActivationPolicy` is for.
+    ///
+    /// `canBecomeMain` is the discriminator: the usage panel's popover and the
+    /// status item's own window are borderless and cannot, so neither puts an
+    /// icon in the Dock.
+    private func syncActivationPolicy() {
+        let hasWindow = NSApp.windows.contains { window in
+            window.isVisible && window.canBecomeMain
+        }
+        let desired: NSApplication.ActivationPolicy = hasWindow ? .regular : .accessory
+        guard NSApp.activationPolicy() != desired else { return }
+        NSApp.setActivationPolicy(desired)
     }
 
     /// Closing the settings window must not take the menubar app with it, and
