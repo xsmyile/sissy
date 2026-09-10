@@ -127,7 +127,8 @@ actor UsageAggregator {
                 id: p.id,
                 tokens: s.today.totalTokens,
                 cost: s.today.totalCost,
-                windows: p.currentWindows()
+                windows: p.currentWindows(),
+                plan: p.currentPlan()
             )
         }
         return FrameBuilder.activeSlices(raw)

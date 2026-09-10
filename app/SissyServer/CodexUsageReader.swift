@@ -39,6 +39,11 @@ actor CodexUsageReader: UsageProvider {
     nonisolated private let latestWindows = AtomicWindows()
     private var latestWindowsAt: Date?
 
+    /// Plan Codex names on the same `rate_limits` block as the windows, so it
+    /// arrives and ages exactly like them: one observation per turn, and
+    /// nothing at all until the CLI has taken a turn.
+    nonisolated private let latestPlan = AtomicPlan()
+
     /// Per-file "last seen model id" so a `token_count` event resolves to the
     /// `turn_context.payload.model` that immediately preceded it in the same
     /// rollout. Codex bumps the model mid-session if the user reassigns the
@@ -339,9 +344,18 @@ actor CodexUsageReader: UsageProvider {
 
     nonisolated func currentWindows() -> [UsageWindow] { latestWindows.live() }
 
+    nonisolated func currentPlan() -> String? { latestPlan.load() }
+
     private func captureWindows(_ raw: Any?, observedAt: Date) {
         guard let dict = raw as? [String: Any] else { return }
         if let seen = latestWindowsAt, seen >= observedAt { return }
+        // Ahead of the window parse and outside its `isEmpty` bail: a rollout
+        // whose buckets did not parse still named the plan, and the plan is
+        // what the panel puts next to the provider whether or not there are
+        // gauges under it.
+        if let plan = UsageReaderShared.sanitizedPlanToken(dict["plan_type"] as? String) {
+            latestPlan.store(plan)
+        }
         let windows = Self.rateLimitBuckets.compactMap { key -> UsageWindow? in
             guard let bucket = dict[key] as? [String: Any],
                 let minutes = bucket["window_minutes"] as? Int,
@@ -629,6 +643,7 @@ actor CodexUsageReader: UsageProvider {
             guard offsets[fileURL] != nil else { continue }
             fileModels[fileURL] = entry.model
         }
+        latestPlan.store(resume.plan)
         guard !resume.rateLimitWindows.isEmpty else { return }
         latestWindows.store(resume.rateLimitWindows)
         latestWindowsAt = resume.rateLimitWindowsAt
@@ -673,7 +688,8 @@ actor CodexUsageReader: UsageProvider {
             // is dropped on read anyway, and filtering here would throw away
             // one that still has seconds left.
             rateLimitWindows: latestWindows.load(),
-            rateLimitWindowsAt: latestWindowsAt
+            rateLimitWindowsAt: latestWindowsAt,
+            plan: latestPlan.load()
         )
 
         let snapshot = UsageStateSnapshot(

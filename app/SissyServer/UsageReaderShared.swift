@@ -19,6 +19,23 @@ enum UsageReaderShared {
     /// rounding so an unchanged file isn't re-ingested on every poll.
     static let mtimeTolerance: TimeInterval = 0.0005
 
+    /// Longest plan token accepted off a vendor payload, matching the bound
+    /// Claude Code applies to its own tier tokens (`^[a-z][a-z0-9_]{0,63}$`).
+    static let maxPlanTokenLength = 64
+
+    /// Narrows a vendor-supplied plan identifier to the shape both CLIs use
+    /// for theirs, so an unexpected payload cannot put arbitrary text on the
+    /// wire. Neither reader owns its source: Codex takes the token out of a
+    /// rollout line and Claude Code out of the CLI's own config file.
+    static func sanitizedPlanToken(_ raw: String?) -> String? {
+        guard let raw, let first = raw.first, raw.count <= maxPlanTokenLength else { return nil }
+        guard first.isASCII, first.isLowercase else { return nil }
+        let allowed = raw.allSatisfy {
+            $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "_")
+        }
+        return allowed ? raw : nil
+    }
+
     /// `yyyy-MM-dd` day-bucket key formatter. POSIX locale + Gregorian
     /// calendar so the key is stable across locale changes that would
     /// otherwise shift digit shaping.

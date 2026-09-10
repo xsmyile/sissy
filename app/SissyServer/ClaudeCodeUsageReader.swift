@@ -45,6 +45,16 @@ final class AtomicWindows: @unchecked Sendable {
     }
 }
 
+/// Same handoff as `AtomicWindows` for a plan token: a reader parses it on its
+/// own actor while `UsageProvider.currentPlan()` is read from outside it.
+/// Unlike a window a plan never expires, so there is no `live()` here.
+final class AtomicPlan: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+    func load() -> String? { lock.withLock { value } }
+    func store(_ v: String?) { lock.withLock { value = v } }
+}
+
 actor ClaudeCodeUsageReader: UsageProvider {
     /// Stable provider id surfaced via `/stats`. The persistence URL is
     /// injected; this reader still writes the legacy `usage-state.json` path
@@ -254,6 +264,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
     }
 
     private let limitsProbe: ClaudeLimitsProbe?
+    nonisolated private let profile: ClaudeProfileSource
 
     init(
         claudeDir: URL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/projects"),
@@ -261,7 +272,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
         pricingOverride: [String: ModelPricing]? = nil,
-        limitsProbe: ClaudeLimitsProbe? = nil
+        limitsProbe: ClaudeLimitsProbe? = nil,
+        profile: ClaudeProfileSource = ClaudeProfileSource()
     ) {
         self.claudeDir = claudeDir
         self.retainDays = retainDays
@@ -269,6 +281,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         self.persistenceURL = persistenceURL
         self.pricingOverride = pricingOverride
         self.limitsProbe = limitsProbe
+        self.profile = profile
     }
 
     /// Claude Code keeps no limit state on disk, so the windows come from the
@@ -276,6 +289,11 @@ actor ClaudeCodeUsageReader: UsageProvider {
     nonisolated func currentWindows() -> [UsageWindow] {
         limitsProbe?.currentWindows() ?? []
     }
+
+    /// The plan comes from the CLI's own config file rather than the usage
+    /// endpoint, which carries no such field — so it is readable whether or
+    /// not the user turned the limits probe on.
+    nonisolated func currentPlan() -> String? { profile.currentPlan() }
 
     func applyPriceCatalog(_ catalog: PriceCatalog) {
         priceCatalog = catalog.table(for: .anthropic)
@@ -305,6 +323,9 @@ actor ClaudeCodeUsageReader: UsageProvider {
 
     func start(onChange: @escaping @Sendable (DayTotals, DayTotals?) async -> Void) async {
         self.onChange = onChange
+        // Ahead of the restored-snapshot emit below, so the first frame a
+        // reconnecting client replays already carries the plan.
+        profile.refresh()
         let loaded = loadAndApplyPersistedState()
         // If we restored a snapshot, fire the callback immediately so Hub
         // builds a cached frame for fresh WS clients. Without this emit the
@@ -450,6 +471,9 @@ actor ClaudeCodeUsageReader: UsageProvider {
     func isWarm() -> Bool { coldScanComplete }
 
     private func poll() async {
+        // Cheap by construction: the source stats the file and re-parses only
+        // when it actually moved, and no more often than its own floor.
+        profile.refresh()
         // Newest files first so the active project's JSONL — the only one
         // that can contain today's usage — is parsed before any historical
         // file. Combined with the throttled broadcast below this means the

@@ -1008,6 +1008,59 @@ func runClaudeLimitsParseTests() {
         true
     )
 
+    // Measured shape of `~/.claude.json`: the plan reaches Sissy as
+    // `oauthAccount.organizationType`, prefixed, where the CLI's own label
+    // switch takes the bare token.
+    let profileBlob = Data(
+        #"{"oauthAccount":{"organizationType":"claude_max","userRateLimitTier":"default_claude_max_5x"}}"#
+            .utf8
+    )
+    expect("profile plan strips the vendor prefix", ClaudeProfileSource.parsePlan(profileBlob), "max")
+
+    let apiKeyProfile = Data(#"{"hasCompletedOnboarding":true}"#.utf8)
+    expect(
+        "a profile with no oauthAccount names no plan",
+        ClaudeProfileSource.parsePlan(apiKeyProfile) == nil,
+        true
+    )
+
+    let unprefixedProfile = Data(#"{"oauthAccount":{"organizationType":"team"}}"#.utf8)
+    expect(
+        "an unprefixed organizationType passes through",
+        ClaudeProfileSource.parsePlan(unprefixedProfile),
+        "team"
+    )
+
+    // The file belongs to another program, so its value is narrowed to the
+    // shape both CLIs use before it can reach a panel row.
+    let shoutingProfile = Data(#"{"oauthAccount":{"organizationType":"claude_MAX"}}"#.utf8)
+    expect(
+        "a plan outside the token shape is refused",
+        ClaudeProfileSource.parsePlan(shoutingProfile) == nil,
+        true
+    )
+
+    expect("plan token accepts snake_case", UsageReaderShared.sanitizedPlanToken("edu_plus"), "edu_plus")
+    expect("plan token accepts digits", UsageReaderShared.sanitizedPlanToken("ent26"), "ent26")
+    expect(
+        "plan token refuses a leading digit",
+        UsageReaderShared.sanitizedPlanToken("5x") == nil,
+        true
+    )
+    expect(
+        "plan token refuses whitespace",
+        UsageReaderShared.sanitizedPlanToken("max 5x") == nil,
+        true
+    )
+    expect("plan token refuses empty", UsageReaderShared.sanitizedPlanToken("") == nil, true)
+    expect(
+        "plan token refuses one longer than the bound",
+        UsageReaderShared.sanitizedPlanToken(
+            String(repeating: "a", count: UsageReaderShared.maxPlanTokenLength + 1)
+        ) == nil,
+        true
+    )
+
     let epochPayload: [String: Any] = [
         "five_hour": ["utilization": 25.0, "resets_at": 1_789_006_037.0],
         "seven_day": ["utilization": 62.0, "resets_at": 1_789_549_854.0],
@@ -1133,7 +1186,7 @@ func runCodexRateLimitTest() {
     let limits =
         #"{"primary":{"used_percent":8.0,"window_minutes":10080,"#
         + #""resets_at":\#(liveReset)},"secondary":{"used_percent":25.0,"#
-        + #""window_minutes":300,"resets_at":\#(staleReset)}}"#
+        + #""window_minutes":300,"resets_at":\#(staleReset)},"plan_type":"plus"}"#
     let payload = """
         {"type":"turn_context","timestamp":"\(nowStr)","payload":{"turn_id":"t1","model":"gpt-5-codex"}}
         {"type":"event_msg","timestamp":"\(nowStr)","payload":{"type":"token_count","info":\(usage),"rate_limits":\(limits)}}
@@ -1146,6 +1199,7 @@ func runCodexRateLimitTest() {
 
     let sem = DispatchSemaphore(value: 0)
     let box = TestBox<[UsageWindow]>([])
+    let planBox = TestBox<String?>(nil)
     Task {
         let reader = CodexUsageReader(
             codexDir: tempDir,
@@ -1155,6 +1209,7 @@ func runCodexRateLimitTest() {
         )
         await reader.start { _, _ in }
         box.value = await reader.currentWindows()
+        planBox.value = await reader.currentPlan()
         await reader.stop()
         sem.signal()
     }
@@ -1163,6 +1218,9 @@ func runCodexRateLimitTest() {
     expect("codex keeps only unexpired windows", box.value.count, 1)
     expect("codex window keyed by minutes", box.value.first?.minutes, 10_080)
     expect("codex window percentage", box.value.first?.usedPercent, 8.0)
+    // The plan rides the same block, and unlike a window it does not expire:
+    // the stale bucket above is dropped while the plan stays.
+    expect("codex plan read off the limits block", planBox.value, "plus")
 }
 
 /// Verifies a snapshot predating `fileModels` is discarded rather than
@@ -1274,7 +1332,7 @@ func runCodexWindowPersistenceTest() {
 
     let line = """
         {"type":"turn_context","timestamp":"\(ts)","payload":{"turn_id":"t1","model":"o3"}}
-        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500},"total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500}},"rate_limits":{"primary":{"used_percent":4.0,"window_minutes":300,"resets_at":\(resets)},"secondary":{"used_percent":17.0,"window_minutes":10080,"resets_at":\(resets)}}}}
+        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500},"total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500}},"rate_limits":{"primary":{"used_percent":4.0,"window_minutes":300,"resets_at":\(resets)},"secondary":{"used_percent":17.0,"window_minutes":10080,"resets_at":\(resets)},"plan_type":"pro"}}}
         """ + "\n"
     try? line.write(to: jsonl, atomically: true, encoding: .utf8)
 
@@ -1293,12 +1351,14 @@ func runCodexWindowPersistenceTest() {
     // any window it reports came from the snapshot.
     let sem2 = DispatchSemaphore(value: 0)
     let box = TestBox<[UsageWindow]>([])
+    let planBox = TestBox<String?>(nil)
     Task {
         let r = CodexUsageReader(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
         await r.start { _, _ in }
         box.value = r.currentWindows()
+        planBox.value = r.currentPlan()
         await r.stop()
         sem2.signal()
     }
@@ -1311,6 +1371,10 @@ func runCodexWindowPersistenceTest() {
     expect(
         "codex weekly window restored",
         box.value.first(where: { $0.minutes == 10_080 })?.usedPercent, 17.0)
+    // Same reason the windows are persisted: with the offsets at EOF there is
+    // nothing left to re-read, so a plan that did not survive the restart
+    // would leave the row without one until the next Codex turn.
+    expect("codex plan survives restart", planBox.value, "pro")
 }
 
 /// Verifies the Codex reader recovers its per-file model state across a
