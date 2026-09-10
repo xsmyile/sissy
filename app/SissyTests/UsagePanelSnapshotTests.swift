@@ -26,13 +26,15 @@ final class UsagePanelSnapshotTests: XCTestCase {
         _ id: String,
         _ tokens: Int,
         _ cost: String,
-        windows: [DisplayFrame.UsageWindow] = []
+        windows: [DisplayFrame.UsageWindow] = [],
+        plan: String? = nil
     ) -> DisplayFrame.ProviderSlice {
         DisplayFrame.ProviderSlice(
             id: id,
             tokens: tokens,
             cost: Decimal(string: cost)!,
-            windows: windows
+            windows: windows,
+            plan: plan
         )
     }
 
@@ -69,6 +71,25 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("claude-code", 1000, "1.00")])
         )
         XCTAssertEqual(snapshot.providers.first?.windows, [])
+    }
+
+    // MARK: Plan
+
+    func testProviderRowWordsTheVendorPlanToken() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice("claude-code", 1000, "1.00", plan: "max"),
+                slice("codex", 1000, "1.00", plan: "plus"),
+            ])
+        )
+        XCTAssertEqual(snapshot.providers.map(\.plan), ["Max", "Plus"])
+    }
+
+    func testProviderWithoutAPlanReportsNone() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("claude-code", 1000, "1.00")])
+        )
+        XCTAssertNil(snapshot.providers.first?.plan)
     }
 
     // MARK: Totals

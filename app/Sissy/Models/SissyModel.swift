@@ -358,12 +358,23 @@ struct DisplayFrame: Codable, Equatable {
         /// provider that publishes none, which is what puts the row back on
         /// its share-of-today bar.
         let windows: [UsageWindow]
+        /// Vendor's own plan token, nil when the daemon reported none — an
+        /// API-key user, a CLI too old to name it, or a daemon predating the
+        /// field. `UsageFormat.planLabel` turns it into the words on the row.
+        let plan: String?
 
-        init(id: String, tokens: Int, cost: Decimal, windows: [UsageWindow] = []) {
+        init(
+            id: String,
+            tokens: Int,
+            cost: Decimal,
+            windows: [UsageWindow] = [],
+            plan: String? = nil
+        ) {
             self.id = id
             self.tokens = tokens
             self.cost = cost
             self.windows = windows
+            self.plan = plan
         }
     }
 

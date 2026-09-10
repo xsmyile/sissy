@@ -41,6 +41,21 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.windowLabel(minutes: 90), "90m")
     }
 
+    func testPlanLabelCapitalisesAVendorToken() {
+        XCTAssertEqual(UsageFormat.planLabel("plus"), "Plus")
+        XCTAssertEqual(UsageFormat.planLabel("max"), "Max")
+    }
+
+    /// Derived rather than mapped, so a tier that ships after this release
+    /// still reads as words instead of disappearing from the row.
+    func testPlanLabelSpacesASnakeCaseTier() {
+        XCTAssertEqual(UsageFormat.planLabel("edu_plus"), "Edu Plus")
+    }
+
+    func testPlanLabelOfNoPlanIsNoLabel() {
+        XCTAssertNil(UsageFormat.planLabel(nil))
+    }
+
     func testResetLabelUsesAClockTimeLaterToday() throws {
         let clock = try fixedClock()
         let reset = try XCTUnwrap(clock.calendar.date(byAdding: .hour, value: 4, to: clock.now))

@@ -65,6 +65,19 @@ enum UsageFormat {
     private static let minutesPerHour = 60
     private static let minutesPerDay = 1440
 
+    /// The vendor's plan token as words: `plus` → "Plus", `edu_plus` → "Edu
+    /// Plus". Derived rather than mapped for the same reason as
+    /// `windowLabel(minutes:)` — the two CLIs between them publish a dozen
+    /// tiers and add to the list without asking, and a table here would show
+    /// nothing for the one that arrived after the release. Both vendors emit
+    /// lowercase `snake_case`, which the daemon enforces before the token
+    /// reaches the wire.
+    static func planLabel(_ plan: String?) -> String? {
+        guard let plan else { return nil }
+        let words = plan.split(separator: "_").map { $0.capitalized }
+        return words.isEmpty ? nil : words.joined(separator: " ")
+    }
+
     static func providerName(_ id: String) -> String {
         switch id {
         case "claude-code": return "Claude Code"
