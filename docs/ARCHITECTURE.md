@@ -22,11 +22,11 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
   "primary": "233M",
   "primary_label": "TOKENS",
   "providers": [
-    {"id": "claude-code", "tokens": 217000000, "cost": "138.42", "windows": [
+    {"id": "claude-code", "tokens": 217000000, "cost": "138.42", "plan": "max", "windows": [
       {"minutes": 300, "used_percent": 12, "resets_at": 1789042799},
       {"minutes": 10080, "used_percent": 27, "resets_at": 1789523999}
     ]},
-    {"id": "codex",       "tokens":  16000000, "cost":  "10.58", "windows": []}
+    {"id": "codex",       "tokens":  16000000, "cost":  "10.58", "plan": "plus", "windows": []}
   ],
   "prev_tokens": 191000000,
   "prev_cost": "121.44"
@@ -36,6 +36,8 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
 `providers` carries the raw per-provider token + cost slices (cost as a canonical decimal string so it round-trips lossless through `Decimal(string:)`). The macOS app sums it to derive both the menubar header subtitle and the panel's per-provider rows from a single payload — eliminating drift between the WS-pushed header and what used to be a polled `/stats` breakdown. Stable order: `claude-code`, `codex`, then alphabetical. Always emitted (empty array before any provider has reported).
 
 `providers[].windows` carries that CLI's subscription rate-limit windows, shortest first, each identified by its `minutes` rather than by its position — vendors do not agree on an order, and Codex's own `primary` bucket is not always the session one. `used_percent` is a percentage of the window's allowance and `resets_at` is epoch seconds; a bucket whose reset has passed is dropped before the frame is built. Empty for a provider that publishes no limits — an API-key user, a CLI that has not surfaced a window yet, or Claude Code with the `claudeLimits` setting off — which is what puts the panel row back on its share-of-today bar.
+
+`providers[].plan` is the account's subscription plan as the vendor's own lowercase token — `max`, `team`, `plus` — never a display label: the app words it in `UsageFormat`, so a tier a vendor ships after this release still reaches the panel. Omitted rather than sent as null for a provider that names none, which is what leaves the panel row's badge off.
 
 Claude Code publishes no limit state on disk, so its windows come from `ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the login keychain and polls the endpoint Claude Code's `/usage` reads. That costs a one-time macOS keychain authorization, so it stays off until the user asks for it in Settings.
 
@@ -71,6 +73,7 @@ Claude Code publishes no limit state on disk, so its windows come from `ClaudeLi
 | `UsageAggregator.swift`         | Sums per-day totals across active providers; emits the combined frame to `Hub` |
 | `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`; dedupes by `requestId`; forwards the limit probe's windows; owns `parseTimestamp`, the one timestamp parser every reader and the probe share |
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429; off unless `claudeLimits` is set |
+| `ClaudeProfile.swift`           | Reads the plan out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain, so it answers with `claudeLimits` off |
 | `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it — bounded so an unanswered authorization dialog cannot park the probe |
 | `CodexUsageReader.swift`        | Tails `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`); uses `last_token_usage` as per-turn delta; model from `turn_context.payload.model` (fallback `gpt-5-codex`) |
 | `UsageReaderShared.swift`       | Tuning constants both tails share (`ingestChunkSize`, `pollEmitThrottle`, mtime slack) so they cannot drift apart |
