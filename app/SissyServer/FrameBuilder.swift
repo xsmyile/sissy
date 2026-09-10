@@ -24,9 +24,9 @@ struct UsageWindow: Sendable, Equatable, Codable {
 
 /// Raw per-provider slice carried on the WS frame so the app can derive both
 /// the menubar header total and the panel's per-provider rows from a single
-/// payload. Firmware ignores the field. Cost is a `Decimal` here; the wire
-/// representation is `NSDecimalNumber.stringValue` so it round-trips lossless
-/// through `Decimal(string:)` on the app side.
+/// payload. Cost is a `Decimal` here; the wire representation is
+/// `NSDecimalNumber.stringValue` so it round-trips lossless through
+/// `Decimal(string:)` on the app side.
 struct ProviderSlice: Sendable, Equatable, Codable {
     let id: String
     let tokens: Int
@@ -53,13 +53,10 @@ struct FrameData: Sendable, Equatable, Codable {
     /// Per-provider totals (raw tokens + Decimal cost) for every provider with
     /// spend today. Stable order: claude-code, codex, then alphabetical. Empty
     /// when no provider has tokens today (none active yet, or all idle today).
-    /// App-only; firmware ignores it.
     let providers: [ProviderSlice]
     /// Yesterday's raw totals, carried so the menubar can render a
     /// day-over-day delta. Both nil until every active provider has produced
-    /// a `prev` snapshot — the same condition that suppresses the `trend`
-    /// state — so the app shows no delta instead of a false 0%. App-only;
-    /// firmware ignores them.
+    /// a `prev` snapshot, so the app shows no delta instead of a false 0%.
     let prevTokens: Int?
     let prevCost: Decimal?
 }

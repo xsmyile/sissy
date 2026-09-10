@@ -1,8 +1,8 @@
 import Foundation
 
 /// Fans N `UsageProvider` streams into a single combined `(today, prev)`
-/// frame. The wire protocol — and therefore the firmware — stays unaware of
-/// multi-provider; the daemon sums per-day totals before broadcast.
+/// frame. The frame's own scalars stay unaware of multi-provider: the daemon
+/// sums per-day totals before broadcast and carries the split alongside them.
 ///
 /// `prev` is emitted as non-nil only when every active provider has produced
 /// a non-nil `prev`. If any provider is still warming (e.g. a fresh Codex

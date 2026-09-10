@@ -3,7 +3,7 @@ import Foundation
 /// Display formatters shared by the menubar menu and the usage panel.
 ///
 /// Intentionally diverges from the daemon's `FrameBuilder.fmtTokens` /
-/// `fmtCost`: those render into 128×64 pixels of OLED and trade precision
+/// `fmtCost`: those were shaped for a 128×64 display and trade precision
 /// for width, while every surface here has room for a decimal and full cent
 /// precision. Keeping both is deliberate — unifying them would force one
 /// surface to compromise. What must not diverge is the app's own surfaces,

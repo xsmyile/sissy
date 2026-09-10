@@ -149,13 +149,13 @@ struct Preferences: Codable, Equatable {
 
     /// Write the daemon-facing `server.json` next to `preferences.json`.
     /// `sissy-serverd` reads this file at boot (and on kickstart) to
-    /// configure its bind address, token, pricing, and state thresholds.
+    /// configure its bind address, token, and pricing.
     ///
     /// Preserves any keys we don't manage here — `providers`, `codexDataDir`,
     /// `pricingOverride`, `remotePricing`, and any hand-edited entries — by reading the
     /// existing file first and merging our values over it. Without that
-    /// merge, a metric switch or a pairing run would silently drop a
-    /// user's `providers.codex = false` override.
+    /// merge, a metric switch would silently drop a user's
+    /// `providers.codex = false` override.
     ///
     /// `claudeLimits` lands here as well as on the WS message that applies it
     /// live, because the daemon reads this file unattended at boot and starts
@@ -172,9 +172,8 @@ struct Preferences: Codable, Equatable {
             dict = existing
         }
         // Loopback: the app is the only client, and it connects over
-        // 127.0.0.1. Binding the wildcard put the daemon on the LAN behind
-        // nothing but a bearer token, which was the price of reaching an
-        // ESP32 on the same network and buys nothing now.
+        // 127.0.0.1. Binding the wildcard would put the daemon on the LAN
+        // behind nothing but a bearer token, for no second client to reach.
         dict["host"] = Self.serverBindHost
         dict["port"] = serverPort
         dict["authToken"] = authToken
@@ -197,8 +196,7 @@ struct Preferences: Codable, Equatable {
             try data.write(to: url, options: .atomic)
         } catch {
             // A dropped write leaves the daemon on stale config (old port/token)
-            // after a metric switch or pairing save — surface it instead of
-            // failing silently.
+            // after a metric switch — surface it instead of failing silently.
             NSLog("sissy: failed to write %@: %@", Self.serverConfigFileName, error.localizedDescription)
             return
         }

@@ -319,8 +319,8 @@ func runSelfTest() {
 }
 
 /// Round-trip a `FrameData` through `Hub.broadcast` and inspect the encoded
-/// payload via a captive sink. Guarantees the wire shape app + firmware both
-/// parse against stays in lock-step with what `FrameBuilder` produces.
+/// payload via a captive sink. Guarantees the wire shape the app parses
+/// against stays in lock-step with what `FrameBuilder` produces.
 private func runHubEncodeTests() {
     final class CapturingSink: FrameSink, @unchecked Sendable {
         let lock = NSLock()

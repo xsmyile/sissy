@@ -32,24 +32,23 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
     private let hub: Hub
     private let server: SissyServer
 
-    // Liveness tracking. Without these, a firmware client whose power gets
-    // yanked (or whose WiFi drops without a clean close) leaves the daemon
-    // socket "alive" until either the next write fails through TCP
-    // retransmit timeouts (minutes) or the kernel's idle keepalive fires
-    // (2 hours on macOS default). The menubar header keeps reporting
-    // "Sissy is …" with stale state in the meantime.
+    // Liveness tracking. Without these, a client killed outright (or whose
+    // socket drops without a clean close) leaves the daemon socket "alive"
+    // until either the next write fails through TCP retransmit timeouts
+    // (minutes) or the kernel's idle keepalive fires (2 hours on macOS
+    // default), and `/stats` keeps counting a client that is gone.
     //
     // Mitigation: send our own WS ping on a fixed cadence and treat lack
     // of any inbound traffic for `heartbeatTimeout` as a dead peer. Closing
     // the channel fires `channelInactive` -> existing presence rebroadcast
-    // path, so the UI flips within `heartbeatTimeout` of the unplug.
+    // path, so the count drops within `heartbeatTimeout` of the peer
+    // going away.
     //
     // SignalR-equivalent defaults: ping every 15 s, declare dead at 30 s of
-    // silence. Industry-standard for low-latency realtime UI fleets;
-    // RFC 6455 leaves the cadence to the application. The firmware already
-    // pings the daemon every 15 s (`WsClient.cpp` `enableHeartbeat`), so
-    // inbound traffic refreshes `lastInboundAt` well inside the timeout
-    // window during normal operation.
+    // silence. RFC 6455 leaves the cadence to the application. URLSession
+    // answers our ping with a pong on the app's behalf and `channelRead`
+    // refreshes `lastInboundAt` for any inbound frame, so a healthy but
+    // idle app stays well inside the timeout window.
     private static let heartbeatInterval: TimeAmount = .seconds(15)
     private static let heartbeatTimeout: TimeAmount = .seconds(30)
 

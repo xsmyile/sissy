@@ -71,9 +71,9 @@ actor Hub {
             "ts": Int(Date().timeIntervalSince1970),
             "providers": providers,
         ]
-        // Emit the field only when set so a sink that doesn't care (firmware)
-        // never sees an extra key with `null`. Same wire weight as before on
-        // the steady-state frames, which is most of them.
+        // Emit the field only when set so the app reads an absent key rather
+        // than a `null` it has to special-case. Steady-state frames — most of
+        // them — keep the same wire weight as before.
         if let prevTokens = frame.prevTokens, let prevCost = frame.prevCost {
             dict["prev_tokens"] = prevTokens
             dict["prev_cost"] = NSDecimalNumber(decimal: prevCost).stringValue
