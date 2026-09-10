@@ -159,6 +159,7 @@ actor CodexUsageReader: UsageProvider {
     func start(onChange: @escaping @Sendable (DayTotals, DayTotals?) async -> Void) async {
         self.onChange = onChange
         let loaded = loadAndApplyPersistedState()
+        adoptAuthFilePlanIfUnknown()
         if loaded {
             let (today, prev) = current()
             lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
@@ -345,6 +346,23 @@ actor CodexUsageReader: UsageProvider {
     nonisolated func currentWindows() -> [UsageWindow] { latestWindows.live() }
 
     nonisolated func currentPlan() -> String? { latestPlan.load() }
+
+    /// Takes the plan from Codex's auth file when neither the snapshot nor a
+    /// rollout has named one yet.
+    ///
+    /// Without this a resumed daemon shows the Codex row with no plan: the
+    /// offsets are at EOF, `plan_type` rides events that were already
+    /// consumed, and the badge waits on the user's next turn. The auth file
+    /// answers immediately, and the first rollout event that lands overwrites
+    /// it — the CLI restamps the claim per turn, this file only on a token
+    /// refresh.
+    private func adoptAuthFilePlanIfUnknown() {
+        guard latestPlan.load() == nil else { return }
+        let url = CodexAuthSource.defaultURL(sessionsDir: codexDir)
+        guard let plan = CodexAuthSource.loadPlan(at: url) else { return }
+        latestPlan.store(plan)
+        persistDirty = true
+    }
 
     private func captureWindows(_ raw: Any?, observedAt: Date) {
         guard let dict = raw as? [String: Any] else { return }
