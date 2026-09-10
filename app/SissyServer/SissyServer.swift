@@ -189,9 +189,15 @@ actor SissyServer {
     /// Re-emit a frame using the most recently observed totals. No-op if the
     /// reader hasn't produced a frame yet — the pending pin will take effect
     /// on the first real poll.
+    ///
+    /// The totals are read *after* the slice fetch on purpose. That `await` is
+    /// a suspension point a provider emit can land in, and totals read before
+    /// it would be the ones that emit has already superseded — rebroadcasting
+    /// them puts the token count backwards and re-caches the stale pair for
+    /// every client that connects next.
     func rebroadcastFromCache() async {
-        guard let totals = lastTotals else { return }
         let slices = await aggregator.currentSlices()
+        guard let totals = lastTotals else { return }
         await rebuildAndBroadcast(today: totals.today, prev: totals.prev, slices: slices)
     }
 
