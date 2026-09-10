@@ -32,6 +32,15 @@ actor ClaudeLimitsProbe {
     /// so once instead of every five minutes — and a *different* failure
     /// still gets through.
     private var lastReported: String?
+    /// Last credentials read from the keychain, held until they expire.
+    ///
+    /// The access token is good for hours while the poll runs every five
+    /// minutes, so re-reading it each time asks macOS to authorize ~96 times
+    /// a day for a value that changed three times. Every one of those reads
+    /// is a chance to meet a keychain whose grant has gone stale — an app
+    /// re-signed, or the item recreated by the CLI — and to put a dialog in
+    /// front of someone who did not just ask for one.
+    private var cached: ClaudeCredentials?
 
     /// Live windows, expired buckets dropped — a window past its reset
     /// describes a period that no longer exists, same rule the Codex reader
@@ -70,10 +79,14 @@ actor ClaudeLimitsProbe {
 
     /// One poll. Returns how long to wait before the next one.
     private func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
+        if let cached, cached.isValid() {
+            return await fetchWindows(using: cached, onRefresh: onRefresh)
+        }
         let credentials: ClaudeCredentials
         switch await ClaudeCredentialsStore.loadOffPool(timeout: Self.keychainTimeout) {
         case .found(let found):
             credentials = found
+            cached = found
         case .absent:
             report(
                 "no Claude Code credentials in the keychain under "
@@ -103,7 +116,15 @@ actor ClaudeLimitsProbe {
                     + "the CLI to renew it")
             return Self.refreshInterval
         }
+        return await fetchWindows(using: credentials, onRefresh: onRefresh)
+    }
 
+    /// The half of a poll that needs no keychain: one request against the
+    /// usage endpoint, and the backoff its answer earns.
+    private func fetchWindows(
+        using credentials: ClaudeCredentials,
+        onRefresh: @Sendable @escaping () async -> Void
+    ) async -> Duration {
         do {
             let fetched = try await fetch(token: credentials.accessToken)
             let summary =
