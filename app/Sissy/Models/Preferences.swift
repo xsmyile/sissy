@@ -129,6 +129,14 @@ struct Preferences: Codable, Equatable {
             prefs = decoded
         } else {
             prefs = Self()
+            // No readable preferences means the compiled default, which is
+            // not necessarily the port the daemon is on: `server.json` is
+            // what it actually read at boot. Adopting it keeps the app
+            // pointed at the running daemon instead of at a port nothing is
+            // bound to.
+            if let port = Self.serverConfigPort(in: directory) {
+                prefs.serverPort = port
+            }
         }
         // `server.json` is the source of truth for the bearer token. When it
         // has one it wins; when it doesn't, a legacy plaintext value here is
@@ -150,6 +158,12 @@ struct Preferences: Codable, Equatable {
     /// needed made macOS re-prompt whenever the app's code signature changed.
     private static func serverConfigToken(in directory: URL) -> String? {
         serverConfig(in: directory)?["authToken"] as? String
+    }
+
+    /// The port the daemon is configured with, as opposed to the one this
+    /// build defaults to.
+    private static func serverConfigPort(in directory: URL) -> Int? {
+        serverConfig(in: directory)?["port"] as? Int
     }
 
     private static func serverConfig(in directory: URL) -> [String: Any]? {
