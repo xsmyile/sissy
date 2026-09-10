@@ -112,7 +112,7 @@ struct GeneralSettingsView: View {
     private var serverBinding: Binding<Bool> {
         Binding(
             get: { server.isOn },
-            set: { _ in model.toggleServer() }
+            set: { model.setServer(running: $0) }
         )
     }
 
@@ -139,21 +139,21 @@ struct GeneralSettingsView: View {
     private var claudeLimitsBinding: Binding<Bool> {
         Binding(
             get: { model.preferences.claudeLimits },
-            set: { _ in model.toggleClaudeLimits() }
+            set: { model.setClaudeLimits($0) }
         )
     }
 
     private var deviceSupportBinding: Binding<Bool> {
         Binding(
             get: { model.preferences.deviceSupport },
-            set: { _ in model.toggleDeviceSupport() }
+            set: { model.setDeviceSupport($0) }
         )
     }
 
     private var notifyBinding: Binding<Bool> {
         Binding(
             get: { model.preferences.notifyOnMascotChange },
-            set: { _ in model.toggleNotifications() }
+            set: { model.setNotifications($0) }
         )
     }
 

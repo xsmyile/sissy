@@ -302,23 +302,37 @@ final class SissyModel {
         webSocketClient.setMascotPin(state: nil)
     }
 
-    func toggleDeviceSupport() {
-        preferences.deviceSupport.toggle()
+    func setDeviceSupport(_ enabled: Bool) {
+        guard enabled != preferences.deviceSupport else { return }
+        preferences.deviceSupport = enabled
         savePreferences()
-        if !preferences.deviceSupport, settingsTab == .device {
+        if !enabled, settingsTab == .device {
             settingsTab = .general
         }
     }
 
-    func toggleClaudeLimits() {
-        preferences.claudeLimits.toggle()
+    func setClaudeLimits(_ enabled: Bool) {
+        guard enabled != preferences.claudeLimits else { return }
+        preferences.claudeLimits = enabled
         savePreferences()
-        webSocketClient.setClaudeLimits(preferences.claudeLimits)
+        webSocketClient.setClaudeLimits(enabled)
     }
 
-    func toggleNotifications() {
-        preferences.notifyOnMascotChange.toggle()
+    func setNotifications(_ enabled: Bool) {
+        guard enabled != preferences.notifyOnMascotChange else { return }
+        preferences.notifyOnMascotChange = enabled
         savePreferences()
+    }
+
+    /// Drives the daemon to a requested state rather than flipping whatever it
+    /// is in. A `Toggle` hands SwiftUI's new value to its binding, and a
+    /// binding that discards it and toggles instead only agrees with the
+    /// switch while every `set` arrives exactly once and already negated —
+    /// an invariant SwiftUI does not promise. `toggleServer` stays for the
+    /// panel's power button, which really is a one-shot action.
+    func setServer(running: Bool) {
+        guard running != serverItemSnapshot.isOn else { return }
+        toggleServer()
     }
 
     func openLogs() {
