@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 @testable import Sissy
@@ -65,6 +66,24 @@ final class MascotMotionTests: XCTestCase {
                 XCTAssertTrue(motion.frameRange.contains(step.index))
             }
         }
+    }
+
+    /// `PanelMascot` leans on this: its `.task(id:)` is only safe from being
+    /// restarted mid-gesture because a second blink cannot come due before the
+    /// first has finished.
+    func testTheCooldownOutlastsTheBlinkItPaces() {
+        XCTAssertGreaterThan(
+            SissyMenuBarMotion.dataBlinkCooldown,
+            SissyMenuBarMotion.blink.duration
+        )
+    }
+
+    /// `PanelMascot` withholds the blink when a frame will not resolve, so
+    /// this is the predicate that decides whether the panel animates at all.
+    func testEveryFrameNameResolvesFromTheCatalogue() {
+        let missing = SissyMenuBarMotion.frameAssetNames.filter { NSImage(named: $0) == nil }
+
+        XCTAssertEqual(missing, [], "frames absent from the asset catalogue")
     }
 
     func testEveryFrameOfTheSequenceIsNamed() {
