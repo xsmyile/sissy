@@ -43,9 +43,6 @@ final class StatusItemController: NSObject {
     /// which sits with the system's own items.
     private static let menuBarIconSize: CGFloat = 17
 
-    /// Shortest spacing between two data-driven blinks.
-    private static let dataBlinkCooldown: TimeInterval = 3
-
     /// The image is assigned once: it never varies, and re-reading it on every
     /// model change would only hand back the same instance. That instance is
     /// the asset catalogue's shared one, so it is copied before resizing —
@@ -124,11 +121,10 @@ final class StatusItemController: NSObject {
     ///
     /// `lastFrameAt` carries the frame's own `ts`, which has second
     /// resolution, and `@Observable` suppresses an assignment that doesn't
-    /// change the value — so a replayed frame is already silent. The cooldown
-    /// covers what that leaves: the readers coalesce emits only down to
-    /// `UsageReaderShared.pollEmitThrottle` (0.2 s), so a turn appending JSONL
-    /// in bursts can push a frame a second, and a 380 ms gesture that often
-    /// never lets the icon settle.
+    /// change the value — so a replayed frame is already silent.
+    /// `SissyMenuBarMotion.dataBlinkCooldown` covers what that leaves. The
+    /// panel's mascot paces itself on the same constant, off its own clock:
+    /// the two surfaces match in rhythm, not frame for frame.
     private func observeFrameArrivals() {
         withObservationTracking {
             _ = model.lastFrameAt
@@ -144,7 +140,7 @@ final class StatusItemController: NSObject {
     private func blinkForArrivedFrame() {
         let now = Date()
         guard model.preferences.mascotMotion,
-            now.timeIntervalSince(lastDataBlinkAt) >= Self.dataBlinkCooldown,
+            now.timeIntervalSince(lastDataBlinkAt) >= SissyMenuBarMotion.dataBlinkCooldown,
             mascotAnimator?.blink() == true
         else { return }
         lastDataBlinkAt = now
