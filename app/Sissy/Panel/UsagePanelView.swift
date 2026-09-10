@@ -63,7 +63,7 @@ struct UsagePanelView: View {
                 Text(menuHeader.title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
-                Text(Self.dateLine)
+                Text(menuHeader.subtitle ?? Self.dateLine)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -72,7 +72,6 @@ struct UsagePanelView: View {
 
             powerButton
         }
-        .opacity(menuHeader.isDimmed ? 0.6 : 1)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
