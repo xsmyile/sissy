@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="assets/sissy.png" alt="Sissy" width="200" />
-
 # Sissy
 
 A menubar companion for **Claude Code** and **Codex**.
@@ -10,7 +8,7 @@ Sissy keeps today's AI spend in your menu bar, across every CLI you use.
 
 Named after my cat: she naps, judges, demands cuddles (A LOT of cuddles), and is, objectively, fabulous.
 
-[Install](#install) • [Demo](#demo) • [How it works](#how-it-works) • [Build from source](#build-from-source) • [Desk companion](#desk-companion)
+[Install](#install) • [Demo](#demo) • [How it works](#how-it-works) • [Build from source](#build-from-source)
 
 _Status: alpha._
 
@@ -38,11 +36,7 @@ Either way: launch Sissy (it lives in the menubar), then **Start Server** to beg
 
 A cat sits in your menu bar and keeps the day's spend one click away.
 
-Click the icon for a panel with the running total, the day-over-day delta, each CLI's share, and its subscription rate-limit windows:
-
-<p align="center">
-  <img src="assets/menu-bar.png" alt="Sissy menubar dropdown" width="300" />
-</p>
+Click the icon for a panel with the running total, the day-over-day delta, each CLI's share, and its subscription rate-limit windows.
 
 ## How it works
 
