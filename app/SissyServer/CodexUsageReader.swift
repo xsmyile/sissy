@@ -371,11 +371,11 @@ actor CodexUsageReader: UsageProvider {
         else { return nil }
 
         // Timestamp lives on the wrapper, ISO with fractional seconds. Reuse
-        // ClaudeCodeUsageReader.parseISODate — identical shape on Codex
+        // ClaudeCodeUsageReader.parseTimestamp — identical shape on Codex
         // rollouts, no need for a parallel implementation.
         let ts: Date
         if let tsStr = obj["timestamp"] as? String,
-            let parsed = ClaudeCodeUsageReader.parseISODate(tsStr)
+            let parsed = ClaudeCodeUsageReader.parseTimestamp(tsStr)
         {
             ts = parsed
         } else {

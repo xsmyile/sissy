@@ -8,7 +8,8 @@ import Foundation
 /// rules here: the poll is slow, a 429 backs off hard (third-party pollers
 /// hammering it every 30 s are a known way to earn a persistent 429), and a
 /// failure leaves the panel on its previous row rather than surfacing an
-/// error the user cannot act on.
+/// error the user cannot act on. Its shape is measured, never inferred: the
+/// buckets meter in percent and report their dollar fields as null.
 actor ClaudeLimitsProbe {
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private static let betaHeader = "oauth-2025-04-20"
@@ -162,11 +163,14 @@ actor ClaudeLimitsProbe {
         return windows
     }
 
+    /// Buckets that report no `utilization`, or no reset, are dropped: a
+    /// window without both halves cannot be drawn, and the plan-scoped
+    /// buckets the endpoint sends alongside these two arrive that way.
     static func parse(_ payload: [String: Any]) -> [UsageWindow] {
         buckets.compactMap { bucket in
             guard let raw = payload[bucket.key] as? [String: Any],
                 let resetsAt = parseReset(raw["resets_at"]),
-                let usedPercent = utilization(of: raw)
+                let usedPercent = raw["utilization"] as? Double
             else { return nil }
             return UsageWindow(
                 minutes: bucket.minutes,
@@ -176,28 +180,16 @@ actor ClaudeLimitsProbe {
         }
     }
 
-    /// How much of the window is gone, as a percentage.
-    ///
-    /// A bucket reports either a ready-made `utilization` or a dollar budget,
-    /// depending on the plan — and a dollar-metered bucket sends `utilization`
-    /// as JSON null, which is why the percentage cannot simply be read.
-    private static func utilization(of bucket: [String: Any]) -> Double? {
-        if let direct = bucket["utilization"] as? Double { return direct }
-        guard let used = bucket["used_dollars"] as? Double,
-            let limit = bucket["limit_dollars"] as? Double,
-            limit > 0
-        else { return nil }
-        return used / limit * 100
-    }
-
     /// `resets_at` is accepted both as epoch seconds and as an ISO-8601
     /// string: the endpoint is undocumented, so the parse does not bet on one.
+    /// The string form is measured to carry a `+00:00` offset and microsecond
+    /// precision, which only the reader's full parse accepts.
     private static func parseReset(_ raw: Any?) -> Date? {
         if let epoch = raw as? Double {
             return Date(timeIntervalSince1970: epoch)
         }
         if let text = raw as? String {
-            return ClaudeCodeUsageReader.parseISODate(text)
+            return ClaudeCodeUsageReader.parseTimestamp(text)
         }
         return nil
     }

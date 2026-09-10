@@ -492,6 +492,20 @@ private func runISODateTests() {
     // Leap day
     let leap = ClaudeCodeUsageReader.parseISODate("2024-02-29T12:00:00Z")
     expect("iso leap day non-nil", leap != nil, true)
+
+    // What the fast path rejects, parseTimestamp must still accept: this is
+    // the exact shape Anthropic's usage endpoint sends.
+    let offset = ClaudeCodeUsageReader.parseTimestamp("2026-09-10T12:20:00.061389+00:00")
+    expect("timestamp with offset and micros non-nil", offset != nil, true)
+    if let d = offset {
+        expect("timestamp with offset value", Int(d.timeIntervalSince1970), 1_789_042_800)
+    }
+    expect(
+        "timestamp with frac and Z",
+        ClaudeCodeUsageReader.parseTimestamp("2026-05-19T10:01:38.269Z") != nil,
+        true
+    )
+    expect("timestamp rejects a non-date", ClaudeCodeUsageReader.parseTimestamp("not a date"), nil)
 }
 
 private func runAssistantMarkerTests() {
@@ -1106,6 +1120,10 @@ func runAggregatorEmitTest() {
 /// are parsers over shapes Sissy does not own: the credential blob in the
 /// login keychain and the undocumented usage payload. Neither touches the
 /// keychain or the network here.
+///
+/// The usage fixture is a live response captured field for field. An invented
+/// `...Z` reset is precisely what let a `Z`-only parser look correct while
+/// every real bucket was being dropped.
 func runClaudeLimitsParseTests() {
     print("=== ClaudeLimits.parse ===")
 
@@ -1140,18 +1158,33 @@ func runClaudeLimitsParseTests() {
     expect("weekly window length", windows.last?.minutes, 10_080)
     expect("session utilization", windows.first?.usedPercent, 25.0)
 
-    let isoPayload: [String: Any] = [
-        "five_hour": ["utilization": 5.0, "resets_at": "2026-09-09T21:27:17.000Z"]
+    let bucketFields: [String: Any] = [
+        "limit_dollars": NSNull(),
+        "used_dollars": NSNull(),
+        "remaining_dollars": NSNull(),
+        "locked_reason": NSNull(),
     ]
+    let measured: [String: Any] = [
+        "five_hour": bucketFields.merging([
+            "utilization": 1.0,
+            "resets_at": "2026-09-10T12:20:00.061389+00:00",
+        ]) { _, new in new },
+        "seven_day": bucketFields.merging([
+            "utilization": 25.0,
+            "resets_at": "2026-09-16T02:00:00.061411+00:00",
+        ]) { _, new in new },
+    ]
+    let live = ClaudeLimitsProbe.parse(measured)
+    expect("measured payload yields both windows", live.count, 2)
+    expect("measured session utilization", live.first?.usedPercent, 1.0)
+    expect("measured weekly utilization", live.last?.usedPercent, 25.0)
     expect(
-        "reset accepted as an ISO timestamp",
-        ClaudeLimitsProbe.parse(isoPayload).first?.resetsAt != nil,
-        true
+        "measured reset survives its offset and microseconds",
+        live.first.map { Int($0.resetsAt.timeIntervalSince1970) },
+        1_789_042_800
     )
 
-    // A dollar-metered plan sends `utilization` as JSON null and budgets in
-    // dollars instead; reading the percentage alone yields nothing.
-    let dollarPayload: [String: Any] = [
+    let noPercent: [String: Any] = [
         "five_hour": [
             "utilization": NSNull(),
             "used_dollars": 12.5,
@@ -1160,9 +1193,9 @@ func runClaudeLimitsParseTests() {
         ]
     ]
     expect(
-        "dollar-metered bucket becomes a percentage",
-        ClaudeLimitsProbe.parse(dollarPayload).first?.usedPercent,
-        25.0
+        "a bucket that reports no utilization is dropped",
+        ClaudeLimitsProbe.parse(noPercent).count,
+        0
     )
 
     let partial: [String: Any] = ["five_hour": ["utilization": 5.0]]

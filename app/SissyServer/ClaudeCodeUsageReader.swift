@@ -242,6 +242,17 @@ actor ClaudeCodeUsageReader: UsageProvider {
         return Date(timeIntervalSince1970: TimeInterval(epoch) + frac)
     }
 
+    /// Parses a JSON timestamp, fast path first, Foundation for the shapes it
+    /// rejects by design: an offset such as `+00:00` in place of `Z`, or more
+    /// than three fractional digits. Both occur — Anthropic's usage endpoint
+    /// sends `2026-09-10T12:20:00.061389+00:00` — so every caller needs the
+    /// fallback, which is why it lives here rather than at each call site.
+    static func parseTimestamp(_ text: String) -> Date? {
+        parseISODate(text)
+            ?? isoFormatter.date(from: text)
+            ?? isoFormatterNoFrac.date(from: text)
+    }
+
     private let limitsProbe: ClaudeLimitsProbe?
 
     init(
@@ -546,16 +557,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
             let tsStr = obj["timestamp"] as? String
         else { return nil }
 
-        let ts: Date
-        if let fast = Self.parseISODate(tsStr) {
-            ts = fast
-        } else if let slow = Self.isoFormatter.date(from: tsStr)
-            ?? Self.isoFormatterNoFrac.date(from: tsStr)
-        {
-            ts = slow
-        } else {
-            return nil
-        }
+        guard let ts = Self.parseTimestamp(tsStr) else { return nil }
 
         let cutoff = Date().addingTimeInterval(Double(-retainDays * 86400))
         if ts < cutoff { return nil }
