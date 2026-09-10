@@ -42,8 +42,6 @@ final class SissyMenuBarAnimator {
     private var generation: UInt = 0
     private let reduceMotion: () -> Bool
 
-    private static let frameTolerance: Duration = .milliseconds(1)
-
     private var restingImage: NSImage { pose == .awake ? awakeImage : asleepImage }
 
     /// Loads every frame before touching the button, so a catalogue missing a
@@ -124,8 +122,6 @@ final class SissyMenuBarAnimator {
         generation &+= 1
         let token = generation
         isPlaying = true
-        let images = frames[motion.frameRange]
-        let duration = motion.duration
         playbackTask = Task { @MainActor [weak self] in
             let clock = ContinuousClock()
             let started = clock.now
@@ -137,20 +133,17 @@ final class SissyMenuBarAnimator {
                     self?.canAnimate() == true
                 else { return }
 
-                let elapsed = started.duration(to: clock.now).components
-                let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
-                guard seconds < duration else { return }
-                let index = min(Int(seconds * SissyMenuBarMotion.framesPerSecond), images.count - 1)
-                if index != lastIndex {
-                    self?.button?.image = images[images.startIndex + index]
-                    lastIndex = index
+                guard let step = motion.step(at: started.duration(to: clock.now)) else { return }
+                if step.index != lastIndex {
+                    self?.button?.image = self?.frames[step.index]
+                    lastIndex = step.index
                 }
 
                 // Absolute deadlines skip overdue frames instead of stretching
                 // the gesture when the main actor is busy.
-                let next = min(Double(index + 1) / SissyMenuBarMotion.framesPerSecond, duration)
-                let deadline = started.advanced(by: .nanoseconds(Int64(next * 1e9)))
-                do { try await clock.sleep(until: deadline, tolerance: Self.frameTolerance) } catch { return }
+                let deadline = started.advanced(by: .nanoseconds(Int64(step.endsAt * 1e9)))
+                let tolerance = SissyMenuBarMotion.frameTolerance
+                do { try await clock.sleep(until: deadline, tolerance: tolerance) } catch { return }
             }
         }
         return true

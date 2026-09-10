@@ -35,7 +35,50 @@ enum SissyMenuBarMotion: Sendable {
         }
     }
 
+    /// Where a motion is `elapsed` after it started: the frame to draw, and
+    /// when that frame gives way to the next. `nil` once the motion has run
+    /// out — the caller then rests on its own pose.
+    ///
+    /// The index is absolute, into `frameAssetNames`, so a caller holding the
+    /// whole sequence needs no range arithmetic of its own. Both surfaces that
+    /// play the mascot go through here: the timing is the one thing they must
+    /// not each reinvent.
+    func step(at elapsed: Duration) -> Step? {
+        let components = elapsed.components
+        let seconds = Double(components.seconds) + Double(components.attoseconds) / 1e18
+        guard seconds >= 0, seconds < duration else { return nil }
+
+        let offset = min(Int(seconds * Self.framesPerSecond), frameRange.count - 1)
+        return Step(
+            index: frameRange.lowerBound + offset,
+            endsAt: min(Double(offset + 1) / Self.framesPerSecond, duration)
+        )
+    }
+
+    /// One frame of a running motion, as `step(at:)` reports it.
+    struct Step: Equatable, Sendable {
+        /// Index into `frameAssetNames`.
+        let index: Int
+        /// Seconds from the motion's start at which this frame is replaced.
+        let endsAt: TimeInterval
+    }
+
     static let framesPerSecond = 60.0
+
+    /// How far a frame may land from its deadline before the sleep is worth
+    /// re-arming. Shared, like the rest of the timing, so neither surface
+    /// drifts from the other.
+    static let frameTolerance: Duration = .milliseconds(1)
+
+    /// Shortest spacing between two data-driven blinks, shared by every
+    /// surface that plays one. Each keeps its own clock, so this sets the
+    /// rhythm they have in common, not a frame they share.
+    ///
+    /// The readers coalesce emits only down to
+    /// `UsageReaderShared.pollEmitThrottle` (0.2 s), so a turn appending JSONL
+    /// in bursts can push a frame a second — and a 380 ms gesture that often
+    /// never lets the mascot settle reads as a twitch.
+    static let dataBlinkCooldown: TimeInterval = 3
 
     /// Every frame of the sequence, in order, as asset catalogue names.
     static let frameAssetNames: [String] = (0..<frameCount).map {
