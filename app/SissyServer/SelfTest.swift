@@ -386,7 +386,7 @@ private func runServerConfigTests() {
     expect("defaults tokenless loopback", ServerConfig.defaults.host, "127.0.0.1")
 
     let tokenlessURL = tempDir.appendingPathComponent("tokenless.json")
-    try? Data(#"{"host":"0.0.0.0","port":8787,"authToken":""}"#.utf8).write(to: tokenlessURL)
+    try? Data(#"{"host":"0.0.0.0","port":5155,"authToken":""}"#.utf8).write(to: tokenlessURL)
     do {
         let loaded = try ServerConfig.load(from: tokenlessURL)
         expect("tokenless wildcard restricted", loaded.host, "127.0.0.1")
@@ -395,7 +395,7 @@ private func runServerConfigTests() {
     }
 
     let tokenURL = tempDir.appendingPathComponent("token.json")
-    try? Data(#"{"host":"0.0.0.0","port":8787,"authToken":"abc123"}"#.utf8).write(to: tokenURL)
+    try? Data(#"{"host":"0.0.0.0","port":5155,"authToken":"abc123"}"#.utf8).write(to: tokenURL)
     do {
         let loaded = try ServerConfig.load(from: tokenURL)
         expect("token wildcard preserved", loaded.host, "0.0.0.0")
@@ -422,7 +422,7 @@ private func runServerConfigTests() {
     // merges into the defaults rather than failing to load.
     let legacyURL = tempDir.appendingPathComponent("legacy.json")
     try? Data(
-        #"{"host":"127.0.0.1","port":8787,"authToken":"x","primaryMetric":"tokens"}"#.utf8
+        #"{"host":"127.0.0.1","port":5155,"authToken":"x","primaryMetric":"tokens"}"#.utf8
     ).write(to: legacyURL)
     do {
         let loaded = try ServerConfig.load(from: legacyURL)
