@@ -6,6 +6,8 @@ import SwiftUI
 /// `NSHumanReadableCopyright` from the running bundle so the page stays
 /// accurate without any extra build wiring.
 struct AboutView: View {
+    let model: SissyModel
+
     private static let githubURL = URL(string: "https://github.com/xsmyile/sissy")!
     private static let issuesURL = URL(string: "https://github.com/xsmyile/sissy/issues/new")!
     private static let authorURL = URL(string: "https://github.com/xsmyile")!
@@ -26,7 +28,13 @@ struct AboutView: View {
         center: .center
     )
 
+    /// How long "Copy diagnostics" says "Copied" before it offers to do it
+    /// again. Long enough to be read, short enough that the button is back
+    /// before anyone reaches for it twice.
+    private static let copyFeedbackDuration: Duration = .seconds(2)
+
     @State private var starBounce = 0
+    @State private var didCopyDiagnostics = false
     @State private var showsAcknowledgements = false
 
     var body: some View {
@@ -51,10 +59,18 @@ struct AboutView: View {
             VStack(spacing: 10) {
                 starButton
 
-                Button("Report an issue") {
-                    NSWorkspace.shared.open(Self.issuesURL)
+                HStack(spacing: 14) {
+                    Button("Report an issue") {
+                        NSWorkspace.shared.open(Self.issuesURL)
+                    }
+                    .buttonStyle(.link)
+
+                    Button(didCopyDiagnostics ? "Copied" : "Copy diagnostics") {
+                        DiagnosticsReport.copyToClipboard(model: model)
+                        didCopyDiagnostics = true
+                    }
+                    .buttonStyle(.link)
                 }
-                .buttonStyle(.link)
             }
 
             credit
@@ -63,6 +79,15 @@ struct AboutView: View {
         .padding(.horizontal, 32)
         .padding(.vertical, 34)
         .sheet(isPresented: $showsAcknowledgements) { AcknowledgementsView() }
+        .task(id: didCopyDiagnostics) {
+            guard didCopyDiagnostics else { return }
+            do {
+                try await Task.sleep(for: Self.copyFeedbackDuration)
+            } catch {
+                return
+            }
+            didCopyDiagnostics = false
+        }
     }
 
     private var starButton: some View {

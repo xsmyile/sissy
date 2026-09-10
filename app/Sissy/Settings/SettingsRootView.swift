@@ -45,7 +45,7 @@ struct SettingsRootView: View {
     var body: some View {
         TabView(selection: $model.settingsTab) {
             tab(.general) { GeneralSettingsView(model: model) }
-            tab(.about) { AboutView() }
+            tab(.about) { AboutView(model: model) }
         }
         .frame(width: Self.width)
         .fixedSize(horizontal: false, vertical: true)
