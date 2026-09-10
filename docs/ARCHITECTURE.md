@@ -39,6 +39,8 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
 
 `providers[].plan` is the account's subscription plan as the vendor's own lowercase token — `max`, `team`, `plus` — never a display label: the app words it in `UsageFormat`, so a tier a vendor ships after this release still reaches the panel. Omitted rather than sent as null for a provider that names none, which is what leaves the panel row's badge off.
 
+`providers[].plan_tier` is the limit tier that plan is metered at (`max_5x`), for the one vendor that publishes one, and rides inside `plan`'s presence: alone it names nothing the app could attribute. The app folds it into the badge only when the tier names the plan it decorates — a Max account reads "Max 5x", while a Team seat metered at the same tier keeps "Team" and puts the tier in the row's tooltip, because "Team 5x" is a plan nobody sells.
+
 Claude Code publishes no limit state on disk, so its windows come from `ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the login keychain and polls the endpoint Claude Code's `/usage` reads. That costs a one-time macOS keychain authorization, so it stays off until the user asks for it in Settings.
 
 `prev_tokens` / `prev_cost` carry yesterday's raw combined totals so the macOS app can render a day-over-day delta without a second data path. Both keys are omitted together until every active provider has produced a `prev` snapshot so the app renders no delta rather than a false 0%.
@@ -75,6 +77,7 @@ Claude Code publishes no limit state on disk, so its windows come from `ClaudeLi
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429; off unless `claudeLimits` is set |
 | `ClaudeProfile.swift`           | Reads the plan out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain, so it answers with `claudeLimits` off |
 | `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it — bounded so an unanswered authorization dialog cannot park the probe |
+| `CodexAuth.swift`               | Reads the `chatgpt_plan_type` claim out of `~/.codex/auth.json`, for the boot before the first turn; touches no other field in it |
 | `CodexUsageReader.swift`        | Tails `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`); uses `last_token_usage` as per-turn delta; model from `turn_context.payload.model` (fallback `gpt-5-codex`) |
 | `UsageReaderShared.swift`       | Tuning constants both tails share (`ingestChunkSize`, `pollEmitThrottle`, mtime slack) so they cannot drift apart |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
