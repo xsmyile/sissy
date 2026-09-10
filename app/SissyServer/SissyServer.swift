@@ -26,23 +26,15 @@ actor SissyServer {
     private var priceCatalogTask: Task<Void, Never>?
     private var startedAt: Date = .distantPast
     private var primaryMetric: PrimaryMetric
-    /// Client-imposed mascot override. When non-nil, every outgoing frame
-    /// has its `state` field replaced before broadcast so menubar + OLED
-    /// stay in lock-step. Memory-only — clears on daemon restart.
-    /// Cached input to the last `rebuildAndBroadcast`. Lets pure config
-    /// changes (pin, primary metric) re-broadcast immediately without
+    /// Cached input to the last `rebuildAndBroadcast`. Lets a pure config
+    /// change — the primary metric — re-broadcast immediately without
     /// hopping into the aggregator actor — which can queue behind a
     /// running poll/cold scan and add 50–200 ms of perceived lag. Slices
-    /// are cached alongside totals so a pin/metric replay can't desync
+    /// are cached alongside totals so a metric replay can't desync
     /// the aggregate scalars from the per-provider breakdown — a fresh
     /// `aggregator.perProviderTotals()` call could race a concurrent
     /// provider emit through actor reentrancy.
     private var lastTotals: (today: DayTotals, prev: DayTotals?, slices: [ProviderSlice])?
-    /// Tracks whole-dollar cost crossings so the menubar pop-up can celebrate
-    /// them. Owned here so it sees the same `today` totals
-    /// `rebuildAndBroadcast` does and lives independent of the JSONL state
-    /// the readers persist. Snapshot on disk lives next to
-    /// `usage-state.json`.
     /// Polls Claude Code's subscription windows. Constructed unconditionally
     /// so the toggle can start it later without rebuilding the provider list;
     /// it does nothing until `start` is called.
@@ -142,8 +134,8 @@ actor SissyServer {
     }
 
     /// Re-emit a frame using the most recently observed totals. No-op if the
-    /// reader hasn't produced a frame yet — the pending pin will take effect
-    /// on the first real poll.
+    /// reader hasn't produced a frame yet — the new metric will take effect on
+    /// the first real poll.
     ///
     /// The totals are read *after* the slice fetch on purpose. That `await` is
     /// a suspension point a provider emit can land in, and totals read before
