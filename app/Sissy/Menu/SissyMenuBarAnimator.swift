@@ -1,7 +1,7 @@
 import AppKit
 
-/// Plays one mascot gesture at a time by swapping the status button's image
-/// through a frame sequence.
+/// Plays the mascot's eye on the status button: a blink when data lands, and
+/// the eye closing or opening when the daemon goes away and comes back.
 ///
 /// Once this exists it is the only writer of `button.image`: a refresh that
 /// reassigned the image mid-gesture would drop the remaining frames and leave
@@ -30,19 +30,18 @@ final class SissyMenuBarAnimator {
     var canAnimate: () -> Bool = { true }
 
     private(set) var isPlaying = false
-    var isSchedulingOccasionalAnimations: Bool { occasionalTask != nil }
+    private(set) var pose: Pose = .awake
 
     private weak var button: NSButton?
     private let awakeImage: NSImage
     private let asleepImage: NSImage
-    private let frames: [SissyMenuBarMotion: [NSImage]]
-    private var pose: Pose = .awake
+    /// One copy of each frame, shared by all three motions: a copy per motion
+    /// would make the same artwork rasterize once per copy.
+    private let frames: [NSImage]
     private var playbackTask: Task<Void, Never>?
-    private var occasionalTask: Task<Void, Never>?
     private var generation: UInt = 0
     private let reduceMotion: () -> Bool
 
-    private static let occasionalInterval: ClosedRange<TimeInterval> = 120...240
     private static let frameTolerance: Duration = .milliseconds(1)
 
     private var restingImage: NSImage { pose == .awake ? awakeImage : asleepImage }
@@ -69,11 +68,7 @@ final class SissyMenuBarAnimator {
         }
         awakeImage = try load(SissyModel.mascotAssetName)
         asleepImage = try load(SissyModel.mascotSleepingAssetName)
-        frames = try Dictionary(
-            uniqueKeysWithValues: SissyMenuBarMotion.allCases.map { motion in
-                (motion, try motion.assetNames.map(load))
-            }
-        )
+        frames = try SissyMenuBarMotion.frameAssetNames.map(load)
         self.button = button
         self.reduceMotion = reduceMotion
         button.image = awakeImage
@@ -81,29 +76,55 @@ final class SissyMenuBarAnimator {
 
     isolated deinit {
         playbackTask?.cancel()
-        occasionalTask?.cancel()
         button?.image = restingImage
     }
 
-    /// Swaps the resting pose. Asleep also blocks gestures: a mascot that
-    /// blinks while the daemon is unreachable claims something is arriving.
-    func setPose(_ newPose: Pose) {
-        guard newPose != pose else { return }
-        pose = newPose
-        stop()
+    /// One blink. A request that arrives during playback is dropped, never
+    /// queued: a backlog of blinks reads as a twitching icon.
+    @discardableResult
+    func blink() -> Bool {
+        guard pose == .awake, !reduceMotion(), canAnimate() else { return false }
+        return start(.blink)
     }
 
-    /// Requests one gesture. A request that arrives during playback is
-    /// dropped, never queued: a backlog of gestures reads as a twitching icon.
+    /// Moves the resting pose, closing or opening the eye on the way there.
+    ///
+    /// Asleep also blocks the blink: a mascot that blinks while the daemon is
+    /// unreachable claims something is arriving. `animated` off — Reduce
+    /// Motion, an open menu, or the pose the app starts in — snaps instead.
+    ///
+    /// The destination image is never installed before the transition runs:
+    /// the eye would flash shut before closing, and flash open before opening.
+    func setPose(_ newPose: Pose, animated: Bool = true) {
+        guard newPose != pose else { return }
+        let shouldAnimate = animated && !reduceMotion() && canAnimate()
+        cancelPlayback()
+        pose = newPose
+        if shouldAnimate, start(newPose == .asleep ? .eyeClose : .eyeOpen) { return }
+        button?.image = restingImage
+    }
+
+    /// Cancels a running gesture and restores the resting frame immediately.
+    func stop() {
+        cancelPlayback()
+        button?.image = restingImage
+    }
+
+    static let systemReduceMotion: () -> Bool = {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// Runs `motion` to its end, then rests on the current pose. Each half of
+    /// the blink ends on the pose it was started for, so the handover from the
+    /// last frame to the resting image is invisible.
     @discardableResult
-    func play(_ motion: SissyMenuBarMotion) -> Bool {
-        guard pose == .awake, !isPlaying, button != nil, !reduceMotion(), canAnimate(),
-            let images = frames[motion]
-        else { return false }
+    private func start(_ motion: SissyMenuBarMotion) -> Bool {
+        guard !isPlaying, button != nil else { return false }
 
         generation &+= 1
         let token = generation
         isPlaying = true
+        let images = frames[motion.frameRange]
         let duration = motion.duration
         playbackTask = Task { @MainActor [weak self] in
             let clock = ContinuousClock()
@@ -113,7 +134,7 @@ final class SissyMenuBarAnimator {
 
             while !Task.isCancelled {
                 guard self?.generation == token, self?.button != nil,
-                    self?.reduceMotion() == false, self?.canAnimate() == true
+                    self?.canAnimate() == true
                 else { return }
 
                 let elapsed = started.duration(to: clock.now).components
@@ -121,7 +142,7 @@ final class SissyMenuBarAnimator {
                 guard seconds < duration else { return }
                 let index = min(Int(seconds * SissyMenuBarMotion.framesPerSecond), images.count - 1)
                 if index != lastIndex {
-                    self?.button?.image = images[index]
+                    self?.button?.image = images[images.startIndex + index]
                     lastIndex = index
                 }
 
@@ -135,37 +156,14 @@ final class SissyMenuBarAnimator {
         return true
     }
 
-    /// Cancels a running gesture and restores the resting frame immediately.
-    func stop() {
+    /// Ends playback without deciding what the button shows: the callers
+    /// differ on that, and a pose change must not paint its destination before
+    /// its own transition has drawn a frame.
+    private func cancelPlayback() {
         generation &+= 1
         playbackTask?.cancel()
         playbackTask = nil
         isPlaying = false
-        button?.image = restingImage
-    }
-
-    /// Schedules `motion` every few minutes. Nothing animates in between —
-    /// this is character, not an indicator, so a blocked trigger is skipped
-    /// rather than replayed later.
-    func startOccasionalAnimations(_ motion: SissyMenuBarMotion) {
-        stopOccasionalAnimations()
-        occasionalTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                let delay = TimeInterval.random(in: Self.occasionalInterval)
-                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
-                guard !Task.isCancelled else { return }
-                self?.play(motion)
-            }
-        }
-    }
-
-    func stopOccasionalAnimations() {
-        occasionalTask?.cancel()
-        occasionalTask = nil
-    }
-
-    static let systemReduceMotion: () -> Bool = {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
     private func finish(generation token: UInt) {
