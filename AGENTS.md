@@ -61,27 +61,7 @@ The mood pop-up, the mascot state machine and the milestone celebrations are gon
 
 ### Daemon modules (`app/SissyServer/`)
 
-| File | Job |
-|---|---|
-| `main.swift`                    | Entry point, signal handling, `--self-test` / `--scan` / `--scan-provider` flags |
-| `SissyServer.swift`             | Actor that owns Hub + UsageAggregator and bootstraps NIO server. Auto-detects Codex provider at boot. |
-| `HTTPRequestHandler.swift`      | `/health`, `/stats` (diagnostic: connectedClients, filesWatched, lastFrameAt); Bearer auth |
-| `WebSocketSinkHandler.swift`    | Per-connection NIO WS handler; conforms to `FrameSink` |
-| `Hub.swift`                     | Actor — fan-out + last-frame replay |
-| `UsageProvider.swift`           | Protocol shared by every CLI tail (id, start/stop, current, isWarm) |
-| `UsageAggregator.swift`         | Sums `DayTotals` across providers; emits combined frame to Hub |
-| `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`. Dedupes by `requestId`. Owns `parseTimestamp`, the one timestamp parser every reader and the probe share. |
-| `ClaudeLimitsProbe.swift`       | Polls `api.anthropic.com/api/oauth/usage` for the 5-hour and weekly windows. Off unless `claudeLimits` is set. |
-| `ClaudeCredentials.swift`       | Reads Claude Code's OAuth token from the login keychain, never writes and never refreshes it. |
-| `CodexUsageReader.swift`        | Tails `~/.codex/sessions/**/rollout-*.jsonl`. Uses `last_token_usage` as per-turn delta; model from `turn_context.payload.model` (fallback `gpt-5-codex`). |
-| `Pricing.swift`                 | Anthropic cost math + `ModelPricing` / `PricingTable`. No rate table — rates come from the catalog or the seed |
-| `OpenAIPricing.swift`           | OpenAI cost math, same three-source precedence |
-| `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM's rate table at runtime; renders `PricingSeed.swift` for `--dump-seed` |
-| `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — the offline / first-run floor. Never hand-edit |
-| `FrameBuilder.swift`            | `fmtTokens`, `fmtBurn`, `fmtCost`, `activeSlices` |
-| `Auth.swift`                    | Constant-time bearer compare. Empty token = open mode (dev only) |
-| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`. Carries `providers: { claudeCode, codex }` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`. |
-| `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude reader stays on legacy `usage-state.json` for upgrade smoothness. |
+The per-file map lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#daemon-modules-appsissyserver) — one table, so a module's note cannot drift between two files.
 
 ### macOS app
 
