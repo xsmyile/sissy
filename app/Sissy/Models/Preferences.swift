@@ -77,6 +77,25 @@ struct Preferences: Codable, Equatable {
         case mascotMotion
     }
 
+    /// Moves an install still sitting on the previous default port onto the
+    /// current one, and reports whether it moved.
+    ///
+    /// 8787 was the default through v0.1.8. It is a busy port —
+    /// `wrangler dev` and Ruby's DRb both take it by default — and a daemon
+    /// that binds at login and never lets go is the side that wins that race,
+    /// so Sissy was the one stealing it. Only a port still on the old default
+    /// moves; a hand-edited one is left alone.
+    ///
+    /// The caller has to act on `true`: the daemon already running is bound to
+    /// the old port and only re-reads `server.json` at boot.
+    mutating func migrateLegacyServerPort() -> Bool {
+        guard serverPort == Self.legacyDefaultServerPort else { return false }
+        serverPort = SissyPaths.defaultServerPort
+        return true
+    }
+
+    private static var legacyDefaultServerPort: Int { SissyPaths.isDev ? 8788 : 8787 }
+
     // MARK: persistence
 
     static let fileName = "preferences.json"
@@ -133,7 +152,7 @@ struct Preferences: Codable, Equatable {
             // not necessarily the port the daemon is on: `server.json` is
             // what it actually read at boot. Adopting it keeps the app
             // pointed at the running daemon instead of at a port nothing is
-            // bound to.
+            // bound to, and leaves a legacy value for the migration to move.
             if let port = Self.serverConfigPort(in: directory) {
                 prefs.serverPort = port
             }

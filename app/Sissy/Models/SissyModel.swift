@@ -62,8 +62,46 @@ final class SissyModel {
     }
 
     func start() {
+        migrateServerPortIfNeeded()
         webSocketClient.start()
         serverHealth.start()
+    }
+
+    /// Applies the one-shot move off the previous default port, before the
+    /// client and the health monitor read a port for the first time.
+    ///
+    /// The rewrite alone would leave the app talking to a port nothing is
+    /// bound to: the running daemon reads `server.json` only at boot, so it
+    /// stays on the old one until launchd starts it again — the next login,
+    /// or never, from the user's side. Restarting the agent is what closes
+    /// that gap. Only an `.enabled` agent is touched: one waiting for the
+    /// user's approval in System Settings cannot be registered again, and
+    /// unregistering it would turn the Server off to fix a port.
+    func migrateServerPortIfNeeded() {
+        guard preferences.migrateLegacyServerPort() else { return }
+        let port = preferences.serverPort
+        savePreferences()
+        Task { [weak self] in
+            guard let self else { return }
+            await serverService.refresh()
+            guard serverService.status == .enabled else { return }
+            do {
+                try await serverService.stop()
+                try await serverService.start {
+                    await self.serverHealth.refreshNow().isReachable
+                }
+            } catch {
+                await showError(
+                    title: "Server restart failed",
+                    message:
+                        "Sissy moved its daemon to port \(port) but could not restart it: "
+                        + "\(error.localizedDescription). Switch Server off and on again "
+                        + "from the menu bar to finish the move."
+                )
+            }
+            await serverHealth.refreshNow()
+            webSocketClient.reconnect()
+        }
     }
 
     func savePreferences() {

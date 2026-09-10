@@ -14,7 +14,7 @@ final class DiagnosticsReportTests: XCTestCase {
             version: "0.1.9",
             build: "42",
             systemVersion: systemVersion,
-            endpoint: "127.0.0.1:8787",
+            endpoint: "127.0.0.1:5155",
             serverState: serverState,
             linkIsConnected: linkIsConnected,
             claudeLimits: claudeLimits,
@@ -27,7 +27,7 @@ final class DiagnosticsReportTests: XCTestCase {
 
         XCTAssertEqual(lines[0], "Sissy 0.1.9 (42)")
         XCTAssertEqual(lines[1], "macOS 26.0 (Build 25A354)")
-        XCTAssertEqual(lines[2], "Server: Running at 127.0.0.1:8787")
+        XCTAssertEqual(lines[2], "Server: Running at 127.0.0.1:5155")
         XCTAssertEqual(lines[3], "Link: connected")
         XCTAssertEqual(lines[4], "Claude limits: on")
     }
@@ -43,7 +43,7 @@ final class DiagnosticsReportTests: XCTestCase {
             snapshot(serverState: "Stopped", linkIsConnected: false, claudeLimits: false)
         )
 
-        XCTAssertTrue(text.contains("Server: Stopped at 127.0.0.1:8787"))
+        XCTAssertTrue(text.contains("Server: Stopped at 127.0.0.1:5155"))
         XCTAssertTrue(text.contains("Link: disconnected"))
         XCTAssertTrue(text.contains("Claude limits: off"))
     }

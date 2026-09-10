@@ -37,9 +37,9 @@ struct ServerConfig: Sendable, Codable {
 
     static let defaults = ServerConfig(
         host: "127.0.0.1",
-        // Default port differs between Debug (8788) and Release (8787) so a
+        // Default port differs between Debug (5156) and Release (5155) so a
         // dev daemon launched by launchd before the app has written its own
-        // server.json doesn't fight the release daemon on 8787.
+        // server.json doesn't fight the release daemon on 5155.
         port: SissyPaths.defaultServerPort,
         authToken: "",
         claudeDataDir: "~/.claude/projects",

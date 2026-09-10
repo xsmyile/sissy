@@ -7,8 +7,8 @@ final class PreferencesTests: XCTestCase {
         let prefs = Preferences()
         XCTAssertEqual(prefs.primaryMetric, .tokens)
         // Default port depends on whether the test host is a Debug (`.dev`)
-        // or Release bundle — 8788 lets a dev install coexist with a
-        // release daemon on 8787 without preferences hand-edit.
+        // or Release bundle — 5156 lets a dev install coexist with a
+        // release daemon on 5155 without preferences hand-edit.
         XCTAssertEqual(prefs.serverPort, SissyPaths.defaultServerPort)
         XCTAssertFalse(prefs.claudeLimits)
     }
@@ -52,6 +52,30 @@ final class PreferencesTests: XCTestCase {
         XCTAssertTrue(prefs.sissyMotion)
     }
 
+    /// The literals are restated rather than read from a constant: the point
+    /// of the test is that the exact pair v0.1.8 shipped is what moves.
+    private var legacyDefaultPort: Int { SissyPaths.isDev ? 8788 : 8787 }
+
+    func testTheLegacyDefaultPortMovesToTheCurrentDefault() {
+        var prefs = Preferences(serverPort: legacyDefaultPort)
+        XCTAssertTrue(prefs.migrateLegacyServerPort())
+        XCTAssertEqual(prefs.serverPort, SissyPaths.defaultServerPort)
+    }
+
+    /// A user who picked a port by hand outranks the new default; moving them
+    /// would break an install that was already working.
+    func testAHandPickedPortSurvivesTheMigration() {
+        var prefs = Preferences(serverPort: 9999)
+        XCTAssertFalse(prefs.migrateLegacyServerPort())
+        XCTAssertEqual(prefs.serverPort, 9999)
+    }
+
+    func testTheMigrationDoesNotFireTwice() {
+        var prefs = Preferences(serverPort: legacyDefaultPort)
+        XCTAssertTrue(prefs.migrateLegacyServerPort())
+        XCTAssertFalse(prefs.migrateLegacyServerPort())
+    }
+
     private func makeSupportDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("sissy-prefs-tests-\(UUID().uuidString)")
@@ -88,5 +112,20 @@ final class PreferencesTests: XCTestCase {
         try writeServerConfig(port: 9001, to: dir)
 
         XCTAssertEqual(Preferences.load(from: dir).serverPort, 9002)
+    }
+
+    /// The two halves compose: an install whose preferences were lost adopts
+    /// the legacy port from `server.json`, which is what lets the migration
+    /// see it and move it. Without the adoption it would read as a fresh
+    /// install already on the new default, and the daemon would be left
+    /// behind on the old one.
+    func testALegacyPortAdoptedFromTheServerConfigStillMigrates() throws {
+        let dir = try makeSupportDir()
+        try writeServerConfig(port: legacyDefaultPort, to: dir)
+
+        var prefs = Preferences.load(from: dir)
+        XCTAssertEqual(prefs.serverPort, legacyDefaultPort)
+        XCTAssertTrue(prefs.migrateLegacyServerPort())
+        XCTAssertEqual(prefs.serverPort, SissyPaths.defaultServerPort)
     }
 }

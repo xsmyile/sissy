@@ -91,7 +91,7 @@ The app writes `~/Library/Application Support/Sissy/server.json`; every key is o
 | `claudeLimits` | `false` | read the CLI's OAuth token to show the 5-hour and weekly windows |
 | `remotePricing` | on | fetch rates at runtime; `false` pins to the built-in snapshot and goes fully offline |
 | `pricingOverride` | none | per-model rates that win over both sources |
-| `port` | `8787` | loopback port |
+| `port` | `5155` | loopback port |
 
 ## Build from source
 
