@@ -295,6 +295,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
     /// not the user turned the limits probe on.
     nonisolated func currentPlan() -> String? { profile.currentPlan() }
 
+    nonisolated func currentPlanTier() -> String? { profile.currentPlanTier() }
+
     func applyPriceCatalog(_ catalog: PriceCatalog) {
         priceCatalog = catalog.table(for: .anthropic)
         // Re-arm the log: a model the previous catalog lacked may now resolve,

@@ -39,19 +39,24 @@ struct ProviderSlice: Sendable, Equatable, Codable {
     /// none. Raw rather than a label so the app owns the wording — same
     /// division as `id`, which the app turns into a display name.
     let plan: String?
+    /// Limit tier the plan is metered at (`max_5x`), for the one vendor that
+    /// publishes one. Only ever set alongside `plan`.
+    let planTier: String?
 
     init(
         id: String,
         tokens: Int,
         cost: Decimal,
         windows: [UsageWindow] = [],
-        plan: String? = nil
+        plan: String? = nil,
+        planTier: String? = nil
     ) {
         self.id = id
         self.tokens = tokens
         self.cost = cost
         self.windows = windows
         self.plan = plan
+        self.planTier = plan == nil ? nil : planTier
     }
 }
 

@@ -55,6 +55,7 @@ struct ScanEntry: Encodable {
     /// names none — and for Codex also when the scan's one-second window
     /// closed before its first `token_count` event.
     let plan: String?
+    let planTier: String?
 }
 
 let args = CommandLine.arguments
@@ -154,7 +155,8 @@ if args.contains("--scan") {
                 filesWatched: p.filesWatched(),
                 prevTokens: prev?.totalTokens,
                 prevCost: prev.map { NSDecimalNumber(decimal: $0.totalCost).stringValue },
-                plan: p.currentPlan()
+                plan: p.currentPlan(),
+                planTier: p.currentPlanTier()
             )
             await p.stop()
         }
