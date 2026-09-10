@@ -436,8 +436,7 @@ struct DisplayFrame: Codable, Equatable {
     var primary: String
     var primaryLabel: String
     /// True when daemon has at least one firmware sink attached. Gates the
-    /// metric row in the menu and the "device connected" indicator in
-    /// PairingView.
+    /// "device connected" indicator in the Device settings tab.
     var devicePresent: Bool
     /// Set by the daemon on the single frame that crosses a whole-dollar
     /// cost boundary. Format: `"cost:<D>"`. Cleared on every other frame.
@@ -486,6 +485,17 @@ struct DisplayFrame: Codable, Equatable {
     struct PrevTotals: Codable, Equatable {
         let tokens: Int
         let cost: Decimal
+    }
+
+    /// When the daemon built this frame, from its own `ts`.
+    ///
+    /// The Hub replays its cached payload to every client that connects, and
+    /// that payload keeps the timestamp of the emit it came from — so a
+    /// reconnect to an idle daemon reports the age of the real last frame
+    /// instead of the moment the socket happened to open. nil for a frame
+    /// with no usable `ts`, which leaves the caller to fall back to now.
+    var builtAt: Date? {
+        ts > 0 ? Date(timeIntervalSince1970: TimeInterval(ts)) : nil
     }
 }
 

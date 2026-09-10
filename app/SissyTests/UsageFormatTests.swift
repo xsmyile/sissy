@@ -23,6 +23,12 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.age(119), "1m ago")
     }
 
+    /// A frame whose timestamp is ahead of this Mac's clock must not render a
+    /// negative age; the footer's job is to say the daemon is alive.
+    func testAgeAheadOfTheClockReadsAsJustNow() {
+        XCTAssertEqual(UsageFormat.age(-3), "just now")
+    }
+
     func testWindowLabelNamesTheSessionWindowInHours() {
         XCTAssertEqual(UsageFormat.windowLabel(minutes: 300), "5h")
     }

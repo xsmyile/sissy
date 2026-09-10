@@ -103,4 +103,17 @@ final class FrameDecoderTests: XCTestCase {
     func testMalformedJSONIsRejected() {
         XCTAssertNil(FrameDecoder.decode("not json"))
     }
+
+    /// The panel's "updated Ns ago" measures the daemon's emit, not the
+    /// socket: the Hub replays one cached payload to every client that
+    /// connects, so a receive-time clock would call a stale frame fresh.
+    func testBuiltAtComesFromTheDaemonTimestamp() throws {
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        XCTAssertEqual(frame.builtAt, Date(timeIntervalSince1970: 42))
+    }
+
+    func testBuiltAtIsAbsentWithoutATimestamp() throws {
+        let frame = try XCTUnwrap(FrameDecoder.decode(#"{"type":"frame","tokens":"1K"}"#))
+        XCTAssertNil(frame.builtAt)
+    }
 }
