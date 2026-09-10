@@ -76,8 +76,8 @@ final class SissyModel {
         /// cross-fade between the two, which needs both of them at once.
         let isAsleep: Bool
         let title: String
+        /// The header's second line. nil hands the line back to the date.
         let subtitle: String?
-        let isDimmed: Bool
     }
 
     /// The glyph is fixed and drawn at full opacity, so all the menu bar icon
@@ -119,9 +119,8 @@ final class SissyModel {
         return MenuSnapshot(
             header: HeaderSnapshot(
                 isAsleep: offline,
-                title: headerTitle(linkUp: linkUp, serverIsOn: server.isOn),
-                subtitle: headerSubtitle(linkUp: linkUp, serverIsOn: server.isOn),
-                isDimmed: !linkUp
+                title: headerTitle(isAsleep: offline, linkUp: linkUp),
+                subtitle: headerSubtitle(isAsleep: offline, serverIsOn: server.isOn)
             ),
             statusIcon: StatusIconSnapshot(isAsleep: offline),
             server: server
@@ -288,29 +287,20 @@ final class SissyModel {
     /// one: the panel's only control is the switch beside this text, and a
     /// header that stayed silent would leave the switch's meaning to
     /// guesswork.
-    private func headerTitle(linkUp: Bool, serverIsOn: Bool) -> String {
-        if !serverIsOn { return "Server is off" }
+    /// Says what the mascot's face already shows, so the two can't disagree:
+    /// the eye is shut exactly when nothing is reaching the app.
+    private func headerTitle(isAsleep: Bool, linkUp: Bool) -> String {
+        if isAsleep { return "Sissy is sleeping" }
         if !linkUp { return "Looking for Sissy..." }
         return "Sissy"
     }
 
-    private func headerSubtitle(linkUp: Bool, serverIsOn: Bool) -> String? {
-        if !serverIsOn { return "Nothing is being counted" }
-        if !linkUp { return "Waiting for the daemon" }
-        guard let frame = currentFrame else { return nil }
-        // Single source of truth: when the daemon ships the providers array
-        // (current build), sum it through the same formatter the Breakdown
-        // submenu rows use so the header and the rows match to the penny.
-        // Fallback path covers a newer-app/older-daemon dev rebuild skew and
-        // the cold-start window before the first provider has emitted.
-        if !frame.providers.isEmpty {
-            return UsageFormat.headerSubtitle(providers: frame.providers, burn: frame.burn)
-        }
-        var parts: [String] = []
-        if frame.tokens != "..." { parts.append("\(frame.tokens) tok") }
-        if frame.cost != "..." { parts.append("$\(frame.cost)") }
-        if frame.burn != "..." { parts.append("\(frame.burn)/h") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    /// Why the mascot is asleep, or nil while she is awake — the panel shows
+    /// today's date in that case. `serverIsOn` is what separates "you turned
+    /// it off" from "it should be running and isn't".
+    private func headerSubtitle(isAsleep: Bool, serverIsOn: Bool) -> String? {
+        guard isAsleep else { return nil }
+        return serverIsOn ? "Waiting for the daemon" : "Server is off"
     }
 
     private func showError(title: String, message: String) async {
@@ -332,10 +322,9 @@ struct DisplayFrame: Codable, Equatable {
     var ts: Int
     var primary: String
     var primaryLabel: String
-    /// Per-provider totals carried on the WS frame so the menubar can derive
-    /// the header subtitle and the panel's rows from the same payload. Empty
-    /// when no provider has emitted yet (or daemon predates the field) —
-    /// `headerSubtitle` falls back to the daemon-formatted scalars.
+    /// Per-provider totals carried on the WS frame so the panel derives its
+    /// total and its rows from the same payload. Empty when no provider has
+    /// emitted yet, or when the daemon predates the field.
     var providers: [ProviderSlice]
     /// Yesterday's raw combined totals, for the day-over-day delta. nil until
     /// every active provider has a previous-day snapshot — the daemon omits
