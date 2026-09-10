@@ -11,7 +11,7 @@ final class StatusItemController: NSObject {
     private let menu = NSMenu()
 
     private let model: SissyModel
-    private var mascotAnimator: SissyMenuBarAnimator?
+    private var sissyAnimator: SissyMenuBarAnimator?
     private var lastDataBlinkAt: Date = .distantPast
 
     private(set) var isMenuOpen: Bool = false
@@ -28,17 +28,17 @@ final class StatusItemController: NSObject {
 
         buildMenu()
         configureButton()
-        configureMascotAnimator()
+        configureSissyAnimator()
         observeModel()
         observeFrameArrivals()
         refreshIcon(model.menuSnapshot.statusIcon)
     }
 
-    /// Canvas height the mascot is drawn at in the menu bar.
+    /// Canvas height Sissy is drawn at in the menu bar.
     ///
     /// The asset is a 22 pt canvas carrying 20 pt of ink, while an
     /// unconfigured SF Symbol — what most menu bar extras render — measures
-    /// 15 pt. At its native size the mascot therefore reads a third taller
+    /// 15 pt. At its native size Sissy therefore reads a third taller
     /// than everything beside it. 17 pt of canvas puts the ink at ~15.5 pt,
     /// which sits with the system's own items.
     private static let menuBarIconSize: CGFloat = 17
@@ -46,10 +46,10 @@ final class StatusItemController: NSObject {
     /// The image is assigned once: it never varies, and re-reading it on every
     /// model change would only hand back the same instance. That instance is
     /// the asset catalogue's shared one, so it is copied before resizing —
-    /// mutating it would resize the mascot everywhere else it is drawn.
+    /// mutating it would resize Sissy everywhere else she is drawn.
     private func configureButton() {
         guard let button = statusItem.button else { return }
-        if let image = NSImage(named: SissyModel.mascotAssetName)?.copy() as? NSImage {
+        if let image = NSImage(named: SissyModel.sissyAssetName)?.copy() as? NSImage {
             image.size = NSSize(width: Self.menuBarIconSize, height: Self.menuBarIconSize)
             button.image = image
         }
@@ -63,21 +63,21 @@ final class StatusItemController: NSObject {
 
     /// Hands the button's image to the animator, which keeps the resting
     /// frame. A catalogue without the frames leaves `configureButton`'s
-    /// static icon in place and the mascot simply never moves.
-    private func configureMascotAnimator() {
+    /// static icon in place and Sissy simply never moves.
+    private func configureSissyAnimator() {
         guard let button = statusItem.button else { return }
         do {
             let animator = try SissyMenuBarAnimator(button: button, iconSize: Self.menuBarIconSize)
             animator.canAnimate = { [weak self] in self?.isMenuOpen == false }
-            // Snapped: a mascot that closes its eye a beat after the icon
+            // Snapped: closing her eye a beat after the icon
             // appears would read as the daemon dying, not as it being off.
             animator.setPose(
                 model.menuSnapshot.statusIcon.isAsleep ? .asleep : .awake,
                 animated: false
             )
-            mascotAnimator = animator
+            sissyAnimator = animator
         } catch {
-            NSLog("sissy: mascot motion unavailable: %@", error.localizedDescription)
+            NSLog("sissy: motion unavailable: %@", error.localizedDescription)
         }
     }
 
@@ -111,19 +111,19 @@ final class StatusItemController: NSObject {
     }
 
     private func refreshIcon(_ icon: SissyModel.StatusIconSnapshot) {
-        mascotAnimator?.setPose(
+        sissyAnimator?.setPose(
             icon.isAsleep ? .asleep : .awake,
-            animated: model.preferences.mascotMotion
+            animated: model.preferences.sissyMotion
         )
     }
 
-    /// A blink when a frame lands is the mascot noticing new numbers.
+    /// A blink when a frame lands is Sissy noticing new numbers.
     ///
     /// `lastFrameAt` carries the frame's own `ts`, which has second
     /// resolution, and `@Observable` suppresses an assignment that doesn't
     /// change the value — so a replayed frame is already silent.
     /// `SissyMenuBarMotion.dataBlinkCooldown` covers what that leaves. The
-    /// panel's mascot paces itself on the same constant, off its own clock:
+    /// panel's Sissy paces herself on the same constant, off her own clock:
     /// the two surfaces match in rhythm, not frame for frame.
     private func observeFrameArrivals() {
         withObservationTracking {
@@ -139,9 +139,9 @@ final class StatusItemController: NSObject {
 
     private func blinkForArrivedFrame() {
         let now = Date()
-        guard model.preferences.mascotMotion,
+        guard model.preferences.sissyMotion,
             now.timeIntervalSince(lastDataBlinkAt) >= SissyMenuBarMotion.dataBlinkCooldown,
-            mascotAnimator?.blink() == true
+            sissyAnimator?.blink() == true
         else { return }
         lastDataBlinkAt = now
     }

@@ -10,7 +10,7 @@ struct Preferences: Codable, Equatable {
     var serverPort: Int = SissyPaths.defaultServerPort
     var authToken: String = ""
     var claudeLimits: Bool = false
-    var mascotMotion: Bool = true
+    var sissyMotion: Bool = true
 
     enum PrimaryMetric: String, Codable, CaseIterable, Identifiable {
         case tokens
@@ -32,14 +32,14 @@ struct Preferences: Codable, Equatable {
         serverPort: Int = SissyPaths.defaultServerPort,
         authToken: String = "",
         claudeLimits: Bool = false,
-        mascotMotion: Bool = true,
+        sissyMotion: Bool = true,
     ) {
         self.primaryMetric = primaryMetric
         self.serverHost = serverHost
         self.serverPort = serverPort
         self.authToken = authToken
         self.claudeLimits = claudeLimits
-        self.mascotMotion = mascotMotion
+        self.sissyMotion = sissyMotion
     }
 
     /// Backwards-compatible decoder so a `preferences.json` written by an
@@ -52,7 +52,29 @@ struct Preferences: Codable, Equatable {
         serverPort = (try? c.decode(Int.self, forKey: .serverPort)) ?? SissyPaths.defaultServerPort
         authToken = (try? c.decode(String.self, forKey: .authToken)) ?? ""
         claudeLimits = (try? c.decode(Bool.self, forKey: .claudeLimits)) ?? false
-        mascotMotion = (try? c.decode(Bool.self, forKey: .mascotMotion)) ?? true
+        sissyMotion = Self.decodeSissyMotion(from: decoder)
+    }
+
+    /// `sissyMotion` was persisted as `mascotMotion` up to and including
+    /// 0.1.8. Reading the old key on upgrade keeps a user who had turned
+    /// motion off from silently getting it back; the next `save()` writes
+    /// only the current name, so the fallback decays on its own.
+    private static func decodeSissyMotion(from decoder: Decoder) -> Bool {
+        if let c = try? decoder.container(keyedBy: CodingKeys.self),
+            let current = try? c.decode(Bool.self, forKey: .sissyMotion)
+        {
+            return current
+        }
+        if let c = try? decoder.container(keyedBy: LegacyCodingKeys.self),
+            let legacy = try? c.decode(Bool.self, forKey: .mascotMotion)
+        {
+            return legacy
+        }
+        return true
+    }
+
+    private enum LegacyCodingKeys: String, CodingKey {
+        case mascotMotion
     }
 
     // MARK: persistence

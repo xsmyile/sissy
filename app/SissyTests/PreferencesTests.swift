@@ -30,4 +30,25 @@ final class PreferencesTests: XCTestCase {
         let round = try JSONDecoder().decode(Preferences.self, from: data)
         XCTAssertEqual(round, original)
     }
+
+    /// A 0.1.8 `preferences.json` spells the motion switch `mascotMotion`.
+    /// Losing that key would turn motion back on for everyone who had
+    /// switched it off, which is the one direction the default cannot cover.
+    func testMotionOffSurvivesTheLegacyKeyName() throws {
+        let legacy = Data(#"{"mascotMotion":false}"#.utf8)
+        let prefs = try JSONDecoder().decode(Preferences.self, from: legacy)
+        XCTAssertFalse(prefs.sissyMotion)
+    }
+
+    func testTheCurrentKeyWinsOverTheLegacyOne() throws {
+        let both = Data(#"{"sissyMotion":true,"mascotMotion":false}"#.utf8)
+        let prefs = try JSONDecoder().decode(Preferences.self, from: both)
+        XCTAssertTrue(prefs.sissyMotion)
+    }
+
+    func testMotionDefaultsOnWhenNeitherKeyIsPresent() throws {
+        let empty = Data("{}".utf8)
+        let prefs = try JSONDecoder().decode(Preferences.self, from: empty)
+        XCTAssertTrue(prefs.sissyMotion)
+    }
 }

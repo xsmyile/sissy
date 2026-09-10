@@ -1,6 +1,6 @@
 import AppKit
 
-/// Plays the mascot's eye on the status button: a blink when data lands, and
+/// Plays Sissy's eye on the status button: a blink when data lands, and
 /// the eye closing or opening when the daemon goes away and comes back.
 ///
 /// Once this exists it is the only writer of `button.image`: a refresh that
@@ -20,7 +20,7 @@ final class SissyMenuBarAnimator {
         var errorDescription: String? {
             switch self {
             case .missingImage(let name):
-                "Missing mascot frame \(name). Regenerate the asset catalogue."
+                "Missing Sissy frame \(name). Regenerate the asset catalogue."
             }
         }
     }
@@ -64,8 +64,8 @@ final class SissyMenuBarAnimator {
             image.isTemplate = true
             return image
         }
-        awakeImage = try load(SissyModel.mascotAssetName)
-        asleepImage = try load(SissyModel.mascotSleepingAssetName)
+        awakeImage = try load(SissyModel.sissyAssetName)
+        asleepImage = try load(SissyModel.sissySleepingAssetName)
         frames = try SissyMenuBarMotion.frameAssetNames.map(load)
         self.button = button
         self.reduceMotion = reduceMotion
@@ -87,8 +87,8 @@ final class SissyMenuBarAnimator {
 
     /// Moves the resting pose, closing or opening the eye on the way there.
     ///
-    /// Asleep also blocks the blink: a mascot that blinks while the daemon is
-    /// unreachable claims something is arriving. `animated` off — Reduce
+    /// Asleep also blocks the blink: blinking while the daemon is unreachable
+    /// claims something is arriving. `animated` off — Reduce
     /// Motion, an open menu, or the pose the app starts in — snaps instead.
     ///
     /// The destination image is never installed before the transition runs:

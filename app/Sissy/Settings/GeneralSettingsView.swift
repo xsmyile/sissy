@@ -61,7 +61,7 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Toggle("Animate the mascot", isOn: mascotMotionBinding)
+                Toggle("Animate Sissy", isOn: sissyMotionBinding)
                 Text(
                     "A blink when new usage lands, in the menu bar and in the panel, "
                         + "and the eye shutting while the server is away. Nothing in between. "
@@ -120,10 +120,10 @@ struct GeneralSettingsView: View {
         )
     }
 
-    private var mascotMotionBinding: Binding<Bool> {
+    private var sissyMotionBinding: Binding<Bool> {
         Binding(
-            get: { model.preferences.mascotMotion },
-            set: { model.setMascotMotion($0) }
+            get: { model.preferences.sissyMotion },
+            set: { model.setSissyMotion($0) }
         )
     }
 
