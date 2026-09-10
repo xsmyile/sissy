@@ -51,4 +51,42 @@ final class PreferencesTests: XCTestCase {
         let prefs = try JSONDecoder().decode(Preferences.self, from: empty)
         XCTAssertTrue(prefs.sissyMotion)
     }
+
+    private func makeSupportDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sissy-prefs-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return dir
+    }
+
+    private func writeServerConfig(port: Int, to directory: URL) throws {
+        let json = #"{"host":"127.0.0.1","port":\#(port),"authToken":""}"#
+        try Data(json.utf8).write(to: directory.appendingPathComponent("server.json"))
+    }
+
+    /// Preferences that will not parse used to fall back to this build's
+    /// default port, which is only the right guess while the default never
+    /// moves. `server.json` is the port the daemon actually read at boot.
+    func testUnreadablePreferencesAdoptTheDaemonsPort() throws {
+        let dir = try makeSupportDir()
+        try Data("not json".utf8).write(to: dir.appendingPathComponent(Preferences.fileName))
+        try writeServerConfig(port: 9001, to: dir)
+
+        XCTAssertEqual(Preferences.load(from: dir).serverPort, 9001)
+    }
+
+    func testAFreshInstallTakesTheCompiledDefault() throws {
+        let dir = try makeSupportDir()
+
+        XCTAssertEqual(Preferences.load(from: dir).serverPort, SissyPaths.defaultServerPort)
+    }
+
+    func testAReadablePreferencesFileOutranksTheServerConfig() throws {
+        let dir = try makeSupportDir()
+        Preferences(serverPort: 9002).save(to: dir)
+        try writeServerConfig(port: 9001, to: dir)
+
+        XCTAssertEqual(Preferences.load(from: dir).serverPort, 9002)
+    }
 }
