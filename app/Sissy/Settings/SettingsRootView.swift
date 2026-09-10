@@ -62,6 +62,12 @@ struct SettingsRootView: View {
         }
         .frame(width: Self.width)
         .fixedSize(horizontal: false, vertical: true)
+        // Left automatic, the toolbar decides its own background from whether
+        // a scroll view underneath it is scrolled off the top — so General,
+        // whose `Form` is one, and About, which has none and can never report
+        // "at the top", disagreed about whether to draw a band under the tabs.
+        // Neither tab ever scrolls: the window is sized to its content.
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
     }
 
     private func tab<Content: View>(
