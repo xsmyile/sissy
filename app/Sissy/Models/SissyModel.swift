@@ -97,8 +97,9 @@ final class SissyModel {
         let isDimmed: Bool
     }
 
+    /// Only the opacity varies now that the glyph is fixed: a dimmed mascot is
+    /// how the menu bar reports that nothing is reaching it.
     struct StatusIconSnapshot {
-        let imageName: String
         let alpha: CGFloat
     }
 
@@ -116,26 +117,28 @@ final class SissyModel {
         let at: Date
     }
 
+    /// Sissy's one mascot asset, template-rendered by the catalogue so every
+    /// surface tints it for its own context. One fixed portrait rather than a
+    /// sprite per mood: a glyph that changes shape on its own is a puzzle for
+    /// anyone who has not memorised the states, and it was carrying no
+    /// information the panel does not state in words.
+    static let mascotAssetName = "SissyMenuBarTemplate"
+
     var menuSnapshot: MenuSnapshot {
         let linkUp = webSocketClient.isConnected && currentFrame != nil
-        let spriteState = pinnedMascot ?? currentFrame?.state ?? "sleep"
         let droppedAfterConnect = webSocketClient.hasEverConnected && !webSocketClient.isConnected
         let healthOffline = !serverHealth.status.isReachable
         let offline = droppedAfterConnect || healthOffline
-        let iconState = offline ? nil : (pinnedMascot ?? currentFrame?.state)
         let server = serverItemSnapshot
 
         return MenuSnapshot(
             header: HeaderSnapshot(
-                imageName: StateDescriptor.mascotImageName(for: spriteState),
+                imageName: Self.mascotAssetName,
                 title: headerTitle(linkUp: linkUp, serverIsOn: server.isOn),
                 subtitle: headerSubtitle(linkUp: linkUp, serverIsOn: server.isOn),
                 isDimmed: !linkUp
             ),
-            statusIcon: StatusIconSnapshot(
-                imageName: StateDescriptor.mascotImageName(for: iconState),
-                alpha: offline ? 0.4 : 1.0
-            ),
+            statusIcon: StatusIconSnapshot(alpha: offline ? 0.4 : 1.0),
             server: server,
             canPickMascot: webSocketClient.isConnected
         )

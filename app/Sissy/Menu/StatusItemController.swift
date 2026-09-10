@@ -30,8 +30,12 @@ final class StatusItemController: NSObject {
         refreshIcon(model.menuSnapshot.statusIcon)
     }
 
+    /// The image is assigned once. It never varies, and re-reading it out of
+    /// the asset catalogue on every model change would only hand back the same
+    /// shared instance.
     private func configureButton() {
         guard let button = statusItem.button else { return }
+        button.image = NSImage(named: SissyModel.mascotAssetName)
         button.imagePosition = .imageOnly
         button.toolTip = "Sissy"
         button.wantsLayer = true
@@ -70,11 +74,7 @@ final class StatusItemController: NSObject {
     }
 
     private func refreshIcon(_ icon: SissyModel.StatusIconSnapshot) {
-        guard let button = statusItem.button else { return }
-        let image = NSImage(named: icon.imageName)
-        image?.isTemplate = true
-        button.image = image
-        button.alphaValue = icon.alpha
+        statusItem.button?.alphaValue = icon.alpha
     }
 
     // MARK: Actions
