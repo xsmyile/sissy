@@ -223,6 +223,13 @@ struct Preferences: Codable, Equatable {
     /// existing file first and merging our values over it. Without that
     /// merge, a metric switch or a pairing run would silently drop a
     /// user's `providers.codex = false` override.
+    ///
+    /// `claudeLimits` lands here as well as on the WS message that applies it
+    /// live, because the daemon reads this file unattended at boot and starts
+    /// the keychain probe from it. Flipping the switch while the socket is
+    /// down otherwise leaves the old value on disk, and the next daemon start
+    /// prompts for a keychain the user had just opted out of — the app's
+    /// `hello` only corrects it once the probe is already running.
     func writeServerConfig() {
         let url = Self.appSupportDir().appendingPathComponent(Self.serverConfigFileName)
         var dict: [String: Any] = [:]
@@ -243,6 +250,7 @@ struct Preferences: Codable, Equatable {
         dict["pollIntervalSeconds"] = Self.pollIntervalSecondsDefault
         dict["primaryMetric"] = primaryMetric.rawValue
         dict["milestoneFrequency"] = milestoneFrequency.rawValue
+        dict["claudeLimits"] = claudeLimits
         dict["stateThresholds"] =
             [
                 "code": costThresholdCode,
