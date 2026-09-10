@@ -78,11 +78,12 @@ final class SissyModel {
         let isDimmed: Bool
     }
 
-    /// The glyph is fixed, so the icon only varies in opacity — a dimmed
-    /// mascot is how the menu bar reports that nothing is reaching it — and in
-    /// whether it is allowed to move.
+    /// The glyph is fixed, so the icon varies in opacity — a dimmed mascot is
+    /// how the menu bar reports that nothing is reaching it — in whether the
+    /// mascot is awake, and in whether it is allowed to move.
     struct StatusIconSnapshot {
         let alpha: CGFloat
+        let isAsleep: Bool
         let motionEnabled: Bool
     }
 
@@ -104,6 +105,10 @@ final class SissyModel {
     /// surface tints it for its own context.
     static let mascotAssetName = "SissyMenuBarTemplate"
 
+    /// The same silhouette with its eye shut. The menu bar rests on this one
+    /// while nothing is reaching the app.
+    static let mascotSleepingAssetName = "SissyMenuBarSleepingTemplate"
+
     var menuSnapshot: MenuSnapshot {
         let linkUp = webSocketClient.isConnected && currentFrame != nil
         let droppedAfterConnect = webSocketClient.hasEverConnected && !webSocketClient.isConnected
@@ -120,6 +125,7 @@ final class SissyModel {
             ),
             statusIcon: StatusIconSnapshot(
                 alpha: offline ? 0.4 : 1.0,
+                isAsleep: offline,
                 motionEnabled: preferences.mascotMotion
             ),
             server: server

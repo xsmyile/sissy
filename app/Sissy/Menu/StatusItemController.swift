@@ -12,6 +12,7 @@ final class StatusItemController: NSObject {
 
     private let model: SissyModel
     private var mascotAnimator: SissyMenuBarAnimator?
+    private var lastDataBlinkAt: Date = .distantPast
 
     private(set) var isMenuOpen: Bool = false
     var statusButton: NSStatusBarButton? { statusItem.button }
@@ -29,6 +30,7 @@ final class StatusItemController: NSObject {
         configureButton()
         configureMascotAnimator()
         observeModel()
+        observeFrameArrivals()
         refreshIcon(model.menuSnapshot.statusIcon)
     }
 
@@ -40,6 +42,9 @@ final class StatusItemController: NSObject {
     /// than everything beside it. 17 pt of canvas puts the ink at ~15.5 pt,
     /// which sits with the system's own items.
     private static let menuBarIconSize: CGFloat = 17
+
+    /// Shortest spacing between two data-driven blinks.
+    private static let dataBlinkCooldown: TimeInterval = 3
 
     /// The image is assigned once: it never varies, and re-reading it on every
     /// model change would only hand back the same instance. That instance is
@@ -104,22 +109,55 @@ final class StatusItemController: NSObject {
 
     private func refreshIcon(_ icon: SissyModel.StatusIconSnapshot) {
         statusItem.button?.alphaValue = icon.alpha
-        applyMotionPreference(icon.motionEnabled)
+        mascotAnimator?.setPose(icon.isAsleep ? .asleep : .awake)
+        applyMotionPreference(icon.motionEnabled && !icon.isAsleep)
     }
 
-    /// Idempotent: `refreshIcon` runs on every model change, and restarting
-    /// the scheduler each time would re-roll the delay and starve the mascot
-    /// of gestures on a busy day.
+    /// The ear twitch is the only scheduled gesture: the blink already fires
+    /// on data, so this one says "awake, nothing new" and nothing else.
+    ///
+    /// Idempotent, because `refreshIcon` runs on every model change and
+    /// restarting the scheduler each time would re-roll the delay and starve
+    /// the mascot of gestures on a busy day.
     private func applyMotionPreference(_ enabled: Bool) {
         guard let animator = mascotAnimator,
             enabled != animator.isSchedulingOccasionalAnimations
         else { return }
         if enabled {
-            animator.startOccasionalAnimations()
+            animator.startOccasionalAnimations(.earTwitch)
         } else {
             animator.stopOccasionalAnimations()
             animator.stop()
         }
+    }
+
+    /// A blink when a frame lands is the mascot noticing new numbers.
+    ///
+    /// `lastFrameAt` carries the frame's own `ts`, which has second
+    /// resolution, and `@Observable` suppresses an assignment that doesn't
+    /// change the value — so a replayed frame is already silent. The cooldown
+    /// covers what that leaves: the readers coalesce emits only down to
+    /// `UsageReaderShared.pollEmitThrottle` (0.2 s), so a turn appending JSONL
+    /// in bursts can push a frame a second, and a 380 ms gesture that often
+    /// never lets the icon settle.
+    private func observeFrameArrivals() {
+        withObservationTracking {
+            _ = model.lastFrameAt
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.blinkForArrivedFrame()
+                self.observeFrameArrivals()
+            }
+        }
+    }
+
+    private func blinkForArrivedFrame() {
+        let now = Date()
+        guard now.timeIntervalSince(lastDataBlinkAt) >= Self.dataBlinkCooldown,
+            mascotAnimator?.play(.blink) == true
+        else { return }
+        lastDataBlinkAt = now
     }
 
     // MARK: Actions
