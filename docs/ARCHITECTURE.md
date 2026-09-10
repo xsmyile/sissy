@@ -89,11 +89,13 @@ The daemon binds first and lets each active provider's initial JSONL backfill fi
 
 Each provider reader retains a 2-day window on disk (today + yesterday). The daemon only ever surfaces today + yesterday — the latter feeds the panel's day-over-day delta — so the retention window is sized to match. Cold scans skip every file with `mtime < now-48h`, which on real-world trees (~500 MB across hundreds of projects) parses ~10-20% of the bytes and finishes in low seconds. Bumping this requires every consumer of `dailyTotals` to actually use the extra history; today nothing does.
 
-## Daemon lifecycle (LaunchAgent)
+## Lifecycle and login items
 
 The daemon binary lives at `Sissy.app/Contents/MacOS/sissy-serverd`. Its LaunchAgent plist is bundled at `Sissy.app/Contents/Library/LaunchAgents/com.radonforge.sissy.server.plist` and uses `BundleProgram` so it remains app-bundle relative if the app is moved.
 
 The menubar app's `ServerServiceController` uses `SMAppService.agent(plistName:)` to register/unregister the LaunchAgent. Registering starts the daemon and enables it for future logins; unregistering stops it and removes the login item registration. Runtime state in the UI comes from `/health`, not from parsing `launchctl` output. Quitting the menubar app does not stop the daemon, which is the point of the split: the day keeps being counted either way.
+
+There are therefore **two independent login items**, one per half. The daemon's agent carries `RunAtLoad`, so once the Server is on it comes back at login whether or not the app does; the app registers itself separately through `SMAppService.mainApp` (`Models/LoginItemController.swift`, exposed as General → "Start at login", which falls back to a button into System Settings when macOS reports the item needs approval), and that switch only decides whether the menu bar icon returns. Neither state is mirrored in `preferences.json`: `SMAppService` is the record, and a user who removed Sissy in System Settings → Login Items would leave a mirrored flag asserting something the system had already undone.
 
 ## Operational notes
 
