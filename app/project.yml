@@ -36,6 +36,12 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - Sissy
+      # The notices file lives at the repo root, where GitHub shows it, and
+      # is bundled as a resource because SwiftNIO ships compiled into the
+      # daemon: Apache-2.0 asks its NOTICE to travel with the binary, not
+      # only with the source.
+      - path: ../THIRD-PARTY-NOTICES.md
+        buildPhase: resources
       - path: ServiceManagement/com.radonforge.sissy.server.plist
         buildPhase:
           copyFiles:
