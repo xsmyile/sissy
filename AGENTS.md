@@ -36,7 +36,7 @@ Adding/removing Swift files requires re-running `xcodegen generate` — the proj
 
 ### CI
 
-`.github/workflows/ci.yml` runs shell/YAML/Python lint on ubuntu, then `xcodebuild`, unit tests, and `--self-test` for both Xcode targets on macos-26.
+`.github/workflows/ci.yml` runs shell/YAML/Python lint on ubuntu, then `xcodebuild`, unit tests, and `--self-test` for both Xcode targets on macos-26. `pricing-oracle.yml` asserts cost agreement with `ccusage` on a synthetic fixture, and `release.yml` builds, notarizes and publishes on a pushed tag.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ Menubar-only (`LSUIElement: true`). Sandbox disabled, network-client entitlement
 
 The app drives the bundled daemon's lifecycle via `Server/ServerServiceController.swift` and `SMAppService.agent(plistName:)`. The LaunchAgent plist is bundled at `Sissy.app/Contents/Library/LaunchAgents/com.radonforge.sissy.server.plist` and points at `Contents/MacOS/sissy-serverd` with `BundleProgram`; the app no longer writes plists into `~/Library/LaunchAgents` or parses `launchctl print` for UI state. `Server/ServerHealthMonitor.swift` polls `/health` every 3 s so the menubar surfaces `Running / Stopped / No JSONL detected`. The app has three surfaces and no windows of its own: a left-click usage panel (`Panel/`, an `NSPopover`), a short right-click `NSMenu` (`Menu/StatusItemController.swift`), and the SwiftUI `Settings` scene (`Settings/`, tabs General/About) — reachable from the app menu's Settings… item (⌘,) and, in code, only through `SettingsLink`, which takes no action closure and is why the panel footer aims the window at a tab through `SissyModel.settingsTab`. Quitting the app does not stop the daemon — that's the whole point of the agent split.
 
-**Two login items, one per half** — [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#lifecycle-and-login-items) says which does what. The rule: neither state is mirrored in `preferences.json`: `SMAppService` is the record, and a user who removes Sissy from System Settings' Login Items would leave a mirrored flag claiming something the system had already undone.
+**Two login items, one per half** — [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#lifecycle-and-login-items) says which does what. The rule: neither state is mirrored in `preferences.json`. `SMAppService` is the record, and a user who removes Sissy from System Settings' Login Items would leave a mirrored flag claiming something the system had already undone.
 
 ## Conventions specific to this repo
 
