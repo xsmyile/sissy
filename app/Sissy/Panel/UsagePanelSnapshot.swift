@@ -37,6 +37,10 @@ struct UsagePanelSnapshot: Equatable {
         /// the name alone — an API-key user has no plan to name, and a Codex
         /// that has not taken a turn yet has not said which it is on.
         let plan: String?
+        /// Limit tier, worded, and only when it is not already part of
+        /// `plan` — a Team seat metered at Max 5x. It goes to the tooltip:
+        /// the badge is for the plan the user pays for.
+        let planTier: String?
         let tokens: String
         let cost: String
         let share: Double
@@ -81,10 +85,12 @@ struct UsagePanelSnapshot: Equatable {
         totalTokens: Int
     ) -> [ProviderRow] {
         slices.map { slice in
-            ProviderRow(
+            let plan = UsageFormat.plan(slice.plan, tier: slice.planTier)
+            return ProviderRow(
                 id: slice.id,
                 name: UsageFormat.providerName(slice.id),
-                plan: UsageFormat.planLabel(slice.plan),
+                plan: plan?.label,
+                planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
                 share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0,

@@ -360,21 +360,27 @@ struct DisplayFrame: Codable, Equatable {
         let windows: [UsageWindow]
         /// Vendor's own plan token, nil when the daemon reported none — an
         /// API-key user, a CLI too old to name it, or a daemon predating the
-        /// field. `UsageFormat.planLabel` turns it into the words on the row.
+        /// field. `UsageFormat.plan(_:tier:)` turns it into the words on the
+        /// row.
         let plan: String?
+        /// Limit tier the plan is metered at, for the one vendor that names
+        /// one. Never present without `plan`.
+        let planTier: String?
 
         init(
             id: String,
             tokens: Int,
             cost: Decimal,
             windows: [UsageWindow] = [],
-            plan: String? = nil
+            plan: String? = nil,
+            planTier: String? = nil
         ) {
             self.id = id
             self.tokens = tokens
             self.cost = cost
             self.windows = windows
             self.plan = plan
+            self.planTier = plan == nil ? nil : planTier
         }
     }
 

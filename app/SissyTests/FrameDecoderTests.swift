@@ -58,6 +58,33 @@ final class FrameDecoderTests: XCTestCase {
             """
         let frame = try XCTUnwrap(FrameDecoder.decode(payload))
         XCTAssertEqual(frame.providers.first?.plan, "plus")
+        XCTAssertNil(frame.providers.first?.planTier)
+    }
+
+    func testDecodesProviderPlanTier() throws {
+        let payload = """
+            {"type":"frame","tokens":"26K","cost":"0.09","burn":"1.5K",
+             "primary":"26K","primary_label":"TOKENS","ts":1,
+             "providers":[{"id":"claude-code","tokens":26000,"cost":"0.0914",
+               "plan":"team","plan_tier":"max_5x"}]}
+            """
+        let frame = try XCTUnwrap(FrameDecoder.decode(payload))
+        XCTAssertEqual(frame.providers.first?.plan, "team")
+        XCTAssertEqual(frame.providers.first?.planTier, "max_5x")
+    }
+
+    /// A tier with no plan beside it describes limits the row cannot
+    /// attribute, so the pairing is refused rather than half-rendered.
+    func testATierWithoutAPlanIsDropped() throws {
+        let payload = """
+            {"type":"frame","tokens":"26K","cost":"0.09","burn":"1.5K",
+             "primary":"26K","primary_label":"TOKENS","ts":1,
+             "providers":[{"id":"claude-code","tokens":26000,"cost":"0.0914",
+               "plan_tier":"max_5x"}]}
+            """
+        let frame = try XCTUnwrap(FrameDecoder.decode(payload))
+        XCTAssertNil(frame.providers.first?.plan)
+        XCTAssertNil(frame.providers.first?.planTier)
     }
 
     /// The daemon omits the key rather than sending null, and a daemon from
