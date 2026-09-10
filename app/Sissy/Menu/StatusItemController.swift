@@ -72,6 +72,12 @@ final class StatusItemController: NSObject {
         do {
             let animator = try SissyMenuBarAnimator(button: button, iconSize: Self.menuBarIconSize)
             animator.canAnimate = { [weak self] in self?.isMenuOpen == false }
+            // Snapped: a mascot that closes its eye a beat after the icon
+            // appears would read as the daemon dying, not as it being off.
+            animator.setPose(
+                model.menuSnapshot.statusIcon.isAsleep ? .asleep : .awake,
+                animated: false
+            )
             mascotAnimator = animator
         } catch {
             NSLog("sissy: mascot motion unavailable: %@", error.localizedDescription)
@@ -108,27 +114,10 @@ final class StatusItemController: NSObject {
     }
 
     private func refreshIcon(_ icon: SissyModel.StatusIconSnapshot) {
-        statusItem.button?.alphaValue = icon.alpha
-        mascotAnimator?.setPose(icon.isAsleep ? .asleep : .awake)
-        applyMotionPreference(icon.motionEnabled && !icon.isAsleep)
-    }
-
-    /// The ear twitch is the only scheduled gesture: the blink already fires
-    /// on data, so this one says "awake, nothing new" and nothing else.
-    ///
-    /// Idempotent, because `refreshIcon` runs on every model change and
-    /// restarting the scheduler each time would re-roll the delay and starve
-    /// the mascot of gestures on a busy day.
-    private func applyMotionPreference(_ enabled: Bool) {
-        guard let animator = mascotAnimator,
-            enabled != animator.isSchedulingOccasionalAnimations
-        else { return }
-        if enabled {
-            animator.startOccasionalAnimations(.earTwitch)
-        } else {
-            animator.stopOccasionalAnimations()
-            animator.stop()
-        }
+        mascotAnimator?.setPose(
+            icon.isAsleep ? .asleep : .awake,
+            animated: model.preferences.mascotMotion
+        )
     }
 
     /// A blink when a frame lands is the mascot noticing new numbers.
@@ -154,8 +143,9 @@ final class StatusItemController: NSObject {
 
     private func blinkForArrivedFrame() {
         let now = Date()
-        guard now.timeIntervalSince(lastDataBlinkAt) >= Self.dataBlinkCooldown,
-            mascotAnimator?.play(.blink) == true
+        guard model.preferences.mascotMotion,
+            now.timeIntervalSince(lastDataBlinkAt) >= Self.dataBlinkCooldown,
+            mascotAnimator?.blink() == true
         else { return }
         lastDataBlinkAt = now
     }
