@@ -42,6 +42,16 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Toggle("Animate the mascot", isOn: mascotMotionBinding)
+                Text(
+                    "A blink or an ear twitch every few minutes, and nothing in between. "
+                        + "Follows the system's Reduce Motion setting."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 LabeledContent("Files") {
                     HStack(spacing: 14) {
                         Button("Open logs") { model.openLogs() }
@@ -76,6 +86,13 @@ struct GeneralSettingsView: View {
         Binding(
             get: { model.preferences.claudeLimits },
             set: { model.setClaudeLimits($0) }
+        )
+    }
+
+    private var mascotMotionBinding: Binding<Bool> {
+        Binding(
+            get: { model.preferences.mascotMotion },
+            set: { model.setMascotMotion($0) }
         )
     }
 

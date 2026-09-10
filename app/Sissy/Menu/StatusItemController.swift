@@ -11,6 +11,7 @@ final class StatusItemController: NSObject {
     private let menu = NSMenu()
 
     private let model: SissyModel
+    private var mascotAnimator: SissyMenuBarAnimator?
 
     private(set) var isMenuOpen: Bool = false
     var statusButton: NSStatusBarButton? { statusItem.button }
@@ -26,6 +27,7 @@ final class StatusItemController: NSObject {
 
         buildMenu()
         configureButton()
+        configureMascotAnimator()
         observeModel()
         refreshIcon(model.menuSnapshot.statusIcon)
     }
@@ -55,6 +57,20 @@ final class StatusItemController: NSObject {
         button.target = self
         button.action = #selector(handleStatusButtonClick)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+
+    /// Hands the button's image to the animator, which keeps the resting
+    /// frame. A catalogue without the frames leaves `configureButton`'s
+    /// static icon in place and the mascot simply never moves.
+    private func configureMascotAnimator() {
+        guard let button = statusItem.button else { return }
+        do {
+            let animator = try SissyMenuBarAnimator(button: button, iconSize: Self.menuBarIconSize)
+            animator.canAnimate = { [weak self] in self?.isMenuOpen == false }
+            mascotAnimator = animator
+        } catch {
+            NSLog("sissy: mascot motion unavailable: %@", error.localizedDescription)
+        }
     }
 
     private func buildMenu() {
@@ -88,6 +104,22 @@ final class StatusItemController: NSObject {
 
     private func refreshIcon(_ icon: SissyModel.StatusIconSnapshot) {
         statusItem.button?.alphaValue = icon.alpha
+        applyMotionPreference(icon.motionEnabled)
+    }
+
+    /// Idempotent: `refreshIcon` runs on every model change, and restarting
+    /// the scheduler each time would re-roll the delay and starve the mascot
+    /// of gestures on a busy day.
+    private func applyMotionPreference(_ enabled: Bool) {
+        guard let animator = mascotAnimator,
+            enabled != animator.isSchedulingOccasionalAnimations
+        else { return }
+        if enabled {
+            animator.startOccasionalAnimations()
+        } else {
+            animator.stopOccasionalAnimations()
+            animator.stop()
+        }
     }
 
     // MARK: Actions

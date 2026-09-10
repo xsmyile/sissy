@@ -10,6 +10,7 @@ struct Preferences: Codable, Equatable {
     var serverPort: Int = SissyPaths.defaultServerPort
     var authToken: String = ""
     var claudeLimits: Bool = false
+    var mascotMotion: Bool = true
 
     enum PrimaryMetric: String, Codable, CaseIterable, Identifiable {
         case tokens
@@ -31,12 +32,14 @@ struct Preferences: Codable, Equatable {
         serverPort: Int = SissyPaths.defaultServerPort,
         authToken: String = "",
         claudeLimits: Bool = false,
+        mascotMotion: Bool = true,
     ) {
         self.primaryMetric = primaryMetric
         self.serverHost = serverHost
         self.serverPort = serverPort
         self.authToken = authToken
         self.claudeLimits = claudeLimits
+        self.mascotMotion = mascotMotion
     }
 
     /// Backwards-compatible decoder so a `preferences.json` written by an
@@ -49,6 +52,7 @@ struct Preferences: Codable, Equatable {
         serverPort = (try? c.decode(Int.self, forKey: .serverPort)) ?? SissyPaths.defaultServerPort
         authToken = (try? c.decode(String.self, forKey: .authToken)) ?? ""
         claudeLimits = (try? c.decode(Bool.self, forKey: .claudeLimits)) ?? false
+        mascotMotion = (try? c.decode(Bool.self, forKey: .mascotMotion)) ?? true
     }
 
     // MARK: persistence
