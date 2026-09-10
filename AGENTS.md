@@ -49,11 +49,11 @@ Adding/removing Swift files requires re-running `xcodegen generate` — the proj
                                                                                         └───────── hello frame ────────┘
 ```
 
-`UsageAggregator` sums per-day totals across N `UsageProvider` instances and emits a single combined frame. The combined `tokens`/`cost`/`state` scalars are still pre-formatted by the daemon — a shape inherited from rendering into 128×64 pixels, and the reason `UsageFormat` in the app deliberately re-implements its own formatters. Alongside them the frame carries a raw `providers: [{id, tokens, cost, windows}]` array so the menubar app derives the header subtitle, the usage panel's per-provider rows and each provider's rate-limit gauges from one push-based payload. `/stats` is now diagnostic-only (`connectedClients`, `filesWatched`, `lastFrameAt`).
+`UsageAggregator` sums per-day totals across N `UsageProvider` instances and emits a single combined frame. The combined `tokens`/`cost`/`burn` scalars are still pre-formatted by the daemon — a shape inherited from rendering into 128×64 pixels, and the reason `UsageFormat` in the app deliberately re-implements its own formatters. Alongside them the frame carries a raw `providers: [{id, tokens, cost, windows}]` array so the menubar app derives the header subtitle, the usage panel's per-provider rows and each provider's rate-limit gauges from one push-based payload. `/stats` is now diagnostic-only (`connectedClients`, `filesWatched`, `lastFrameAt`).
 
-The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client gets it replayed on connect, so a reconnecting app shows the real last reading instead of placeholders. Any change to the frame contract (`tokens`, `cost`, `state`, `providers` — including each slice's `windows` — `prev_tokens`/`prev_cost`) must be made in **three** places that have no shared schema:
+The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client gets it replayed on connect, so a reconnecting app shows the real last reading instead of placeholders. Any change to the frame contract (`tokens`, `cost`, `burn`, `primary`/`primary_label`, `providers` — including each slice's `windows` — `prev_tokens`/`prev_cost`) must be made in **three** places that have no shared schema:
 
-1. `app/SissyServer/FrameBuilder.swift` — `FrameData` shape, scalar formatters, picks `state`, owns `ProviderSlice`.
+1. `app/SissyServer/FrameBuilder.swift` — `FrameData` shape, scalar formatters, picks the primary metric, owns `ProviderSlice`.
 2. `app/SissyServer/Hub.swift` — `encode(_:)` is where `FrameData` becomes JSON on the wire.
 3. `app/Sissy/Server/FrameDecoder.swift` — parses into `DisplayFrame` (`WebSocketClient` only hands it the message).
 
