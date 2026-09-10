@@ -26,32 +26,8 @@ actor Hub {
     func broadcast(_ frame: FrameData) async {
         lastFrameAt = Date()
         let payload = encode(frame)
-        // Cache a milestone-stripped copy for replays (new sink connect via
-        // `register`, app process restart). The live broadcast below is the
-        // authoritative
-        // delivery for that crossing — replaying the same milestone string
-        // later would refire the celebration pop-up for an already-seen
-        // event. Steady-state frames (milestone == nil) skip the extra
-        // encode.
-        if frame.milestone == nil {
-            lastFrame = frame
-            lastFramePayload = payload
-        } else {
-            let cached = FrameData(
-                tokens: frame.tokens,
-                cost: frame.cost,
-                burn: frame.burn,
-                state: frame.state,
-                primary: frame.primary,
-                primaryLabel: frame.primaryLabel,
-                milestone: nil,
-                providers: frame.providers,
-                prevTokens: frame.prevTokens,
-                prevCost: frame.prevCost
-            )
-            lastFrame = cached
-            lastFramePayload = encode(cached)
-        }
+        lastFrame = frame
+        lastFramePayload = payload
         // Fire deliveries concurrently rather than in dictionary iteration
         // order, so one slow sink cannot hold up the rest.
         let snapshot = Array(sinks.values)
@@ -90,7 +66,6 @@ actor Hub {
             "tokens": frame.tokens,
             "cost": frame.cost,
             "burn": frame.burn,
-            "state": frame.state,
             "primary": frame.primary,
             "primary_label": frame.primaryLabel,
             "ts": Int(Date().timeIntervalSince1970),
@@ -99,9 +74,6 @@ actor Hub {
         // Emit the field only when set so a sink that doesn't care (firmware)
         // never sees an extra key with `null`. Same wire weight as before on
         // the steady-state frames, which is most of them.
-        if let milestone = frame.milestone {
-            dict["milestone"] = milestone
-        }
         if let prevTokens = frame.prevTokens, let prevCost = frame.prevCost {
             dict["prev_tokens"] = prevTokens
             dict["prev_cost"] = NSDecimalNumber(decimal: prevCost).stringValue
@@ -109,7 +81,7 @@ actor Hub {
         do {
             return try JSONSerialization.data(withJSONObject: dict)
         } catch {
-            daemonLog("sissy-serverd: frame encode failed for state \(frame.state): \(error)")
+            daemonLog("sissy-serverd: frame encode failed at \(frame.tokens) tokens: \(error)")
             return Data()
         }
     }

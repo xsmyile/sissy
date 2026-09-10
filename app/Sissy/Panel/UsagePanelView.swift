@@ -18,10 +18,7 @@ struct UsagePanelView: View {
     }
 
     private func makeSnapshot(_ frame: DisplayFrame) -> UsagePanelSnapshot {
-        UsagePanelSnapshot.make(
-            frame: frame,
-            milestoneFrequency: model.preferences.milestoneFrequency
-        )
+        UsagePanelSnapshot.make(frame: frame)
     }
 
     var body: some View {
@@ -32,9 +29,6 @@ struct UsagePanelView: View {
             Divider()
             if let snapshot {
                 headline(snapshot)
-                if let milestone = snapshot.milestone {
-                    milestoneBar(milestone)
-                }
                 if !snapshot.providers.isEmpty {
                     Divider()
                     providers(snapshot.providers)
@@ -167,29 +161,6 @@ struct UsagePanelView: View {
         case .down: return .red
         case .flat: return .secondary
         }
-    }
-
-    // MARK: Milestone
-
-    private func milestoneBar(_ milestone: UsagePanelSnapshot.MilestoneProgress) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text("next milestone $\(milestone.nextDollars)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Text("\(UsageFormat.cost(milestone.remaining)) to go")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            ProgressView(value: milestone.fraction)
-                .progressViewStyle(.linear)
-                .tint(.accentColor)
-        }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 12)
-        .animation(.default, value: milestone.fraction)
     }
 
     // MARK: Providers

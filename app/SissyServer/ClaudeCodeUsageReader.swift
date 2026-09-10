@@ -103,11 +103,11 @@ actor ClaudeCodeUsageReader: UsageProvider {
     /// False until the initial backfill scan has finished parsing every
     /// in-window JSONL. While false, `current()` suppresses `prev` (passes
     /// nil) so consumers can't make ratio decisions on a partially populated
-    /// "yesterday" total. Without this guard `FrameBuilder.pickState` would
-    /// transiently emit `"trend"` mid-scan: yesterday's daily total is
-    /// rebuilt incrementally as the reader walks the JSONL file containing
-    /// it, so for a few hundred ms `today` looks like a >=1.3× spike vs a
-    /// not-yet-finalised `prev`. The flag flips once after `start()` runs
+    /// "yesterday" total. Without this guard the panel would flash a wild
+    /// day-over-day delta mid-scan: yesterday's daily total is rebuilt
+    /// incrementally as the reader walks the JSONL file containing it, so for
+    /// a few hundred ms `today` is compared against a not-yet-finalised
+    /// `prev`. The flag flips once after `start()` runs
     /// its blocking cold pass; FSEvents-driven incremental ingest from
     /// then on operates on a fully consistent `prev`.
     private var coldScanComplete = false
@@ -318,14 +318,14 @@ actor ClaudeCodeUsageReader: UsageProvider {
         }
         await poll()
         // Cold backfill done: from here on `prev` is consistent with the
-        // full in-window JSONL state, safe to expose to `pickState`. Order
-        // matters — set this before the emit below so that frame is the one
-        // that introduces `prev` to the UI.
+        // full in-window JSONL state, safe to expose. Order matters — set
+        // this before the emit below so that frame is the one that
+        // introduces `prev` to the UI.
         coldScanComplete = true
         // Every backfill emit ran with `prev` still suppressed, and `poll()`
         // re-emits only when JSONL actually changed. Without this emit an
         // idle CLI leaves `Hub`'s cached frame built from a nil `prev`, so
-        // `pickState` cannot reach `trend` until the next turn writes a line.
+        // the panel shows no delta until the next turn writes a line.
         let (warmToday, warmPrev) = current()
         lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
         await onChange(warmToday, warmPrev)
@@ -446,9 +446,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
 
     /// True once the initial backfill scan has finished. Lets callers gate
     /// behavior that depends on `today.totalTokens` reflecting the full
-    /// in-window state instead of a partial mid-scan aggregate — most
-    /// importantly milestone firing, which would otherwise re-announce
-    /// crossings as cold-scan emits walk past them.
+    /// in-window state instead of a partial mid-scan aggregate.
     func isWarm() -> Bool { coldScanComplete }
 
     private func poll() async {

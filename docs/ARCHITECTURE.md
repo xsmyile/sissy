@@ -19,7 +19,6 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
   "tokens": "233M",
   "cost": "149",
   "burn": "47K",
-  "state": "glow",
   "primary": "233M",
   "primary_label": "TOKENS",
   "providers": [
@@ -34,26 +33,23 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
 }
 ```
 
-`state` is one of `sleep`, `think`, `code`, `trend`, `glow`, `angry`.
-
 `providers` carries the raw per-provider token + cost slices (cost as a canonical decimal string so it round-trips lossless through `Decimal(string:)`). The macOS app sums it to derive both the menubar header subtitle and the panel's per-provider rows from a single payload — eliminating drift between the WS-pushed header and what used to be a polled `/stats` breakdown. Stable order: `claude-code`, `codex`, then alphabetical. Always emitted (empty array before any provider has reported).
 
 `providers[].windows` carries that CLI's subscription rate-limit windows, shortest first, each identified by its `minutes` rather than by its position — vendors do not agree on an order, and Codex's own `primary` bucket is not always the session one. `used_percent` is a percentage of the window's allowance and `resets_at` is epoch seconds; a bucket whose reset has passed is dropped before the frame is built. Empty for a provider that publishes no limits — an API-key user, a CLI that has not surfaced a window yet, or Claude Code with the `claudeLimits` setting off — which is what puts the panel row back on its share-of-today bar.
 
 Claude Code publishes no limit state on disk, so its windows come from `ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the login keychain and polls the endpoint Claude Code's `/usage` reads. That costs a one-time macOS keychain authorization, so it stays off until the user asks for it in Settings.
 
-`prev_tokens` / `prev_cost` carry yesterday's raw combined totals so the macOS app can render a day-over-day delta without a second data path. Both keys are omitted together until every active provider has produced a `prev` snapshot — the same condition that suppresses the `trend` state — so the app renders no delta rather than a false 0%.
+`prev_tokens` / `prev_cost` carry yesterday's raw combined totals so the macOS app can render a day-over-day delta without a second data path. Both keys are omitted together until every active provider has produced a `prev` snapshot so the app renders no delta rather than a false 0%.
 
 ### Client → server
 
-`hello` — sent immediately on connect. The macOS app uses it to identify itself, push the selected primary metric, sync the current milestone preset, and state whether the Claude Code limit probe should run.
+`hello` — sent immediately on connect. The app uses it to push the selected primary metric and to state whether the Claude Code limit probe should run.
 
 ```json
 {
   "type": "hello",
   "client": "mac-app",
   "primary_metric": "tokens",
-  "milestone_frequency": "normal",
   "claude_limits": false
 }
 ```
@@ -87,53 +83,7 @@ Claude Code publishes no limit state on disk, so its windows come from `ClaudeLi
 
 The daemon binds first and lets each active provider's initial JSONL backfill finish in detached tasks — clients can connect within ~1 s even on a multi-GB Claude Code or Codex history. Steady-state CPU is near zero: provider-specific `FSEventStream`s (rooted at `~/.claude/projects` for Claude Code and `~/.codex/sessions` for Codex) wake their readers only when JSONL actually changes (kernel-level coalesced events at ~1 s latency). A low-frequency safety-net poll (default 60 s, configurable via `server.json.pollIntervalSeconds`) catches missed-event flags (`MustScanSubDirs`/`UserDropped`/`KernelDropped`) and midnight day rollover when no JSONL activity straddles the boundary. Claude Code entries are deduplicated by `requestId` because Claude Code logs each assistant turn 2-3 times as the message streams; Codex turns are deduplicated implicitly because `last_token_usage` arrives once per turn.
 
-Each provider reader retains a 2-day window on disk (today + yesterday). The daemon only ever surfaces today + yesterday — the latter feeds `FrameBuilder.pickState`'s `trend` heuristic — so the retention window is sized to match. Cold scans skip every file with `mtime < now-48h`, which on real-world trees (~500 MB across hundreds of projects) parses ~10-20% of the bytes and finishes in low seconds. Bumping this requires every consumer of `dailyTotals` to actually use the extra history; today nothing does.
-
-## Mascot state machine
-
-Daemon picks `state` from the current cost vs. yesterday's:
-
-| Condition | `state` |
-|---|---|
-| `tokens == 0`               | `sleep` |
-| `cost ≥ $200`               | `angry` |
-| `cost ≥ $100`               | `glow`  |
-| `cost ≥ 1.3 × yesterday`    | `trend` |
-| `cost ≥ $20`                | `code`  |
-| otherwise                   | `think` |
-
-Thresholds in `server.json.stateThresholds`; logic in `FrameBuilder.pickState`.
-
-The menu bar no longer renders `state` — one fixed portrait replaced the per-mood sprites — so the only surviving consumer is the mood pop-up. The thresholds are absolute dollar amounts, which makes them meaningless for anyone whose daily spend sits far from them; `state` is expected to go when the frame contract is reworked.
-
-## Milestone presets
-
-Milestone notifications (e.g. *"You crossed $25"*) fire on every whole-dollar step the user crosses during the day. Cost is the only axis — tokens were dropped because they aren't comparable across models or agents (1M Opus ≠ 1M Haiku ≠ 1M GPT-5), and `Pricing.swift` already normalizes everything to USD so a cost-only milestone scales to ccusage imports and multi-provider futures without per-model weights. The cadence is user-tunable from **Settings › General › Milestones**; the preset key is persisted in `server.json.milestoneFrequency` and the bucket counter lives in `~/Library/Application Support/Sissy/milestones.json` next to the usage snapshot.
-
-| Preset key       | Cost step |
-|------------------|-----------|
-| `very_frequent`  | $5        |
-| `frequent`       | $10       |
-| `normal` (def.)  | $25       |
-| `sparse`         | $50       |
-| `rare`           | $100      |
-
-Source of truth: `MilestoneFrequency.presets` in `app/SissyServer/SissyServer.swift`. The app mirrors the values in `Preferences.MilestoneFrequency` (label + detail strings); a value mismatch between the two enums silently degrades to the `normal` defaults at lookup time.
-
-Bucket semantics:
-- `costBucket` = highest whole-dollar step crossed so far today. Persisted across restarts so a daemon bounce doesn't replay notifications.
-- `presetKey` recorded alongside the bucket so a preset change is detected at load time → silent reseed (treat as midnight rollover): `bucket = today / new_step`, no fire. Same semantics for a runtime change via `set_milestone_frequency`.
-- Defensive snap-down: if the persisted bucket exceeds what today's totals imply (e.g. snapshot invalidation recomputes today smaller), `check()` ratchets the bucket down silently so future genuine crossings still fire instead of being swallowed.
-- Legacy snapshots (pre-cost-only) decode cleanly: the stale `tokenBucket` field is ignored via `decodeIfPresent`; `costBucket`, `dayKey`, and `presetKey` carry through unchanged.
-
-Wire control:
-
-| Direction          | Payload                                                                 | Effect |
-|--------------------|--------------------------------------------------------------------------|--------|
-| App → daemon       | `{"type":"hello","client":"mac-app","milestone_frequency":"frequent"}` | Apply at connect. Same payload also carries `primary_metric`. |
-| App → daemon       | `{"type":"set_milestone_frequency","value":"sparse"}`                   | Runtime change. Persists `server.json`, reseeds tracker, rebroadcasts cached frame. |
-
-Invalid preset keys are dropped silently (`MilestoneFrequency.isValid` guard) — a hand-edited typo or a stale version of the app talking to a newer daemon degrades to "no change".
+Each provider reader retains a 2-day window on disk (today + yesterday). The daemon only ever surfaces today + yesterday — the latter feeds the panel's day-over-day delta — so the retention window is sized to match. Cold scans skip every file with `mtime < now-48h`, which on real-world trees (~500 MB across hundreds of projects) parses ~10-20% of the bytes and finishes in low seconds. Bumping this requires every consumer of `dailyTotals` to actually use the extra history; today nothing does.
 
 ## Daemon lifecycle (LaunchAgent)
 

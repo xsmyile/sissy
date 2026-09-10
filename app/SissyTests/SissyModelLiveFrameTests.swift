@@ -27,11 +27,9 @@ final class SissyModelLiveFrameTests: XCTestCase {
             tokens: "26K",
             cost: "0.09",
             burn: "1.5K",
-            state: "code",
             ts: Int(Self.landedAt.timeIntervalSince1970),
             primary: "26K",
             primaryLabel: "TOKENS",
-            milestone: nil,
             providers: [],
             prev: nil
         )
@@ -53,7 +51,7 @@ final class SissyModelLiveFrameTests: XCTestCase {
         model.serverHealth.status = .up
 
         XCTAssertEqual(model.liveFrame?.at, Self.landedAt)
-        XCTAssertEqual(model.liveFrame?.frame.state, "code")
+        XCTAssertEqual(model.liveFrame?.frame.tokens, "26K")
     }
 
     /// A daemon that is up but has found no JSONL is still counting, so its

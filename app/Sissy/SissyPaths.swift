@@ -18,7 +18,7 @@ enum SissyPaths {
 
     /// `Sissy` (release) or `Sissy-Dev` (Debug). Used as both the
     /// `Application Support` and `Library/Logs` subdirectory so a dev
-    /// daemon's preferences, server.json, milestones, usage-state, and log
+    /// daemon's preferences, server.json, usage-state, and log
     /// file all live under one isolated tree.
     static var supportDirName: String { isDev ? "Sissy-Dev" : "Sissy" }
 

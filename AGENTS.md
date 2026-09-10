@@ -57,7 +57,7 @@ The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client
 2. `app/SissyServer/Hub.swift` — `encode(_:)` is where `FrameData` becomes JSON on the wire.
 3. `app/Sissy/Server/FrameDecoder.swift` — parses into `DisplayFrame` (`WebSocketClient` only hands it the message).
 
-`state` no longer reaches any glyph: one fixed portrait replaced the per-mood sprites, so the mood pop-up is its last consumer. Its thresholds live in `StateThresholds` and are absolute dollar amounts, which is why they mean nothing to a user whose daily spend sits far from them. Expect `state` to leave the wire when the contract is reworked.
+The mood pop-up, the mascot state machine and the milestone celebrations are gone as of 0.1.9, and with them `state`, `pickState`, `StateThresholds` and the `MilestoneTracker`. They were the reason the app carried thresholds in dollars, which meant nothing to anyone whose daily spend sat far from them. Don't reintroduce a decorative signal on the cost axis; if the app grows a headline indicator it should sit on rate-limit headroom, which reads the same for every user.
 
 ### Daemon modules (`app/SissyServer/`)
 
@@ -78,7 +78,7 @@ The daemon is stateful in one place: `Hub.lastFramePayload`. Every new WS client
 | `OpenAIPricing.swift`           | OpenAI cost math, same three-source precedence |
 | `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM's rate table at runtime; renders `PricingSeed.swift` for `--dump-seed` |
 | `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — the offline / first-run floor. Never hand-edit |
-| `FrameBuilder.swift`            | `fmtTokens`, `fmtBurn`, `fmtCost`, `pickState` |
+| `FrameBuilder.swift`            | `fmtTokens`, `fmtBurn`, `fmtCost`, `activeSlices` |
 | `Auth.swift`                    | Constant-time bearer compare. Empty token = open mode (dev only) |
 | `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`. Carries `providers: { claudeCode, codex }` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`. |
 | `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude reader stays on legacy `usage-state.json` for upgrade smoothness. |
@@ -91,7 +91,7 @@ The app drives the bundled daemon's lifecycle via `Server/ServerServiceControlle
 
 ## Conventions specific to this repo
 
-- **One fixed mascot, no per-mood swap.** `SissyModel.mascotAssetName` is the single asset; it is a template image, so surfaces tint it and never ship a second copy. Sizing is per-surface: the menu bar draws it at 17 pt because the asset carries 20 pt of ink where an unconfigured SF Symbol measures 15, and at native size it reads a third taller than its neighbours. Copy the image before resizing — `NSImage(named:)` returns the catalogue's shared instance.
+- **One fixed mascot.** `SissyModel.mascotAssetName` is the single asset; it is a template image, so surfaces tint it and never ship a second copy. Sizing is per-surface: the menu bar draws it at 17 pt because the asset carries 20 pt of ink where an unconfigured SF Symbol measures 15, and at native size it reads a third taller than its neighbours. Copy the image before resizing — `NSImage(named:)` returns the catalogue's shared instance.
 - **The daemon binds loopback.** It has one client, the app, on `127.0.0.1`. The wildcard bind existed to let an ESP32 on the LAN reach it; putting it back exposes the port to the network for nothing.
 - **The git tag is the only version source; never hand-edit a version.** `scripts/version.sh` resolves `MARKETING_VERSION` from the latest tag and `CURRENT_PROJECT_VERSION` from `git rev-list --count HEAD`; `release.sh`, `release.yml` and `dev-build-app.sh` pass both to xcodebuild, which reaches the app and the daemon in one build. Cutting a release is `git tag -a vX.Y.Z && git push --tags` — there is no bump commit. The pair in `app/project.yml` is a `0.0.0` / `0` dev placeholder, and both `Info.plist` files carry only `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)`. Reintroducing a literal in either plist recreates the bug where 0.1.6 and 0.1.7 both shipped build 6; the pre-notarization `verify bundle version` guard in `release.sh` and `release.yml` exists to catch exactly that. The release workflow needs `fetch-depth: 0` — the default shallow clone makes the commit count 1.
 - **Bearer token symmetry.** `authToken` in `~/Library/Application Support/Sissy/server.json` is written by the app and read by the daemon. A mismatch 401s the WS handshake with nothing in the UI to say so.

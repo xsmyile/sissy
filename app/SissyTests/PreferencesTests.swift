@@ -10,7 +10,6 @@ final class PreferencesTests: XCTestCase {
         // or Release bundle — 8788 lets a dev install coexist with a
         // release daemon on 8787 without preferences hand-edit.
         XCTAssertEqual(prefs.serverPort, SissyPaths.defaultServerPort)
-        XCTAssertEqual(prefs.costThresholdTrendRatio, 1.3)
         XCTAssertFalse(prefs.claudeLimits)
     }
 
@@ -25,10 +24,7 @@ final class PreferencesTests: XCTestCase {
             primaryMetric: .burnRate,
             serverPort: 9999,
             authToken: "abcd1234",
-            costThresholdCode: 5,
-            costThresholdGlow: 50,
-            costThresholdAngry: 500,
-            costThresholdTrendRatio: 2.0
+            claudeLimits: true
         )
         let data = try JSONEncoder().encode(original)
         let round = try JSONDecoder().decode(Preferences.self, from: data)

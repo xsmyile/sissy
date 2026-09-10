@@ -1,11 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Settings that change what the menubar and the device show.
+/// Settings that change what the menu bar and the panel show.
 struct GeneralSettingsView: View {
     let model: SissyModel
-
-    private static let autoMascotTag = "auto"
 
     private var server: SissyModel.ServerItemSnapshot { model.menuSnapshot.server }
 
@@ -30,37 +28,6 @@ struct GeneralSettingsView: View {
                 Text(serverCaption)
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Picker("Milestones", selection: milestoneBinding) {
-                    ForEach(Preferences.MilestoneFrequency.allCases) { preset in
-                        Text("every \(preset.detail)").tag(preset)
-                    }
-                }
-                Text("How often Sissy celebrates a spend threshold.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Picker("Mascot", selection: mascotBinding) {
-                    Text("Auto").tag(Self.autoMascotTag)
-                    Divider()
-                    ForEach(SissyModel.mascotStates, id: \.wire) { state in
-                        Text(state.label).tag(state.wire)
-                    }
-                }
-                .disabled(!model.menuSnapshot.canPickMascot && model.pinnedMascot == nil)
-
-                Toggle("Show mood pop-ups", isOn: notifyBinding)
-
-                Text(
-                    "Auto follows today's spend. Pinning a mood freezes both the menubar icon "
-                        + "and the device."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
             }
 
             Section {
@@ -105,37 +72,10 @@ struct GeneralSettingsView: View {
         )
     }
 
-    private var milestoneBinding: Binding<Preferences.MilestoneFrequency> {
-        Binding(
-            get: { model.preferences.milestoneFrequency },
-            set: { model.selectMilestoneFrequency($0) }
-        )
-    }
-
-    private var mascotBinding: Binding<String> {
-        Binding(
-            get: { model.pinnedMascot ?? Self.autoMascotTag },
-            set: { wire in
-                if wire == Self.autoMascotTag {
-                    model.clearMascotPin()
-                } else {
-                    model.pinMascot(wire)
-                }
-            }
-        )
-    }
-
     private var claudeLimitsBinding: Binding<Bool> {
         Binding(
             get: { model.preferences.claudeLimits },
             set: { model.setClaudeLimits($0) }
-        )
-    }
-
-    private var notifyBinding: Binding<Bool> {
-        Binding(
-            get: { model.preferences.notifyOnMascotChange },
-            set: { model.setNotifications($0) }
         )
     }
 

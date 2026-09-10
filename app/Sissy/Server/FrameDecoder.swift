@@ -22,18 +22,15 @@ enum FrameDecoder {
             tokens: tokens,
             cost: dict["cost"] as? String ?? placeholder,
             burn: dict["burn"] as? String ?? placeholder,
-            state: dict["state"] as? String ?? defaultState,
             ts: dict["ts"] as? Int ?? 0,
             primary: dict["primary"] as? String ?? tokens,
             primaryLabel: dict["primary_label"] as? String ?? defaultPrimaryLabel,
-            milestone: dict["milestone"] as? String,
             providers: decodeProviders(dict["providers"]),
             prev: decodePrev(dict)
         )
     }
 
     static let placeholder = "..."
-    private static let defaultState = "think"
     private static let defaultPrimaryLabel = "TOKENS"
 
     private static func decodeProviders(_ raw: Any?) -> [DisplayFrame.ProviderSlice] {

@@ -52,34 +52,6 @@ func runSelfTest() {
     expect("fmtCost(100)", FrameBuilder.fmtCost(100), "100")
     expect("fmtCost(199.7)", FrameBuilder.fmtCost(Decimal(string: "199.7")!), "199")
 
-    let th = StateThresholds()
-    expect(
-        "state empty",
-        FrameBuilder.pickState(today: DayTotals(totalTokens: 0, totalCost: 0), prev: nil, thresholds: th),
-        "sleep")
-    expect(
-        "state think",
-        FrameBuilder.pickState(today: DayTotals(totalTokens: 1_000, totalCost: 5), prev: nil, thresholds: th),
-        "think")
-    expect(
-        "state code",
-        FrameBuilder.pickState(
-            today: DayTotals(totalTokens: 1_000, totalCost: 25), prev: nil, thresholds: th), "code")
-    expect(
-        "state glow",
-        FrameBuilder.pickState(
-            today: DayTotals(totalTokens: 1_000, totalCost: 120), prev: nil, thresholds: th), "glow")
-    expect(
-        "state angry",
-        FrameBuilder.pickState(
-            today: DayTotals(totalTokens: 1_000, totalCost: 250), prev: nil, thresholds: th), "angry")
-    expect(
-        "state trend",
-        FrameBuilder.pickState(
-            today: DayTotals(totalTokens: 1_000, totalCost: 15),
-            prev: DayTotals(totalTokens: 1_000, totalCost: 10),
-            thresholds: th), "trend")
-
     let frame = FrameBuilder.build(
         today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
         prev: nil,
@@ -89,7 +61,6 @@ func runSelfTest() {
     expect("frame tokens", frame.tokens, "2.5M")
     expect("frame cost", frame.cost, "42.5")
     expect("frame burn", frame.burn, "500K")
-    expect("frame state", frame.state, "code")
     expect("frame primary", frame.primary, "2.5M")
     expect("frame label", frame.primaryLabel, "TOKENS")
     expect("frame prev tokens absent", frame.prevTokens, nil)
@@ -318,9 +289,6 @@ func runSelfTest() {
     print("=== UsageStatePersistence ===")
     runPersistenceTests()
 
-    print("=== MilestoneTracker ===")
-    runMilestoneTests()
-
     print("=== ClaudeCodeUsageReader.streamingIngest ===")
     runStreamingIngestTests()
 
@@ -434,38 +402,30 @@ private func runServerConfigTests() {
         expect("token config loads", false, true)
     }
 
-    // MilestoneFrequency lookup + invalid-key fallback.
-    expect("normal cost step", MilestoneFrequency.costStep(for: "normal"), 25)
-    expect(
-        "invalid preset falls back to normal",
-        MilestoneFrequency.costStep(for: "asdf-not-a-preset"), 25)
-    expect("preset validator accepts normal", MilestoneFrequency.isValid("normal"), true)
-    expect("preset validator rejects junk", MilestoneFrequency.isValid("frenetic"), false)
-
     // ServerConfig.save roundtrip: emits valid JSON that ServerConfig.load
-    // can ingest, and milestoneFrequency carries through.
+    // can ingest.
     let saveURL = tempDir.appendingPathComponent("roundtrip.json")
     var cfg = ServerConfig.defaults
-    cfg.milestoneFrequency = "sparse"
+    cfg.claudeLimits = true
     cfg.authToken = "tok"
     do {
         try ServerConfig.save(cfg, to: saveURL)
         let reloaded = try ServerConfig.load(from: saveURL)
-        expect("save roundtrip milestoneFrequency", reloaded.milestoneFrequency, "sparse")
+        expect("save roundtrip claudeLimits", reloaded.claudeLimits, true)
         expect("save roundtrip authToken", reloaded.authToken, "tok")
     } catch {
         expect("save roundtrip", false, true)
     }
 
-    // Backwards compat: a server.json without `milestoneFrequency` merges
-    // into the default ("normal") rather than failing to load.
+    // Backwards compat: a server.json missing keys this build knows about
+    // merges into the defaults rather than failing to load.
     let legacyURL = tempDir.appendingPathComponent("legacy.json")
     try? Data(
         #"{"host":"127.0.0.1","port":8787,"authToken":"x","primaryMetric":"tokens"}"#.utf8
     ).write(to: legacyURL)
     do {
         let loaded = try ServerConfig.load(from: legacyURL)
-        expect("legacy config defaults milestoneFrequency", loaded.milestoneFrequency, "normal")
+        expect("legacy config defaults claudeLimits", loaded.claudeLimits, false)
     } catch {
         expect("legacy config loads", false, true)
     }
@@ -631,109 +591,6 @@ private func runPersistenceTests() {
     expect("hash differs by path", h1 != h3, true)
 }
 
-private func runMilestoneTests() {
-    // First call seeds the bucket from current totals — no fire even when the
-    // user is already well past several thresholds. Critical: this is what
-    // protects a daemon-restart-mid-day from burst-firing the milestones a
-    // heavy session has already crossed.
-    var t = MilestoneTracker()
-    let day = "2026-05-20"
-    let seed = t.check(
-        today: DayTotals(totalTokens: 329_000_000, totalCost: Decimal(string: "211.00")!),
-        dayKey: day)
-    expect("seed no fire", seed, nil)
-    expect("seed costBucket", t.costBucket, 8)  // 211 / 25
-
-    // No crossing → no fire even though totals advance a few dollars within
-    // the same bucket.
-    let inSameBucket = t.check(
-        today: DayTotals(totalTokens: 340_000_000, totalCost: Decimal(string: "215.00")!),
-        dayKey: day)
-    expect("no crossing no fire", inSameBucket, nil)
-
-    // Cost crossing fires immediately, no queue.
-    let costCross = t.check(
-        today: DayTotals(totalTokens: 350_000_000, totalCost: Decimal(string: "225.00")!),
-        dayKey: day)
-    expect("cost cross", costCross, "cost:225")
-    expect("cost bucket advanced", t.costBucket, 9)
-
-    // Day rollover wipes bucket without firing anything from yesterday's
-    // accumulated total.
-    var t3 = MilestoneTracker()
-    _ = t3.check(
-        today: DayTotals(totalTokens: 200_000_000, totalCost: Decimal(string: "100.00")!),
-        dayKey: "2026-05-19")
-    let nextDay = t3.check(
-        today: DayTotals(totalTokens: 0, totalCost: 0),
-        dayKey: "2026-05-20")
-    expect("day rollover no fire", nextDay, nil)
-    expect("rollover resets costBucket", t3.costBucket, 0)
-    expect("rollover day key updated", t3.dayKey, "2026-05-20")
-
-    // Custom step value: tracker with $5 step fires more aggressively.
-    var tCustom = MilestoneTracker(presetKey: "very_frequent", costStep: 5)
-    _ = tCustom.check(
-        today: DayTotals(totalTokens: 0, totalCost: 0), dayKey: day)
-    let customCross = tCustom.check(
-        today: DayTotals(totalTokens: 10_000_000, totalCost: Decimal(string: "5.00")!),
-        dayKey: day)
-    expect("custom step cost cross", customCross, "cost:5")
-
-    // Preset change via `applyPreset`: silent reseed, no fire on next
-    // check even when totals would imply crossings under the new step.
-    var tPreset = MilestoneTracker(presetKey: "normal", costStep: 25)
-    _ = tPreset.check(
-        today: DayTotals(totalTokens: 100_000_000, totalCost: Decimal(string: "50.00")!),
-        dayKey: day)
-    expect("preset normal bucket", tPreset.costBucket, 2)
-    tPreset.applyPreset(presetKey: "frequent", costStep: 10)
-    expect("preset change clears dayKey", tPreset.dayKey, nil)
-    let postPreset = tPreset.check(
-        today: DayTotals(totalTokens: 100_000_000, totalCost: Decimal(string: "50.00")!),
-        dayKey: day)
-    expect("preset reseed no fire", postPreset, nil)
-    expect("preset reseed cost bucket", tPreset.costBucket, 5)  // 50 / 10
-
-    // Ratchet-down: persisted bucket can be larger than what today's
-    // totals would imply, e.g. after a snapshot invalidation that
-    // recomputes today smaller than what the milestone file last saw.
-    // Without snap-down, every crossing in the gap is permanently
-    // swallowed because the monotonic-up firing check never passes.
-    var t4 = MilestoneTracker()
-    t4.dayKey = day
-    t4.costBucket = 5  // claims $125 crossed
-    let snap = t4.check(
-        today: DayTotals(totalTokens: 108_000_000, totalCost: Decimal(string: "73.00")!),
-        dayKey: day)
-    expect("snap-down no fire", snap, nil)
-    expect("snap-down costBucket", t4.costBucket, 2)  // 73 / 25
-    let postSnapCross = t4.check(
-        today: DayTotals(totalTokens: 108_000_000, totalCost: Decimal(string: "75.00")!),
-        dayKey: day)
-    expect("snap-down then fire cost", postSnapCross, "cost:75")
-    expect("snap-down then bucket advanced", t4.costBucket, 3)
-
-    // Legacy decoder: a snapshot from the old token+cost era still loads.
-    // Stale `tokenBucket` is dropped; `costBucket` and `presetKey` carry
-    // through. Cost-only checks resume against the loaded bucket.
-    let legacyJSON = #"{"costBucket":4,"dayKey":"2026-05-20","presetKey":"normal","tokenBucket":7}"#
-    if let legacyData = legacyJSON.data(using: .utf8),
-        let decoded = try? JSONDecoder().decode(MilestoneTracker.self, from: legacyData)
-    {
-        expect("legacy decode preserves costBucket", decoded.costBucket, 4)
-        expect("legacy decode preserves dayKey", decoded.dayKey, "2026-05-20")
-        expect("legacy decode preserves presetKey", decoded.presetKey, "normal")
-    } else {
-        expect("legacy tracker decodes", false, true)
-    }
-}
-
-/// End-to-end check that the chunked reader still tallies a JSONL file with
-/// a line that straddles a 64 KB chunk boundary. Regression guard for the
-/// streaming refactor — the old `readDataToEndOfFile()` path slurped the
-/// whole delta and was trivially correct; the new code has to stitch a
-/// carry buffer across chunk reads.
 private func runStreamingIngestTests() {
     let fm = FileManager.default
     let tempDir = fm.temporaryDirectory.appendingPathComponent(

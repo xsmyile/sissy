@@ -2,23 +2,17 @@ import Foundation
 import NIOCore
 import NIOWebSocket
 
-/// Decoded form of a control message from a connected client (mac app or
-/// firmware). Closed set; unknown keys are ignored by `JSONDecoder` and
-/// missing optionals decode to nil.
+/// Decoded form of a control message from the app. Closed set; unknown keys
+/// are ignored by `JSONDecoder` and missing optionals decode to nil.
 private struct ClientMessage: Decodable {
     let type: String
     let primaryMetric: String?
-    let milestoneFrequency: String?
-    let client: String?
-    let state: String?
-    let value: String?
     let claudeLimits: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case type, client, state, value
+        case type
         case claudeLimits = "claude_limits"
         case primaryMetric = "primary_metric"
-        case milestoneFrequency = "milestone_frequency"
     }
 }
 
@@ -148,28 +142,14 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
                 let server = self.server
                 Task { await server.setPrimaryMetric(metric) }
             }
-            if let freq = msg.milestoneFrequency {
-                let server = self.server
-                Task { await server.setMilestoneFrequency(freq) }
-            }
             if let claudeLimits = msg.claudeLimits {
                 let server = self.server
                 Task { await server.setClaudeLimits(enabled: claudeLimits) }
             }
-        case "set_state":
-            // `state` absent or "auto" → clear pin and resume computed state.
-            let server = self.server
-            Task { await server.setPinnedState(msg.state) }
         case "set_claude_limits":
             guard let enabled = msg.claudeLimits else { return }
             let server = self.server
             Task { await server.setClaudeLimits(enabled: enabled) }
-        case "set_milestone_frequency":
-            // Invalid keys (typos, future values) are dropped by the actor's
-            // `MilestoneFrequency.isValid` guard; no error path needed here.
-            guard let raw = msg.value else { return }
-            let server = self.server
-            Task { await server.setMilestoneFrequency(raw) }
         default:
             break
         }

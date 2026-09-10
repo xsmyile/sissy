@@ -11,25 +11,7 @@ final class SissyModel {
     var currentFrame: DisplayFrame? = nil
     var lastFrameAt: Date? = nil
     var preferences: Preferences = .load()
-    /// Optimistic mirror of the daemon's mascot pin. nil = Auto (computed
-    /// state). The daemon is authoritative — this is just what the menu
-    /// most recently asked for, used to flag the active row with a checkmark
-    /// without waiting for the next frame to confirm.
-    var pinnedMascot: String? = nil
     var settingsTab: SettingsTab = .general
-    /// Mood line picked at the last mascot state-change. Both the menubar
-    /// header and the mood pop-up read this so they show the same catchphrase
-    /// for the same transition (the pool offers 4 lines per state — without
-    /// this, each surface would roll independently and disagree). Stays nil
-    /// until the first transition is observed; the header then falls back to
-    /// `StateDescriptor.voice(for:)` for its canonical line.
-    var currentMoodPhrase: String? = nil
-    /// Celebration line for the most recent milestone crossing. Set by the
-    /// notifier alongside the pop-up so the menubar header can mirror what
-    /// the user just saw flash. Held verbatim (full sentence — no "Sissy is"
-    /// prefix at render) and auto-cleared after the pop-up dismisses so the
-    /// header returns to the canonical mood line.
-    var currentMilestonePhrase: String? = nil
     private var serverToggleInFlight: Bool = false
     private var serverToggleLabel: String = ""
     private var serverToggleTarget: ServerToggleTarget?
@@ -87,7 +69,6 @@ final class SissyModel {
         let header: HeaderSnapshot
         let statusIcon: StatusIconSnapshot
         let server: ServerItemSnapshot
-        let canPickMascot: Bool
     }
 
     struct HeaderSnapshot {
@@ -118,10 +99,7 @@ final class SissyModel {
     }
 
     /// Sissy's one mascot asset, template-rendered by the catalogue so every
-    /// surface tints it for its own context. One fixed portrait rather than a
-    /// sprite per mood: a glyph that changes shape on its own is a puzzle for
-    /// anyone who has not memorised the states, and it was carrying no
-    /// information the panel does not state in words.
+    /// surface tints it for its own context.
     static let mascotAssetName = "SissyMenuBarTemplate"
 
     var menuSnapshot: MenuSnapshot {
@@ -139,8 +117,7 @@ final class SissyModel {
                 isDimmed: !linkUp
             ),
             statusIcon: StatusIconSnapshot(alpha: offline ? 0.4 : 1.0),
-            server: server,
-            canPickMascot: webSocketClient.isConnected
+            server: server
         )
     }
 
@@ -207,34 +184,11 @@ final class SissyModel {
         webSocketClient.pushSettings()
     }
 
-    func selectMilestoneFrequency(_ preset: Preferences.MilestoneFrequency) {
-        guard preset != preferences.milestoneFrequency else { return }
-        preferences.milestoneFrequency = preset
-        savePreferences()
-        webSocketClient.setMilestoneFrequency(preset.rawValue)
-    }
-
-    func pinMascot(_ wire: String) {
-        pinnedMascot = wire
-        webSocketClient.setMascotPin(state: wire)
-    }
-
-    func clearMascotPin() {
-        pinnedMascot = nil
-        webSocketClient.setMascotPin(state: nil)
-    }
-
     func setClaudeLimits(_ enabled: Bool) {
         guard enabled != preferences.claudeLimits else { return }
         preferences.claudeLimits = enabled
         savePreferences()
         webSocketClient.setClaudeLimits(enabled)
-    }
-
-    func setNotifications(_ enabled: Bool) {
-        guard enabled != preferences.notifyOnMascotChange else { return }
-        preferences.notifyOnMascotChange = enabled
-        savePreferences()
     }
 
     /// Drives the daemon to a requested state rather than flipping whatever it
@@ -264,9 +218,7 @@ final class SissyModel {
     /// nothing will refresh — "updated 3h ago" under a stopped server reads as
     /// a live reading of an idle daemon rather than as no reading at all.
     ///
-    /// Derived rather than cleared on disconnect: `currentFrame` is what
-    /// `MascotNotifier` diffs, so nilling it there would fire a mood
-    /// transition every time the socket came back. The gate is the same `isOn`
+    /// Derived rather than cleared on disconnect. The gate is the same `isOn`
     /// the power button shows, which keeps the two from disagreeing and leaves
     /// a registered-but-restarting daemon its frame instead of blanking the
     /// panel on every launchd blip.
@@ -318,20 +270,15 @@ final class SissyModel {
         )
     }
 
-    /// With the server off the headline reports that rather than a mood: the
-    /// panel's only control is the switch beside it, and a header still
-    /// talking about spend would leave the switch's meaning to guesswork.
+    /// The panel's own name while it has a live reading, and what is wrong
+    /// when it does not. The two failure lines matter more than the healthy
+    /// one: the panel's only control is the switch beside this text, and a
+    /// header that stayed silent would leave the switch's meaning to
+    /// guesswork.
     private func headerTitle(linkUp: Bool, serverIsOn: Bool) -> String {
         if !serverIsOn { return "Server is off" }
         if !linkUp { return "Looking for Sissy..." }
-        let state = pinnedMascot ?? currentFrame?.state
-        if let phrase = currentMilestonePhrase, pinnedMascot == nil {
-            return phrase
-        }
-        if let phrase = currentMoodPhrase, pinnedMascot == nil {
-            return StateDescriptor.moodHeadline(voice: phrase)
-        }
-        return StateDescriptor.moodHeadline(voice: StateDescriptor.voice(for: state))
+        return "Sissy"
     }
 
     private func headerSubtitle(linkUp: Bool, serverIsOn: Bool) -> String? {
@@ -362,14 +309,6 @@ final class SissyModel {
         _ = alert.runModal()
     }
 
-    static let mascotStates: [(label: String, wire: String)] = [
-        ("Sleep", "sleep"),
-        ("Think", "think"),
-        ("Code", "code"),
-        ("Trend", "trend"),
-        ("Glow", "glow"),
-        ("Angry", "angry"),
-    ]
 }
 
 /// The frame as it lands on the device's OLED.
@@ -377,15 +316,9 @@ struct DisplayFrame: Codable, Equatable {
     var tokens: String
     var cost: String
     var burn: String
-    var state: String
     var ts: Int
     var primary: String
     var primaryLabel: String
-    /// Set by the daemon on the single frame that crosses a whole-dollar
-    /// cost boundary. Format: `"cost:<D>"`. Cleared on every other frame.
-    /// The notifier diffs on this and pops a milestone celebration when it
-    /// goes from nil to a value.
-    var milestone: String?
     /// Per-provider totals carried on the WS frame so the menubar can derive
     /// the header subtitle and the panel's rows from the same payload. Empty
     /// when no provider has emitted yet (or daemon predates the field) —
