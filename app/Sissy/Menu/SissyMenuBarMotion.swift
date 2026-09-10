@@ -1,40 +1,49 @@
 import Foundation
 
-/// The mascot's two menu bar gestures, each a frame sequence sampled at a
-/// fixed rate.
+/// The mascot's eye movements, as index ranges into one rendered sequence.
 ///
-/// The frames are traced from the same silhouette as the resting icon, and the
-/// first and last frame of every sequence *are* that silhouette — so a gesture
-/// starts and ends without a jump, whatever interrupts it. Durations come from
-/// the motion the frames were rendered from, not from the frame count: the
-/// sequence carries one frame past the end so the playback clamp always has a
-/// frame to land on.
-enum SissyMenuBarMotion: String, CaseIterable, Sendable {
+/// The sequence is a full blink: 24 frames at 60 fps, traced from the same
+/// silhouette as the resting icon, with frame 0 and frame 23 *being* that
+/// silhouette — so a gesture starts and ends without a jump, whatever
+/// interrupts it. Frames 6 through 9 are byte-identical: that is the shut-eye
+/// hold, and it is why the closing half stops at 6 and the opening half starts
+/// at 9 instead of replaying it.
+enum SissyMenuBarMotion: Sendable {
+    /// Shut and open again: the mascot noticing new numbers.
     case blink
-    case earTwitch
+    /// The closing half alone, left resting on the shut eye.
+    case eyeClose
+    /// The opening half alone, back to the resting silhouette.
+    case eyeOpen
 
-    var duration: TimeInterval {
+    var frameRange: Range<Int> {
         switch self {
-        case .blink: Self.blinkDuration
-        case .earTwitch: Self.earTwitchDuration
+        case .blink: 0..<Self.frameCount
+        case .eyeClose: 0..<(Self.shutEyeFirst + 1)
+        case .eyeOpen: Self.shutEyeLast..<Self.frameCount
         }
     }
 
-    var assetNames: [String] {
+    /// The blink's own duration is the one the frames were rendered from; it
+    /// falls a frame short of the sequence on purpose, so the playback clamp
+    /// always has a frame to land on. The halves are measured off the frames
+    /// they actually carry.
+    var duration: TimeInterval {
         switch self {
-        case .blink: Self.names(prefix: "SissyMotionBlink", count: Self.blinkFrameCount)
-        case .earTwitch: Self.names(prefix: "SissyMotionEar", count: Self.earTwitchFrameCount)
+        case .blink: Self.blinkDuration
+        case .eyeClose, .eyeOpen: Double(frameRange.count) / Self.framesPerSecond
         }
     }
 
     static let framesPerSecond = 60.0
 
-    private static let blinkDuration: TimeInterval = 0.380
-    private static let earTwitchDuration: TimeInterval = 0.490
-    private static let blinkFrameCount = 24
-    private static let earTwitchFrameCount = 31
-
-    private static func names(prefix: String, count: Int) -> [String] {
-        (0..<count).map { prefix + String(format: "%03d", $0) }
+    /// Every frame of the sequence, in order, as asset catalogue names.
+    static let frameAssetNames: [String] = (0..<frameCount).map {
+        "SissyMotionBlink" + String(format: "%03d", $0)
     }
+
+    private static let frameCount = 24
+    private static let blinkDuration: TimeInterval = 0.380
+    private static let shutEyeFirst = 6
+    private static let shutEyeLast = 9
 }
