@@ -30,12 +30,25 @@ final class StatusItemController: NSObject {
         refreshIcon(model.menuSnapshot.statusIcon)
     }
 
-    /// The image is assigned once. It never varies, and re-reading it out of
-    /// the asset catalogue on every model change would only hand back the same
-    /// shared instance.
+    /// Canvas height the mascot is drawn at in the menu bar.
+    ///
+    /// The asset is a 22 pt canvas carrying 20 pt of ink, while an
+    /// unconfigured SF Symbol — what most menu bar extras render — measures
+    /// 15 pt. At its native size the mascot therefore reads a third taller
+    /// than everything beside it. 17 pt of canvas puts the ink at ~15.5 pt,
+    /// which sits with the system's own items.
+    private static let menuBarIconSize: CGFloat = 17
+
+    /// The image is assigned once: it never varies, and re-reading it on every
+    /// model change would only hand back the same instance. That instance is
+    /// the asset catalogue's shared one, so it is copied before resizing —
+    /// mutating it would resize the mascot everywhere else it is drawn.
     private func configureButton() {
         guard let button = statusItem.button else { return }
-        button.image = NSImage(named: SissyModel.mascotAssetName)
+        if let image = NSImage(named: SissyModel.mascotAssetName)?.copy() as? NSImage {
+            image.size = NSSize(width: Self.menuBarIconSize, height: Self.menuBarIconSize)
+            button.image = image
+        }
         button.imagePosition = .imageOnly
         button.toolTip = "Sissy"
         button.wantsLayer = true
