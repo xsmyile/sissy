@@ -17,7 +17,7 @@ struct DeviceSettingsView: View {
 
     private static let portFieldWidth: CGFloat = 72
 
-    private var isConnected: Bool { model.currentFrame?.devicePresent ?? false }
+    private var isConnected: Bool { model.liveFrame?.frame.devicePresent ?? false }
 
     var body: some View {
         Form {

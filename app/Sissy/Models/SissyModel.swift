@@ -46,8 +46,12 @@ final class SissyModel {
     let serverHealth: ServerHealthMonitor
     let webSocketClient: WebSocketClient
 
-    init() {
-        self.serverService = ServerServiceController()
+    /// `serverService` is injected so a test can pin the LaunchAgent lookup to
+    /// a plist that is not in the bundle. Left to its default it asks
+    /// `SMAppService` about the real agent, and whether a dev daemon happens
+    /// to be registered on the machine would decide what the model reports.
+    init(serverService: ServerServiceController = ServerServiceController()) {
+        self.serverService = serverService
         self.webSocketClient = WebSocketClient()
         // The monitor must always read the CURRENT preferences, not a
         // snapshot from app launch. A `var prefsRef` mutated after init
@@ -104,6 +108,12 @@ final class SissyModel {
         let isEnabled: Bool
         let isOn: Bool
         let requiresApproval: Bool
+    }
+
+    /// A frame together with when it landed.
+    struct LiveFrame {
+        let frame: DisplayFrame
+        let at: Date
     }
 
     var menuSnapshot: MenuSnapshot {
@@ -342,6 +352,25 @@ final class SissyModel {
     }
 
     // MARK: Derived state
+
+    /// The last frame for as long as it still describes a day something is
+    /// counting, paired with when it landed.
+    ///
+    /// nil once the daemon is gone. The numbers then describe a day that
+    /// stopped being counted, and the panel's footer keeps ageing a timestamp
+    /// nothing will refresh — "updated 3h ago" under a stopped server reads as
+    /// a live reading of an idle daemon rather than as no reading at all.
+    ///
+    /// Derived rather than cleared on disconnect: `currentFrame` is what
+    /// `MascotNotifier` diffs, so nilling it there would fire a mood
+    /// transition every time the socket came back. The gate is the same `isOn`
+    /// the power button shows, which keeps the two from disagreeing and leaves
+    /// a registered-but-restarting daemon its frame instead of blanking the
+    /// panel on every launchd blip.
+    var liveFrame: LiveFrame? {
+        guard serverItemSnapshot.isOn, let currentFrame, let lastFrameAt else { return nil }
+        return LiveFrame(frame: currentFrame, at: lastFrameAt)
+    }
 
     private var serverItemSnapshot: ServerItemSnapshot {
         let busy = serverToggleInFlight || serverService.isTransitioning
