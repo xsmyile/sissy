@@ -27,13 +27,19 @@ final class SissyModel {
     let serverService: ServerServiceController
     let serverHealth: ServerHealthMonitor
     let webSocketClient: WebSocketClient
+    let loginItem: LoginItemController
 
     /// `serverService` is injected so a test can pin the LaunchAgent lookup to
     /// a plist that is not in the bundle. Left to its default it asks
     /// `SMAppService` about the real agent, and whether a dev daemon happens
     /// to be registered on the machine would decide what the model reports.
-    init(serverService: ServerServiceController = ServerServiceController()) {
+    /// `loginItem` is injected for the same reason.
+    init(
+        serverService: ServerServiceController = ServerServiceController(),
+        loginItem: LoginItemController = LoginItemController()
+    ) {
         self.serverService = serverService
+        self.loginItem = loginItem
         self.webSocketClient = WebSocketClient()
         // The monitor must always read the CURRENT preferences, not a
         // snapshot from app launch. A `var prefsRef` mutated after init
@@ -201,6 +207,18 @@ final class SissyModel {
         guard enabled != preferences.mascotMotion else { return }
         preferences.mascotMotion = enabled
         savePreferences()
+    }
+
+    /// Registers or removes the app's own login item. Failures are the
+    /// user's to see rather than the caller's to handle: the switch has no
+    /// second way to get the app opened at login.
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            try loginItem.setEnabled(enabled)
+        } catch {
+            let verb = enabled ? "Enable" : "Disable"
+            Task { await showError(title: "\(verb) at login failed", message: error.localizedDescription) }
+        }
     }
 
     /// Drives the daemon to a requested state rather than flipping whatever it
