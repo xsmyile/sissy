@@ -41,6 +41,40 @@ struct UsageStateSnapshot: Codable, Equatable {
     /// lifetime. Today-only keeps the file small (~tens of KB) while still
     /// protecting against the assistant-turn-streamed-across-restart edge.
     var dedupKeysToday: [DedupKey]
+    /// State only the Codex reader can resume from, absent in a snapshot
+    /// written before it existed.
+    ///
+    /// Optional rather than version-gated because a `schemaVersion` bump
+    /// would also discard Claude Code's snapshot — a ~16 s cold scan of
+    /// `~/.claude/projects` — for a change that tells it nothing. `nil` means
+    /// "this snapshot predates the field", which the Codex reader answers with
+    /// a cold scan of its own tree and every other reader ignores.
+    var codexResume: CodexResume?
+
+    /// Grouped so the absence above is one question rather than three, and so
+    /// each collection can be non-optional: within a resume block, empty and
+    /// missing mean the same thing.
+    struct CodexResume: Codable, Equatable {
+        /// Model resolved for each file from the `turn_context` line preceding
+        /// its last consumed `token_count`. Persisted because rebuilding it
+        /// means re-reading every byte already consumed — minutes of CPU on a
+        /// real tree, all of it before the reader can emit anything. Claude
+        /// Code needs no equivalent: it carries the model on every entry.
+        var fileModels: [FileModel]
+        /// Last rate-limit windows observed. Codex learns its limits only from
+        /// the CLI's own event stream, so without these a restart leaves the
+        /// panel's Codex gauges blank until the next turn. Claude Code
+        /// re-polls the usage endpoint at boot and needs none of this.
+        var rateLimitWindows: [UsageWindow]
+        /// Event timestamp the windows came from, so a rollout older than the
+        /// snapshot cannot overwrite them after a resume.
+        var rateLimitWindowsAt: Date?
+    }
+
+    struct FileModel: Codable, Equatable {
+        var path: String
+        var model: String
+    }
 
     struct FileEntry: Codable, Equatable {
         var path: String

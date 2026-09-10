@@ -330,6 +330,8 @@ func runSelfTest() {
     print("=== CodexUsageReader.streamingIngest ===")
     runCodexParserTests()
     runCodexModelBackfillTest()
+    runCodexLegacySnapshotTest()
+    runCodexWindowPersistenceTest()
     runCodexRateLimitTest()
     runClaudeLimitsParseTests()
     runKeychainTimeoutTests()
@@ -1306,11 +1308,158 @@ func runCodexRateLimitTest() {
     expect("codex window percentage", box.value.first?.usedPercent, 8.0)
 }
 
+/// Verifies a snapshot predating `fileModels` is discarded rather than
+/// resumed from. Honouring one means the model map has to be rebuilt by
+/// re-reading every consumed byte, which on a real tree left the reader
+/// emitting nothing for ~110 s and the panel without its Codex row for the
+/// whole time. A cold scan gets the same answer in seconds, so the assertion
+/// is that the totals survive the discard.
+func runCodexLegacySnapshotTest() {
+    print("=== CodexUsageReader.legacySnapshot ===")
+    let fm = FileManager.default
+    let tempDir = fm.temporaryDirectory.appendingPathComponent(
+        "sissy-codex-legacy-\(UUID().uuidString)"
+    )
+    try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tempDir) }
+    let subdir = tempDir.appendingPathComponent("2026/05/25", isDirectory: true)
+    try? fm.createDirectory(at: subdir, withIntermediateDirectories: true)
+    let jsonl = subdir.appendingPathComponent("rollout-legacy.jsonl")
+    let snapshot = tempDir.appendingPathComponent("usage-state.json")
+
+    let isoFmt = ISO8601DateFormatter()
+    isoFmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let ts = isoFmt.string(from: Date())
+
+    let initial = """
+        {"type":"session_meta","timestamp":"\(ts)","payload":{"id":"lg","model_provider":"openai"}}
+        {"type":"turn_context","timestamp":"\(ts)","payload":{"turn_id":"t1","model":"o3"}}
+        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":2000,"cached_input_tokens":0,"output_tokens":1000,"reasoning_output_tokens":0,"total_tokens":3000},"total_token_usage":{"input_tokens":2000,"cached_input_tokens":0,"output_tokens":1000,"reasoning_output_tokens":0,"total_tokens":3000}}}}
+        """ + "\n"
+    try? initial.write(to: jsonl, atomically: true, encoding: .utf8)
+
+    let sem1 = DispatchSemaphore(value: 0)
+    Task {
+        let r = CodexUsageReader(
+            codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
+            persistenceURL: snapshot)
+        await r.start { _, _ in }
+        await r.stop()
+        sem1.signal()
+    }
+    sem1.wait()
+
+    // Strip the field to forge a snapshot written by an older daemon. The
+    // offsets stay at EOF, so a reader that honoured it would resume with an
+    // empty model map and mis-price the appended turn.
+    let hadField = TestBox<Bool>(false)
+    if let data = try? Data(contentsOf: snapshot),
+        var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    {
+        hadField.value = obj.removeValue(forKey: "codexResume") != nil
+        if let stripped = try? JSONSerialization.data(withJSONObject: obj) {
+            try? stripped.write(to: snapshot)
+        }
+    }
+    expect("codex snapshot carries resume state", hadField.value, true)
+
+    let append = """
+        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":4000,"cached_input_tokens":0,"output_tokens":2000,"reasoning_output_tokens":0,"total_tokens":6000},"total_token_usage":{"input_tokens":6000,"cached_input_tokens":0,"output_tokens":3000,"reasoning_output_tokens":0,"total_tokens":9000}}}}
+        """ + "\n"
+    if let fh = try? FileHandle(forWritingTo: jsonl) {
+        _ = try? fh.seekToEnd()
+        try? fh.write(contentsOf: Data(append.utf8))
+        try? fh.close()
+    }
+
+    let sem2 = DispatchSemaphore(value: 0)
+    let observed = TestBox<Decimal>(0)
+    Task {
+        let r = CodexUsageReader(
+            codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
+            persistenceURL: snapshot)
+        await r.start { _, _ in }
+        let (today, _) = await r.current()
+        observed.value = today.totalCost
+        await r.stop()
+        sem2.signal()
+    }
+    sem2.wait()
+
+    // Both events at o3 rates: the discard forces a cold scan, which reads
+    // the turn_context again and prices the appended event correctly.
+    let expected =
+        OpenAIPricing.cost(model: "o3", input: 2000, output: 1000, cacheRead: 0)
+        + OpenAIPricing.cost(model: "o3", input: 4000, output: 2000, cacheRead: 0)
+    expect("codex legacy snapshot cold-scans", observed.value, expected)
+}
+
+/// Verifies the rate-limit windows survive a restart. Codex learns its limits
+/// only from the CLI's own event stream, so a reader that resumed at EOF with
+/// nothing persisted showed no gauges at all until the next turn.
+func runCodexWindowPersistenceTest() {
+    print("=== CodexUsageReader.windowPersistence ===")
+    let fm = FileManager.default
+    let tempDir = fm.temporaryDirectory.appendingPathComponent(
+        "sissy-codex-windows-\(UUID().uuidString)"
+    )
+    try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tempDir) }
+    let subdir = tempDir.appendingPathComponent("2026/05/25", isDirectory: true)
+    try? fm.createDirectory(at: subdir, withIntermediateDirectories: true)
+    let jsonl = subdir.appendingPathComponent("rollout-windows.jsonl")
+    let snapshot = tempDir.appendingPathComponent("usage-state.json")
+
+    let isoFmt = ISO8601DateFormatter()
+    isoFmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let ts = isoFmt.string(from: Date())
+    let resets = Int(Date().addingTimeInterval(3600).timeIntervalSince1970)
+
+    let line = """
+        {"type":"turn_context","timestamp":"\(ts)","payload":{"turn_id":"t1","model":"o3"}}
+        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500},"total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500}},"rate_limits":{"primary":{"used_percent":4.0,"window_minutes":300,"resets_at":\(resets)},"secondary":{"used_percent":17.0,"window_minutes":10080,"resets_at":\(resets)}}}}
+        """ + "\n"
+    try? line.write(to: jsonl, atomically: true, encoding: .utf8)
+
+    let sem1 = DispatchSemaphore(value: 0)
+    Task {
+        let r = CodexUsageReader(
+            codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
+            persistenceURL: snapshot)
+        await r.start { _, _ in }
+        await r.stop()
+        sem1.signal()
+    }
+    sem1.wait()
+
+    // Second boot reads no new bytes — the offsets are already at EOF — so
+    // any window it reports came from the snapshot.
+    let sem2 = DispatchSemaphore(value: 0)
+    let box = TestBox<[UsageWindow]>([])
+    Task {
+        let r = CodexUsageReader(
+            codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
+            persistenceURL: snapshot)
+        await r.start { _, _ in }
+        box.value = r.currentWindows()
+        await r.stop()
+        sem2.signal()
+    }
+    sem2.wait()
+
+    expect("codex windows survive restart", box.value.count, 2)
+    expect(
+        "codex 5h window restored",
+        box.value.first(where: { $0.minutes == 300 })?.usedPercent, 4.0)
+    expect(
+        "codex weekly window restored",
+        box.value.first(where: { $0.minutes == 10_080 })?.usedPercent, 17.0)
+}
+
 /// Verifies the Codex reader recovers its per-file model state across a
-/// daemon restart. Without the back-scan during `loadAndApplyPersistedState`,
-/// an event landing after the persisted offset but on a session that
-/// declared a non-default model in an earlier turn_context would mis-price
-/// as `gpt-5-codex`.
+/// daemon restart. Without the persisted model map, an event landing after
+/// the persisted offset but on a session that declared a non-default model in
+/// an earlier turn_context would mis-price as `gpt-5-codex`.
 func runCodexModelBackfillTest() {
     print("=== CodexUsageReader.modelBackfill ===")
     let fm = FileManager.default
