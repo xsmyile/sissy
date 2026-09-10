@@ -433,7 +433,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         let todayKey = cal.startOfDay(for: Date())
         let prevKey = cal.date(byAdding: .day, value: -1, to: todayKey)!
         // Suppress `prev` until the cold backfill scan finishes — see
-        // `coldScanComplete` for the rationale (avoid spurious `trend`
+        // `coldScanComplete` for the rationale (avoid a spurious delta
         // mid-scan when yesterday's total is half-rebuilt).
         let prev = coldScanComplete ? dailyTotals[prevKey] : nil
         return (
@@ -501,8 +501,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
             lastKey != todayKey
         {
             // Calendar day rolled since the last emit and nothing wrote a
-            // new JSONL line. Force a synthetic broadcast so the menubar +
-            // OLED reset to a fresh "today=0, prev=yesterday" frame instead
+            // new JSONL line. Force a synthetic broadcast so the menubar
+            // resets to a fresh "today=0, prev=yesterday" frame instead
             // of holding the stale frame until the next Claude turn. Covers
             // both the trivial case (Mac stays awake across midnight) and
             // the wake-after-sleep case (system slept across one or more

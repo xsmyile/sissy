@@ -105,7 +105,7 @@ actor SissyServer {
     }
 
     /// Client asked us to switch the primary metric (tokens / burn_rate).
-    /// Rebuild and re-broadcast the last frame so the menubar + OLED update
+    /// Rebuild and re-broadcast the last frame so the menubar updates
     /// immediately instead of waiting for the next JSONL change.
     func setPrimaryMetric(_ raw: String) async {
         let metric = PrimaryMetric(rawValue: raw) ?? .tokens
@@ -114,10 +114,6 @@ actor SissyServer {
         await rebroadcastFromCache()
     }
 
-    /// Pin/unpin the mascot state. Pass nil (or "auto") to clear and let the
-    /// computed state through. Immediately re-broadcasts the cached totals
-    /// so the UI flips without hopping into the aggregator actor — that
-    /// hop can queue behind a running poll and add 50–200 ms of lag.
     /// Turn the Claude Code limit probe on or off and persist the choice.
     /// Starting it is what triggers the one-time keychain prompt, so this is
     /// only ever reached from an explicit user action.
@@ -346,10 +342,10 @@ actor SissyServer {
             .childChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             // Belt-and-suspenders to the application-level WS heartbeat in
             // `WebSocketSinkHandler`. macOS keepidle defaults to ~2 hours so
-            // this alone wouldn't catch a dead firmware sink in time, but
-            // pairing it with the WS ping covers the case where the socket
-            // is alive at the kernel level yet stuck before reaching the
-            // handler. Cheap to enable.
+            // this alone wouldn't catch a dead sink in time, but combining
+            // it with the WS ping covers the case where the socket is alive
+            // at the kernel level yet stuck before reaching the handler.
+            // Cheap to enable.
             .childChannelOption(ChannelOptions.socketOption(.so_keepalive), value: 1)
 
         channel = try await bootstrap.bind(host: config.host, port: config.port).get()

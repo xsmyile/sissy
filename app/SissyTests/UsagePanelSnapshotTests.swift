@@ -73,7 +73,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
 
     // MARK: Totals
 
-    func testTotalsComeFromTheProviderSlicesNotTheOledScalars() {
+    func testTotalsComeFromTheProviderSlicesNotTheFormattedScalars() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [
                 slice("claude-code", 722_000_000, "478.20"),

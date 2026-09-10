@@ -311,7 +311,7 @@ final class SissyModel {
 
 }
 
-/// The frame as it lands on the device's OLED.
+/// The daemon's broadcast frame, as `FrameDecoder` hands it to the app.
 struct DisplayFrame: Codable, Equatable {
     var tokens: String
     var cost: String
