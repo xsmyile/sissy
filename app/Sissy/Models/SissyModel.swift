@@ -78,10 +78,12 @@ final class SissyModel {
         let isDimmed: Bool
     }
 
-    /// Only the opacity varies now that the glyph is fixed: a dimmed mascot is
-    /// how the menu bar reports that nothing is reaching it.
+    /// The glyph is fixed, so the icon only varies in opacity — a dimmed
+    /// mascot is how the menu bar reports that nothing is reaching it — and in
+    /// whether it is allowed to move.
     struct StatusIconSnapshot {
         let alpha: CGFloat
+        let motionEnabled: Bool
     }
 
     struct ServerItemSnapshot {
@@ -116,7 +118,10 @@ final class SissyModel {
                 subtitle: headerSubtitle(linkUp: linkUp, serverIsOn: server.isOn),
                 isDimmed: !linkUp
             ),
-            statusIcon: StatusIconSnapshot(alpha: offline ? 0.4 : 1.0),
+            statusIcon: StatusIconSnapshot(
+                alpha: offline ? 0.4 : 1.0,
+                motionEnabled: preferences.mascotMotion
+            ),
             server: server
         )
     }
@@ -189,6 +194,12 @@ final class SissyModel {
         preferences.claudeLimits = enabled
         savePreferences()
         webSocketClient.setClaudeLimits(enabled)
+    }
+
+    func setMascotMotion(_ enabled: Bool) {
+        guard enabled != preferences.mascotMotion else { return }
+        preferences.mascotMotion = enabled
+        savePreferences()
     }
 
     /// Drives the daemon to a requested state rather than flipping whatever it
