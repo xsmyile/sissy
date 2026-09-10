@@ -42,7 +42,7 @@ A pixel-art cat sits in your menubar and shifts mood as the day's spend climbs: 
   <img src="assets/states.png" alt="Sissy's six moods, from sleeping to angry" width="640" />
 </p>
 
-Click the icon for the running total and burn rate, plus a per-CLI **Breakdown** when more than one tool is active, and controls for milestone cadence and mascot mood:
+Click the icon for a panel with the running total, the day-over-day delta, the next milestone, and a per-CLI split in each vendor's own colour:
 
 <p align="center">
   <img src="assets/menu-bar.png" alt="Sissy menubar dropdown" width="300" />
@@ -58,14 +58,18 @@ When the mood shifts, a small popover slides in with Sissy's current vibe:
 
 A small daemon on your Mac tails each supported CLI's session log, sums the day's spend across all of them, and shows the combined total in the menubar.
 
-Currently supports Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`, also honors `CODEX_HOME`). Codex is tracked whenever its session directory exists; force it on or off via `providers` in `~/Library/Application Support/Sissy/server.json`. When two or more CLIs have spent something today, the menubar grows a **Breakdown** submenu with that day's per-CLI split.
+Currently supports Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`, also honors `CODEX_HOME`). Codex is tracked whenever its session directory exists; force it on or off via `providers` in `~/Library/Application Support/Sissy/server.json`. Every active CLI gets its own row in the panel with that day's split.
 
 ## Build from source
 
 ```bash
 scripts/dev-build-app.sh
-open app/build-dev/Build/Products/Debug/Sissy.app
 ```
+
+The script builds into `~/.cache/sissy/build-dev`, removes dev bundles left by
+other worktrees or by a plain `xcodebuild`, and relaunches the result — so
+exactly one dev app exists no matter which branch you build. Pass
+`RELAUNCH=0` to skip the relaunch.
 
 Menubar → **Server** toggles the bundled LaunchAgent. When switched on it registers the daemon so it restarts on login; turning it off unregisters the agent. That control requires a normally signed app build. `CODE_SIGNING_ALLOWED=NO` is fine for CI but not for testing Server start/stop locally.
 

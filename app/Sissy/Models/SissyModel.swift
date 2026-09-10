@@ -9,12 +9,14 @@ import Observation
 @Observable
 final class SissyModel {
     var currentFrame: DisplayFrame? = nil
+    var lastFrameAt: Date? = nil
     var preferences: Preferences = .load()
     /// Optimistic mirror of the daemon's mascot pin. nil = Auto (computed
     /// state). The daemon is authoritative — this is just what the menu
     /// most recently asked for, used to flag the active row with a checkmark
     /// without waiting for the next frame to confirm.
     var pinnedMascot: String? = nil
+    var settingsTab: SettingsTab = .general
     /// Mood line picked at the last mascot state-change. Both the menubar
     /// header and the mood pop-up read this so they show the same catchphrase
     /// for the same transition (the pool offers 4 lines per state — without
@@ -81,23 +83,7 @@ final class SissyModel {
         let header: HeaderSnapshot
         let statusIcon: StatusIconSnapshot
         let server: ServerItemSnapshot
-        let primaryMetric: Preferences.PrimaryMetric
-        let milestoneFrequency: Preferences.MilestoneFrequency
-        let mascotLabel: String
-        let pinnedMascot: String?
         let canPickMascot: Bool
-        let notifyOnMascotChange: Bool
-        /// Hide the "Metric" submenu when no firmware companion is attached.
-        /// The setting only affects the OLED's primary-slot render — the
-        /// menubar header already prints tokens · cost · burn unconditionally,
-        /// so without a device the row is a dead option. Pre-first-frame this
-        /// stays true so the row doesn't flicker hidden→visible on connect.
-        let showMetric: Bool
-        /// Per-provider usage rows for the "Breakdown" submenu. Empty or
-        /// single-entry lists are suppressed by the menu builder — only
-        /// shown when at least two providers are active so a single-CLI
-        /// install never sees a useless one-row submenu.
-        let providerBreakdown: [DisplayFrame.ProviderSlice]
     }
 
     struct HeaderSnapshot {
@@ -116,6 +102,8 @@ final class SissyModel {
         let title: String
         let subtitle: String
         let isEnabled: Bool
+        let isOn: Bool
+        let requiresApproval: Bool
     }
 
     var menuSnapshot: MenuSnapshot {
@@ -125,33 +113,29 @@ final class SissyModel {
         let healthOffline = !serverHealth.status.isReachable
         let offline = droppedAfterConnect || healthOffline
         let iconState = offline ? nil : (pinnedMascot ?? currentFrame?.state)
+        let server = serverItemSnapshot
 
         return MenuSnapshot(
             header: HeaderSnapshot(
                 imageName: StateDescriptor.mascotImageName(for: spriteState),
-                title: headerTitle(linkUp: linkUp),
-                subtitle: headerSubtitle(linkUp: linkUp),
+                title: headerTitle(linkUp: linkUp, serverIsOn: server.isOn),
+                subtitle: headerSubtitle(linkUp: linkUp, serverIsOn: server.isOn),
                 isDimmed: !linkUp
             ),
             statusIcon: StatusIconSnapshot(
                 imageName: StateDescriptor.mascotImageName(for: iconState),
                 alpha: offline ? 0.4 : 1.0
             ),
-            server: serverItemSnapshot,
-            primaryMetric: preferences.primaryMetric,
-            milestoneFrequency: preferences.milestoneFrequency,
-            mascotLabel: currentMascotLabel,
-            pinnedMascot: pinnedMascot,
-            canPickMascot: webSocketClient.isConnected,
-            notifyOnMascotChange: preferences.notifyOnMascotChange,
-            showMetric: currentFrame?.devicePresent ?? true,
-            providerBreakdown: linkUp ? (currentFrame?.providers ?? []) : []
+            server: server,
+            canPickMascot: webSocketClient.isConnected
         )
     }
 
     // MARK: Menu actions
 
-    func toggleServerFromMenu() {
+    var serverIsBusy: Bool { serverToggleInFlight || serverService.isTransitioning }
+
+    func toggleServer() {
         if serverToggleInFlight || serverService.isTransitioning { return }
         if serverService.requiresApproval && serverService.isAvailable {
             serverService.openLoginItemsSettings()
@@ -318,9 +302,37 @@ final class SissyModel {
         webSocketClient.setMascotPin(state: nil)
     }
 
-    func toggleNotifications() {
-        preferences.notifyOnMascotChange.toggle()
+    func setDeviceSupport(_ enabled: Bool) {
+        guard enabled != preferences.deviceSupport else { return }
+        preferences.deviceSupport = enabled
         savePreferences()
+        if !enabled, settingsTab == .device {
+            settingsTab = .general
+        }
+    }
+
+    func setClaudeLimits(_ enabled: Bool) {
+        guard enabled != preferences.claudeLimits else { return }
+        preferences.claudeLimits = enabled
+        savePreferences()
+        webSocketClient.setClaudeLimits(enabled)
+    }
+
+    func setNotifications(_ enabled: Bool) {
+        guard enabled != preferences.notifyOnMascotChange else { return }
+        preferences.notifyOnMascotChange = enabled
+        savePreferences()
+    }
+
+    /// Drives the daemon to a requested state rather than flipping whatever it
+    /// is in. A `Toggle` hands SwiftUI's new value to its binding, and a
+    /// binding that discards it and toggles instead only agrees with the
+    /// switch while every `set` arrives exactly once and already negated —
+    /// an invariant SwiftUI does not promise. `toggleServer` stays for the
+    /// panel's power button, which really is a one-shot action.
+    func setServer(running: Bool) {
+        guard running != serverItemSnapshot.isOn else { return }
+        toggleServer()
     }
 
     func openLogs() {
@@ -368,16 +380,17 @@ final class SissyModel {
         return ServerItemSnapshot(
             title: title,
             subtitle: subtitle,
-            isEnabled: serverService.isAvailable && !busy
+            isEnabled: serverService.isAvailable && !busy,
+            isOn: serverIsOn,
+            requiresApproval: serverService.requiresApproval
         )
     }
 
-    private var currentMascotLabel: String {
-        guard let wire = pinnedMascot else { return "Auto" }
-        return Self.mascotStates.first(where: { $0.wire == wire })?.label ?? "Auto"
-    }
-
-    private func headerTitle(linkUp: Bool) -> String {
+    /// With the server off the headline reports that rather than a mood: the
+    /// panel's only control is the switch beside it, and a header still
+    /// talking about spend would leave the switch's meaning to guesswork.
+    private func headerTitle(linkUp: Bool, serverIsOn: Bool) -> String {
+        if !serverIsOn { return "Server is off" }
         if !linkUp { return "Looking for Sissy..." }
         let state = pinnedMascot ?? currentFrame?.state
         if let phrase = currentMilestonePhrase, pinnedMascot == nil {
@@ -389,7 +402,8 @@ final class SissyModel {
         return StateDescriptor.moodHeadline(voice: StateDescriptor.voice(for: state))
     }
 
-    private func headerSubtitle(linkUp: Bool) -> String? {
+    private func headerSubtitle(linkUp: Bool, serverIsOn: Bool) -> String? {
+        if !serverIsOn { return "Nothing is being counted" }
         if !linkUp { return "Waiting for the daemon" }
         guard let frame = currentFrame else { return nil }
         // Single source of truth: when the daemon ships the providers array
@@ -398,10 +412,7 @@ final class SissyModel {
         // Fallback path covers a newer-app/older-daemon dev rebuild skew and
         // the cold-start window before the first provider has emitted.
         if !frame.providers.isEmpty {
-            return StatusItemController.formatHeaderSubtitle(
-                providers: frame.providers,
-                burn: frame.burn
-            )
+            return UsageFormat.headerSubtitle(providers: frame.providers, burn: frame.burn)
         }
         var parts: [String] = []
         if frame.tokens != "..." { parts.append("\(frame.tokens) tok") }
@@ -439,8 +450,7 @@ struct DisplayFrame: Codable, Equatable {
     var primary: String
     var primaryLabel: String
     /// True when daemon has at least one firmware sink attached. Gates the
-    /// metric row in the menu and the "device connected" indicator in
-    /// PairingView.
+    /// "device connected" indicator in the Device settings tab.
     var devicePresent: Bool
     /// Set by the daemon on the single frame that crosses a whole-dollar
     /// cost boundary. Format: `"cost:<D>"`. Cleared on every other frame.
@@ -448,16 +458,58 @@ struct DisplayFrame: Codable, Equatable {
     /// goes from nil to a value.
     var milestone: String?
     /// Per-provider totals carried on the WS frame so the menubar can derive
-    /// the header subtitle and the Breakdown submenu rows from the same
-    /// payload. Empty when no provider has emitted yet (or daemon predates
-    /// the field) — `headerSubtitle` falls back to the daemon-formatted
-    /// scalars; Breakdown stays hidden by its `>= 2 sources` gate.
+    /// the header subtitle and the panel's rows from the same payload. Empty
+    /// when no provider has emitted yet (or daemon predates the field) —
+    /// `headerSubtitle` falls back to the daemon-formatted scalars.
     var providers: [ProviderSlice]
+    /// Yesterday's raw combined totals, for the day-over-day delta. nil until
+    /// every active provider has a previous-day snapshot — the daemon omits
+    /// both wire keys together in that window, and nil renders as "no
+    /// comparison" rather than a 0% that was never measured.
+    var prev: PrevTotals?
 
     struct ProviderSlice: Codable, Equatable, Identifiable {
         let id: String
         let tokens: Int
         let cost: Decimal
+        /// Subscription windows the CLI reported, shortest first. Empty for a
+        /// provider that publishes none, which is what puts the row back on
+        /// its share-of-today bar.
+        let windows: [UsageWindow]
+
+        init(id: String, tokens: Int, cost: Decimal, windows: [UsageWindow] = []) {
+            self.id = id
+            self.tokens = tokens
+            self.cost = cost
+            self.windows = windows
+        }
+    }
+
+    /// One rate-limit window as the vendor reported it. `minutes` is the
+    /// identity: vendors do not agree on an ordering, so the label comes from
+    /// the length and never from the position in the payload.
+    struct UsageWindow: Codable, Equatable, Identifiable {
+        let minutes: Int
+        let usedPercent: Double
+        let resetsAt: Date
+
+        var id: Int { minutes }
+    }
+
+    struct PrevTotals: Codable, Equatable {
+        let tokens: Int
+        let cost: Decimal
+    }
+
+    /// When the daemon built this frame, from its own `ts`.
+    ///
+    /// The Hub replays its cached payload to every client that connects, and
+    /// that payload keeps the timestamp of the emit it came from — so a
+    /// reconnect to an idle daemon reports the age of the real last frame
+    /// instead of the moment the socket happened to open. nil for a frame
+    /// with no usable `ts`, which leaves the caller to fall back to now.
+    var builtAt: Date? {
+        ts > 0 ? Date(timeIntervalSince1970: TimeInterval(ts)) : nil
     }
 }
 

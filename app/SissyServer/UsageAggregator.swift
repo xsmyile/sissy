@@ -69,6 +69,14 @@ actor UsageAggregator {
         aggregate()
     }
 
+    /// Slices rebuilt against each provider's *current* windows. A rate-limit
+    /// refresh changes no token total, so a rebroadcast that replayed the
+    /// cached slices would keep shipping the windows captured at the last
+    /// ingest — invisible until the CLI happened to write another event.
+    func currentSlices() -> [ProviderSlice] {
+        currentProviderSlices()
+    }
+
     /// Live sum of each provider's `filesWatched()`. Computed on demand
     /// because providers' own counters update during cold-scan / poll even
     /// when no `onChange` fires (e.g. restart from a persisted snapshot
@@ -106,12 +114,21 @@ actor UsageAggregator {
 
     /// Breakdown slices for the wire: every provider that spent tokens today,
     /// in canonical order. Providers with no usage today (still-warming or
-    /// simply unused) are omitted so the menubar Breakdown shows the day's
-    /// actual per-CLI split instead of stale `$0` rows.
+    /// simply unused) are omitted so the panel shows the day's actual per-CLI
+    /// split instead of stale `$0` rows.
+    ///
+    /// Rate-limit windows are read through each provider's nonisolated
+    /// accessor. Awaiting the provider here would deadlock: the emit that
+    /// leads here runs while the provider still holds its own actor.
     private func currentProviderSlices() -> [ProviderSlice] {
         let raw = providers.compactMap { p -> ProviderSlice? in
             guard let s = perProvider[p.id] else { return nil }
-            return ProviderSlice(id: p.id, tokens: s.today.totalTokens, cost: s.today.totalCost)
+            return ProviderSlice(
+                id: p.id,
+                tokens: s.today.totalTokens,
+                cost: s.today.totalCost,
+                windows: p.currentWindows()
+            )
         }
         return FrameBuilder.activeSlices(raw)
     }

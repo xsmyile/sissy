@@ -92,6 +92,17 @@ func runSelfTest() {
     expect("frame state", frame.state, "code")
     expect("frame primary", frame.primary, "2.5M")
     expect("frame label", frame.primaryLabel, "TOKENS")
+    expect("frame prev tokens absent", frame.prevTokens, nil)
+    expect("frame prev cost absent", frame.prevCost, nil)
+
+    let framePrev = FrameBuilder.build(
+        today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
+        prev: DayTotals(totalTokens: 2_000_000, totalCost: Decimal(string: "31.00")!),
+        hoursElapsed: 5,
+        primaryMetric: .tokens
+    )
+    expect("frame prev tokens", framePrev.prevTokens, 2_000_000)
+    expect("frame prev cost", framePrev.prevCost, Decimal(string: "31.00")!)
 
     let frameBurn = FrameBuilder.build(
         today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
@@ -319,6 +330,12 @@ func runSelfTest() {
     print("=== CodexUsageReader.streamingIngest ===")
     runCodexParserTests()
     runCodexModelBackfillTest()
+    runCodexLegacySnapshotTest()
+    runCodexWindowPersistenceTest()
+    runCodexRateLimitTest()
+    runClaudeLimitsParseTests()
+    runKeychainTimeoutTests()
+    runAggregatorEmitTest()
 
     print("=== FSWatcher ===")
     runFSWatcherTests()
@@ -478,6 +495,20 @@ private func runISODateTests() {
     // Leap day
     let leap = ClaudeCodeUsageReader.parseISODate("2024-02-29T12:00:00Z")
     expect("iso leap day non-nil", leap != nil, true)
+
+    // What the fast path rejects, parseTimestamp must still accept: this is
+    // the exact shape Anthropic's usage endpoint sends.
+    let offset = ClaudeCodeUsageReader.parseTimestamp("2026-09-10T12:20:00.061389+00:00")
+    expect("timestamp with offset and micros non-nil", offset != nil, true)
+    if let d = offset {
+        expect("timestamp with offset value", Int(d.timeIntervalSince1970), 1_789_042_800)
+    }
+    expect(
+        "timestamp with frac and Z",
+        ClaudeCodeUsageReader.parseTimestamp("2026-05-19T10:01:38.269Z") != nil,
+        true
+    )
+    expect("timestamp rejects a non-date", ClaudeCodeUsageReader.parseTimestamp("not a date"), nil)
 }
 
 private func runAssistantMarkerTests() {
@@ -1040,11 +1071,395 @@ private func runCodexParserTests() {
     expect("codex re-ingest matches first pass", replay.value, box.value.tokens)
 }
 
+/// A provider emits from inside its own actor, so anything the aggregator
+/// awaits on that provider while handling the emit deadlocks the pair: the
+/// provider waits for the callback, the callback waits for the provider, the
+/// cold scan never finishes and the daemon serves frames that never arrive.
+/// It shipped once. The guard is a provider that emits exactly that way.
+func runAggregatorEmitTest() {
+    print("=== UsageAggregator.emit ===")
+
+    actor EmittingProvider: UsageProvider {
+        nonisolated let id = "emitter"
+        nonisolated private let box = AtomicWindows()
+
+        init() {
+            box.store([
+                UsageWindow(minutes: 300, usedPercent: 12, resetsAt: .distantFuture)
+            ])
+        }
+
+        func start(onChange: @Sendable @escaping (DayTotals, DayTotals?) async -> Void) async {
+            // Deliberately awaited while this actor is held, which is what
+            // every real reader does at the end of its cold scan.
+            await onChange(DayTotals(totalTokens: 10, totalCost: 1), nil)
+        }
+
+        func stop() async {}
+        func current() async -> (today: DayTotals, prev: DayTotals?) {
+            (DayTotals(totalTokens: 10, totalCost: 1), nil)
+        }
+        nonisolated func filesWatched() -> Int { 1 }
+        func isWarm() async -> Bool { true }
+        nonisolated func currentWindows() -> [UsageWindow] { box.live() }
+        func applyPriceCatalog(_ catalog: PriceCatalog) async {}
+    }
+
+    let sem = DispatchSemaphore(value: 0)
+    let received = TestBox<[ProviderSlice]>([])
+    Task {
+        let aggregator = UsageAggregator(providers: [EmittingProvider()])
+        await aggregator.start { _, _, slices in
+            received.value = slices
+            sem.signal()
+        }
+    }
+    let timedOut = sem.wait(timeout: .now() + 5) == .timedOut
+    expect("aggregator completes a provider emit", !timedOut, true)
+    expect("emitted slice carries the provider window", received.value.first?.windows.count, 1)
+}
+
+/// Claude Code publishes no limit state on disk, so both halves of that path
+/// are parsers over shapes Sissy does not own: the credential blob in the
+/// login keychain and the undocumented usage payload. Neither touches the
+/// keychain or the network here.
+///
+/// The usage fixture is a live response captured field for field. An invented
+/// `...Z` reset is precisely what let a `Z`-only parser look correct while
+/// every real bucket was being dropped.
+func runClaudeLimitsParseTests() {
+    print("=== ClaudeLimits.parse ===")
+
+    let credentialBlob = Data(
+        #"{"claudeAiOauth":{"accessToken":"tok","refreshToken":"r","expiresAt":1789006037000}}"#
+            .utf8
+    )
+    let credentials = ClaudeCredentialsStore.parse(credentialBlob)
+    expect("credentials access token", credentials?.accessToken, "tok")
+    // Claude Code writes the expiry in milliseconds; read as seconds it would
+    // land in the year 58,000 and every token would look valid forever.
+    expect(
+        "credentials expiry normalised to seconds",
+        credentials?.expiresAt,
+        Date(timeIntervalSince1970: 1_789_006_037)
+    )
+
+    let noToken = Data(#"{"claudeAiOauth":{"refreshToken":"r","expiresAt":1}}"#.utf8)
+    expect(
+        "credentials without an access token are unusable",
+        ClaudeCredentialsStore.parse(noToken) == nil,
+        true
+    )
+
+    let epochPayload: [String: Any] = [
+        "five_hour": ["utilization": 25.0, "resets_at": 1_789_006_037.0],
+        "seven_day": ["utilization": 62.0, "resets_at": 1_789_549_854.0],
+    ]
+    let windows = ClaudeLimitsProbe.parse(epochPayload)
+    expect("usage payload yields both windows", windows.count, 2)
+    expect("session window length", windows.first?.minutes, 300)
+    expect("weekly window length", windows.last?.minutes, 10_080)
+    expect("session utilization", windows.first?.usedPercent, 25.0)
+
+    let bucketFields: [String: Any] = [
+        "limit_dollars": NSNull(),
+        "used_dollars": NSNull(),
+        "remaining_dollars": NSNull(),
+        "locked_reason": NSNull(),
+    ]
+    let measured: [String: Any] = [
+        "five_hour": bucketFields.merging([
+            "utilization": 1.0,
+            "resets_at": "2026-09-10T12:20:00.061389+00:00",
+        ]) { _, new in new },
+        "seven_day": bucketFields.merging([
+            "utilization": 25.0,
+            "resets_at": "2026-09-16T02:00:00.061411+00:00",
+        ]) { _, new in new },
+    ]
+    let live = ClaudeLimitsProbe.parse(measured)
+    expect("measured payload yields both windows", live.count, 2)
+    expect("measured session utilization", live.first?.usedPercent, 1.0)
+    expect("measured weekly utilization", live.last?.usedPercent, 25.0)
+    expect(
+        "measured reset survives its offset and microseconds",
+        live.first.map { Int($0.resetsAt.timeIntervalSince1970) },
+        1_789_042_800
+    )
+
+    let noPercent: [String: Any] = [
+        "five_hour": [
+            "utilization": NSNull(),
+            "used_dollars": 12.5,
+            "limit_dollars": 50.0,
+            "resets_at": 1_789_006_037.0,
+        ]
+    ]
+    expect(
+        "a bucket that reports no utilization is dropped",
+        ClaudeLimitsProbe.parse(noPercent).count,
+        0
+    )
+
+    let partial: [String: Any] = ["five_hour": ["utilization": 5.0]]
+    expect("a bucket without a reset is dropped", ClaudeLimitsProbe.parse(partial).count, 0)
+}
+
+/// The keychain lookup has to be abandonable: `SecItemCopyMatching` parks for
+/// as long as macOS takes to authorize, which can mean an unanswered dialog,
+/// and a poll loop waiting on it goes silent. The first attempt raced the
+/// lookup against a sleeper inside a task group — which cannot bound anything,
+/// since a group awaits every child before returning — so the budget only ever
+/// described a wait already served in full. The keychain is the external I/O
+/// this test stands in for; everything else is the real path.
+///
+/// Order matters: abandoning a lookup leaves the single in-flight slot taken
+/// until the fake returns, so the delivering case runs first.
+func runKeychainTimeoutTests() {
+    print("=== ClaudeCredentialsStore.loadOffPool ===")
+
+    let delivered = DispatchSemaphore(value: 0)
+    let answered = TestBox<Bool>(false)
+    Task {
+        let result = await ClaudeCredentialsStore.loadOffPool(timeout: .seconds(5)) { .absent }
+        if case .absent = result { answered.value = true }
+        delivered.signal()
+    }
+    delivered.wait()
+    expect("a lookup that answers is delivered", answered.value, true)
+
+    let abandoned = DispatchSemaphore(value: 0)
+    let elapsed = TestBox<TimeInterval>(0)
+    let gaveUp = TestBox<Bool>(false)
+    Task {
+        let started = Date()
+        let result = await ClaudeCredentialsStore.loadOffPool(timeout: .milliseconds(200)) {
+            Thread.sleep(forTimeInterval: 1.5)
+            return .absent
+        }
+        elapsed.value = Date().timeIntervalSince(started)
+        if case .timedOut = result { gaveUp.value = true }
+        abandoned.signal()
+    }
+    abandoned.wait()
+    expect("a lookup that parks is abandoned", gaveUp.value, true)
+    expect("abandoning does not wait for the lookup", elapsed.value < 1.0, true)
+}
+
+/// Codex ships its subscription limits on the same `token_count` event the
+/// reader already parses. Two properties matter and neither is obvious from
+/// the payload: a bucket is identified by `window_minutes` and not by its
+/// `primary`/`secondary` key, and a bucket whose `resets_at` has passed
+/// describes a window that no longer exists.
+func runCodexRateLimitTest() {
+    print("=== CodexUsageReader.rateLimits ===")
+    let fm = FileManager.default
+    let tempDir = fm.temporaryDirectory.appendingPathComponent(
+        "sissy-codex-limits-\(UUID().uuidString)"
+    )
+    let subdir = tempDir.appendingPathComponent("2026/05/25", isDirectory: true)
+    try? fm.createDirectory(at: subdir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tempDir) }
+
+    let isoFmt = ISO8601DateFormatter()
+    isoFmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let nowStr = isoFmt.string(from: Date())
+    let liveReset = Int(Date().addingTimeInterval(3_600).timeIntervalSince1970)
+    let staleReset = Int(Date().addingTimeInterval(-60).timeIntervalSince1970)
+
+    // `primary` is the weekly bucket here on purpose: real rollouts do ship
+    // that arrangement, and a reader keying off the position would label it
+    // as the session window.
+    let usage =
+        #"{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"#
+        + #""output_tokens":10,"total_tokens":110}}"#
+    let limits =
+        #"{"primary":{"used_percent":8.0,"window_minutes":10080,"#
+        + #""resets_at":\#(liveReset)},"secondary":{"used_percent":25.0,"#
+        + #""window_minutes":300,"resets_at":\#(staleReset)}}"#
+    let payload = """
+        {"type":"turn_context","timestamp":"\(nowStr)","payload":{"turn_id":"t1","model":"gpt-5-codex"}}
+        {"type":"event_msg","timestamp":"\(nowStr)","payload":{"type":"token_count","info":\(usage),"rate_limits":\(limits)}}
+        """ + "\n"
+    try? payload.write(
+        to: subdir.appendingPathComponent("rollout-2026-05-25T10-12-05-limits.jsonl"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let sem = DispatchSemaphore(value: 0)
+    let box = TestBox<[UsageWindow]>([])
+    Task {
+        let reader = CodexUsageReader(
+            codexDir: tempDir,
+            retainDays: 2,
+            pollInterval: .seconds(60),
+            persistenceURL: nil
+        )
+        await reader.start { _, _ in }
+        box.value = await reader.currentWindows()
+        await reader.stop()
+        sem.signal()
+    }
+    sem.wait()
+
+    expect("codex keeps only unexpired windows", box.value.count, 1)
+    expect("codex window keyed by minutes", box.value.first?.minutes, 10_080)
+    expect("codex window percentage", box.value.first?.usedPercent, 8.0)
+}
+
+/// Verifies a snapshot predating `fileModels` is discarded rather than
+/// resumed from. Honouring one means the model map has to be rebuilt by
+/// re-reading every consumed byte, which on a real tree left the reader
+/// emitting nothing for ~110 s and the panel without its Codex row for the
+/// whole time. A cold scan gets the same answer in seconds, so the assertion
+/// is that the totals survive the discard.
+func runCodexLegacySnapshotTest() {
+    print("=== CodexUsageReader.legacySnapshot ===")
+    let fm = FileManager.default
+    let tempDir = fm.temporaryDirectory.appendingPathComponent(
+        "sissy-codex-legacy-\(UUID().uuidString)"
+    )
+    try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tempDir) }
+    let subdir = tempDir.appendingPathComponent("2026/05/25", isDirectory: true)
+    try? fm.createDirectory(at: subdir, withIntermediateDirectories: true)
+    let jsonl = subdir.appendingPathComponent("rollout-legacy.jsonl")
+    let snapshot = tempDir.appendingPathComponent("usage-state.json")
+
+    let isoFmt = ISO8601DateFormatter()
+    isoFmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let ts = isoFmt.string(from: Date())
+
+    let initial = """
+        {"type":"session_meta","timestamp":"\(ts)","payload":{"id":"lg","model_provider":"openai"}}
+        {"type":"turn_context","timestamp":"\(ts)","payload":{"turn_id":"t1","model":"o3"}}
+        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":2000,"cached_input_tokens":0,"output_tokens":1000,"reasoning_output_tokens":0,"total_tokens":3000},"total_token_usage":{"input_tokens":2000,"cached_input_tokens":0,"output_tokens":1000,"reasoning_output_tokens":0,"total_tokens":3000}}}}
+        """ + "\n"
+    try? initial.write(to: jsonl, atomically: true, encoding: .utf8)
+
+    let sem1 = DispatchSemaphore(value: 0)
+    Task {
+        let r = CodexUsageReader(
+            codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
+            persistenceURL: snapshot)
+        await r.start { _, _ in }
+        await r.stop()
+        sem1.signal()
+    }
+    sem1.wait()
+
+    // Strip the field to forge a snapshot written by an older daemon. The
+    // offsets stay at EOF, so a reader that honoured it would resume with an
+    // empty model map and mis-price the appended turn.
+    let hadField = TestBox<Bool>(false)
+    if let data = try? Data(contentsOf: snapshot),
+        var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    {
+        hadField.value = obj.removeValue(forKey: "codexResume") != nil
+        if let stripped = try? JSONSerialization.data(withJSONObject: obj) {
+            try? stripped.write(to: snapshot)
+        }
+    }
+    expect("codex snapshot carries resume state", hadField.value, true)
+
+    let append = """
+        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":4000,"cached_input_tokens":0,"output_tokens":2000,"reasoning_output_tokens":0,"total_tokens":6000},"total_token_usage":{"input_tokens":6000,"cached_input_tokens":0,"output_tokens":3000,"reasoning_output_tokens":0,"total_tokens":9000}}}}
+        """ + "\n"
+    if let fh = try? FileHandle(forWritingTo: jsonl) {
+        _ = try? fh.seekToEnd()
+        try? fh.write(contentsOf: Data(append.utf8))
+        try? fh.close()
+    }
+
+    let sem2 = DispatchSemaphore(value: 0)
+    let observed = TestBox<Decimal>(0)
+    Task {
+        let r = CodexUsageReader(
+            codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
+            persistenceURL: snapshot)
+        await r.start { _, _ in }
+        let (today, _) = await r.current()
+        observed.value = today.totalCost
+        await r.stop()
+        sem2.signal()
+    }
+    sem2.wait()
+
+    // Both events at o3 rates: the discard forces a cold scan, which reads
+    // the turn_context again and prices the appended event correctly.
+    let expected =
+        OpenAIPricing.cost(model: "o3", input: 2000, output: 1000, cacheRead: 0)
+        + OpenAIPricing.cost(model: "o3", input: 4000, output: 2000, cacheRead: 0)
+    expect("codex legacy snapshot cold-scans", observed.value, expected)
+}
+
+/// Verifies the rate-limit windows survive a restart. Codex learns its limits
+/// only from the CLI's own event stream, so a reader that resumed at EOF with
+/// nothing persisted showed no gauges at all until the next turn.
+func runCodexWindowPersistenceTest() {
+    print("=== CodexUsageReader.windowPersistence ===")
+    let fm = FileManager.default
+    let tempDir = fm.temporaryDirectory.appendingPathComponent(
+        "sissy-codex-windows-\(UUID().uuidString)"
+    )
+    try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tempDir) }
+    let subdir = tempDir.appendingPathComponent("2026/05/25", isDirectory: true)
+    try? fm.createDirectory(at: subdir, withIntermediateDirectories: true)
+    let jsonl = subdir.appendingPathComponent("rollout-windows.jsonl")
+    let snapshot = tempDir.appendingPathComponent("usage-state.json")
+
+    let isoFmt = ISO8601DateFormatter()
+    isoFmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let ts = isoFmt.string(from: Date())
+    let resets = Int(Date().addingTimeInterval(3600).timeIntervalSince1970)
+
+    let line = """
+        {"type":"turn_context","timestamp":"\(ts)","payload":{"turn_id":"t1","model":"o3"}}
+        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500},"total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500}},"rate_limits":{"primary":{"used_percent":4.0,"window_minutes":300,"resets_at":\(resets)},"secondary":{"used_percent":17.0,"window_minutes":10080,"resets_at":\(resets)}}}}
+        """ + "\n"
+    try? line.write(to: jsonl, atomically: true, encoding: .utf8)
+
+    let sem1 = DispatchSemaphore(value: 0)
+    Task {
+        let r = CodexUsageReader(
+            codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
+            persistenceURL: snapshot)
+        await r.start { _, _ in }
+        await r.stop()
+        sem1.signal()
+    }
+    sem1.wait()
+
+    // Second boot reads no new bytes — the offsets are already at EOF — so
+    // any window it reports came from the snapshot.
+    let sem2 = DispatchSemaphore(value: 0)
+    let box = TestBox<[UsageWindow]>([])
+    Task {
+        let r = CodexUsageReader(
+            codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
+            persistenceURL: snapshot)
+        await r.start { _, _ in }
+        box.value = r.currentWindows()
+        await r.stop()
+        sem2.signal()
+    }
+    sem2.wait()
+
+    expect("codex windows survive restart", box.value.count, 2)
+    expect(
+        "codex 5h window restored",
+        box.value.first(where: { $0.minutes == 300 })?.usedPercent, 4.0)
+    expect(
+        "codex weekly window restored",
+        box.value.first(where: { $0.minutes == 10_080 })?.usedPercent, 17.0)
+}
+
 /// Verifies the Codex reader recovers its per-file model state across a
-/// daemon restart. Without the back-scan during `loadAndApplyPersistedState`,
-/// an event landing after the persisted offset but on a session that
-/// declared a non-default model in an earlier turn_context would mis-price
-/// as `gpt-5-codex`.
+/// daemon restart. Without the persisted model map, an event landing after
+/// the persisted offset but on a session that declared a non-default model in
+/// an earlier turn_context would mis-price as `gpt-5-codex`.
 func runCodexModelBackfillTest() {
     print("=== CodexUsageReader.modelBackfill ===")
     let fm = FileManager.default

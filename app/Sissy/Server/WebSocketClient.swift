@@ -144,6 +144,18 @@ final class WebSocketClient {
         send(payload, label: "set_milestone_frequency", on: task)
     }
 
+    /// Ask the daemon to read (or stop reading) Claude Code's OAuth token so
+    /// it can publish that CLI's subscription windows. Also carried on
+    /// `hello`, so a reconnect re-asserts the user's choice.
+    func setClaudeLimits(_ enabled: Bool) {
+        guard let task else { return }
+        let payload: [String: Any] = [
+            "type": "set_claude_limits",
+            "claude_limits": enabled,
+        ]
+        send(payload, label: "set_claude_limits", on: task)
+    }
+
     /// Pin the mascot to `state` on the daemon (sticky until cleared).
     /// Passing nil clears the pin so the daemon resumes the computed state.
     func setMascotPin(state: String?) {
@@ -172,6 +184,7 @@ final class WebSocketClient {
             "client": "mac-app",
             "primary_metric": metric,
             "milestone_frequency": model.preferences.milestoneFrequency.rawValue,
+            "claude_limits": model.preferences.claudeLimits,
         ]
         // Connection might be mid-handshake; the next reconnect re-sends.
         send(payload, label: "hello", on: task)
@@ -240,58 +253,15 @@ final class WebSocketClient {
     }
 
     private func handle(_ message: URLSessionWebSocketTask.Message) {
-        let text: String
+        let frame: DisplayFrame?
         switch message {
-        case .string(let s): text = s
-        case .data(let d): text = String(decoding: d, as: UTF8.self)
+        case .string(let text): frame = FrameDecoder.decode(text)
+        case .data(let data): frame = FrameDecoder.decode(data)
         @unknown default: return
         }
-
-        guard let data = text.data(using: .utf8),
-            let any = try? JSONSerialization.jsonObject(with: data),
-            let dict = any as? [String: Any],
-            dict["type"] as? String == "frame"
-        else { return }
-
-        let tokens = dict["tokens"] as? String ?? "..."
-        let cost = dict["cost"] as? String ?? "..."
-        let burn = dict["burn"] as? String ?? "..."
-        let state = dict["state"] as? String ?? "think"
-        let ts = dict["ts"] as? Int ?? 0
-        let primary = dict["primary"] as? String ?? tokens
-        let primaryLabel = dict["primary_label"] as? String ?? "TOKENS"
-        let devicePresent = dict["device_present"] as? Bool ?? false
-        // Present only on the single frame that crosses a threshold; absent
-        // otherwise. The notifier filters non-crossing frames out via
-        // `compactMap` and dedupes on `(milestone, ts)`.
-        let milestone = dict["milestone"] as? String
-        // Per-provider slices: header total + Breakdown rows derive from this.
-        // Empty when the daemon hasn't emitted any provider yet, or when an
-        // older daemon predates the field — `headerSubtitle` then falls back
-        // to the daemon-formatted `tokens`/`cost` strings.
-        var providers: [DisplayFrame.ProviderSlice] = []
-        if let rawProviders = dict["providers"] as? [[String: Any]] {
-            for raw in rawProviders {
-                guard let id = raw["id"] as? String,
-                    let tokensRaw = raw["tokens"] as? Int,
-                    let costRaw = raw["cost"] as? String,
-                    let costDec = Decimal(string: costRaw)
-                else { continue }
-                providers.append(.init(id: id, tokens: tokensRaw, cost: costDec))
-            }
-        }
-        model?.currentFrame = DisplayFrame(
-            tokens: tokens,
-            cost: cost,
-            burn: burn,
-            state: state,
-            ts: ts,
-            primary: primary,
-            primaryLabel: primaryLabel,
-            devicePresent: devicePresent,
-            milestone: milestone,
-            providers: providers
-        )
+        guard let frame else { return }
+        model?.currentFrame = frame
+        model?.lastFrameAt = frame.builtAt ?? Date()
     }
 
     private func scheduleReconnect() {

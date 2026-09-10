@@ -29,6 +29,16 @@ actor CodexUsageReader: UsageProvider {
 
     private var fileOffsets: [URL: UInt64] = [:]
     private var fileMTimes: [URL: TimeInterval] = [:]
+    /// Rate-limit buckets Codex ships on a `token_count` event. Position is
+    /// not meaning: each bucket carries its own `window_minutes`.
+    private static let rateLimitBuckets = ["primary", "secondary"]
+
+    /// Newest rate-limit observation and the event timestamp it came from.
+    /// A cold scan walks files in no particular order, so an older rollout
+    /// must not overwrite a fresher window.
+    nonisolated private let latestWindows = AtomicWindows()
+    private var latestWindowsAt: Date?
+
     /// Per-file "last seen model id" so a `token_count` event resolves to the
     /// `turn_context.payload.model` that immediately preceded it in the same
     /// rollout. Codex bumps the model mid-session if the user reassigns the
@@ -151,6 +161,11 @@ actor CodexUsageReader: UsageProvider {
         }
         await poll()
         coldScanComplete = true
+        // See ClaudeCodeUsageReader.start for why the post-backfill emit is
+        // explicit rather than left to the next `poll()`.
+        let (warmToday, warmPrev) = current()
+        lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
+        await onChange(warmToday, warmPrev)
         startFSWatcher()
         let interval = pollInterval
         pollTask = Task { [weak self] in
@@ -322,6 +337,28 @@ actor CodexUsageReader: UsageProvider {
         fileModels[url] = model
     }
 
+    nonisolated func currentWindows() -> [UsageWindow] { latestWindows.live() }
+
+    private func captureWindows(_ raw: Any?, observedAt: Date) {
+        guard let dict = raw as? [String: Any] else { return }
+        if let seen = latestWindowsAt, seen >= observedAt { return }
+        let windows = Self.rateLimitBuckets.compactMap { key -> UsageWindow? in
+            guard let bucket = dict[key] as? [String: Any],
+                let minutes = bucket["window_minutes"] as? Int,
+                let used = bucket["used_percent"] as? Double,
+                let resets = bucket["resets_at"] as? Double
+            else { return nil }
+            return UsageWindow(
+                minutes: minutes,
+                usedPercent: used,
+                resetsAt: Date(timeIntervalSince1970: resets)
+            )
+        }
+        if windows.isEmpty { return }
+        latestWindows.store(windows)
+        latestWindowsAt = observedAt
+    }
+
     /// Parses a `token_count` event line. Returns nil for any non-billable
     /// shape, dedup hit, or event outside the retain window.
     private func parseTokenCount(_ data: Data, url: URL, byteOffset: UInt64) -> UsageEvent? {
@@ -334,11 +371,11 @@ actor CodexUsageReader: UsageProvider {
         else { return nil }
 
         // Timestamp lives on the wrapper, ISO with fractional seconds. Reuse
-        // ClaudeCodeUsageReader.parseISODate — identical shape on Codex
+        // ClaudeCodeUsageReader.parseTimestamp — identical shape on Codex
         // rollouts, no need for a parallel implementation.
         let ts: Date
         if let tsStr = obj["timestamp"] as? String,
-            let parsed = ClaudeCodeUsageReader.parseISODate(tsStr)
+            let parsed = ClaudeCodeUsageReader.parseTimestamp(tsStr)
         {
             ts = parsed
         } else {
@@ -348,6 +385,8 @@ actor CodexUsageReader: UsageProvider {
             // retain window below.
             ts = Date()
         }
+
+        captureWindows(payload["rate_limits"], observedAt: ts)
 
         let cutoff = Date().addingTimeInterval(Double(-retainDays * 86400))
         if ts < cutoff { return nil }
@@ -516,6 +555,13 @@ actor CodexUsageReader: UsageProvider {
         let expectedHash = UsageStatePersistence.hashDataDir(codexDir)
         guard snapshot.claudeDataDirHash == expectedHash else { return false }
         guard snapshot.retainDays == retainDays else { return false }
+        // Without the persisted model map the only way to rebuild it is to
+        // re-read every byte already consumed, and the reader emits nothing
+        // until that finishes — measured at ~110 s against a 43 MB tree,
+        // because Codex writes single JSONL lines of ~175 KB. A cold scan of
+        // the same tree is ~2 s and rebuilds the map exactly, so a snapshot
+        // from before this field existed is better discarded than honoured.
+        guard let resume = snapshot.codexResume else { return false }
 
         let fm = FileManager.default
         let cutoffDate = Date().addingTimeInterval(Double(-retainDays * 86400))
@@ -564,72 +610,28 @@ actor CodexUsageReader: UsageProvider {
         fileMTimes = newMTimes
         dailyTotals = newDaily
         seenLineKeys = newKeys
-        // `fileModels` is not in the snapshot — it's derived from the
-        // `turn_context` lines preceding each `token_count`. After a restart
-        // that resumed past a turn_context but before its matching
-        // token_count, the next event would otherwise fall back to
-        // `defaultModel` and mis-price the turn. Backfill from disk now,
-        // before any ingest can fire.
-        for (url, offset) in newOffsets where offset > 0 {
-            if let model = scanLastModel(in: url, upTo: offset) {
-                fileModels[url] = model
-            }
-        }
+        applyResume(resume, resumingFrom: newOffsets)
         return true
     }
 
-    /// Read the file from byte 0 up to `upTo`, looking only for
-    /// `turn_context` lines. Returns the model id from the latest match (or
-    /// nil if no turn_context appeared before the offset). Used once per
-    /// loaded file at startup; cost is bounded by rollout size (~hundreds
-    /// of KB) and the byte-marker prefilter skips ~95% of lines without
-    /// JSON parse.
-    private func scanLastModel(in url: URL, upTo: UInt64) -> String? {
-        guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? fh.close() }
-        var remaining = upTo
-        var carry = Data()
-        var latest: String? = nil
-        while remaining > 0 {
-            let want = min(remaining, UInt64(UsageReaderShared.ingestChunkSize))
-            let chunk: Data
-            do {
-                chunk = try fh.read(upToCount: Int(want)) ?? Data()
-            } catch { break }
-            if chunk.isEmpty { break }
-            remaining -= UInt64(chunk.count)
-            let combined = carry + chunk
-            carry.removeAll(keepingCapacity: true)
-            var lineStart = combined.startIndex
-            for i in combined.indices {
-                if combined[i] == 0x0A {
-                    let lineData = combined.subdata(in: lineStart..<i)
-                    let lineCount = lineData.count
-                    if lineCount > 0 {
-                        let hasMarker = lineData.withUnsafeBytes {
-                            (raw: UnsafeRawBufferPointer) -> Bool in
-                            guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self)
-                            else { return false }
-                            return Self.bufferContainsTurnContextMarker(base, from: 0, to: lineCount)
-                        }
-                        if hasMarker,
-                            let obj = try? JSONSerialization.jsonObject(with: lineData)
-                                as? [String: Any],
-                            obj["type"] as? String == "turn_context",
-                            let payload = obj["payload"] as? [String: Any],
-                            let model = payload["model"] as? String, !model.isEmpty
-                        {
-                            latest = model
-                        }
-                    }
-                    lineStart = i + 1
-                }
-            }
-            if lineStart < combined.endIndex {
-                carry = combined.subdata(in: lineStart..<combined.endIndex)
-            }
+    /// Restores the state that has no cheap way back.
+    ///
+    /// The model map is what keeps a resume that landed past a `turn_context`
+    /// but before its matching `token_count` from pricing that turn against
+    /// `defaultModel`. Entries for files the offset reconciliation dropped are
+    /// skipped — they describe bytes this reader will no longer resume from.
+    private func applyResume(
+        _ resume: UsageStateSnapshot.CodexResume,
+        resumingFrom offsets: [URL: UInt64]
+    ) {
+        for entry in resume.fileModels {
+            let fileURL = URL(fileURLWithPath: entry.path)
+            guard offsets[fileURL] != nil else { continue }
+            fileModels[fileURL] = entry.model
         }
-        return latest
+        guard !resume.rateLimitWindows.isEmpty else { return }
+        latestWindows.store(resume.rateLimitWindows)
+        latestWindowsAt = resume.rateLimitWindowsAt
     }
 
     private func saveSnapshotIfDirty(force: Bool = false) {
@@ -663,6 +665,17 @@ actor CodexUsageReader: UsageProvider {
             return UsageStateSnapshot.DedupKey(key: key, day: dayFmt.string(from: day))
         }
 
+        let resume = UsageStateSnapshot.CodexResume(
+            fileModels: fileModels.map {
+                UsageStateSnapshot.FileModel(path: $0.key.path, model: $0.value)
+            },
+            // Raw, not `live()`: a bucket that expires between save and load
+            // is dropped on read anyway, and filtering here would throw away
+            // one that still has seconds left.
+            rateLimitWindows: latestWindows.load(),
+            rateLimitWindowsAt: latestWindowsAt
+        )
+
         let snapshot = UsageStateSnapshot(
             schemaVersion: UsageStateSnapshot.currentSchemaVersion,
             savedAt: now,
@@ -670,7 +683,8 @@ actor CodexUsageReader: UsageProvider {
             retainDays: retainDays,
             files: files,
             dailyTotals: daily,
-            dedupKeysToday: todayKeys
+            dedupKeysToday: todayKeys,
+            codexResume: resume
         )
         do {
             try UsageStatePersistence.save(snapshot, to: url)

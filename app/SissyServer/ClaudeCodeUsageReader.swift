@@ -27,6 +27,24 @@ final class AtomicIntCounter: @unchecked Sendable {
     func store(_ v: Int) { lock.withLock { value = v } }
 }
 
+/// Lock-protected window snapshot, read without entering the owning actor.
+///
+/// The aggregator reads these while a provider is mid-emit — that is, while
+/// the provider holds its own actor waiting on the emit callback. An `await`
+/// back into the provider there deadlocks both sides, so the read has to be
+/// synchronous, the same reason `filesWatched()` is nonisolated.
+final class AtomicWindows: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: [UsageWindow] = []
+    func load() -> [UsageWindow] { lock.withLock { value } }
+    func store(_ v: [UsageWindow]) { lock.withLock { value = v } }
+    /// Drops buckets whose reset has passed: a window past its reset
+    /// describes a period that no longer exists.
+    func live(now: Date = Date()) -> [UsageWindow] {
+        lock.withLock { value.filter { $0.resetsAt > now } }
+    }
+}
+
 actor ClaudeCodeUsageReader: UsageProvider {
     /// Stable provider id surfaced via `/stats`. The persistence URL is
     /// injected; this reader still writes the legacy `usage-state.json` path
@@ -224,18 +242,39 @@ actor ClaudeCodeUsageReader: UsageProvider {
         return Date(timeIntervalSince1970: TimeInterval(epoch) + frac)
     }
 
+    /// Parses a JSON timestamp, fast path first, Foundation for the shapes it
+    /// rejects by design: an offset such as `+00:00` in place of `Z`, or more
+    /// than three fractional digits. Both occur — Anthropic's usage endpoint
+    /// sends `2026-09-10T12:20:00.061389+00:00` — so every caller needs the
+    /// fallback, which is why it lives here rather than at each call site.
+    static func parseTimestamp(_ text: String) -> Date? {
+        parseISODate(text)
+            ?? isoFormatter.date(from: text)
+            ?? isoFormatterNoFrac.date(from: text)
+    }
+
+    private let limitsProbe: ClaudeLimitsProbe?
+
     init(
         claudeDir: URL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/projects"),
         retainDays: Int = 2,
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
-        pricingOverride: [String: ModelPricing]? = nil
+        pricingOverride: [String: ModelPricing]? = nil,
+        limitsProbe: ClaudeLimitsProbe? = nil
     ) {
         self.claudeDir = claudeDir
         self.retainDays = retainDays
         self.pollInterval = pollInterval
         self.persistenceURL = persistenceURL
         self.pricingOverride = pricingOverride
+        self.limitsProbe = limitsProbe
+    }
+
+    /// Claude Code keeps no limit state on disk, so the windows come from the
+    /// probe rather than from anything this reader parsed.
+    nonisolated func currentWindows() -> [UsageWindow] {
+        limitsProbe?.currentWindows() ?? []
     }
 
     func applyPriceCatalog(_ catalog: PriceCatalog) {
@@ -280,9 +319,16 @@ actor ClaudeCodeUsageReader: UsageProvider {
         await poll()
         // Cold backfill done: from here on `prev` is consistent with the
         // full in-window JSONL state, safe to expose to `pickState`. Order
-        // matters — set this before any further emit so the first
-        // post-backfill frame is the one that introduces `prev` to the UI.
+        // matters — set this before the emit below so that frame is the one
+        // that introduces `prev` to the UI.
         coldScanComplete = true
+        // Every backfill emit ran with `prev` still suppressed, and `poll()`
+        // re-emits only when JSONL actually changed. Without this emit an
+        // idle CLI leaves `Hub`'s cached frame built from a nil `prev`, so
+        // `pickState` cannot reach `trend` until the next turn writes a line.
+        let (warmToday, warmPrev) = current()
+        lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
+        await onChange(warmToday, warmPrev)
         startFSWatcher()
         let interval = pollInterval
         pollTask = Task { [weak self] in
@@ -511,16 +557,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
             let tsStr = obj["timestamp"] as? String
         else { return nil }
 
-        let ts: Date
-        if let fast = Self.parseISODate(tsStr) {
-            ts = fast
-        } else if let slow = Self.isoFormatter.date(from: tsStr)
-            ?? Self.isoFormatterNoFrac.date(from: tsStr)
-        {
-            ts = slow
-        } else {
-            return nil
-        }
+        guard let ts = Self.parseTimestamp(tsStr) else { return nil }
 
         let cutoff = Date().addingTimeInterval(Double(-retainDays * 86400))
         if ts < cutoff { return nil }

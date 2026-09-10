@@ -33,6 +33,12 @@ struct ServerConfig: Sendable, Codable {
     /// `"normal"` at lookup time, so a hand-edited typo degrades gracefully.
     var milestoneFrequency: String
     var providers: ProviderToggles
+    /// Whether the daemon reads Claude Code's OAuth token from the login
+    /// keychain to show that CLI's 5-hour and weekly subscription windows.
+    /// Off unless the user asks for it in Settings: turning it on is what
+    /// makes the one-time macOS keychain prompt expected rather than a
+    /// surprise from a background agent.
+    var claudeLimits: Bool
 
     static let defaults = ServerConfig(
         host: "127.0.0.1",
@@ -49,7 +55,8 @@ struct ServerConfig: Sendable, Codable {
         pricingOverride: nil,
         remotePricing: nil,
         milestoneFrequency: "normal",
-        providers: .defaults
+        providers: .defaults,
+        claudeLimits: false
     )
 
     static var defaultURL: URL {
@@ -85,6 +92,7 @@ struct ServerConfig: Sendable, Codable {
         if let v = obj["primaryMetric"] as? String { merged.primaryMetric = v }
         if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
         if let v = obj["milestoneFrequency"] as? String { merged.milestoneFrequency = v }
+        if let v = obj["claudeLimits"] as? Bool { merged.claudeLimits = v }
         if let prov = obj["providers"] as? [String: Any] {
             var toggles = ProviderToggles.defaults
             toggles.claudeCode = prov["claudeCode"] as? Bool
