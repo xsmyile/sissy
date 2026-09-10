@@ -1017,35 +1017,25 @@ func runClaudeLimitsParseTests() {
             .utf8
     )
     expect(
-        "profile plan strips the vendor prefix",
-        ClaudeProfileSource.parseProfile(profileBlob)?.plan,
-        "max"
-    )
-    expect(
-        "profile tier strips its own prefix",
-        ClaudeProfileSource.parseProfile(profileBlob)?.tier,
-        "max_5x"
+        "profile plan and tier both strip their vendor prefix",
+        ClaudeProfileSource.read(profileBlob),
+        .found(ClaudeProfileSource.Profile(plan: "max", tier: "max_5x"))
     )
 
     let apiKeyProfile = Data(#"{"hasCompletedOnboarding":true}"#.utf8)
     expect(
         "a profile with no oauthAccount names no plan",
-        ClaudeProfileSource.parseProfile(apiKeyProfile) == nil,
+        ClaudeProfileSource.read(apiKeyProfile) == .absent,
         true
     )
 
     let unprefixedProfile = Data(#"{"oauthAccount":{"organizationType":"team"}}"#.utf8)
+    // An unprefixed organizationType passes through, and a plan with no tier
+    // beside it must not synthesise one.
     expect(
-        "an unprefixed organizationType passes through",
-        ClaudeProfileSource.parseProfile(unprefixedProfile)?.plan,
-        "team"
-    )
-    // A plan with no tier beside it is the normal shape for anything but a
-    // metered subscription, and it must not synthesise one.
-    expect(
-        "a profile naming no tier reports none",
-        ClaudeProfileSource.parseProfile(unprefixedProfile)?.tier == nil,
-        true
+        "an unprefixed organizationType passes through without a tier",
+        ClaudeProfileSource.read(unprefixedProfile),
+        .found(ClaudeProfileSource.Profile(plan: "team", tier: nil))
     )
 
     // The file belongs to another program, so its value is narrowed to the
@@ -1053,7 +1043,7 @@ func runClaudeLimitsParseTests() {
     let shoutingProfile = Data(#"{"oauthAccount":{"organizationType":"claude_MAX"}}"#.utf8)
     expect(
         "a plan outside the token shape is refused",
-        ClaudeProfileSource.parseProfile(shoutingProfile) == nil,
+        ClaudeProfileSource.read(shoutingProfile) == .absent,
         true
     )
 
@@ -1063,9 +1053,11 @@ func runClaudeLimitsParseTests() {
         #"{"oauthAccount":{"organizationType":"claude_pro","userRateLimitTier":"Default Pro"}}"#
             .utf8
     )
-    let oddTier = ClaudeProfileSource.parseProfile(oddTierProfile)
-    expect("a refused tier keeps the plan", oddTier?.plan, "pro")
-    expect("a refused tier reports none", oddTier?.tier == nil, true)
+    expect(
+        "a refused tier keeps the plan and reports no tier",
+        ClaudeProfileSource.read(oddTierProfile),
+        .found(ClaudeProfileSource.Profile(plan: "pro", tier: nil))
+    )
 
     expect("plan token accepts snake_case", UsageReaderShared.sanitizedPlanToken("edu_plus"), "edu_plus")
     expect("plan token accepts digits", UsageReaderShared.sanitizedPlanToken("ent26"), "ent26")
@@ -1086,6 +1078,15 @@ func runClaudeLimitsParseTests() {
             String(repeating: "a", count: UsageReaderShared.maxPlanTokenLength + 1)
         ) == nil,
         true
+    )
+
+    // A payload that does not parse is not a claim that the account has no
+    // plan: treating it as one blanked the badge on any bad read, and the
+    // reading the source already holds is the better answer.
+    expect(
+        "unparseable bytes are unreadable, not absent",
+        ClaudeProfileSource.read(Data("{ truncated".utf8)),
+        .unreadable
     )
 
     // Measured shape of `~/.codex/auth.json`: the plan is a claim inside the
