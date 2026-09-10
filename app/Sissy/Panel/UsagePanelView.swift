@@ -8,9 +8,6 @@ struct UsagePanelView: View {
     let model: SissyModel
 
     private static let width: CGFloat = 340
-    /// Long enough to read as the eye closing, short enough not to lag the
-    /// power button the pose change follows.
-    private static let poseFadeDuration: TimeInterval = 0.25
     private static let footerTick: TimeInterval = 1
     private static let secondaryWindowOpacity: Double = 0.55
     private static let powerButtonSize: CGFloat = 26
@@ -51,13 +48,12 @@ struct UsagePanelView: View {
     private var header: some View {
         let menuHeader = model.menuSnapshot.header
         return HStack(spacing: 10) {
-            ZStack {
-                mascot(SissyModel.mascotAssetName)
-                    .opacity(menuHeader.isAsleep ? 0 : 1)
-                mascot(SissyModel.mascotSleepingAssetName)
-                    .opacity(menuHeader.isAsleep ? 1 : 0)
-            }
-            .animation(.easeInOut(duration: Self.poseFadeDuration), value: menuHeader.isAsleep)
+            PanelMascot(
+                isAsleep: menuHeader.isAsleep,
+                lastFrameAt: model.lastFrameAt,
+                motionEnabled: model.preferences.mascotMotion,
+                size: Self.mascotSize
+            )
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(menuHeader.title)
@@ -74,18 +70,6 @@ struct UsagePanelView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-    }
-
-    /// Both poses are drawn, one of them transparent, because opacity is what
-    /// animates: swapping the asset on one `Image` snaps, while fading a pair
-    /// of them carries the eye shut the way the menu bar's own frames do.
-    private func mascot(_ assetName: String) -> some View {
-        Image(assetName)
-            .renderingMode(.template)
-            .resizable()
-            .scaledToFit()
-            .frame(width: Self.mascotSize, height: Self.mascotSize)
-            .foregroundStyle(.secondary)
     }
 
     /// Starts and stops the background daemon. It replaces the old "server"
