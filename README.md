@@ -116,4 +116,4 @@ Named after my cat: she naps, judges, demands cuddles (A LOT of cuddles), and is
 
 ## License
 
-[MIT](./LICENSE).
+[MIT](./LICENSE). The Swift packages the daemon links carry their own terms, reproduced in [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md).

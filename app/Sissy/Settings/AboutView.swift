@@ -1,12 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// About tab: identity, version, and the two links worth having.
-/// Reads `CFBundleShortVersionString` + `CFBundleVersion` from the running
-/// bundle so the page stays accurate without any extra build wiring.
+/// About tab: identity, version, and the links worth having.
+/// Reads `CFBundleShortVersionString`, `CFBundleVersion` and
+/// `NSHumanReadableCopyright` from the running bundle so the page stays
+/// accurate without any extra build wiring.
 struct AboutView: View {
     private static let githubURL = URL(string: "https://github.com/xsmyile/sissy")!
     private static let issuesURL = URL(string: "https://github.com/xsmyile/sissy/issues/new")!
+    private static let authorURL = URL(string: "https://github.com/xsmyile")!
 
     private static let starGradient = LinearGradient(
         colors: [Color(red: 1.0, green: 0.84, blue: 0.25), Color(red: 0.98, green: 0.62, blue: 0.11)],
@@ -25,6 +27,7 @@ struct AboutView: View {
     )
 
     @State private var starBounce = 0
+    @State private var showsAcknowledgements = false
 
     var body: some View {
         VStack(spacing: 22) {
@@ -33,9 +36,10 @@ struct AboutView: View {
             VStack(spacing: 6) {
                 Text("Sissy")
                     .font(.system(size: 26, weight: .bold, design: .rounded))
-                Text("\(Self.shortVersion) (\(Self.buildNumber))")
+                Text("\(Bundle.main.shortVersion) (\(Bundle.main.buildNumber))")
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
                 Text("Tracks Claude Code and Codex spend\nfrom your Mac menu bar.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -45,32 +49,61 @@ struct AboutView: View {
             }
 
             VStack(spacing: 10) {
-                Button {
-                    NSWorkspace.shared.open(Self.githubURL)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "star.fill")
-                            .foregroundStyle(Self.starGradient)
-                            .symbolEffect(.bounce, value: starBounce)
-                        Text("Star Sissy on GitHub")
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.glassProminent)
-                .onHover { hovering in
-                    if hovering { starBounce += 1 }
-                }
+                starButton
 
                 Button("Report an issue") {
                     NSWorkspace.shared.open(Self.issuesURL)
                 }
                 .buttonStyle(.link)
             }
+
+            credit
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 32)
         .padding(.vertical, 34)
+        .sheet(isPresented: $showsAcknowledgements) { AcknowledgementsView() }
+    }
+
+    private var starButton: some View {
+        Button {
+            NSWorkspace.shared.open(Self.githubURL)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "star.fill")
+                    .foregroundStyle(Self.starGradient)
+                    .symbolEffect(.bounce, value: starBounce)
+                Text("Star Sissy on GitHub")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.glassProminent)
+        .onHover { hovering in
+            if hovering { starBounce += 1 }
+        }
+    }
+
+    private var credit: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Button("Made by Smyile") {
+                    NSWorkspace.shared.open(Self.authorURL)
+                }
+                .buttonStyle(.link)
+
+                Text(verbatim: "·")
+                    .foregroundStyle(.tertiary)
+
+                Button("Acknowledgements") { showsAcknowledgements = true }
+                    .buttonStyle(.link)
+            }
+            .font(.callout)
+
+            Text(Bundle.main.humanReadableCopyright)
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+        }
     }
 
     private var icon: some View {
@@ -94,13 +127,5 @@ struct AboutView: View {
         Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage())
             .resizable()
             .interpolation(.high)
-    }
-
-    private static var shortVersion: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "..."
-    }
-
-    private static var buildNumber: String {
-        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "..."
     }
 }
