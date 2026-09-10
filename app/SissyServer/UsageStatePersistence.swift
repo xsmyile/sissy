@@ -69,6 +69,13 @@ struct UsageStateSnapshot: Codable, Equatable {
         /// Event timestamp the windows came from, so a rollout older than the
         /// snapshot cannot overwrite them after a resume.
         var rateLimitWindowsAt: Date?
+        /// Last plan Codex named, for the same reason as the windows above: it
+        /// rides the CLI's own `rate_limits` block, so with offsets at EOF
+        /// there is nothing left to re-read and the panel row would sit
+        /// without a plan until the next turn. Optional within an already
+        /// optional block — a snapshot from before this field simply resumes
+        /// without one.
+        var plan: String?
     }
 
     struct FileModel: Codable, Equatable {

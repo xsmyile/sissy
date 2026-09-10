@@ -48,7 +48,7 @@ actor Hub {
         // empty, so a fallback-using client can distinguish "no providers
         // yet" from "field absent on an older daemon".
         let providers: [[String: Any]] = frame.providers.map { slice in
-            [
+            var row: [String: Any] = [
                 "id": slice.id,
                 "tokens": slice.tokens,
                 "cost": NSDecimalNumber(decimal: slice.cost).stringValue,
@@ -60,6 +60,10 @@ actor Hub {
                     ] as [String: Any]
                 },
             ]
+            // Absent rather than null for a provider that names no plan, same
+            // rule the `prev_*` pair below follows.
+            if let plan = slice.plan { row["plan"] = plan }
+            return row
         }
         var dict: [String: Any] = [
             "type": "frame",

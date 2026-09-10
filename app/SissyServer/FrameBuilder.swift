@@ -35,12 +35,23 @@ struct ProviderSlice: Sendable, Equatable, Codable {
     /// CLI that has not surfaced a window yet. The panel falls back to the
     /// share-of-today bar rather than rendering an empty gauge.
     let windows: [UsageWindow]
+    /// Vendor's own plan token (`max`, `plus`), nil when the provider names
+    /// none. Raw rather than a label so the app owns the wording — same
+    /// division as `id`, which the app turns into a display name.
+    let plan: String?
 
-    init(id: String, tokens: Int, cost: Decimal, windows: [UsageWindow] = []) {
+    init(
+        id: String,
+        tokens: Int,
+        cost: Decimal,
+        windows: [UsageWindow] = [],
+        plan: String? = nil
+    ) {
         self.id = id
         self.tokens = tokens
         self.cost = cost
         self.windows = windows
+        self.plan = plan
     }
 }
 

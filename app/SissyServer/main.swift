@@ -50,6 +50,11 @@ struct ScanEntry: Encodable {
     let filesWatched: Int
     let prevTokens: Int?
     let prevCost: String?
+    /// Plan the provider named for this account, so the value the panel badges
+    /// can be read without a WebSocket client. Absent for a provider that
+    /// names none — and for Codex also when the scan's one-second window
+    /// closed before its first `token_count` event.
+    let plan: String?
 }
 
 let args = CommandLine.arguments
@@ -148,7 +153,8 @@ if args.contains("--scan") {
                 cost: NSDecimalNumber(decimal: today.totalCost).stringValue,
                 filesWatched: p.filesWatched(),
                 prevTokens: prev?.totalTokens,
-                prevCost: prev.map { NSDecimalNumber(decimal: $0.totalCost).stringValue }
+                prevCost: prev.map { NSDecimalNumber(decimal: $0.totalCost).stringValue },
+                plan: p.currentPlan()
             )
             await p.stop()
         }
