@@ -65,17 +65,49 @@ enum UsageFormat {
     private static let minutesPerHour = 60
     private static let minutesPerDay = 1440
 
-    /// The vendor's plan token as words: `plus` → "Plus", `edu_plus` → "Edu
-    /// Plus". Derived rather than mapped for the same reason as
+    /// The plan as the badge says it, plus the limit tier when the tier
+    /// belongs to a different plan than the account's own.
+    ///
+    /// A Max account metered at `max_5x` reads as one thing, "Max 5x". A Team
+    /// seat metered at the same tier does not: "Team 5x" is a plan nobody
+    /// sells, so the badge stays "Team" and the tier goes to the row's
+    /// tooltip. Folding is therefore conditional on the tier naming the plan
+    /// it decorates.
+    static func plan(_ plan: String?, tier: String?) -> (label: String, tier: String?)? {
+        guard let plan, let label = words(plan) else { return nil }
+        let parts = tierParts(tier)
+        guard let base = parts.base else { return (label, nil) }
+        if base == plan {
+            return (parts.multiplier.map { "\(label) \($0)" } ?? label, nil)
+        }
+        guard let baseLabel = words(base) else { return (label, nil) }
+        return (label, parts.multiplier.map { "\(baseLabel) \($0)" } ?? baseLabel)
+    }
+
+    /// A vendor token as words: `plus` → "Plus", `edu_plus` → "Edu Plus".
+    /// Derived rather than mapped for the same reason as
     /// `windowLabel(minutes:)` — the two CLIs between them publish a dozen
     /// tiers and add to the list without asking, and a table here would show
     /// nothing for the one that arrived after the release. Both vendors emit
     /// lowercase `snake_case`, which the daemon enforces before the token
     /// reaches the wire.
-    static func planLabel(_ plan: String?) -> String? {
-        guard let plan else { return nil }
-        let words = plan.split(separator: "_").map { $0.capitalized }
-        return words.isEmpty ? nil : words.joined(separator: " ")
+    private static func words(_ token: String) -> String? {
+        let parts = token.split(separator: "_").map { $0.capitalized }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+
+    /// Splits a tier into the plan it meters and the multiplier on it:
+    /// `max_5x` → (`max`, "5x"), `pro` → (`pro`, nil). The multiplier is
+    /// recognised by shape rather than by a list, and stays verbatim — "5X"
+    /// is not how anyone writes it.
+    private static func tierParts(_ tier: String?) -> (base: String?, multiplier: String?) {
+        guard let tier, !tier.isEmpty else { return (nil, nil) }
+        guard let separator = tier.lastIndex(of: "_") else { return (tier, nil) }
+        let suffix = String(tier[tier.index(after: separator)...])
+        guard suffix.hasSuffix("x"), suffix.count > 1,
+            suffix.dropLast().allSatisfy(\.isNumber)
+        else { return (tier, nil) }
+        return (String(tier[tier.startIndex..<separator]), suffix)
     }
 
     static func providerName(_ id: String) -> String {

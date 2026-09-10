@@ -42,18 +42,46 @@ final class UsageFormatTests: XCTestCase {
     }
 
     func testPlanLabelCapitalisesAVendorToken() {
-        XCTAssertEqual(UsageFormat.planLabel("plus"), "Plus")
-        XCTAssertEqual(UsageFormat.planLabel("max"), "Max")
+        XCTAssertEqual(UsageFormat.plan("plus", tier: nil)?.label, "Plus")
+        XCTAssertEqual(UsageFormat.plan("max", tier: nil)?.label, "Max")
     }
 
     /// Derived rather than mapped, so a tier that ships after this release
     /// still reads as words instead of disappearing from the row.
     func testPlanLabelSpacesASnakeCaseTier() {
-        XCTAssertEqual(UsageFormat.planLabel("edu_plus"), "Edu Plus")
+        XCTAssertEqual(UsageFormat.plan("edu_plus", tier: nil)?.label, "Edu Plus")
     }
 
     func testPlanLabelOfNoPlanIsNoLabel() {
-        XCTAssertNil(UsageFormat.planLabel(nil))
+        XCTAssertNil(UsageFormat.plan(nil, tier: nil))
+    }
+
+    func testPlanFoldsTheMultiplierWhenTheTierNamesItsOwnPlan() {
+        let plan = UsageFormat.plan("max", tier: "max_20x")
+        XCTAssertEqual(plan?.label, "Max 20x")
+        XCTAssertNil(plan?.tier)
+    }
+
+    /// "Team 5x" is a plan nobody sells, so the seat keeps its own badge and
+    /// the tier it is metered at becomes the tooltip.
+    func testPlanKeepsTheTierApartWhenItNamesAnotherPlan() {
+        let plan = UsageFormat.plan("team", tier: "max_5x")
+        XCTAssertEqual(plan?.label, "Team")
+        XCTAssertEqual(plan?.tier, "Max 5x")
+    }
+
+    func testPlanIgnoresATierThatOnlyRepeatsThePlan() {
+        let plan = UsageFormat.plan("pro", tier: "pro")
+        XCTAssertEqual(plan?.label, "Pro")
+        XCTAssertNil(plan?.tier)
+    }
+
+    /// The multiplier is recognised by shape, so a suffix that is not one
+    /// stays part of the tier's name rather than being read as "10 times".
+    func testPlanTreatsANonMultiplierSuffixAsPartOfTheTier() {
+        let plan = UsageFormat.plan("team", tier: "business_edu")
+        XCTAssertEqual(plan?.label, "Team")
+        XCTAssertEqual(plan?.tier, "Business Edu")
     }
 
     func testResetLabelUsesAClockTimeLaterToday() throws {

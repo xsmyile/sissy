@@ -27,14 +27,16 @@ final class UsagePanelSnapshotTests: XCTestCase {
         _ tokens: Int,
         _ cost: String,
         windows: [DisplayFrame.UsageWindow] = [],
-        plan: String? = nil
+        plan: String? = nil,
+        planTier: String? = nil
     ) -> DisplayFrame.ProviderSlice {
         DisplayFrame.ProviderSlice(
             id: id,
             tokens: tokens,
             cost: Decimal(string: cost)!,
             windows: windows,
-            plan: plan
+            plan: plan,
+            planTier: planTier
         )
     }
 
@@ -90,6 +92,37 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("claude-code", 1000, "1.00")])
         )
         XCTAssertNil(snapshot.providers.first?.plan)
+    }
+
+    func testProviderRowFoldsTheTierIntoTheBadgeWhenItNamesThePlan() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice("claude-code", 1000, "1.00", plan: "max", planTier: "max_5x")
+            ])
+        )
+        XCTAssertEqual(snapshot.providers.first?.plan, "Max 5x")
+        XCTAssertNil(snapshot.providers.first?.planTier)
+    }
+
+    func testProviderRowCarriesAForeignTierSeparately() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice("claude-code", 1000, "1.00", plan: "team", planTier: "max_5x")
+            ])
+        )
+        XCTAssertEqual(snapshot.providers.first?.plan, "Team")
+        XCTAssertEqual(snapshot.providers.first?.planTier, "Max 5x")
+    }
+
+    /// A tier cannot arrive on its own: the daemon drops it when there is no
+    /// plan, and the decoder's own initialiser refuses the pairing too, so a
+    /// row can never badge limits it cannot attribute.
+    func testATierWithoutAPlanIsDiscarded() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("claude-code", 1000, "1.00", planTier: "max_5x")])
+        )
+        XCTAssertNil(snapshot.providers.first?.plan)
+        XCTAssertNil(snapshot.providers.first?.planTier)
     }
 
     // MARK: Totals

@@ -188,7 +188,7 @@ struct UsagePanelView: View {
                 Text(row.name)
                     .font(.system(size: 12, weight: .medium))
                 if let plan = row.plan {
-                    planBadge(plan)
+                    planBadge(plan, tier: row.planTier)
                 }
                 Spacer(minLength: 0)
                 Text("\(row.tokens) · \(row.cost)")
@@ -216,7 +216,10 @@ struct UsagePanelView: View {
     /// what says the word is an attribute of the account instead. It yields
     /// its width first — of the three things on this line, the plan is the
     /// one a reader can still infer once it is gone.
-    private func planBadge(_ plan: String) -> some View {
+    ///
+    /// `tier` is present only when the account is metered at some other
+    /// plan's limits, which is a sentence and not a badge.
+    private func planBadge(_ plan: String, tier: String?) -> some View {
         Text(plan)
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(.secondary)
@@ -225,6 +228,7 @@ struct UsagePanelView: View {
             .padding(.vertical, 1)
             .background(Capsule().fill(.quaternary))
             .layoutPriority(-1)
+            .help(tier.map { "\($0) rate limits" } ?? plan)
     }
 
     private func windowRow(
