@@ -64,9 +64,20 @@ actor ClaudeLimitsProbe {
         }
     }
 
+    /// Stops the poll loop and drops the windows it had published.
+    ///
+    /// Dropping them is the whole job. The aggregator rebuilds every slice
+    /// from `currentWindows()`, so a cancelled task publishes nothing new but
+    /// keeps its last answer on the wire: turning the setting off left the
+    /// gauges up until each bucket outlived its own reset — five hours for the
+    /// session window, a week for the other. `lastReported` goes with them so
+    /// turning the setting back on logs what it found instead of deduping
+    /// against a poll from before the stop.
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        windows.store([])
+        lastReported = nil
     }
 
     /// Logs `message` the first time this condition is seen, and again only
@@ -121,12 +132,21 @@ actor ClaudeLimitsProbe {
 
     /// The half of a poll that needs no keychain: one request against the
     /// usage endpoint, and the backoff its answer earns.
+    ///
+    /// The request is a suspension point `stop()` can land in, so its answer
+    /// is published only if the poll that asked for it is still wanted —
+    /// otherwise a reply that arrived a moment too late would restore the
+    /// windows `stop()` had just cleared. The test is the calling task's own
+    /// cancellation rather than `pollTask != nil`, because a quick off/on of
+    /// the setting leaves a *new* task in that property while this
+    /// continuation still belongs to the cancelled one.
     private func fetchWindows(
         using credentials: ClaudeCredentials,
         onRefresh: @Sendable @escaping () async -> Void
     ) async -> Duration {
         do {
             let fetched = try await fetch(token: credentials.accessToken)
+            guard !Task.isCancelled else { return Self.refreshInterval }
             let summary =
                 fetched
                 .map { "\($0.minutes)m \(Int($0.usedPercent.rounded()))%" }
