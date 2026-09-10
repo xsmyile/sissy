@@ -45,7 +45,8 @@ enum FrameDecoder {
                 id: id,
                 tokens: tokens,
                 cost: cost,
-                windows: decodeWindows(row["windows"])
+                windows: decodeWindows(row["windows"]),
+                plan: row["plan"] as? String
             )
         }
     }

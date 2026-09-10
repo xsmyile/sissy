@@ -187,6 +187,9 @@ struct UsagePanelView: View {
                     .frame(width: 7, height: 7)
                 Text(row.name)
                     .font(.system(size: 12, weight: .medium))
+                if let plan = row.plan {
+                    planBadge(plan)
+                }
                 Spacer(minLength: 0)
                 Text("\(row.tokens) · \(row.cost)")
                     .font(.system(size: 12))
@@ -206,6 +209,22 @@ struct UsagePanelView: View {
                 }
             }
         }
+    }
+
+    /// The account's plan, badged rather than set as plain text beside the
+    /// name: "Codex Plus" reads as a product OpenAI sells, and the pill is
+    /// what says the word is an attribute of the account instead. It yields
+    /// its width first — of the three things on this line, the plan is the
+    /// one a reader can still infer once it is gone.
+    private func planBadge(_ plan: String) -> some View {
+        Text(plan)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(.quaternary))
+            .layoutPriority(-1)
     }
 
     private func windowRow(

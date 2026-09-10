@@ -50,6 +50,25 @@ final class FrameDecoderTests: XCTestCase {
         XCTAssertEqual(frame.providers.first?.windows, [])
     }
 
+    func testDecodesProviderPlan() throws {
+        let payload = """
+            {"type":"frame","tokens":"26K","cost":"0.09","burn":"1.5K",
+             "primary":"26K","primary_label":"TOKENS","ts":1,
+             "providers":[{"id":"codex","tokens":26000,"cost":"0.0914","plan":"plus"}]}
+            """
+        let frame = try XCTUnwrap(FrameDecoder.decode(payload))
+        XCTAssertEqual(frame.providers.first?.plan, "plus")
+    }
+
+    /// The daemon omits the key rather than sending null, and a daemon from
+    /// before the field sends nothing at all — both have to read as "this
+    /// account named no plan" and not as a decode failure that drops the row.
+    func testProviderWithoutAPlanStillDecodes() throws {
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        XCTAssertEqual(frame.providers.count, 1)
+        XCTAssertNil(frame.providers.first?.plan)
+    }
+
     /// Cost crosses the wire as a canonical decimal string precisely so a
     /// sub-cent total survives; a `Double` hop here would drop precision.
     func testPrevCostRoundTripsLossless() throws {

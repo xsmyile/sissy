@@ -33,6 +33,10 @@ struct UsagePanelSnapshot: Equatable {
     struct ProviderRow: Equatable, Identifiable {
         let id: String
         let name: String
+        /// Subscription plan, already worded. Nil leaves the row's header at
+        /// the name alone — an API-key user has no plan to name, and a Codex
+        /// that has not taken a turn yet has not said which it is on.
+        let plan: String?
         let tokens: String
         let cost: String
         let share: Double
@@ -80,6 +84,7 @@ struct UsagePanelSnapshot: Equatable {
             ProviderRow(
                 id: slice.id,
                 name: UsageFormat.providerName(slice.id),
+                plan: UsageFormat.planLabel(slice.plan),
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
                 share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0,
