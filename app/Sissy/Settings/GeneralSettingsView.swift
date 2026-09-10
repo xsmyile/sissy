@@ -63,7 +63,8 @@ struct GeneralSettingsView: View {
             Section {
                 Toggle("Animate the mascot", isOn: mascotMotionBinding)
                 Text(
-                    "A blink or an ear twitch every few minutes, and nothing in between. "
+                    "A blink when new usage lands, in the menu bar and in the panel, "
+                        + "and the eye shutting while the server is away. Nothing in between. "
                         + "Follows the system's Reduce Motion setting."
                 )
                 .font(.callout)
