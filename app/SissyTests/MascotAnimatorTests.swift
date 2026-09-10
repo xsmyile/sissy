@@ -16,8 +16,8 @@ final class MascotAnimatorTests: XCTestCase {
 
     /// Hands the main actor over until the gesture has drawn something.
     ///
-    /// `play` only enqueues its playback task, so anything asserted straight
-    /// after it is asserted against the resting image the animator has not
+    /// `blink` and `setPose` only enqueue a playback task, so anything asserted
+    /// straight after them is asserted against the image the animator has not
     /// left yet — which is how an assertion about playback passes without any
     /// playback happening.
     private func waitForFirstFrame(
@@ -47,19 +47,20 @@ final class MascotAnimatorTests: XCTestCase {
 
     /// The frames are addressed by name, so nothing but loading them catches a
     /// catalogue that was regenerated with a different set.
-    func testEveryFrameOfEveryGestureLoadsFromTheCatalogue() throws {
+    func testEveryFrameAndBothRestingPosesLoadFromTheCatalogue() throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
+
         XCTAssertFalse(animator.isPlaying)
-        for motion in SissyMenuBarMotion.allCases {
-            XCTAssertTrue(animator.play(motion), "\(motion) refused to start")
-            animator.stop()
-        }
+        XCTAssertTrue(animator.blink())
+        animator.setPose(.asleep, animated: false)
+        animator.setPose(.awake, animated: false)
     }
 
     func testTheRestingImageIsInstalledAtTheRequestedSize() throws {
         let button = NSButton()
         _ = try makeAnimator(button)
+
         XCTAssertEqual(button.image?.size, NSSize(width: iconSize, height: iconSize))
         XCTAssertEqual(button.image?.isTemplate, true)
     }
@@ -69,7 +70,7 @@ final class MascotAnimatorTests: XCTestCase {
         let animator = try makeAnimator(button)
         let resting = button.image
 
-        XCTAssertTrue(animator.play(.blink))
+        XCTAssertTrue(animator.blink())
         await waitForFirstFrame(on: button, leaving: resting)
 
         animator.stop()
@@ -78,90 +79,119 @@ final class MascotAnimatorTests: XCTestCase {
         XCTAssertIdentical(button.image, resting)
     }
 
-    func testAGestureFinishesOnItsOwnAndLeavesTheAnimatorFree() async throws {
+    func testABlinkFinishesOnItsOwnAndLeavesTheAnimatorFree() async throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
         let resting = button.image
 
-        XCTAssertTrue(animator.play(.blink))
+        XCTAssertTrue(animator.blink())
         await waitForFirstFrame(on: button, leaving: resting)
         await waitUntilIdle(animator)
 
         XCTAssertIdentical(button.image, resting)
-        XCTAssertTrue(animator.play(.earTwitch), "a finished gesture left the animator busy")
+        XCTAssertTrue(animator.blink(), "a finished gesture left the animator busy")
         animator.stop()
     }
 
-    func testAGestureRequestedDuringPlaybackIsDropped() async throws {
+    func testABlinkRequestedDuringPlaybackIsDropped() async throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
         let resting = button.image
 
-        XCTAssertTrue(animator.play(.blink))
+        XCTAssertTrue(animator.blink())
         await waitForFirstFrame(on: button, leaving: resting)
 
-        XCTAssertFalse(animator.play(.earTwitch))
-        XCTAssertFalse(animator.play(.blink))
+        XCTAssertFalse(animator.blink())
     }
 
-    func testReduceMotionBlocksEveryGesture() throws {
+    func testTheClosingHalfLandsOnTheShutEyeAndRefusesBlinks() async throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        let awake = button.image
+
+        animator.setPose(.asleep)
+        await waitForFirstFrame(on: button, leaving: awake)
+        await waitUntilIdle(animator)
+        let afterClosing = button.image
+
+        XCTAssertFalse(animator.blink(), "a sleeping mascot blinked")
+        // Identity against the same animator's snapped pose: an animated
+        // transition that ended on a frame instead of the pose would differ.
+        animator.setPose(.awake, animated: false)
+        animator.setPose(.asleep, animated: false)
+        XCTAssertIdentical(button.image, afterClosing)
+    }
+
+    func testWakingUpPlaysTheOpeningHalfAndRestsAwake() async throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        let awake = button.image
+        animator.setPose(.asleep, animated: false)
+        let asleep = button.image
+
+        animator.setPose(.awake)
+        await waitForFirstFrame(on: button, leaving: asleep)
+        await waitUntilIdle(animator)
+
+        XCTAssertIdentical(button.image, awake)
+        XCTAssertTrue(animator.blink())
+        animator.stop()
+    }
+
+    /// The transition must not paint where it is going before it gets there:
+    /// the eye would flash shut, then close.
+    func testTheClosingHalfDoesNotStartFromTheShutEye() async throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        let awake = button.image
+        animator.setPose(.asleep, animated: false)
+        let asleep = button.image
+        animator.setPose(.awake, animated: false)
+
+        animator.setPose(.asleep)
+        await waitForFirstFrame(on: button, leaving: awake)
+
+        XCTAssertNotIdentical(button.image, asleep, "the eye flashed shut before closing")
+    }
+
+    func testAPoseChangeInterruptsARunningBlink() async throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        let awake = button.image
+
+        XCTAssertTrue(animator.blink())
+        await waitForFirstFrame(on: button, leaving: awake)
+        animator.setPose(.asleep)
+        await waitUntilIdle(animator)
+
+        XCTAssertEqual(animator.pose, .asleep)
+        XCTAssertNotIdentical(button.image, awake)
+    }
+
+    func testReduceMotionBlocksTheBlinkAndSnapsThePose() throws {
         let button = NSButton()
         let animator = try makeAnimator(button, reduceMotion: true)
+        let awake = button.image
 
-        for motion in SissyMenuBarMotion.allCases {
-            XCTAssertFalse(animator.play(motion))
-        }
+        XCTAssertFalse(animator.blink())
+
+        animator.setPose(.asleep)
+
         XCTAssertFalse(animator.isPlaying)
+        XCTAssertNotIdentical(button.image, awake)
     }
 
-    func testABlockedSurfaceStopsGesturesFromStarting() throws {
+    func testAnOpenMenuBlocksTheBlinkAndSnapsThePose() throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
         animator.canAnimate = { false }
-
-        XCTAssertFalse(animator.play(.blink))
-        XCTAssertFalse(animator.isPlaying)
-    }
-
-    func testSleepingSwapsTheRestingImageAndRefusesGestures() throws {
-        let button = NSButton()
-        let animator = try makeAnimator(button)
         let awake = button.image
 
-        animator.setPose(.asleep)
-        XCTAssertNotIdentical(button.image, awake)
-        for motion in SissyMenuBarMotion.allCases {
-            XCTAssertFalse(animator.play(motion), "\(motion) played while asleep")
-        }
-
-        animator.setPose(.awake)
-        XCTAssertIdentical(button.image, awake)
-        XCTAssertTrue(animator.play(.blink))
-    }
-
-    func testFallingAsleepInterruptsARunningGesture() async throws {
-        let button = NSButton()
-        let animator = try makeAnimator(button)
-        let awake = button.image
-
-        XCTAssertTrue(animator.play(.blink))
-        await waitForFirstFrame(on: button, leaving: awake)
+        XCTAssertFalse(animator.blink())
 
         animator.setPose(.asleep)
 
         XCTAssertFalse(animator.isPlaying)
         XCTAssertNotIdentical(button.image, awake)
-    }
-
-    func testTheOccasionalSchedulerReportsAndClearsItself() throws {
-        let button = NSButton()
-        let animator = try makeAnimator(button)
-        XCTAssertFalse(animator.isSchedulingOccasionalAnimations)
-
-        animator.startOccasionalAnimations(.earTwitch)
-        XCTAssertTrue(animator.isSchedulingOccasionalAnimations)
-
-        animator.stopOccasionalAnimations()
-        XCTAssertFalse(animator.isSchedulingOccasionalAnimations)
     }
 }
