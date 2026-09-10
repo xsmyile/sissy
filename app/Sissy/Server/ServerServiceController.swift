@@ -147,10 +147,10 @@ final class ServerServiceController {
         }
         if log.contains("config load failed") {
             return
-                "The daemon could not load its server configuration. Open Logs for the detailed error, then save preferences or restart the server."
+                "The daemon could not load its server configuration. Open logs from Settings for the detailed error, then save preferences or restart the server."
         }
         if log.contains("start failed") {
-            return "The daemon exited during startup. Open Logs for the detailed launch error."
+            return "The daemon exited during startup. Open logs from Settings for the detailed launch error."
         }
         return nil
     }
