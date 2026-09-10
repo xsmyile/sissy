@@ -6,8 +6,8 @@ import Foundation
 ///
 /// `prev` is emitted as non-nil only when every active provider has produced
 /// a non-nil `prev`. If any provider is still warming (e.g. a fresh Codex
-/// reader on the first poll after install) the aggregated `prev` is nil so
-/// `FrameBuilder.pickState` can't trip the `"trend"` branch on a
+/// reader on the first poll after install) the aggregated `prev` is nil, so
+/// the app shows no day-over-day delta rather than one measured against a
 /// half-populated yesterday.
 actor UsageAggregator {
     private struct Snapshot {

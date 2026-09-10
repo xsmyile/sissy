@@ -3,13 +3,12 @@ import Foundation
 
 /// Bootstraps the menubar app and leaves runtime ownership to dedicated
 /// coordinators: `SissyModel` owns app state and server actions,
-/// `StatusItemController` the native menu, `UsagePanelController` the popover.
+/// `StatusItemController` the status item, `UsagePanelController` the panel.
 /// The only window is the SwiftUI `Settings` scene, which opens itself.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model: SissyModel
 
-    private var mascotNotifier: MascotNotifier?
     private var statusController: StatusItemController?
     private var panelController: UsagePanelController?
 
@@ -30,18 +29,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let button = statusController?.statusButton else { return }
             panelController?.toggle(relativeTo: button)
         }
-
-        // Both surfaces anchor to the same status button, so a mood pop-up
-        // while either is open would fight it for the anchor.
-        let notifier = MascotNotifier(
-            model: model,
-            statusButtonProvider: { [weak statusController] in statusController?.statusButton },
-            menuIsOpenProvider: { [weak statusController, weak panelController] in
-                (statusController?.isMenuOpen ?? false) || (panelController?.isOpen ?? false)
-            }
-        )
-        notifier.start()
-        mascotNotifier = notifier
 
         let center = NotificationCenter.default
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {

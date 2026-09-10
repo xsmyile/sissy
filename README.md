@@ -6,7 +6,7 @@
 
 A menubar companion for **Claude Code** and **Codex**.
 
-Sissy watches your token meter and gets moodier the more you spend.
+Sissy keeps today's AI spend in your menu bar, across every CLI you use.
 
 Named after my cat: she naps, judges, demands cuddles (A LOT of cuddles), and is, objectively, fabulous.
 
@@ -36,18 +36,12 @@ Either way: launch Sissy (it lives in the menubar), then **Start Server** to beg
 
 ## Demo
 
-A cat sits in your menubar and keeps the day's spend one click away.
+A cat sits in your menu bar and keeps the day's spend one click away.
 
-Click the icon for a panel with the running total, the day-over-day delta, the next milestone, and a per-CLI split in each vendor's own colour:
+Click the icon for a panel with the running total, the day-over-day delta, each CLI's share, and its subscription rate-limit windows:
 
 <p align="center">
   <img src="assets/menu-bar.png" alt="Sissy menubar dropdown" width="300" />
-</p>
-
-When the mood shifts, a small popover slides in with Sissy's current vibe:
-
-<p align="center">
-  <img src="assets/pop-up.png" alt="Sissy mood popover" width="300" />
 </p>
 
 ## How it works

@@ -7,8 +7,7 @@ import SwiftUI
 /// A popover rather than a borderless `NSPanel` because it brings screen-edge
 /// repositioning and menubar anchoring for free, and `hasFullSizeContent` lets
 /// the hosted view own the whole surface including the chevron region. The
-/// status item stays an `NSStatusItem`, which is what keeps `MascotNotifier`'s
-/// button anchor working.
+/// status item stays an `NSStatusItem` so the panel has a button to anchor to.
 ///
 /// Click-outside dismissal is *not* free here — see `outsideClickMonitor`.
 @MainActor

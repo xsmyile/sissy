@@ -2,8 +2,7 @@ import Foundation
 import Observation
 
 /// Connects to the local Sissy server's `/ws` and feeds incoming frames
-/// into `SissyModel.currentFrame`. Keeps the menu bar icon in sync with the
-/// real mascot state instead of relying on a static placeholder.
+/// into `SissyModel.currentFrame`.
 ///
 /// Auto-reconnects on disconnect with a bounded exponential backoff so a
 /// missing or restarting server doesn't permanently break the UI.
@@ -14,7 +13,7 @@ final class WebSocketClient {
     /// Becomes true after the first successful WS handshake and never resets.
     /// Lets the menubar suppress the "offline" badge during the launch window
     /// before WS has had a chance to connect — otherwise the icon flickers
-    /// offline → online → frame-state in the first second of app launch.
+    /// offline → online in the first second of app launch.
     private(set) var hasEverConnected: Bool = false
 
     @ObservationIgnored private weak var model: SissyModel?
@@ -131,19 +130,6 @@ final class WebSocketClient {
         sendHello()
     }
 
-    /// Push the milestone-frequency preset to the daemon. Sent on
-    /// menubar-pick; the daemon also reads `milestone_frequency` from the
-    /// `hello` payload so a fresh connection reflects the current selection
-    /// without needing a separate round-trip.
-    func setMilestoneFrequency(_ value: String) {
-        guard let task else { return }
-        let payload: [String: Any] = [
-            "type": "set_milestone_frequency",
-            "value": value,
-        ]
-        send(payload, label: "set_milestone_frequency", on: task)
-    }
-
     /// Ask the daemon to read (or stop reading) Claude Code's OAuth token so
     /// it can publish that CLI's subscription windows. Also carried on
     /// `hello`, so a reconnect re-asserts the user's choice.
@@ -154,19 +140,6 @@ final class WebSocketClient {
             "claude_limits": enabled,
         ]
         send(payload, label: "set_claude_limits", on: task)
-    }
-
-    /// Pin the mascot to `state` on the daemon (sticky until cleared).
-    /// Passing nil clears the pin so the daemon resumes the computed state.
-    func setMascotPin(state: String?) {
-        guard let task else { return }
-        var payload: [String: Any] = ["type": "set_state"]
-        if let state {
-            payload["state"] = state
-        } else {
-            payload["state"] = "auto"
-        }
-        send(payload, label: "set_state", on: task)
     }
 
     private func sendHello() {
@@ -183,7 +156,6 @@ final class WebSocketClient {
             "type": "hello",
             "client": "mac-app",
             "primary_metric": metric,
-            "milestone_frequency": model.preferences.milestoneFrequency.rawValue,
             "claude_limits": model.preferences.claudeLimits,
         ]
         // Connection might be mid-handshake; the next reconnect re-sends.

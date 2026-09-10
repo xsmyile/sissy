@@ -4,7 +4,7 @@ import XCTest
 
 final class FrameDecoderTests: XCTestCase {
     private let fullFrame = """
-        {"type":"frame","ts":42,"tokens":"26K","cost":"0.09","burn":"1.5K","state":"trend",
+        {"type":"frame","ts":42,"tokens":"26K","cost":"0.09","burn":"1.5K",
          "primary":"26K","primary_label":"TOKENS",
          "providers":[{"id":"claude-code","tokens":26000,"cost":"0.0914"}],
          "prev_tokens":10000,"prev_cost":"0.0326"}
@@ -15,7 +15,6 @@ final class FrameDecoderTests: XCTestCase {
         XCTAssertEqual(frame.tokens, "26K")
         XCTAssertEqual(frame.cost, "0.09")
         XCTAssertEqual(frame.burn, "1.5K")
-        XCTAssertEqual(frame.state, "trend")
         XCTAssertEqual(frame.ts, 42)
         XCTAssertEqual(frame.primary, "26K")
         XCTAssertEqual(frame.primaryLabel, "TOKENS")
@@ -33,7 +32,7 @@ final class FrameDecoderTests: XCTestCase {
     /// renders the tightest limit first, so the decoder is what sorts.
     func testDecodesProviderWindowsShortestFirst() throws {
         let payload = """
-            {"type":"frame","tokens":"26K","cost":"0.09","burn":"1.5K","state":"code",
+            {"type":"frame","tokens":"26K","cost":"0.09","burn":"1.5K",
              "primary":"26K","primary_label":"TOKENS","ts":1,
              "providers":[{"id":"codex","tokens":26000,"cost":"0.0914","windows":[
                {"minutes":10080,"used_percent":8.0,"resets_at":1789549854},
@@ -89,7 +88,6 @@ final class FrameDecoderTests: XCTestCase {
         let frame = try XCTUnwrap(FrameDecoder.decode(#"{"type":"frame","tokens":"1K"}"#))
         XCTAssertEqual(frame.cost, FrameDecoder.placeholder)
         XCTAssertEqual(frame.burn, FrameDecoder.placeholder)
-        XCTAssertEqual(frame.state, "think")
         XCTAssertEqual(frame.primary, "1K")
         XCTAssertEqual(frame.primaryLabel, "TOKENS")
     }

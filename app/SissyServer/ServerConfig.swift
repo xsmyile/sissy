@@ -20,7 +20,6 @@ struct ServerConfig: Sendable, Codable {
     var codexDataDir: String
     var pollIntervalSeconds: Double
     var primaryMetric: String
-    var stateThresholds: StateThresholds
     var pricingOverride: [String: ModelPricing]?
     /// Whether the daemon fetches LiteLLM's rate table at runtime
     /// (`PriceCatalog`). `nil` means on — it's what keeps a newly launched
@@ -28,10 +27,6 @@ struct ServerConfig: Sendable, Codable {
     /// pricing to the tables compiled into the binary and make the daemon fully
     /// offline; `pricingOverride` still applies either way.
     var remotePricing: Bool?
-    /// `MilestoneFrequency` preset key. Drives the whole-dollar cost step;
-    /// see `MilestoneFrequency.presets`. Unknown values fall back to
-    /// `"normal"` at lookup time, so a hand-edited typo degrades gracefully.
-    var milestoneFrequency: String
     var providers: ProviderToggles
     /// Whether the daemon reads Claude Code's OAuth token from the login
     /// keychain to show that CLI's 5-hour and weekly subscription windows.
@@ -51,10 +46,8 @@ struct ServerConfig: Sendable, Codable {
         codexDataDir: "~/.codex/sessions",
         pollIntervalSeconds: 60.0,
         primaryMetric: "tokens",
-        stateThresholds: StateThresholds(),
         pricingOverride: nil,
         remotePricing: nil,
-        milestoneFrequency: "normal",
         providers: .defaults,
         claudeLimits: false
     )
@@ -91,19 +84,12 @@ struct ServerConfig: Sendable, Codable {
         if let v = obj["pollIntervalSeconds"] as? Double { merged.pollIntervalSeconds = v }
         if let v = obj["primaryMetric"] as? String { merged.primaryMetric = v }
         if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
-        if let v = obj["milestoneFrequency"] as? String { merged.milestoneFrequency = v }
         if let v = obj["claudeLimits"] as? Bool { merged.claudeLimits = v }
         if let prov = obj["providers"] as? [String: Any] {
             var toggles = ProviderToggles.defaults
             toggles.claudeCode = prov["claudeCode"] as? Bool
             toggles.codex = prov["codex"] as? Bool
             merged.providers = toggles
-        }
-        if let raw = obj["stateThresholds"],
-            let nested = try? JSONSerialization.data(withJSONObject: raw),
-            let decoded = try? JSONDecoder().decode(StateThresholds.self, from: nested)
-        {
-            merged.stateThresholds = decoded
         }
         if let raw = obj["pricingOverride"],
             let nested = try? JSONSerialization.data(withJSONObject: raw),
@@ -114,9 +100,8 @@ struct ServerConfig: Sendable, Codable {
         return merged
     }
 
-    /// Atomic write to disk. Used by runtime config-change paths (e.g.
-    /// menubar "Milestone frequency" picker) so the new value survives
-    /// daemon restarts. Pretty-printed + sorted-keys so the file stays
+    /// Atomic write to disk. Used by runtime config-change paths so a change
+    /// the app pushed survives daemon restarts. Pretty-printed + sorted-keys so the file stays
     /// hand-editable.
     static func save(_ config: ServerConfig, to url: URL = ServerConfig.defaultURL) throws {
         let dir = url.deletingLastPathComponent()

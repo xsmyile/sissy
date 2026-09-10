@@ -1,9 +1,9 @@
 import Foundation
 
-/// Everything numeric the usage panel renders, derived from one frame plus
-/// the milestone preset. Pure by construction: no AppKit, no clock, no model
-/// access, so the panel's arithmetic — shares, day-over-day delta, milestone
-/// progress — is testable without a live daemon.
+/// Everything numeric the usage panel renders, derived from one frame. Pure
+/// by construction: no AppKit, no clock, no model access, so the panel's
+/// arithmetic — shares, day-over-day delta — is testable without a live
+/// daemon.
 ///
 /// Totals come from the frame's raw `providers` slices rather than the
 /// daemon-formatted scalars, so the big number, the rows and the delta all
@@ -13,7 +13,6 @@ struct UsagePanelSnapshot: Equatable {
     let cost: String
     let burn: String
     let delta: TokenDelta?
-    let milestone: MilestoneProgress?
     let providers: [ProviderRow]
 
     /// Day-over-day change in tokens. Absent when the daemon hasn't shipped
@@ -29,12 +28,6 @@ struct UsagePanelSnapshot: Equatable {
         case up
         case down
         case flat
-    }
-
-    struct MilestoneProgress: Equatable {
-        let nextDollars: Int
-        let fraction: Double
-        let remaining: Decimal
     }
 
     struct ProviderRow: Equatable, Identifiable {
@@ -57,10 +50,7 @@ struct UsagePanelSnapshot: Equatable {
         let resetsAt: Date
     }
 
-    static func make(
-        frame: DisplayFrame,
-        milestoneFrequency: Preferences.MilestoneFrequency
-    ) -> Self {
+    static func make(frame: DisplayFrame) -> Self {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
         return Self(
@@ -68,7 +58,6 @@ struct UsagePanelSnapshot: Equatable {
             cost: frame.providers.isEmpty ? "$\(frame.cost)" : UsageFormat.cost(totalCost),
             burn: frame.burn,
             delta: makeDelta(today: totalTokens, prev: frame.prev),
-            milestone: makeMilestone(cost: totalCost, step: milestoneFrequency.costStep),
             providers: makeRows(frame.providers, totalTokens: totalTokens)
         )
     }
@@ -81,23 +70,6 @@ struct UsagePanelSnapshot: Equatable {
             return TokenDelta(percent: 0, direction: .flat)
         }
         return TokenDelta(percent: percent, direction: today > prev.tokens ? .up : .down)
-    }
-
-    /// Truncates toward zero to match `MilestoneTracker.dollars` in the
-    /// daemon: rounding here would put the panel's "next $500" a dollar away
-    /// from the crossing that actually fires the celebration.
-    private static func makeMilestone(cost: Decimal, step: Int) -> MilestoneProgress? {
-        guard step > 0 else { return nil }
-        let dollars = NSDecimalNumber(decimal: cost).doubleValue
-        guard dollars >= 0 else { return nil }
-        let crossed = Int(dollars) / step
-        let floor = Double(crossed * step)
-        let next = (crossed + 1) * step
-        return MilestoneProgress(
-            nextDollars: next,
-            fraction: (dollars - floor) / Double(step),
-            remaining: Decimal(next) - cost
-        )
     }
 
     private static func makeRows(

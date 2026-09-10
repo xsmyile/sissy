@@ -9,13 +9,7 @@ struct Preferences: Codable, Equatable {
     var serverHost: String = "127.0.0.1"
     var serverPort: Int = SissyPaths.defaultServerPort
     var authToken: String = ""
-    var costThresholdCode: Double = 20
-    var costThresholdGlow: Double = 100
-    var costThresholdAngry: Double = 200
-    var costThresholdTrendRatio: Double = 1.3
     var claudeLimits: Bool = false
-    var notifyOnMascotChange: Bool = true
-    var milestoneFrequency: MilestoneFrequency = .normal
 
     enum PrimaryMetric: String, Codable, CaseIterable, Identifiable {
         case tokens
@@ -31,87 +25,30 @@ struct Preferences: Codable, Equatable {
         }
     }
 
-    /// User-selectable milestone notification cadence. Wire values must
-    /// match `MilestoneFrequency.presets` in `app/SissyServer/SissyServer.swift`
-    /// — that table is the source of truth; this enum is a UI mirror.
-    enum MilestoneFrequency: String, Codable, CaseIterable, Identifiable {
-        case veryFrequent = "very_frequent"
-        case frequent
-        case normal
-        case sparse
-        case rare
-
-        var id: String { rawValue }
-
-        /// Menubar label.
-        var label: String {
-            switch self {
-            case .veryFrequent: return "Very frequent"
-            case .frequent: return "Frequent"
-            case .normal: return "Normal"
-            case .sparse: return "Sparse"
-            case .rare: return "Rare"
-            }
-        }
-
-        /// Whole-dollar spacing between milestone celebrations. Mirrors
-        /// `MilestoneFrequency.presets` in the daemon.
-        var costStep: Int {
-            switch self {
-            case .veryFrequent: return 5
-            case .frequent: return 10
-            case .normal: return 25
-            case .sparse: return 50
-            case .rare: return 100
-            }
-        }
-
-        /// Trailing parenthetical shown next to the label, e.g. "($25)".
-        var detail: String { "$\(costStep)" }
-    }
-
     init(
         primaryMetric: PrimaryMetric = .tokens,
         serverHost: String = "127.0.0.1",
         serverPort: Int = SissyPaths.defaultServerPort,
         authToken: String = "",
-        costThresholdCode: Double = 20,
-        costThresholdGlow: Double = 100,
-        costThresholdAngry: Double = 200,
-        costThresholdTrendRatio: Double = 1.3,
         claudeLimits: Bool = false,
-        notifyOnMascotChange: Bool = true,
-        milestoneFrequency: MilestoneFrequency = .normal
     ) {
         self.primaryMetric = primaryMetric
         self.serverHost = serverHost
         self.serverPort = serverPort
         self.authToken = authToken
-        self.costThresholdCode = costThresholdCode
-        self.costThresholdGlow = costThresholdGlow
-        self.costThresholdAngry = costThresholdAngry
-        self.costThresholdTrendRatio = costThresholdTrendRatio
         self.claudeLimits = claudeLimits
-        self.notifyOnMascotChange = notifyOnMascotChange
-        self.milestoneFrequency = milestoneFrequency
     }
 
-    /// Backwards-compatible decoder so a `preferences.json` that pre-dates a
-    /// newer field (e.g. `milestoneFrequency`) still loads with that field
-    /// defaulted, instead of forcing a wipe-and-restart on first launch.
+    /// Backwards-compatible decoder so a `preferences.json` written by an
+    /// older build still loads, with anything it predates defaulted, instead
+    /// of forcing a wipe-and-restart on first launch.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         primaryMetric = (try? c.decode(PrimaryMetric.self, forKey: .primaryMetric)) ?? .tokens
         serverHost = (try? c.decode(String.self, forKey: .serverHost)) ?? "127.0.0.1"
         serverPort = (try? c.decode(Int.self, forKey: .serverPort)) ?? SissyPaths.defaultServerPort
         authToken = (try? c.decode(String.self, forKey: .authToken)) ?? ""
-        costThresholdCode = (try? c.decode(Double.self, forKey: .costThresholdCode)) ?? 20
-        costThresholdGlow = (try? c.decode(Double.self, forKey: .costThresholdGlow)) ?? 100
-        costThresholdAngry = (try? c.decode(Double.self, forKey: .costThresholdAngry)) ?? 200
-        costThresholdTrendRatio = (try? c.decode(Double.self, forKey: .costThresholdTrendRatio)) ?? 1.3
         claudeLimits = (try? c.decode(Bool.self, forKey: .claudeLimits)) ?? false
-        notifyOnMascotChange = (try? c.decode(Bool.self, forKey: .notifyOnMascotChange)) ?? true
-        milestoneFrequency = (try? c.decode(MilestoneFrequency.self, forKey: .milestoneFrequency)) ?? .normal
     }
 
     // MARK: persistence
@@ -246,15 +183,7 @@ struct Preferences: Codable, Equatable {
         // common path. Keep this in sync with `ServerConfig.defaults`.
         dict["pollIntervalSeconds"] = Self.pollIntervalSecondsDefault
         dict["primaryMetric"] = primaryMetric.rawValue
-        dict["milestoneFrequency"] = milestoneFrequency.rawValue
         dict["claudeLimits"] = claudeLimits
-        dict["stateThresholds"] =
-            [
-                "code": costThresholdCode,
-                "glow": costThresholdGlow,
-                "angry": costThresholdAngry,
-                "trendRatio": costThresholdTrendRatio,
-            ] as [String: Any]
         guard
             let data = try? JSONSerialization.data(
                 withJSONObject: dict,
