@@ -17,14 +17,17 @@ struct UsagePanelView: View {
             + Date.now.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 
-    private var snapshot: UsagePanelSnapshot? {
-        model.currentFrame.map {
-            UsagePanelSnapshot.make(frame: $0, milestoneFrequency: model.preferences.milestoneFrequency)
-        }
+    private func makeSnapshot(_ frame: DisplayFrame) -> UsagePanelSnapshot {
+        UsagePanelSnapshot.make(
+            frame: frame,
+            milestoneFrequency: model.preferences.milestoneFrequency
+        )
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let live = model.liveFrame
+        let snapshot = live.map { makeSnapshot($0.frame) }
+        return VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
             if let snapshot {
@@ -40,7 +43,7 @@ struct UsagePanelView: View {
                 placeholder
             }
             Divider()
-            footer
+            footer(live)
         }
         .frame(width: Self.width)
     }
@@ -290,16 +293,21 @@ struct UsagePanelView: View {
 
     // MARK: Footer
 
-    private var footer: some View {
+    /// Carries the age of the frame only while one is live: the panel body
+    /// already says what it is waiting for, and repeating it in the footer
+    /// read as two problems.
+    private func footer(_ live: SissyModel.LiveFrame?) -> some View {
         HStack(spacing: 6) {
-            TimelineView(.periodic(from: .now, by: Self.footerTick)) { context in
-                Text(updatedLine(now: context.date))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
+            if let live {
+                TimelineView(.periodic(from: .now, by: Self.footerTick)) { context in
+                    Text("updated " + UsageFormat.age(context.date.timeIntervalSince(live.at)))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
 
-            if model.currentFrame?.devicePresent == true {
-                deviceChip
+                if live.frame.devicePresent {
+                    deviceChip
+                }
             }
 
             Spacer(minLength: 0)
@@ -321,13 +329,6 @@ struct UsagePanelView: View {
                 .font(.system(size: 11))
         }
         .foregroundStyle(.secondary)
-    }
-
-    /// Empty until the first frame lands: the panel body already says what it
-    /// is waiting for, and repeating it in the footer read as two problems.
-    private func updatedLine(now: Date) -> String {
-        guard let last = model.lastFrameAt else { return "" }
-        return "updated " + UsageFormat.age(now.timeIntervalSince(last))
     }
 
     /// `SettingsLink` is the only public way to open the `Settings` scene, and
