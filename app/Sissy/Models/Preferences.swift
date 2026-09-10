@@ -167,33 +167,40 @@ struct Preferences: Codable, Equatable {
         } else {
             prefs = Self()
         }
-        // Keychain is the source of truth for the bearer token. If it's
-        // populated, it overrides whatever's on disk; if it's empty and
-        // disk holds a legacy plaintext value, migrate up to Keychain on
-        // the next `save()`.
-        if let kc = KeychainStore.bearerToken, !kc.isEmpty {
-            prefs.authToken = kc
+        // `server.json` is the source of truth for the bearer token. When it
+        // has one it wins; when it doesn't, a legacy plaintext value here is
+        // kept and lands there on the next `writeServerConfig()`.
+        if let token = Self.serverConfigToken(), !token.isEmpty {
+            prefs.authToken = token
         }
         return prefs
     }
 
+    /// The bearer token as the daemon sees it.
+    ///
+    /// `sissy-serverd` reads `server.json` unattended at boot, so the token
+    /// has to be readable from disk by a background agent with nobody there
+    /// to answer a prompt — which is why that file is written 0600 and is the
+    /// only copy. A duplicate in the login keychain used to exist and bought
+    /// nothing: whoever can read a 0600 file owned by this user is the same
+    /// principal whose keychain is already unlocked, and the per-item ACL it
+    /// needed made macOS re-prompt whenever the app's code signature changed.
+    private static func serverConfigToken() -> String? {
+        let url = appSupportDir().appendingPathComponent(serverConfigFileName)
+        guard let data = try? Data(contentsOf: url),
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return obj["authToken"] as? String
+    }
+
     func save() {
-        // Move the bearer token to Keychain so plaintext disk never
-        // outlives the migration boundary. Daemon still reads from
-        // server.json (see `writeServerConfig`), which is written with
-        // 0600 perms so a same-user process is still the only thing that
-        // can read it.
+        // This file is 0644; `server.json` is 0600. Keep the token out of
+        // here, but only once the 0600 file actually holds it — a `save()`
+        // that runs before its paired `writeServerConfig()` would otherwise
+        // drop a freshly generated token on the floor.
         var copy = self
-        if !authToken.isEmpty {
-            // Only drop the plaintext disk copy once the Keychain actually holds
-            // the token. If the Keychain is locked/unavailable, keep the disk
-            // fallback (KeychainStore documents this) so the app can still load
-            // its own token next launch instead of silently losing it.
-            if KeychainStore.setBearerToken(authToken) {
-                copy.authToken = ""
-            } else {
-                NSLog("sissy: keychain write failed; retaining token in preferences.json as fallback")
-            }
+        if !authToken.isEmpty, Self.serverConfigToken() == authToken {
+            copy.authToken = ""
         }
         let url = Self.appSupportDir().appendingPathComponent(Self.fileName)
         guard let data = try? JSONEncoder().encode(copy) else {
