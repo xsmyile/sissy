@@ -18,7 +18,6 @@ final class UsagePanelSnapshotTests: XCTestCase {
             ts: 0,
             primary: tokens,
             primaryLabel: "TOKENS",
-            devicePresent: false,
             milestone: nil,
             providers: providers,
             prev: prev

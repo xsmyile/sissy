@@ -200,97 +200,6 @@ final class SissyModel {
         }
     }
 
-    var pairingServerActionTitle: String {
-        if serverToggleInFlight {
-            return serverToggleLabel.replacingOccurrences(of: "...", with: " Server...")
-        }
-        if serverService.isTransitioning {
-            return serverService.transitionLabel.replacingOccurrences(of: "...", with: " Server...")
-        }
-        if serverService.requiresApproval {
-            return "Open Login Items Settings"
-        }
-        if serverService.isRegistered || serverHealth.status.isReachable {
-            return "Restart Server"
-        }
-        return "Start Server"
-    }
-
-    var canRunPairingServerAction: Bool {
-        serverService.isAvailable && !serverToggleInFlight && !serverService.isTransitioning
-    }
-
-    var pairingServerStatusText: String {
-        if !serverService.isAvailable {
-            return "The bundled server is unavailable."
-        }
-        if serverService.requiresApproval {
-            return "macOS needs Login Items approval before the server can run."
-        }
-        if serverToggleInFlight || serverService.isTransitioning {
-            return "Applying the server configuration."
-        }
-        switch serverHealth.status {
-        case .up, .usageReaderEmpty:
-            return "The server is running."
-        case .down:
-            return "The server is stopped."
-        case .unknown:
-            return "Checking the server."
-        }
-    }
-
-    func applyPairingServerConfiguration() {
-        if serverToggleInFlight || serverService.isTransitioning { return }
-        if serverService.requiresApproval && serverService.isAvailable {
-            serverService.openLoginItemsSettings()
-            return
-        }
-        if !serverService.isAvailable { return }
-
-        let shouldRestart = serverService.isRegistered || serverHealth.status.isReachable
-        serverToggleInFlight = true
-        serverToggleLabel = shouldRestart ? "Restarting..." : "Starting..."
-        serverToggleTarget = .on
-
-        Task { [weak self] in
-            guard let self else { return }
-            defer {
-                self.serverToggleInFlight = false
-                self.serverToggleLabel = ""
-                self.serverToggleTarget = nil
-            }
-
-            let bookmark = serverService.errorLogBookmark()
-            let port = preferences.serverPort
-            do {
-                ensureAuthToken()
-                savePreferences()
-                if shouldRestart {
-                    try await serverService.stop {
-                        let status = await self.serverHealth.refreshNow()
-                        return !status.isReachable
-                    }
-                    await serverHealth.refreshNow()
-                }
-                try await serverService.start {
-                    let status = await self.serverHealth.refreshNow()
-                    return status.isReachable
-                }
-                let status = await serverHealth.refreshNow()
-                webSocketClient.reconnect()
-                if !status.isReachable,
-                    let hint = serverService.startFailureHint(since: bookmark, port: port)
-                {
-                    await showError(title: "Server update failed", message: hint)
-                }
-            } catch {
-                let verb = shouldRestart ? "Restart" : "Start"
-                await showError(title: "\(verb) failed", message: error.localizedDescription)
-            }
-        }
-    }
-
     func selectMetric(_ metric: Preferences.PrimaryMetric) {
         guard metric != preferences.primaryMetric else { return }
         preferences.primaryMetric = metric
@@ -313,15 +222,6 @@ final class SissyModel {
     func clearMascotPin() {
         pinnedMascot = nil
         webSocketClient.setMascotPin(state: nil)
-    }
-
-    func setDeviceSupport(_ enabled: Bool) {
-        guard enabled != preferences.deviceSupport else { return }
-        preferences.deviceSupport = enabled
-        savePreferences()
-        if !enabled, settingsTab == .device {
-            settingsTab = .general
-        }
     }
 
     func setClaudeLimits(_ enabled: Bool) {
@@ -481,9 +381,6 @@ struct DisplayFrame: Codable, Equatable {
     var ts: Int
     var primary: String
     var primaryLabel: String
-    /// True when daemon has at least one firmware sink attached. Gates the
-    /// "device connected" indicator in the Device settings tab.
-    var devicePresent: Bool
     /// Set by the daemon on the single frame that crosses a whole-dollar
     /// cost boundary. Format: `"cost:<D>"`. Cleared on every other frame.
     /// The notifier diffs on this and pops a milestone celebration when it

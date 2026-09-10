@@ -5,7 +5,7 @@ import XCTest
 final class FrameDecoderTests: XCTestCase {
     private let fullFrame = """
         {"type":"frame","ts":42,"tokens":"26K","cost":"0.09","burn":"1.5K","state":"trend",
-         "primary":"26K","primary_label":"TOKENS","device_present":true,
+         "primary":"26K","primary_label":"TOKENS",
          "providers":[{"id":"claude-code","tokens":26000,"cost":"0.0914"}],
          "prev_tokens":10000,"prev_cost":"0.0326"}
         """
@@ -19,7 +19,6 @@ final class FrameDecoderTests: XCTestCase {
         XCTAssertEqual(frame.ts, 42)
         XCTAssertEqual(frame.primary, "26K")
         XCTAssertEqual(frame.primaryLabel, "TOKENS")
-        XCTAssertTrue(frame.devicePresent)
     }
 
     func testDecodesProviderSlice() throws {
@@ -35,7 +34,7 @@ final class FrameDecoderTests: XCTestCase {
     func testDecodesProviderWindowsShortestFirst() throws {
         let payload = """
             {"type":"frame","tokens":"26K","cost":"0.09","burn":"1.5K","state":"code",
-             "primary":"26K","primary_label":"TOKENS","device_present":true,"ts":1,
+             "primary":"26K","primary_label":"TOKENS","ts":1,
              "providers":[{"id":"codex","tokens":26000,"cost":"0.0914","windows":[
                {"minutes":10080,"used_percent":8.0,"resets_at":1789549854},
                {"minutes":300,"used_percent":25.5,"resets_at":1789006037}]}]}
@@ -93,7 +92,6 @@ final class FrameDecoderTests: XCTestCase {
         XCTAssertEqual(frame.state, "think")
         XCTAssertEqual(frame.primary, "1K")
         XCTAssertEqual(frame.primaryLabel, "TOKENS")
-        XCTAssertFalse(frame.devicePresent)
     }
 
     func testNonFrameMessageIsRejected() {

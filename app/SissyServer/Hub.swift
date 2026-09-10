@@ -4,15 +4,8 @@ protocol FrameSink: Sendable, AnyObject {
     func deliver(_ payload: Data) async
 }
 
-enum SinkKind: Sendable {
-    case unknown
-    case app
-    case device
-}
-
 actor Hub {
     private var sinks: [ObjectIdentifier: any FrameSink] = [:]
-    private var kinds: [ObjectIdentifier: SinkKind] = [:]
     private var lastFramePayload: Data?
     private var lastFrameAt: Date?
     private(set) var lastFrame: FrameData?
@@ -20,7 +13,6 @@ actor Hub {
     func register(_ sink: any FrameSink) async {
         let id = ObjectIdentifier(sink)
         sinks[id] = sink
-        kinds[id] = .unknown
         if let payload = lastFramePayload {
             await sink.deliver(payload)
         }
@@ -29,25 +21,14 @@ actor Hub {
     func unregister(_ sink: any FrameSink) {
         let id = ObjectIdentifier(sink)
         sinks.removeValue(forKey: id)
-        kinds.removeValue(forKey: id)
-    }
-
-    func setKind(_ sink: any FrameSink, kind: SinkKind) {
-        let id = ObjectIdentifier(sink)
-        guard sinks[id] != nil else { return }
-        kinds[id] = kind
-    }
-
-    func hasDevice() -> Bool {
-        kinds.values.contains(where: { $0 == .device })
     }
 
     func broadcast(_ frame: FrameData) async {
         lastFrameAt = Date()
-        let payload = encode(frame, devicePresent: hasDevice())
+        let payload = encode(frame)
         // Cache a milestone-stripped copy for replays (new sink connect via
-        // `register`, device-presence flip via `rebroadcastPresence`, app
-        // process restart). The live broadcast below is the authoritative
+        // `register`, app process restart). The live broadcast below is the
+        // authoritative
         // delivery for that crossing — replaying the same milestone string
         // later would refire the celebration pop-up for an already-seen
         // event. Steady-state frames (milestone == nil) skip the extra
@@ -69,29 +50,10 @@ actor Hub {
                 prevCost: frame.prevCost
             )
             lastFrame = cached
-            lastFramePayload = encode(cached, devicePresent: hasDevice())
+            lastFramePayload = encode(cached)
         }
-        // Fire deliveries concurrently. A slow sink (firmware over WiFi)
-        // used to serialize the fast sink (app over localhost) behind it,
-        // so the menubar icon could lag tens-to-hundreds of milliseconds
-        // for no reason other than dictionary iteration order. TaskGroup
-        // gives each sink its own awaitable Task and joins on group exit.
-        let snapshot = Array(sinks.values)
-        await withTaskGroup(of: Void.self) { group in
-            for sink in snapshot {
-                group.addTask { await sink.deliver(payload) }
-            }
-        }
-    }
-
-    /// Re-emit the cached last frame with a refreshed `device_present` flag.
-    /// Used after a sink's kind is resolved post-hello or after a sink
-    /// disconnects, so the menubar header flips immediately instead of
-    /// waiting for the next usage poll to fire a new frame.
-    func rebroadcastPresence() async {
-        guard let frame = lastFrame else { return }
-        let payload = encode(frame, devicePresent: hasDevice())
-        lastFramePayload = payload
+        // Fire deliveries concurrently rather than in dictionary iteration
+        // order, so one slow sink cannot hold up the rest.
         let snapshot = Array(sinks.values)
         await withTaskGroup(of: Void.self) { group in
             for sink in snapshot {
@@ -103,7 +65,7 @@ actor Hub {
     func connectedCount() -> Int { sinks.count }
     func lastFrameTimestamp() -> Date? { lastFrameAt }
 
-    private func encode(_ frame: FrameData, devicePresent: Bool) -> Data {
+    private func encode(_ frame: FrameData) -> Data {
         // Per-provider slices land on the wire as raw `{id, tokens, cost}`
         // dicts; cost goes through `NSDecimalNumber.stringValue` so the app
         // can `Decimal(string:)` it back lossless. Always emitted, even when
@@ -131,7 +93,6 @@ actor Hub {
             "state": frame.state,
             "primary": frame.primary,
             "primary_label": frame.primaryLabel,
-            "device_present": devicePresent,
             "ts": Int(Date().timeIntervalSince1970),
             "providers": providers,
         ]

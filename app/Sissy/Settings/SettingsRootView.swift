@@ -1,17 +1,15 @@
 import SwiftUI
 
 /// Tab the settings window shows. Held on `SissyModel` rather than in local
-/// `@State` so a surface that opens the window can aim it — the panel's device
-/// button lands on `.device` instead of dropping the user on General.
+/// `@State` so a surface that opens the window can aim it, rather than
+/// dropping the user on whichever tab was last selected.
 enum SettingsTab: Hashable {
     case general
-    case device
     case about
 
     var title: String {
         switch self {
         case .general: return "General"
-        case .device: return "Device"
         case .about: return "About"
         }
     }
@@ -19,7 +17,6 @@ enum SettingsTab: Hashable {
     var symbol: String {
         switch self {
         case .general: return "gearshape"
-        case .device: return "cpu"
         case .about: return "info.circle"
         }
     }
@@ -42,22 +39,12 @@ struct SettingsRootView: View {
     /// and in Mission Control.
     private static let windowTitle = "Sissy Settings"
 
-    /// The OLED companion is opt-in hardware, so its tab is absent until the
-    /// user asks for it — or until one is actually reporting, which keeps an
-    /// already-paired device reachable without hunting for the switch.
-    private var showsDeviceTab: Bool {
-        model.preferences.deviceSupport || model.currentFrame?.devicePresent == true
-    }
-
     /// `fixedSize` is what makes the window follow the selected tab: without a
     /// definite ideal height the settings window keeps whatever height the
     /// tallest tab established, and About then floats in the leftover space.
     var body: some View {
         TabView(selection: $model.settingsTab) {
             tab(.general) { GeneralSettingsView(model: model) }
-            if showsDeviceTab {
-                tab(.device) { DeviceSettingsView(model: model) }
-            }
             tab(.about) { AboutView() }
         }
         .frame(width: Self.width)
