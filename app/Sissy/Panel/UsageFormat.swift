@@ -72,27 +72,4 @@ enum UsageFormat {
         default: return id
         }
     }
-
-    /// Header subtitle for the menubar pull-down. Sums the provider slices the
-    /// daemon shipped so the total matches the panel's per-provider rows to
-    /// the penny. Burn rate isn't per-provider, so it passes through
-    /// daemon-formatted.
-    static func headerSubtitle(
-        providers: [DisplayFrame.ProviderSlice],
-        burn: String
-    ) -> String? {
-        var parts: [String] = []
-        let totalTokens = providers.reduce(0) { $0 + $1.tokens }
-        let totalCost = providers.reduce(Decimal(0)) { $0 + $1.cost }
-        if totalTokens > 0 {
-            parts.append("\(tokens(totalTokens)) tok")
-        }
-        if totalCost > 0 || !providers.isEmpty {
-            parts.append(cost(totalCost))
-        }
-        if burn != FrameDecoder.placeholder {
-            parts.append("\(burn)/h")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
 }
