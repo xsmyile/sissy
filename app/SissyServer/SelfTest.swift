@@ -332,6 +332,7 @@ func runSelfTest() {
     runCodexModelBackfillTest()
     runCodexRateLimitTest()
     runClaudeLimitsParseTests()
+    runKeychainTimeoutTests()
     runAggregatorEmitTest()
 
     print("=== FSWatcher ===")
@@ -1200,6 +1201,47 @@ func runClaudeLimitsParseTests() {
 
     let partial: [String: Any] = ["five_hour": ["utilization": 5.0]]
     expect("a bucket without a reset is dropped", ClaudeLimitsProbe.parse(partial).count, 0)
+}
+
+/// The keychain lookup has to be abandonable: `SecItemCopyMatching` parks for
+/// as long as macOS takes to authorize, which can mean an unanswered dialog,
+/// and a poll loop waiting on it goes silent. The first attempt raced the
+/// lookup against a sleeper inside a task group — which cannot bound anything,
+/// since a group awaits every child before returning — so the budget only ever
+/// described a wait already served in full. The keychain is the external I/O
+/// this test stands in for; everything else is the real path.
+///
+/// Order matters: abandoning a lookup leaves the single in-flight slot taken
+/// until the fake returns, so the delivering case runs first.
+func runKeychainTimeoutTests() {
+    print("=== ClaudeCredentialsStore.loadOffPool ===")
+
+    let delivered = DispatchSemaphore(value: 0)
+    let answered = TestBox<Bool>(false)
+    Task {
+        let result = await ClaudeCredentialsStore.loadOffPool(timeout: .seconds(5)) { .absent }
+        if case .absent = result { answered.value = true }
+        delivered.signal()
+    }
+    delivered.wait()
+    expect("a lookup that answers is delivered", answered.value, true)
+
+    let abandoned = DispatchSemaphore(value: 0)
+    let elapsed = TestBox<TimeInterval>(0)
+    let gaveUp = TestBox<Bool>(false)
+    Task {
+        let started = Date()
+        let result = await ClaudeCredentialsStore.loadOffPool(timeout: .milliseconds(200)) {
+            Thread.sleep(forTimeInterval: 1.5)
+            return .absent
+        }
+        elapsed.value = Date().timeIntervalSince(started)
+        if case .timedOut = result { gaveUp.value = true }
+        abandoned.signal()
+    }
+    abandoned.wait()
+    expect("a lookup that parks is abandoned", gaveUp.value, true)
+    expect("abandoning does not wait for the lookup", elapsed.value < 1.0, true)
 }
 
 /// Codex ships its subscription limits on the same `token_count` event the
