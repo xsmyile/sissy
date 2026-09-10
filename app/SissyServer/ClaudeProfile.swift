@@ -61,6 +61,18 @@ final class ClaudeProfileSource: @unchecked Sendable {
         let tier: String?
     }
 
+    /// Outcome of reading the config file, on the same reasoning as
+    /// `ClaudeCredentialsLookup`: naming no plan and answering nothing are
+    /// different states. The first is an account without one — an API-key
+    /// user, or a CLI signed out — and clears the plan on the row. The second
+    /// is a payload this type could not parse, which is no information at
+    /// all, and must leave the last good reading where it is.
+    enum Reading: Sendable, Equatable {
+        case found(Profile)
+        case absent
+        case unreadable
+    }
+
     init(url: URL = ClaudeProfileSource.defaultURL) {
         self.url = url
     }
@@ -76,8 +88,11 @@ final class ClaudeProfileSource: @unchecked Sendable {
     func currentPlanTier() -> String? { lock.withLock { profile?.tier } }
 
     /// Re-reads the file when it has changed on disk and the floor has
-    /// passed. A file that has stopped naming a plan clears the held one: a
-    /// signed-out CLI should not leave a stale plan on the row.
+    /// passed. A file that has stopped naming a plan clears the held one — a
+    /// signed-out CLI should not leave a stale plan on the row — while a
+    /// payload that would not parse leaves both the reading and the
+    /// bookkeeping untouched, so the next poll tries again instead of
+    /// treating a failed read as an answer.
     func refresh(now: Date = Date()) {
         let (parsedBefore, knownMTime, dueAt) = lock.withLock {
             (lastParsedAt != .distantPast, lastMTime, lastParsedAt + Self.minimumReparseInterval)
@@ -88,28 +103,32 @@ final class ClaudeProfileSource: @unchecked Sendable {
         else { return }
         if parsedBefore && abs(mtime - knownMTime) < UsageReaderShared.mtimeTolerance { return }
         guard let data = try? Data(contentsOf: url) else { return }
-        let parsed = Self.parseProfile(data)
+        let reading = Self.read(data)
+        guard reading != .unreadable else { return }
         lock.withLock {
-            profile = parsed
+            profile = if case .found(let found) = reading { found } else { nil }
             lastParsedAt = now
             lastMTime = mtime
         }
     }
 
-    /// Pulls the plan and its tier out of a `.claude.json` payload. Returns
-    /// nil for every shape that does not name a plan, so a config file the CLI
-    /// reorganises costs the panel a badge rather than showing a wrong one.
-    static func parseProfile(_ data: Data) -> Profile? {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let account = root["oauthAccount"] as? [String: Any],
+    /// Reads a `.claude.json` payload. A shape that parses but names no plan
+    /// is `.absent`, so a config file the CLI reorganises costs the panel a
+    /// badge rather than showing a wrong one; bytes that are not a JSON object
+    /// at all are `.unreadable`, which is not the same claim.
+    static func read(_ data: Data) -> Reading {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .unreadable
+        }
+        guard let account = root["oauthAccount"] as? [String: Any],
             let plan = UsageReaderShared.sanitizedPlanToken(
                 stripping(planPrefix, from: account["organizationType"] as? String)
             )
-        else { return nil }
+        else { return .absent }
         let tier = UsageReaderShared.sanitizedPlanToken(
             stripping(tierPrefix, from: account["userRateLimitTier"] as? String)
         )
-        return Profile(plan: plan, tier: tier)
+        return .found(Profile(plan: plan, tier: tier))
     }
 
     private static func stripping(_ prefix: String, from raw: String?) -> String? {
