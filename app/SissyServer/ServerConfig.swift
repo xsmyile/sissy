@@ -13,13 +13,9 @@ struct ProviderToggles: Sendable, Codable, Equatable {
 }
 
 struct ServerConfig: Sendable, Codable {
-    var host: String
-    var port: Int
-    var authToken: String
     var claudeDataDir: String
     var codexDataDir: String
     var pollIntervalSeconds: Double
-    var primaryMetric: String
     var pricingOverride: [String: ModelPricing]?
     /// Whether the daemon fetches LiteLLM's rate table at runtime
     /// (`PriceCatalog`). `nil` means on — it's what keeps a newly launched
@@ -41,16 +37,9 @@ struct ServerConfig: Sendable, Codable {
     var keepAwake: KeepAwakeMode
 
     static let defaults = ServerConfig(
-        host: "127.0.0.1",
-        // Default port differs between Debug (5156) and Release (5155) so a
-        // dev daemon launched by launchd before the app has written its own
-        // server.json doesn't fight the release daemon on 5155.
-        port: SissyPaths.defaultServerPort,
-        authToken: "",
         claudeDataDir: "~/.claude/projects",
         codexDataDir: "~/.codex/sessions",
         pollIntervalSeconds: 60.0,
-        primaryMetric: "tokens",
         pricingOverride: nil,
         remotePricing: nil,
         providers: .defaults,
@@ -69,11 +58,11 @@ struct ServerConfig: Sendable, Codable {
         let data = try Data(contentsOf: url)
         let decoder = JSONDecoder()
         do {
-            return restrictTokenlessWildcardBind(try decoder.decode(ServerConfig.self, from: data))
+            return try decoder.decode(ServerConfig.self, from: data)
         } catch {
             // Partial config OK: fall back to defaults and overlay decodable keys.
             let merged = try mergeWithDefaults(data: data) ?? .defaults
-            return restrictTokenlessWildcardBind(merged)
+            return merged
         }
     }
 
@@ -82,13 +71,9 @@ struct ServerConfig: Sendable, Codable {
             return nil
         }
         var merged = defaults
-        if let v = obj["host"] as? String { merged.host = v }
-        if let v = obj["port"] as? Int { merged.port = v }
-        if let v = obj["authToken"] as? String { merged.authToken = v }
         if let v = obj["claudeDataDir"] as? String { merged.claudeDataDir = v }
         if let v = obj["codexDataDir"] as? String { merged.codexDataDir = v }
         if let v = obj["pollIntervalSeconds"] as? Double { merged.pollIntervalSeconds = v }
-        if let v = obj["primaryMetric"] as? String { merged.primaryMetric = v }
         if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
         if let v = obj["claudeLimits"] as? Bool { merged.claudeLimits = v }
         // An unknown mode reads as off rather than failing the whole file: a
@@ -120,22 +105,12 @@ struct ServerConfig: Sendable, Codable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(config)
         try data.write(to: url, options: [.atomic])
-        // server.json carries the bearer token in plaintext for the
-        // daemon (this process) to re-read on restart. Match the app's
-        // permissions so a same-user unprivileged process can't read it.
+        // Owner-only. Nothing secret lives here since the bearer token
+        // went with the socket, but this is the file that decides which
+        // directories Sissy reads and what it prices them at, and there is
+        // no reason for another user on the machine to be able to edit it.
         try? FileManager.default.setAttributes(
             [.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: url.path)
-    }
-
-    private static func restrictTokenlessWildcardBind(_ config: ServerConfig) -> ServerConfig {
-        guard config.authToken.isEmpty, isWildcardHost(config.host) else { return config }
-        var restricted = config
-        restricted.host = "127.0.0.1"
-        return restricted
-    }
-
-    private static func isWildcardHost(_ host: String) -> Bool {
-        host == "0.0.0.0" || host == "::" || host == "*"
     }
 
     var resolvedClaudeDataDir: URL {
@@ -158,10 +133,6 @@ struct ServerConfig: Sendable, Codable {
                 .appendingPathComponent(String(path.dropFirst(2)))
         }
         return URL(fileURLWithPath: path)
-    }
-
-    var resolvedPrimaryMetric: PrimaryMetric {
-        PrimaryMetric(rawValue: primaryMetric) ?? .tokens
     }
 
     var remotePricingEnabled: Bool {

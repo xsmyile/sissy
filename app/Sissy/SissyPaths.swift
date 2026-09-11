@@ -22,15 +22,6 @@ enum SissyPaths {
     /// file all live under one isolated tree.
     static var supportDirName: String { isDev ? "Sissy-Dev" : "Sissy" }
 
-    /// Default server port. Dev defaults to 5156 to avoid the canonical 5155
-    /// taken by a release daemon on the same machine; user preferences
-    /// override the default either way.
-    ///
-    /// 5155 sits below macOS's ephemeral floor (`net.inet.ip.portrange.hifirst`,
-    /// 49152), so no outbound socket can be handed the port before a daemon
-    /// starting at login gets to bind it.
-    static var defaultServerPort: Int { isDev ? 5156 : 5155 }
-
     static var appSupportDir: URL {
         URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Library/Application Support/\(supportDirName)")
