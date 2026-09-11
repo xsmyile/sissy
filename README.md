@@ -36,7 +36,7 @@ brew install --cask xsmyile/sissy/sissy
 
 Grab the latest `Sissy-x.y.z.dmg` from [Releases](../../releases/latest), open it, and drag **Sissy** into Applications.
 
-Either way: launch Sissy (it lives in the menu bar, there is no dock icon and no window), then **Start Server** to begin tailing. The build is Developer ID signed and notarized, so there's no `xattr` workaround and no right-click → Open.
+Either way: launch Sissy and it starts tailing. It lives in the menu bar — no dock icon, no window — and asks for nothing on first run. The build is Developer ID signed and notarized, so there's no `xattr` workaround and no right-click → Open.
 
 ## What you see
 
@@ -46,9 +46,9 @@ The menu bar carries today's token total. Click it for a panel with
 - the swing against yesterday,
 - one row per CLI with its tokens and cost, carrying either a gauge per rate-limit window and the time it resets, or, for a CLI that reports no limits, its share of the day.
 
-The cup beside the panel's power button is **keep awake**: switch it on and the Mac stops idling to sleep under a running agent. It lights the same way the power button does, and the mode is remembered until you switch it off — including across a restart. It does not override closing the lid.
+The cup beside the panel's power button is **keep awake**: switch it on and the Mac stops idling to sleep under a running agent. It lights the same way the power button does, and the mode is remembered until you switch it off — including across a restart. It does not override closing the lid, and the hold lasts only while Sissy is running: quit and the Mac sleeps normally again.
 
-Right-click for the short menu; **Settings…** (⌘,) holds the server toggle and the Claude Code limits opt-in.
+Right-click for the short menu; **Settings…** (⌘,) holds *Start at login* and the Claude Code limits opt-in.
 
 <p align="center">
   <img src="assets/usage-panel.png" alt="Sissy's usage panel" width="420" />
@@ -69,13 +69,13 @@ Adding a CLI is one `UsageProvider` implementation. See [`docs/ARCHITECTURE.md`]
 
 ## How it works
 
-A small daemon, `sissy-serverd`, ships inside the app bundle. It watches the log directories, prices each turn as it lands, and pushes a single combined frame to the app over a loopback WebSocket. It runs as a LaunchAgent, so the day keeps adding up whether or not the app is open: quitting Sissy leaves the daemon counting, switching **Server** off unregisters it.
+Sissy is one process. It watches the log directories, prices each turn as it lands, and renders the combined reading — no helper, no socket, no port. Counting runs while Sissy runs; the numbers live in the CLIs' own log files either way, so a relaunch picks up exactly where it left off. Switch on **Start at login** if you want a day counted from the moment you sit down.
 
-There is no price table in the source. Rates come from [LiteLLM](https://github.com/BerriAI/litellm)'s public price list, fetched at runtime and cached for a day, with a snapshot compiled in as the offline floor. A CLI that ships a new model therefore prices correctly without a Sissy release. It is also the source [`ccusage`](https://github.com/ryoppippi/ccusage) reads, which is why the two agree on the same logs. CI asserts it on every change to the daemon, and weekly regardless.
+There is no price table in the source. Rates come from [LiteLLM](https://github.com/BerriAI/litellm)'s public price list, fetched at runtime and cached for a day, with a snapshot compiled in as the offline floor. A CLI that ships a new model therefore prices correctly without a Sissy release. It is also the source [`ccusage`](https://github.com/ryoppippi/ccusage) reads, which is why the two agree on the same logs. CI asserts it on every change to the engine, and weekly regardless.
 
 ## Privacy
 
-Your session logs never leave the machine; Sissy reads them and renders a number. The daemon binds `127.0.0.1` and makes exactly two kinds of outbound request:
+Your session logs never leave the machine; Sissy reads them and renders a number. It listens on no port and makes exactly two kinds of outbound request:
 
 - LiteLLM's price list on `raw.githubusercontent.com`, once a day;
 - `api.anthropic.com/api/oauth/usage`, only with Claude Code limits enabled, using the OAuth token the CLI already stored, read-only, never refreshed, never written back.
@@ -94,7 +94,7 @@ The app writes `~/Library/Application Support/Sissy/server.json`; every key is o
 | `keepAwake` | `off` | `on` holds a power assertion so the Mac never idles to sleep |
 | `remotePricing` | on | fetch rates at runtime; `false` pins to the built-in snapshot and goes fully offline |
 | `pricingOverride` | none | per-model rates that win over both sources |
-| `port` | `5155` | loopback port |
+| `pollIntervalSeconds` | `60` | safety-net poll between filesystem events |
 
 ## Build from source
 
@@ -107,11 +107,11 @@ other worktrees or by a plain `xcodebuild`, and relaunches the result, so
 exactly one dev app exists no matter which branch you build. Pass
 `RELAUNCH=0` to skip the relaunch.
 
-Menu bar → **Server** toggles the bundled LaunchAgent. That control requires a normally signed app build: `CODE_SIGNING_ALLOWED=NO` is fine for CI but not for testing Server start/stop locally.
+**Start at login** goes through `SMAppService`, which requires a normally signed app build: `CODE_SIGNING_ALLOWED=NO` is fine for CI but not for testing that switch locally.
 
 ## Credits
 
-Usage parsing follows [`ccusage`](https://github.com/ryoppippi/ccusage): both the JSONL schemas (Claude Code and Codex rollouts) and per-model pricing come from there. The daemon's WebSocket server is [SwiftNIO](https://github.com/apple/swift-nio).
+Usage parsing follows [`ccusage`](https://github.com/ryoppippi/ccusage): both the JSONL schemas (Claude Code and Codex rollouts) and per-model pricing come from there.
 
 ## The name
 
