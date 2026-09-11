@@ -18,7 +18,7 @@ struct UsagePanelView: View {
     private static let width: CGFloat = 340
     private static let footerTick: TimeInterval = 1
     private static let secondaryWindowOpacity: Double = 0.55
-    private static let powerButtonSize: CGFloat = 26
+    private static let controlButtonSize: CGFloat = 26
     private static let sissySize: CGFloat = 24
 
     private static var dateLine: String {
@@ -79,22 +79,19 @@ struct UsagePanelView: View {
             Spacer(minLength: 0)
 
             keepAwakeButton
-            powerButton
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
 
-    /// The keep-awake switch, built as the power button's twin because it is
-    /// its sibling: the two controls in this panel both say what the machine
-    /// is doing, and giving one of them a footer glyph's styling made it read
-    /// as a link rather than a switch.
+    /// The panel's one control, styled as a switch rather than a footer
+    /// glyph: it says what the machine is doing, and a link's styling made it
+    /// read as navigation.
     ///
-    /// Colour carries the state the same way: the glass tints while the Mac is
-    /// actually being held. A mode that is on and holding nothing — power
-    /// management refused the assertion, or the daemon has not answered yet —
-    /// keeps the amber glyph without the tinted glass, so the two axes stay
-    /// separable at a glance.
+    /// Colour carries the two axes separately. The glass tints while the Mac
+    /// is actually being held; a mode that is on and holding nothing — power
+    /// management refused the assertion — keeps the amber glyph without the
+    /// tinted glass, so "switched on" and "holding" stay legible apart.
     private var keepAwakeButton: some View {
         let state = model.keepAwake
         return Button {
@@ -102,7 +99,7 @@ struct UsagePanelView: View {
         } label: {
             Image(systemName: "cup.and.saucer.fill")
                 .font(.system(size: 11, weight: .semibold))
-                .frame(width: Self.powerButtonSize, height: Self.powerButtonSize)
+                .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
                 .foregroundStyle(state.mode == .off ? Color.secondary : Color.orange)
                 .contentShape(.circle)
         }
@@ -111,7 +108,6 @@ struct UsagePanelView: View {
             state.active ? .regular.tint(.orange.opacity(0.22)) : .regular,
             in: .circle
         )
-        .disabled(!model.canKeepAwake)
         .help(keepAwakeHelp(state))
     }
 
@@ -121,36 +117,6 @@ struct UsagePanelView: View {
         case (.on, true): return "Keeping this Mac awake · click to allow sleep"
         case (.on, false): return "Switched on · the Mac is not being held awake"
         }
-    }
-
-    /// Starts and stops the background daemon. It replaces the old "server"
-    /// dot: the state it reported was the same state this button now shows,
-    /// and one control beats an indicator plus a button hidden in a
-    /// placeholder that only appeared when the daemon was already missing.
-    private var powerButton: some View {
-        let server = model.menuSnapshot.server
-        return Button {
-            model.toggleServer()
-        } label: {
-            Group {
-                if model.serverIsBusy {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "power")
-                        .font(.system(size: 12, weight: .bold))
-                }
-            }
-            .frame(width: Self.powerButtonSize, height: Self.powerButtonSize)
-            .foregroundStyle(server.isOn ? Color.green : Color.secondary)
-            .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .glassEffect(
-            server.isOn ? .regular.tint(.green.opacity(0.22)) : .regular,
-            in: .circle
-        )
-        .disabled(!server.isEnabled)
-        .help(server.isOn ? "Stop the server" : "Start the server")
     }
 
     // MARK: Headline
@@ -181,7 +147,7 @@ struct UsagePanelView: View {
     }
 
     private func subline(_ snapshot: UsagePanelSnapshot) -> String {
-        snapshot.burn == FrameDecoder.placeholder
+        snapshot.burn == FrameBuilder.placeholder
             ? snapshot.cost : "\(snapshot.cost) · \(snapshot.burn)/h"
     }
 
@@ -319,18 +285,26 @@ struct UsagePanelView: View {
 
     // MARK: Placeholder
 
+    private var placeholderDetail: String {
+        if !model.engine.isWarm { return "The first reading lands as soon as they are read." }
+        if model.engine.filesWatched == 0 {
+            return "Sissy reads ~/.claude/projects and ~/.codex/sessions. Neither has anything in it."
+        }
+        return "The first turn of the day shows up here within a few seconds of landing."
+    }
+
+    /// Why there is no reading, in the words the header already used, plus
+    /// what happens next. Three outcomes rather than one: the readers are
+    /// still walking the trees, they found no session logs at all, or they
+    /// found logs and today is simply still empty — and only the middle one
+    /// is something to act on.
     private var placeholder: some View {
-        let isOn = model.menuSnapshot.server.isOn
-        return VStack(alignment: .leading, spacing: 3) {
-            Text(isOn ? "Waiting for the daemon" : "Server is off")
+        VStack(alignment: .leading, spacing: 3) {
+            Text(model.menuSnapshot.header.subtitle ?? "")
                 .font(.system(size: 12, weight: .medium))
-            Text(
-                isOn
-                    ? "It reports the day's first frame within a few seconds."
-                    : "Switch it on with the power button above."
-            )
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
+            Text(placeholderDetail)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)

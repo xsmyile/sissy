@@ -1,72 +1,46 @@
-import ServiceManagement
 import XCTest
 
 @testable import Sissy
 
 /// Sissy's face and the header's words are one signal: the eye is shut
-/// exactly when the header says she is sleeping, and the second line says why
+/// exactly when the header says she is asleep, and the second line says why
 /// only while she is. Anything else and the panel contradicts the menu bar.
-@MainActor
+///
+/// Three ways to have nothing, and they are not interchangeable — one is
+/// still working, one is a fault worth acting on, one is an ordinary empty
+/// morning.
 final class SissyModelHeaderTests: XCTestCase {
-    /// Pins `SMAppService` to a plist the bundle does not carry, so
-    /// `isRegistered` is false whatever agent is installed on the machine
-    /// running the tests. Health then decides the rest on its own.
-    private func makeModel() -> SissyModel {
-        SissyModel(
-            serverService: ServerServiceController(
-                service: .agent(plistName: "com.radonforge.sissy.tests.absent.plist")
-            )
-        )
+    func testAReadingNamesSissyAndOwesTheLineBackToTheDate() {
+        let header = SissyModel.HeaderSnapshot.make(hasFrame: true, isWarm: true, filesWatched: 12)
+
+        XCTAssertFalse(header.isAsleep)
+        XCTAssertEqual(header.title, "Sissy")
+        XCTAssertNil(header.subtitle, "an awake Sissy owes the line back to the date")
     }
 
-    private func frame() -> FrameData {
-        FrameData(
-            tokens: "26K",
-            cost: "0.09",
-            burn: "1.5K",
-            primary: "26K",
-            primaryLabel: "TOKENS",
-            providers: [],
-            prevTokens: nil,
-            prevCost: nil,
-            keepAwake: .off
-        )
+    /// Warmth is what separates this from the two below: until the readers
+    /// finish, "no files" is a number nobody has measured yet.
+    func testAColdScanSaysItIsStillReading() {
+        let header = SissyModel.HeaderSnapshot.make(hasFrame: false, isWarm: false, filesWatched: 0)
+
+        XCTAssertTrue(header.isAsleep)
+        XCTAssertEqual(header.title, "Sissy is waking up")
+        XCTAssertEqual(header.subtitle, "Reading your session logs")
     }
 
-    func testAStoppedDaemonSleepsAndTheLineSaysWhy() {
-        let model = makeModel()
-        model.serverHealth.status = .down
+    func testNoLogsAtAllIsNamedAsSuch() {
+        let header = SissyModel.HeaderSnapshot.make(hasFrame: false, isWarm: true, filesWatched: 0)
 
-        let snapshot = model.menuSnapshot
-
-        XCTAssertTrue(snapshot.header.isAsleep)
-        XCTAssertTrue(snapshot.statusIcon.isAsleep)
-        XCTAssertEqual(snapshot.header.title, "Sissy is sleeping")
-        XCTAssertEqual(snapshot.header.subtitle, "Server is off")
+        XCTAssertTrue(header.isAsleep)
+        XCTAssertEqual(header.subtitle, "No session logs found")
     }
 
-    func testADaemonWithNothingToShowYetIsAwake() {
-        let model = makeModel()
-        model.serverHealth.status = .up
+    /// The common case first thing in the morning, and the one that must not
+    /// read as a fault.
+    func testLogsButAnEmptyDaySaysSoWithoutBlamingAnything() {
+        let header = SissyModel.HeaderSnapshot.make(hasFrame: false, isWarm: true, filesWatched: 98)
 
-        let snapshot = model.menuSnapshot
-
-        XCTAssertFalse(snapshot.header.isAsleep)
-        XCTAssertFalse(snapshot.statusIcon.isAsleep)
-        XCTAssertEqual(snapshot.header.title, "Looking for Sissy...")
-        XCTAssertNil(snapshot.header.subtitle, "an awake Sissy owes the line back to the date")
-    }
-
-    func testAFrameOnALiveSocketNamesSissyAndNothingElse() {
-        let model = makeModel()
-        model.serverHealth.status = .up
-        model.currentFrame = frame()
-        model.webSocketClient.isConnected = true
-
-        let snapshot = model.menuSnapshot
-
-        XCTAssertFalse(snapshot.header.isAsleep)
-        XCTAssertEqual(snapshot.header.title, "Sissy")
-        XCTAssertNil(snapshot.header.subtitle)
+        XCTAssertTrue(header.isAsleep)
+        XCTAssertEqual(header.subtitle, "Nothing spent yet today")
     }
 }

@@ -3,7 +3,7 @@ import Foundation
 import Observation
 
 /// Main runtime owner for the menubar app. UI surfaces observe this object,
-/// while server/service/WebSocket adapters stay as leaf implementation
+/// while the metering engine and the login item stay as leaf implementation
 /// details behind it.
 @MainActor
 @Observable
@@ -12,96 +12,47 @@ final class SissyModel {
     var lastFrameAt: Date? = nil
     var preferences: Preferences
     var settingsTab: SettingsTab = .general
-    private var serverToggleInFlight: Bool = false
-    private var serverToggleLabel: String = ""
-    private var serverToggleTarget: ServerToggleTarget?
-
-    /// Optimistic target for an in-flight Server start/stop. `nil` when no
-    /// toggle is pending, so the menu derives the row state from the live
-    /// service/health status instead.
-    private enum ServerToggleTarget {
-        case on
-        case off
-    }
 
     private let supportDirectory: URL
-    let serverService: ServerServiceController
-    let serverHealth: ServerHealthMonitor
-    let webSocketClient: WebSocketClient
+    let engine: UsageEngineHost
     let loginItem: LoginItemController
 
-    /// `serverService` is injected so a test can pin the LaunchAgent lookup to
-    /// a plist that is not in the bundle. Left to its default it asks
-    /// `SMAppService` about the real agent, and whether a dev daemon happens
-    /// to be registered on the machine would decide what the model reports.
-    /// `loginItem` is injected for the same reason, and `supportDirectory`
-    /// for the other half of that problem: `xcodebuild test` launches the real
-    /// app host, which builds this model against the machine's own install, so
-    /// a test covering a path that persists preferences needs somewhere else
-    /// to write.
+    /// `loginItem` is injected so a test can pin the lookup to a service that
+    /// is definitely not registered, rather than letting whatever is on the
+    /// machine decide what the model reports. `supportDirectory` is injected
+    /// for the other half of that problem: `xcodebuild test` launches the
+    /// real app host, which builds this model against the machine's own
+    /// install, so a test covering a path that persists preferences needs
+    /// somewhere else to write.
     init(
-        serverService: ServerServiceController = ServerServiceController(),
         loginItem: LoginItemController = LoginItemController(),
         supportDirectory: URL = Preferences.appSupportDir()
     ) {
         self.supportDirectory = supportDirectory
         self.preferences = .load(from: supportDirectory)
-        self.serverService = serverService
         self.loginItem = loginItem
-        self.webSocketClient = WebSocketClient()
-        // The monitor must always read the CURRENT preferences, not a
-        // snapshot from app launch. A `var prefsRef` mutated after init
-        // tripped Swift 6's "mutated after capture by sendable closure"
-        // diagnostic; an explicit weak-box holds the back-reference
-        // safely and the closure stays MainActor-isolated through
-        // ServerHealthMonitor's @MainActor prefsProvider type.
-        let holder = SissyModelWeakHolder()
-        self.serverHealth = ServerHealthMonitor(prefsProvider: { holder.preferences() })
-        holder.model = self
-        self.webSocketClient.attach(model: self)
+        self.engine = UsageEngineHost()
+        self.engine.attach(model: self)
     }
 
     func start() {
-        migrateServerPortIfNeeded()
-        webSocketClient.start()
-        serverHealth.start()
+        retireLegacyAgentIfNeeded()
+        engine.start()
     }
 
-    /// Applies the one-shot move off the previous default port, before the
-    /// client and the health monitor read a port for the first time.
-    ///
-    /// The rewrite alone would leave the app talking to a port nothing is
-    /// bound to: the running daemon reads `server.json` only at boot, so it
-    /// stays on the old one until launchd starts it again — the next login,
-    /// or never, from the user's side. Restarting the agent is what closes
-    /// that gap. Only an `.enabled` agent is touched: one waiting for the
-    /// user's approval in System Settings cannot be registered again, and
-    /// unregistering it would turn the Server off to fix a port.
-    func migrateServerPortIfNeeded() {
-        guard preferences.migrateLegacyServerPort() else { return }
-        let port = preferences.serverPort
-        savePreferences()
-        Task { [weak self] in
-            guard let self else { return }
-            await serverService.refresh()
-            guard serverService.status == .enabled else { return }
-            do {
-                try await serverService.stop()
-                try await serverService.start {
-                    await self.serverHealth.refreshNow().isReachable
-                }
-            } catch {
-                await showError(
-                    title: "Server restart failed",
-                    message:
-                        "Sissy moved its daemon to port \(port) but could not restart it: "
-                        + "\(error.localizedDescription). Switch Server off and on again "
-                        + "from the menu bar to finish the move."
-                )
-            }
-            await serverHealth.refreshNow()
-            webSocketClient.reconnect()
+    /// Undoes the LaunchAgent an older install registered, once.
+    private func retireLegacyAgentIfNeeded() {
+        let outcome = LegacyAgentRetirement.run(
+            alreadyRan: preferences.retiredServerAgent,
+            loginItem: loginItem
+        ) { [self] in
+            preferences.retiredServerAgent = true
+            savePreferences()
         }
+        guard !outcome.retired.isEmpty else { return }
+        daemonLog(
+            "sissy: retired \(outcome.retired.joined(separator: ", "))"
+                + (outcome.claimedLoginItem ? "; Sissy now opens at login in its place" : ""))
     }
 
     func savePreferences() {
@@ -109,27 +60,45 @@ final class SissyModel {
         preferences.writeServerConfig(to: supportDirectory)
     }
 
-    func ensureAuthToken() {
-        if preferences.authToken.isEmpty {
-            preferences.authToken = Preferences.makeSecret()
-        }
-    }
-
     // MARK: Menu snapshots
 
     struct MenuSnapshot {
         let header: HeaderSnapshot
         let statusIcon: StatusIconSnapshot
-        let server: ServerItemSnapshot
     }
 
-    struct HeaderSnapshot {
+    struct HeaderSnapshot: Equatable {
         /// Carried as the pose rather than an asset name so the panel can
         /// cross-fade between the two, which needs both of them at once.
         let isAsleep: Bool
         let title: String
         /// The header's second line. nil hands the line back to the date.
         let subtitle: String?
+
+        /// Sissy is awake exactly when there is a reading to show. In one
+        /// process there is no link to lose, so the only way to have nothing
+        /// is to have read nothing yet — and the subtitle then has to say
+        /// which nothing, because "still looking", "nothing to find" and
+        /// "found it, the day is empty" are the same blank panel otherwise.
+        /// The third is the common one first thing in the morning, and the
+        /// only one of the three that is not a fault.
+        static func make(hasFrame: Bool, isWarm: Bool, filesWatched: Int) -> Self {
+            guard !hasFrame else {
+                return Self(isAsleep: false, title: "Sissy", subtitle: nil)
+            }
+            guard isWarm else {
+                return Self(
+                    isAsleep: true,
+                    title: "Sissy is waking up",
+                    subtitle: "Reading your session logs"
+                )
+            }
+            return Self(
+                isAsleep: true,
+                title: "Sissy is sleeping",
+                subtitle: filesWatched == 0 ? "No session logs found" : "Nothing spent yet today"
+            )
+        }
     }
 
     /// The glyph is fixed and drawn at full opacity, so all the menu bar icon
@@ -137,14 +106,6 @@ final class SissyModel {
     /// reaching the app.
     struct StatusIconSnapshot {
         let isAsleep: Bool
-    }
-
-    struct ServerItemSnapshot {
-        let title: String
-        let subtitle: String
-        let isEnabled: Bool
-        let isOn: Bool
-        let requiresApproval: Bool
     }
 
     /// A frame together with when it landed.
@@ -162,95 +123,32 @@ final class SissyModel {
     static let sissySleepingAssetName = "SissyMenuBarSleepingTemplate"
 
     var menuSnapshot: MenuSnapshot {
-        let linkUp = webSocketClient.isConnected && currentFrame != nil
-        let droppedAfterConnect = webSocketClient.hasEverConnected && !webSocketClient.isConnected
-        let healthOffline = !serverHealth.status.isReachable
-        let offline = droppedAfterConnect || healthOffline
-        let server = serverItemSnapshot
-
-        return MenuSnapshot(
-            header: HeaderSnapshot(
-                isAsleep: offline,
-                title: headerTitle(isAsleep: offline, linkUp: linkUp),
-                subtitle: headerSubtitle(isAsleep: offline, serverIsOn: server.isOn)
-            ),
-            statusIcon: StatusIconSnapshot(isAsleep: offline),
-            server: server
+        let header = HeaderSnapshot.make(
+            hasFrame: currentFrame != nil,
+            isWarm: engine.isWarm,
+            filesWatched: engine.filesWatched
         )
+        return MenuSnapshot(header: header, statusIcon: StatusIconSnapshot(isAsleep: header.isAsleep))
     }
 
     // MARK: Menu actions
-
-    var serverIsBusy: Bool { serverToggleInFlight || serverService.isTransitioning }
-
-    func toggleServer() {
-        if serverToggleInFlight || serverService.isTransitioning { return }
-        if serverService.requiresApproval && serverService.isAvailable {
-            serverService.openLoginItemsSettings()
-            return
-        }
-        if !serverService.isAvailable { return }
-
-        let shouldStop = serverService.isRegistered || serverHealth.status.isReachable
-        serverToggleInFlight = true
-        serverToggleLabel = shouldStop ? "Stopping..." : "Starting..."
-        serverToggleTarget = shouldStop ? .off : .on
-
-        Task { [weak self] in
-            guard let self else { return }
-            defer {
-                self.serverToggleInFlight = false
-                self.serverToggleLabel = ""
-                self.serverToggleTarget = nil
-            }
-            do {
-                if shouldStop {
-                    try await serverService.stop {
-                        let status = await self.serverHealth.refreshNow()
-                        return !status.isReachable
-                    }
-                    await serverHealth.refreshNow()
-                    webSocketClient.reconnect()
-                } else {
-                    let bookmark = serverService.errorLogBookmark()
-                    let port = preferences.serverPort
-                    ensureAuthToken()
-                    savePreferences()
-                    try await serverService.start {
-                        let status = await self.serverHealth.refreshNow()
-                        return status.isReachable
-                    }
-                    let status = await serverHealth.refreshNow()
-                    webSocketClient.reconnect()
-                    if !status.isReachable,
-                        let hint = serverService.startFailureHint(since: bookmark, port: port)
-                    {
-                        await showError(title: "Start failed", message: hint)
-                    }
-                }
-            } catch {
-                let verb = shouldStop ? "Stop" : "Start"
-                await showError(title: "\(verb) failed", message: error.localizedDescription)
-            }
-        }
-    }
 
     func setClaudeLimits(_ enabled: Bool) {
         guard enabled != preferences.claudeLimits else { return }
         preferences.claudeLimits = enabled
         savePreferences()
-        webSocketClient.setClaudeLimits(enabled)
+        engine.setClaudeLimits(enabled)
     }
 
     // MARK: Keep awake
 
-    /// A mode the app has asked for and the daemon has not confirmed yet.
+    /// A mode the app has asked for and the engine has not answered yet.
     ///
-    /// The daemon rebroadcasts on every change, but frames also arrive on
-    /// their own every few hundred milliseconds while an agent is working —
-    /// which is exactly when this control gets used. Retiring the request on
-    /// the next frame rather than on the *answering* one would flash the old
-    /// mode back for a moment, so the mode is what was asked for until a frame
+    /// The engine re-emits on every change, but frames also arrive on their
+    /// own every few hundred milliseconds while an agent is working — which
+    /// is exactly when this control gets used. Retiring the request on the
+    /// next frame rather than on the *answering* one would flash the old mode
+    /// back for a moment, so the mode is what was asked for until a frame
     /// agrees with it.
     private struct PendingKeepAwake {
         let mode: KeepAwakeMode
@@ -259,18 +157,13 @@ final class SissyModel {
 
     private var pendingKeepAwake: PendingKeepAwake?
 
-    /// How long an unanswered request keeps showing. Past it the daemon's own
-    /// answer wins, so a request that never arrived — a dropped socket, a
-    /// daemon too old to know the message — stops misreporting the Mac.
+    /// How long an unanswered request keeps showing. Past it the engine's own
+    /// answer wins, so a request power management refused stops misreporting
+    /// the Mac.
     private static let keepAwakeAckWindow: TimeInterval = 5
 
     /// The keep-awake state as the panel should draw it.
-    ///
-    /// Gated on the server for the same reason the panel's numbers are: the
-    /// assertion belongs to the daemon, so once that is gone nothing is being
-    /// held whatever the last frame said.
     var keepAwake: KeepAwakeState {
-        guard menuSnapshot.server.isOn else { return .off }
         let reported = currentFrame?.keepAwake ?? .off
         guard let pending = pendingKeepAwake,
             reported.mode != pending.mode,
@@ -279,25 +172,21 @@ final class SissyModel {
         return KeepAwakeState(mode: pending.mode, active: reported.active)
     }
 
-    /// The daemon is the only thing that can hold the assertion, so the
-    /// control is dead while it is not there to ask.
-    var canKeepAwake: Bool { menuSnapshot.server.isOn && webSocketClient.isConnected }
-
     func setKeepAwake(_ mode: KeepAwakeMode) {
         guard mode != keepAwake.mode else { return }
         pendingKeepAwake = PendingKeepAwake(mode: mode, askedAt: Date())
-        webSocketClient.setKeepAwake(mode: mode)
+        engine.setKeepAwake(mode: mode)
     }
 
-    /// Where the daemon's answer lands. Both fields move together so an
+    /// Where the engine's answer lands. Both fields move together so an
     /// arriving frame can retire a keep-awake request in the same step — but
     /// only the frame that actually carries the answer.
-    func applyFrame(_ frame: FrameData, builtAt: Date? = nil) {
+    func applyFrame(_ frame: FrameData) {
         if let pending = pendingKeepAwake, frame.keepAwake.mode == pending.mode {
             pendingKeepAwake = nil
         }
         currentFrame = frame
-        lastFrameAt = builtAt ?? Date()
+        lastFrameAt = Date()
     }
 
     func setSissyMotion(_ enabled: Bool) {
@@ -318,19 +207,8 @@ final class SissyModel {
         }
     }
 
-    /// Drives the daemon to a requested state rather than flipping whatever it
-    /// is in. A `Toggle` hands SwiftUI's new value to its binding, and a
-    /// binding that discards it and toggles instead only agrees with the
-    /// switch while every `set` arrives exactly once and already negated —
-    /// an invariant SwiftUI does not promise. `toggleServer` stays for the
-    /// panel's power button, which really is a one-shot action.
-    func setServer(running: Bool) {
-        guard running != serverItemSnapshot.isOn else { return }
-        toggleServer()
-    }
-
     func openLogs() {
-        let url = serverService.openableLogsURL
+        let url = SissyPaths.logsDir
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         NSWorkspace.shared.open(url)
     }
@@ -345,77 +223,9 @@ final class SissyModel {
     /// nothing will refresh — "updated 3h ago" under a stopped server reads as
     /// a live reading of an idle daemon rather than as no reading at all.
     ///
-    /// Derived rather than cleared on disconnect. The gate is the same `isOn`
-    /// the power button shows, which keeps the two from disagreeing and leaves
-    /// a registered-but-restarting daemon its frame instead of blanking the
-    /// panel on every launchd blip.
     var liveFrame: LiveFrame? {
-        guard serverItemSnapshot.isOn, let currentFrame, let lastFrameAt else { return nil }
+        guard let currentFrame, let lastFrameAt else { return nil }
         return LiveFrame(frame: currentFrame, at: lastFrameAt)
-    }
-
-    private var serverItemSnapshot: ServerItemSnapshot {
-        let busy = serverToggleInFlight || serverService.isTransitioning
-        let serverIsOn =
-            serverToggleTarget.map { $0 == .on }
-            ?? (serverService.isRegistered || serverHealth.status.isReachable)
-
-        let title: String
-        let subtitle: String
-        if !serverService.isAvailable {
-            title = "Server unavailable"
-            subtitle = "Service missing"
-        } else if serverService.requiresApproval {
-            title = "Open Login Items Settings..."
-            subtitle = "Approval required"
-        } else if serverToggleInFlight {
-            title = serverToggleLabel.replacingOccurrences(of: "...", with: " Server...")
-            subtitle = serverToggleLabel
-        } else if serverService.isTransitioning {
-            title = serverService.transitionLabel.replacingOccurrences(of: "...", with: " Server...")
-            subtitle = serverService.transitionLabel
-        } else {
-            title = serverIsOn ? "Stop Server" : "Start Server"
-            switch serverHealth.status {
-            case .up:
-                subtitle = "Running"
-            case .down:
-                subtitle = serverService.isRegistered ? "Starting" : "Stopped"
-            case .usageReaderEmpty:
-                subtitle = "No JSONL"
-            case .unknown:
-                subtitle = "Checking"
-            }
-        }
-
-        return ServerItemSnapshot(
-            title: title,
-            subtitle: subtitle,
-            isEnabled: serverService.isAvailable && !busy,
-            isOn: serverIsOn,
-            requiresApproval: serverService.requiresApproval
-        )
-    }
-
-    /// The panel's own name while it has a live reading, and what is wrong
-    /// when it does not. The two failure lines matter more than the healthy
-    /// one: the panel's only control is the switch beside this text, and a
-    /// header that stayed silent would leave the switch's meaning to
-    /// guesswork.
-    /// Says what Sissy's face already shows, so the two can't disagree:
-    /// the eye is shut exactly when nothing is reaching the app.
-    private func headerTitle(isAsleep: Bool, linkUp: Bool) -> String {
-        if isAsleep { return "Sissy is sleeping" }
-        if !linkUp { return "Looking for Sissy..." }
-        return "Sissy"
-    }
-
-    /// Why Sissy is asleep, or nil while she is awake — the panel shows
-    /// today's date in that case. `serverIsOn` is what separates "you turned
-    /// it off" from "it should be running and isn't".
-    private func headerSubtitle(isAsleep: Bool, serverIsOn: Bool) -> String? {
-        guard isAsleep else { return nil }
-        return serverIsOn ? "Waiting for the daemon" : "Server is off"
     }
 
     private func showError(title: String, message: String) async {
@@ -427,18 +237,4 @@ final class SissyModel {
         _ = alert.runModal()
     }
 
-}
-
-/// Lets `SissyModel.init` hand `ServerHealthMonitor` a closure that reads
-/// "current" preferences without needing the fully-initialized `self` at
-/// capture time. The closure captures the holder; the holder's `model`
-/// pointer is filled in once `init` is done. Marked `@unchecked Sendable`
-/// only because Swift 6 can't see the `@MainActor` boundary on
-/// `prefsProvider`; reads always happen on MainActor.
-@MainActor
-private final class SissyModelWeakHolder: @unchecked Sendable {
-    weak var model: SissyModel?
-    func preferences() -> Preferences {
-        model?.preferences ?? Preferences()
-    }
 }

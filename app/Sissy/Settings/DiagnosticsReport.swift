@@ -9,14 +9,16 @@ import Foundation
 struct DiagnosticsReport {
     /// Everything the report states, with nothing left to look up. Pure by
     /// construction so the wording is testable without a bundle, a clock or
-    /// a live daemon.
+    /// a running engine.
     struct Snapshot: Equatable {
         let version: String
         let build: String
         let systemVersion: String
-        let endpoint: String
-        let serverState: String
-        let linkIsConnected: Bool
+        /// What the readers have found so far. A report filed before the
+        /// cold scan finished reads very differently from one filed after
+        /// it found nothing, and the two are the same zero without this.
+        let filesWatched: Int
+        let isWarm: Bool
         let claudeLimits: Bool
         let providers: [ProviderSlice]
         /// Every `ccusage` found on disk. A gap between Sissy's cost and
@@ -29,8 +31,8 @@ struct DiagnosticsReport {
         [
             "Sissy \(snapshot.version) (\(snapshot.build))",
             "macOS \(normalize(systemVersion: snapshot.systemVersion))",
-            "Server: \(snapshot.serverState) at \(snapshot.endpoint)",
-            "Link: \(snapshot.linkIsConnected ? "connected" : "disconnected")",
+            "Readers: \(snapshot.isWarm ? "warm" : "still scanning"), "
+                + "\(snapshot.filesWatched) file(s) watched",
             "Claude limits: \(snapshot.claudeLimits ? "on" : "off")",
             "Providers: \(describe(snapshot.providers))",
             "ccusage: \(describe(snapshot.ccusage))",
@@ -49,9 +51,8 @@ struct DiagnosticsReport {
                 version: bundle.shortVersion,
                 build: bundle.buildNumber,
                 systemVersion: processInfo.operatingSystemVersionString,
-                endpoint: "\(prefs.serverHost):\(prefs.serverPort)",
-                serverState: model.menuSnapshot.server.subtitle,
-                linkIsConnected: model.webSocketClient.isConnected,
+                filesWatched: model.engine.filesWatched,
+                isWarm: model.engine.isWarm,
                 claudeLimits: prefs.claudeLimits,
                 providers: model.currentFrame?.providers ?? [],
                 ccusage: CcusageProbe.installs()
