@@ -104,6 +104,7 @@ compiled into the app too.
 |---|---|
 | `UsageEngine.swift`             | Actor that owns the aggregator, the limits probe and the keep-awake hold; builds each frame and calls the callback it was handed |
 | `UsageProvider.swift`           | Protocol shared by each CLI log reader (id, start/stop, current, isWarm) |
+| `ProviderReadiness.swift`       | `ProviderID`, and how a toggle resolves (`on` / `off` / `auto — detected` / `auto — not found`) alongside each running provider's scan progress |
 | `UsageAggregator.swift`         | Sums per-day totals across active providers and rebuilds the per-provider slices |
 | `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`; dedupes by `requestId`; forwards the limit probe's windows; owns `parseTimestamp`, the one timestamp parser every reader and the probe share |
 | `CodexUsageReader.swift`        | Tails `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`); uses `last_token_usage` as per-turn delta; model from `turn_context.payload.model` (fallback `gpt-5-codex`) |
@@ -151,7 +152,7 @@ nothing does.
 Menu-bar only (`LSUIElement: true`), sandbox disabled. Three surfaces and no
 windows of its own: a left-click usage panel (`Panel/`, an `NSPopover`), a short
 right-click `NSMenu` (`Menu/StatusItemController.swift`), and the SwiftUI
-`Settings` scene (`Settings/`, tabs General/About) — reachable from the app menu's
+`Settings` scene (`Settings/`, tabs General/Providers/About) — reachable from the app menu's
 Settings… item (⌘,) and, in code, only through `SettingsLink`, which takes no
 action closure and is why the panel footer aims the window at a tab through
 `SissyModel.settingsTab`.
@@ -163,7 +164,10 @@ metering lives in `server.json`, which the engine owns — the app reads
 it used to keep could disagree with the file the probe actually booted from.
 
 **Three readiness states, not one blank panel.** `HeaderSnapshot.make` is a pure
-function of `(hasFrame, isWarm, filesWatched)`, which is what the tests target:
+function of `(hasFrame, isWarm, filesWatched)`, which is what the tests target.
+Both scalars are folded from `UsageEngineHost.providers`, the per-provider list
+the Providers tab renders, so the header cannot disagree with the page that
+explains it:
 
 | | Header |
 |---|---|
@@ -174,6 +178,19 @@ function of `(hasFrame, isWarm, filesWatched)`, which is what the tests target:
 
 The last is the common one first thing in the morning and the only one of the
 three that is not a fault. A single "waiting" line sent people hunting for one.
+
+**The Providers tab answers "why is this CLI not in my panel".** A row carries the
+resolved activation and, for a provider that is metering, what its scan found —
+and the two ways to find nothing are kept apart, because a data dir that is not
+there is a different problem from one that is there and empty. Both name the path.
+`ProviderRowSnapshot.make` is the pure function the tests target, as
+`HeaderSnapshot.make` is for the header. "Show Claude Code limits" lives on the
+Claude Code row: it is a property of that provider and reads as one beside that
+provider's state.
+
+There is no on/off switch on the page yet — turning a provider off at runtime
+means stopping a live reader, and nothing has ever called `stop()`. A row that is
+off therefore says where the switch that turned it off lives.
 
 ## Lifecycle and login items
 
