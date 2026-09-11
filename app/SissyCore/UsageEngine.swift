@@ -52,12 +52,30 @@ actor UsageEngine {
     /// user asked for — which is `config.keepAwake`. They differ when power
     /// management refuses the assertion, and the panel shows both.
     private var keepAwakeActive = false
-    /// Whether anyone is there to see the reading. The hold follows it:
-    /// quitting Sissy has to let the Mac sleep again, and a hold nobody can
-    /// see is a battery complaint with no visible cause. The *mode* is
-    /// untouched by this — it is where the user left the switch, and it is
-    /// what the hold resumes from.
-    private var observerPresent = false
+    /// An engine runs once. `stopped` is terminal on purpose: the app builds a
+    /// fresh engine when it needs one, so reviving this instance would leave
+    /// two of them metering the same trees.
+    private enum Lifecycle {
+        case idle
+        case running
+        case stopped
+    }
+
+    /// Where this engine is in that sequence.
+    ///
+    /// `running` is also the answer to "is anyone there to see the reading",
+    /// which in one process is the same question: the hold follows it, because
+    /// quitting Sissy has to let the Mac sleep again and a hold nobody can see
+    /// is a battery complaint with no visible cause. The *mode* is untouched by
+    /// this — it is where the user left the switch, and what the hold resumes
+    /// from.
+    ///
+    /// `start()` re-reads this after every suspension. A `stop()` landing in
+    /// one of those windows would otherwise be overtaken by the rest of
+    /// `start()`, which would boot the aggregator and the refresh loop against
+    /// an engine that has already been torn down, with no handle left to
+    /// cancel them.
+    private var lifecycle: Lifecycle = .idle
     private var onFrame: (@Sendable (FrameData) async -> Void)?
 
     /// Every provider Sissy knows about, metering or not, with how it was
@@ -133,6 +151,8 @@ actor UsageEngine {
     /// The cold backfill runs in a detached task: on a multi-GB log tree it
     /// takes seconds, and the caller has a surface to put up in the meantime.
     func start(onFrame: @escaping @Sendable (FrameData) async -> Void) async {
+        guard lifecycle == .idle else { return }
+        lifecycle = .running
         self.onFrame = onFrame
         // Settle on one catalog before the cold scan starts, so the backfill
         // prices historical events against the same rates the live tail will
@@ -144,11 +164,13 @@ actor UsageEngine {
         } else {
             sissyLog("sissy: remote pricing disabled — using the embedded rate seed")
         }
+        guard lifecycle == .running else { return }
         sissyLog("sissy: claude limits — \(config.claudeLimits ? "on" : "off")")
         if config.claudeLimits {
             await startClaudeLimitsProbe()
         }
         await applyKeepAwake()
+        guard lifecycle == .running else { return }
         let me = self
         bootTask = Task.detached { [aggregator] in
             await aggregator.start { today, prev, slices in
@@ -157,7 +179,11 @@ actor UsageEngine {
         }
     }
 
+    /// Tears everything down. Idempotent, and safe to land while `start()` is
+    /// still suspended — that is what `lifecycle` is re-read for. Terminal: an
+    /// engine that has stopped stays stopped.
     func stop() async {
+        lifecycle = .stopped
         // Cancel the aggregator boot Task first so the cold scan observes
         // cancellation and bails out of its file enumeration loops before
         // anything else is torn down.
@@ -166,9 +192,11 @@ actor UsageEngine {
         // Released first, before the awaits below: the kernel drops a dead
         // process's assertions on its own, but `stop()` is also reachable
         // without an exit, and a Mac held awake by something that has shut
-        // down is a battery complaint nobody can trace back.
-        _ = await keepAwake.apply(holding: false)
-        keepAwakeActive = false
+        // down is a battery complaint nobody can trace back. Through
+        // `applyKeepAwake` rather than by hand, so the release is the one the
+        // log records — `lifecycle` is already `stopped`, which is what makes
+        // the wanted state false.
+        await applyKeepAwake()
         await claudeLimitsProbe.stop()
         await aggregator.stop()
         bootTask = nil
@@ -193,7 +221,7 @@ actor UsageEngine {
     /// Starting it is what triggers the one-time keychain prompt, so this is
     /// only ever reached from an explicit user action.
     func setClaudeLimits(enabled: Bool) async {
-        if enabled == config.claudeLimits { return }
+        guard lifecycle == .running, enabled != config.claudeLimits else { return }
         config.claudeLimits = enabled
         do {
             try ServerConfig.save(config, to: configURL)
@@ -223,15 +251,6 @@ actor UsageEngine {
         await reemitFromCache()
     }
 
-    /// Takes or drops the hold as the surface comes and goes. In one process
-    /// that is the app's own lifetime, so it switches once each way.
-    func setObserverPresent(_ present: Bool) async {
-        guard present != observerPresent else { return }
-        observerPresent = present
-        await applyKeepAwake()
-        await reemitFromCache()
-    }
-
     /// Drives the assertion to whatever the stored mode asks for.
     ///
     /// The desired state is re-read from `config` after the hop into the
@@ -240,7 +259,7 @@ actor UsageEngine {
     /// reports has to describe where the user left the switch rather than
     /// where this call found it.
     private func applyKeepAwake() async {
-        let wanted = config.keepAwake == .on && observerPresent
+        let wanted = config.keepAwake == .on && lifecycle == .running
         let held = await keepAwake.apply(holding: wanted)
         keepAwakeActive = held && wanted
         sissyLog(
@@ -323,6 +342,7 @@ actor UsageEngine {
                     + "\(PriceCatalogSource.coldStartBudget) — backfilling from the embedded "
                     + "seed, refresh continues in the background")
         }
+        guard lifecycle == .running else { return }
         if let resolved {
             await aggregator.applyPriceCatalog(resolved)
         }
