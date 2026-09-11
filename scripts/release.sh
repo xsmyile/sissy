@@ -117,8 +117,10 @@ codesign --force --timestamp --options runtime \
 # which notarizes but doesn't ship.
 log "verify codesign"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-codesign -dvvv "$APP_PATH" 2>&1 | tee /tmp/sign-app.txt >/dev/null
-grep -q "Authority=$SIGN_IDENTITY" /tmp/sign-app.txt \
+SIGN_DUMP="$(mktemp -t sissy-sign)"
+trap 'rm -f "$SIGN_DUMP"' EXIT
+codesign -dvvv "$APP_PATH" 2>&1 | tee "$SIGN_DUMP" >/dev/null
+grep -q "Authority=$SIGN_IDENTITY" "$SIGN_DUMP" \
   || die "app not signed with '$SIGN_IDENTITY' authority"
 # Notarization preflight: secure timestamp present, no get-task-allow. One
 # Mach-O to check since the app stopped shipping a second executable.
