@@ -4,9 +4,9 @@ import XCTest
 
 /// Nothing called `stop()` until termination was wired to it, so everything it
 /// does ran for the first time here. Two properties matter: a teardown must
-/// leave nothing running, and it must hold even when it lands while `start()`
-/// is still suspended — which is the window that used to boot the aggregator
-/// and the refresh loop against an engine that had already shut down.
+/// leave nothing running, and it must win against a concurrent `start()` in
+/// either order — the window that used to boot the aggregator and the pricing
+/// refresh against an engine that had already shut down.
 final class UsageEngineLifecycleTests: XCTestCase {
     private var tempDir: URL!
 
@@ -65,10 +65,12 @@ final class UsageEngineLifecycleTests: XCTestCase {
         XCTAssertEqual(readiness.count, 2, "the resolved list outlives the readers")
     }
 
-    /// The window the flag exists for. `stop()` is issued without awaiting
-    /// `start()`, so it lands while `start()` is suspended; `start()` must then
-    /// abandon the rest of its boot rather than resume into it.
-    func testAStopLandingDuringStartLeavesNothingRunning() async {
+    /// Which of the two reaches the actor first is deliberately not controlled,
+    /// because that is the point: a boot racing a teardown has to end stopped
+    /// whichever way it lands. The ordering this catches in practice is the one
+    /// a boolean flag got wrong — a `stop()` arriving before `start()` left the
+    /// flag false, and `start()` then booted as if nothing had happened.
+    func testAStopWinsOverAConcurrentStart() async {
         let engine = makeEngine()
         let booting = Task { await engine.start { _ in } }
 
