@@ -64,8 +64,8 @@ work.
 |---|---|---|
 | — | `docs`: this ledger | merged (#50) |
 | 0 | `fix(daemon)`: the keep-awake hold follows the app | merged (#51) |
-| 1 | `refactor`: the engine compiles into the app | **in review** |
-| 2 | `feat(cli)`: `--refresh-catalog`, and the oracle pointed at it | todo |
+| 1 | `refactor`: the engine compiles into the app | merged (#52) |
+| 2 | `feat(cli)`: `--refresh-catalog`, and the oracle pointed at it | **in review** |
 | 3 | `refactor(app)`: frames from the engine, not the WebSocket | todo |
 | 4 | `refactor`: drop the LaunchAgent | todo |
 | 5 | `refactor`: drop the wire | todo |
@@ -100,8 +100,11 @@ excluded, both gone by PR 5.
 
 **2 — `--refresh-catalog`.** `pricing-oracle.yml:83-98` currently **boots the
 daemon in server mode**, greps its log for the catalog line, then `kill -TERM`s
-it. That step does not survive PR 5. Replace it with a flag that fetches, writes
-the cache and exits, and repoint the workflow before the server goes.
+it. That step does not survive PR 5, so `--refresh-catalog` replaces it: one
+fetch, validated through the same `isUsable` gate the runtime refresh uses,
+written to `pricing-catalog.json`, non-zero exit if no attempt lands a usable
+catalog. The workflow now runs the flag and fails on its exit code instead of
+grepping a background daemon's log for a readiness line.
 
 **3 — frames from the engine.** The app builds the aggregator itself and gets
 frames from a callback. Deletes `WebSocketClient`, `FrameDecoder`,
