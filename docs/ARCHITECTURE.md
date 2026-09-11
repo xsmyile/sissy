@@ -191,7 +191,11 @@ there is a different problem from one that is there and empty. Both name the pat
 `ProviderRowSnapshot.make` is the pure function the tests target, as
 `HeaderSnapshot.make` is for the header. "Show Claude Code limits" lives on the
 Claude Code row: it is a property of that provider and reads as one beside that
-provider's state.
+provider's state. Its caption is split — what the switch shows and that macOS
+will ask stay on screen, because a permission prompt the app did not warn about
+is what Sissy's first-run promise exists to avoid; the read-only guarantee and
+the expect-it-again-after-an-update note sit behind an `info.circle` popover. A
+button rather than a `help` tooltip, which only a hovering pointer ever finds.
 
 There is no on/off switch on the page yet — turning a provider off at runtime
 means stopping a live reader, and nothing has ever called `stop()`. A row that is
