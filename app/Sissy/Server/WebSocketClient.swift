@@ -142,6 +142,19 @@ final class WebSocketClient {
         send(payload, label: "set_claude_limits", on: task)
     }
 
+    /// Switch the daemon's keep-awake mode. Deliberately absent from `hello`:
+    /// the daemon persists the mode itself, so the app has nothing to
+    /// re-assert on a reconnect and an app that did would overwrite a change
+    /// made while it was away.
+    func setKeepAwake(mode: KeepAwakeMode) {
+        guard let task else { return }
+        let payload: [String: Any] = [
+            "type": "set_keep_awake",
+            "keep_awake_mode": mode.rawValue,
+        ]
+        send(payload, label: "set_keep_awake", on: task)
+    }
+
     private func sendHello() {
         guard let model, let task else { return }
         // Wire format is snake_case to match the server's enum
@@ -232,8 +245,7 @@ final class WebSocketClient {
         @unknown default: return
         }
         guard let frame else { return }
-        model?.currentFrame = frame
-        model?.lastFrameAt = frame.builtAt ?? Date()
+        model?.applyFrame(frame)
     }
 
     private func scheduleReconnect() {
