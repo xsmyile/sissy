@@ -40,6 +40,12 @@ final class SissyModel {
         engine.start()
     }
 
+    /// Stops metering and waits for it. Reached from termination, which is the
+    /// only thing that ends a run.
+    func stop() async {
+        await engine.stop()
+    }
+
     /// Undoes the LaunchAgent an older install registered, once.
     private func retireLegacyAgentIfNeeded() {
         let outcome = LegacyAgentRetirement.run(
