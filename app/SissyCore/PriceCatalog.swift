@@ -1,7 +1,7 @@
 import Foundation
 
 /// Which provider's rates a catalog slice carries.
-enum CatalogProvider: String, Sendable, Codable {
+enum CatalogProvider: String, Sendable {
     case anthropic
     case openai
 }

@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// Usage panel shown on a left-click of the status item. Reads the live

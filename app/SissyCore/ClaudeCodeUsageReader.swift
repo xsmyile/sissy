@@ -1,9 +1,5 @@
 import Foundation
 
-#if canImport(Darwin)
-import Darwin
-#endif
-
 struct UsageEvent: Sendable, Equatable {
     let timestamp: Date
     let inputTokens: Int
