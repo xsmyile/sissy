@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Build a local Sissy.app that is suitable for testing Server start/stop.
-# `SMAppService` rejects CODE_SIGNING_ALLOWED=NO products because the bundled
-# LaunchAgent and daemon must live inside a normally signed app bundle.
+# Build a local Sissy.app that is suitable for testing the login item and the
+# one-shot retirement of the old server agent. `SMAppService` rejects
+# CODE_SIGNING_ALLOWED=NO products, so both paths need a normally signed
+# bundle to exercise at all.
 
 set -euo pipefail
 
@@ -89,25 +90,17 @@ xcodebuild \
   clean build
 
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/Sissy.app"
-DAEMON_PATH="$APP_PATH/Contents/MacOS/sissy-serverd"
 
 [[ -d "$APP_PATH" ]] || die "build did not produce $APP_PATH"
-[[ -x "$DAEMON_PATH" ]] || die "build did not produce bundled daemon at $DAEMON_PATH"
 
-printf '==> inspect code signatures\n'
+printf '==> inspect code signature\n'
 
 APP_TEAM="$(
   codesign -dv --verbose=2 "$APP_PATH" 2>&1 \
     | awk -F= '/TeamIdentifier/ { print $2; exit }'
 )"
-DAEMON_TEAM="$(
-  codesign -dv --verbose=2 "$DAEMON_PATH" 2>&1 \
-    | awk -F= '/TeamIdentifier/ { print $2; exit }'
-)"
 
 [[ -n "$APP_TEAM" ]] || die "Sissy.app has no TeamIdentifier; it is not signed for SMAppService testing"
-[[ -n "$DAEMON_TEAM" ]] || die "sissy-serverd has no TeamIdentifier; it is not signed for SMAppService testing"
-[[ "$APP_TEAM" == "$DAEMON_TEAM" ]] || die "app team $APP_TEAM does not match daemon team $DAEMON_TEAM"
 
 if ! VERIFY_OUTPUT="$(codesign --verify --deep --strict --verbose=2 "$APP_PATH" 2>&1)"; then
   printf 'warning: strict codesign verification reported:\n%s\n' "$VERIFY_OUTPUT" >&2

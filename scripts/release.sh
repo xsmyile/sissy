@@ -109,9 +109,6 @@ done
 log "re-sign for Developer ID distribution"
 codesign --force --timestamp --options runtime \
   --sign "$SIGN_IDENTITY" \
-  "$APP_PATH/Contents/MacOS/sissy-serverd"
-codesign --force --timestamp --options runtime \
-  --sign "$SIGN_IDENTITY" \
   --entitlements "$APP_DIR/Sissy/Sissy.entitlements" \
   "$APP_PATH"
 
@@ -123,18 +120,13 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 codesign -dvvv "$APP_PATH" 2>&1 | tee /tmp/sign-app.txt >/dev/null
 grep -q "Authority=$SIGN_IDENTITY" /tmp/sign-app.txt \
   || die "app not signed with '$SIGN_IDENTITY' authority"
-codesign -dv --verbose=2 "$APP_PATH/Contents/MacOS/sissy-serverd" 2>&1 \
-  | tee /tmp/sign-daemon.txt >/dev/null
-grep -q "$TEAM_ID" /tmp/sign-daemon.txt \
-  || die "sissy-serverd not signed with team $TEAM_ID"
-# Notarization preflight: secure timestamp present, no get-task-allow.
-for bin in "$APP_PATH" "$APP_PATH/Contents/MacOS/sissy-serverd"; do
-  codesign -dvv "$bin" 2>&1 | grep -q "Timestamp=" \
-    || die "no secure timestamp on $bin"
-  if codesign -d --entitlements - "$bin" 2>/dev/null | grep -q "get-task-allow"; then
-    die "get-task-allow present on $bin"
-  fi
-done
+# Notarization preflight: secure timestamp present, no get-task-allow. One
+# Mach-O to check since the app stopped shipping a second executable.
+codesign -dvv "$APP_PATH" 2>&1 | grep -q "Timestamp=" \
+  || die "no secure timestamp on $APP_PATH"
+if codesign -d --entitlements - "$APP_PATH" 2>/dev/null | grep -q "get-task-allow"; then
+  die "get-task-allow present on $APP_PATH"
+fi
 
 # Package DMG
 log "create DMG"
