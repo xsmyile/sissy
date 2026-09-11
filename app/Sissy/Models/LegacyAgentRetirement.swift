@@ -26,6 +26,11 @@ enum LegacyAgentRetirement {
         var retired: [String] = []
         /// Whether the app claimed the login item the agent used to hold.
         var claimedLoginItem: Bool = false
+        /// Whether this run settled the question. False when a lookup or an
+        /// unregister failed, which is the one case worth trying again: the
+        /// alternative is an agent that starts at login forever because a
+        /// single bad launch spent the one shot.
+        var conclusive: Bool = true
     }
 
     private static func liveStatus(_ label: String) -> SMAppService.Status {
@@ -36,9 +41,10 @@ enum LegacyAgentRetirement {
         try SMAppService.agent(plistName: "\(label).plist").unregister()
     }
 
-    /// Runs once per install. `alreadyRan` and `markRan` carry the flag so
-    /// the caller owns where it is stored and a test can run this against
-    /// nothing persistent.
+    /// Runs once per install, where "once" means once *conclusively* —
+    /// `markRan` is only called when the question was actually settled.
+    /// `alreadyRan` and `markRan` carry the flag so the caller owns where it
+    /// is stored and a test can run this against nothing persistent.
     @MainActor
     static func run(
         alreadyRan: Bool,
@@ -48,30 +54,13 @@ enum LegacyAgentRetirement {
         markRan: () -> Void
     ) -> Outcome {
         guard !alreadyRan else { return Outcome() }
-        defer { markRan() }
 
-        var outcome = Outcome()
-        for label in labels {
-            // `.notFound` is the answer for a plist this bundle no longer
-            // ships, which is every machine that installed after the agent
-            // was removed. Only a registration launchd still knows about is
-            // worth undoing.
-            guard agentStatus(label) != .notFound, agentStatus(label) != .notRegistered else { continue }
-            do {
-                try unregisterAgent(label)
-                outcome.retired.append(label)
-            } catch {
-                let nsError = error as NSError
-                // Already gone is the state we wanted.
-                guard nsError.code == kSMErrorJobNotFound else {
-                    daemonLog("sissy: could not retire the \(label) agent: \(error)")
-                    continue
-                }
-                outcome.retired.append(label)
-            }
-        }
-
+        var outcome = unregisterAll(agentStatus: agentStatus, unregisterAgent: unregisterAgent)
+        if outcome.conclusive { markRan() }
         guard !outcome.retired.isEmpty else { return outcome }
+
+        // Only now, and only because something was retired: the agent held a
+        // login item the app has to take over, or the user stops counting.
         loginItem.refresh()
         guard !loginItem.isEnabled, !loginItem.requiresApproval else { return outcome }
         do {
@@ -81,5 +70,52 @@ enum LegacyAgentRetirement {
             daemonLog("sissy: retired the server agent but could not claim the login item: \(error)")
         }
         return outcome
+    }
+
+    private static func unregisterAll(
+        agentStatus: (String) -> SMAppService.Status,
+        unregisterAgent: (String) throws -> Void
+    ) -> Outcome {
+        var outcome = Outcome()
+        for label in labels {
+            switch agentStatus(label) {
+            case .notRegistered:
+                // launchd does not know it. Nothing to undo, and nothing
+                // will register it again — the app no longer can.
+                continue
+            case .notFound:
+                // The plist is not in this bundle, so `unregister()` has
+                // nothing to resolve and a registration launchd may still
+                // hold cannot be reached from here. Never spend the one shot
+                // on that answer: it is the shape of a packaging mistake,
+                // not of a clean machine.
+                daemonLog(
+                    "sissy: \(label) is not resolvable from this bundle; "
+                        + "leaving it for the next launch")
+                outcome.conclusive = false
+            default:
+                retire(label, using: unregisterAgent, into: &outcome)
+            }
+        }
+        return outcome
+    }
+
+    private static func retire(
+        _ label: String,
+        using unregisterAgent: (String) throws -> Void,
+        into outcome: inout Outcome
+    ) {
+        do {
+            try unregisterAgent(label)
+            outcome.retired.append(label)
+        } catch {
+            // Already gone is the state we wanted.
+            guard (error as NSError).code == kSMErrorJobNotFound else {
+                daemonLog("sissy: could not retire the \(label) agent: \(error)")
+                outcome.conclusive = false
+                return
+            }
+            outcome.retired.append(label)
+        }
     }
 }
