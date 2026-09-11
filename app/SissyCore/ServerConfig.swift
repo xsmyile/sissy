@@ -27,8 +27,8 @@ struct ServerConfig: Sendable, Codable {
     /// Whether Sissy reads Claude Code's OAuth token from the login
     /// keychain to show that CLI's 5-hour and weekly subscription windows.
     /// Off unless the user asks for it in Settings: turning it on is what
-    /// makes the one-time macOS keychain prompt expected rather than a
-    /// surprise from a background agent.
+    /// makes the one-time macOS keychain prompt expected rather than something
+    /// a first launch springs on someone who never asked for limits.
     var claudeLimits: Bool
     /// Whether Sissy holds a power assertion so the Mac does not idle to
     /// sleep. Persisted here rather than kept in memory because it is a
