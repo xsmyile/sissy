@@ -46,6 +46,8 @@ The menu bar carries today's token total. Click it for a panel with
 - the swing against yesterday,
 - one row per CLI with its tokens and cost, carrying either a gauge per rate-limit window and the time it resets, or, for a CLI that reports no limits, its share of the day.
 
+The cup beside the panel's power button is **keep awake**: switch it on and the Mac stops idling to sleep under a running agent. It lights the same way the power button does, and the mode is remembered until you switch it off — including across a restart. It does not override closing the lid.
+
 Right-click for the short menu; **Settings…** (⌘,) holds the server toggle and the Claude Code limits opt-in.
 
 <p align="center">
@@ -89,6 +91,7 @@ The app writes `~/Library/Application Support/Sissy/server.json`; every key is o
 | `providers` | auto-detect | force `claudeCode` / `codex` on or off |
 | `claudeDataDir`, `codexDataDir` | `~/.claude/projects`, `~/.codex/sessions` | where to look |
 | `claudeLimits` | `false` | read the CLI's OAuth token to show the 5-hour and weekly windows |
+| `keepAwake` | `off` | `on` holds a power assertion so the Mac never idles to sleep |
 | `remotePricing` | on | fetch rates at runtime; `false` pins to the built-in snapshot and goes fully offline |
 | `pricingOverride` | none | per-model rates that win over both sources |
 | `port` | `5155` | loopback port |
