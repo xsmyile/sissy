@@ -37,7 +37,7 @@ actor UsageAggregator {
         self.onChange = onChange
         // Strong-self capture is intentional: provider callbacks must fire
         // for the daemon's full lifetime, and the aggregator outlives both
-        // providers and the NIO server. Using `[weak self]` here trips the
+        // providers and whatever is rendering them. Using `[weak self]` trips the
         // Swift 6 "capture of var self in concurrently-executing code"
         // diagnostic without buying anything — there's no retain cycle to
         // break because no provider keeps a strong ref back to us.
@@ -81,7 +81,7 @@ actor UsageAggregator {
     /// because providers' own counters update during cold-scan / poll even
     /// when no `onChange` fires (e.g. restart from a persisted snapshot
     /// where every offset is already at EOF). A cached value would let
-    /// `/health` return `no-jsonl-found` indefinitely until the next token
+    /// the panel say "no session logs found" indefinitely until the next token
     /// event nudged it.
     nonisolated func filesWatched() -> Int {
         providers.reduce(0) { $0 + $1.filesWatched() }

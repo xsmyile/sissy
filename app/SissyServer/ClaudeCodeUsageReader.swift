@@ -13,13 +13,11 @@ struct UsageEvent: Sendable, Equatable {
     let cost: Decimal
 }
 
-/// Lock-protected counter shared between the reader actor and the
-/// HTTP `/health` + `/stats` handlers. Without this, both handlers had to
-/// `await reader.filesWatched()`, which queued behind the long initial
-/// backfill scan and made `/health` time out (`URLRequest.timeoutInterval`
-/// = 2 s) for the first 1–3 s after daemon start. The menubar's health
-/// status then flipped `.up`/`.down` on every probe until the backfill
-/// finished, producing a visible icon flicker.
+/// Lock-protected counter the reader actor shares with whoever asks how
+/// many files are being watched. Reading it without the hop matters because
+/// the actor is busy for the whole initial backfill: an `await
+/// reader.filesWatched()` queues behind that scan, and the panel's
+/// warming state would be the last thing to learn the scan had started.
 final class AtomicIntCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var value: Int = 0
@@ -56,7 +54,8 @@ final class AtomicPlan: @unchecked Sendable {
 }
 
 actor ClaudeCodeUsageReader: UsageProvider {
-    /// Stable provider id surfaced via `/stats`. The persistence URL is
+    /// Stable provider id, also the key its row is drawn under. The
+    /// persistence URL is
     /// injected; this reader still writes the legacy `usage-state.json` path
     /// for upgrade smoothness, not `usage-state-claude-code.json`.
     nonisolated let id: String = "claude-code"
@@ -329,11 +328,10 @@ actor ClaudeCodeUsageReader: UsageProvider {
         // reconnecting client replays already carries the plan.
         profile.refresh()
         let loaded = loadAndApplyPersistedState()
-        // If we restored a snapshot, fire the callback immediately so Hub
-        // builds a cached frame for fresh WS clients. Without this emit the
-        // first broadcast waits for the next JSONL append — minutes idle
-        // between Claude turns — and the menubar stays at the "Looking for
-        // Sissy…" placeholder despite valid totals being in memory.
+        // If we restored a snapshot, fire the callback immediately. Without
+        // this emit the first frame waits for the next JSONL append — minutes
+        // of idle between Claude turns — and the panel sits on its empty-day
+        // placeholder despite valid totals being in memory.
         if loaded {
             let (today, prev) = current()
             lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
@@ -347,8 +345,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
         coldScanComplete = true
         // Every backfill emit ran with `prev` still suppressed, and `poll()`
         // re-emits only when JSONL actually changed. Without this emit an
-        // idle CLI leaves `Hub`'s cached frame built from a nil `prev`, so
-        // the panel shows no delta until the next turn writes a line.
+        // idle CLI leaves the last frame built from a nil `prev`, so the
+        // panel shows no delta until the next turn writes a line.
         let (warmToday, warmPrev) = current()
         lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
         await onChange(warmToday, warmPrev)
@@ -427,9 +425,9 @@ actor ClaudeCodeUsageReader: UsageProvider {
                 if !seen.insert(url).inserted { continue }
                 if ingestNewLines(in: url) { dirty = true }
             }
-            // Keep watchedCounter (drives /health usageReader status + menubar
-            // "No JSONL detected" pill) in sync with reality. Without this,
-            // an FSEvents-only daemon that boots into an empty tree and then
+            // Keep watchedCounter (which decides whether the panel says "no
+            // session logs found") in sync with reality. Without this, an
+            // FSEvents-only run that starts against an empty tree and then
             // sees the first Claude turn would still report files=0 because
             // the counter only updates on enumerate() calls.
             watchedCounter.store(max(watchedCounter.load(), fileOffsets.count))
@@ -495,17 +493,17 @@ actor ClaudeCodeUsageReader: UsageProvider {
             if ingestNewLines(in: url) { dirtySinceEmit = true }
             // Cooperative concurrency: without these yields the actor pins
             // one Swift concurrency thread for the entire backfill scan,
-            // starving the NIO HTTP/WS handler Tasks that await on this
-            // actor. Cancellation check immediately after the yield is what
-            // lets `stop()` interrupt an in-flight cold scan instead of
-            // waiting for every file to drain.
+            // starving everything else that awaits on it — the readiness
+            // poll behind the panel's warming state included. The
+            // cancellation check immediately after the yield is what lets
+            // `stop()` interrupt an in-flight cold scan instead of waiting
+            // for every file to drain.
             if i % 4 == 3 {
                 await Task.yield()
                 if Task.isCancelled { return }
             }
-            // Stream partial totals out during backfill. Hub.broadcast caches
-            // each payload, so a late-arriving WS client still gets the most
-            // recent in-progress total replayed on connect.
+            // Stream partial totals out during backfill, so the panel counts
+            // up while the scan runs instead of sitting blank until it ends.
             if dirtySinceEmit,
                 Date().timeIntervalSince(lastEmitAt) > emitThrottle,
                 let cb = onChange
