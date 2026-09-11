@@ -241,14 +241,18 @@ actor UsageEngine {
 
     /// Drives the assertion to whatever the stored mode asks for.
     ///
-    /// The desired state is re-read from `config` after the hop into the
-    /// actor, never captured before it: this is an actor, so a second mode
-    /// change can land while this one is suspended, and the flag the frame
-    /// reports has to describe where the user left the switch rather than
-    /// where this call found it.
+    /// The desired state is read back after the hop into the `KeepAwake`
+    /// actor, never taken from before it: a second mode change can land while
+    /// this one is suspended, and the flag the frame reports has to describe
+    /// where the user left the switch rather than where this call found it.
+    /// The later call owns both the assertion and the flag — the calls reach
+    /// `KeepAwake` in order, so it is the one that says how the Mac ends up —
+    /// which is why an overtaken call stops here instead of reporting a hold
+    /// that has already been released.
     private func applyKeepAwake() async {
         let wanted = config.keepAwake == .on && lifecycle == .running
         let held = await keepAwake.apply(holding: wanted)
+        guard wanted == (config.keepAwake == .on && lifecycle == .running) else { return }
         keepAwakeActive = held && wanted
         sissyLog(
             "sissy: keep-awake \(config.keepAwake.rawValue) — "
