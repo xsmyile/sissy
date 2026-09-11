@@ -88,6 +88,10 @@ struct FrameData: Sendable, Equatable, Codable {
 }
 
 enum FrameBuilder {
+    /// What a formatter prints when there is nothing to print yet. Read back
+    /// by the panel, which drops the burn line rather than showing it.
+    static let placeholder = "..."
+
     static func fmtTokens(_ n: Int) -> String {
         if n >= 1_000_000_000 {
             let v = Double(n) / 1_000_000_000
@@ -105,7 +109,7 @@ enum FrameBuilder {
     }
 
     static func fmtBurn(tokens: Int, hoursElapsed: Double) -> String {
-        if tokens <= 0 || hoursElapsed <= 0 { return "..." }
+        if tokens <= 0 || hoursElapsed <= 0 { return placeholder }
         let safeHours = max(hoursElapsed, 1.0 / 60.0)
         let rate = Int(Double(tokens) / safeHours)
         return fmtTokens(rate)

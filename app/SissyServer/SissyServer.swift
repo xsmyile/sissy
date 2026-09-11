@@ -4,315 +4,71 @@ import NIOHTTP1
 import NIOPosix
 import NIOWebSocket
 
+/// Puts a `UsageEngine` behind a loopback WebSocket.
+///
+/// Nothing about metering lives here any more — this is the transport, and
+/// the only thing left that needs NIO. The app runs the same engine
+/// in-process; see `docs/single-process-migration.md`.
 actor SissyServer {
-    /// In-memory, mutable mirror of the persisted `ServerConfig`. Runtime
-    /// changes update this and call
-    /// `ServerConfig.save` so the new value survives a restart.
-    private(set) var config: ServerConfig
     let hub: Hub
-    let aggregator: UsageAggregator
+    let engine: UsageEngine
 
     private let group: EventLoopGroup
-    private let configURL: URL
+    private let host: String
+    private let port: Int
+    private let authToken: String
     private var channel: (any Channel)?
-    /// Handle on the aggregator boot Task so `stop()` can cancel an
-    /// in-flight cold scan. Without this the daemon kept walking
-    /// `~/.claude/projects` after the NIO channel had closed and only
-    /// drained when every provider finished its scan organically.
-    private var bootTask: Task<Void, Never>?
-    /// Handle on the pricing-catalog refresh loop so `stop()` can cancel an
-    /// in-flight fetch instead of leaving it to finish against a torn-down
-    /// daemon.
-    private var priceCatalogTask: Task<Void, Never>?
     private var startedAt: Date = .distantPast
-    private var primaryMetric: PrimaryMetric
-    /// Cached input to the last `rebuildAndBroadcast`. Lets a pure config
-    /// change — the primary metric — re-broadcast immediately without
-    /// hopping into the aggregator actor — which can queue behind a
-    /// running poll/cold scan and add 50–200 ms of perceived lag. Slices
-    /// are cached alongside totals so a metric replay can't desync
-    /// the aggregate scalars from the per-provider breakdown — a fresh
-    /// `aggregator.perProviderTotals()` call could race a concurrent
-    /// provider emit through actor reentrancy.
-    private var lastTotals: (today: DayTotals, prev: DayTotals?, slices: [ProviderSlice])?
-    /// Polls Claude Code's subscription windows. Constructed unconditionally
-    /// so the toggle can start it later without rebuilding the provider list;
-    /// it does nothing until `start` is called.
-    private let claudeLimitsProbe: ClaudeLimitsProbe
-    /// Holds the power assertion. Constructed unconditionally and inert until
-    /// asked, like the probe above: an actor nobody has told to hold anything
-    /// touches nothing.
-    private let keepAwake = KeepAwake()
-    /// Whether the Mac is being held awake right now, as opposed to what the
-    /// user asked for — which is `config.keepAwake`. They differ when power
-    /// management refuses the assertion, and the panel shows both.
-    private var keepAwakeActive = false
-    /// Whether a client is connected. The hold follows it: quitting Sissy has
-    /// to let the Mac sleep again, and a daemon holding one for an app nobody
-    /// can see is a battery complaint with no visible cause. The *mode* is
-    /// untouched by this — it is where the user left the switch, and it is
-    /// what the hold resumes from on the next connect.
-    private var clientPresent = false
+    private let isoFormatter = ISO8601DateFormatter()
 
     init(
         config: ServerConfig,
         group: EventLoopGroup,
         configURL: URL = ServerConfig.defaultURL
     ) {
-        self.config = config
         self.group = group
-        self.configURL = configURL
+        self.host = config.host
+        self.port = config.port
+        self.authToken = config.authToken
         self.hub = Hub()
-        self.primaryMetric = config.resolvedPrimaryMetric
-
-        // Resolve provider toggles. Unset (nil) means "let the daemon
-        // decide": ClaudeCodeUsageReader is the v0.1.0 baseline (always on);
-        // Codex is tailed whenever its rollout dir exists (the cold scan is
-        // already 48h-bounded, so an idle reader is cheap). Explicit `false`
-        // forces off even when data exists; explicit `true` forces on.
-        let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
-        let claudeOn = config.providers.claudeCode ?? true
-        let codexOn =
-            config.providers.codex
-            ?? FileManager.default.fileExists(atPath: config.resolvedCodexDataDir.path)
-        let limitsProbe = ClaudeLimitsProbe()
-        self.claudeLimitsProbe = limitsProbe
-        var providers: [any UsageProvider] = []
-        if claudeOn {
-            // Legacy persistence URL on purpose: existing installs already
-            // wrote `usage-state.json` (no provider suffix). Keeping it lets
-            // a daemon upgrade skip the cold backfill instead of stranding
-            // historical offsets behind a renamed file.
-            providers.append(
-                ClaudeCodeUsageReader(
-                    claudeDir: config.resolvedClaudeDataDir,
-                    pollInterval: pollInterval,
-                    persistenceURL: UsageStatePersistence.defaultURL,
-                    pricingOverride: config.pricingOverride,
-                    limitsProbe: limitsProbe
-                ))
-        }
-        if codexOn {
-            providers.append(
-                CodexUsageReader(
-                    codexDir: config.resolvedCodexDataDir,
-                    pollInterval: pollInterval,
-                    persistenceURL: UsageStatePersistence.forProvider("codex"),
-                    pricingOverride: config.pricingOverride
-                ))
-        }
-        self.aggregator = UsageAggregator(providers: providers)
-        let codexResolution = config.providers.codex == nil ? " (auto)" : ""
-        daemonLog(
-            "sissy-serverd: providers — "
-                + "claude-code=\(claudeOn ? "on" : "off"), "
-                + "codex=\(codexOn ? "on" : "off")\(codexResolution)"
-        )
+        self.engine = UsageEngine(config: config, configURL: configURL)
     }
 
-    /// Client asked us to switch the primary metric (tokens / burn_rate).
-    /// Rebuild and re-broadcast the last frame so the menubar updates
-    /// immediately instead of waiting for the next JSONL change.
-    func setPrimaryMetric(_ raw: String) async {
-        let metric = PrimaryMetric(rawValue: raw) ?? .tokens
-        if metric == primaryMetric { return }
-        primaryMetric = metric
-        await rebroadcastFromCache()
-    }
-
-    /// Turn the Claude Code limit probe on or off and persist the choice.
-    /// Starting it is what triggers the one-time keychain prompt, so this is
-    /// only ever reached from an explicit user action.
-    func setClaudeLimits(enabled: Bool) async {
-        if enabled == config.claudeLimits { return }
-        config.claudeLimits = enabled
-        do {
-            try ServerConfig.save(config, to: configURL)
-        } catch {
-            daemonLog(
-                "sissy-serverd: failed to persist claudeLimits to \(configURL.path): \(error)")
-        }
-        if enabled {
-            await startClaudeLimitsProbe()
-        } else {
-            await claudeLimitsProbe.stop()
-        }
-        await rebroadcastFromCache()
-    }
-
-    /// Switch the keep-awake mode and persist it, so the choice survives a
-    /// daemon restart the app was not around for.
-    func setKeepAwake(mode raw: String) async {
-        guard let mode = KeepAwakeMode(rawValue: raw), mode != config.keepAwake else { return }
-        config.keepAwake = mode
-        do {
-            try ServerConfig.save(config, to: configURL)
-        } catch {
-            daemonLog("sissy-serverd: failed to persist keepAwake to \(configURL.path): \(error)")
-        }
-        await applyKeepAwake()
-        await rebroadcastFromCache()
-    }
-
-    /// Drives the assertion to whatever the stored mode asks for.
-    ///
-    /// The desired state is re-read from `config` after the hop into the
-    /// actor, never captured before it: this is an actor, so a second mode
-    /// change can land while this one is suspended, and the flag the frame
-    /// reports has to describe where the user left the switch rather than
-    /// where this call found it.
-    private func applyKeepAwake() async {
-        let wanted = config.keepAwake == .on && clientPresent
-        let held = await keepAwake.apply(holding: wanted)
-        keepAwakeActive = held && wanted
-        daemonLog(
-            "sissy-serverd: keep-awake \(config.keepAwake.rawValue) — "
-                + (keepAwakeActive ? "holding" : "not holding"))
-    }
-
-    /// Takes or drops the hold as Sissy comes and goes.
-    ///
-    /// Rebroadcasting matters on the arrival edge: `Hub` runs this before it
-    /// replays, so the frame the reconnecting app renders first already says
-    /// the Mac is held again rather than flashing a switched-on control that
-    /// is holding nothing.
-    func clientPresenceChanged(_ present: Bool) async {
-        guard present != clientPresent else { return }
-        clientPresent = present
-        await applyKeepAwake()
-        await rebroadcastFromCache()
-    }
-
-    private func startClaudeLimitsProbe() async {
-        let me = self
-        await claudeLimitsProbe.start {
-            await me.rebroadcastFromCache()
-        }
-    }
-
-    /// Re-emit a frame using the most recently observed totals. No-op if the
-    /// reader hasn't produced a frame yet — the new metric will take effect on
-    /// the first real poll.
-    ///
-    /// The totals are read *after* the slice fetch on purpose. That `await` is
-    /// a suspension point a provider emit can land in, and totals read before
-    /// it would be the ones that emit has already superseded — rebroadcasting
-    /// them puts the token count backwards and re-caches the stale pair for
-    /// every client that connects next.
-    func rebroadcastFromCache() async {
-        let slices = await aggregator.currentSlices()
-        guard let totals = lastTotals else { return }
-        await rebuildAndBroadcast(today: totals.today, prev: totals.prev, slices: slices)
-    }
+    func setPrimaryMetric(_ raw: String) async { await engine.setPrimaryMetric(raw) }
+    func setClaudeLimits(enabled: Bool) async { await engine.setClaudeLimits(enabled: enabled) }
+    func setKeepAwake(mode raw: String) async { await engine.setKeepAwake(mode: raw) }
+    func rebroadcastFromCache() async { await engine.rebroadcastFromCache() }
 
     func start() async throws {
         startedAt = Date()
         // Registered before the bind, or the first client could arrive
         // between the two and leave the hold waiting for a second one.
-        let me = self
+        let engine = self.engine
         await hub.onPresenceChange { present in
-            await me.clientPresenceChanged(present)
+            await engine.setObserverPresent(present)
         }
-        // Bind first so clients can connect immediately. Each provider's
-        // initial backfill scan can take several seconds on a multi-MB
-        // log tree (`~/.claude/projects`, `~/.codex/sessions`, …); we let
-        // them run after the socket is open.
+        // Bind first so clients can connect immediately. The engine's initial
+        // backfill can take several seconds on a multi-MB log tree.
         try await bootstrap()
-        // Settle on one catalog before the cold scan starts, so the backfill
-        // prices historical events against the same rates the live tail will
-        // use. A refresh does not reprice what it already counted, so a catalog
-        // that lands mid-scan would leave the day split across two rate sets.
-        if config.remotePricingEnabled {
-            await resolveInitialPriceCatalog()
-        } else {
-            daemonLog("sissy-serverd: remote pricing disabled — using the embedded rate seed")
-        }
-        daemonLog(
-            "sissy-serverd: claude limits — \(config.claudeLimits ? "on" : "off")")
-        if config.claudeLimits {
-            await startClaudeLimitsProbe()
-        }
-        await applyKeepAwake()
-        let server = self
-        bootTask = Task.detached { [aggregator] in
-            await aggregator.start { today, prev, slices in
-                await server.rebuildAndBroadcast(today: today, prev: prev, slices: slices)
-            }
-        }
-    }
-
-    /// Picks the rate catalog the cold backfill will run against, then starts
-    /// the background refresh loop.
-    ///
-    /// Order matters: a usable cache is applied synchronously, and when there
-    /// is none the first fetch is awaited under a short budget rather than left
-    /// to race the backfill. Either way the scan sees one catalog for its whole
-    /// run. Falling through to the seed is a deliberate outcome, not a failure
-    /// — the refresh loop keeps retrying behind it.
-    private func resolveInitialPriceCatalog() async {
-        var resolved: PriceCatalog?
-        var initialDelay: Duration = .zero
-        if let cached = PriceCatalogSource.loadCache() {
-            resolved = cached
-            let age = Date().timeIntervalSince(cached.fetchedAt)
-            initialDelay = PriceCatalogSource.refreshDelay(forCacheAge: age)
-            daemonLog("sissy-serverd: pricing from cached catalog, \(Int(age / 3600))h old")
-        } else if let fetched = await PriceCatalogSource.fetchForColdStart() {
-            resolved = fetched
-            initialDelay = PriceCatalogSource.refreshInterval
-            PriceCatalogSource.saveCache(fetched)
-            daemonLog(
-                "sissy-serverd: pricing catalog fetched before backfill — "
-                    + "anthropic=\(fetched.anthropic.count), openai=\(fetched.openai.count)")
-        } else {
-            daemonLog(
-                "sissy-serverd: no usable pricing cache and no catalog within "
-                    + "\(PriceCatalogSource.coldStartBudget) — backfilling from the embedded "
-                    + "seed, refresh continues in the background")
-        }
-        if let resolved {
-            await aggregator.applyPriceCatalog(resolved)
-        }
-        let aggregator = self.aggregator
-        priceCatalogTask = Task.detached {
-            await PriceCatalogSource.refreshLoop(
-                initialDelay: initialDelay,
-                initialPrevious: resolved
-            ) { catalog in
-                await aggregator.applyPriceCatalog(catalog)
-            }
+        let hub = self.hub
+        await engine.start { frame in
+            await hub.broadcast(frame)
         }
     }
 
     func stop() async {
-        // Cancel the aggregator boot Task first so the cold scan observes
-        // cancellation and bails out of its file enumeration loops before
-        // the channel close handshake even starts.
-        bootTask?.cancel()
-        priceCatalogTask?.cancel()
-        // Released first, before the awaits below: the kernel drops a dead
-        // process's assertions on its own, but `stop()` is also reachable
-        // without an exit, and a Mac held awake by a daemon that has shut
-        // down is a battery complaint nobody can trace back.
-        _ = await keepAwake.apply(holding: false)
-        keepAwakeActive = false
+        await engine.stop()
         try? await channel?.close().get()
-        await claudeLimitsProbe.stop()
-        await aggregator.stop()
-        bootTask = nil
-        priceCatalogTask = nil
     }
 
     func healthSnapshot() async -> HealthResponse {
-        let files = aggregator.filesWatched()
-        // Suppress "no-jsonl-found" until the initial cold scan has completed.
-        // `bootstrap()` brings the HTTP server up before `aggregator.start()`
-        // runs its first enumeration, so without this gate the frontend
-        // briefly observes `files == 0` and flashes the yellow "No JSONL"
-        // warning every time the daemon is (re)started, even on a tree
-        // with hundreds of session files.
-        let coldDone = await aggregator.isWarm()
-        let usageStatus = (coldDone && files == 0) ? "no-jsonl-found" : "ok"
+        let readiness = await engine.readiness()
+        // Suppress "no-jsonl-found" until the initial cold scan has
+        // completed. The server binds before the first enumeration runs, so
+        // without this gate the frontend briefly observes zero files and
+        // flashes the yellow "No JSONL" warning on every start, even on a
+        // tree with hundreds of session files.
+        let usageStatus = (readiness.isWarm && readiness.filesWatched == 0) ? "no-jsonl-found" : "ok"
         return HealthResponse(
             status: "ok",
             usageReader: usageStatus,
@@ -320,49 +76,21 @@ actor SissyServer {
         )
     }
 
-    private let isoFormatter = ISO8601DateFormatter()
-
     func statsSnapshot() async -> StatsResponse {
         let count = await hub.connectedCount()
         let lastAt = await hub.lastFrameTimestamp()
-        let files = aggregator.filesWatched()
+        let readiness = await engine.readiness()
         return StatsResponse(
             connectedClients: count,
-            filesWatched: files,
+            filesWatched: readiness.filesWatched,
             lastFrameAt: lastAt.map { isoFormatter.string(from: $0) }
         )
-    }
-
-    private func rebuildAndBroadcast(
-        today: DayTotals,
-        prev: DayTotals?,
-        slices: [ProviderSlice]
-    ) async {
-        lastTotals = (today, prev, slices)
-        let now = Date()
-        let cal = Calendar.current
-        let startOfDay = cal.startOfDay(for: now)
-        let hoursElapsed = max(now.timeIntervalSince(startOfDay) / 3600, 1.0 / 60.0)
-        // Slices arrive captured against the same `perProvider` snapshot the
-        // aggregator used to compute `today`/`prev` (or replayed from
-        // `lastTotals` on a metric-toggle rebuild). A fresh
-        // `perProviderTotals()` call here would race actor reentrancy and
-        // could ship a frame whose scalars and breakdown disagree.
-        let frame = FrameBuilder.build(
-            today: today,
-            prev: prev,
-            hoursElapsed: hoursElapsed,
-            primaryMetric: primaryMetric,
-            providers: slices,
-            keepAwake: KeepAwakeState(mode: config.keepAwake, active: keepAwakeActive)
-        )
-        await hub.broadcast(frame)
     }
 
     private func bootstrap() async throws {
         let server = self
         let hub = self.hub
-        let expectedToken = config.authToken
+        let expectedToken = authToken
 
         let upgrader = NIOWebSocketServerUpgrader(
             maxFrameSize: 1 << 14,
@@ -411,6 +139,6 @@ actor SissyServer {
             // Cheap to enable.
             .childChannelOption(ChannelOptions.socketOption(.so_keepalive), value: 1)
 
-        channel = try await bootstrap.bind(host: config.host, port: config.port).get()
+        channel = try await bootstrap.bind(host: host, port: port).get()
     }
 }
