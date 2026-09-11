@@ -29,17 +29,21 @@ struct ProviderRowSnapshot: Equatable {
     /// ways to find nothing are kept apart on purpose: a data dir that is not
     /// there is a different problem from one that is there and empty, and
     /// naming the path is what makes either actionable.
+    ///
+    /// Exhaustive over the activation on purpose — a state added later has no
+    /// sensible line to fall back to, so it has to fail the build here rather
+    /// than quietly claim the user switched something off.
     private static func detail(for readiness: ProviderReadiness) -> String {
         let path = (readiness.dataDir.path as NSString).abbreviatingWithTildeInPath
-        guard readiness.activation.isMetering else {
-            switch readiness.activation {
-            case .autoNotFound: return "\(path) does not exist"
-            default: return "Switched off in server.json"
-            }
+        switch readiness.activation {
+        case .off: return "Switched off in server.json"
+        case .autoNotFound: return "\(path) does not exist"
+        case .on, .autoDetected: return scanned(readiness.scan, at: path)
         }
-        guard let scan = readiness.scan, scan.isWarm else {
-            return "Reading your session logs"
-        }
+    }
+
+    private static func scanned(_ scan: ProviderReadiness.ScanProgress?, at path: String) -> String {
+        guard let scan, scan.isWarm else { return "Reading your session logs" }
         switch scan.filesWatched {
         case 0: return "No session logs in \(path)"
         case 1: return "1 session file in \(path)"
