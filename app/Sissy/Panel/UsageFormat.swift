@@ -112,8 +112,8 @@ enum UsageFormat {
 
     static func providerName(_ id: String) -> String {
         switch id {
-        case "claude-code": return "Claude Code"
-        case "codex": return "Codex"
+        case ProviderID.claudeCode: return "Claude Code"
+        case ProviderID.codex: return "Codex"
         default: return id
         }
     }

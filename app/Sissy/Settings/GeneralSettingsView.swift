@@ -26,18 +26,6 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Toggle("Show Claude Code limits", isOn: claudeLimitsBinding)
-                Text(
-                    "Reads the token Claude Code already keeps in your keychain to show its "
-                        + "5-hour and weekly windows next to Codex's. macOS asks for your "
-                        + "permission, and asks again whenever Sissy's own binary changes; "
-                        + "Sissy only ever reads the token, never writes or refreshes it."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
-
-            Section {
                 Toggle("Animate Sissy", isOn: sissyMotionBinding)
                 Text(
                     "A blink when new usage lands, in the menu bar and in the panel, "
@@ -68,13 +56,6 @@ struct GeneralSettingsView: View {
         // reads it whenever the window appears rather than trusting what it
         // last set: the user can undo it from System Settings.
         .task { model.loginItem.refresh() }
-    }
-
-    private var claudeLimitsBinding: Binding<Bool> {
-        Binding(
-            get: { model.engine.claudeLimits },
-            set: { model.setClaudeLimits($0) }
-        )
     }
 
     private var launchAtLoginBinding: Binding<Bool> {
