@@ -73,25 +73,25 @@ actor UsageAggregator {
         currentProviderSlices()
     }
 
-    /// Live sum of each provider's `filesWatched()`. Computed on demand
-    /// because providers' own counters update during cold-scan / poll even
-    /// when no `onChange` fires (e.g. restart from a persisted snapshot
-    /// where every offset is already at EOF). A cached value would let
-    /// the panel say "no session logs found" indefinitely until the next token
-    /// event nudged it.
-    nonisolated func filesWatched() -> Int {
-        providers.reduce(0) { $0 + $1.filesWatched() }
-    }
-
-    /// True once every provider has finished its cold scan. Empty provider
-    /// list returns true so a zero-provider run (auto-detect disabled all
-    /// of them) doesn't pin the menubar in the cold-start placeholder
-    /// forever.
-    func isWarm() async -> Bool {
+    /// Per-provider scan progress, keyed by provider id. Only the providers
+    /// that are actually metering appear: a provider with no reader has no
+    /// scan, and the caller renders that as its own state rather than as a
+    /// scan that found nothing.
+    ///
+    /// Read on demand, never cached: a provider's own counters move during
+    /// cold scan and poll even when no `onChange` fires — a restart from a
+    /// snapshot whose offsets are all at EOF emits nothing at all — and a
+    /// cached value would leave the panel saying "no session logs found"
+    /// until the next token event nudged it.
+    func scanProgress() async -> [String: ProviderReadiness.ScanProgress] {
+        var progress: [String: ProviderReadiness.ScanProgress] = [:]
         for p in providers {
-            if await !p.isWarm() { return false }
+            progress[p.id] = ProviderReadiness.ScanProgress(
+                filesWatched: p.filesWatched(),
+                isWarm: await p.isWarm()
+            )
         }
-        return true
+        return progress
     }
 
     private func handleProviderEmit(id: String, today: DayTotals, prev: DayTotals?) async {

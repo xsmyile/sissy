@@ -60,61 +60,71 @@ actor UsageEngine {
     private var observerPresent = false
     private var onFrame: (@Sendable (FrameData) async -> Void)?
 
-    /// What the surface needs to tell "still reading the tree" apart from
-    /// "there is nothing to read", which are the same zero until the cold
-    /// scan finishes.
-    struct Readiness: Sendable, Equatable {
-        let filesWatched: Int
-        let isWarm: Bool
+    /// Every provider Sissy knows about, metering or not, with how it was
+    /// resolved. Built once in `init` alongside the readers, because the
+    /// resolution is what decides which readers exist and there is nothing
+    /// left to re-derive it from afterwards.
+    private let resolvedProviders: [ResolvedProvider]
+
+    private struct ResolvedProvider {
+        let id: String
+        let activation: ProviderActivation
+        let dataDir: URL
     }
 
     init(config: ServerConfig, configURL: URL = ServerConfig.defaultURL) {
         self.config = config
         self.configURL = configURL
 
-        // Resolve provider toggles. Unset (nil) means "let the engine
-        // decide": ClaudeCodeUsageReader is the v0.1.0 baseline (always on);
-        // Codex is tailed whenever its rollout dir exists (the cold scan is
-        // already 48h-bounded, so an idle reader is cheap). Explicit `false`
-        // forces off even when data exists; explicit `true` forces on.
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
-        let claudeOn = config.providers.claudeCode ?? true
-        let codexOn =
-            config.providers.codex
-            ?? FileManager.default.fileExists(atPath: config.resolvedCodexDataDir.path)
+        let claudeDir = config.resolvedClaudeDataDir
+        let codexDir = config.resolvedCodexDataDir
+        // Claude Code has no detection step: it is the v0.1.0 baseline and an
+        // unset toggle leaves it on. Codex is tailed whenever its rollout dir
+        // exists — the cold scan is already 48h-bounded, so an idle reader is
+        // cheap.
+        let claudeActivation: ProviderActivation = (config.providers.claudeCode ?? true) ? .on : .off
+        let codexActivation = ProviderActivation.resolve(
+            toggle: config.providers.codex,
+            autoDetected: FileManager.default.fileExists(atPath: codexDir.path)
+        )
+        self.resolvedProviders = [
+            ResolvedProvider(
+                id: ProviderID.claudeCode, activation: claudeActivation, dataDir: claudeDir),
+            ResolvedProvider(id: ProviderID.codex, activation: codexActivation, dataDir: codexDir),
+        ]
         let limitsProbe = ClaudeLimitsProbe()
         self.claudeLimitsProbe = limitsProbe
         var providers: [any UsageProvider] = []
-        if claudeOn {
+        if claudeActivation.isMetering {
             // Legacy persistence URL on purpose: existing installs already
             // wrote `usage-state.json` (no provider suffix). Keeping it lets
             // an upgrade skip the cold backfill instead of stranding
             // historical offsets behind a renamed file.
             providers.append(
                 ClaudeCodeUsageReader(
-                    claudeDir: config.resolvedClaudeDataDir,
+                    claudeDir: claudeDir,
                     pollInterval: pollInterval,
                     persistenceURL: UsageStatePersistence.defaultURL,
                     pricingOverride: config.pricingOverride,
                     limitsProbe: limitsProbe
                 ))
         }
-        if codexOn {
+        if codexActivation.isMetering {
             providers.append(
                 CodexUsageReader(
-                    codexDir: config.resolvedCodexDataDir,
+                    codexDir: codexDir,
                     pollInterval: pollInterval,
                     persistenceURL: UsageStatePersistence.forProvider("codex"),
                     pricingOverride: config.pricingOverride
                 ))
         }
         self.aggregator = UsageAggregator(providers: providers)
-        let codexResolution = config.providers.codex == nil ? " (auto)" : ""
-        sissyLog(
-            "sissy: providers — "
-                + "claude-code=\(claudeOn ? "on" : "off"), "
-                + "codex=\(codexOn ? "on" : "off")\(codexResolution)"
-        )
+        let resolution =
+            resolvedProviders
+            .map { "\($0.id)=\($0.activation.logToken)" }
+            .joined(separator: ", ")
+        sissyLog("sissy: providers — \(resolution)")
     }
 
     /// Starts metering. `onFrame` is called for every reading from here on,
@@ -165,8 +175,18 @@ actor UsageEngine {
         priceCatalogTask = nil
     }
 
-    func readiness() async -> Readiness {
-        Readiness(filesWatched: aggregator.filesWatched(), isWarm: await aggregator.isWarm())
+    /// Every known provider with how it resolved and, for the ones that are
+    /// metering, how far their scan has got. In canonical order.
+    func providerReadiness() async -> [ProviderReadiness] {
+        let progress = await aggregator.scanProgress()
+        return resolvedProviders.map {
+            ProviderReadiness(
+                id: $0.id,
+                activation: $0.activation,
+                dataDir: $0.dataDir,
+                scan: progress[$0.id]
+            )
+        }
     }
 
     /// Turn the Claude Code limit probe on or off and persist the choice.
