@@ -122,7 +122,7 @@ compiled into the app too.
 | `UsageReaderShared.swift`       | Tuning constants the tail and its adapters share (`ingestChunkSize`, `pollEmitThrottle`, mtime slack), the token-count bound, and `parseTimestamp` — the one timestamp parser every source and the probe use |
 | `UsageAtomics.swift`            | The three lock boxes a provider is read through from outside its actor (`AtomicIntCounter`, `AtomicWindows`, `AtomicPlan`) |
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429; off unless `claudeLimits` is set |
-| `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it — bounded so an unanswered authorization dialog cannot park the probe |
+| `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it. One lookup runs at a time and every caller waits on that one under its own budget, so an unanswered authorization dialog parks neither the probe nor a second dispatch thread, and the answer reaches whoever is still waiting when it finally comes |
 | `ClaudeProfile.swift`           | Reads the plan out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain, so it answers with `claudeLimits` off |
 | `CodexAuth.swift`               | Reads the `chatgpt_plan_type` claim out of `~/.codex/auth.json`, for the boot before the first turn; touches no other field in it |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
@@ -132,10 +132,10 @@ compiled into the app too.
 | `OpenAIPricing.swift`           | OpenAI cost math, same override → catalog → seed precedence |
 | `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM rates at runtime; renders the seed for `--dump-seed` |
 | `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — offline / first-run floor |
-| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`, `keepAwake`. The engine owns the file |
+| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`, `keepAwake`. The engine owns the file, and saves it through a staging file so it is owner-only before it answers to its own name |
 | `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude Code stays on the legacy `usage-state.json` for upgrade smoothness |
 | `SissyPaths.swift`              | Support-dir and logs-dir resolution (`.dev` bundle id → dev tree) |
-| `SissyLog.swift`                | `sissyLog`, stderr plus a size-capped `Library/Logs/Sissy/sissy.err.log` |
+| `SissyLog.swift`                | `sissyLog`, stderr plus `Library/Logs/Sissy/sissy.err.log`, capped as it is written (one generation kept); every message is escaped to a single line, because some carry text the CLIs wrote |
 | `main.swift`                    | The tool's entry point: `--self-test` / `--scan` / `--scan-provider` / `--config` / `--dump-seed` / `--refresh-catalog`. No flag prints the list and exits 2 |
 | `SelfTest.swift`                | The `--self-test` harness: pure formatter, pricing, parser and persistence assertions, run in CI |
 
