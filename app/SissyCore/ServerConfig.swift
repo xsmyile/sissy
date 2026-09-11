@@ -104,13 +104,32 @@ struct ServerConfig: Sendable, Codable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(config)
-        try data.write(to: url, options: [.atomic])
-        // Owner-only. Nothing secret lives here since the bearer token
-        // went with the socket, but this is the file that decides which
-        // directories Sissy reads and what it prices them at, and there is
-        // no reason for another user on the machine to be able to edit it.
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: url.path)
+        // Owner-only, and owner-only before it is reachable under its own
+        // name. Nothing secret lives here since the bearer token went with the
+        // socket, but this is the file that decides which directories Sissy
+        // reads and what it prices them at, and there is no reason for another
+        // user on the machine to be able to edit it. Writing first and
+        // chmod-ing after left the file world-readable for the width of that
+        // gap, which is the only window the mode has to cover.
+        let staging = dir.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)")
+        do {
+            try data.write(to: staging)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: staging.path)
+            // `rename(2)` rather than `FileManager.replaceItemAt`, which needs
+            // something already there to replace: this is also the first save
+            // on a fresh install. It keeps the mode set above, where an atomic
+            // `Data.write` would leave the default one until the chmod landed.
+            if rename(staging.path, url.path) != 0 {
+                let code = errno
+                throw NSError(
+                    domain: NSPOSIXErrorDomain, code: Int(code),
+                    userInfo: [NSFilePathErrorKey: url.path])
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            throw error
+        }
     }
 
     var resolvedClaudeDataDir: URL {
