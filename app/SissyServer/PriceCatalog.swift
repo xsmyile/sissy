@@ -61,7 +61,7 @@ enum PriceCatalogSource {
     static let refreshInterval: Duration = .seconds(24 * 60 * 60)
     /// Retry cadence after a failed refresh. Short enough that a transient
     /// upstream outage doesn't cost a full day of staleness, long enough not to
-    /// hammer GitHub from every installed daemon.
+    /// hammer GitHub from every install.
     static let retryInterval: Duration = .seconds(60 * 60)
     static let requestTimeout: TimeInterval = 20
     static let fetchAttempts = 3

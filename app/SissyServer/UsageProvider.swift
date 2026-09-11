@@ -10,7 +10,7 @@ import Foundation
 /// implementation but every stateful method is `async` so callers don't need
 /// to know.
 protocol UsageProvider: AnyObject, Sendable {
-    /// Stable identifier used as the key in `/stats` per-provider breakdown
+    /// Stable identifier used as the key in the per-provider breakdown
     /// and (where applicable) as the suffix on provider-specific persistence
     /// files. Kebab-case, lowercase. Claude is the exception: it keeps the
     /// legacy unqualified `usage-state.json` for upgrade smoothness.
@@ -31,7 +31,7 @@ protocol UsageProvider: AnyObject, Sendable {
     /// rationale.
     func current() async -> (today: DayTotals, prev: DayTotals?)
 
-    /// Number of session files currently being watched. Drives /health
+    /// Number of session files currently being watched. Drives the panel's
     /// and the menubar "No JSONL detected" pill. Nonisolated so the HTTP
     /// handler can read it without hopping into the actor mid-scan.
     nonisolated func filesWatched() -> Int
