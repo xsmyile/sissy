@@ -57,7 +57,6 @@ final class SissyModel {
 
     func savePreferences() {
         preferences.save(to: supportDirectory)
-        preferences.writeServerConfig(to: supportDirectory)
     }
 
     // MARK: Menu snapshots
@@ -134,9 +133,6 @@ final class SissyModel {
     // MARK: Menu actions
 
     func setClaudeLimits(_ enabled: Bool) {
-        guard enabled != preferences.claudeLimits else { return }
-        preferences.claudeLimits = enabled
-        savePreferences()
         engine.setClaudeLimits(enabled)
     }
 
