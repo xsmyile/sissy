@@ -36,6 +36,24 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - Sissy
+      # The metering engine, compiled into the app as well as the daemon.
+      # Sissy is folding the two processes into one (see
+      # docs/single-process-migration.md); this is the step that gives the
+      # app the engine, before anything starts calling it. Excluded here is
+      # everything that is the *daemon* rather than the engine: its entry
+      # point, its self-test harness, the NIO server and the two helpers the
+      # app already carries its own copy of.
+      - path: SissyServer
+        excludes:
+          - main.swift
+          - SelfTest.swift
+          - SissyServer.swift
+          - Hub.swift
+          - HTTPRequestHandler.swift
+          - HTTPResponses.swift
+          - WebSocketSinkHandler.swift
+          - Auth.swift
+          - SissyPaths.swift
       # The notices file lives at the repo root, where GitHub shows it, and
       # is bundled as a resource because SwiftNIO ships compiled into the
       # daemon: Apache-2.0 asks its NOTICE to travel with the binary, not
