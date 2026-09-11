@@ -9,7 +9,7 @@ struct ScanEntry: Encodable {
     let prevTokens: Int?
     let prevCost: String?
     /// Plan the provider named for this account, so the value the panel badges
-    /// can be read without a WebSocket client. Absent for a provider that
+    /// can be read without launching the app. Absent for a provider that
     /// names none — and for Codex also when the scan's one-second window
     /// closed before its first `token_count` event.
     let plan: String?

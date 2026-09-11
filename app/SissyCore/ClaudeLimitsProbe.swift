@@ -18,7 +18,7 @@ actor ClaudeLimitsProbe {
     private static let rateLimitedBackoff: Duration = .seconds(1800)
     private static let keychainTimeout: Duration = .seconds(20)
 
-    /// Wire key to window length. Anthropic publishes finer buckets
+    /// Response key to window length. Anthropic publishes finer buckets
     /// (`seven_day_opus`, `seven_day_sonnet`); the panel shows the two that
     /// apply to every plan.
     private static let buckets: [(key: String, minutes: Int)] = [
@@ -48,7 +48,7 @@ actor ClaudeLimitsProbe {
     nonisolated func currentWindows() -> [UsageWindow] { windows.live() }
 
     /// Starts the poll loop. `onRefresh` fires only when the windows actually
-    /// changed, so a steady state costs no broadcasts. Idempotent.
+    /// changed, so a steady state costs no emits. Idempotent.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
         if pollTask != nil { return }
         pollTask = Task { [weak self] in
@@ -68,7 +68,7 @@ actor ClaudeLimitsProbe {
     ///
     /// Dropping them is the whole job. The aggregator rebuilds every slice
     /// from `currentWindows()`, so a cancelled task publishes nothing new but
-    /// keeps its last answer on the wire: turning the setting off left the
+    /// keeps its last answer in the frame: turning the setting off left the
     /// gauges up until each bucket outlived its own reset — five hours for the
     /// session window, a week for the other. `lastReported` goes with them so
     /// turning the setting back on logs what it found instead of deduping

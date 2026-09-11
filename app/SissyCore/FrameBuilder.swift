@@ -22,11 +22,9 @@ struct UsageWindow: Sendable, Equatable, Codable, Identifiable {
     var id: Int { minutes }
 }
 
-/// Raw per-provider slice carried on the WS frame so the app can derive both
-/// the menubar header total and the panel's per-provider rows from a single
-/// payload. Cost is a `Decimal` here; the wire representation is
-/// `NSDecimalNumber.stringValue` so it round-trips lossless through
-/// `Decimal(string:)` on the app side.
+/// Raw per-provider slice carried on the frame so the app derives both the
+/// menubar header total and the panel's per-provider rows from a single
+/// payload rather than from two counts that can disagree.
 struct ProviderSlice: Sendable, Equatable, Codable, Identifiable {
     let id: String
     let tokens: Int
@@ -154,7 +152,7 @@ enum FrameBuilder {
         }
     }
 
-    /// Breakdown slices for the wire: only CLIs with spend today, in canonical
+    /// Breakdown slices for the frame: only CLIs with spend today, in canonical
     /// order. A provider with zero tokens today is omitted so the menubar
     /// Breakdown reflects that day's actual per-CLI split rather than every
     /// warm reader.
