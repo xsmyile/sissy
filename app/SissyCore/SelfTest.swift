@@ -107,7 +107,7 @@ func runSelfTest() {
     )
     expect("frame providers empty default", frameNoProviders.providers.isEmpty, true)
 
-    print("=== Hub.encode ===")
+    print("=== FrameBuilder.build ===")
     runFrameBuildTests()
 
     print("=== Pricing ===")

@@ -53,7 +53,7 @@ Adding/removing Swift files requires re-running `xcodegen generate` — the proj
 
 `UsageAggregator` sums per-day totals across N `UsageProvider` instances and `UsageEngine` builds a single combined frame from them. One process: the app runs the engine in-process and the frame is a Swift value, not JSON. There is no wire contract to keep in step any more — `FrameData`, `ProviderSlice` and `UsageWindow` live in `app/SissyCore/FrameBuilder.swift` and the app renders those types directly.
 
-The combined `tokens`/`cost`/`burn` scalars are still pre-formatted, a shape inherited from rendering into 128×64 pixels, and the reason `UsageFormat` in the app re-implements its own formatters; only `burn` is still read from the frame. Alongside them the frame carries a raw `providers` array so the header subtitle, the panel's per-provider rows and each provider's rate-limit gauges all come from one payload.
+The combined `tokens`/`cost`/`burn` scalars are still pre-formatted, a shape inherited from rendering into 128×64 pixels, and the reason `UsageFormat` in the app re-implements its own formatters. `burn` is read off the frame as-is; `tokens` and `cost` only in the branch where no provider has spent anything today, where both formatters agree on "0". Alongside them the frame carries a raw `providers` array so the header subtitle, the panel's per-provider rows and each provider's rate-limit gauges all come from one payload.
 
 `app/SissyCore/` also builds `sissy-cli`, which CI drives for `--self-test`, `--scan`, `--dump-seed` and `--refresh-catalog`. Only `main.swift` and `SelfTest.swift` are the tool's own; every other file in that directory is compiled into the app too.
 
