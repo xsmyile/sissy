@@ -37,10 +37,10 @@ wire, an optimistic-ack window, and a gate on link state.
 ## Target shape
 
 ```
-SissyCore   (shared target)  readers, pricing, aggregator, FSWatcher,
-                             persistence, formatters — no NIO
-Sissy.app   (app)            UI + SissyCore in-process
-sissy-cli   (tool, CI only)  --self-test / --scan / --dump-seed / --refresh-catalog
+app/SissyServer/  the engine: readers, pricing, aggregator, FSWatcher,
+                  persistence, formatters — no NIO. Compiled into both.
+Sissy.app  (app)  UI + the engine in-process
+sissy-cli  (tool) --self-test / --scan / --dump-seed / --refresh-catalog
 ```
 
 Only four daemon files import NIO (`main`, `SissyServer`, `HTTPRequestHandler`,
@@ -49,15 +49,24 @@ unchanged. `FSWatcher` uses `FSEventStreamSetDispatchQueue` on a `.utility`
 queue — chosen deliberately over `ScheduleWithRunLoop` — so it drops into an
 AppKit process with no run-loop work.
 
+**The engine is shared as sources, not as a module.** A framework or static
+library would mean annotating ~25 files with `public` for a boundary that
+exists for one release: the daemon target is deleted in PR 5, after which there
+is one consumer and a thin CLI. Both targets listing the same directory costs a
+second compile of code that is about to have one home, and no annotation churn
+in files #35 is rewriting at the same time. The directory keeps its name until
+PR 5 for the same reason — a rename now would conflict with every line of that
+work.
+
 ## PR ledger
 
 | # | PR | State |
 |---|---|---|
-| — | `docs`: this ledger | **in review** |
-| 0 | `fix(daemon)`: the keep-awake hold follows the app | todo |
-| 1 | `refactor`: SissyCore, one shared target | todo |
+| — | `docs`: this ledger | merged (#50) |
+| 0 | `fix(daemon)`: the keep-awake hold follows the app | merged (#51) |
+| 1 | `refactor`: the engine compiles into the app | **in review** |
 | 2 | `feat(cli)`: `--refresh-catalog`, and the oracle pointed at it | todo |
-| 3 | `refactor(app)`: frames from SissyCore, not the WebSocket | todo |
+| 3 | `refactor(app)`: frames from the engine, not the WebSocket | todo |
 | 4 | `refactor`: drop the LaunchAgent | todo |
 | 5 | `refactor`: drop the wire | todo |
 | 6 | `refactor`: drop the OLED residue | todo |
@@ -78,16 +87,23 @@ only while a client is connected. That is exactly the `{mode, active}` split
 condition in `applyKeepAwake`. After PR 3 it is free — the process dies, the
 assertion dies with it.
 
-**1 — SissyCore.** A mechanical move: every non-NIO file in `app/SissyServer/`
-into a shared target that both `Sissy` and the tool link. No behaviour change,
-no renames. Land this before anything else touches those files.
+**1 — the engine compiles into the app.** The app target lists
+`app/SissyServer` too, excluding the nine files that are the *daemon* rather
+than the engine: `main`, `SelfTest`, `SissyServer`, `Hub`,
+`HTTPRequestHandler`, `HTTPResponses`, `WebSocketSinkHandler`, `Auth`,
+`SissyPaths`. Two things had to give first — `daemonLog` moved out of
+`main.swift` into `DaemonLog.swift`, since seven engine files call it; and the
+app's mirror of `KeepAwakeMode`/`KeepAwakeState` was deleted in favour of the
+engine's, which is a strict superset. Nothing calls the engine yet: that is
+PR 3. The only other name clashes were `HealthResponse` and `SissyPaths`, both
+excluded, both gone by PR 5.
 
 **2 — `--refresh-catalog`.** `pricing-oracle.yml:83-98` currently **boots the
 daemon in server mode**, greps its log for the catalog line, then `kill -TERM`s
 it. That step does not survive PR 5. Replace it with a flag that fetches, writes
 the cache and exits, and repoint the workflow before the server goes.
 
-**3 — frames from SissyCore.** The app builds the aggregator itself and gets
+**3 — frames from the engine.** The app builds the aggregator itself and gets
 frames from a callback. Deletes `WebSocketClient`, `FrameDecoder`,
 `ServerHealthMonitor`, `Server/HTTPResponses`. Two things ride along:
 - `fmtBurn` has to **move** into `UsageFormat`. `burn` is not dead like
@@ -195,4 +211,4 @@ without the daemon, but after the merge the app is the writer.
 - Reintroduce a network bind, a bearer token or a port. If a second consumer
   ever appears, that is a new decision with a new design, not a revival.
 - Fold `SelfTest`'s surviving 1,400 lines into XCTest as part of this work. It
-  is worth doing once SissyCore exists; it is not this refactor.
+  is worth doing once the daemon target is gone; it is not this refactor.
