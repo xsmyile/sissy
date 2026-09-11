@@ -22,70 +22,96 @@ struct KeepAwakeState: Sendable, Equatable {
     static let off = Self(mode: .off, active: false)
 }
 
-/// Owns the power assertion that stops the Mac idling to sleep.
+/// Owns the power assertions that stop the Mac, and its screen, idling off.
 ///
 /// The hold dies with the process, deliberately: a Mac held awake by
 /// something with no icon in the menu bar is a battery complaint with no path
 /// back to its cause. The *mode* survives in `server.json`, so the next launch
 /// resumes the hold the user asked for.
 actor KeepAwake {
-    private var assertion: IOPMAssertionID?
+    private var system: IOPMAssertionID?
+    private var display: IOPMAssertionID?
 
-    /// Prevents the *idle* system sleep, which is the one that interrupts a
-    /// running agent. The display is left to sleep on its own: a run needs no
-    /// lit screen, and holding one awake would drain a laptop for nothing.
+    /// Two assertions, not the display one alone — which already keeps the
+    /// system up for as long as the screen is lit. A screen blanked by hand,
+    /// from a hot corner or ⌃⇧⏻, takes that effect away with it, and the Mac
+    /// would idle to sleep under a switch the user left on. Holding both makes
+    /// the screen the addition it reads as and never the whole hold.
     ///
-    /// Neither assertion survives the lid closing, which is why the app says so
-    /// next to the control rather than leaving it to be discovered by a lost
-    /// run.
-    private static let assertionType = kIOPMAssertionTypePreventUserIdleSystemSleep
-    private static let assertionName = "Sissy is keeping this Mac awake"
+    /// A lit screen is also a Mac that does not lock itself, which is the one
+    /// consequence here a user would not predict; the panel's control says so
+    /// rather than leaving it to be discovered.
+    ///
+    /// Neither assertion survives the lid closing. macOS sleeps a laptop on
+    /// clamshell whoever is asserting what, unless it is on power with an
+    /// external display attached — which is its own feature and not one Sissy
+    /// can grant.
+    private static let systemType = kIOPMAssertionTypePreventUserIdleSystemSleep
+    private static let displayType = kIOPMAssertionTypePreventUserIdleDisplaySleep
+    private static let systemName = "Sissy is keeping this Mac awake"
+    private static let displayName = "Sissy is keeping this screen on"
 
-    /// Drives the assertion to `holding` and reports what it ended up as.
+    /// Drives the hold to `holding` and reports whether the Mac is being kept
+    /// awake.
     ///
     /// Reporting rather than throwing is what keeps the engine honest: power
-    /// management refusing the assertion is nothing this layer can act on, but
+    /// management refusing an assertion is nothing this layer can act on, but
     /// it is something the user has to see — the panel then shows the mode they
-    /// chose and a Mac that is not being held.
+    /// chose and a Mac that is not being held. The answer follows the system
+    /// assertion, which is what that claim is about: a refused display
+    /// assertion leaves a Mac that stays up behind a screen that dims, and says
+    /// so in the log rather than retracting the hold that did take.
+    ///
+    /// The reverse is not survivable the same way, so it is not survived: a
+    /// false answer has to mean nothing is held, or the panel would report a
+    /// Mac free to sleep while a screen assertion quietly kept it up. A system
+    /// assertion that could not be taken therefore drops the display one with
+    /// it.
     ///
     /// Serialising every change through this actor is also what makes two mode
     /// switches in the same instant safe: they arrive in order and the last one
     /// decides.
     func apply(holding: Bool) -> Bool {
-        if holding {
-            hold()
-        } else {
-            release()
+        guard holding else {
+            releaseAll()
+            return false
         }
-        return assertion != nil
+        if system == nil { system = create(Self.systemType, named: Self.systemName) }
+        if display == nil { display = create(Self.displayType, named: Self.displayName) }
+        if system == nil { releaseAll() }
+        return system != nil
     }
 
-    private func hold() {
-        guard assertion == nil else { return }
+    private func releaseAll() {
+        release(&display, named: Self.displayName)
+        release(&system, named: Self.systemName)
+    }
+
+    private func create(_ type: String, named name: String) -> IOPMAssertionID? {
         var id = IOPMAssertionID(0)
         let status = IOPMAssertionCreateWithName(
-            Self.assertionType as CFString,
+            type as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            Self.assertionName as CFString,
+            name as CFString,
             &id
         )
         guard status == kIOReturnSuccess else {
             sissyLog(
-                "sissy: power management refused the keep-awake assertion "
-                    + "(IOReturn \(status)) — the Mac will sleep as usual")
-            return
+                "sissy: power management refused the \(type) assertion "
+                    + "(IOReturn \(status)) — that half of the hold is not in effect")
+            return nil
         }
-        assertion = id
+        return id
     }
 
     /// Releasing what is not held is not an error: `stop()` runs on every exit
     /// path, including the ones where nothing was ever held.
-    private func release() {
+    private func release(_ assertion: inout IOPMAssertionID?, named name: String) {
         guard let id = assertion else { return }
         assertion = nil
         let status = IOPMAssertionRelease(id)
         if status != kIOReturnSuccess {
-            sissyLog("sissy: keep-awake release returned IOReturn \(status)")
+            sissyLog("sissy: releasing \"\(name)\" returned IOReturn \(status)")
         }
     }
 }
