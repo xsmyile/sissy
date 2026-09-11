@@ -13,8 +13,6 @@ final class SissyModelLiveFrameTests: XCTestCase {
             tokens: "26K",
             cost: "0.09",
             burn: "1.5K",
-            primary: "26K",
-            primaryLabel: "TOKENS",
             providers: [],
             prevTokens: nil,
             prevCost: nil,
