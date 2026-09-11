@@ -26,7 +26,6 @@ enum OpenAIPricing {
         input: Int,
         output: Int,
         cacheRead: Int,
-        cacheCreation: Int = 0,
         override: [String: ModelPricing]? = nil,
         catalog: PricingTable? = nil
     ) -> Decimal {
@@ -36,7 +35,6 @@ enum OpenAIPricing {
             Decimal(input) * p.inputPerMTok
             + Decimal(output) * p.outputPerMTok
             + Decimal(cacheRead) * p.cacheReadPerMTok
-            + Decimal(cacheCreation) * p.cacheCreationPerMTok
         var result = raw / million
         var rounded = Decimal()
         NSDecimalRound(&rounded, &result, 6, .bankers)

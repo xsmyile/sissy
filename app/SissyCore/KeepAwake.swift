@@ -16,7 +16,7 @@ enum KeepAwakeMode: String, Sendable, Codable {
 /// mode, where Sissy watches without always holding — which is also what makes
 /// a refused assertion visible instead of silent: the mode stays where the user
 /// put it and `active` says what came of it.
-struct KeepAwakeState: Sendable, Equatable, Codable {
+struct KeepAwakeState: Sendable, Equatable {
     let mode: KeepAwakeMode
     let active: Bool
 

@@ -5,7 +5,7 @@ import Foundation
 /// always on (it's the v0.1.0 baseline), and Codex is auto-detected from
 /// disk activity. Explicit `false` forces off even if data exists; explicit
 /// `true` forces on even if no recent activity is detected.
-struct ProviderToggles: Sendable, Codable, Equatable {
+struct ProviderToggles: Sendable, Codable {
     var claudeCode: Bool?
     var codex: Bool?
 

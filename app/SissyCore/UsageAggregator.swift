@@ -65,10 +65,6 @@ actor UsageAggregator {
         for p in providers { await p.applyPriceCatalog(catalog) }
     }
 
-    func current() -> (today: DayTotals, prev: DayTotals?) {
-        aggregate()
-    }
-
     /// Slices rebuilt against each provider's *current* windows. A rate-limit
     /// refresh changes no token total, so a re-emit that replayed the
     /// cached slices would keep shipping the windows captured at the last

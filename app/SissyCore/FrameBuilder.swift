@@ -11,7 +11,7 @@ struct DayTotals: Sendable, Equatable {
 /// Codex labels its buckets `primary`/`secondary` but a `primary` bucket is
 /// not always the 5-hour one, so anything that keys off position eventually
 /// mislabels a weekly window as a session window.
-struct UsageWindow: Sendable, Equatable, Codable, Identifiable {
+struct UsageWindow: Sendable, Equatable, Codable {
     /// Ceiling for `usedPercent`. Deliberately far above a full window: a
     /// vendor reporting 105% is reporting an overage the panel shows as-is,
     /// and only a value this side of absurd is corruption rather than data.
@@ -35,17 +35,12 @@ struct UsageWindow: Sendable, Equatable, Codable, Identifiable {
         self.usedPercent = usedPercent
         self.resetsAt = resetsAt
     }
-
-    /// The length identifies the window, so it is also what the panel keys
-    /// its rows by — a vendor reordering its buckets must not re-create the
-    /// row it moved.
-    var id: Int { minutes }
 }
 
 /// Raw per-provider slice carried on the frame so the app derives both the
 /// menubar header total and the panel's per-provider rows from a single
 /// payload rather than from two counts that can disagree.
-struct ProviderSlice: Sendable, Equatable, Codable, Identifiable {
+struct ProviderSlice: Sendable, Equatable, Identifiable {
     let id: String
     let tokens: Int
     let cost: Decimal
@@ -78,7 +73,7 @@ struct ProviderSlice: Sendable, Equatable, Codable, Identifiable {
     }
 }
 
-struct FrameData: Sendable, Equatable, Codable {
+struct FrameData: Sendable, Equatable {
     let tokens: String
     let cost: String
     let burn: String

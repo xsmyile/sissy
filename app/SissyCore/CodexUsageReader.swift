@@ -1,9 +1,5 @@
 import Foundation
 
-#if canImport(Darwin)
-import Darwin
-#endif
-
 /// Tails `~/.codex/sessions/**/rollout-*.jsonl` and emits aggregated daily
 /// usage to `UsageAggregator`. Codex rolls one JSONL per session; each
 /// `event_msg` of type `token_count` carries a `last_token_usage` block which
