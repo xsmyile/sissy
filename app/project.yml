@@ -105,7 +105,10 @@ targets:
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Sissy.app/Contents/MacOS/Sissy"
 
-  sissy-serverd:
+  # Not shipped to anyone. CI drives it for --self-test / --scan /
+  # --dump-seed / --refresh-catalog, which is why it exists at all: the
+  # engine's checks need an entry point that is not an AppKit app.
+  sissy-cli:
     type: tool
     platform: macOS
     deploymentTarget: "26.0"
@@ -113,17 +116,21 @@ targets:
       - SissyServer
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.server
-        PRODUCT_NAME: sissy-serverd
+        # Deliberately not `…sissy.server`: that string is now the label of
+        # the retired LaunchAgent, which `LegacyAgentRetirement` still looks
+        # up and the cask still zaps. Two things answering to one id is how a
+        # retirement ends up pointed at the wrong one.
+        PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.cli
+        PRODUCT_NAME: sissy-cli
         INFOPLIST_FILE: SissyServer/Info.plist
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: NO
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic
       configs:
-        # Mirror the app target so a Debug daemon bundled into the dev app
-        # carries its own bundle id. The daemon reads
-        # `Bundle.main.bundleIdentifier` from the embedded `__info_plist`
-        # section and uses it to pick the `Sissy-Dev/` support dir.
+        # Mirror the app target so a Debug build reads what a dev `Sissy.app`
+        # wrote. The tool reads `Bundle.main.bundleIdentifier` from the
+        # embedded `__info_plist` section and uses the `.dev` suffix to pick
+        # the `Sissy-Dev/` support dir.
         Debug:
-          PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.server.dev
+          PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.cli.dev
