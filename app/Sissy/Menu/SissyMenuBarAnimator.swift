@@ -1,7 +1,7 @@
 import AppKit
 
 /// Plays Sissy's eye on the status button: a blink when data lands, and
-/// the eye closing or opening when the daemon goes away and comes back.
+/// the eye closing or opening as readings stop and start again.
 ///
 /// Once this exists it is the only writer of `button.image`: a refresh that
 /// reassigned the image mid-gesture would drop the remaining frames and leave
@@ -87,8 +87,8 @@ final class SissyMenuBarAnimator {
 
     /// Moves the resting pose, closing or opening the eye on the way there.
     ///
-    /// Asleep also blocks the blink: blinking while the daemon is unreachable
-    /// claims something is arriving. `animated` off — Reduce
+    /// Asleep also blocks the blink: blinking while nothing is reaching the
+    /// app claims something is arriving. `animated` off — Reduce
     /// Motion, an open menu, or the pose the app starts in — snaps instead.
     ///
     /// The destination image is never installed before the transition runs:

@@ -5,7 +5,7 @@ import IOKit.pwr_mgt
 ///
 /// Persisted in `server.json` rather than held in memory: a mode is a setting,
 /// not a transient hold, and someone who switched their Mac to never sleep
-/// expects it to still be that way after launchd has restarted the daemon.
+/// expects it to still be that way the next time Sissy launches.
 enum KeepAwakeMode: String, Sendable, Codable {
     case off
     case on
@@ -25,9 +25,10 @@ struct KeepAwakeState: Sendable, Equatable, Codable {
 
 /// Owns the power assertion that stops the Mac idling to sleep.
 ///
-/// It lives in the daemon because it has to outlive the menu bar icon: the
-/// agent split exists so the day keeps counting after Sissy quits, and a hold
-/// that died with the app would be one nobody could lean on.
+/// The hold dies with the process, deliberately: a Mac held awake by
+/// something with no icon in the menu bar is a battery complaint with no path
+/// back to its cause. The *mode* survives in `server.json`, so the next launch
+/// resumes the hold the user asked for.
 actor KeepAwake {
     private var assertion: IOPMAssertionID?
 
@@ -43,7 +44,7 @@ actor KeepAwake {
 
     /// Drives the assertion to `holding` and reports what it ended up as.
     ///
-    /// Reporting rather than throwing is what keeps the daemon honest: power
+    /// Reporting rather than throwing is what keeps the engine honest: power
     /// management refusing the assertion is nothing this layer can act on, but
     /// it is something the user has to see — the panel then shows the mode they
     /// chose and a Mac that is not being held.

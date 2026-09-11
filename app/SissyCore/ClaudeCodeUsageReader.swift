@@ -65,7 +65,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
     private let pollInterval: Duration
     /// When non-nil, the reader snapshots its state to this URL on a
     /// throttle and on stop. On the first `poll` it tries to load + reconcile
-    /// the snapshot so a daemon restart skips the cold backfill. Nil disables
+    /// the snapshot so a relaunch skips the cold backfill. Nil disables
     /// persistence entirely — used by `--scan` and tests that want a fresh
     /// reader without touching the user's saved state.
     private let persistenceURL: URL?
@@ -75,19 +75,19 @@ actor ClaudeCodeUsageReader: UsageProvider {
     private let pricingOverride: [String: ModelPricing]?
     /// Anthropic slice of the runtime `PriceCatalog`. Sits between the user's
     /// override and the embedded generated seed, so a model that launched after
-    /// this daemon was built still prices correctly. Refreshed in place by
+    /// this build was cut still prices correctly. Refreshed in place by
     /// `applyPriceCatalog`; a refresh applies to events ingested from then on
     /// and does not reprice accumulated totals.
     private var priceCatalog: PricingTable?
     /// Models already reported as unpriced. Keeps the warning to one line per
-    /// model per daemon run instead of one per ingested event.
+    /// model per run instead of one per ingested event.
     private var loggedUnpricedModels: Set<String> = []
     private var fileOffsets: [URL: UInt64] = [:]
     private var fileMTimes: [URL: TimeInterval] = [:]
     private var dailyTotals: [Date: DayTotals] = [:]
     /// Dedup keys tagged with the event day. The day tag lets `trim()` evict
     /// keys older than the retain window (previously the set grew unbounded
-    /// across long-running daemon sessions) and lets the persistence layer
+    /// across long-running sessions) and lets the persistence layer
     /// store only today's keys without losing the streaming-across-restart
     /// safety net.
     private var seenRequestKeys: [String: Date] = [:]
@@ -107,7 +107,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
     /// activity so the UI rolls over to a fresh "today" frame at midnight
     /// (and on the first poll after a long system sleep that crossed it).
     /// Nil until the first emit so we never fire a synthetic rollover before
-    /// the daemon has produced a real frame.
+    /// the reader has produced a real frame.
     private var lastEmittedDayKey: Date?
     /// False until the initial backfill scan has finished parsing every
     /// in-window JSONL. While false, `current()` suppresses `prev` (passes
@@ -122,7 +122,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
     private var coldScanComplete = false
     /// Max wall-clock between throttled saves. SIGKILL/power loss bounds
     /// progress loss to this window; SIGTERM still flushes cleanly via
-    /// `stop()`. Five seconds keeps SSD churn low on long-running daemons.
+    /// `stop()`. Five seconds keeps SSD churn low on a long-running process.
     private static let saveThrottle: TimeInterval = 5
 
     /// FSEvents coalescing window. Higher = more batching (lower CPU, more
@@ -374,7 +374,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         // `self` via the closure can be reclaimed. Without this clear the
         // strong-self capture in `UsageAggregator.start` would keep the
         // aggregator (and therefore every provider) alive for the rest of
-        // the process — irrelevant for the daemon's normal lifetime, but
+        // the process — irrelevant for a normal app lifetime, but
         // it shows up as a leak in test harnesses that boot+stop many
         // readers within one process.
         onChange = nil
@@ -477,7 +477,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         // Newest files first so the active project's JSONL — the only one
         // that can contain today's usage — is parsed before any historical
         // file. Combined with the throttled broadcast below this means the
-        // menubar gets a usable frame within ~100 ms of daemon start even on
+        // menubar gets a usable frame within ~100 ms of launch even on
         // a cold cache, instead of waiting for the entire backfill to
         // complete (~12 s on a 300 MB tree).
         let files = enumerateJSONLSortedByMTime()
@@ -657,7 +657,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         let cutoff = cal.startOfDay(for: Date().addingTimeInterval(Double(-retainDays * 86400)))
         dailyTotals = dailyTotals.filter { $0.key >= cutoff }
         // Evict dedup keys for days that have aged out so the set's memory
-        // footprint stays bounded across long-running daemon sessions.
+        // footprint stays bounded across long-running sessions.
         seenRequestKeys = seenRequestKeys.filter { $0.value >= cutoff }
     }
 

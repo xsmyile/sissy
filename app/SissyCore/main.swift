@@ -74,7 +74,7 @@ if args.contains("--refresh-catalog") {
     exit(status)
 }
 // Optional `--config <path>` override. Lets smoke tests / integration runs
-// point the daemon at an isolated config + JSONL tree without touching the
+// point the tool at an isolated config + JSONL tree without touching the
 // user's real `~/Library/Application Support/Sissy/server.json`.
 let configURL: URL = {
     guard let idx = args.firstIndex(of: "--config") else { return ServerConfig.defaultURL }
@@ -108,8 +108,8 @@ if args.contains("--scan") {
     // Swift 6 strict concurrency, top-level `Task { … }` inherits the main
     // actor and deadlocks against the semaphore.
     Task.detached {
-        // Same directories, overrides and pricing policy as the daemon, so
-        // comparing this output against `ccusage` measures the daemon's real
+        // Same directories, overrides and pricing policy as the app, so
+        // comparing this output against `ccusage` measures Sissy's real
         // behaviour rather than a set of defaults nobody runs.
         var providers: [any UsageProvider] = []
         if scanFilter == "all" || scanFilter == "claude-code" {
@@ -125,8 +125,8 @@ if args.contains("--scan") {
                     pricingOverride: config.pricingOverride))
         }
         // No fetch here — `--scan` stays offline and fast. The cached catalog
-        // only exists once a daemon has refreshed it; otherwise the embedded
-        // seed prices, which is also what the daemon would do.
+        // only exists once something has refreshed it; otherwise the embedded
+        // seed prices, which is also what the app would do.
         if config.remotePricingEnabled, let cached = PriceCatalogSource.loadCache() {
             for p in providers { await p.applyPriceCatalog(cached) }
             sissyLog(

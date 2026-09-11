@@ -70,7 +70,8 @@ final class StatusItemController: NSObject {
             let animator = try SissyMenuBarAnimator(button: button, iconSize: Self.menuBarIconSize)
             animator.canAnimate = { [weak self] in self?.isMenuOpen == false }
             // Snapped: closing her eye a beat after the icon
-            // appears would read as the daemon dying, not as it being off.
+            // appears would read as her falling asleep, not as her starting
+            // out that way.
             animator.setPose(
                 model.menuSnapshot.statusIcon.isAsleep ? .asleep : .awake,
                 animated: false

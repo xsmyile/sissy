@@ -2,11 +2,11 @@ import Foundation
 
 /// Everything numeric the usage panel renders, derived from one frame. Pure
 /// by construction: no AppKit, no clock, no model access, so the panel's
-/// arithmetic — shares, day-over-day delta — is testable without a live
-/// daemon.
+/// arithmetic — shares, day-over-day delta — is testable without a running
+/// engine.
 ///
-/// Totals come from the frame's raw `providers` slices rather than the
-/// daemon-formatted scalars, so the big number, the rows and the delta all
+/// Totals come from the frame's raw `providers` slices rather than its
+/// pre-formatted scalars, so the big number, the rows and the delta all
 /// agree to the penny.
 struct UsagePanelSnapshot: Equatable {
     let tokens: String
@@ -15,10 +15,10 @@ struct UsagePanelSnapshot: Equatable {
     let delta: TokenDelta?
     let providers: [ProviderRow]
 
-    /// Day-over-day change in tokens. Absent when the daemon hasn't shipped
+    /// Day-over-day change in tokens. Absent when the frame carries no
     /// yesterday yet, or when yesterday was zero and a percentage would be
     /// undefined. Note the comparison is today-so-far against yesterday's
-    /// full day — daily totals are the only granularity the daemon keeps.
+    /// full day — daily totals are the only granularity the engine keeps.
     struct TokenDelta: Equatable {
         let percent: Int
         let direction: DeltaDirection

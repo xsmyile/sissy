@@ -8,7 +8,7 @@ struct PanelSissyBlinkGate {
     let isAsleep: Bool
 
     /// Asleep she never blinks: it would claim something is arriving
-    /// while the daemon is unreachable. The cooldown is the animator's, so both
+    /// while nothing is reaching the app. The cooldown is the animator's, so both
     /// surfaces pace their blinks the same way — each still keeps its own
     /// clock, and a panel opened mid-cooldown is not in phase with the menu
     /// bar.

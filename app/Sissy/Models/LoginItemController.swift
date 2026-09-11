@@ -4,10 +4,10 @@ import ServiceManagement
 
 /// Whether macOS opens Sissy at login, through `SMAppService.mainApp`.
 ///
-/// Deliberately separate from `ServerServiceController`: the daemon's agent
-/// carries `RunAtLoad`, so once the Server is on it starts at login and keeps
-/// counting whether or not the app is running. This decides one thing only,
-/// whether the menu bar icon comes back with it.
+/// The only login item Sissy has. It used to be the second of two — the
+/// retired agent carried `RunAtLoad` and counted whether or not the app was
+/// running — which is why `LegacyAgentRetirement` claims this one on behalf
+/// of a user whose counting used to come from the agent.
 ///
 /// `SMAppService` is the state, and no copy of it lands in
 /// `preferences.json`: someone who removes Sissy from System Settings' Login

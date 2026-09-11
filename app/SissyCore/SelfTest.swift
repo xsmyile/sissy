@@ -638,7 +638,7 @@ private func runFSWatcherTests() {
 
     let watcher = FSWatcher(label: "sissy.test.fswatch")
     // ignoreSelf: false because this process is the writer in the test;
-    // production keeps the default true since the daemon never writes
+    // production keeps the default true since Sissy never writes
     // inside the watched tree.
     let ok = watcher.start(path: resolvedDir, latency: 0.5, ignoreSelf: false) { event in
         let done = box.lock.withLock { () -> Bool in
@@ -777,7 +777,7 @@ private func runOpenAIPricingTests() {
         "gpt-5-codex prefix wins over gpt-5",
         prefix?.inputPerMTok, Decimal(string: "1.25")!)
 
-    // Unknown OpenAI model returns nil so the daemon doesn't silently bill at
+    // Unknown OpenAI model returns nil so Sissy doesn't silently bill at
     // a wrong rate. Cost path then returns 0 — surfacing the gap, not hiding
     // it.
     expect("unknown openai model", OpenAIPricing.price(for: "claude-opus-4"), nil)
@@ -896,7 +896,7 @@ private func runCodexParserTests() {
 /// A provider emits from inside its own actor, so anything the aggregator
 /// awaits on that provider while handling the emit deadlocks the pair: the
 /// provider waits for the callback, the callback waits for the provider, the
-/// cold scan never finishes and the daemon serves frames that never arrive.
+/// cold scan never finishes and the panel waits on frames that never arrive.
 /// It shipped once. The guard is a provider that emits exactly that way.
 func runAggregatorEmitTest() {
     print("=== UsageAggregator.emit ===")
@@ -1178,7 +1178,7 @@ func runKeychainTimeoutTests() {
 
 /// A rollout tree Codex has already been read to the end of names no plan —
 /// `plan_type` rides events the reader consumed on an earlier boot — which is
-/// how a resumed daemon ended up showing the Codex row with no badge. The
+/// how a resumed reader ended up showing the Codex row with no badge. The
 /// auth file is what answers before the next turn.
 func runCodexAuthFallbackTest() {
     print("=== CodexUsageReader.authFallback ===")
@@ -1341,7 +1341,7 @@ func runCodexLegacySnapshotTest() {
     }
     sem1.wait()
 
-    // Strip the field to forge a snapshot written by an older daemon. The
+    // Strip the field to forge a snapshot written by an older build. The
     // offsets stay at EOF, so a reader that honoured it would resume with an
     // empty model map and mis-price the appended turn.
     let hadField = TestBox<Bool>(false)
@@ -1455,7 +1455,7 @@ func runCodexWindowPersistenceTest() {
 }
 
 /// Verifies the Codex reader recovers its per-file model state across a
-/// daemon restart. Without the persisted model map, an event landing after
+/// relaunch. Without the persisted model map, an event landing after
 /// the persisted offset but on a session that declared a non-default model in
 /// an earlier turn_context would mis-price as `gpt-5-codex`.
 func runCodexModelBackfillTest() {

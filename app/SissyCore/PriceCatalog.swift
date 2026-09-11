@@ -11,7 +11,7 @@ enum CatalogProvider: String, Sendable, Codable {
 /// against, which is why reading it directly keeps Sissy's cost agreeing with
 /// the number users cross-check.
 ///
-/// This is the only rate source in the daemon. There is no hand-maintained
+/// This is the only rate source in Sissy. There is no hand-maintained
 /// table to keep current, so a provider shipping a new model needs no Sissy
 /// release: the runtime refresh picks it up, and `PricingSeed` — a snapshot of
 /// this same structure generated at build time — covers a first run with no
@@ -53,7 +53,7 @@ struct PriceCatalog: Sendable, Codable {
 /// Fetch / cache / validate pipeline for `PriceCatalog`.
 enum PriceCatalogSource {
     /// Kept as a string and resolved at fetch time so a typo surfaces as a
-    /// thrown `invalidURL` in the daemon log rather than a launch-time trap.
+    /// thrown `invalidURL` in Sissy's log rather than a launch-time trap.
     static let litellmURLString =
         "https://raw.githubusercontent.com/BerriAI/litellm/main/"
         + "model_prices_and_context_window.json"
@@ -68,7 +68,7 @@ enum PriceCatalogSource {
     static let fetchBackoffBase: Duration = .seconds(2)
     /// How long the cold backfill will wait for a first catalog when there is
     /// no cache to start from. Short enough that a slow network delays the
-    /// first frame rather than the daemon, long enough to cover a normal fetch.
+    /// first frame rather than the launch, long enough to cover a normal fetch.
     static let coldStartBudget: Duration = .seconds(8)
 
     private static let perMillion = 1_000_000.0
@@ -235,7 +235,7 @@ enum PriceCatalogSource {
     /// Whether a cache is newer than the snapshot this binary ships.
     ///
     /// A cache written before the seed was generated is not an upgrade over it:
-    /// a daemon that sat idle across a release would otherwise boot, prefer its
+    /// an install that sat idle across a release would otherwise boot, prefer its
     /// months-old file, and never see the rates the new build was cut with —
     /// permanently so if the machine is offline.
     static func outranksSeed(_ catalog: PriceCatalog) -> Bool {
@@ -347,7 +347,7 @@ enum PriceCatalogSource {
         return catalog
     }
 
-    /// Refreshes on `refreshInterval` for the daemon's lifetime, starting after
+    /// Refreshes on `refreshInterval` for the process's lifetime, starting after
     /// `initialDelay` so a restart that already loaded a recent cache doesn't
     /// refetch immediately.
     ///

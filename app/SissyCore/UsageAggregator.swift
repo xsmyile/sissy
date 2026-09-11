@@ -1,8 +1,8 @@
 import Foundation
 
 /// Fans N `UsageProvider` streams into a single combined `(today, prev)`
-/// frame. The frame's own scalars stay unaware of multi-provider: the daemon
-/// sums per-day totals before broadcast and carries the split alongside them.
+/// frame. The frame's own scalars stay unaware of multi-provider: the engine
+/// sums per-day totals before emitting and carries the split alongside them.
 ///
 /// `prev` is emitted as non-nil only when every active provider has produced
 /// a non-nil `prev`. If any provider is still warming (e.g. a fresh Codex
@@ -36,7 +36,7 @@ actor UsageAggregator {
     func start(onChange: @escaping @Sendable (DayTotals, DayTotals?, [ProviderSlice]) async -> Void) async {
         self.onChange = onChange
         // Strong-self capture is intentional: provider callbacks must fire
-        // for the daemon's full lifetime, and the aggregator outlives both
+        // for the engine's full lifetime, and the aggregator outlives both
         // providers and whatever is rendering them. Using `[weak self]` trips the
         // Swift 6 "capture of var self in concurrently-executing code"
         // diagnostic without buying anything — there's no retain cycle to
@@ -88,7 +88,7 @@ actor UsageAggregator {
     }
 
     /// True once every provider has finished its cold scan. Empty provider
-    /// list returns true so a zero-provider daemon (auto-detect disabled all
+    /// list returns true so a zero-provider run (auto-detect disabled all
     /// of them) doesn't pin the menubar in the cold-start placeholder
     /// forever.
     func isWarm() async -> Bool {

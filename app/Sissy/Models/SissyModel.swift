@@ -214,10 +214,9 @@ final class SissyModel {
     /// The last frame for as long as it still describes a day something is
     /// counting, paired with when it landed.
     ///
-    /// nil once the daemon is gone. The numbers then describe a day that
-    /// stopped being counted, and the panel's footer keeps ageing a timestamp
-    /// nothing will refresh — "updated 3h ago" under a stopped server reads as
-    /// a live reading of an idle daemon rather than as no reading at all.
+    /// nil until the first frame lands, and nothing nils it afterwards: in
+    /// one process the engine is either counting or the app is gone, so a
+    /// timestamp on screen can never be ageing under something that stopped.
     ///
     var liveFrame: LiveFrame? {
         guard let currentFrame, let lastFrameAt else { return nil }
