@@ -11,7 +11,7 @@ enum UsageReaderShared {
     static let ingestChunkSize = 64 * 1024
 
     /// Minimum spacing between frame emits while tailing, so a burst of new
-    /// lines fans out one broadcast instead of one per line.
+    /// lines costs one emit instead of one per line.
     static let pollEmitThrottle: TimeInterval = 0.2
 
     /// Slack added to a file's persisted mtime before treating the on-disk
@@ -24,8 +24,8 @@ enum UsageReaderShared {
     static let maxPlanTokenLength = 64
 
     /// Narrows a vendor-supplied plan identifier to the shape both CLIs use
-    /// for theirs, so an unexpected payload cannot put arbitrary text on the
-    /// wire. Neither reader owns its source: Codex takes the token out of a
+    /// for theirs, so an unexpected payload cannot put arbitrary text in the
+    /// frame. Neither reader owns its source: Codex takes the token out of a
     /// rollout line and Claude Code out of the CLI's own config file.
     static func sanitizedPlanToken(_ raw: String?) -> String? {
         guard let raw, let first = raw.first, raw.count <= maxPlanTokenLength else { return nil }

@@ -186,7 +186,7 @@ actor UsageEngine {
         } else {
             await claudeLimitsProbe.stop()
         }
-        await rebroadcastFromCache()
+        await reemitFromCache()
     }
 
     /// Switch the keep-awake mode and persist it, so the choice survives a
@@ -200,17 +200,16 @@ actor UsageEngine {
             sissyLog("sissy: failed to persist keepAwake to \(configURL.path): \(error)")
         }
         await applyKeepAwake()
-        await rebroadcastFromCache()
+        await reemitFromCache()
     }
 
-    /// Takes or drops the hold as the surface comes and goes. In-process that
-    /// is the app's own lifetime and switches once; across a socket it is the
-    /// client arriving and leaving.
+    /// Takes or drops the hold as the surface comes and goes. In one process
+    /// that is the app's own lifetime, so it switches once each way.
     func setObserverPresent(_ present: Bool) async {
         guard present != observerPresent else { return }
         observerPresent = present
         await applyKeepAwake()
-        await rebroadcastFromCache()
+        await reemitFromCache()
     }
 
     /// Drives the assertion to whatever the stored mode asks for.
@@ -232,7 +231,7 @@ actor UsageEngine {
     private func startClaudeLimitsProbe() async {
         let me = self
         await claudeLimitsProbe.start {
-            await me.rebroadcastFromCache()
+            await me.reemitFromCache()
         }
     }
 
@@ -245,7 +244,7 @@ actor UsageEngine {
     /// before it would be the ones that emit has already superseded —
     /// re-emitting them puts the token count backwards and re-caches the
     /// stale pair.
-    func rebroadcastFromCache() async {
+    func reemitFromCache() async {
         let slices = await aggregator.currentSlices()
         guard let totals = lastTotals else { return }
         await rebuildAndEmit(today: totals.today, prev: totals.prev, slices: slices)

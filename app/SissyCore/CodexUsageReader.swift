@@ -191,7 +191,7 @@ actor CodexUsageReader: UsageProvider {
         pollTask = nil
         // See ClaudeCodeUsageReader.stop for the rationale on clearing
         // onChange — breaks the strong-self capture the aggregator made
-        // via the broadcast closure.
+        // via the emit closure.
         onChange = nil
     }
 

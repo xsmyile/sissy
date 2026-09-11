@@ -21,8 +21,8 @@ final class UsageEngineHost {
     private(set) var filesWatched: Int = 0
     /// Whether the Claude Code limit probe is on. Read from `server.json`,
     /// which the engine owns: the app keeps no second copy, because the one
-    /// it used to keep is what made a switch flipped with the socket down
-    /// disagree with the file the probe actually booted from.
+    /// it used to keep could disagree with the file the probe actually booted
+    /// from.
     private(set) var claudeLimits: Bool = false
 
     @ObservationIgnored private weak var model: SissyModel?

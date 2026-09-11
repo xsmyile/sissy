@@ -4,7 +4,7 @@ import Foundation
 /// one CLI's session log (Claude Code JSONL today, Codex JSONL next), parses
 /// usage events, and pushes a `(today, prev)` pair through `onChange` whenever
 /// state changes. The aggregator fans these into a single combined frame so
-/// the wire protocol stays unaware of multi-provider.
+/// the frame stays unaware of multi-provider.
 ///
 /// Conforming types are typically actors; protocol leaves isolation up to the
 /// implementation but every stateful method is `async` so callers don't need

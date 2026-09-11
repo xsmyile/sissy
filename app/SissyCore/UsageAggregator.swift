@@ -70,7 +70,7 @@ actor UsageAggregator {
     }
 
     /// Slices rebuilt against each provider's *current* windows. A rate-limit
-    /// refresh changes no token total, so a rebroadcast that replayed the
+    /// refresh changes no token total, so a re-emit that replayed the
     /// cached slices would keep shipping the windows captured at the last
     /// ingest — invisible until the CLI happened to write another event.
     func currentSlices() -> [ProviderSlice] {
@@ -112,7 +112,7 @@ actor UsageAggregator {
         }
     }
 
-    /// Breakdown slices for the wire: every provider that spent tokens today,
+    /// Breakdown slices for the frame: every provider that spent tokens today,
     /// in canonical order. Providers with no usage today (still-warming or
     /// simply unused) are omitted so the panel shows the day's actual per-CLI
     /// split instead of stale `$0` rows.

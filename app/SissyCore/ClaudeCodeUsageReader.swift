@@ -325,7 +325,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
     func start(onChange: @escaping @Sendable (DayTotals, DayTotals?) async -> Void) async {
         self.onChange = onChange
         // Ahead of the restored-snapshot emit below, so the first frame a
-        // reconnecting client replays already carries the plan.
+        // relaunch replays already carries the plan.
         profile.refresh()
         let loaded = loadAndApplyPersistedState()
         // If we restored a snapshot, fire the callback immediately. Without
@@ -370,7 +370,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         fsWatcher = nil
         pollTask?.cancel()
         pollTask = nil
-        // Release the broadcast callback so the aggregator that captured
+        // Release the emit callback so the aggregator that captured
         // `self` via the closure can be reclaimed. Without this clear the
         // strong-self capture in `UsageAggregator.start` would keep the
         // aggregator (and therefore every provider) alive for the rest of
@@ -476,7 +476,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         profile.refresh()
         // Newest files first so the active project's JSONL — the only one
         // that can contain today's usage — is parsed before any historical
-        // file. Combined with the throttled broadcast below this means the
+        // file. Combined with the throttled emit below this means the
         // menubar gets a usable frame within ~100 ms of launch even on
         // a cold cache, instead of waiting for the entire backfill to
         // complete (~12 s on a 300 MB tree).
@@ -525,7 +525,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
             lastKey != todayKey
         {
             // Calendar day rolled since the last emit and nothing wrote a
-            // new JSONL line. Force a synthetic broadcast so the menubar
+            // new JSONL line. Force a synthetic emit so the menubar
             // resets to a fresh "today=0, prev=yesterday" frame instead
             // of holding the stale frame until the next Claude turn. Covers
             // both the trivial case (Mac stays awake across midnight) and
