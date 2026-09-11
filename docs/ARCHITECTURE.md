@@ -228,6 +228,21 @@ and stops when it quits; the numbers live in files that are there either way, so
 a relaunch resumes from persisted offsets and loses nothing. `KeepAwake` is the
 worked example: the mode persists, the power assertions do not.
 
+**Quitting is the only thing that ends a run**, so it is the readers' one chance
+to write their offsets. `applicationShouldTerminate` answers `.terminateLater`,
+awaits `UsageEngine.stop()` and only then releases the quit — bounded by
+`AppDelegate.teardownBudget`, because a teardown that will not finish must not
+leave a menu bar app that refuses to quit. Missing the flush costs a few
+re-parsed lines that dedup absorbs; refusing to quit costs a Force Quit.
+
+An engine runs once: `UsageEngine.lifecycle` goes `idle → running → stopped` and
+`stopped` is terminal. `start()` re-reads it after every suspension, because
+`stop()` can land inside one of them — it used to be overtaken by the rest of
+`start()`, which would boot the aggregator and the pricing refresh against an
+engine already torn down, with no handle left to cancel either. The app builds a
+fresh engine when it needs one, so reviving a stopped instance would only ever
+mean two of them metering the same trees.
+
 ## Operational notes
 
 - **Pricing**: there is no hand-maintained rate table. Rates resolve `server.json`
