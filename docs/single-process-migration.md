@@ -65,9 +65,9 @@ work.
 | — | `docs`: this ledger | merged (#50) |
 | 0 | `fix(daemon)`: the keep-awake hold follows the app | merged (#51) |
 | 1 | `refactor`: the engine compiles into the app | merged (#52) |
-| 2 | `feat(cli)`: `--refresh-catalog`, and the oracle pointed at it | **in review** |
-| 3 | `refactor(app)`: frames from the engine, not the WebSocket | todo |
-| 4 | `refactor`: drop the LaunchAgent | todo |
+| 2 | `feat(cli)`: `--refresh-catalog`, and the oracle pointed at it | merged (#53) |
+| 3 | `refactor(app)`: render the engine's frame types | **in review** |
+| 4 | `refactor(app)`: run the engine in-process, retire the LaunchAgent | todo |
 | 5 | `refactor`: drop the wire | todo |
 | 6 | `refactor`: drop the OLED residue | todo |
 | 7 | `chore`: notices and acknowledgements | todo |
@@ -77,6 +77,15 @@ work.
 The order of 2 → 4 → 5 is not cosmetic: it is the sequence in which CI never
 goes red. PR 2 has to give the oracle its replacement entry point *before* PR 5
 removes the server mode the oracle currently boots.
+
+**PRs 3 and 4 as first planned were not separable, and are now split
+differently.** The app cannot run the engine while the daemon is still
+registered: two processes would tail the same trees, write the same
+`usage-state.json`, hold two power assertions and run two probes against
+Anthropic's endpoint. So retiring the LaunchAgent is part of the engine swap,
+not a step after it. What *is* separable is the type unification — the app
+rendering the engine's own `FrameData` instead of a mirror of it — which is
+behaviour-neutral and shrinks the swap. That is PR 3; the swap is PR 4.
 
 ### What each PR covers
 
@@ -106,9 +115,23 @@ written to `pricing-catalog.json`, non-zero exit if no attempt lands a usable
 catalog. The workflow now runs the flag and fails on its exit code instead of
 grepping a background daemon's log for a readiness line.
 
-**3 — frames from the engine.** The app builds the aggregator itself and gets
-frames from a callback. Deletes `WebSocketClient`, `FrameDecoder`,
-`ServerHealthMonitor`, `Server/HTTPResponses`. Two things ride along:
+**3 — the engine's frame types.** `DisplayFrame` and its three nested types
+were a field-for-field mirror of the engine's `FrameData`, `ProviderSlice`,
+`UsageWindow` and a `PrevTotals` pair — the same initialisers, down to
+`planTier` being dropped when `plan` is nil. The app now uses the engine's,
+and `Identifiable` moved onto them so SwiftUI keys rows by `minutes` and by
+provider id as before. `ts` left the frame: it describes the transport, not
+the reading, so `FrameDecoder` returns it beside the frame as `builtAt` and
+`applyFrame` takes it as an argument. Behaviour-neutral, still over the
+WebSocket.
+
+**4 — run the engine in-process, retire the LaunchAgent.** The app builds the
+aggregator itself and gets frames from a callback; the agent is unregistered
+and the Server toggle goes with it. Deletes `WebSocketClient`,
+`ServerHealthMonitor`, `FrameDecoder`, `Server/HTTPResponses`,
+`ServerServiceController`, both plists and the `copyFiles` phases in
+`project.yml`. Three things ride along:
+- **The migration is two steps, not one** — see Decisions below.
 - `fmtBurn` has to **move** into `UsageFormat`. `burn` is not dead like
   `primary` — `UsagePanelSnapshot.swift:67` passes the daemon's string through
   and `UsagePanelView.swift:172-173` renders it.
@@ -116,10 +139,6 @@ frames from a callback. Deletes `WebSocketClient`, `FrameDecoder`,
   app connects to something already hot; in one process the first launch after
   an install (or after a `schemaVersion` bump, ~16 s measured) happens with the
   panel open. `isWarm()` already exists, so this is UI, not plumbing.
-
-**4 — drop the LaunchAgent.** Deletes `ServerServiceController`, both plists,
-the `copyFiles` phases in `project.yml`, the Server toggle and its five states.
-**The migration is two steps, not one** — see Decisions below.
 
 **5 — drop the wire.** `Hub`, `WebSocketSinkHandler`, `HTTPRequestHandler`,
 `Auth`, `SwiftNIO`. `sissy-serverd` becomes `sissy-cli`. Config collapses:
