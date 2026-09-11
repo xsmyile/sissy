@@ -32,6 +32,10 @@ final class UsageEngineHost {
     @ObservationIgnored private weak var model: SissyModel?
     @ObservationIgnored private var engine: UsageEngine?
     @ObservationIgnored private var readinessTask: Task<Void, Never>?
+    /// Handle on the engine's own boot, so `stop()` has something to cancel
+    /// rather than leaving a `start()` in flight against an engine it has
+    /// already let go of.
+    @ObservationIgnored private var bootTask: Task<Void, Never>?
 
     /// How often the warming state is re-read while the cold scan runs. The
     /// readers emit nothing until they finish, so there is no frame to hang
@@ -55,8 +59,7 @@ final class UsageEngineHost {
         self.engine = engine
         claudeLimits = config.claudeLimits
         let host = self
-        Task {
-            await engine.setObserverPresent(true)
+        bootTask = Task {
             await engine.start { frame in
                 await host.deliver(frame)
             }
@@ -64,12 +67,18 @@ final class UsageEngineHost {
         pollReadiness()
     }
 
-    func stop() {
+    /// Stops metering and waits for it, so the readers get their final offset
+    /// flush before the process goes. Cancelling `bootTask` is not what stops
+    /// a boot still in flight — `engine.stop()` is, by clearing the flag
+    /// `start()` re-reads after each of its suspensions.
+    func stop() async {
         readinessTask?.cancel()
         readinessTask = nil
+        bootTask?.cancel()
+        bootTask = nil
         guard let engine else { return }
         self.engine = nil
-        Task { await engine.stop() }
+        await engine.stop()
     }
 
     /// Re-reads what each provider is doing. The readiness poll below stops
