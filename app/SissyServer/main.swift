@@ -41,6 +41,39 @@ if args.contains("--dump-seed") {
     sem.wait()
     exit(status)
 }
+if args.contains("--refresh-catalog") {
+    // Puts a live LiteLLM catalog in the cache and exits. The pricing-oracle
+    // job needs Sissy priced from the same upstream snapshot `ccusage` reads,
+    // so that a disagreement means a convention diverged rather than the
+    // embedded seed simply being older. Booting the server and grepping its
+    // log for the refresh line did that until there was a server to boot.
+    let sem = DispatchSemaphore(value: 0)
+    var status: Int32 = 0
+    Task.detached {
+        defer { sem.signal() }
+        do {
+            let catalog = try await PriceCatalogSource.fetch()
+            guard PriceCatalogSource.isUsable(catalog) else {
+                daemonLog(
+                    "sissy-serverd: --refresh-catalog rejected the fetched catalog "
+                        + "(\(catalog.anthropic.count) anthropic, \(catalog.openai.count) openai rates) "
+                        + "— upstream changed shape; the cache is left as it was")
+                status = 1
+                return
+            }
+            PriceCatalogSource.saveCache(catalog)
+            daemonLog(
+                "sissy-serverd: pricing catalog refreshed — "
+                    + "\(catalog.anthropic.count + catalog.openai.count) rates cached at "
+                    + PriceCatalogSource.cacheURL.path)
+        } catch {
+            daemonLog("sissy-serverd: --refresh-catalog failed: \(error)")
+            status = 1
+        }
+    }
+    sem.wait()
+    exit(status)
+}
 // Optional `--config <path>` override. Lets smoke tests / integration runs
 // point the daemon at an isolated config + JSONL tree without touching the
 // user's real `~/Library/Application Support/Sissy/server.json`.
