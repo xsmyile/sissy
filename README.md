@@ -119,4 +119,4 @@ Named after my cat: she naps, judges, demands cuddles (A LOT of cuddles), and is
 
 ## License
 
-[MIT](./LICENSE). The Swift packages the daemon links carry their own terms, reproduced in [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md).
+[MIT](./LICENSE). Sissy links no third-party code; the projects it reads from are credited in [CREDITS.md](./CREDITS.md).
