@@ -26,7 +26,7 @@ private func expect<T: Equatable>(_ name: String, _ actual: T, _ expected: T) {
 
 func runSelfTest() {
     print(
-        "build: \(SissyPaths.isDev ? "dev" : "release") · supportDir=\(SissyPaths.supportDirName) · defaultPort=\(SissyPaths.defaultServerPort)"
+        "build: \(SissyPaths.isDev ? "dev" : "release") · supportDir=\(SissyPaths.supportDirName)"
     )
     print("=== FrameBuilder ===")
 
@@ -55,39 +55,26 @@ func runSelfTest() {
     let frame = FrameBuilder.build(
         today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
         prev: nil,
-        hoursElapsed: 5,
-        primaryMetric: .tokens
+        hoursElapsed: 5
     )
     expect("frame tokens", frame.tokens, "2.5M")
     expect("frame cost", frame.cost, "42.5")
     expect("frame burn", frame.burn, "500K")
-    expect("frame primary", frame.primary, "2.5M")
-    expect("frame label", frame.primaryLabel, "TOKENS")
     expect("frame prev tokens absent", frame.prevTokens, nil)
     expect("frame prev cost absent", frame.prevCost, nil)
 
     let framePrev = FrameBuilder.build(
         today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
         prev: DayTotals(totalTokens: 2_000_000, totalCost: Decimal(string: "31.00")!),
-        hoursElapsed: 5,
-        primaryMetric: .tokens
+        hoursElapsed: 5
     )
     expect("frame prev tokens", framePrev.prevTokens, 2_000_000)
     expect("frame prev cost", framePrev.prevCost, Decimal(string: "31.00")!)
 
-    let frameBurn = FrameBuilder.build(
-        today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
-        prev: nil,
-        hoursElapsed: 5,
-        primaryMetric: .burnRate
-    )
-    expect("burn primary", frameBurn.primary, "500K")
-    expect("burn label", frameBurn.primaryLabel, "BURN/H")
-
     // ProviderSlice path: build() passes the array through verbatim and
-    // sortProviders enforces the canonical wire order (claude-code, codex,
-    // alphabetical). This is the contract `rebuildAndBroadcast` and the
-    // app's `headerSubtitle` both depend on.
+    // sortProviders enforces the canonical order (claude-code, codex,
+    // alphabetical), which the panel's rows and the header subtitle both
+    // read without re-deriving it.
     let unordered = [
         ProviderSlice(id: "codex", tokens: 200, cost: Decimal(string: "1.50")!),
         ProviderSlice(id: "zzz", tokens: 1, cost: 0),
@@ -107,7 +94,6 @@ func runSelfTest() {
         today: DayTotals(totalTokens: 301, totalCost: Decimal(string: "3.50")!),
         prev: nil,
         hoursElapsed: 1,
-        primaryMetric: .tokens,
         providers: sorted
     )
     expect("frame providers count", frameWithProviders.providers.count, 3)
@@ -117,13 +103,12 @@ func runSelfTest() {
     let frameNoProviders = FrameBuilder.build(
         today: DayTotals(totalTokens: 0, totalCost: 0),
         prev: nil,
-        hoursElapsed: 1,
-        primaryMetric: .tokens
+        hoursElapsed: 1
     )
     expect("frame providers empty default", frameNoProviders.providers.isEmpty, true)
 
     print("=== Hub.encode ===")
-    runHubEncodeTests()
+    runFrameBuildTests()
 
     print("=== Pricing ===")
 
@@ -319,139 +304,40 @@ func runSelfTest() {
     }
 }
 
-/// Round-trip a `FrameData` through `Hub.broadcast` and inspect the encoded
-/// payload via a captive sink. Guarantees the wire shape the app parses
-/// against stays in lock-step with what `FrameBuilder` produces.
-private func runHubEncodeTests() {
-    final class CapturingSink: FrameSink, @unchecked Sendable {
-        let lock = NSLock()
-        var payload: Data?
-        func deliver(_ data: Data) async {
-            lock.withLock { self.payload = data }
-        }
-    }
-    let sink = CapturingSink()
+/// What `FrameBuilder.build` puts in a frame. The JSON shape this used to
+/// assert went with the wire — the frame is a Swift value now and the
+/// compiler checks its fields — but what lands in them is still behaviour.
+private func runFrameBuildTests() {
     let frame = FrameBuilder.build(
         today: DayTotals(totalTokens: 33_121_400, totalCost: Decimal(string: "23.99")!),
         prev: nil,
         hoursElapsed: 1,
-        primaryMetric: .tokens,
         providers: [
             ProviderSlice(id: "claude-code", tokens: 33_121_400, cost: Decimal(string: "23.99")!),
             ProviderSlice(id: "codex", tokens: 0, cost: 0),
-        ]
-    )
-    let sem = DispatchSemaphore(value: 0)
-    Task {
-        let hub = Hub()
-        await hub.register(sink)
-        await hub.broadcast(frame)
-        sem.signal()
-    }
-    sem.wait()
-    let data = sink.lock.withLock { sink.payload } ?? Data()
-    expect("hub encoded payload non-empty", !data.isEmpty, true)
-    guard
-        let any = try? JSONSerialization.jsonObject(with: data),
-        let dict = any as? [String: Any]
-    else {
-        expect("hub payload decodes as dict", false, true)
-        return
-    }
-    expect("hub payload type", dict["type"] as? String, "frame")
-    guard let providers = dict["providers"] as? [[String: Any]] else {
-        expect("hub payload providers is array", false, true)
-        return
-    }
-    expect("hub payload providers count", providers.count, 2)
-    expect("hub payload providers[0].id", providers[0]["id"] as? String, "claude-code")
-    expect("hub payload providers[0].tokens", providers[0]["tokens"] as? Int, 33_121_400)
-    // Cost round-trips lossless: stringValue on the daemon, Decimal(string:)
-    // on the consumer. Drift here would re-introduce the bug this refactor
-    // exists to fix.
-    let costStr = providers[0]["cost"] as? String ?? ""
-    expect("hub payload providers[0].cost roundtrip", Decimal(string: costStr), Decimal(string: "23.99")!)
-    expect("hub payload providers[1].id", providers[1]["id"] as? String, "codex")
-    expect("hub payload providers[1].tokens", providers[1]["tokens"] as? Int, 0)
-    // Always present, even off: the app draws its control from this key and
-    // could not tell an absent one from a daemon that predates it.
-    guard let keepAwake = dict["keep_awake"] as? [String: Any] else {
-        expect("hub payload carries keep_awake", false, true)
-        return
-    }
-    expect("hub payload keep_awake mode", keepAwake["mode"] as? String, "off")
-    expect("hub payload keep_awake active", keepAwake["active"] as? Bool, false)
-    runHubKeepAwakeEncodeTest()
-    runHubPresenceEdgeTest()
-}
-
-/// The hold follows the app, so what the daemon is told has to be edges: one
-/// arrival when the first client connects and one departure when the last one
-/// goes. A second client that reported an arrival would take a hold the user
-/// never asked twice for, and a first disconnect that reported a departure
-/// would drop one they are still using.
-private func runHubPresenceEdgeTest() {
-    final class Sink: FrameSink, @unchecked Sendable {
-        func deliver(_ data: Data) async {}
-    }
-    final class Log: @unchecked Sendable {
-        let lock = NSLock()
-        var events: [Bool] = []
-        func append(_ present: Bool) { lock.withLock { events.append(present) } }
-    }
-    let log = Log()
-    let first = Sink()
-    let second = Sink()
-    let sem = DispatchSemaphore(value: 0)
-    Task {
-        let hub = Hub()
-        await hub.onPresenceChange { present in log.append(present) }
-        await hub.register(first)
-        await hub.register(second)
-        await hub.unregister(first)
-        await hub.unregister(second)
-        sem.signal()
-    }
-    sem.wait()
-    expect("hub presence edges", log.lock.withLock { log.events }, [true, false])
-}
-
-/// The mode and its effect travel as two fields, because they come apart.
-private func runHubKeepAwakeEncodeTest() {
-    final class CapturingSink: FrameSink, @unchecked Sendable {
-        let lock = NSLock()
-        var payload: Data?
-        func deliver(_ data: Data) async {
-            lock.withLock { self.payload = data }
-        }
-    }
-    let sink = CapturingSink()
-    let frame = FrameBuilder.build(
-        today: DayTotals(totalTokens: 10, totalCost: 0),
-        prev: nil,
-        hoursElapsed: 1,
-        primaryMetric: .tokens,
+        ],
         keepAwake: KeepAwakeState(mode: .on, active: true)
     )
-    let sem = DispatchSemaphore(value: 0)
-    Task {
-        let hub = Hub()
-        await hub.register(sink)
-        await hub.broadcast(frame)
-        sem.signal()
-    }
-    sem.wait()
-    let data = sink.lock.withLock { sink.payload } ?? Data()
-    guard
-        let any = try? JSONSerialization.jsonObject(with: data),
-        let dict = any as? [String: Any],
-        let keepAwake = dict["keep_awake"] as? [String: Any]
-    else {
-        expect("hub keep-awake payload decodes", false, true)
-        return
-    }
-    expect("hub payload keep_awake on", keepAwake["mode"] as? String, "on")
-    expect("hub payload keep_awake holding", keepAwake["active"] as? Bool, true)
+    expect("frame providers count", frame.providers.count, 2)
+    expect("frame providers[0].id", frame.providers[0].id, "claude-code")
+    expect("frame providers[0].tokens", frame.providers[0].tokens, 33_121_400)
+    expect("frame providers[0].cost", frame.providers[0].cost, Decimal(string: "23.99")!)
+    expect("frame providers[1].id", frame.providers[1].id, "codex")
+    expect("frame keep-awake mode", frame.keepAwake.mode, .on)
+    expect("frame keep-awake active", frame.keepAwake.active, true)
+    // Both nil together or neither: a half-present pair would render a
+    // day-over-day delta measured against a zero nobody observed.
+    expect("frame prev tokens absent", frame.prevTokens == nil, true)
+    expect("frame prev cost absent", frame.prevCost == nil, true)
+
+    let withPrev = FrameBuilder.build(
+        today: DayTotals(totalTokens: 10, totalCost: 1),
+        prev: DayTotals(totalTokens: 4, totalCost: Decimal(string: "0.5")!),
+        hoursElapsed: 1
+    )
+    expect("frame prev tokens", withPrev.prevTokens, 4)
+    expect("frame prev cost", withPrev.prevCost, Decimal(string: "0.5")!)
+    expect("frame keep-awake defaults off", withPrev.keepAwake, .off)
 }
 
 private func runServerConfigTests() {
@@ -462,39 +348,21 @@ private func runServerConfigTests() {
     try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
     defer { try? fm.removeItem(at: tempDir) }
 
-    expect("defaults tokenless loopback", ServerConfig.defaults.host, "127.0.0.1")
-
-    let tokenlessURL = tempDir.appendingPathComponent("tokenless.json")
-    try? Data(#"{"host":"0.0.0.0","port":5155,"authToken":""}"#.utf8).write(to: tokenlessURL)
-    do {
-        let loaded = try ServerConfig.load(from: tokenlessURL)
-        expect("tokenless wildcard restricted", loaded.host, "127.0.0.1")
-    } catch {
-        expect("tokenless config loads", false, true)
-    }
-
-    let tokenURL = tempDir.appendingPathComponent("token.json")
-    try? Data(#"{"host":"0.0.0.0","port":5155,"authToken":"abc123"}"#.utf8).write(to: tokenURL)
-    do {
-        let loaded = try ServerConfig.load(from: tokenURL)
-        expect("token wildcard preserved", loaded.host, "0.0.0.0")
-    } catch {
-        expect("token config loads", false, true)
-    }
-
     // ServerConfig.save roundtrip: emits valid JSON that ServerConfig.load
-    // can ingest.
+    // can ingest. It matters more than it used to — this file is now the only
+    // place a metering setting is written, so a broken roundtrip loses the
+    // setting rather than desyncing a second copy.
     let saveURL = tempDir.appendingPathComponent("roundtrip.json")
     var cfg = ServerConfig.defaults
     cfg.claudeLimits = true
-    cfg.authToken = "tok"
     cfg.keepAwake = .on
+    cfg.codexDataDir = "~/somewhere/else"
     do {
         try ServerConfig.save(cfg, to: saveURL)
         let reloaded = try ServerConfig.load(from: saveURL)
         expect("save roundtrip claudeLimits", reloaded.claudeLimits, true)
-        expect("save roundtrip authToken", reloaded.authToken, "tok")
         expect("save roundtrip keepAwake", reloaded.keepAwake, .on)
+        expect("save roundtrip codexDataDir", reloaded.codexDataDir, "~/somewhere/else")
     } catch {
         expect("save roundtrip", false, true)
     }
@@ -502,24 +370,27 @@ private func runServerConfigTests() {
     // A mode written by a newer build must cost the user that one setting,
     // not the rest of the file with it.
     let futureModeURL = tempDir.appendingPathComponent("future-mode.json")
-    try? Data(#"{"authToken":"tok","keepAwake":"hypersleep"}"#.utf8).write(to: futureModeURL)
+    try? Data(#"{"claudeLimits":true,"keepAwake":"hypersleep"}"#.utf8).write(to: futureModeURL)
     do {
         let loaded = try ServerConfig.load(from: futureModeURL)
         expect("unknown keepAwake mode reads as off", loaded.keepAwake, .off)
-        expect("unknown keepAwake mode keeps the rest", loaded.authToken, "tok")
+        expect("unknown keepAwake mode keeps the rest", loaded.claudeLimits, true)
     } catch {
         expect("future-mode config loads", false, true)
     }
 
-    // Backwards compat: a server.json missing keys this build knows about
-    // merges into the defaults rather than failing to load.
+    // Backwards compat: a `server.json` written by a build that still had a
+    // wire in it carries keys this one has never heard of. It must load, and
+    // it must not drag the removed settings back in.
     let legacyURL = tempDir.appendingPathComponent("legacy.json")
     try? Data(
-        #"{"host":"127.0.0.1","port":5155,"authToken":"x","primaryMetric":"tokens"}"#.utf8
+        #"{"host":"127.0.0.1","port":5155,"authToken":"x","primaryMetric":"tokens","claudeLimits":true}"#
+            .utf8
     ).write(to: legacyURL)
     do {
         let loaded = try ServerConfig.load(from: legacyURL)
-        expect("legacy config defaults claudeLimits", loaded.claudeLimits, false)
+        expect("legacy config keeps what this build still has", loaded.claudeLimits, true)
+        expect("legacy config defaults the rest", loaded.keepAwake, .off)
     } catch {
         expect("legacy config loads", false, true)
     }
