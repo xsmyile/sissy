@@ -482,6 +482,14 @@ actor CodexUsageReader: UsageProvider {
         let cutoff = cal.startOfDay(for: Date().addingTimeInterval(Double(-retainDays * 86400)))
         dailyTotals = dailyTotals.filter { $0.key >= cutoff }
         seenLineKeys = seenLineKeys.filter { $0.value >= cutoff }
+        // `fileModels` goes with the other two: it is keyed the same way and
+        // is what prices a resumed file, so an entry outliving its offset
+        // would be a model map for a file nothing reads.
+        let retained = UsageReaderShared.retainedFiles(
+            mtimes: fileMTimes, cutoff: cutoff.timeIntervalSince1970)
+        fileOffsets = fileOffsets.filter { retained.contains($0.key) }
+        fileModels = fileModels.filter { retained.contains($0.key) }
+        fileMTimes = fileMTimes.filter { retained.contains($0.key) }
     }
 
     private func ingestNewLines(in url: URL) -> Bool {

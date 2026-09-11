@@ -659,6 +659,10 @@ actor ClaudeCodeUsageReader: UsageProvider {
         // Evict dedup keys for days that have aged out so the set's memory
         // footprint stays bounded across long-running sessions.
         seenRequestKeys = seenRequestKeys.filter { $0.value >= cutoff }
+        let retained = UsageReaderShared.retainedFiles(
+            mtimes: fileMTimes, cutoff: cutoff.timeIntervalSince1970)
+        fileOffsets = fileOffsets.filter { retained.contains($0.key) }
+        fileMTimes = fileMTimes.filter { retained.contains($0.key) }
     }
 
     private func ingestNewLines(in url: URL) -> Bool {
