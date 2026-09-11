@@ -54,10 +54,14 @@ enum ClaudeCredentialsStore {
     /// therefore runs outside structured concurrency and the gate below
     /// delivers whichever outcome arrives first.
     ///
-    /// A lookup that outlived its budget is still running, so the next call
-    /// answers `.timedOut` rather than parking a second dispatch thread on the
-    /// same query; the slot reopens when the abandoned one returns, and its
-    /// result is discarded.
+    /// One lookup runs at a time and every caller waits on that one, each
+    /// under its own budget. A caller arriving while an abandoned lookup is
+    /// still parked therefore starts no second one — that would queue a second
+    /// dispatch thread behind the same dialog without asking a different
+    /// question — and is not answered `.timedOut` on the spot either: it is
+    /// served the moment the dialog is. Only the lookup returning reopens the
+    /// slot, because only that proves the query is no longer parked in the
+    /// Security framework.
     ///
     /// `lookup` exists so the abandonment can be tested without a keychain:
     /// the blocking call is the one piece of external I/O here, and nothing
@@ -66,18 +70,27 @@ enum ClaudeCredentialsStore {
         timeout: Duration,
         lookup: @Sendable @escaping () -> ClaudeCredentialsLookup = { load() }
     ) async -> ClaudeCredentialsLookup {
-        guard gate.claim() else { return .timedOut }
-        DispatchQueue.global(qos: .utility).async { gate.finish(lookup()) }
-        let deadline = Task {
-            do {
-                try await Task.sleep(for: timeout)
-            } catch {
-                return
+        let id = UUID()
+        var deadline: Task<Void, Never>?
+        let outcome = await withCheckedContinuation { continuation in
+            let mine = gate.join(id, continuation)
+            // Armed before the lookup is dispatched and after the join, so it
+            // can neither fire against an unregistered waiter nor be skipped
+            // by an answer that lands first.
+            deadline = Task {
+                do {
+                    try await Task.sleep(for: timeout)
+                } catch {
+                    return
+                }
+                gate.giveUp(id)
             }
-            gate.giveUp()
+            if mine {
+                DispatchQueue.global(qos: .utility).async { gate.finish(lookup()) }
+            }
         }
-        defer { deadline.cancel() }
-        return await gate.wait()
+        deadline?.cancel()
+        return outcome
     }
 
     private static let gate = KeychainLookupGate()
@@ -123,63 +136,49 @@ enum ClaudeCredentialsStore {
     }
 }
 
-/// One-shot handoff between a blocking keychain lookup and the caller waiting
-/// on it, plus the single in-flight slot that keeps an abandoned lookup from
-/// being duplicated.
+/// The single in-flight keychain lookup and everyone waiting on its answer.
 ///
-/// `finish` and `giveUp` are both safe to call in either order and after the
-/// caller has left: whichever lands first resumes the waiter, and the other
-/// is dropped.
-private final class KeychainLookupGate: @unchecked Sendable {
+/// One at a time is the whole point: `SecItemCopyMatching` behind a
+/// user-presence prompt blocks until the dialog is answered, and a second call
+/// would park a second dispatch thread behind that same dialog. The waiters
+/// are independent of it — each leaves on its own budget, and whoever is still
+/// there when the lookup returns is served.
+final class KeychainLookupGate: @unchecked Sendable {
     private let lock = NSLock()
-    private var outstanding = false
-    private var waiter: CheckedContinuation<ClaudeCredentialsLookup, Never>?
-    private var undelivered: ClaudeCredentialsLookup?
+    private var inFlight = false
+    private var waiters: [UUID: CheckedContinuation<ClaudeCredentialsLookup, Never>] = [:]
 
-    /// True when the caller now owns the only in-flight lookup.
-    func claim() -> Bool {
+    /// Registers `id` as a waiter and reports whether this caller is the one
+    /// that has to run the lookup.
+    func join(
+        _ id: UUID,
+        _ continuation: CheckedContinuation<ClaudeCredentialsLookup, Never>
+    ) -> Bool {
         lock.withLock {
-            if outstanding { return false }
-            outstanding = true
-            waiter = nil
-            undelivered = nil
+            waiters[id] = continuation
+            if inFlight { return false }
+            inFlight = true
             return true
         }
     }
 
-    func wait() async -> ClaudeCredentialsLookup {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            if let ready = undelivered {
-                undelivered = nil
-                lock.unlock()
-                continuation.resume(returning: ready)
-                return
-            }
-            waiter = continuation
-            lock.unlock()
-        }
-    }
-
-    /// The lookup returned. Frees the slot, and hands the value over if the
-    /// caller is still waiting for it.
+    /// The lookup returned. Hands its answer to everyone still waiting and
+    /// reopens the slot.
     func finish(_ value: ClaudeCredentialsLookup) {
         lock.lock()
-        outstanding = false
-        let pending = waiter
-        waiter = nil
-        if pending == nil { undelivered = value }
+        inFlight = false
+        let pending = waiters
+        waiters.removeAll()
         lock.unlock()
-        pending?.resume(returning: value)
+        for continuation in pending.values { continuation.resume(returning: value) }
     }
 
-    /// The budget ran out. The slot stays taken because the lookup itself is
-    /// still parked in the Security framework.
-    func giveUp() {
+    /// One caller's budget ran out. It leaves alone: the lookup stays in
+    /// flight, and the waiters still under their own budget are served by it.
+    func giveUp(_ id: UUID) {
         lock.lock()
-        let pending = waiter
-        waiter = nil
+        let abandoned = waiters.removeValue(forKey: id)
         lock.unlock()
-        pending?.resume(returning: .timedOut)
+        abandoned?.resume(returning: .timedOut)
     }
 }
