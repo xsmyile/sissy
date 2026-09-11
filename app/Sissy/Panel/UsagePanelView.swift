@@ -26,7 +26,7 @@ struct UsagePanelView: View {
             + Date.now.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 
-    private func makeSnapshot(_ frame: DisplayFrame) -> UsagePanelSnapshot {
+    private func makeSnapshot(_ frame: FrameData) -> UsagePanelSnapshot {
         UsagePanelSnapshot.make(frame: frame)
     }
 

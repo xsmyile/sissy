@@ -19,16 +19,16 @@ final class SissyModelKeepAwakeTests: XCTestCase {
         )
     }
 
-    private func frame(_ keepAwake: KeepAwakeState) -> DisplayFrame {
-        DisplayFrame(
+    private func frame(_ keepAwake: KeepAwakeState) -> FrameData {
+        FrameData(
             tokens: "26K",
             cost: "0.09",
             burn: "1.5K",
-            ts: Int(Date().timeIntervalSince1970),
             primary: "26K",
             primaryLabel: "TOKENS",
             providers: [],
-            prev: nil,
+            prevTokens: nil,
+            prevCost: nil,
             keepAwake: keepAwake
         )
     }

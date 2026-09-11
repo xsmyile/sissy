@@ -8,7 +8,7 @@ import Observation
 @MainActor
 @Observable
 final class SissyModel {
-    var currentFrame: DisplayFrame? = nil
+    var currentFrame: FrameData? = nil
     var lastFrameAt: Date? = nil
     var preferences: Preferences
     var settingsTab: SettingsTab = .general
@@ -149,7 +149,7 @@ final class SissyModel {
 
     /// A frame together with when it landed.
     struct LiveFrame {
-        let frame: DisplayFrame
+        let frame: FrameData
         let at: Date
     }
 
@@ -292,12 +292,12 @@ final class SissyModel {
     /// Where the daemon's answer lands. Both fields move together so an
     /// arriving frame can retire a keep-awake request in the same step — but
     /// only the frame that actually carries the answer.
-    func applyFrame(_ frame: DisplayFrame) {
+    func applyFrame(_ frame: FrameData, builtAt: Date? = nil) {
         if let pending = pendingKeepAwake, frame.keepAwake.mode == pending.mode {
             pendingKeepAwake = nil
         }
         currentFrame = frame
-        lastFrameAt = frame.builtAt ?? Date()
+        lastFrameAt = builtAt ?? Date()
     }
 
     func setSissyMotion(_ enabled: Bool) {
@@ -427,90 +427,6 @@ final class SissyModel {
         _ = alert.runModal()
     }
 
-}
-
-/// The daemon's broadcast frame, as `FrameDecoder` hands it to the app.
-struct DisplayFrame: Codable, Equatable {
-    var tokens: String
-    var cost: String
-    var burn: String
-    var ts: Int
-    var primary: String
-    var primaryLabel: String
-    /// Per-provider totals carried on the WS frame so the panel derives its
-    /// total and its rows from the same payload. Empty when no provider has
-    /// emitted yet, or when the daemon predates the field.
-    var providers: [ProviderSlice]
-    /// Yesterday's raw combined totals, for the day-over-day delta. nil until
-    /// every active provider has a previous-day snapshot — the daemon omits
-    /// both wire keys together in that window, and nil renders as "no
-    /// comparison" rather than a 0% that was never measured.
-    var prev: PrevTotals?
-    /// The daemon's keep-awake mode and whether it is holding. Defaults to off
-    /// rather than being optional: a daemon too old to send the key is one
-    /// that holds nothing, which is what off means.
-    var keepAwake: KeepAwakeState = .off
-
-    struct ProviderSlice: Codable, Equatable, Identifiable {
-        let id: String
-        let tokens: Int
-        let cost: Decimal
-        /// Subscription windows the CLI reported, shortest first. Empty for a
-        /// provider that publishes none, which is what puts the row back on
-        /// its share-of-today bar.
-        let windows: [UsageWindow]
-        /// Vendor's own plan token, nil when the daemon reported none — an
-        /// API-key user, a CLI too old to name it, or a daemon predating the
-        /// field. `UsageFormat.plan(_:tier:)` turns it into the words on the
-        /// row.
-        let plan: String?
-        /// Limit tier the plan is metered at, for the one vendor that names
-        /// one. Never present without `plan`.
-        let planTier: String?
-
-        init(
-            id: String,
-            tokens: Int,
-            cost: Decimal,
-            windows: [UsageWindow] = [],
-            plan: String? = nil,
-            planTier: String? = nil
-        ) {
-            self.id = id
-            self.tokens = tokens
-            self.cost = cost
-            self.windows = windows
-            self.plan = plan
-            self.planTier = plan == nil ? nil : planTier
-        }
-    }
-
-    /// One rate-limit window as the vendor reported it. `minutes` is the
-    /// identity: vendors do not agree on an ordering, so the label comes from
-    /// the length and never from the position in the payload.
-    struct UsageWindow: Codable, Equatable, Identifiable {
-        let minutes: Int
-        let usedPercent: Double
-        let resetsAt: Date
-
-        var id: Int { minutes }
-    }
-
-    struct PrevTotals: Codable, Equatable {
-        let tokens: Int
-        let cost: Decimal
-    }
-
-    /// When the daemon built this frame, from its own `ts`.
-    ///
-    /// The Hub replays its cached payload to every client that connects, and
-    /// that payload keeps the timestamp of the emit it came from — so a
-    /// reconnect to an idle daemon reports the age of the real last frame
-    /// instead of the moment the socket happened to open. nil for a frame
-    /// with no usable `ts`, which leaves the caller to fall back to now.
-    var builtAt: Date? {
-        ts > 0 ? Date(timeIntervalSince1970: TimeInterval(ts)) : nil
-    }
 }
 
 /// Lets `SissyModel.init` hand `ServerHealthMonitor` a closure that reads
