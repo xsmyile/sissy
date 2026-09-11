@@ -289,6 +289,7 @@ func runSelfTest() {
     runCodexAuthFallbackTest()
     runClaudeLimitsParseTests()
     runKeychainTimeoutTests()
+    runKeychainGateTests()
     runAggregatorEmitTest()
 
     print("=== FSWatcher ===")
@@ -1143,8 +1144,9 @@ func runClaudeLimitsParseTests() {
 /// described a wait already served in full. The keychain is the external I/O
 /// this test stands in for; everything else is the real path.
 ///
-/// Order matters: abandoning a lookup leaves the single in-flight slot taken
-/// until the fake returns, so the delivering case runs first.
+/// Order matters: the abandoned lookup below stays parked until its fake
+/// returns, and everything that runs while it is parked joins it rather than
+/// starting one of its own, so the delivering case runs first.
 func runKeychainTimeoutTests() {
     print("=== ClaudeCredentialsStore.loadOffPool ===")
 
@@ -1174,6 +1176,97 @@ func runKeychainTimeoutTests() {
     abandoned.wait()
     expect("a lookup that parks is abandoned", gaveUp.value, true)
     expect("abandoning does not wait for the lookup", elapsed.value < 1.0, true)
+}
+
+/// The gate's own contract, which the path above cannot observe without a
+/// dialog nobody can raise here: one lookup in flight, every caller waiting on
+/// that one, and a caller that runs out of budget leaving alone.
+///
+/// It is what an unanswered dialog used to cost. A lookup abandoned by its
+/// caller kept the slot, so every later one was answered `.timedOut` on the
+/// spot and the Claude limits stayed dead for the rest of the process — the
+/// dialog being answered afterwards changed nothing, because nobody was left
+/// waiting on it.
+func runKeychainGateTests() {
+    print("=== KeychainLookupGate ===")
+
+    let gate = KeychainLookupGate()
+    let first = UUID()
+    let second = UUID()
+    let firstJoined = DispatchSemaphore(value: 0)
+    let secondJoined = DispatchSemaphore(value: 0)
+    let served = DispatchSemaphore(value: 0)
+    let firstRunsLookup = TestBox<Bool>(false)
+    let secondRunsLookup = TestBox<Bool>(true)
+    let firstServed = TestBox<Bool>(false)
+    let secondServed = TestBox<Bool>(false)
+
+    Task {
+        let result = await withCheckedContinuation { continuation in
+            firstRunsLookup.value = gate.join(first, continuation)
+            firstJoined.signal()
+        }
+        if case .absent = result { firstServed.value = true }
+        served.signal()
+    }
+    firstJoined.wait()
+    Task {
+        let result = await withCheckedContinuation { continuation in
+            secondRunsLookup.value = gate.join(second, continuation)
+            secondJoined.signal()
+        }
+        if case .absent = result { secondServed.value = true }
+        served.signal()
+    }
+    secondJoined.wait()
+
+    expect("the first caller runs the lookup", firstRunsLookup.value, true)
+    expect("a caller joining one in flight does not", secondRunsLookup.value, false)
+
+    gate.finish(.absent)
+    served.wait()
+    served.wait()
+    expect("the answer reaches the caller that ran the lookup", firstServed.value, true)
+    expect("and the one that joined it", secondServed.value, true)
+
+    let third = UUID()
+    let fourth = UUID()
+    let thirdJoined = DispatchSemaphore(value: 0)
+    let fourthJoined = DispatchSemaphore(value: 0)
+    let thirdDone = DispatchSemaphore(value: 0)
+    let fourthDone = DispatchSemaphore(value: 0)
+    let slotReopened = TestBox<Bool>(false)
+    let thirdGaveUp = TestBox<Bool>(false)
+    let fourthServed = TestBox<Bool>(false)
+
+    Task {
+        let result = await withCheckedContinuation { continuation in
+            slotReopened.value = gate.join(third, continuation)
+            thirdJoined.signal()
+        }
+        if case .timedOut = result { thirdGaveUp.value = true }
+        thirdDone.signal()
+    }
+    thirdJoined.wait()
+    expect("the lookup returning is what reopens the slot", slotReopened.value, true)
+
+    Task {
+        let result = await withCheckedContinuation { continuation in
+            _ = gate.join(fourth, continuation)
+            fourthJoined.signal()
+        }
+        if case .denied = result { fourthServed.value = true }
+        fourthDone.signal()
+    }
+    fourthJoined.wait()
+
+    gate.giveUp(third)
+    thirdDone.wait()
+    expect("a caller out of budget is answered timedOut", thirdGaveUp.value, true)
+
+    gate.finish(.denied)
+    fourthDone.wait()
+    expect("giving up takes nobody else with it", fourthServed.value, true)
 }
 
 /// A rollout tree Codex has already been read to the end of names no plan —
