@@ -14,8 +14,8 @@ enum ProviderPalette {
 
     static func tint(for id: String) -> Color {
         switch id {
-        case "claude-code": return claudeCode
-        case "codex": return codex
+        case ProviderID.claudeCode: return claudeCode
+        case ProviderID.codex: return codex
         default: return .secondary
         }
     }

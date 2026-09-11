@@ -5,11 +5,13 @@ import SwiftUI
 /// dropping the user on whichever tab was last selected.
 enum SettingsTab: Hashable {
     case general
+    case providers
     case about
 
     var title: String {
         switch self {
         case .general: return "General"
+        case .providers: return "Providers"
         case .about: return "About"
         }
     }
@@ -17,6 +19,7 @@ enum SettingsTab: Hashable {
     var symbol: String {
         switch self {
         case .general: return "gearshape"
+        case .providers: return "rectangle.stack"
         case .about: return "info.circle"
         }
     }
@@ -45,6 +48,7 @@ struct SettingsRootView: View {
     var body: some View {
         TabView(selection: $model.settingsTab) {
             tab(.general) { GeneralSettingsView(model: model) }
+            tab(.providers) { ProvidersSettingsView(model: model) }
             tab(.about) { AboutView(model: model) }
         }
         .frame(width: Self.width)
