@@ -291,6 +291,7 @@ func runSelfTest() {
     runKeychainTimeoutTests()
     runKeychainGateTests()
     runSissyLogTests()
+    runServerConfigSaveTests()
     runAggregatorEmitTest()
 
     print("=== FSWatcher ===")
@@ -1218,6 +1219,41 @@ func runSissyLogTests() {
         "one generation is kept",
         (try? fm.contentsOfDirectory(atPath: dir.path))?.count ?? 0,
         2)
+}
+
+/// `server.json` decides which trees Sissy reads and what it prices them at,
+/// so it is written owner-only — and owner-only from the moment it answers to
+/// its own name, which is what the staging file below is for. The first save
+/// on a fresh install has nothing to replace, which is the case a
+/// replace-in-place would have missed.
+func runServerConfigSaveTests() {
+    print("=== ServerConfig.save ===")
+
+    let fm = FileManager.default
+    let dir = fm.temporaryDirectory.appendingPathComponent("sissy-config-\(UUID().uuidString)")
+    defer { try? fm.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("server.json")
+
+    func mode() -> Int {
+        let attrs = try? fm.attributesOfItem(atPath: url.path)
+        return (attrs?[.posixPermissions] as? NSNumber)?.intValue ?? 0
+    }
+
+    var config = ServerConfig.defaults
+    config.claudeLimits = true
+    expect(
+        "a config saves where there is no file yet", (try? ServerConfig.save(config, to: url)) != nil, true)
+    expect("and is owner-only", mode(), 0o600)
+    expect("and reads back", (try? ServerConfig.load(from: url))?.claudeLimits, true)
+
+    config.claudeLimits = false
+    expect("a config saves over one that is there", (try? ServerConfig.save(config, to: url)) != nil, true)
+    expect("and is owner-only too", mode(), 0o600)
+    expect("and replaces it", (try? ServerConfig.load(from: url))?.claudeLimits, false)
+    expect(
+        "no staging file is left behind",
+        (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.count ?? 0,
+        1)
 }
 
 /// The gate's own contract, which the path above cannot observe without a
