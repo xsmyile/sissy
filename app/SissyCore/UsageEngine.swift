@@ -23,22 +23,10 @@ actor UsageEngine {
     /// in-flight fetch instead of leaving it to finish against a torn-down
     /// engine.
     private var priceCatalogTask: Task<Void, Never>?
-    /// Cached input to the last `rebuildAndEmit`. Lets a pure config change —
-    /// the primary metric — re-emit immediately without hopping into the
-    /// aggregator actor, which can queue behind a running poll/cold scan and
-    /// add 50–200 ms of perceived lag. Slices are cached alongside totals so
-    /// a metric replay can't desync the aggregate scalars from the
-    /// per-provider breakdown — a fresh `perProviderTotals()` call could race
-    /// a concurrent provider emit through actor reentrancy.
-    private var lastTotals: Reading?
-
-    /// The three inputs a frame is built from, kept together because they
-    /// have to be replayed together.
-    private struct Reading {
-        let today: DayTotals
-        let prev: DayTotals?
-        let slices: [ProviderSlice]
-    }
+    /// Whether a provider has produced a reading yet. It is what a config
+    /// change re-emits against: before the first one there is nothing to
+    /// rebuild, and the change lands on the first real frame instead.
+    private var hasReading = false
 
     /// Polls Claude Code's subscription windows. Constructed unconditionally
     /// so the toggle can start it later without rebuilding the provider list;
@@ -234,7 +222,7 @@ actor UsageEngine {
         } else {
             await claudeLimitsProbe.stop()
         }
-        await reemitFromCache()
+        await reemit()
     }
 
     /// Switch the keep-awake mode and persist it, so the choice survives a
@@ -248,7 +236,7 @@ actor UsageEngine {
             sissyLog("sissy: failed to persist keepAwake to \(configURL.path): \(error)")
         }
         await applyKeepAwake()
-        await reemitFromCache()
+        await reemit()
     }
 
     /// Drives the assertion to whatever the stored mode asks for.
@@ -270,23 +258,23 @@ actor UsageEngine {
     private func startClaudeLimitsProbe() async {
         let me = self
         await claudeLimitsProbe.start {
-            await me.reemitFromCache()
+            await me.reemit()
         }
     }
 
-    /// Re-emit a frame using the most recently observed totals. No-op if the
-    /// reader hasn't produced a frame yet — the new setting will take effect
-    /// on the first real poll.
+    /// Rebuild the frame from what the aggregator holds right now, so a
+    /// setting the user just changed is visible without waiting for the next
+    /// token event. No-op until a provider has produced a reading — the
+    /// setting takes effect on the first real frame instead.
     ///
-    /// The totals are read *after* the slice fetch on purpose. That `await`
-    /// is a suspension point a provider emit can land in, and totals read
-    /// before it would be the ones that emit has already superseded —
-    /// re-emitting them puts the token count backwards and re-caches the
-    /// stale pair.
-    func reemitFromCache() async {
-        let slices = await aggregator.currentSlices()
-        guard let totals = lastTotals else { return }
-        await rebuildAndEmit(today: totals.today, prev: totals.prev, slices: slices)
+    /// Totals and slices come back from a single hop on purpose. Read
+    /// separately they describe two moments: a provider emit landing in the
+    /// suspension between them pairs its new scalars with the breakdown from
+    /// before it, and that pair is what the frame ships.
+    private func reemit() async {
+        guard hasReading else { return }
+        let reading = await aggregator.currentReading()
+        await rebuildAndEmit(today: reading.today, prev: reading.prev, slices: reading.slices)
     }
 
     private func rebuildAndEmit(
@@ -294,15 +282,15 @@ actor UsageEngine {
         prev: DayTotals?,
         slices: [ProviderSlice]
     ) async {
-        lastTotals = Reading(today: today, prev: prev, slices: slices)
+        hasReading = true
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
         let hoursElapsed = max(now.timeIntervalSince(startOfDay) / 3600, 1.0 / 60.0)
         // Slices arrive captured against the same `perProvider` snapshot the
-        // aggregator used to compute `today`/`prev` (or replayed from
-        // `lastTotals` on a metric-toggle rebuild). A fresh
-        // `perProviderTotals()` call here would race actor reentrancy and
-        // could ship a frame whose scalars and breakdown disagree.
+        // aggregator used to compute `today`/`prev`, whether they came from an
+        // emit or from `currentReading()`. Rebuilding them here would race
+        // actor reentrancy and could ship a frame whose scalars and breakdown
+        // disagree.
         let frame = FrameBuilder.build(
             today: today,
             prev: prev,

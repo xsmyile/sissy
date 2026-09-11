@@ -1,5 +1,13 @@
 import Foundation
 
+/// The three values a frame is built from, kept together because they only
+/// describe a reading while they describe the same one.
+struct UsageReading: Sendable {
+    let today: DayTotals
+    let prev: DayTotals?
+    let slices: [ProviderSlice]
+}
+
 /// Fans N `UsageProvider` streams into a single combined `(today, prev)`
 /// frame. The frame's own scalars stay unaware of multi-provider: the engine
 /// sums per-day totals before emitting and carries the split alongside them.
@@ -65,12 +73,17 @@ actor UsageAggregator {
         for p in providers { await p.applyPriceCatalog(catalog) }
     }
 
-    /// Slices rebuilt against each provider's *current* windows. A rate-limit
-    /// refresh changes no token total, so a re-emit that replayed the
-    /// cached slices would keep shipping the windows captured at the last
-    /// ingest — invisible until the CLI happened to write another event.
-    func currentSlices() -> [ProviderSlice] {
-        currentProviderSlices()
+    /// What a frame would be built from right now.
+    ///
+    /// Both halves are recomputed here rather than replayed: a rate-limit
+    /// refresh changes no token total, so slices captured at the last ingest
+    /// would keep shipping the windows from before it — invisible until the
+    /// CLI happened to write another event. And they are recomputed in one
+    /// hop, with no suspension between them, so a caller cannot pair totals
+    /// from one moment with a breakdown from another.
+    func currentReading() -> UsageReading {
+        let (today, prev) = aggregate()
+        return UsageReading(today: today, prev: prev, slices: currentProviderSlices())
     }
 
     /// Per-provider scan progress, keyed by provider id. Only the providers
