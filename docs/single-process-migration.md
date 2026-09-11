@@ -68,10 +68,10 @@ work.
 | 2 | `feat(cli)`: `--refresh-catalog`, and the oracle pointed at it | merged (#53) |
 | 3 | `refactor(app)`: render the engine's frame types | merged (#54) |
 | 4 | `refactor(app)`: run the engine in-process, retire the LaunchAgent | merged (#55) |
-| 4a | `fix`: the release path, and a retirement that could not retire | **in review** |
-| 5 | `refactor`: drop the wire | todo |
-| 6 | `refactor`: drop the OLED residue | todo |
-| 7 | `chore`: notices and acknowledgements | todo |
+| 4a | `fix`: the release path, and a retirement that could not retire | merged (#56) |
+| 5 | `refactor`: drop the wire | **in review** |
+| 6 | `refactor`: drop the OLED residue | folded into 5 |
+| 7 | `chore`: notices and acknowledgements | folded into 5 |
 | 8 | `ci`: drop the daemon scheme | todo |
 | 9 | `docs`: architecture and the rules that go with it | todo |
 
@@ -181,32 +181,41 @@ Two notes for whoever reviews the migration path:
   file and would collide with #35; it goes with the directory rename in PR 9.
 
 **5 — drop the wire.** `Hub`, `WebSocketSinkHandler`, `HTTPRequestHandler`,
-`Auth`, `SwiftNIO`. `sissy-serverd` becomes `sissy-cli`. Config collapses:
-`server.json` and `preferences.json` become one file, which is a deliberate
-choice because the README documents `server.json` as hand-editable. Drops from
-`Preferences`: `serverHost`, `serverPort`, `authToken`, `primaryMetric`,
-`minimumSecretLength`, the CSPRNG token generator, `ensureAuthToken`,
-`migrateLegacyServerPort`, `serverConfigPort`, `legacyDefaultServerPort` — and
-with them `PreferencesTests` and `SissyModelPortMigrationTests`. Drops from
-`ServerConfig`: `host`, `port`, `authToken`, `primaryMetric` and their merge
-arms. `SelfTest` loses `runHubEncodeTests` and `runHubKeepAwakeEncodeTest`; the
-other ~1,400 lines survive.
+`HTTPResponses`, `Auth`, `SissyServer` and SwiftNIO. `sissy-serverd` keeps its
+name for now — renaming the scheme is PR 8's, where the workflows are touched
+— and with no mode given it prints what it is for and exits 2, because it is a
+CI tool and no longer a service.
 
-`filesWatched()` and `isWarm()` **stay** — the panel's "warming" and "no JSONL"
-states need them. They just stop travelling over HTTP. That overlaps with
-#35's per-source `/health` work; the two merge.
+PRs 6 and 7 folded in, each because removing the wire forced them:
 
-**6 — OLED residue.** `primary`, `primary_label` and `primaryMetric` are dead
-end to end: the preference has no UI anywhere, the daemon computes the pair from
-it, the app decodes them into `DisplayFrame` and never draws them. Only tests
-assert them.
+- **The OLED residue had to go with it.** `primaryMetric` was a `ServerConfig`
+  key, so removing the wire-era keys took it, and it took `primary` /
+  `primary_label` / `PrimaryMetric` / `selectPrimary` with it. All dead end to
+  end: the preference had no UI anywhere, and the app decoded the pair and
+  never drew it.
+- **The notices had to go with it too.** SwiftNIO and its three transitive
+  Apple packages were the entire content of `THIRD-PARTY-NOTICES.md`. No
+  third-party code ships now, so nothing has to travel with the binary:
+  the file is `CREDITS.md`, credits-only, no longer bundled; the
+  acknowledgements sheet lost its licence half and kept its two credits;
+  `AcknowledgementsTests` became `AboutTests`, which now asserts the
+  *absence* of a bundled licence file.
 
-**7 — notices.** `THIRD-PARTY-NOTICES.md` covers SwiftNIO and its three
-transitive Apple packages, and nothing else. Without NIO the licence sections,
-the `project.yml` resource copy, `ThirdPartyNotices`, `AcknowledgementsView`,
-`AcknowledgementsTests` and About's Acknowledgements sheet are all dead. The
-`## Credits` section (ccusage, LiteLLM) is not a licence obligation and is worth
-keeping, so this shrinks the file rather than deleting it.
+**`server.json` got one owner, which it needed.** With both processes gone the
+app's `Preferences.writeServerConfig` and `UsageEngine` were both writing that
+file — last writer wins, and `claudeLimits` lived in both files. The engine
+owns `server.json` now and `Preferences` holds only what the app itself
+remembers (`sissyMotion`, `retiredServerAgent`), down from 284 lines to 86.
+`claudeLimits` is read from the engine, so the Settings toggle and the probe
+cannot disagree.
+
+`filesWatched()` and `isWarm()` **stay** — the panel's readiness states need
+them. They just stop travelling over HTTP. That overlaps with #35's per-source
+`/health` work; the two merge.
+
+Also swept: every comment left claiming a `/health` endpoint, a `Hub`, a WS
+client or a NIO handler. They were true when written and are now the kind of
+thing a reader would trust.
 
 **8 — CI and scripts.** The `sissy-serverd` scheme steps in `ci.yml`,
 `release.yml` and `pricing-oracle.yml`, and the scheme's own rename. The
