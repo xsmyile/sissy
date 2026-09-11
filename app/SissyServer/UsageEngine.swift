@@ -23,7 +23,6 @@ actor UsageEngine {
     /// in-flight fetch instead of leaving it to finish against a torn-down
     /// engine.
     private var priceCatalogTask: Task<Void, Never>?
-    private var primaryMetric: PrimaryMetric
     /// Cached input to the last `rebuildAndEmit`. Lets a pure config change —
     /// the primary metric — re-emit immediately without hopping into the
     /// aggregator actor, which can queue behind a running poll/cold scan and
@@ -72,7 +71,6 @@ actor UsageEngine {
     init(config: ServerConfig, configURL: URL = ServerConfig.defaultURL) {
         self.config = config
         self.configURL = configURL
-        self.primaryMetric = config.resolvedPrimaryMetric
 
         // Resolve provider toggles. Unset (nil) means "let the engine
         // decide": ClaudeCodeUsageReader is the v0.1.0 baseline (always on);
@@ -169,16 +167,6 @@ actor UsageEngine {
 
     func readiness() async -> Readiness {
         Readiness(filesWatched: aggregator.filesWatched(), isWarm: await aggregator.isWarm())
-    }
-
-    /// Switch the primary metric (tokens / burn_rate). Rebuild and re-emit
-    /// the last frame so the surface updates immediately instead of waiting
-    /// for the next JSONL change.
-    func setPrimaryMetric(_ raw: String) async {
-        let metric = PrimaryMetric(rawValue: raw) ?? .tokens
-        if metric == primaryMetric { return }
-        primaryMetric = metric
-        await rebroadcastFromCache()
     }
 
     /// Turn the Claude Code limit probe on or off and persist the choice.
@@ -281,7 +269,6 @@ actor UsageEngine {
             today: today,
             prev: prev,
             hoursElapsed: hoursElapsed,
-            primaryMetric: primaryMetric,
             providers: slices,
             keepAwake: KeepAwakeState(mode: config.keepAwake, active: keepAwakeActive)
         )

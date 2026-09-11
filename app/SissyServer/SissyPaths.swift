@@ -16,8 +16,6 @@ enum SissyPaths {
 
     static var supportDirName: String { isDev ? "Sissy-Dev" : "Sissy" }
 
-    static var defaultServerPort: Int { isDev ? 5156 : 5155 }
-
     static var appSupportDir: URL {
         URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Library/Application Support/\(supportDirName)")

@@ -5,11 +5,6 @@ struct DayTotals: Sendable, Equatable {
     let totalCost: Decimal
 }
 
-enum PrimaryMetric: String, Sendable {
-    case tokens = "tokens"
-    case burnRate = "burn_rate"
-}
-
 /// One subscription rate-limit window exactly as the vendor reports it.
 ///
 /// `minutes` identifies the window rather than its position in the payload:
@@ -69,8 +64,6 @@ struct FrameData: Sendable, Equatable, Codable {
     let tokens: String
     let cost: String
     let burn: String
-    let primary: String
-    let primaryLabel: String
     /// Per-provider totals (raw tokens + Decimal cost) for every provider with
     /// spend today. Stable order: claude-code, codex, then alphabetical. Empty
     /// when no provider has tokens today (none active yet, or all idle today).
@@ -122,32 +115,19 @@ enum FrameBuilder {
         return String(format: "%.2f", d)
     }
 
-    static func selectPrimary(tokens: String, burn: String, metric: PrimaryMetric) -> (
-        value: String, label: String
-    ) {
-        switch metric {
-        case .burnRate: return (burn, "BURN/H")
-        case .tokens: return (tokens, "TOKENS")
-        }
-    }
-
     static func build(
         today: DayTotals,
         prev: DayTotals?,
         hoursElapsed: Double,
-        primaryMetric: PrimaryMetric,
         providers: [ProviderSlice] = [],
         keepAwake: KeepAwakeState = .off
     ) -> FrameData {
         let tokens = fmtTokens(today.totalTokens)
         let burn = fmtBurn(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
-        let (primary, primaryLabel) = selectPrimary(tokens: tokens, burn: burn, metric: primaryMetric)
         return FrameData(
             tokens: tokens,
             cost: fmtCost(today.totalCost),
             burn: burn,
-            primary: primary,
-            primaryLabel: primaryLabel,
             providers: providers,
             prevTokens: prev?.totalTokens,
             prevCost: prev?.totalCost,

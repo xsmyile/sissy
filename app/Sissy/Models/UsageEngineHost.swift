@@ -19,6 +19,11 @@ final class UsageEngineHost {
     /// panel open.
     private(set) var isWarm: Bool = false
     private(set) var filesWatched: Int = 0
+    /// Whether the Claude Code limit probe is on. Read from `server.json`,
+    /// which the engine owns: the app keeps no second copy, because the one
+    /// it used to keep is what made a switch flipped with the socket down
+    /// disagree with the file the probe actually booted from.
+    private(set) var claudeLimits: Bool = false
 
     @ObservationIgnored private weak var model: SissyModel?
     @ObservationIgnored private var engine: UsageEngine?
@@ -44,6 +49,7 @@ final class UsageEngineHost {
         let config = (try? ServerConfig.load()) ?? .defaults
         let engine = UsageEngine(config: config)
         self.engine = engine
+        claudeLimits = config.claudeLimits
         let host = self
         Task {
             await engine.setObserverPresent(true)
@@ -63,19 +69,14 @@ final class UsageEngineHost {
     }
 
     func setClaudeLimits(_ enabled: Bool) {
-        guard let engine else { return }
+        guard let engine, enabled != claudeLimits else { return }
+        claudeLimits = enabled
         Task { await engine.setClaudeLimits(enabled: enabled) }
     }
 
     func setKeepAwake(mode: KeepAwakeMode) {
         guard let engine else { return }
         Task { await engine.setKeepAwake(mode: mode.rawValue) }
-    }
-
-    func setPrimaryMetric(_ metric: Preferences.PrimaryMetric) {
-        guard let engine else { return }
-        let raw = metric == .burnRate ? PrimaryMetric.burnRate.rawValue : PrimaryMetric.tokens.rawValue
-        Task { await engine.setPrimaryMetric(raw) }
     }
 
     private func deliver(_ frame: FrameData) {
