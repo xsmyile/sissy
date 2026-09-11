@@ -235,13 +235,6 @@ final class SissyModel {
         }
     }
 
-    func selectMetric(_ metric: Preferences.PrimaryMetric) {
-        guard metric != preferences.primaryMetric else { return }
-        preferences.primaryMetric = metric
-        savePreferences()
-        webSocketClient.pushSettings()
-    }
-
     func setClaudeLimits(_ enabled: Bool) {
         guard enabled != preferences.claudeLimits else { return }
         preferences.claudeLimits = enabled
