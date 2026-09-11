@@ -23,6 +23,27 @@ enum UsageReaderShared {
     /// Claude Code applies to its own tier tokens (`^[a-z][a-z0-9_]{0,63}$`).
     static let maxPlanTokenLength = 64
 
+    /// Largest per-field token count accepted off a session log.
+    ///
+    /// The counts are summed into a per-day total with Swift's trapping
+    /// arithmetic, and the logs belong to the CLIs rather than to Sissy. A
+    /// value near `Int.max` therefore crashed the process — and did so again
+    /// on every relaunch, because a file's offset only advances once its
+    /// whole chunk has been ingested, so the line was re-read forever. A
+    /// billion is three orders of magnitude past the largest context any CLI
+    /// ships, so the clamp cannot reach a real reading.
+    static let maxTokenCount = 1_000_000_000
+
+    /// Reads one token count off a decoded JSONL object, bounded so the
+    /// per-day sum cannot overflow. Missing, non-numeric, or out of range
+    /// reads as zero; `as? Int` already answers nil for a float, for an
+    /// infinity, and for anything wider than `Int64`, so only the in-range
+    /// absurdities need the clamp.
+    static func tokenCount(_ raw: Any?) -> Int {
+        guard let value = raw as? Int else { return 0 }
+        return min(max(value, 0), maxTokenCount)
+    }
+
     /// Narrows a vendor-supplied plan identifier to the shape both CLIs use
     /// for theirs, so an unexpected payload cannot put arbitrary text in the
     /// frame. Neither reader owns its source: Codex takes the token out of a

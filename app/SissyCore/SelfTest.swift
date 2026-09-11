@@ -906,9 +906,9 @@ func runAggregatorEmitTest() {
         nonisolated private let box = AtomicWindows()
 
         init() {
-            box.store([
-                UsageWindow(minutes: 300, usedPercent: 12, resetsAt: .distantFuture)
-            ])
+            box.store(
+                [UsageWindow(minutes: 300, usedPercent: 12, resetsAt: .distantFuture)]
+                    .compactMap { $0 })
         }
 
         func start(onChange: @Sendable @escaping (DayTotals, DayTotals?) async -> Void) async {

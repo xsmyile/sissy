@@ -39,28 +39,29 @@ final class UsagePanelSnapshotTests: XCTestCase {
         )
     }
 
-    private func window(_ minutes: Int, _ usedPercent: Double) -> UsageWindow {
-        UsageWindow(
-            minutes: minutes,
-            usedPercent: usedPercent,
-            resetsAt: Date(timeIntervalSince1970: 1_789_006_037)
-        )
+    private func window(_ minutes: Int, _ usedPercent: Double) throws -> UsageWindow {
+        try XCTUnwrap(
+            UsageWindow(
+                minutes: minutes,
+                usedPercent: usedPercent,
+                resetsAt: Date(timeIntervalSince1970: 1_789_006_037)
+            ))
     }
 
     // MARK: Rate-limit windows
 
-    func testProviderRowCarriesALabelledWindowPerLimit() {
+    func testProviderRowCarriesALabelledWindowPerLimit() throws {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [
-                slice("codex", 1000, "1.00", windows: [window(300, 25), window(10080, 8)])
+                slice("codex", 1000, "1.00", windows: [try window(300, 25), try window(10080, 8)])
             ])
         )
         XCTAssertEqual(snapshot.providers.first?.windows.map(\.label), ["5h", "7d"])
     }
 
-    func testWindowPercentRoundsWhileTheBarStaysClamped() {
+    func testWindowPercentRoundsWhileTheBarStaysClamped() throws {
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window(300, 104.6)])])
+            frame: frame(providers: [slice("codex", 1000, "1.00", windows: [try window(300, 104.6)])])
         )
         let row = snapshot.providers.first?.windows.first
         XCTAssertEqual(row?.percent, 105)

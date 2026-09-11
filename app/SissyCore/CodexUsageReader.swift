@@ -431,9 +431,9 @@ actor CodexUsageReader: UsageProvider {
         if seenLineKeys[dedupKey] != nil { return nil }
         seenLineKeys[dedupKey] = Calendar.current.startOfDay(for: ts)
 
-        let input = (last["input_tokens"] as? Int) ?? 0
-        let cached = (last["cached_input_tokens"] as? Int) ?? 0
-        let output = (last["output_tokens"] as? Int) ?? 0
+        let input = UsageReaderShared.tokenCount(last["input_tokens"])
+        let cached = UsageReaderShared.tokenCount(last["cached_input_tokens"])
+        let output = UsageReaderShared.tokenCount(last["output_tokens"])
         // Codex `input_tokens` is gross input (cached + uncached). ccusage and
         // OpenAI's pricing both treat cached as a separate billable channel,
         // so we strip the cached component out before passing along.
@@ -725,7 +725,11 @@ actor CodexUsageReader: UsageProvider {
             lastSaveAt = now
             persistDirty = false
         } catch {
-            // Same swallow-and-retry policy as ClaudeCodeUsageReader.
+            // Retried on the next dirty save rather than propagated: a
+            // snapshot is an optimisation, and losing one costs a cold scan,
+            // not a reading. Logged because the failure is otherwise
+            // invisible and every later launch pays for it.
+            sissyLog("sissy: codex snapshot save failed at \(url.path): \(error)")
         }
     }
 }
