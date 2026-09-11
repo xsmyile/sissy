@@ -75,6 +75,11 @@ struct FrameData: Sendable, Equatable, Codable {
     /// a `prev` snapshot, so the app shows no delta instead of a false 0%.
     let prevTokens: Int?
     let prevCost: Decimal?
+    /// The keep-awake mode and whether it is holding right now. Always
+    /// emitted, including when off: the app renders the control from this, and
+    /// an absent key would be indistinguishable from a daemon too old to have
+    /// one.
+    let keepAwake: KeepAwakeState
 }
 
 enum FrameBuilder {
@@ -122,7 +127,8 @@ enum FrameBuilder {
         prev: DayTotals?,
         hoursElapsed: Double,
         primaryMetric: PrimaryMetric,
-        providers: [ProviderSlice] = []
+        providers: [ProviderSlice] = [],
+        keepAwake: KeepAwakeState = .off
     ) -> FrameData {
         let tokens = fmtTokens(today.totalTokens)
         let burn = fmtBurn(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
@@ -135,7 +141,8 @@ enum FrameBuilder {
             primaryLabel: primaryLabel,
             providers: providers,
             prevTokens: prev?.totalTokens,
-            prevCost: prev?.totalCost
+            prevCost: prev?.totalCost,
+            keepAwake: keepAwake
         )
     }
 

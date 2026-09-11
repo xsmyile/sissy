@@ -373,6 +373,53 @@ private func runHubEncodeTests() {
     expect("hub payload providers[0].cost roundtrip", Decimal(string: costStr), Decimal(string: "23.99")!)
     expect("hub payload providers[1].id", providers[1]["id"] as? String, "codex")
     expect("hub payload providers[1].tokens", providers[1]["tokens"] as? Int, 0)
+    // Always present, even off: the app draws its control from this key and
+    // could not tell an absent one from a daemon that predates it.
+    guard let keepAwake = dict["keep_awake"] as? [String: Any] else {
+        expect("hub payload carries keep_awake", false, true)
+        return
+    }
+    expect("hub payload keep_awake mode", keepAwake["mode"] as? String, "off")
+    expect("hub payload keep_awake active", keepAwake["active"] as? Bool, false)
+    runHubKeepAwakeEncodeTest()
+}
+
+/// The mode and its effect travel as two fields, because they come apart.
+private func runHubKeepAwakeEncodeTest() {
+    final class CapturingSink: FrameSink, @unchecked Sendable {
+        let lock = NSLock()
+        var payload: Data?
+        func deliver(_ data: Data) async {
+            lock.withLock { self.payload = data }
+        }
+    }
+    let sink = CapturingSink()
+    let frame = FrameBuilder.build(
+        today: DayTotals(totalTokens: 10, totalCost: 0),
+        prev: nil,
+        hoursElapsed: 1,
+        primaryMetric: .tokens,
+        keepAwake: KeepAwakeState(mode: .on, active: true)
+    )
+    let sem = DispatchSemaphore(value: 0)
+    Task {
+        let hub = Hub()
+        await hub.register(sink)
+        await hub.broadcast(frame)
+        sem.signal()
+    }
+    sem.wait()
+    let data = sink.lock.withLock { sink.payload } ?? Data()
+    guard
+        let any = try? JSONSerialization.jsonObject(with: data),
+        let dict = any as? [String: Any],
+        let keepAwake = dict["keep_awake"] as? [String: Any]
+    else {
+        expect("hub keep-awake payload decodes", false, true)
+        return
+    }
+    expect("hub payload keep_awake on", keepAwake["mode"] as? String, "on")
+    expect("hub payload keep_awake holding", keepAwake["active"] as? Bool, true)
 }
 
 private func runServerConfigTests() {
@@ -409,13 +456,27 @@ private func runServerConfigTests() {
     var cfg = ServerConfig.defaults
     cfg.claudeLimits = true
     cfg.authToken = "tok"
+    cfg.keepAwake = .on
     do {
         try ServerConfig.save(cfg, to: saveURL)
         let reloaded = try ServerConfig.load(from: saveURL)
         expect("save roundtrip claudeLimits", reloaded.claudeLimits, true)
         expect("save roundtrip authToken", reloaded.authToken, "tok")
+        expect("save roundtrip keepAwake", reloaded.keepAwake, .on)
     } catch {
         expect("save roundtrip", false, true)
+    }
+
+    // A mode written by a newer build must cost the user that one setting,
+    // not the rest of the file with it.
+    let futureModeURL = tempDir.appendingPathComponent("future-mode.json")
+    try? Data(#"{"authToken":"tok","keepAwake":"hypersleep"}"#.utf8).write(to: futureModeURL)
+    do {
+        let loaded = try ServerConfig.load(from: futureModeURL)
+        expect("unknown keepAwake mode reads as off", loaded.keepAwake, .off)
+        expect("unknown keepAwake mode keeps the rest", loaded.authToken, "tok")
+    } catch {
+        expect("future-mode config loads", false, true)
     }
 
     // Backwards compat: a server.json missing keys this build knows about
