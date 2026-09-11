@@ -1,8 +1,8 @@
 import Foundation
 
-/// Constants and helpers shared by the per-CLI usage readers
-/// (`ClaudeCodeUsageReader`, `CodexUsageReader`). Centralized so a tuning
-/// change can't silently drift between the two tails.
+/// Constants and helpers shared by the one tail (`LocalUsageProvider`) and
+/// the per-CLI adapters that feed it. Centralized so a tuning change can't
+/// silently drift between a source and the engine reading it.
 enum UsageReaderShared {
     /// Streaming read chunk size for incremental JSONL ingest. Big enough to
     /// fit ~10 average assistant lines (most are 1-4 KB) so per-chunk overhead
@@ -72,6 +72,86 @@ enum UsageReaderShared {
     /// enumerator would do for it anyway.
     static func retainedFiles(mtimes: [URL: TimeInterval], cutoff: TimeInterval) -> Set<URL> {
         Set(mtimes.lazy.filter { $0.value >= cutoff }.map(\.key))
+    }
+
+    // `ISO8601DateFormatter.date(from:)` is documented thread-safe on Apple
+    // platforms (only `formatOptions` mutation is not). We only ever read
+    // these instances; `nonisolated(unsafe)` is the right escape hatch under
+    // Swift 6 strict concurrency.
+    nonisolated(unsafe) private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    nonisolated(unsafe) private static let isoFormatterNoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// Manual parser for the `YYYY-MM-DDTHH:MM:SS[.fff]Z` shape both CLIs
+    /// write to JSONL. Foundation's `ISO8601DateFormatter` allocates on
+    /// every call and walks Calendar+locale, costing tens of µs per parse.
+    /// Across the cold-start workload (~44k assistant lines) that alone is
+    /// over a second of pure formatter overhead. This path is digit-math +
+    /// `timegm`, sub-µs/line. Returns nil for any unexpected shape so the
+    /// caller can fall back to the Foundation formatter, keeping forward
+    /// compatibility if the upstream timestamp format ever shifts.
+    static func parseISODate(_ s: String) -> Date? {
+        let bytes = Array(s.utf8)
+        if bytes.count < 20 { return nil }
+        // Fixed-offset digit check on the date+time skeleton. Bails on the
+        // first wrong separator so a slightly different shape ("+00:00"
+        // timezones, etc.) falls through to the formatter path.
+        guard bytes[4] == 0x2D, bytes[7] == 0x2D, bytes[10] == 0x54,
+            bytes[13] == 0x3A, bytes[16] == 0x3A
+        else { return nil }
+        func d(_ i: Int) -> Int { Int(bytes[i] &- 0x30) }
+        for idx in [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18] {
+            let v = bytes[idx]
+            if v < 0x30 || v > 0x39 { return nil }
+        }
+        let year = d(0) * 1000 + d(1) * 100 + d(2) * 10 + d(3)
+        let month = d(5) * 10 + d(6)
+        let day = d(8) * 10 + d(9)
+        let hour = d(11) * 10 + d(12)
+        let minute = d(14) * 10 + d(15)
+        let second = d(17) * 10 + d(18)
+        var i = 19
+        var frac: Double = 0
+        if i < bytes.count && bytes[i] == 0x2E {  // '.'
+            i += 1
+            var num = 0
+            var div = 1
+            while i < bytes.count, bytes[i] >= 0x30, bytes[i] <= 0x39 {
+                num = num * 10 + Int(bytes[i] &- 0x30)
+                div *= 10
+                i += 1
+            }
+            if div > 1 { frac = Double(num) / Double(div) }
+        }
+        guard i < bytes.count, bytes[i] == 0x5A else { return nil }  // 'Z'
+        var tmStruct = tm()
+        tmStruct.tm_year = Int32(year - 1900)
+        tmStruct.tm_mon = Int32(month - 1)
+        tmStruct.tm_mday = Int32(day)
+        tmStruct.tm_hour = Int32(hour)
+        tmStruct.tm_min = Int32(minute)
+        tmStruct.tm_sec = Int32(second)
+        let epoch = timegm(&tmStruct)
+        if epoch == -1 { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(epoch) + frac)
+    }
+
+    /// Parses a JSON timestamp, fast path first, Foundation for the shapes it
+    /// rejects by design: an offset such as `+00:00` in place of `Z`, or more
+    /// than three fractional digits. Both occur — Anthropic's usage endpoint
+    /// sends `2026-09-10T12:20:00.061389+00:00` — so every caller needs the
+    /// fallback, which is why it lives here rather than at each call site.
+    static func parseTimestamp(_ text: String) -> Date? {
+        parseISODate(text)
+            ?? isoFormatter.date(from: text)
+            ?? isoFormatterNoFrac.date(from: text)
     }
 
     /// `yyyy-MM-dd` day-bucket key formatter. POSIX locale + Gregorian

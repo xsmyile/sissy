@@ -27,7 +27,7 @@ protocol UsageProvider: AnyObject, Sendable {
 
     /// Latest `(today, prev)` totals as observed by this provider. `prev` is
     /// suppressed (nil) until the cold scan has finished — see
-    /// `ClaudeCodeUsageReader.coldScanComplete` for the trend-flicker
+    /// `LocalUsageProvider.coldScanComplete` for the trend-flicker
     /// rationale.
     func current() async -> (today: DayTotals, prev: DayTotals?)
 

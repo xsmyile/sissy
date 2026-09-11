@@ -120,7 +120,7 @@ actor UsageEngine {
             // an upgrade skip the cold backfill instead of stranding
             // historical offsets behind a renamed file.
             providers.append(
-                ClaudeCodeUsageReader(
+                LocalUsageProvider.claudeCode(
                     claudeDir: claudeDir,
                     pollInterval: pollInterval,
                     persistenceURL: UsageStatePersistence.defaultURL,
@@ -130,7 +130,7 @@ actor UsageEngine {
         }
         if codexActivation.isMetering {
             providers.append(
-                CodexUsageReader(
+                LocalUsageProvider.codex(
                     codexDir: codexDir,
                     pollInterval: pollInterval,
                     persistenceURL: UsageStatePersistence.forProvider("codex"),

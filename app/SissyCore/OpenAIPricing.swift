@@ -6,7 +6,7 @@ import Foundation
 /// Codex emits `reasoning_output_tokens` alongside `output_tokens`, but
 /// `output_tokens` is already gross (it includes the reasoning portion);
 /// `reasoning_output_tokens` is a sub-breakdown for observability, not an
-/// additive counter. `CodexUsageReader` therefore passes `output_tokens`
+/// additive counter. `CodexAdapter` therefore passes `output_tokens`
 /// straight through — same convention ccusage uses. Cached input is a separate
 /// billable channel (`cacheReadPerMTok`); Codex rollouts report no
 /// cache-creation tokens, so `cacheCreationPerMTok` stays 0 by convention.

@@ -115,13 +115,13 @@ if args.contains("--scan") {
         var providers: [any UsageProvider] = []
         if scanFilter == "all" || scanFilter == "claude-code" {
             providers.append(
-                ClaudeCodeUsageReader(
+                LocalUsageProvider.claudeCode(
                     claudeDir: config.resolvedClaudeDataDir,
                     pricingOverride: config.pricingOverride))
         }
         if scanFilter == "all" || scanFilter == "codex" {
             providers.append(
-                CodexUsageReader(
+                LocalUsageProvider.codex(
                     codexDir: config.resolvedCodexDataDir,
                     pricingOverride: config.pricingOverride))
         }
