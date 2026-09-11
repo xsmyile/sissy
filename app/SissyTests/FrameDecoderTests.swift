@@ -98,6 +98,45 @@ final class FrameDecoderTests: XCTestCase {
 
     /// Cost crosses the wire as a canonical decimal string precisely so a
     /// sub-cent total survives; a `Double` hop here would drop precision.
+    func testDecodesTheKeepAwakeState() throws {
+        let json = """
+            {"type":"frame","ts":42,"tokens":"26K","cost":"0.09","burn":"1.5K",
+             "primary":"26K","primary_label":"TOKENS","providers":[],
+             "keep_awake":{"mode":"on","active":true}}
+            """
+        let frame = try XCTUnwrap(FrameDecoder.decode(json))
+        XCTAssertEqual(frame.keepAwake, KeepAwakeState(mode: .on, active: true))
+    }
+
+    /// The mode and its effect are separate fields because they come apart:
+    /// power management can refuse the assertion the user asked for.
+    func testAModeThatIsNotHoldingDecodesAsBoth() throws {
+        let json = """
+            {"type":"frame","ts":42,"tokens":"26K","cost":"0.09","burn":"1.5K",
+             "primary":"26K","primary_label":"TOKENS","providers":[],
+             "keep_awake":{"mode":"on","active":false}}
+            """
+        let frame = try XCTUnwrap(FrameDecoder.decode(json))
+        XCTAssertEqual(frame.keepAwake.mode, .on)
+        XCTAssertFalse(frame.keepAwake.active)
+    }
+
+    func testAnUnknownKeepAwakeModeDecodesToOffWithoutDroppingTheFrame() throws {
+        let json = """
+            {"type":"frame","ts":42,"tokens":"26K","cost":"0.09","burn":"1.5K",
+             "primary":"26K","primary_label":"TOKENS","providers":[],
+             "keep_awake":{"mode":"hypersleep","active":true}}
+            """
+        let frame = try XCTUnwrap(FrameDecoder.decode(json))
+        XCTAssertEqual(frame.tokens, "26K")
+        XCTAssertEqual(frame.keepAwake, .off)
+    }
+
+    func testAnOmittedKeepAwakeKeyDecodesToOff() throws {
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        XCTAssertEqual(frame.keepAwake, .off)
+    }
+
     func testPrevCostRoundTripsLossless() throws {
         let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
         XCTAssertEqual(frame.prev?.tokens, 10000)

@@ -249,6 +249,64 @@ final class SissyModel {
         webSocketClient.setClaudeLimits(enabled)
     }
 
+    // MARK: Keep awake
+
+    /// A mode the app has asked for and the daemon has not confirmed yet.
+    ///
+    /// The daemon rebroadcasts on every change, but frames also arrive on
+    /// their own every few hundred milliseconds while an agent is working —
+    /// which is exactly when this control gets used. Retiring the request on
+    /// the next frame rather than on the *answering* one would flash the old
+    /// mode back for a moment, so the mode is what was asked for until a frame
+    /// agrees with it.
+    private struct PendingKeepAwake {
+        let mode: KeepAwakeMode
+        let askedAt: Date
+    }
+
+    private var pendingKeepAwake: PendingKeepAwake?
+
+    /// How long an unanswered request keeps showing. Past it the daemon's own
+    /// answer wins, so a request that never arrived — a dropped socket, a
+    /// daemon too old to know the message — stops misreporting the Mac.
+    private static let keepAwakeAckWindow: TimeInterval = 5
+
+    /// The keep-awake state as the panel should draw it.
+    ///
+    /// Gated on the server for the same reason the panel's numbers are: the
+    /// assertion belongs to the daemon, so once that is gone nothing is being
+    /// held whatever the last frame said.
+    var keepAwake: KeepAwakeState {
+        guard menuSnapshot.server.isOn else { return .off }
+        let reported = currentFrame?.keepAwake ?? .off
+        guard let pending = pendingKeepAwake,
+            reported.mode != pending.mode,
+            Date().timeIntervalSince(pending.askedAt) < Self.keepAwakeAckWindow
+        else { return reported }
+        return KeepAwakeState(mode: pending.mode, active: reported.active)
+    }
+
+    /// The daemon is the only thing that can hold the assertion, so the
+    /// control is dead while it is not there to ask.
+    var canKeepAwake: Bool { menuSnapshot.server.isOn && webSocketClient.isConnected }
+
+    func setKeepAwake(_ mode: KeepAwakeMode) {
+        guard mode != keepAwake.mode else { return }
+        pendingKeepAwake = PendingKeepAwake(mode: mode, askedAt: Date())
+        webSocketClient.setKeepAwake(mode: mode)
+    }
+
+    /// Where the daemon's answer lands. Both fields move together so an
+    /// arriving frame can retire a keep-awake request in the same step — but
+    /// only the frame that actually carries the answer.
+    func applyFrame(_ frame: DisplayFrame) {
+        if let pending = pendingKeepAwake, frame.keepAwake.mode == pending.mode {
+            pendingKeepAwake = nil
+        }
+        currentFrame = frame
+        lastFrameAt = frame.builtAt ?? Date()
+    }
+
     func setSissyMotion(_ enabled: Bool) {
         guard enabled != preferences.sissyMotion else { return }
         preferences.sissyMotion = enabled
@@ -395,6 +453,10 @@ struct DisplayFrame: Codable, Equatable {
     /// both wire keys together in that window, and nil renders as "no
     /// comparison" rather than a 0% that was never measured.
     var prev: PrevTotals?
+    /// The daemon's keep-awake mode and whether it is holding. Defaults to off
+    /// rather than being optional: a daemon too old to send the key is one
+    /// that holds nothing, which is what off means.
+    var keepAwake: KeepAwakeState = .off
 
     struct ProviderSlice: Codable, Equatable, Identifiable {
         let id: String

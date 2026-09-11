@@ -66,10 +66,48 @@ struct UsagePanelView: View {
 
             Spacer(minLength: 0)
 
+            keepAwakeButton
             powerButton
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    /// The keep-awake switch, built as the power button's twin because it is
+    /// its sibling: the two controls in this panel both say what the machine
+    /// is doing, and giving one of them a footer glyph's styling made it read
+    /// as a link rather than a switch.
+    ///
+    /// Colour carries the state the same way: the glass tints while the Mac is
+    /// actually being held. A mode that is on and holding nothing — power
+    /// management refused the assertion, or the daemon has not answered yet —
+    /// keeps the amber glyph without the tinted glass, so the two axes stay
+    /// separable at a glance.
+    private var keepAwakeButton: some View {
+        let state = model.keepAwake
+        return Button {
+            model.setKeepAwake(state.mode == .on ? .off : .on)
+        } label: {
+            Image(systemName: "cup.and.saucer.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: Self.powerButtonSize, height: Self.powerButtonSize)
+                .foregroundStyle(state.mode == .off ? Color.secondary : Color.orange)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(
+            state.active ? .regular.tint(.orange.opacity(0.22)) : .regular,
+            in: .circle
+        )
+        .disabled(!model.canKeepAwake)
+        .help(keepAwakeHelp(state))
+    }
+
+    private func keepAwakeHelp(_ state: KeepAwakeState) -> String {
+        switch (state.mode, state.active) {
+        case (.off, _): return "Keep this Mac awake"
+        case (.on, true): return "Keeping this Mac awake · click to allow sleep"
+        case (.on, false): return "Switched on · the Mac is not being held awake"
+        }
     }
 
     /// Starts and stops the background daemon. It replaces the old "server"

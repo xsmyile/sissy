@@ -26,7 +26,8 @@ enum FrameDecoder {
             primary: dict["primary"] as? String ?? tokens,
             primaryLabel: dict["primary_label"] as? String ?? defaultPrimaryLabel,
             providers: decodeProviders(dict["providers"]),
-            prev: decodePrev(dict)
+            prev: decodePrev(dict),
+            keepAwake: decodeKeepAwake(dict["keep_awake"])
         )
     }
 
@@ -70,6 +71,17 @@ enum FrameDecoder {
                 )
             }
             .sorted { $0.minutes < $1.minutes }
+    }
+
+    /// A mode this build has never heard of reads as off rather than dropping
+    /// the frame: the daemon ships inside the app bundle, so the two agree by
+    /// construction — but a user running a newer daemon against an older app
+    /// should lose one control, not the whole panel.
+    private static func decodeKeepAwake(_ raw: Any?) -> KeepAwakeState {
+        guard let row = raw as? [String: Any],
+            let mode = (row["mode"] as? String).flatMap(KeepAwakeMode.init(rawValue:))
+        else { return .off }
+        return KeepAwakeState(mode: mode, active: row["active"] as? Bool ?? false)
     }
 
     /// Both keys travel together or not at all; a half-present or malformed
