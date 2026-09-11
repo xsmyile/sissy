@@ -174,6 +174,29 @@ actor LocalUsageProvider: UsageProvider {
     /// pass; FSEvents-driven incremental ingest from then on operates on a
     /// fully consistent `prev`.
     private var coldScanComplete = false
+    /// A provider runs once. `stopped` is terminal for the same reason
+    /// `UsageEngine.lifecycle` is: the app builds a fresh engine, and with it
+    /// fresh providers, when it needs one, so reviving this instance would
+    /// leave two tails on the same tree.
+    private enum Lifecycle {
+        case idle
+        case running
+        case stopped
+    }
+
+    /// Where this provider is in that sequence.
+    ///
+    /// `start()` re-reads this after the cold scan, because a `stop()` can
+    /// land in any of the suspensions the scan is made of: the actor is
+    /// released on every `Task.yield()` and every emit. Until it was read
+    /// back, the rest of `start()` overtook the teardown — declaring the
+    /// scan complete on a partial pass, then arming an FSEvents stream and a
+    /// 60 s loop that nothing was left to cancel.
+    ///
+    /// It is also what an FSEvents batch already in flight is answered with,
+    /// and what makes `poll()`'s post-yield check true to its comment: a
+    /// teardown, not only a cancelled boot task, now interrupts a cold scan.
+    private var lifecycle: Lifecycle = .idle
     /// Max wall-clock between throttled saves. SIGKILL/power loss bounds
     /// progress loss to this window; SIGTERM still flushes cleanly via
     /// `stop()`. Five seconds keeps SSD churn low on a long-running process.
@@ -214,6 +237,8 @@ actor LocalUsageProvider: UsageProvider {
     }
 
     func start(onChange: @escaping @Sendable (DayTotals, DayTotals?) async -> Void) async {
+        guard lifecycle == .idle else { return }
+        lifecycle = .running
         self.onChange = onChange
         let loaded = loadAndApplyPersistedState()
         // Ahead of the restored-snapshot emit below, so the first frame a
@@ -230,6 +255,13 @@ actor LocalUsageProvider: UsageProvider {
             await onChange(today, prev)
         }
         await poll()
+        // The scan above ends either because it finished or because it was cut
+        // short, and only the first may be taken for a complete pass. A
+        // cancelled boot task bails `poll()` out of its file loop; a `stop()`
+        // can land in any of the suspensions it is made of. Resuming past this
+        // guard used to expose a half-built `prev` and arm a stream and a loop
+        // the teardown had no handle left to cancel.
+        guard lifecycle == .running, !Task.isCancelled else { return }
         // Cold backfill done: from here on `prev` is consistent with the
         // full in-window JSONL state, safe to expose. Order matters — set
         // this before the emit below so that frame is the one that
@@ -242,6 +274,10 @@ actor LocalUsageProvider: UsageProvider {
         let (warmToday, warmPrev) = current()
         lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
         await onChange(warmToday, warmPrev)
+        // Read back once more before arming anything: `pollTask` is
+        // unstructured and inherits nothing, so a boot cancelled during the
+        // emit above would otherwise leave a 60 s loop behind it.
+        guard lifecycle == .running, !Task.isCancelled else { return }
         startFSWatcher()
         let interval = pollInterval
         pollTask = Task { [weak self] in
@@ -254,6 +290,10 @@ actor LocalUsageProvider: UsageProvider {
     }
 
     func stop() async {
+        guard lifecycle != .stopped else { return }
+        // Ahead of the flush, so a `poll()` or an FSEvents batch queued behind
+        // this one bails instead of writing after the final snapshot.
+        lifecycle = .stopped
         // Force a final flush so a clean SIGTERM never loses unsaved offset
         // progress. Best-effort: a save failure is logged where it happens and
         // nothing on the shutdown path can act on it.
@@ -300,6 +340,12 @@ actor LocalUsageProvider: UsageProvider {
     private func ingestEventPaths(
         _ urls: [URL], rescanAll: Bool, rootChanged: Bool
     ) async {
+        // A batch can already be in flight when `stop()` releases the watcher:
+        // `FSWatcher.dispatch` reads its handler under the lock and then hops
+        // off the FSEvents queue, so the hop can land here after the teardown.
+        // One carrying `rootChanged` would otherwise build a fresh stream that
+        // nothing is left to stop.
+        guard lifecycle == .running else { return }
         if rootChanged {
             fsWatcher?.stop()
             fsWatcher = nil
@@ -366,6 +412,7 @@ actor LocalUsageProvider: UsageProvider {
     func isWarm() -> Bool { coldScanComplete }
 
     private func poll() async {
+        guard lifecycle == .running else { return }
         adapter.willPoll()
         // Newest files first so the active session's JSONL — the only one
         // that can contain today's usage — is parsed before any historical
@@ -387,13 +434,14 @@ actor LocalUsageProvider: UsageProvider {
             // Cooperative concurrency: without these yields the actor pins
             // one Swift concurrency thread for the entire backfill scan,
             // starving everything else that awaits on it — the readiness
-            // poll behind the panel's warming state included. The
-            // cancellation check immediately after the yield is what lets
-            // `stop()` interrupt an in-flight cold scan instead of waiting
-            // for every file to drain.
+            // poll behind the panel's warming state included. The check
+            // immediately after the yield is what lets a teardown interrupt
+            // an in-flight cold scan instead of waiting for every file to
+            // drain: a cancelled boot task on the way down, or a `stop()`
+            // that landed while the yield had the actor released.
             if i % 4 == 3 {
                 await Task.yield()
-                if Task.isCancelled { return }
+                if Task.isCancelled || lifecycle == .stopped { return }
             }
             // Stream partial totals out during backfill, so the panel counts
             // up while the scan runs instead of sitting blank until it ends.
