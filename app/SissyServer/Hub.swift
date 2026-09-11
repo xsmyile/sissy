@@ -9,18 +9,38 @@ actor Hub {
     private var lastFramePayload: Data?
     private var lastFrameAt: Date?
     private(set) var lastFrame: FrameData?
+    private var presenceChanged: (@Sendable (Bool) async -> Void)?
 
+    /// Called when the first client arrives and when the last one leaves, so
+    /// the daemon can drive what only makes sense while someone is listening.
+    ///
+    /// Edges only: a second connection is not a second arrival, and the app
+    /// reconnecting through a backoff is one departure and one arrival rather
+    /// than a stream of them.
+    func onPresenceChange(_ handler: @escaping @Sendable (Bool) async -> Void) {
+        presenceChanged = handler
+    }
+
+    /// The handler runs *before* the replay, and the sink is already in
+    /// `sinks` when it does: a handler that rebroadcasts therefore refreshes
+    /// `lastFramePayload` in time for this client to be replayed the new
+    /// frame instead of the stale one it would otherwise render first.
     func register(_ sink: any FrameSink) async {
         let id = ObjectIdentifier(sink)
+        let wasEmpty = sinks.isEmpty
         sinks[id] = sink
+        if wasEmpty {
+            await presenceChanged?(true)
+        }
         if let payload = lastFramePayload {
             await sink.deliver(payload)
         }
     }
 
-    func unregister(_ sink: any FrameSink) {
+    func unregister(_ sink: any FrameSink) async {
         let id = ObjectIdentifier(sink)
-        sinks.removeValue(forKey: id)
+        guard sinks.removeValue(forKey: id) != nil, sinks.isEmpty else { return }
+        await presenceChanged?(false)
     }
 
     func broadcast(_ frame: FrameData) async {

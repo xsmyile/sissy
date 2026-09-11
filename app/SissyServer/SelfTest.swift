@@ -382,6 +382,38 @@ private func runHubEncodeTests() {
     expect("hub payload keep_awake mode", keepAwake["mode"] as? String, "off")
     expect("hub payload keep_awake active", keepAwake["active"] as? Bool, false)
     runHubKeepAwakeEncodeTest()
+    runHubPresenceEdgeTest()
+}
+
+/// The hold follows the app, so what the daemon is told has to be edges: one
+/// arrival when the first client connects and one departure when the last one
+/// goes. A second client that reported an arrival would take a hold the user
+/// never asked twice for, and a first disconnect that reported a departure
+/// would drop one they are still using.
+private func runHubPresenceEdgeTest() {
+    final class Sink: FrameSink, @unchecked Sendable {
+        func deliver(_ data: Data) async {}
+    }
+    final class Log: @unchecked Sendable {
+        let lock = NSLock()
+        var events: [Bool] = []
+        func append(_ present: Bool) { lock.withLock { events.append(present) } }
+    }
+    let log = Log()
+    let first = Sink()
+    let second = Sink()
+    let sem = DispatchSemaphore(value: 0)
+    Task {
+        let hub = Hub()
+        await hub.onPresenceChange { present in log.append(present) }
+        await hub.register(first)
+        await hub.register(second)
+        await hub.unregister(first)
+        await hub.unregister(second)
+        sem.signal()
+    }
+    sem.wait()
+    expect("hub presence edges", log.lock.withLock { log.events }, [true, false])
 }
 
 /// The mode and its effect travel as two fields, because they come apart.
