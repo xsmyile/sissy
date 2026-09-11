@@ -599,9 +599,9 @@ actor ClaudeCodeUsageReader: UsageProvider {
         if seenRequestKeys[dedupeKey] != nil { return nil }
         seenRequestKeys[dedupeKey] = Calendar.current.startOfDay(for: ts)
 
-        let input = (usage["input_tokens"] as? Int) ?? 0
-        let output = (usage["output_tokens"] as? Int) ?? 0
-        let cacheRead = (usage["cache_read_input_tokens"] as? Int) ?? 0
+        let input = UsageReaderShared.tokenCount(usage["input_tokens"])
+        let output = UsageReaderShared.tokenCount(usage["output_tokens"])
+        let cacheRead = UsageReaderShared.tokenCount(usage["cache_read_input_tokens"])
 
         // Cache writes bill at two rates: 5-minute (1.25× input) and 1-hour
         // (2× input). Prefer the nested `cache_creation` split; fall back to
@@ -611,10 +611,10 @@ actor ClaudeCodeUsageReader: UsageProvider {
         let cacheCreation5m: Int
         let cacheCreation1h: Int
         if let split = usage["cache_creation"] as? [String: Any] {
-            cacheCreation5m = (split["ephemeral_5m_input_tokens"] as? Int) ?? 0
-            cacheCreation1h = (split["ephemeral_1h_input_tokens"] as? Int) ?? 0
+            cacheCreation5m = UsageReaderShared.tokenCount(split["ephemeral_5m_input_tokens"])
+            cacheCreation1h = UsageReaderShared.tokenCount(split["ephemeral_1h_input_tokens"])
         } else {
-            cacheCreation5m = (usage["cache_creation_input_tokens"] as? Int) ?? 0
+            cacheCreation5m = UsageReaderShared.tokenCount(usage["cache_creation_input_tokens"])
             cacheCreation1h = 0
         }
         let cacheCreation = cacheCreation5m + cacheCreation1h

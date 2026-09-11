@@ -12,9 +12,29 @@ struct DayTotals: Sendable, Equatable {
 /// not always the 5-hour one, so anything that keys off position eventually
 /// mislabels a weekly window as a session window.
 struct UsageWindow: Sendable, Equatable, Codable, Identifiable {
+    /// Ceiling for `usedPercent`. Deliberately far above a full window: a
+    /// vendor reporting 105% is reporting an overage the panel shows as-is,
+    /// and only a value this side of absurd is corruption rather than data.
+    static let maxUsedPercent: Double = 10_000
+
     let minutes: Int
     let usedPercent: Double
     let resetsAt: Date
+
+    /// Fails on a percentage or a reset Sissy cannot draw, which is what
+    /// makes both producers safe: the values come off a vendor payload, and
+    /// a non-finite one reached `Int(_:)` in the panel and killed it on every
+    /// render. It validates rather than substitutes — an overage above 100%
+    /// is real and the panel renders it — so a rejected bucket drops its one
+    /// gauge, exactly as a bucket missing half its fields already does.
+    init?(minutes: Int, usedPercent: Double, resetsAt: Date) {
+        guard usedPercent.isFinite, (0...Self.maxUsedPercent).contains(usedPercent),
+            resetsAt.timeIntervalSince1970.isFinite
+        else { return nil }
+        self.minutes = minutes
+        self.usedPercent = usedPercent
+        self.resetsAt = resetsAt
+    }
 
     /// The length identifies the window, so it is also what the panel keys
     /// its rows by — a vendor reordering its buckets must not re-create the

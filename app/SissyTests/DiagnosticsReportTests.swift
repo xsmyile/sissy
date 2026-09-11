@@ -60,7 +60,7 @@ final class DiagnosticsReportTests: XCTestCase {
                     windows: [
                         UsageWindow(minutes: 300, usedPercent: 41.6, resetsAt: .now),
                         UsageWindow(minutes: 10080, usedPercent: 7.2, resetsAt: .now),
-                    ]
+                    ].compactMap { $0 }
                 ),
                 ProviderSlice(id: "codex", tokens: 89_012, cost: 1.5),
             ])
