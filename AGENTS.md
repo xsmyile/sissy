@@ -95,7 +95,7 @@ Menubar-only (`LSUIElement: true`). Sandbox disabled, network-client entitlement
 
 ## Local fast feedback (pre-commit)
 
-`pip install pre-commit && pre-commit install` once per clone. Subsequent `git commit` automatically runs `swift-format`, `swiftlint`, `shellcheck`, `ruff` (check+format), and `actionlint` against changed files. Same tools as CI, no version drift.
+`pip install pre-commit && pre-commit install` once per clone. Subsequent `git commit` automatically runs `swift-format`, `swiftlint`, `shellcheck`, and `actionlint` against changed files. Same tools as CI, no version drift.
 
 `pre-commit run --all-files` runs the full sweep.
 
@@ -107,8 +107,8 @@ Consumed by the `/commit` skill. Run before each commit; `--no-checks` to skip.
 
 ```yaml
 quality-gates:
-  format: xcrun swift-format lint --recursive --strict app/Sissy app/SissyCore app/SissyTests && ruff format --check scripts/
-  lint: swiftlint lint --quiet --lenient && ruff check scripts/ && shellcheck scripts/*.sh
+  format: xcrun swift-format lint --recursive --strict app/Sissy app/SissyCore app/SissyTests
+  lint: swiftlint lint --quiet --lenient && shellcheck scripts/*.sh
 ```
 
 `test:` is intentionally omitted — `xcodebuild test` is too slow per-commit; CI catches it.

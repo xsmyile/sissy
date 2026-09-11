@@ -1,7 +1,10 @@
+# `app/SissyTests` is deliberately absent: it was listed here and in
+# `excluded` at the same time, and `excluded` wins — the tests have never been
+# linted. `swift-format` covers them, which is what the pre-commit hook and CI
+# both run against them.
 included:
   - app/Sissy
   - app/SissyCore
-  - app/SissyTests
 
 disabled_rules:
   - line_length
@@ -13,11 +16,6 @@ disabled_rules:
   - type_body_length
   - function_body_length
   - implicit_optional_initialization
-  # Codebase intentionally uses non-failable lossy String(decoding:as:) for
-  # WS frames, serial replies, and hostname/IP display where U+FFFD is fine;
-  # the failable conversion this rule prefers would drop whole payloads on a
-  # single invalid byte.
-  - optional_data_string_conversion
 
 excluded:
   - app/SissyTests
