@@ -83,11 +83,16 @@ in Settings.
 `keepAwake` carries `{mode, active}` and is never optional, including when off:
 the panel draws its control from this, and "off" and "nothing reported" must not
 collapse into the same value. `mode` is where the user left the switch and
-survives in `server.json`; `active` is whether a power assertion is held right
-now. The two come apart — power management can refuse the assertion — and the
-panel renders them as two properties of one glyph, tint for the mode and fill for
-the effect, so "switched on and holding nothing" is readable at a glance rather
-than silent.
+survives in `server.json`; `active` is whether the Mac is being held awake right
+now. The hold covers the screen as well, but `active` follows the system
+assertion, which is what that claim is about: a refused display assertion leaves
+a Mac that stays up behind a screen that dims, and says so in the log rather than
+retracting the hold that did take. A system assertion that could not be taken
+drops the display one with it, so a false `active` always means nothing is held.
+The two come apart — power management can refuse an assertion — and the panel
+renders them as two properties of one glyph, tint for the mode and fill for the
+effect, so "switched on and holding nothing" is readable at a glance rather than
+silent.
 
 `prevTokens` / `prevCost` carry yesterday's raw combined totals so the panel can
 render a day-over-day delta without a second data path. Both are nil together
@@ -114,7 +119,7 @@ compiled into the app too.
 | `CodexAuth.swift`               | Reads the `chatgpt_plan_type` claim out of `~/.codex/auth.json`, for the boot before the first turn; touches no other field in it |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow`, plus `fmtTokens` / `fmtBurn` / `fmtCost` and the slice ordering |
-| `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` assertion, plus `KeepAwakeMode` / `KeepAwakeState`; the mode persists in `server.json`, the assertion dies with the process |
+| `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` and `PreventUserIdleDisplaySleep` assertions, plus `KeepAwakeMode` / `KeepAwakeState`; the mode persists in `server.json`, the assertions die with the process |
 | `Pricing.swift`                 | Anthropic cost math, `ModelPricing`, `PricingTable`; no rate table of its own |
 | `OpenAIPricing.swift`           | OpenAI cost math, same override → catalog → seed precedence |
 | `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM rates at runtime; renders the seed for `--dump-seed` |
@@ -204,7 +209,7 @@ with them.
 Nothing Sissy does to the machine outlives Sissy. It counts while it is running
 and stops when it quits; the numbers live in files that are there either way, so
 a relaunch resumes from persisted offsets and loses nothing. `KeepAwake` is the
-worked example: the mode persists, the power assertion does not.
+worked example: the mode persists, the power assertions do not.
 
 ## Operational notes
 

@@ -112,8 +112,10 @@ struct UsagePanelView: View {
 
     private func keepAwakeHelp(_ state: KeepAwakeState) -> String {
         switch (state.mode, state.active) {
-        case (.off, _): return "Keep this Mac awake"
-        case (.on, true): return "Keeping this Mac awake · click to allow sleep"
+        case (.off, _): return "Keep this Mac and its screen awake"
+        case (.on, true):
+            return "Keeping this Mac and its screen awake, so it will not lock "
+                + "· click to allow sleep"
         case (.on, false): return "Switched on · the Mac is not being held awake"
         }
     }
