@@ -72,7 +72,7 @@ struct GeneralSettingsView: View {
 
     private var claudeLimitsBinding: Binding<Bool> {
         Binding(
-            get: { model.preferences.claudeLimits },
+            get: { model.engine.claudeLimits },
             set: { model.setClaudeLimits($0) }
         )
     }

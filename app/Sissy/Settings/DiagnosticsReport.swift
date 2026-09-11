@@ -45,7 +45,6 @@ struct DiagnosticsReport {
         bundle: Bundle = .main,
         processInfo: ProcessInfo = .processInfo
     ) -> String {
-        let prefs = model.preferences
         return text(
             Snapshot(
                 version: bundle.shortVersion,
@@ -53,7 +52,7 @@ struct DiagnosticsReport {
                 systemVersion: processInfo.operatingSystemVersionString,
                 filesWatched: model.engine.filesWatched,
                 isWarm: model.engine.isWarm,
-                claudeLimits: prefs.claudeLimits,
+                claudeLimits: model.engine.claudeLimits,
                 providers: model.currentFrame?.providers ?? [],
                 ccusage: CcusageProbe.installs()
             )
