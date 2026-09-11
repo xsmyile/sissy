@@ -66,8 +66,8 @@ work.
 | 0 | `fix(daemon)`: the keep-awake hold follows the app | merged (#51) |
 | 1 | `refactor`: the engine compiles into the app | merged (#52) |
 | 2 | `feat(cli)`: `--refresh-catalog`, and the oracle pointed at it | merged (#53) |
-| 3 | `refactor(app)`: render the engine's frame types | **in review** |
-| 4 | `refactor(app)`: run the engine in-process, retire the LaunchAgent | todo |
+| 3 | `refactor(app)`: render the engine's frame types | merged (#54) |
+| 4 | `refactor(app)`: run the engine in-process, retire the LaunchAgent | **in review** |
 | 5 | `refactor`: drop the wire | todo |
 | 6 | `refactor`: drop the OLED residue | todo |
 | 7 | `chore`: notices and acknowledgements | todo |
@@ -125,20 +125,38 @@ the reading, so `FrameDecoder` returns it beside the frame as `builtAt` and
 `applyFrame` takes it as an argument. Behaviour-neutral, still over the
 WebSocket.
 
-**4 — run the engine in-process, retire the LaunchAgent.** The app builds the
-aggregator itself and gets frames from a callback; the agent is unregistered
-and the Server toggle goes with it. Deletes `WebSocketClient`,
-`ServerHealthMonitor`, `FrameDecoder`, `Server/HTTPResponses`,
-`ServerServiceController`, both plists and the `copyFiles` phases in
-`project.yml`. Three things ride along:
-- **The migration is two steps, not one** — see Decisions below.
-- `fmtBurn` has to **move** into `UsageFormat`. `burn` is not dead like
-  `primary` — `UsagePanelSnapshot.swift:67` passes the daemon's string through
-  and `UsagePanelView.swift:172-173` renders it.
-- The panel needs a **warming** state. Today the daemon warms at login and the
-  app connects to something already hot; in one process the first launch after
-  an install (or after a `schemaVersion` bump, ~16 s measured) happens with the
-  panel open. `isWarm()` already exists, so this is UI, not plumbing.
+**4 — run the engine in-process, retire the LaunchAgent.** `UsageEngine` is
+the non-NIO half of `SissyServer`, extracted so both the app and the tool run
+one implementation; `SissyServer` is now a 144-line NIO shell over it and
+`UsageEngineHost` is the app's one hop between that actor and `@MainActor`.
+Gone: `WebSocketClient`, `ServerHealthMonitor`, `FrameDecoder`,
+`Server/HTTPResponses`, `ServerServiceController`, both plists, the
+`copyFiles` phases, the Server toggle and its five states, the port
+migration, the bearer-token generator's call sites, and
+`app/Sissy/Server/` entirely.
+
+What replaced the five server states is three readiness states, because they
+are the three things that are actually true when the panel is blank: the
+readers are still walking the trees, they walked them and found no session
+logs, or they found logs and today is still empty. `HeaderSnapshot.make` is a
+pure function of `(hasFrame, isWarm, filesWatched)` and is what the tests
+target. The third state is the common one first thing in the morning and the
+only one of the three that is not a fault — a single "waiting" line sent
+people hunting for one.
+
+`fmtBurn`'s placeholder moved onto `FrameBuilder.placeholder`, where the
+formatter that produces it lives; `burn` is still read straight off the frame
+so nothing else had to move.
+
+Two notes for whoever reviews the migration path:
+- It runs from `SissyModel.start()`, which means it also runs under
+  `xcodebuild test` — the test host launches the real app. It touches nothing
+  unless launchd actually knows about an agent, so a machine with no
+  registration is unaffected, but a dev machine with the `.dev` agent
+  registered will have it retired by a test run. That is the correct
+  production behaviour arriving early rather than a bug.
+- The log prefix is still `sissy-serverd:`. Renaming it touches every engine
+  file and would collide with #35; it goes with the directory rename in PR 9.
 
 **5 — drop the wire.** `Hub`, `WebSocketSinkHandler`, `HTTPRequestHandler`,
 `Auth`, `SwiftNIO`. `sissy-serverd` becomes `sissy-cli`. Config collapses:
@@ -232,5 +250,7 @@ without the daemon, but after the merge the app is the writer.
 
 - Reintroduce a network bind, a bearer token or a port. If a second consumer
   ever appears, that is a new decision with a new design, not a revival.
+- Add a file to `app/SissyServer/` that imports NIO or reaches for `Hub`. The
+  app target compiles that directory too, minus the tool's own nine files.
 - Fold `SelfTest`'s surviving 1,400 lines into XCTest as part of this work. It
   is worth doing once the daemon target is gone; it is not this refactor.
