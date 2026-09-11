@@ -67,7 +67,8 @@ work.
 | 1 | `refactor`: the engine compiles into the app | merged (#52) |
 | 2 | `feat(cli)`: `--refresh-catalog`, and the oracle pointed at it | merged (#53) |
 | 3 | `refactor(app)`: render the engine's frame types | merged (#54) |
-| 4 | `refactor(app)`: run the engine in-process, retire the LaunchAgent | **in review** |
+| 4 | `refactor(app)`: run the engine in-process, retire the LaunchAgent | merged (#55) |
+| 4a | `fix`: the release path, and a retirement that could not retire | **in review** |
 | 5 | `refactor`: drop the wire | todo |
 | 6 | `refactor`: drop the OLED residue | todo |
 | 7 | `chore`: notices and acknowledgements | todo |
@@ -148,13 +149,34 @@ people hunting for one.
 formatter that produces it lives; `burn` is still read straight off the frame
 so nothing else had to move.
 
+**4a — what PR 4 broke, found by running it.** Three things, none of which
+CI could catch:
+- `release.sh` and `release.yml` still signed and verified
+  `Contents/MacOS/sissy-serverd`, and `dev-build-app.sh` hard-failed on it
+  missing. The release workflow only runs on a pushed tag, so master was
+  green with a broken release; the dev-build script broke immediately.
+- **The retirement could not retire.** `SMAppService.agent(plistName:)`
+  resolves the plist *inside the app bundle*, so removing the plists left
+  `.status` answering "Unable to find service status" and `unregister()` with
+  nothing to resolve — a no-op on exactly the machines that still had an
+  agent. Both plists are bundled again, for that one purpose, and come out a
+  release after 0.1.10.
+- **The one shot was spent on the failure.** `markRan()` fired from a
+  `defer`, so a run that retired nothing still burned the flag and no later
+  launch would retry. It now only marks when the question was settled.
+
+Measured end to end on a machine that had the dev agent registered: agent
+retired, login item claimed, `sissy-serverd` gone, app metering in-process
+with live Claude limit windows.
+
 Two notes for whoever reviews the migration path:
 - It runs from `SissyModel.start()`, which means it also runs under
   `xcodebuild test` — the test host launches the real app. It touches nothing
   unless launchd actually knows about an agent, so a machine with no
   registration is unaffected, but a dev machine with the `.dev` agent
   registered will have it retired by a test run. That is the correct
-  production behaviour arriving early rather than a bug.
+  production behaviour arriving early rather than a bug. It is also how the
+  one-shot flag got spent before the fix above.
 - The log prefix is still `sissy-serverd:`. Renaming it touches every engine
   file and would collide with #35; it goes with the directory rename in PR 9.
 
@@ -187,10 +209,10 @@ the `project.yml` resource copy, `ThirdPartyNotices`, `AcknowledgementsView`,
 keeping, so this shrinks the file rather than deleting it.
 
 **8 — CI and scripts.** The `sissy-serverd` scheme steps in `ci.yml`,
-`release.yml` and `pricing-oracle.yml`; the daemon signing arms in
-`release.sh:112,126-131`. `scripts/dev-build-app.sh` exists *entirely* because
-SMAppService demands a normally signed bundle — it goes back to a plain
-`xcodebuild`, and the AGENTS.md rule about it goes with it. The Homebrew cask's
+`release.yml` and `pricing-oracle.yml`, and the scheme's own rename. The
+signing arms and `dev-build-app.sh` were done early in 4a — the script keeps
+its reason to exist, narrowed: `SMAppService` still demands a normally signed
+bundle for the login item and for the retirement. The Homebrew cask's
 `uninstall launchctl:` and its `~/Library/LaunchAgents/…plist` zap path stay for
 at least one release to clean up existing installs.
 
