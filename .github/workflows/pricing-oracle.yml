@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "app/SissyServer/**"
+      - "app/SissyCore/**"
       - "app/project.yml"
       - ".github/workflows/pricing-oracle.yml"
 

@@ -108,7 +108,7 @@ jobs:
       - name: Swift format lint
         run: |
           xcrun swift-format lint --recursive --strict \
-            app/Sissy app/SissyServer app/SissyTests
+            app/Sissy app/SissyCore app/SissyTests
 
       # Test gates duplicated from ci.yml so a release tag can never
       # ship behind a green CI run that didn't include the latest

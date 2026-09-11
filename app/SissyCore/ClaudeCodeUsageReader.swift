@@ -317,8 +317,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
         guard Pricing.price(for: model, override: pricingOverride, catalog: priceCatalog) == nil
         else { return }
         loggedUnpricedModels.insert(model)
-        daemonLog(
-            "sissy-serverd: no rate for '\(model)' in any pricing source — its tokens "
+        sissyLog(
+            "sissy: no rate for '\(model)' in any pricing source — its tokens "
                 + "bill at $0; add a `pricingOverride` entry in server.json")
     }
 

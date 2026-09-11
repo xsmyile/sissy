@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 
 - `app/` — macOS 26+ Xcode workspace, two targets:
   - `Sissy` — menubar SwiftUI app (`app/Sissy/`).
-  - `sissy-serverd` — native daemon (`app/SissyServer/`), built as a command-line tool and copied into `Sissy.app/Contents/MacOS/` so the app ships the daemon as a single bundle.
+  - `sissy-serverd` — native daemon (`app/SissyCore/`), built as a command-line tool and copied into `Sissy.app/Contents/MacOS/` so the app ships the daemon as a single bundle.
   Xcode project generated from `app/project.yml` via XcodeGen — never hand-edit `Sissy.xcodeproj`. Bundle id `com.radonforge.sissy`, team `AS75YRKL95`.
 - `docs/ARCHITECTURE.md` is the source of truth for wire protocol + module map; read it before changing the WS frame shape.
 
@@ -35,7 +35,7 @@ xcodebuild -project Sissy.xcodeproj -scheme sissy-cli -configuration Debug build
 
 The login item and the one-shot retirement of the legacy agent both go through `SMAppService`, which must be tested from a normally signed app bundle. `CODE_SIGNING_ALLOWED=NO` is fine for CI compilation/tests, but launching that product locally makes macOS reject `Contents/Library/LaunchAgents/com.radonforge.sissy.server.plist`.
 
-Adding/removing Swift files requires re-running `xcodegen generate` — the project file is generated, not tracked semantically. The engine sources live in `app/SissyServer/` and compile into both targets; the app target in `app/Sissy/`.
+Adding/removing Swift files requires re-running `xcodegen generate` — the project file is generated, not tracked semantically. The engine sources live in `app/SissyCore/` and compile into both targets; the app target in `app/Sissy/`.
 
 ### CI
 
@@ -51,15 +51,15 @@ Adding/removing Swift files requires re-running `xcodegen generate` — the proj
 ~/.codex/sessions/**/*.jsonl  ──► CodexUsageReader      ─┘
 ```
 
-`UsageAggregator` sums per-day totals across N `UsageProvider` instances and `UsageEngine` builds a single combined frame from them. One process: the app runs the engine in-process and the frame is a Swift value, not JSON. There is no wire contract to keep in step any more — `FrameData`, `ProviderSlice` and `UsageWindow` live in `app/SissyServer/FrameBuilder.swift` and the app renders those types directly.
+`UsageAggregator` sums per-day totals across N `UsageProvider` instances and `UsageEngine` builds a single combined frame from them. One process: the app runs the engine in-process and the frame is a Swift value, not JSON. There is no wire contract to keep in step any more — `FrameData`, `ProviderSlice` and `UsageWindow` live in `app/SissyCore/FrameBuilder.swift` and the app renders those types directly.
 
 The combined `tokens`/`cost`/`burn` scalars are still pre-formatted, a shape inherited from rendering into 128×64 pixels, and the reason `UsageFormat` in the app re-implements its own formatters; only `burn` is still read from the frame. Alongside them the frame carries a raw `providers` array so the header subtitle, the panel's per-provider rows and each provider's rate-limit gauges all come from one payload.
 
-`app/SissyServer/` also still builds `sissy-serverd`, which CI drives for `--self-test`, `--scan`, `--dump-seed` and `--refresh-catalog`. Its NIO half (`SissyServer`, `Hub`, `HTTPRequestHandler`, `WebSocketSinkHandler`, `Auth`) is the last of the two-process design and goes next; nothing ships it to a user and the app never connects to it. A new file in that directory is compiled into the app too, so it must not import NIO or reach for `Hub`.
+`app/SissyCore/` also still builds `sissy-serverd`, which CI drives for `--self-test`, `--scan`, `--dump-seed` and `--refresh-catalog`. Its NIO half (`SissyServer`, `Hub`, `HTTPRequestHandler`, `WebSocketSinkHandler`, `Auth`) is the last of the two-process design and goes next; nothing ships it to a user and the app never connects to it. A new file in that directory is compiled into the app too, so it must not import NIO or reach for `Hub`.
 
 The mood pop-up, Sissy's state machine and the milestone celebrations are gone as of 0.1.9, and with them `state`, `pickState`, `StateThresholds` and the `MilestoneTracker`. They were the reason the app carried thresholds in dollars, which meant nothing to anyone whose daily spend sat far from them. Don't reintroduce a decorative signal on the cost axis; if the app grows a headline indicator it should sit on rate-limit headroom, which reads the same for every user.
 
-### Daemon modules (`app/SissyServer/`)
+### Daemon modules (`app/SissyCore/`)
 
 The per-file map lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#daemon-modules-appsissyserver) — one table, so a module's note cannot drift between two files.
 
@@ -82,7 +82,7 @@ The app drives the bundled daemon's lifecycle via `Server/ServerServiceControlle
 - **The git tag is the only version source; never hand-edit a version.** `scripts/version.sh` resolves `MARKETING_VERSION` from the latest tag and `CURRENT_PROJECT_VERSION` from `git rev-list --count HEAD`; `release.sh`, `release.yml` and `dev-build-app.sh` pass both to xcodebuild, which reaches the app and the daemon in one build. Cutting a release is `git tag -a vX.Y.Z && git push --tags` — there is no bump commit. The pair in `app/project.yml` is a `0.0.0` / `0` dev placeholder, and both `Info.plist` files carry only `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)`. Reintroducing a literal in either plist recreates the bug where 0.1.6 and 0.1.7 both shipped build 6; the pre-notarization `verify bundle version` guard in `release.sh` and `release.yml` exists to catch exactly that. The release workflow needs `fetch-depth: 0` — the default shallow clone makes the commit count 1.
 - **Bearer token symmetry.** `authToken` in `~/Library/Application Support/Sissy/server.json` is written by the app and read by the daemon. A mismatch 401s the WS handshake with nothing in the UI to say so.
 - **There is no hand-maintained rate table, and adding one is a regression.** Rates resolve through three sources: `server.json` `pricingOverride` → the LiteLLM catalog fetched at runtime (`PriceCatalog`, refreshed every 24 h, cached in Application Support) → `PricingSeed.swift`. A provider shipping a new model therefore needs **no Sissy release**. If a model prices at $0, fix the seed or wait for the refresh — do not reintroduce a table.
-- **`PricingSeed.swift` is generated, not authored.** Regenerate when cutting a release: `sissy-cli --dump-seed > app/SissyServer/PricingSeed.swift`. It is produced by the same Swift parser that validates the runtime fetch, so there is no second implementation to drift.
+- **`PricingSeed.swift` is generated, not authored.** Regenerate when cutting a release: `sissy-cli --dump-seed > app/SissyCore/PricingSeed.swift`. It is produced by the same Swift parser that validates the runtime fetch, so there is no second implementation to drift.
 - **ccusage is the cost oracle — specifically the JS package on npm.** It prices from LiteLLM too, so reading LiteLLM directly is what keeps Sissy agreeing with the number users cross-check. Where the two would disagree, match ccusage — subscription users never see a token invoice, so agreeing with the community tool beats agreeing with a hypothetical bill. The `pricing-oracle` workflow asserts exact agreement on a synthetic fixture, and invokes it as `npx ccusage@latest`. Verify pricing questions by **measuring** against ccusage, not by reading pricing pages: two independent readings of the long-context rules (an earlier pass here and a Codex review) both got them wrong, and a three-point measurement settled it in minutes.
 - **`brew install ccusage` is a different implementation and is not the oracle.** Upstream ships a Rust rewrite alongside the JS package (`rust/crates/ccusage`), and the Homebrew formula still `cargo install`s that one — checked 2026-09-10 against the current homebrew-core formula, which builds `ccusage/ccusage` v20.0.20 from source. Measured on 1M `ephemeral_1h` opus tokens: the Rust build 20.1.0 bills the 1-hour tier at the 5-minute rate and says $6.25, where npm and Sissy both say $10.00 (re-measured 2026-09-10 against npm 20.0.20; first measured 2026-07-29 against 20.0.19). Claude Code writes ~93% of its cache at the 1h TTL, so on a real day that reads as Sissy over-billing by ~7% — it is not. Before acting on a user-reported gap, check which binary produced their number; About → **Copy diagnostics** names it (`CcusageProbe`, which classifies an install by where its symlinks land — `node_modules` is npm, `Cellar` is Homebrew).
 - **A stale `brew` ccusage will never upgrade off itself.** The project moved from `ryoppippi/ccusage` to `ccusage/ccusage` and renumbered *backwards*: the old formula pinned v20.1.0, the current one v20.0.20. Homebrew sorts 20.1.0 as newer, so `brew outdated` stays silent forever and `brew upgrade` is a no-op — a machine that installed it before the move keeps serving the build with the cache-write bug. Only `brew uninstall ccusage` and a fresh install move it. The fix that removes the whole class of confusion is `npm i -g ccusage`, which puts the oracle itself on `PATH`. Note the 1-hour bug is fixed in the current Rust source (`CACHE_CREATE_1H_INPUT_MULTIPLIER = 2.0` in `ccusage-core/src/cost.rs`), so the divergence is version-specific — but that same file bills long context as whole-request substitution where the JS was measured to bill only the tokens above the threshold, so the two implementations still are not interchangeable.
@@ -109,7 +109,7 @@ Consumed by the `/commit` skill. Run before each commit; `--no-checks` to skip.
 
 ```yaml
 quality-gates:
-  format: xcrun swift-format lint --recursive --strict app/Sissy app/SissyServer app/SissyTests && ruff format --check scripts/
+  format: xcrun swift-format lint --recursive --strict app/Sissy app/SissyCore app/SissyTests && ruff format --check scripts/
   lint: swiftlint lint --quiet --lenient && ruff check scripts/ && shellcheck scripts/*.sh
 ```
 

@@ -70,8 +70,8 @@ actor KeepAwake {
             &id
         )
         guard status == kIOReturnSuccess else {
-            daemonLog(
-                "sissy-serverd: power management refused the keep-awake assertion "
+            sissyLog(
+                "sissy: power management refused the keep-awake assertion "
                     + "(IOReturn \(status)) — the Mac will sleep as usual")
             return
         }
@@ -85,7 +85,7 @@ actor KeepAwake {
         assertion = nil
         let status = IOPMAssertionRelease(id)
         if status != kIOReturnSuccess {
-            daemonLog("sissy-serverd: keep-awake release returned IOReturn \(status)")
+            sissyLog("sissy: keep-awake release returned IOReturn \(status)")
         }
     }
 }

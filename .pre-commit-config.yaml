@@ -8,15 +8,15 @@ repos:
         name: swift-format
         entry: xcrun swift-format lint --recursive --strict
         language: system
-        files: ^app/(Sissy|SissyServer|SissyTests)/.*\.swift$
+        files: ^app/(Sissy|SissyCore|SissyTests)/.*\.swift$
         pass_filenames: false
-        args: [app/Sissy, app/SissyServer, app/SissyTests]
+        args: [app/Sissy, app/SissyCore, app/SissyTests]
 
       - id: swiftlint
         name: swiftlint
         entry: swiftlint lint --quiet --lenient
         language: system
-        files: ^app/(Sissy|SissyServer)/.*\.swift$
+        files: ^app/(Sissy|SissyCore)/.*\.swift$
         pass_filenames: false
 
       - id: shellcheck

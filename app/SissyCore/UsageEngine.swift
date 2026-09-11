@@ -110,8 +110,8 @@ actor UsageEngine {
         }
         self.aggregator = UsageAggregator(providers: providers)
         let codexResolution = config.providers.codex == nil ? " (auto)" : ""
-        daemonLog(
-            "sissy-serverd: providers — "
+        sissyLog(
+            "sissy: providers — "
                 + "claude-code=\(claudeOn ? "on" : "off"), "
                 + "codex=\(codexOn ? "on" : "off")\(codexResolution)"
         )
@@ -132,9 +132,9 @@ actor UsageEngine {
         if config.remotePricingEnabled {
             await resolveInitialPriceCatalog()
         } else {
-            daemonLog("sissy-serverd: remote pricing disabled — using the embedded rate seed")
+            sissyLog("sissy: remote pricing disabled — using the embedded rate seed")
         }
-        daemonLog("sissy-serverd: claude limits — \(config.claudeLimits ? "on" : "off")")
+        sissyLog("sissy: claude limits — \(config.claudeLimits ? "on" : "off")")
         if config.claudeLimits {
             await startClaudeLimitsProbe()
         }
@@ -178,8 +178,8 @@ actor UsageEngine {
         do {
             try ServerConfig.save(config, to: configURL)
         } catch {
-            daemonLog(
-                "sissy-serverd: failed to persist claudeLimits to \(configURL.path): \(error)")
+            sissyLog(
+                "sissy: failed to persist claudeLimits to \(configURL.path): \(error)")
         }
         if enabled {
             await startClaudeLimitsProbe()
@@ -197,7 +197,7 @@ actor UsageEngine {
         do {
             try ServerConfig.save(config, to: configURL)
         } catch {
-            daemonLog("sissy-serverd: failed to persist keepAwake to \(configURL.path): \(error)")
+            sissyLog("sissy: failed to persist keepAwake to \(configURL.path): \(error)")
         }
         await applyKeepAwake()
         await rebroadcastFromCache()
@@ -224,8 +224,8 @@ actor UsageEngine {
         let wanted = config.keepAwake == .on && observerPresent
         let held = await keepAwake.apply(holding: wanted)
         keepAwakeActive = held && wanted
-        daemonLog(
-            "sissy-serverd: keep-awake \(config.keepAwake.rawValue) — "
+        sissyLog(
+            "sissy: keep-awake \(config.keepAwake.rawValue) — "
                 + (keepAwakeActive ? "holding" : "not holding"))
     }
 
@@ -290,17 +290,17 @@ actor UsageEngine {
             resolved = cached
             let age = Date().timeIntervalSince(cached.fetchedAt)
             initialDelay = PriceCatalogSource.refreshDelay(forCacheAge: age)
-            daemonLog("sissy-serverd: pricing from cached catalog, \(Int(age / 3600))h old")
+            sissyLog("sissy: pricing from cached catalog, \(Int(age / 3600))h old")
         } else if let fetched = await PriceCatalogSource.fetchForColdStart() {
             resolved = fetched
             initialDelay = PriceCatalogSource.refreshInterval
             PriceCatalogSource.saveCache(fetched)
-            daemonLog(
-                "sissy-serverd: pricing catalog fetched before backfill — "
+            sissyLog(
+                "sissy: pricing catalog fetched before backfill — "
                     + "anthropic=\(fetched.anthropic.count), openai=\(fetched.openai.count)")
         } else {
-            daemonLog(
-                "sissy-serverd: no usable pricing cache and no catalog within "
+            sissyLog(
+                "sissy: no usable pricing cache and no catalog within "
                     + "\(PriceCatalogSource.coldStartBudget) — backfilling from the embedded "
                     + "seed, refresh continues in the background")
         }

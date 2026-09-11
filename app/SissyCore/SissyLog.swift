@@ -34,7 +34,7 @@ private func rotateLogIfNeeded(at url: URL, maxBytes: UInt64) {
     try? fm.moveItem(at: url, to: rotated)
 }
 
-func daemonLog(_ message: String) {
+func sissyLog(_ message: String) {
     let line = message.hasSuffix("\n") ? message : "\(message)\n"
     let data = Data(line.utf8)
     FileHandle.standardError.write(data)

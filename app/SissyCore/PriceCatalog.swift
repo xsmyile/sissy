@@ -377,21 +377,21 @@ enum PriceCatalogSource {
                 let changed = changedModelCount(from: previous, to: catalog)
                 previous = catalog
                 if changed > 0 {
-                    daemonLog(
-                        "sissy-serverd: pricing catalog refreshed — \(changed) rate(s) changed; "
+                    sissyLog(
+                        "sissy: pricing catalog refreshed — \(changed) rate(s) changed; "
                             + "applies to events ingested from now on, already-counted events "
                             + "are not repriced")
                 } else {
-                    daemonLog(
-                        "sissy-serverd: pricing catalog refreshed — "
+                    sissyLog(
+                        "sissy: pricing catalog refreshed — "
                             + "anthropic=\(catalog.anthropic.count), openai=\(catalog.openai.count)")
                 }
                 delay = refreshInterval
             } catch is CancellationError {
                 return
             } catch {
-                daemonLog(
-                    "sissy-serverd: pricing catalog refresh failed (\(error)) — "
+                sissyLog(
+                    "sissy: pricing catalog refresh failed (\(error)) — "
                         + "keeping previous rates, retrying later")
                 delay = retryInterval
             }
