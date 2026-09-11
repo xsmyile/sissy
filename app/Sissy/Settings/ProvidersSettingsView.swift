@@ -52,11 +52,36 @@ struct ProviderRowSnapshot: Equatable {
     }
 }
 
+/// What the Claude Code limits switch says about itself.
+///
+/// Split because the two halves are not equally urgent. `caption` carries the
+/// only two facts that change what someone does — what the switch shows, and
+/// that macOS will ask — and stays on screen, because a permission prompt this
+/// app did not warn about is the thing Sissy's first-run promise exists to
+/// avoid. `detail` is the reassurance and the after-an-update expectation:
+/// worth keeping, not worth four permanent lines.
+enum ClaudeLimitsCopy {
+    static let title = "Show Claude Code limits"
+
+    static let caption =
+        "Shows Claude Code's 5-hour and weekly windows next to Codex's. "
+        + "macOS will ask for your permission."
+
+    static let detail =
+        "Sissy reads the token Claude Code already keeps in your keychain — only ever "
+        + "reads it, never writes or refreshes it. macOS asks again whenever Sissy's own "
+        + "binary changes, so expect the prompt after an update."
+}
+
 /// Where each provider's numbers come from, and what it is doing about them.
 struct ProvidersSettingsView: View {
     let model: SissyModel
 
+    @State private var showingLimitsDetail = false
+
     private static let tintDotSize: CGFloat = 8
+    /// Wide enough that the detail reads as a paragraph rather than a column.
+    private static let detailPopoverWidth: CGFloat = 280
 
     var body: some View {
         Form {
@@ -97,15 +122,38 @@ struct ProvidersSettingsView: View {
 
     @ViewBuilder
     private var claudeLimits: some View {
-        Toggle("Show Claude Code limits", isOn: claudeLimitsBinding)
-        Text(
-            "Reads the token Claude Code already keeps in your keychain to show its "
-                + "5-hour and weekly windows next to Codex's. macOS asks for your "
-                + "permission, and asks again whenever Sissy's own binary changes; "
-                + "Sissy only ever reads the token, never writes or refreshes it."
-        )
-        .font(.callout)
-        .foregroundStyle(.secondary)
+        LabeledContent {
+            Toggle(ClaudeLimitsCopy.title, isOn: claudeLimitsBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        } label: {
+            HStack(spacing: 4) {
+                Text(ClaudeLimitsCopy.title)
+                detailButton
+            }
+        }
+        Text(ClaudeLimitsCopy.caption)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
+    /// A button rather than a `help` tooltip: a tooltip is reachable only by
+    /// hovering a pointer over it, and this is the one control on the page
+    /// whose consequences someone may want to read before flipping it.
+    private var detailButton: some View {
+        Button {
+            showingLimitsDetail = true
+        } label: {
+            Image(systemName: "info.circle")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("What Sissy reads")
+        .popover(isPresented: $showingLimitsDetail, arrowEdge: .bottom) {
+            Text(ClaudeLimitsCopy.detail)
+                .font(.callout)
+                .frame(width: Self.detailPopoverWidth)
+                .padding()
+        }
     }
 
     private var claudeLimitsBinding: Binding<Bool> {
