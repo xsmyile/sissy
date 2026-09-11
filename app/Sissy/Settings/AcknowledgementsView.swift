@@ -24,7 +24,7 @@ struct AcknowledgementsView: View {
             name: "ccusage",
             detail:
                 "The cost oracle Sissy measures itself against, and where it learned to read the CLIs' logs.",
-            url: URL(string: "https://github.com/ryoppippi/ccusage")!
+            url: URL(string: "https://github.com/ccusage/ccusage")!
         ),
         Credit(
             name: "LiteLLM",

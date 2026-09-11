@@ -71,7 +71,7 @@ Adding a CLI is one `UsageProvider` implementation. See [`docs/ARCHITECTURE.md`]
 
 Sissy is one process. It watches the log directories, prices each turn as it lands, and renders the combined reading — no helper, no socket, no port. Counting runs while Sissy runs; the numbers live in the CLIs' own log files either way, so a relaunch picks up exactly where it left off. Switch on **Start at login** if you want a day counted from the moment you sit down.
 
-There is no price table in the source. Rates come from [LiteLLM](https://github.com/BerriAI/litellm)'s public price list, fetched at runtime and cached for a day, with a snapshot compiled in as the offline floor. A CLI that ships a new model therefore prices correctly without a Sissy release. It is also the source [`ccusage`](https://github.com/ryoppippi/ccusage) reads, which is why the two agree on the same logs. CI asserts it on every change to the engine, and weekly regardless.
+There is no price table in the source. Rates come from [LiteLLM](https://github.com/BerriAI/litellm)'s public price list, fetched at runtime and cached for a day, with a snapshot compiled in as the offline floor. A CLI that ships a new model therefore prices correctly without a Sissy release. It is also the source [`ccusage`](https://github.com/ccusage/ccusage) reads, which is why the two agree on the same logs. CI asserts it on every change to the engine, and weekly regardless.
 
 ## Privacy
 
@@ -111,7 +111,7 @@ exactly one dev app exists no matter which branch you build. Pass
 
 ## Credits
 
-Usage parsing follows [`ccusage`](https://github.com/ryoppippi/ccusage): both the JSONL schemas (Claude Code and Codex rollouts) and per-model pricing come from there.
+Usage parsing follows [`ccusage`](https://github.com/ccusage/ccusage): both the JSONL schemas (Claude Code and Codex rollouts) and per-model pricing come from there.
 
 ## The name
 
