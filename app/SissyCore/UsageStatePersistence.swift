@@ -1,8 +1,8 @@
 import CryptoKit
 import Foundation
 
-/// On-disk snapshot of a per-provider usage reader. The daemon writes one
-/// of these per provider so a restart can skip the cold backfill of that
+/// On-disk snapshot of a per-provider usage reader. Sissy writes one of
+/// these per provider so a relaunch can skip the cold backfill of that
 /// provider's JSONL tree and resume from each file's last-known offset.
 /// Claude Code keeps the legacy unqualified `usage-state.json` path for
 /// upgrade smoothness; Codex (and future providers) use
@@ -35,7 +35,7 @@ struct UsageStateSnapshot: Codable, Equatable {
     var files: [FileEntry]
     var dailyTotals: [DailyTotal]
     /// Dedup keys for the current day only (`startOfDay(today)` ≤ eventDay).
-    /// Older keys aren't worth persisting — by the time a daemon restart
+    /// Older keys aren't worth persisting — by the time a relaunch
     /// happens, yesterday's streaming chunks have long since been flushed
     /// and any duplicate write would have been seen within the same process
     /// lifetime. Today-only keeps the file small (~tens of KB) while still
@@ -178,7 +178,7 @@ enum UsageStatePersistence {
     /// Atomic save via `Data.write(options: .atomic)`. Foundation writes to a
     /// temp file beside the target then renames atomically — POSIX rename(2)
     /// guarantee on APFS. The parent directory is created lazily because
-    /// the daemon may be the first thing to touch
+    /// Sissy may be the first thing to touch
     /// `~/Library/Application Support/Sissy/` on a fresh install.
     static func save(_ snapshot: UsageStateSnapshot, to url: URL) throws {
         let dir = url.deletingLastPathComponent()

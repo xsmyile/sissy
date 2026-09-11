@@ -11,7 +11,7 @@ struct FSWatcherEvent: Sendable {
 }
 
 /// Thin Swift wrapper around `FSEventStreamCreate` for watching a single
-/// directory tree. Designed for daemon-style long-running observers; not a
+/// directory tree. Designed for long-running observers; not a
 /// general FSEvents library.
 ///
 /// Why a `class` and not an `actor`: the FSEvents C API requires a plain C
@@ -88,10 +88,10 @@ final class FSWatcher: @unchecked Sendable {
         // UseCFTypes     → eventPaths arrives as CFArray<CFString>, which
         //                  bridges to [String] without manual C-string math.
         // WatchRoot      → fires a RootChanged event if `path` itself is
-        //                  renamed/deleted. Lets the daemon log + reconnect
+        //                  renamed/deleted. Lets the reader log it and re-arm
         //                  rather than silently losing notifications.
         // IgnoreSelf     → suppress events caused by this process. Default on
-        //                  because the daemon never writes inside
+        //                  because Sissy never writes inside
         //                  `~/.claude/projects` in production; the self-test
         //                  flips it off because the test *is* the writer.
         var flags: FSEventStreamCreateFlags =

@@ -4,7 +4,7 @@ import SwiftUI
 /// About's "Acknowledgements" sheet: what Sissy owes whom.
 ///
 /// It used to carry the licence text too, because SwiftNIO shipped compiled
-/// into the daemon and Apache-2.0 asks its NOTICE to travel with the binary.
+/// into the binary and Apache-2.0 asks its NOTICE to travel with it.
 /// No third-party code ships in Sissy any more, so there is nothing left to
 /// reproduce — only the projects Sissy reads from, which are owed a credit
 /// whether or not a licence demands one.
@@ -29,7 +29,7 @@ struct AcknowledgementsView: View {
         Credit(
             name: "LiteLLM",
             detail:
-                "The model price table the daemon fetches at runtime, which is what ccusage prices from too.",
+                "The model price table Sissy fetches at runtime, which is what ccusage prices from too.",
             url: URL(string: "https://github.com/BerriAI/litellm")!
         ),
     ]

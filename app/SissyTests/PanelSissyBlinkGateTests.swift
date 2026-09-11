@@ -32,7 +32,7 @@ final class PanelSissyBlinkGateTests: XCTestCase {
         XCTAssertFalse(gate(reduceMotion: true).allows(at: now, lastBlinkAt: .distantPast))
     }
 
-    /// A blink while the daemon is unreachable would report an arrival that
+    /// A blink while nothing is reaching the app would report an arrival that
     /// did not happen.
     func testASleepingSissyDoesNotBlink() {
         XCTAssertFalse(gate(isAsleep: true).allows(at: now, lastBlinkAt: .distantPast))

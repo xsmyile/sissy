@@ -3,7 +3,7 @@ import Foundation
 /// Reads the plan out of the id_token Codex keeps in `~/.codex/auth.json`.
 ///
 /// The rollout stream is the fresher source — the CLI restamps `plan_type` on
-/// every turn — but it only answers while there are unread bytes. A daemon
+/// every turn — but it only answers while there are unread bytes. A reader
 /// that resumed with its offsets at EOF has nothing left to re-read, which
 /// left the Codex row with a plan the next turn would name and no badge until
 /// then. This file answers at boot, before any turn, and the rollout

@@ -7,7 +7,7 @@ import Foundation
 /// (measured), and the copy in the login keychain sits behind the
 /// authorization prompt the `claudeLimits` toggle exists to gate — reaching
 /// for it would put a keychain dialog in front of someone who only switched
-/// the daemon on. `.claude.json` is therefore the one source that also
+/// limits on. `.claude.json` is therefore the one source that also
 /// answers for a user who never enabled limits.
 ///
 /// A class rather than an actor because `UsageProvider.currentPlan()` is

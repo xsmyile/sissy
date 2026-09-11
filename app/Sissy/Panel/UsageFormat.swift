@@ -2,7 +2,7 @@ import Foundation
 
 /// Display formatters shared by the menubar menu and the usage panel.
 ///
-/// Intentionally diverges from the daemon's `FrameBuilder.fmtTokens` /
+/// Intentionally diverges from the engine's `FrameBuilder.fmtTokens` /
 /// `fmtCost`: those were shaped for a 128×64 display and trade precision
 /// for width, while every surface here has room for a decimal and full cent
 /// precision. Keeping both is deliberate — unifying them would force one
@@ -25,7 +25,7 @@ enum UsageFormat {
 
     /// Coarse age of the last frame, for the panel's footer. Deliberately
     /// one unit and no seconds past a minute: the footer is a reassurance that
-    /// the daemon is alive, not a stopwatch.
+    /// the reading is live, not a stopwatch.
     static func age(_ interval: TimeInterval) -> String {
         let seconds = Int(interval.rounded())
         if seconds < 5 { return "just now" }
@@ -89,8 +89,8 @@ enum UsageFormat {
     /// `windowLabel(minutes:)` — the two CLIs between them publish a dozen
     /// tiers and add to the list without asking, and a table here would show
     /// nothing for the one that arrived after the release. Both vendors emit
-    /// lowercase `snake_case`, which the daemon enforces before the token
-    /// reaches the wire.
+    /// lowercase `snake_case`, and the engine passes the token through
+    /// verbatim.
     private static func words(_ token: String) -> String? {
         let parts = token.split(separator: "_").map { $0.capitalized }
         return parts.isEmpty ? nil : parts.joined(separator: " ")

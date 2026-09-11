@@ -350,7 +350,7 @@ actor CodexUsageReader: UsageProvider {
     /// Takes the plan from Codex's auth file when neither the snapshot nor a
     /// rollout has named one yet.
     ///
-    /// Without this a resumed daemon shows the Codex row with no plan: the
+    /// Without this a resumed reader shows the Codex row with no plan: the
     /// offsets are at EOF, `plan_type` rides events that were already
     /// consumed, and the badge waits on the user's next turn. The auth file
     /// answers immediately, and the first rollout event that lands overwrites

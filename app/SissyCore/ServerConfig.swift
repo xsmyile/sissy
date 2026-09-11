@@ -1,7 +1,7 @@
 import Foundation
 
 /// Per-provider on/off toggles surfaced to the user via `server.json`.
-/// `nil` is the "let the daemon decide" state: ClaudeCodeUsageReader is
+/// `nil` is the "let Sissy decide" state: ClaudeCodeUsageReader is
 /// always on (it's the v0.1.0 baseline), and Codex is auto-detected from
 /// disk activity. Explicit `false` forces off even if data exists; explicit
 /// `true` forces on even if no recent activity is detected.
@@ -17,23 +17,23 @@ struct ServerConfig: Sendable, Codable {
     var codexDataDir: String
     var pollIntervalSeconds: Double
     var pricingOverride: [String: ModelPricing]?
-    /// Whether the daemon fetches LiteLLM's rate table at runtime
+    /// Whether Sissy fetches LiteLLM's rate table at runtime
     /// (`PriceCatalog`). `nil` means on — it's what keeps a newly launched
     /// model from mispricing until the next Sissy release. Set `false` to pin
-    /// pricing to the tables compiled into the binary and make the daemon fully
+    /// pricing to the tables compiled into the binary and make Sissy fully
     /// offline; `pricingOverride` still applies either way.
     var remotePricing: Bool?
     var providers: ProviderToggles
-    /// Whether the daemon reads Claude Code's OAuth token from the login
+    /// Whether Sissy reads Claude Code's OAuth token from the login
     /// keychain to show that CLI's 5-hour and weekly subscription windows.
     /// Off unless the user asks for it in Settings: turning it on is what
     /// makes the one-time macOS keychain prompt expected rather than a
     /// surprise from a background agent.
     var claudeLimits: Bool
-    /// Whether the daemon holds a power assertion so the Mac does not idle to
+    /// Whether Sissy holds a power assertion so the Mac does not idle to
     /// sleep. Persisted here rather than kept in memory because it is a
     /// setting, not a hold: a user who switched their Mac to never sleep
-    /// expects that to survive the daemon restarting at login.
+    /// expects that to survive Sissy restarting at login.
     var keepAwake: KeepAwakeMode
 
     static let defaults = ServerConfig(
@@ -95,9 +95,9 @@ struct ServerConfig: Sendable, Codable {
         return merged
     }
 
-    /// Atomic write to disk. Used by runtime config-change paths so a change
-    /// the app pushed survives daemon restarts. Pretty-printed + sorted-keys so the file stays
-    /// hand-editable.
+    /// Atomic write to disk. Used by the engine's runtime config-change paths
+    /// so a change survives a relaunch. Pretty-printed + sorted-keys so the
+    /// file stays hand-editable.
     static func save(_ config: ServerConfig, to url: URL = ServerConfig.defaultURL) throws {
         let dir = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

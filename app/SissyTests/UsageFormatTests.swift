@@ -24,7 +24,7 @@ final class UsageFormatTests: XCTestCase {
     }
 
     /// A frame whose timestamp is ahead of this Mac's clock must not render a
-    /// negative age; the footer's job is to say the daemon is alive.
+    /// negative age; the footer's job is to say the reading is live.
     func testAgeAheadOfTheClockReadsAsJustNow() {
         XCTAssertEqual(UsageFormat.age(-3), "just now")
     }

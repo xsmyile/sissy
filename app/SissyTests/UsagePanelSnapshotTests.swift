@@ -113,7 +113,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.providers.first?.planTier, "Max 5x")
     }
 
-    /// A tier cannot arrive on its own: the daemon drops it when there is no
+    /// A tier cannot arrive on its own: the engine drops it when there is no
     /// plan, and the decoder's own initialiser refuses the pairing too, so a
     /// row can never badge limits it cannot attribute.
     func testATierWithoutAPlanIsDiscarded() {
@@ -137,7 +137,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.cost, "$492.56")
     }
 
-    func testFallsBackToDaemonScalarsBeforeAnyProviderReports() {
+    func testFallsBackToFrameScalarsBeforeAnyProviderReports() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [], tokens: "233M", cost: "149")
         )
@@ -176,7 +176,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertEqual(delta.percent, 0)
     }
 
-    func testNoDeltaWhenTheDaemonHasNotShippedYesterday() {
+    func testNoDeltaWhenTheFrameCarriesNoYesterday() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("codex", 100, "1.00")])
         )

@@ -73,10 +73,9 @@ struct FrameData: Sendable, Equatable, Codable {
     /// a `prev` snapshot, so the app shows no delta instead of a false 0%.
     let prevTokens: Int?
     let prevCost: Decimal?
-    /// The keep-awake mode and whether it is holding right now. Always
-    /// emitted, including when off: the app renders the control from this, and
-    /// an absent key would be indistinguishable from a daemon too old to have
-    /// one.
+    /// The keep-awake mode and whether it is holding right now. Not optional,
+    /// including when off: the app renders the control from this, and "off"
+    /// and "nothing reported" must not collapse into the same value.
     let keepAwake: KeepAwakeState
 }
 
@@ -135,9 +134,9 @@ enum FrameBuilder {
         )
     }
 
-    /// Stable order for the wire: claude-code first (v0.1.0 baseline), then
-    /// codex, then anything else alphabetically. App + daemon use the same
-    /// rule so a freshly-connected client never sees rows shuffle.
+    /// Stable order: claude-code first (v0.1.0 baseline), then codex, then
+    /// anything else alphabetically, so the panel's rows never shuffle between
+    /// frames.
     static func providerSortOrder(_ id: String) -> Int {
         switch id {
         case "claude-code": return 0
