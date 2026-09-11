@@ -290,6 +290,7 @@ func runSelfTest() {
     runClaudeLimitsParseTests()
     runKeychainTimeoutTests()
     runKeychainGateTests()
+    runSissyLogTests()
     runAggregatorEmitTest()
 
     print("=== FSWatcher ===")
@@ -1176,6 +1177,47 @@ func runKeychainTimeoutTests() {
     abandoned.wait()
     expect("a lookup that parks is abandoned", gaveUp.value, true)
     expect("abandoning does not wait for the lookup", elapsed.value < 1.0, true)
+}
+
+/// The log is the one file Sissy writes that nothing else bounds, and the one
+/// place text it did not write ends up verbatim — a model name off a
+/// third-party JSONL, which is how a forged line would get in.
+func runSissyLogTests() {
+    print("=== SissyLog ===")
+
+    expect(
+        "a plain message goes through unchanged",
+        SissyLogLine.single("sissy: claude limits — on"),
+        "sissy: claude limits — on")
+    expect(
+        "a newline in an interpolated value cannot forge a line",
+        SissyLogLine.single("no rate for 'a\nsissy: forged'"),
+        "no rate for 'a\\nsissy: forged'")
+    expect("a control character is escaped", SissyLogLine.single("a\u{01}b"), "a\\x01b")
+    let long = String(repeating: "x", count: SissyLogLine.maxCharacters + 100)
+    expect(
+        "a line longer than the cap is cut",
+        SissyLogLine.single(long).count,
+        SissyLogLine.maxCharacters + 1)
+
+    let fm = FileManager.default
+    let dir = fm.temporaryDirectory.appendingPathComponent("sissy-log-\(UUID().uuidString)")
+    defer { try? fm.removeItem(at: dir) }
+    let cap: UInt64 = 256
+    let log = SissyLogFile(directory: dir, name: "sissy.err.log", maxBytes: cap)
+    let line = Data((String(repeating: "y", count: 63) + "\n").utf8)
+    for _ in 0..<10 { log.write(line) }
+
+    func size(_ name: String) -> UInt64 {
+        let attrs = try? fm.attributesOfItem(atPath: dir.appendingPathComponent(name).path)
+        return (attrs?[.size] as? NSNumber)?.uint64Value ?? 0
+    }
+    expect("the log rotates without a relaunch", size("sissy.err.1.log") > 0, true)
+    expect("the live log stays under the cap", size("sissy.err.log") <= cap, true)
+    expect(
+        "one generation is kept",
+        (try? fm.contentsOfDirectory(atPath: dir.path))?.count ?? 0,
+        2)
 }
 
 /// The gate's own contract, which the path above cannot observe without a
