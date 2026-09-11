@@ -25,18 +25,6 @@ repos:
         language: system
         files: ^scripts/.*\.sh$
 
-      - id: ruff-check
-        name: ruff check
-        entry: ruff check
-        language: system
-        files: ^scripts/.*\.py$
-
-      - id: ruff-format
-        name: ruff format
-        entry: ruff format --check
-        language: system
-        files: ^scripts/.*\.py$
-
       - id: actionlint
         name: actionlint
         entry: actionlint

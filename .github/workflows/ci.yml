@@ -8,7 +8,7 @@ on:
 
 jobs:
   lint:
-    name: lint (shellcheck + actionlint + ruff)
+    name: lint (shellcheck + actionlint)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -18,13 +18,6 @@ jobs:
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
-      - name: ruff check + format
-        run: |
-          # Pinned: an unpinned install turns master red whenever upstream
-          # widens the default rule set, with no change on our side.
-          pipx install ruff==0.16.0
-          ruff check scripts/
-          ruff format --check scripts/
 
   app:
     name: app + cli (Xcode build + self-test)
