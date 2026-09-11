@@ -14,15 +14,20 @@ companion left first; the wire followed it.
 ## Data flow
 
 ```
-~/.claude/projects/**/*.jsonl ──► ClaudeCodeUsageReader ─┐
-                                                          ├─► UsageAggregator ──► UsageEngine ──► FrameData
-~/.codex/sessions/**/*.jsonl  ──► CodexUsageReader      ─┘                                             │
-                                                                                                      ▼
-                                                                            UsageEngineHost ──► SissyModel ──► menu bar, panel
+~/.claude/projects/**/*.jsonl ──► LocalUsageProvider(ClaudeCodeAdapter) ─┐
+                                                                          ├─► UsageAggregator ──► UsageEngine ──► FrameData
+~/.codex/sessions/**/*.jsonl  ──► LocalUsageProvider(CodexAdapter)      ─┘                                             │
+                                                                                                                      ▼
+                                                                                            UsageEngineHost ──► SissyModel ──► menu bar, panel
 ```
 
-Each reader tails one CLI's session logs and pushes a `(today, prev)` pair
-through `onChange` whenever its totals move. `UsageAggregator` fans those into a
+One tail reads both trees. `LocalUsageProvider` owns everything that is the same
+either way — offsets, mtimes, the FSEvents watcher, the safety-net poll, dedup,
+day buckets, persistence, the emit throttle — and a `SourceAdapter` per log
+format owns the three things that are not: which bytes on a line are worth
+parsing, what they cost, and which of its own state has to survive a relaunch.
+Each provider pushes a `(today, prev)` pair through `onChange` whenever its
+totals move. `UsageAggregator` fans those into a
 single combined reading, `UsageEngine` builds a `FrameData` from it, and the
 engine calls the callback it was handed. The app hands it one that lands the
 frame on `SissyModel`; `sissy-cli --scan` hands it one that prints JSON.
@@ -108,12 +113,14 @@ compiled into the app too.
 | File | Job |
 |---|---|
 | `UsageEngine.swift`             | Actor that owns the aggregator, the limits probe and the keep-awake hold; builds each frame and calls the callback it was handed |
-| `UsageProvider.swift`           | Protocol shared by each CLI log reader (id, start/stop, current, isWarm) |
+| `UsageProvider.swift`           | Protocol shared by each provider (id, start/stop, current, isWarm) |
 | `ProviderReadiness.swift`       | `ProviderID`, and how a toggle resolves (`on` / `off` / `auto — detected` / `auto — not found`) alongside each running provider's scan progress |
 | `UsageAggregator.swift`         | Sums per-day totals across active providers and rebuilds the per-provider slices |
-| `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`; dedupes by `requestId`; forwards the limit probe's windows; owns `parseTimestamp`, the one timestamp parser every reader and the probe share |
-| `CodexUsageReader.swift`        | Tails `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`); uses `last_token_usage` as per-turn delta; model from `turn_context.payload.model` (fallback `gpt-5-codex`) |
-| `UsageReaderShared.swift`       | Tuning constants both tails share (`ingestChunkSize`, `pollEmitThrottle`, mtime slack) so they cannot drift apart |
+| `LocalUsageProvider.swift`      | The one tail behind both trees: enumeration, offsets, mtimes, FSEvents, the poll, the dedup ledger, day buckets, snapshot load/save, emit throttle. Also `UsageEvent`, `SourceAdapter` and `SourceDescriptor` |
+| `ClaudeCodeSource.swift`        | `ClaudeCodeAdapter`: `assistant` lines out of `~/.claude/projects/**/*.jsonl`, deduped by `requestId`, priced against the Anthropic slice; the plan and the probe's windows reach the provider as its `SourceSignals` |
+| `CodexSource.swift`             | `CodexAdapter`: `token_count` events out of `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`), `last_token_usage` as per-turn delta, model from `turn_context.payload.model` (fallback `gpt-5-codex`); owns the resume block |
+| `UsageReaderShared.swift`       | Tuning constants the tail and its adapters share (`ingestChunkSize`, `pollEmitThrottle`, mtime slack), the token-count bound, and `parseTimestamp` — the one timestamp parser every source and the probe use |
+| `UsageAtomics.swift`            | The three lock boxes a provider is read through from outside its actor (`AtomicIntCounter`, `AtomicWindows`, `AtomicPlan`) |
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429; off unless `claudeLimits` is set |
 | `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it — bounded so an unanswered authorization dialog cannot park the probe |
 | `ClaudeProfile.swift`           | Reads the plan out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain, so it answers with `claudeLimits` off |
@@ -126,16 +133,16 @@ compiled into the app too.
 | `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM rates at runtime; renders the seed for `--dump-seed` |
 | `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — offline / first-run floor |
 | `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`, `keepAwake`. The engine owns the file |
-| `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); the Claude reader stays on the legacy `usage-state.json` for upgrade smoothness |
+| `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude Code stays on the legacy `usage-state.json` for upgrade smoothness |
 | `SissyPaths.swift`              | Support-dir and logs-dir resolution (`.dev` bundle id → dev tree) |
 | `SissyLog.swift`                | `sissyLog`, stderr plus a size-capped `Library/Logs/Sissy/sissy.err.log` |
 | `main.swift`                    | The tool's entry point: `--self-test` / `--scan` / `--scan-provider` / `--config` / `--dump-seed` / `--refresh-catalog`. No flag prints the list and exits 2 |
 | `SelfTest.swift`                | The `--self-test` harness: pure formatter, pricing, parser and persistence assertions, run in CI |
 
-The readers let each active provider's initial JSONL backfill finish in detached
-tasks, so the app is interactive immediately even on a multi-GB history.
+Each active provider's initial JSONL backfill finishes in a detached task, so the
+app is interactive immediately even on a multi-GB history.
 Steady-state CPU is near zero: provider-specific `FSEventStream`s (rooted at
-`~/.claude/projects` and `~/.codex/sessions`) wake their readers only when JSONL
+`~/.claude/projects` and `~/.codex/sessions`) wake their providers only when JSONL
 actually changes (kernel-coalesced events at ~1 s latency). A low-frequency
 safety-net poll (default 60 s, `server.json.pollIntervalSeconds`) catches
 missed-event flags (`MustScanSubDirs` / `UserDropped` / `KernelDropped`) and the
@@ -144,7 +151,7 @@ entries are deduplicated by `requestId` because Claude Code logs each assistant
 turn 2-3 times as the message streams; Codex turns are deduplicated implicitly
 because `last_token_usage` arrives once per turn.
 
-Each reader retains a 2-day window on disk (today + yesterday). Sissy only ever
+Each provider retains a 2-day window on disk (today + yesterday). Sissy only ever
 surfaces today + yesterday — the latter feeds the panel's day-over-day delta — so
 the retention window is sized to match. Cold scans skip every file with
 `mtime < now-48h`, which on real-world trees (~500 MB across hundreds of
