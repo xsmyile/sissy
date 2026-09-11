@@ -123,13 +123,6 @@ final class WebSocketClient {
         reconnectAttempt = 0
     }
 
-    /// Push the current primary-metric preference to the server. Used both on
-    /// connect and whenever the user flips the picker in Settings — the server
-    /// keeps the metric in-memory and applies it to all attached clients.
-    func pushSettings() {
-        sendHello()
-    }
-
     /// Ask the daemon to read (or stop reading) Claude Code's OAuth token so
     /// it can publish that CLI's subscription windows. Also carried on
     /// `hello`, so a reconnect re-asserts the user's choice.

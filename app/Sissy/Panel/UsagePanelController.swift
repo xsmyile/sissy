@@ -21,9 +21,6 @@ import SwiftUI
 @MainActor
 final class UsagePanelController {
     private let popover = NSPopover()
-    private var hostingController: NSHostingController<UsagePanelView>?
-
-    var isOpen: Bool { popover.isShown }
 
     init(model: SissyModel) {
         popover.behavior = .transient
@@ -34,7 +31,6 @@ final class UsagePanelController {
         let controller = NSHostingController(rootView: root)
         controller.sizingOptions = [.preferredContentSize]
         popover.contentViewController = controller
-        hostingController = controller
     }
 
     func toggle(relativeTo button: NSStatusBarButton) {

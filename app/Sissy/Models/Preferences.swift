@@ -99,7 +99,6 @@ struct Preferences: Codable, Equatable {
     // MARK: persistence
 
     static let fileName = "preferences.json"
-    static let minimumSecretLength = 12
 
     static func makeSecret(length: Int = 32) -> String {
         guard length > 0 else { return "" }
