@@ -24,11 +24,6 @@ settings:
     MARKETING_VERSION: "0.0.0"
     CURRENT_PROJECT_VERSION: "0"
 
-packages:
-  SwiftNIO:
-    url: https://github.com/apple/swift-nio
-    exactVersion: "2.65.0"
-
 targets:
   Sissy:
     type: application
@@ -38,28 +33,14 @@ targets:
       - Sissy
       # The metering engine the app runs in-process. Still shared with the
       # command-line tool, which CI drives for --self-test / --scan /
-      # --dump-seed / --refresh-catalog. Excluded here is everything that is
-      # the *tool* rather than the engine: its entry point, its self-test
-      # harness, the NIO server left over for one more PR, and the two
-      # helpers the app carries its own copy of. See
-      # docs/single-process-migration.md.
+      # --dump-seed / --refresh-catalog. Excluded here is the tool's own
+      # entry point and self-test harness, plus the path helper the app
+      # carries its own copy of. See docs/single-process-migration.md.
       - path: SissyServer
         excludes:
           - main.swift
           - SelfTest.swift
-          - SissyServer.swift
-          - Hub.swift
-          - HTTPRequestHandler.swift
-          - HTTPResponses.swift
-          - WebSocketSinkHandler.swift
-          - Auth.swift
           - SissyPaths.swift
-      # The notices file lives at the repo root, where GitHub shows it, and
-      # is bundled as a resource because SwiftNIO ships compiled into the
-      # daemon: Apache-2.0 asks its NOTICE to travel with the binary, not
-      # only with the source.
-      - path: ../THIRD-PARTY-NOTICES.md
-        buildPhase: resources
       # Still bundled, and only so the one-shot retirement can undo them:
       # `SMAppService.agent(plistName:)` resolves the plist inside the app
       # bundle, so an agent whose plist is gone cannot be unregistered — it
@@ -130,17 +111,6 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - SissyServer
-    dependencies:
-      - package: SwiftNIO
-        product: NIOCore
-      - package: SwiftNIO
-        product: NIOPosix
-      - package: SwiftNIO
-        product: NIOHTTP1
-      - package: SwiftNIO
-        product: NIOWebSocket
-      - package: SwiftNIO
-        product: NIOFoundationCompat
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.server

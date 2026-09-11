@@ -1,5 +1,4 @@
 import Foundation
-import NIOPosix
 
 /// One provider's totals as emitted by `--scan`. Optional previous-day fields
 /// are omitted from the JSON when the provider has no prior-day data.
@@ -163,33 +162,17 @@ if args.contains("--scan") {
     exit(0)
 }
 
-let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-let server = SissyServer(config: config, group: group, configURL: configURL)
-
-Task {
-    do {
-        try await server.start()
-        daemonLog("sissy-serverd listening on \(config.host):\(config.port)")
-    } catch {
-        daemonLog("sissy-serverd: start failed: \(error)")
-        exit(1)
-    }
-}
-
-signal(SIGTERM, SIG_IGN)
-signal(SIGINT, SIG_IGN)
-let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-let shutdown: @Sendable () -> Void = {
-    Task {
-        await server.stop()
-        try? await group.shutdownGracefully()
-        exit(0)
-    }
-}
-sigterm.setEventHandler(handler: shutdown)
-sigint.setEventHandler(handler: shutdown)
-sigterm.resume()
-sigint.resume()
-
-dispatchMain()
+// No flag, nothing to do. `sissy-serverd` used to be a LaunchAgent; the app
+// runs the engine in-process now and this binary exists for CI — the
+// self-test, the ccusage oracle's scan, the pricing seed and the catalog
+// refresh. Saying so beats exiting silently on a typo'd flag.
+daemonLog(
+    """
+    sissy-serverd: no mode given. This binary is a CI tool, not a service.
+      --self-test         pure formatter, pricing and parser assertions
+      --scan              today's totals as JSON, optionally --scan-provider <id>
+      --dump-seed         regenerate PricingSeed.swift from a live LiteLLM fetch
+      --refresh-catalog   put a live LiteLLM catalog in the cache
+      --config <path>     read an isolated server.json instead of the real one
+    """)
+exit(2)
