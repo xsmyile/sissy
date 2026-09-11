@@ -43,7 +43,9 @@ Authentication: HTTP header `Authorization: Bearer <token>` on the WebSocket han
 
 Claude Code publishes no limit state on disk, so its windows come from `ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the login keychain and polls the endpoint Claude Code's `/usage` reads. That costs a one-time macOS keychain authorization, so it stays off until the user asks for it in Settings.
 
-`keep_awake` carries `{mode, active}` and is always present, unlike the pairs below: the app draws its control from this key, so an absent one could not be told apart from a daemon that predates the feature. `mode` is where the user left the switch (`off`, `on`) and `active` is whether a power assertion is held right now. The two are separate fields because they come apart — power management can refuse the assertion — and the panel renders them as two properties of one glyph, tint for the mode and fill for the effect, so "switched on and holding nothing" is readable at a glance rather than silent. The hold lives in the daemon (`KeepAwake`) because it has to outlive the app: Sissy can be quit under one.
+`keep_awake` carries `{mode, active}` and is always present, unlike the pairs below: the app draws its control from this key, so an absent one could not be told apart from a daemon that predates the feature. `mode` is where the user left the switch (`off`, `on`) and `active` is whether a power assertion is held right now. The two are separate fields because they come apart — power management can refuse the assertion, and the hold follows the app — and the panel renders them as two properties of one glyph, tint for the mode and fill for the effect, so "switched on and holding nothing" is readable at a glance rather than silent.
+
+The hold is taken when the first client connects and dropped when the last one leaves, so quitting Sissy lets the Mac sleep again. The mode is untouched by that: it is where the user left the switch, it survives in `server.json`, and it is what the hold resumes from on the next connect. `Hub` reports the two edges only — a second client is not a second arrival — and it reports an arrival *before* it replays the last frame, so the reconnecting app renders a control that is already holding rather than flashing one that is not.
 
 `prev_tokens` / `prev_cost` carry yesterday's raw combined totals so the macOS app can render a day-over-day delta without a second data path. Both keys are omitted together until every active provider has produced a `prev` snapshot so the app renders no delta rather than a false 0%.
 
@@ -84,7 +86,7 @@ Unlike `claude_limits` this is **not** carried on `hello` and has no copy in `pr
 | `HTTPResponses.swift`           | Codable/Sendable wire shapes for `/health` and `/stats`, mirrored by `app/Sissy/Server/HTTPResponses.swift` |
 | `WebSocketSinkHandler.swift`    | Per-connection WS handler, conforms to `FrameSink` |
 | `Hub.swift`                     | Actor — fan-out to all connected WS clients + last-frame replay |
-| `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` assertion, plus the `KeepAwakeMode` / `KeepAwakeState` wire types; mode persisted in `server.json`, assertion released on `stop()` |
+| `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` assertion, plus the `KeepAwakeMode` / `KeepAwakeState` wire types; mode persisted in `server.json`, assertion held only while a client is connected and released on `stop()` |
 | `UsageProvider.swift`           | Protocol shared by each CLI log reader (id, start/stop, current, isWarm) |
 | `UsageAggregator.swift`         | Sums per-day totals across active providers; emits the combined frame to `Hub` |
 | `ClaudeCodeUsageReader.swift`   | Tails `~/.claude/projects/**/*.jsonl`; dedupes by `requestId`; forwards the limit probe's windows; owns `parseTimestamp`, the one timestamp parser every reader and the probe share |
