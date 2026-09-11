@@ -47,6 +47,12 @@ actor SissyServer {
     /// user asked for — which is `config.keepAwake`. They differ when power
     /// management refuses the assertion, and the panel shows both.
     private var keepAwakeActive = false
+    /// Whether a client is connected. The hold follows it: quitting Sissy has
+    /// to let the Mac sleep again, and a daemon holding one for an app nobody
+    /// can see is a battery complaint with no visible cause. The *mode* is
+    /// untouched by this — it is where the user left the switch, and it is
+    /// what the hold resumes from on the next connect.
+    private var clientPresent = false
 
     init(
         config: ServerConfig,
@@ -156,11 +162,25 @@ actor SissyServer {
     /// reports has to describe where the user left the switch rather than
     /// where this call found it.
     private func applyKeepAwake() async {
-        let held = await keepAwake.apply(holding: config.keepAwake == .on)
-        keepAwakeActive = held && config.keepAwake == .on
+        let wanted = config.keepAwake == .on && clientPresent
+        let held = await keepAwake.apply(holding: wanted)
+        keepAwakeActive = held && wanted
         daemonLog(
             "sissy-serverd: keep-awake \(config.keepAwake.rawValue) — "
                 + (keepAwakeActive ? "holding" : "not holding"))
+    }
+
+    /// Takes or drops the hold as Sissy comes and goes.
+    ///
+    /// Rebroadcasting matters on the arrival edge: `Hub` runs this before it
+    /// replays, so the frame the reconnecting app renders first already says
+    /// the Mac is held again rather than flashing a switched-on control that
+    /// is holding nothing.
+    func clientPresenceChanged(_ present: Bool) async {
+        guard present != clientPresent else { return }
+        clientPresent = present
+        await applyKeepAwake()
+        await rebroadcastFromCache()
     }
 
     private func startClaudeLimitsProbe() async {
@@ -187,6 +207,12 @@ actor SissyServer {
 
     func start() async throws {
         startedAt = Date()
+        // Registered before the bind, or the first client could arrive
+        // between the two and leave the hold waiting for a second one.
+        let me = self
+        await hub.onPresenceChange { present in
+            await me.clientPresenceChanged(present)
+        }
         // Bind first so clients can connect immediately. Each provider's
         // initial backfill scan can take several seconds on a multi-MB
         // log tree (`~/.claude/projects`, `~/.codex/sessions`, …); we let
