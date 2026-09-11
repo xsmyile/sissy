@@ -8,11 +8,13 @@ private struct ClientMessage: Decodable {
     let type: String
     let primaryMetric: String?
     let claudeLimits: Bool?
+    let keepAwakeMode: String?
 
     enum CodingKeys: String, CodingKey {
         case type
         case claudeLimits = "claude_limits"
         case primaryMetric = "primary_metric"
+        case keepAwakeMode = "keep_awake_mode"
     }
 }
 
@@ -149,6 +151,10 @@ final class WebSocketSinkHandler: ChannelInboundHandler, FrameSink, Sendable {
             guard let enabled = msg.claudeLimits else { return }
             let server = self.server
             Task { await server.setClaudeLimits(enabled: enabled) }
+        case "set_keep_awake":
+            guard let mode = msg.keepAwakeMode else { return }
+            let server = self.server
+            Task { await server.setKeepAwake(mode: mode) }
         default:
             break
         }

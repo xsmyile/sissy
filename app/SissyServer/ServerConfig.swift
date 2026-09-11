@@ -34,6 +34,11 @@ struct ServerConfig: Sendable, Codable {
     /// makes the one-time macOS keychain prompt expected rather than a
     /// surprise from a background agent.
     var claudeLimits: Bool
+    /// Whether the daemon holds a power assertion so the Mac does not idle to
+    /// sleep. Persisted here rather than kept in memory because it is a
+    /// setting, not a hold: a user who switched their Mac to never sleep
+    /// expects that to survive the daemon restarting at login.
+    var keepAwake: KeepAwakeMode
 
     static let defaults = ServerConfig(
         host: "127.0.0.1",
@@ -49,7 +54,8 @@ struct ServerConfig: Sendable, Codable {
         pricingOverride: nil,
         remotePricing: nil,
         providers: .defaults,
-        claudeLimits: false
+        claudeLimits: false,
+        keepAwake: .off
     )
 
     static var defaultURL: URL {
@@ -85,6 +91,10 @@ struct ServerConfig: Sendable, Codable {
         if let v = obj["primaryMetric"] as? String { merged.primaryMetric = v }
         if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
         if let v = obj["claudeLimits"] as? Bool { merged.claudeLimits = v }
+        // An unknown mode reads as off rather than failing the whole file: a
+        // value written by a newer build must not cost the user every other
+        // setting in here.
+        merged.keepAwake = (obj["keepAwake"] as? String).flatMap(KeepAwakeMode.init(rawValue:)) ?? .off
         if let prov = obj["providers"] as? [String: Any] {
             var toggles = ProviderToggles.defaults
             toggles.claudeCode = prov["claudeCode"] as? Bool

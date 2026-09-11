@@ -78,6 +78,13 @@ actor Hub {
             "primary_label": frame.primaryLabel,
             "ts": Int(Date().timeIntervalSince1970),
             "providers": providers,
+            // Always present, unlike the pairs below: the app draws the
+            // control from this, and an absent key could not be told apart
+            // from a daemon that predates the feature.
+            "keep_awake": [
+                "mode": frame.keepAwake.mode.rawValue,
+                "active": frame.keepAwake.active,
+            ] as [String: Any],
         ]
         // Emit the field only when set so the app reads an absent key rather
         // than a `null` it has to special-case. Steady-state frames — most of

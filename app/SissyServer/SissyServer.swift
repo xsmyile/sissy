@@ -39,6 +39,14 @@ actor SissyServer {
     /// so the toggle can start it later without rebuilding the provider list;
     /// it does nothing until `start` is called.
     private let claudeLimitsProbe: ClaudeLimitsProbe
+    /// Holds the power assertion. Constructed unconditionally and inert until
+    /// asked, like the probe above: an actor nobody has told to hold anything
+    /// touches nothing.
+    private let keepAwake = KeepAwake()
+    /// Whether the Mac is being held awake right now, as opposed to what the
+    /// user asked for — which is `config.keepAwake`. They differ when power
+    /// management refuses the assertion, and the panel shows both.
+    private var keepAwakeActive = false
 
     init(
         config: ServerConfig,
@@ -126,6 +134,35 @@ actor SissyServer {
         await rebroadcastFromCache()
     }
 
+    /// Switch the keep-awake mode and persist it, so the choice survives a
+    /// daemon restart the app was not around for.
+    func setKeepAwake(mode raw: String) async {
+        guard let mode = KeepAwakeMode(rawValue: raw), mode != config.keepAwake else { return }
+        config.keepAwake = mode
+        do {
+            try ServerConfig.save(config, to: configURL)
+        } catch {
+            daemonLog("sissy-serverd: failed to persist keepAwake to \(configURL.path): \(error)")
+        }
+        await applyKeepAwake()
+        await rebroadcastFromCache()
+    }
+
+    /// Drives the assertion to whatever the stored mode asks for.
+    ///
+    /// The desired state is re-read from `config` after the hop into the
+    /// actor, never captured before it: this is an actor, so a second mode
+    /// change can land while this one is suspended, and the flag the frame
+    /// reports has to describe where the user left the switch rather than
+    /// where this call found it.
+    private func applyKeepAwake() async {
+        let held = await keepAwake.apply(holding: config.keepAwake == .on)
+        keepAwakeActive = held && config.keepAwake == .on
+        daemonLog(
+            "sissy-serverd: keep-awake \(config.keepAwake.rawValue) — "
+                + (keepAwakeActive ? "holding" : "not holding"))
+    }
+
     private func startClaudeLimitsProbe() async {
         let me = self
         await claudeLimitsProbe.start {
@@ -169,6 +206,7 @@ actor SissyServer {
         if config.claudeLimits {
             await startClaudeLimitsProbe()
         }
+        await applyKeepAwake()
         let server = self
         bootTask = Task.detached { [aggregator] in
             await aggregator.start { today, prev, slices in
@@ -226,6 +264,12 @@ actor SissyServer {
         // the channel close handshake even starts.
         bootTask?.cancel()
         priceCatalogTask?.cancel()
+        // Released first, before the awaits below: the kernel drops a dead
+        // process's assertions on its own, but `stop()` is also reachable
+        // without an exit, and a Mac held awake by a daemon that has shut
+        // down is a battery complaint nobody can trace back.
+        _ = await keepAwake.apply(holding: false)
+        keepAwakeActive = false
         try? await channel?.close().get()
         await claudeLimitsProbe.stop()
         await aggregator.stop()
@@ -283,7 +327,8 @@ actor SissyServer {
             prev: prev,
             hoursElapsed: hoursElapsed,
             primaryMetric: primaryMetric,
-            providers: slices
+            providers: slices,
+            keepAwake: KeepAwakeState(mode: config.keepAwake, active: keepAwakeActive)
         )
         await hub.broadcast(frame)
     }
