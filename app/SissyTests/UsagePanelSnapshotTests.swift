@@ -4,21 +4,22 @@ import XCTest
 
 final class UsagePanelSnapshotTests: XCTestCase {
     private func frame(
-        providers: [DisplayFrame.ProviderSlice],
-        prev: DisplayFrame.PrevTotals? = nil,
+        providers: [ProviderSlice],
+        prev: Int? = nil,
         tokens: String = "26K",
         cost: String = "0.09",
         burn: String = "1.5K"
-    ) -> DisplayFrame {
-        DisplayFrame(
+    ) -> FrameData {
+        FrameData(
             tokens: tokens,
             cost: cost,
             burn: burn,
-            ts: 0,
             primary: tokens,
             primaryLabel: "TOKENS",
             providers: providers,
-            prev: prev
+            prevTokens: prev,
+            prevCost: prev.map { Decimal($0) },
+            keepAwake: .off
         )
     }
 
@@ -26,11 +27,11 @@ final class UsagePanelSnapshotTests: XCTestCase {
         _ id: String,
         _ tokens: Int,
         _ cost: String,
-        windows: [DisplayFrame.UsageWindow] = [],
+        windows: [UsageWindow] = [],
         plan: String? = nil,
         planTier: String? = nil
-    ) -> DisplayFrame.ProviderSlice {
-        DisplayFrame.ProviderSlice(
+    ) -> ProviderSlice {
+        ProviderSlice(
             id: id,
             tokens: tokens,
             cost: Decimal(string: cost)!,
@@ -40,8 +41,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
         )
     }
 
-    private func window(_ minutes: Int, _ usedPercent: Double) -> DisplayFrame.UsageWindow {
-        DisplayFrame.UsageWindow(
+    private func window(_ minutes: Int, _ usedPercent: Double) -> UsageWindow {
+        UsageWindow(
             minutes: minutes,
             usedPercent: usedPercent,
             resetsAt: Date(timeIntervalSince1970: 1_789_006_037)
@@ -150,7 +151,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
 
     func testDeltaIsUpWhenTodayExceedsYesterday() throws {
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 130, "1.00")], prev: .init(tokens: 100, cost: 1))
+            frame: frame(providers: [slice("codex", 130, "1.00")], prev: 100)
         )
         let delta = try XCTUnwrap(snapshot.delta)
         XCTAssertEqual(delta.direction, .up)
@@ -159,7 +160,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
 
     func testDeltaIsDownWithAPositivePercentage() throws {
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 40, "1.00")], prev: .init(tokens: 100, cost: 1))
+            frame: frame(providers: [slice("codex", 40, "1.00")], prev: 100)
         )
         let delta = try XCTUnwrap(snapshot.delta)
         XCTAssertEqual(delta.direction, .down)
@@ -170,7 +171,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
     /// as a rendering bug — so it collapses to `.flat` instead.
     func testSubPercentMoveReadsAsFlat() throws {
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 10_002, "1.00")], prev: .init(tokens: 10_000, cost: 1))
+            frame: frame(providers: [slice("codex", 10_002, "1.00")], prev: 10_000)
         )
         let delta = try XCTUnwrap(snapshot.delta)
         XCTAssertEqual(delta.direction, .flat)
@@ -186,14 +187,14 @@ final class UsagePanelSnapshotTests: XCTestCase {
 
     func testNoDeltaWhenYesterdayWasZero() {
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 100, "1.00")], prev: .init(tokens: 0, cost: 0))
+            frame: frame(providers: [slice("codex", 100, "1.00")], prev: 0)
         )
         XCTAssertNil(snapshot.delta)
     }
 
     func testNoDeltaBeforeTodayHasAnyTokens() {
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [], prev: .init(tokens: 100, cost: 1))
+            frame: frame(providers: [], prev: 100)
         )
         XCTAssertNil(snapshot.delta)
     }

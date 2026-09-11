@@ -11,17 +11,16 @@ final class FrameDecoderTests: XCTestCase {
         """
 
     func testDecodesEveryScalarOnAFullFrame() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame)).frame
         XCTAssertEqual(frame.tokens, "26K")
         XCTAssertEqual(frame.cost, "0.09")
         XCTAssertEqual(frame.burn, "1.5K")
-        XCTAssertEqual(frame.ts, 42)
         XCTAssertEqual(frame.primary, "26K")
         XCTAssertEqual(frame.primaryLabel, "TOKENS")
     }
 
     func testDecodesProviderSlice() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame)).frame
         XCTAssertEqual(frame.providers.count, 1)
         XCTAssertEqual(frame.providers.first?.id, "claude-code")
         XCTAssertEqual(frame.providers.first?.tokens, 26000)
@@ -38,7 +37,7 @@ final class FrameDecoderTests: XCTestCase {
                {"minutes":10080,"used_percent":8.0,"resets_at":1789549854},
                {"minutes":300,"used_percent":25.5,"resets_at":1789006037}]}]}
             """
-        let frame = try XCTUnwrap(FrameDecoder.decode(payload))
+        let frame = try XCTUnwrap(FrameDecoder.decode(payload)).frame
         let windows = try XCTUnwrap(frame.providers.first?.windows)
         XCTAssertEqual(windows.map(\.minutes), [300, 10080])
         XCTAssertEqual(windows.first?.usedPercent, 25.5)
@@ -46,7 +45,7 @@ final class FrameDecoderTests: XCTestCase {
     }
 
     func testProviderWithoutWindowsDecodesToNone() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame)).frame
         XCTAssertEqual(frame.providers.first?.windows, [])
     }
 
@@ -56,7 +55,7 @@ final class FrameDecoderTests: XCTestCase {
              "primary":"26K","primary_label":"TOKENS","ts":1,
              "providers":[{"id":"codex","tokens":26000,"cost":"0.0914","plan":"plus"}]}
             """
-        let frame = try XCTUnwrap(FrameDecoder.decode(payload))
+        let frame = try XCTUnwrap(FrameDecoder.decode(payload)).frame
         XCTAssertEqual(frame.providers.first?.plan, "plus")
         XCTAssertNil(frame.providers.first?.planTier)
     }
@@ -68,7 +67,7 @@ final class FrameDecoderTests: XCTestCase {
              "providers":[{"id":"claude-code","tokens":26000,"cost":"0.0914",
                "plan":"team","plan_tier":"max_5x"}]}
             """
-        let frame = try XCTUnwrap(FrameDecoder.decode(payload))
+        let frame = try XCTUnwrap(FrameDecoder.decode(payload)).frame
         XCTAssertEqual(frame.providers.first?.plan, "team")
         XCTAssertEqual(frame.providers.first?.planTier, "max_5x")
     }
@@ -82,7 +81,7 @@ final class FrameDecoderTests: XCTestCase {
              "providers":[{"id":"claude-code","tokens":26000,"cost":"0.0914",
                "plan_tier":"max_5x"}]}
             """
-        let frame = try XCTUnwrap(FrameDecoder.decode(payload))
+        let frame = try XCTUnwrap(FrameDecoder.decode(payload)).frame
         XCTAssertNil(frame.providers.first?.plan)
         XCTAssertNil(frame.providers.first?.planTier)
     }
@@ -91,7 +90,7 @@ final class FrameDecoderTests: XCTestCase {
     /// before the field sends nothing at all — both have to read as "this
     /// account named no plan" and not as a decode failure that drops the row.
     func testProviderWithoutAPlanStillDecodes() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame)).frame
         XCTAssertEqual(frame.providers.count, 1)
         XCTAssertNil(frame.providers.first?.plan)
     }
@@ -104,7 +103,7 @@ final class FrameDecoderTests: XCTestCase {
              "primary":"26K","primary_label":"TOKENS","providers":[],
              "keep_awake":{"mode":"on","active":true}}
             """
-        let frame = try XCTUnwrap(FrameDecoder.decode(json))
+        let frame = try XCTUnwrap(FrameDecoder.decode(json)).frame
         XCTAssertEqual(frame.keepAwake, KeepAwakeState(mode: .on, active: true))
     }
 
@@ -116,7 +115,7 @@ final class FrameDecoderTests: XCTestCase {
              "primary":"26K","primary_label":"TOKENS","providers":[],
              "keep_awake":{"mode":"on","active":false}}
             """
-        let frame = try XCTUnwrap(FrameDecoder.decode(json))
+        let frame = try XCTUnwrap(FrameDecoder.decode(json)).frame
         XCTAssertEqual(frame.keepAwake.mode, .on)
         XCTAssertFalse(frame.keepAwake.active)
     }
@@ -127,37 +126,40 @@ final class FrameDecoderTests: XCTestCase {
              "primary":"26K","primary_label":"TOKENS","providers":[],
              "keep_awake":{"mode":"hypersleep","active":true}}
             """
-        let frame = try XCTUnwrap(FrameDecoder.decode(json))
+        let frame = try XCTUnwrap(FrameDecoder.decode(json)).frame
         XCTAssertEqual(frame.tokens, "26K")
         XCTAssertEqual(frame.keepAwake, .off)
     }
 
     func testAnOmittedKeepAwakeKeyDecodesToOff() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame)).frame
         XCTAssertEqual(frame.keepAwake, .off)
     }
 
     func testPrevCostRoundTripsLossless() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
-        XCTAssertEqual(frame.prev?.tokens, 10000)
-        XCTAssertEqual(frame.prev?.cost, Decimal(string: "0.0326"))
+        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame)).frame
+        XCTAssertEqual(frame.prevTokens, 10000)
+        XCTAssertEqual(frame.prevCost, Decimal(string: "0.0326"))
     }
 
     func testOmittedPrevKeysDecodeToNoComparison() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(#"{"type":"frame","tokens":"1K"}"#))
-        XCTAssertNil(frame.prev)
+        let frame = try XCTUnwrap(FrameDecoder.decode(#"{"type":"frame","tokens":"1K"}"#)).frame
+        XCTAssertNil(frame.prevTokens)
+        XCTAssertNil(frame.prevCost)
     }
 
     func testHalfPresentPrevPairDecodesToNoComparison() throws {
         let json = #"{"type":"frame","tokens":"1K","prev_tokens":10}"#
-        let frame = try XCTUnwrap(FrameDecoder.decode(json))
-        XCTAssertNil(frame.prev)
+        let frame = try XCTUnwrap(FrameDecoder.decode(json)).frame
+        XCTAssertNil(frame.prevTokens)
+        XCTAssertNil(frame.prevCost)
     }
 
     func testMalformedPrevCostDecodesToNoComparison() throws {
         let json = #"{"type":"frame","tokens":"1K","prev_tokens":10,"prev_cost":"abc"}"#
-        let frame = try XCTUnwrap(FrameDecoder.decode(json))
-        XCTAssertNil(frame.prev)
+        let frame = try XCTUnwrap(FrameDecoder.decode(json)).frame
+        XCTAssertNil(frame.prevTokens)
+        XCTAssertNil(frame.prevCost)
     }
 
     func testMalformedProviderRowIsSkippedWithoutDroppingTheFrame() throws {
@@ -165,12 +167,12 @@ final class FrameDecoderTests: XCTestCase {
             {"type":"frame","tokens":"1K","providers":[{"id":"x","tokens":1,"cost":"nope"},
              {"id":"codex","tokens":2,"cost":"1.00"}]}
             """
-        let frame = try XCTUnwrap(FrameDecoder.decode(json))
+        let frame = try XCTUnwrap(FrameDecoder.decode(json)).frame
         XCTAssertEqual(frame.providers.map(\.id), ["codex"])
     }
 
     func testMissingScalarsFallBackToPlaceholders() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(#"{"type":"frame","tokens":"1K"}"#))
+        let frame = try XCTUnwrap(FrameDecoder.decode(#"{"type":"frame","tokens":"1K"}"#)).frame
         XCTAssertEqual(frame.cost, FrameDecoder.placeholder)
         XCTAssertEqual(frame.burn, FrameDecoder.placeholder)
         XCTAssertEqual(frame.primary, "1K")
@@ -189,12 +191,12 @@ final class FrameDecoderTests: XCTestCase {
     /// socket: the Hub replays one cached payload to every client that
     /// connects, so a receive-time clock would call a stale frame fresh.
     func testBuiltAtComesFromTheDaemonTimestamp() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(fullFrame))
-        XCTAssertEqual(frame.builtAt, Date(timeIntervalSince1970: 42))
+        let decoded = try XCTUnwrap(FrameDecoder.decode(fullFrame))
+        XCTAssertEqual(decoded.builtAt, Date(timeIntervalSince1970: 42))
     }
 
     func testBuiltAtIsAbsentWithoutATimestamp() throws {
-        let frame = try XCTUnwrap(FrameDecoder.decode(#"{"type":"frame","tokens":"1K"}"#))
-        XCTAssertNil(frame.builtAt)
+        let decoded = try XCTUnwrap(FrameDecoder.decode(#"{"type":"frame","tokens":"1K"}"#))
+        XCTAssertNil(decoded.builtAt)
     }
 }

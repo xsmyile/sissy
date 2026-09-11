@@ -231,14 +231,14 @@ final class WebSocketClient {
     }
 
     private func handle(_ message: URLSessionWebSocketTask.Message) {
-        let frame: DisplayFrame?
+        let decoded: FrameDecoder.Decoded?
         switch message {
-        case .string(let text): frame = FrameDecoder.decode(text)
-        case .data(let data): frame = FrameDecoder.decode(data)
+        case .string(let text): decoded = FrameDecoder.decode(text)
+        case .data(let data): decoded = FrameDecoder.decode(data)
         @unknown default: return
         }
-        guard let frame else { return }
-        model?.applyFrame(frame)
+        guard let decoded else { return }
+        model?.applyFrame(decoded.frame, builtAt: decoded.builtAt)
     }
 
     private func scheduleReconnect() {

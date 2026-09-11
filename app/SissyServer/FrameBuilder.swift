@@ -16,10 +16,15 @@ enum PrimaryMetric: String, Sendable {
 /// Codex labels its buckets `primary`/`secondary` but a `primary` bucket is
 /// not always the 5-hour one, so anything that keys off position eventually
 /// mislabels a weekly window as a session window.
-struct UsageWindow: Sendable, Equatable, Codable {
+struct UsageWindow: Sendable, Equatable, Codable, Identifiable {
     let minutes: Int
     let usedPercent: Double
     let resetsAt: Date
+
+    /// The length identifies the window, so it is also what the panel keys
+    /// its rows by — a vendor reordering its buckets must not re-create the
+    /// row it moved.
+    var id: Int { minutes }
 }
 
 /// Raw per-provider slice carried on the WS frame so the app can derive both
@@ -27,7 +32,7 @@ struct UsageWindow: Sendable, Equatable, Codable {
 /// payload. Cost is a `Decimal` here; the wire representation is
 /// `NSDecimalNumber.stringValue` so it round-trips lossless through
 /// `Decimal(string:)` on the app side.
-struct ProviderSlice: Sendable, Equatable, Codable {
+struct ProviderSlice: Sendable, Equatable, Codable, Identifiable {
     let id: String
     let tokens: Int
     let cost: Decimal

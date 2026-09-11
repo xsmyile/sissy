@@ -19,16 +19,17 @@ final class SissyModelHeaderTests: XCTestCase {
         )
     }
 
-    private func frame() -> DisplayFrame {
-        DisplayFrame(
+    private func frame() -> FrameData {
+        FrameData(
             tokens: "26K",
             cost: "0.09",
             burn: "1.5K",
-            ts: 1_789_000_000,
             primary: "26K",
             primaryLabel: "TOKENS",
             providers: [],
-            prev: nil
+            prevTokens: nil,
+            prevCost: nil,
+            keepAwake: .off
         )
     }
 

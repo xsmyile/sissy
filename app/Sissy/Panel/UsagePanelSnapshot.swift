@@ -58,30 +58,30 @@ struct UsagePanelSnapshot: Equatable {
         let resetsAt: Date
     }
 
-    static func make(frame: DisplayFrame) -> Self {
+    static func make(frame: FrameData) -> Self {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
         return Self(
             tokens: frame.providers.isEmpty ? frame.tokens : UsageFormat.tokens(totalTokens),
             cost: frame.providers.isEmpty ? "$\(frame.cost)" : UsageFormat.cost(totalCost),
             burn: frame.burn,
-            delta: makeDelta(today: totalTokens, prev: frame.prev),
+            delta: makeDelta(today: totalTokens, prevTokens: frame.prevTokens),
             providers: makeRows(frame.providers, totalTokens: totalTokens)
         )
     }
 
-    private static func makeDelta(today: Int, prev: DisplayFrame.PrevTotals?) -> TokenDelta? {
-        guard let prev, prev.tokens > 0, today > 0 else { return nil }
-        let ratio = Double(today - prev.tokens) / Double(prev.tokens)
+    private static func makeDelta(today: Int, prevTokens: Int?) -> TokenDelta? {
+        guard let prevTokens, prevTokens > 0, today > 0 else { return nil }
+        let ratio = Double(today - prevTokens) / Double(prevTokens)
         let percent = Int((abs(ratio) * 100).rounded())
         if percent == 0 {
             return TokenDelta(percent: 0, direction: .flat)
         }
-        return TokenDelta(percent: percent, direction: today > prev.tokens ? .up : .down)
+        return TokenDelta(percent: percent, direction: today > prevTokens ? .up : .down)
     }
 
     private static func makeRows(
-        _ slices: [DisplayFrame.ProviderSlice],
+        _ slices: [ProviderSlice],
         totalTokens: Int
     ) -> [ProviderRow] {
         slices.map { slice in
@@ -99,7 +99,7 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
-    private static func makeWindow(_ window: DisplayFrame.UsageWindow) -> WindowRow {
+    private static func makeWindow(_ window: UsageWindow) -> WindowRow {
         WindowRow(
             id: window.minutes,
             label: UsageFormat.windowLabel(minutes: window.minutes),

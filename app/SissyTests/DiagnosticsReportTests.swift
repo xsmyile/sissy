@@ -4,7 +4,7 @@ import XCTest
 
 final class DiagnosticsReportTests: XCTestCase {
     private func snapshot(
-        providers: [DisplayFrame.ProviderSlice] = [],
+        providers: [ProviderSlice] = [],
         serverState: String = "Running",
         linkIsConnected: Bool = true,
         claudeLimits: Bool = true,
@@ -53,16 +53,16 @@ final class DiagnosticsReportTests: XCTestCase {
     func testProvidersReportExactTokensAndTheirWindows() {
         let text = DiagnosticsReport.text(
             snapshot(providers: [
-                DisplayFrame.ProviderSlice(
+                ProviderSlice(
                     id: "claude-code",
                     tokens: 1_234_567,
                     cost: 12.34,
                     windows: [
-                        DisplayFrame.UsageWindow(minutes: 300, usedPercent: 41.6, resetsAt: .now),
-                        DisplayFrame.UsageWindow(minutes: 10080, usedPercent: 7.2, resetsAt: .now),
+                        UsageWindow(minutes: 300, usedPercent: 41.6, resetsAt: .now),
+                        UsageWindow(minutes: 10080, usedPercent: 7.2, resetsAt: .now),
                     ]
                 ),
-                DisplayFrame.ProviderSlice(id: "codex", tokens: 89_012, cost: 1.5),
+                ProviderSlice(id: "codex", tokens: 89_012, cost: 1.5),
             ])
         )
 
@@ -140,7 +140,7 @@ final class DiagnosticsReportTests: XCTestCase {
     func testReportCarriesNoCostFigures() {
         let text = DiagnosticsReport.text(
             snapshot(providers: [
-                DisplayFrame.ProviderSlice(id: "claude-code", tokens: 10, cost: 99.99)
+                ProviderSlice(id: "claude-code", tokens: 10, cost: 99.99)
             ])
         )
 

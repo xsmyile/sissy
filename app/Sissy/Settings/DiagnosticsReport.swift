@@ -18,7 +18,7 @@ struct DiagnosticsReport {
         let serverState: String
         let linkIsConnected: Bool
         let claudeLimits: Bool
-        let providers: [DisplayFrame.ProviderSlice]
+        let providers: [ProviderSlice]
         /// Every `ccusage` found on disk. A gap between Sissy's cost and
         /// "what ccusage says" cannot be triaged without knowing which of the
         /// two programs by that name produced the number.
@@ -74,7 +74,7 @@ struct DiagnosticsReport {
         return String(systemVersion.dropFirst(prefix.count))
     }
 
-    private static func describe(_ slices: [DisplayFrame.ProviderSlice]) -> String {
+    private static func describe(_ slices: [ProviderSlice]) -> String {
         guard !slices.isEmpty else { return "none reported" }
         return slices.map { slice in
             "\(slice.id) \(slice.tokens) tokens, \(describe(slice.windows))"
@@ -106,7 +106,7 @@ struct DiagnosticsReport {
         }
     }
 
-    private static func describe(_ windows: [DisplayFrame.UsageWindow]) -> String {
+    private static func describe(_ windows: [UsageWindow]) -> String {
         guard !windows.isEmpty else { return "no windows" }
         return
             windows

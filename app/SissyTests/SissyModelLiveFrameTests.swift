@@ -22,16 +22,17 @@ final class SissyModelLiveFrameTests: XCTestCase {
         )
     }
 
-    private func frame() -> DisplayFrame {
-        DisplayFrame(
+    private func frame() -> FrameData {
+        FrameData(
             tokens: "26K",
             cost: "0.09",
             burn: "1.5K",
-            ts: Int(Self.landedAt.timeIntervalSince1970),
             primary: "26K",
             primaryLabel: "TOKENS",
             providers: [],
-            prev: nil
+            prevTokens: nil,
+            prevCost: nil,
+            keepAwake: .off
         )
     }
 
