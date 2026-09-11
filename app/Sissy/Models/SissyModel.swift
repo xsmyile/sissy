@@ -50,7 +50,7 @@ final class SissyModel {
             savePreferences()
         }
         guard !outcome.retired.isEmpty else { return }
-        daemonLog(
+        sissyLog(
             "sissy: retired \(outcome.retired.joined(separator: ", "))"
                 + (outcome.claimedLoginItem ? "; Sissy now opens at login in its place" : ""))
     }

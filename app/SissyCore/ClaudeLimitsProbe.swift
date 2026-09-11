@@ -85,7 +85,7 @@ actor ClaudeLimitsProbe {
     private func report(_ message: String) {
         if lastReported == message { return }
         lastReported = message
-        daemonLog("sissy-serverd: \(message)")
+        sissyLog("sissy: \(message)")
     }
 
     /// One poll. Returns how long to wait before the next one.

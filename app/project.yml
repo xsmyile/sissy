@@ -33,14 +33,12 @@ targets:
       - Sissy
       # The metering engine the app runs in-process. Still shared with the
       # command-line tool, which CI drives for --self-test / --scan /
-      # --dump-seed / --refresh-catalog. Excluded here is the tool's own
-      # entry point and self-test harness, plus the path helper the app
-      # carries its own copy of. See docs/single-process-migration.md.
-      - path: SissyServer
+      # --dump-seed / --refresh-catalog. Excluded here is only the tool's own
+      # entry point and self-test harness.
+      - path: SissyCore
         excludes:
           - main.swift
           - SelfTest.swift
-          - SissyPaths.swift
       # Still bundled, and only so the one-shot retirement can undo them:
       # `SMAppService.agent(plistName:)` resolves the plist inside the app
       # bundle, so an agent whose plist is gone cannot be unregistered — it
@@ -113,7 +111,7 @@ targets:
     platform: macOS
     deploymentTarget: "26.0"
     sources:
-      - SissyServer
+      - SissyCore
     settings:
       base:
         # Deliberately not `…sissy.server`: that string is now the label of
@@ -122,7 +120,7 @@ targets:
         # retirement ends up pointed at the wrong one.
         PRODUCT_BUNDLE_IDENTIFIER: com.radonforge.sissy.cli
         PRODUCT_NAME: sissy-cli
-        INFOPLIST_FILE: SissyServer/Info.plist
+        INFOPLIST_FILE: SissyCore/Info.plist
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: NO
         ENABLE_HARDENED_RUNTIME: YES

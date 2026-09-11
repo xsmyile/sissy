@@ -67,7 +67,7 @@ enum LegacyAgentRetirement {
             try loginItem.setEnabled(true)
             outcome.claimedLoginItem = true
         } catch {
-            daemonLog("sissy: retired the server agent but could not claim the login item: \(error)")
+            sissyLog("sissy: retired the server agent but could not claim the login item: \(error)")
         }
         return outcome
     }
@@ -89,7 +89,7 @@ enum LegacyAgentRetirement {
                 // hold cannot be reached from here. Never spend the one shot
                 // on that answer: it is the shape of a packaging mistake,
                 // not of a clean machine.
-                daemonLog(
+                sissyLog(
                     "sissy: \(label) is not resolvable from this bundle; "
                         + "leaving it for the next launch")
                 outcome.conclusive = false
@@ -111,7 +111,7 @@ enum LegacyAgentRetirement {
         } catch {
             // Already gone is the state we wanted.
             guard (error as NSError).code == kSMErrorJobNotFound else {
-                daemonLog("sissy: could not retire the \(label) agent: \(error)")
+                sissyLog("sissy: could not retire the \(label) agent: \(error)")
                 outcome.conclusive = false
                 return
             }

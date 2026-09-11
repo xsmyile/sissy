@@ -75,7 +75,7 @@ The hold is taken when the first client connects and dropped when the last one l
 
 Unlike `claude_limits` this is **not** carried on `hello` and has no copy in `preferences.json`. The daemon persists the mode to `server.json` and is the only owner: the app re-asserting it on every reconnect would overwrite a change made while it was closed, and a second copy would be a second thing to keep in step. An unknown mode is ignored by the daemon and read as `off` by the app, so a version mismatch costs one control rather than the frame.
 
-## Daemon modules (`app/SissyServer/`)
+## Daemon modules (`app/SissyCore/`)
 
 | File | Job |
 |---|---|
@@ -121,7 +121,7 @@ There are therefore **two independent login items**, one per half. The daemon's 
 
 ## Operational notes
 
-- **Pricing**: there is no hand-maintained rate table. Rates resolve `server.json` `pricingOverride` → the LiteLLM catalog fetched at runtime (`PriceCatalog.swift`, refreshed every 24 h, cached in Application Support) → `PricingSeed.swift`, a generated snapshot embedded at build time for the offline / first-run case. A new model therefore needs no Sissy release. The cold backfill runs against exactly one catalog: a cache newer than the seed is applied before the scan starts, otherwise the first fetch is awaited under `PriceCatalogSource.coldStartBudget` and the seed prices the scan if it doesn't land. A refresh never reprices what it already counted, so letting a catalog arrive mid-scan would split a single day across two rate sets. `remotePricing: false` pins the daemon to the seed and stops all outbound requests. Regenerate the seed when cutting a release: `sissy-serverd --dump-seed > app/SissyServer/PricingSeed.swift`. The `pricing-oracle` CI job asserts exact agreement with `ccusage`, which prices from the same LiteLLM data.
+- **Pricing**: there is no hand-maintained rate table. Rates resolve `server.json` `pricingOverride` → the LiteLLM catalog fetched at runtime (`PriceCatalog.swift`, refreshed every 24 h, cached in Application Support) → `PricingSeed.swift`, a generated snapshot embedded at build time for the offline / first-run case. A new model therefore needs no Sissy release. The cold backfill runs against exactly one catalog: a cache newer than the seed is applied before the scan starts, otherwise the first fetch is awaited under `PriceCatalogSource.coldStartBudget` and the seed prices the scan if it doesn't land. A refresh never reprices what it already counted, so letting a catalog arrive mid-scan would split a single day across two rate sets. `remotePricing: false` pins the daemon to the seed and stops all outbound requests. Regenerate the seed when cutting a release: `sissy-serverd --dump-seed > app/SissyCore/PricingSeed.swift`. The `pricing-oracle` CI job asserts exact agreement with `ccusage`, which prices from the same LiteLLM data.
 - **Binding**: the daemon listens on `127.0.0.1` only. The app is its sole client.
 - **Replay**: every WS client gets the last broadcast frame on connect, so a restart doesn't show stale placeholders.
 - **Failure modes**:

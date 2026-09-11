@@ -1,6 +1,6 @@
 included:
   - app/Sissy
-  - app/SissyServer
+  - app/SissyCore
   - app/SissyTests
 
 disabled_rules:

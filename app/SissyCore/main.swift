@@ -32,7 +32,7 @@ if args.contains("--dump-seed") {
             let catalog = try await PriceCatalogSource.fetch()
             print(try PriceCatalogSource.swiftSeedSource(for: catalog))
         } catch {
-            daemonLog("sissy-serverd: --dump-seed failed: \(error)")
+            sissyLog("sissy: --dump-seed failed: \(error)")
             status = 1
         }
         sem.signal()
@@ -53,20 +53,20 @@ if args.contains("--refresh-catalog") {
         do {
             let catalog = try await PriceCatalogSource.fetch()
             guard PriceCatalogSource.isUsable(catalog) else {
-                daemonLog(
-                    "sissy-serverd: --refresh-catalog rejected the fetched catalog "
+                sissyLog(
+                    "sissy: --refresh-catalog rejected the fetched catalog "
                         + "(\(catalog.anthropic.count) anthropic, \(catalog.openai.count) openai rates) "
                         + "— upstream changed shape; the cache is left as it was")
                 status = 1
                 return
             }
             PriceCatalogSource.saveCache(catalog)
-            daemonLog(
-                "sissy-serverd: pricing catalog refreshed — "
+            sissyLog(
+                "sissy: pricing catalog refreshed — "
                     + "\(catalog.anthropic.count + catalog.openai.count) rates cached at "
                     + PriceCatalogSource.cacheURL.path)
         } catch {
-            daemonLog("sissy-serverd: --refresh-catalog failed: \(error)")
+            sissyLog("sissy: --refresh-catalog failed: \(error)")
             status = 1
         }
     }
@@ -79,7 +79,7 @@ if args.contains("--refresh-catalog") {
 let configURL: URL = {
     guard let idx = args.firstIndex(of: "--config") else { return ServerConfig.defaultURL }
     guard idx + 1 < args.count else {
-        daemonLog("sissy-serverd: --config requires a path argument")
+        sissyLog("sissy: --config requires a path argument")
         exit(2)
     }
     return URL(fileURLWithPath: args[idx + 1])
@@ -88,7 +88,7 @@ let config: ServerConfig
 do {
     config = try ServerConfig.load(from: configURL)
 } catch {
-    daemonLog("sissy-serverd: config load failed: \(error)")
+    sissyLog("sissy: config load failed: \(error)")
     exit(1)
 }
 
@@ -129,11 +129,11 @@ if args.contains("--scan") {
         // seed prices, which is also what the daemon would do.
         if config.remotePricingEnabled, let cached = PriceCatalogSource.loadCache() {
             for p in providers { await p.applyPriceCatalog(cached) }
-            daemonLog(
-                "sissy-serverd: --scan pricing from cached catalog "
+            sissyLog(
+                "sissy: --scan pricing from cached catalog "
                     + "(fetched \(ISO8601DateFormatter().string(from: cached.fetchedAt)))")
         } else {
-            daemonLog("sissy-serverd: --scan pricing from the embedded rate seed")
+            sissyLog("sissy: --scan pricing from the embedded rate seed")
         }
         var out: [String: ScanEntry] = [:]
         for p in providers {
@@ -166,7 +166,7 @@ if args.contains("--scan") {
 // the engine in-process now and it exists for CI — the self-test, the ccusage
 // oracle's scan, the pricing seed and the catalog refresh. Saying so beats
 // exiting silently on a typo'd flag.
-daemonLog(
+sissyLog(
     """
     sissy-cli: no mode given. This binary is a CI tool, not a service.
       --self-test         pure formatter, pricing and parser assertions
