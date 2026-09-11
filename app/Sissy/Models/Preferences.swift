@@ -11,6 +11,11 @@ struct Preferences: Codable, Equatable {
     var authToken: String = ""
     var claudeLimits: Bool = false
     var sissyMotion: Bool = true
+    /// Whether the one-shot retirement of the `sissy-serverd` LaunchAgent has
+    /// run. Not a mirror of any login state — `SMAppService` stays the record
+    /// for that — only a note that the migration happened, so a user who
+    /// later removes Sissy from Login Items does not get it put back.
+    var retiredServerAgent: Bool = false
 
     enum PrimaryMetric: String, Codable, CaseIterable, Identifiable {
         case tokens
@@ -33,6 +38,7 @@ struct Preferences: Codable, Equatable {
         authToken: String = "",
         claudeLimits: Bool = false,
         sissyMotion: Bool = true,
+        retiredServerAgent: Bool = false,
     ) {
         self.primaryMetric = primaryMetric
         self.serverHost = serverHost
@@ -40,6 +46,7 @@ struct Preferences: Codable, Equatable {
         self.authToken = authToken
         self.claudeLimits = claudeLimits
         self.sissyMotion = sissyMotion
+        self.retiredServerAgent = retiredServerAgent
     }
 
     /// Backwards-compatible decoder so a `preferences.json` written by an
@@ -53,6 +60,7 @@ struct Preferences: Codable, Equatable {
         authToken = (try? c.decode(String.self, forKey: .authToken)) ?? ""
         claudeLimits = (try? c.decode(Bool.self, forKey: .claudeLimits)) ?? false
         sissyMotion = Self.decodeSissyMotion(from: decoder)
+        retiredServerAgent = (try? c.decode(Bool.self, forKey: .retiredServerAgent)) ?? false
     }
 
     /// `sissyMotion` was persisted as `mascotMotion` up to and including

@@ -5,31 +5,8 @@ import SwiftUI
 struct GeneralSettingsView: View {
     let model: SissyModel
 
-    private var server: SissyModel.ServerItemSnapshot { model.menuSnapshot.server }
-
     var body: some View {
         Form {
-            Section {
-                LabeledContent("Server") {
-                    HStack(spacing: 8) {
-                        if !server.isEnabled && model.serverIsBusy {
-                            ProgressView().controlSize(.small)
-                        }
-                        if server.requiresApproval {
-                            Button("Approve in Login Items") { model.toggleServer() }
-                        } else {
-                            Toggle("Server", isOn: serverBinding)
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .disabled(!server.isEnabled)
-                        }
-                    }
-                }
-                Text(serverCaption)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
             Section {
                 LabeledContent("Start at login") {
                     if model.loginItem.requiresApproval {
@@ -41,8 +18,8 @@ struct GeneralSettingsView: View {
                     }
                 }
                 Text(
-                    "Puts the menu bar icon back after a restart. The server starts at login on "
-                        + "its own once it's on, so usage keeps counting either way."
+                    "Sissy counts while it is running, so leaving this on is what keeps the "
+                        + "day complete after a restart."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -64,7 +41,7 @@ struct GeneralSettingsView: View {
                 Toggle("Animate Sissy", isOn: sissyMotionBinding)
                 Text(
                     "A blink when new usage lands, in the menu bar and in the panel, "
-                        + "and the eye shutting while the server is away. Nothing in between. "
+                        + "and the eye shutting while there is nothing to show. Nothing in between. "
                         + "Follows the system's Reduce Motion setting."
                 )
                 .font(.callout)
@@ -91,19 +68,6 @@ struct GeneralSettingsView: View {
         // reads it whenever the window appears rather than trusting what it
         // last set: the user can undo it from System Settings.
         .task { model.loginItem.refresh() }
-    }
-
-    private var serverCaption: String {
-        let endpoint = "\(model.preferences.serverHost):\(model.preferences.serverPort)"
-        return "\(server.subtitle) · \(endpoint). Runs as a background agent and keeps counting "
-            + "after you quit Sissy."
-    }
-
-    private var serverBinding: Binding<Bool> {
-        Binding(
-            get: { server.isOn },
-            set: { model.setServer(running: $0) }
-        )
     }
 
     private var claudeLimitsBinding: Binding<Bool> {

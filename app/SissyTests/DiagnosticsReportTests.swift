@@ -5,8 +5,8 @@ import XCTest
 final class DiagnosticsReportTests: XCTestCase {
     private func snapshot(
         providers: [ProviderSlice] = [],
-        serverState: String = "Running",
-        linkIsConnected: Bool = true,
+        filesWatched: Int = 98,
+        isWarm: Bool = true,
         claudeLimits: Bool = true,
         systemVersion: String = "Version 26.0 (Build 25A354)",
         ccusage: [CcusageProbe.Install] = []
@@ -15,23 +15,21 @@ final class DiagnosticsReportTests: XCTestCase {
             version: "0.1.9",
             build: "42",
             systemVersion: systemVersion,
-            endpoint: "127.0.0.1:5155",
-            serverState: serverState,
-            linkIsConnected: linkIsConnected,
+            filesWatched: filesWatched,
+            isWarm: isWarm,
             claudeLimits: claudeLimits,
             providers: providers,
             ccusage: ccusage
         )
     }
 
-    func testReportStatesVersionOSServerAndLink() {
+    func testReportStatesVersionOSReadersAndLimits() {
         let lines = DiagnosticsReport.text(snapshot()).split(separator: "\n").map(String.init)
 
         XCTAssertEqual(lines[0], "Sissy 0.1.9 (42)")
         XCTAssertEqual(lines[1], "macOS 26.0 (Build 25A354)")
-        XCTAssertEqual(lines[2], "Server: Running at 127.0.0.1:5155")
-        XCTAssertEqual(lines[3], "Link: connected")
-        XCTAssertEqual(lines[4], "Claude limits: on")
+        XCTAssertEqual(lines[2], "Readers: warm, 98 file(s) watched")
+        XCTAssertEqual(lines[3], "Claude limits: on")
     }
 
     func testUnprefixedSystemVersionIsLeftAlone() {
@@ -40,13 +38,15 @@ final class DiagnosticsReportTests: XCTestCase {
         XCTAssertTrue(text.contains("macOS 26.0"))
     }
 
-    func testStoppedServerAndDroppedLinkAreStated() {
+    /// A report filed mid-scan reads very differently from one filed after
+    /// the readers found nothing, and they are the same zero without the
+    /// warmth beside it.
+    func testAColdScanIsNotReportedAsAnEmptyTree() {
         let text = DiagnosticsReport.text(
-            snapshot(serverState: "Stopped", linkIsConnected: false, claudeLimits: false)
+            snapshot(filesWatched: 0, isWarm: false, claudeLimits: false)
         )
 
-        XCTAssertTrue(text.contains("Server: Stopped at 127.0.0.1:5155"))
-        XCTAssertTrue(text.contains("Link: disconnected"))
+        XCTAssertTrue(text.contains("Readers: still scanning, 0 file(s) watched"))
         XCTAssertTrue(text.contains("Claude limits: off"))
     }
 

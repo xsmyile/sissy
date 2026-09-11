@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// Bootstraps the menubar app and leaves runtime ownership to dedicated
-/// coordinators: `SissyModel` owns app state and server actions,
+/// coordinators: `SissyModel` owns app state and the metering engine,
 /// `StatusItemController` the status item, `UsagePanelController` the panel.
 /// The only window is the SwiftUI `Settings` scene, which opens itself.
 @MainActor
