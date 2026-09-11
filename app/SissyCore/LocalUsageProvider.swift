@@ -9,75 +9,133 @@ struct UsageEvent: Sendable, Equatable {
     let cost: Decimal
 }
 
-/// Lock-protected counter the reader actor shares with whoever asks how
-/// many files are being watched. Reading it without the hop matters because
-/// the actor is busy for the whole initial backfill: an `await
-/// reader.filesWatched()` queues behind that scan, and the panel's
-/// warming state would be the last thing to learn the scan had started.
-final class AtomicIntCounter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: Int = 0
-    func load() -> Int { lock.withLock { value } }
-    func store(_ v: Int) { lock.withLock { value = v } }
-}
-
-/// Lock-protected window snapshot, read without entering the owning actor.
+/// One line of a session log, as handed to a `SourceAdapter`.
 ///
-/// The aggregator reads these while a provider is mid-emit — that is, while
-/// the provider holds its own actor waiting on the emit callback. An `await`
-/// back into the provider there deadlocks both sides, so the read has to be
-/// synchronous, the same reason `filesWatched()` is nonisolated.
-final class AtomicWindows: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: [UsageWindow] = []
-    func load() -> [UsageWindow] { lock.withLock { value } }
-    func store(_ v: [UsageWindow]) { lock.withLock { value = v } }
-    /// Drops buckets whose reset has passed: a window past its reset
-    /// describes a period that no longer exists.
-    func live(now: Date = Date()) -> [UsageWindow] {
-        lock.withLock { value.filter { $0.resetsAt > now } }
-    }
+/// `byteOffset` is the line's absolute position in the file, which is what
+/// Codex dedups on; `retainCutoff` is recomputed per line so a scan that runs
+/// across the window's edge admits exactly what it would have a moment ago.
+struct SourceLine {
+    let data: Data
+    let url: URL
+    let byteOffset: UInt64
+    let retainCutoff: Date
 }
 
-/// Same handoff as `AtomicWindows` for a plan token: a reader parses it on its
-/// own actor while `UsageProvider.currentPlan()` is read from outside it.
-/// Unlike a window a plan never expires, so there is no `live()` here.
-final class AtomicPlan: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: String?
-    func load() -> String? { lock.withLock { value } }
-    func store(_ v: String?) { lock.withLock { value = v } }
+/// What a source can answer without entering the provider's actor.
+///
+/// The aggregator reads these while the emitting provider still holds its
+/// actor, so they cannot be `await`ed — see `AtomicWindows` for what that
+/// deadlock looks like. A source that publishes none of them takes the
+/// defaults.
+protocol SourceSignals: Sendable {
+    func currentWindows() -> [UsageWindow]
+    func currentPlan() -> String?
+    func currentPlanTier() -> String?
 }
 
-actor ClaudeCodeUsageReader: UsageProvider {
-    /// Stable provider id, also the key its row is drawn under. The
-    /// persistence URL is
-    /// injected; this reader still writes the legacy `usage-state.json` path
-    /// for upgrade smoothness, not `usage-state-claude-code.json`.
-    nonisolated let id: String = "claude-code"
+extension SourceSignals {
+    func currentWindows() -> [UsageWindow] { [] }
+    func currentPlan() -> String? { nil }
+    func currentPlanTier() -> String? { nil }
+}
 
-    private let claudeDir: URL
+/// The facts `LocalUsageProvider` copies out of its adapter at init, so it can
+/// answer them from outside its own actor.
+struct SourceDescriptor: Sendable {
+    /// Stable provider id, also the key its row is drawn under and the suffix
+    /// on its persistence file.
+    let id: String
+    /// Root of the session-log tree: enumerated on every poll, watched by
+    /// FSEvents, and hashed into the snapshot so pointing the provider
+    /// somewhere else invalidates it.
+    let root: URL
+    /// FSEvents queue label, one per source so a stack trace names the tail
+    /// it came from.
+    let watcherLabel: String
+    let signals: SourceSignals
+}
+
+/// One CLI's log format, behind the tail every local provider shares.
+///
+/// An adapter owns exactly three things: which bytes on a line are worth
+/// parsing, what a line costs, and which of its own state has to survive a
+/// relaunch. Everything else — offsets, mtimes, the watcher, the poll, the
+/// dedup ledger, the day buckets, persistence, the emit throttle — belongs to
+/// `LocalUsageProvider`.
+///
+/// Adapters are only ever touched from inside the provider's actor, which is
+/// what lets them hold plain mutable parsing state.
+protocol SourceAdapter: AnyObject {
+    var descriptor: SourceDescriptor { get }
+
+    /// True when the bytes of one line are worth a JSON parse. Run on the raw
+    /// chunk before any allocation: on both formats the overwhelming majority
+    /// of lines carry no usage at all.
+    func lineMayCount(_ buf: UnsafePointer<UInt8>, from: Int, to: Int) -> Bool
+
+    /// Turns one line into a billable event, nil for every other shape.
+    ///
+    /// The adapter claims its own dedup key in `seen` — the key's shape is the
+    /// format's business, while the ledger is the provider's because the
+    /// provider is what persists and trims it. Events older than
+    /// `line.retainCutoff` are dropped without claiming a key.
+    func event(from line: SourceLine, seen: inout [String: Date]) -> UsageEvent?
+
+    /// Swap in a freshly fetched rate catalog. The adapter takes the slice
+    /// matching its upstream vendor.
+    func applyPriceCatalog(_ catalog: PriceCatalog)
+
+    /// Ran once after any snapshot load and before the first emit, for state
+    /// the adapter reads out of band rather than off a log line. True when it
+    /// changed something the next snapshot should carry.
+    func prepareToStart() -> Bool
+
+    /// Ran at the top of every poll, for out-of-band state that goes stale.
+    func willPoll()
+
+    /// Drops per-file state for files the provider no longer tracks, so an
+    /// adapter's own maps age out with the offsets they describe.
+    func trim(retaining files: Set<URL>)
+
+    /// Takes the adapter's slice of a snapshot, before the provider commits
+    /// any of its own. Returning false discards the whole snapshot and forces
+    /// a cold scan, so an adapter that refuses must do it without having
+    /// mutated anything.
+    func resume(from snapshot: UsageStateSnapshot, offsets: [URL: UInt64]) -> Bool
+
+    /// The adapter's slice of the snapshot being written. The field is named
+    /// for the one source that has ever needed it.
+    func resumeState() -> UsageStateSnapshot.CodexResume?
+}
+
+extension SourceAdapter {
+    func prepareToStart() -> Bool { false }
+    func willPoll() {}
+    func trim(retaining files: Set<URL>) {}
+    func resume(from snapshot: UsageStateSnapshot, offsets: [URL: UInt64]) -> Bool { true }
+    func resumeState() -> UsageStateSnapshot.CodexResume? { nil }
+}
+
+/// The tail behind every provider that reads a CLI's session logs off local
+/// disk: file enumeration, per-file offsets and mtimes, the FSEvents watcher,
+/// the safety-net poll, dedup, day buckets, snapshot persistence and the
+/// throttled emit. What differs per CLI lives in its `SourceAdapter`.
+actor LocalUsageProvider: UsageProvider {
+    nonisolated let id: String
+    nonisolated private let signals: SourceSignals
+
+    private let adapter: any SourceAdapter
+    private let root: URL
+    private let watcherLabel: String
     private let retainDays: Int
     private let pollInterval: Duration
-    /// When non-nil, the reader snapshots its state to this URL on a
-    /// throttle and on stop. On the first `poll` it tries to load + reconcile
-    /// the snapshot so a relaunch skips the cold backfill. Nil disables
+    /// When non-nil, the provider snapshots its state to this URL on a
+    /// throttle and on stop. On `start` it tries to load + reconcile the
+    /// snapshot so a relaunch skips the cold backfill. Nil disables
     /// persistence entirely — used by `--scan` and tests that want a fresh
-    /// reader without touching the user's saved state.
+    /// provider without touching the user's saved state.
     private let persistenceURL: URL?
-    /// Per-model price overrides from `ServerConfig.pricingOverride`. When a
-    /// model matches an override entry (exact or longest-prefix) the override
-    /// outranks both the runtime catalog and the embedded seed.
-    private let pricingOverride: [String: ModelPricing]?
-    /// Anthropic slice of the runtime `PriceCatalog`. Sits between the user's
-    /// override and the embedded generated seed, so a model that launched after
-    /// this build was cut still prices correctly. Refreshed in place by
-    /// `applyPriceCatalog`; a refresh applies to events ingested from then on
-    /// and does not reprice accumulated totals.
-    private var priceCatalog: PricingTable?
-    /// Models already reported as unpriced. Keeps the warning to one line per
-    /// model per run instead of one per ingested event.
-    private var loggedUnpricedModels: Set<String> = []
+
     private var fileOffsets: [URL: UInt64] = [:]
     private var fileMTimes: [URL: TimeInterval] = [:]
     private var dailyTotals: [Date: DayTotals] = [:]
@@ -86,7 +144,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
     /// across long-running sessions) and lets the persistence layer
     /// store only today's keys without losing the streaming-across-restart
     /// safety net.
-    private var seenRequestKeys: [String: Date] = [:]
+    private var seenEventKeys: [String: Date] = [:]
     private var pollTask: Task<Void, Never>?
     private var onChange: (@Sendable (DayTotals, DayTotals?) async -> Void)?
     nonisolated private let watchedCounter = AtomicIntCounter()
@@ -103,18 +161,18 @@ actor ClaudeCodeUsageReader: UsageProvider {
     /// activity so the UI rolls over to a fresh "today" frame at midnight
     /// (and on the first poll after a long system sleep that crossed it).
     /// Nil until the first emit so we never fire a synthetic rollover before
-    /// the reader has produced a real frame.
+    /// the provider has produced a real frame.
     private var lastEmittedDayKey: Date?
     /// False until the initial backfill scan has finished parsing every
     /// in-window JSONL. While false, `current()` suppresses `prev` (passes
     /// nil) so consumers can't make ratio decisions on a partially populated
     /// "yesterday" total. Without this guard the panel would flash a wild
     /// day-over-day delta mid-scan: yesterday's daily total is rebuilt
-    /// incrementally as the reader walks the JSONL file containing it, so for
+    /// incrementally as the tail walks the JSONL file containing it, so for
     /// a few hundred ms `today` is compared against a not-yet-finalised
-    /// `prev`. The flag flips once after `start()` runs
-    /// its blocking cold pass; FSEvents-driven incremental ingest from
-    /// then on operates on a fully consistent `prev`.
+    /// `prev`. The flag flips once after `start()` runs its blocking cold
+    /// pass; FSEvents-driven incremental ingest from then on operates on a
+    /// fully consistent `prev`.
     private var coldScanComplete = false
     /// Max wall-clock between throttled saves. SIGKILL/power loss bounds
     /// progress loss to this window; SIGTERM still flushes cleanly via
@@ -128,205 +186,43 @@ actor ClaudeCodeUsageReader: UsageProvider {
     /// instead of many.
     private static let fsEventsLatency: CFTimeInterval = 1.0
 
-    // `ISO8601DateFormatter.date(from:)` is documented thread-safe on Apple
-    // platforms (only `formatOptions` mutation is not). We only ever read
-    // these instances; `nonisolated(unsafe)` is the right escape hatch under
-    // Swift 6 strict concurrency.
-    nonisolated(unsafe) private static let isoFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    nonisolated(unsafe) private static let isoFormatterNoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
-    /// Bytes for `"type"` and `"assistant"`. Used as a cheap prefilter on raw
-    /// line bytes before paying the JSON-parse cost: a line passes only if it
-    /// contains `"type"` followed (with optional JSON whitespace and a `:`) by
-    /// `"assistant"`. Tolerating whitespace matters — `json.dumps` defaults
-    /// emit `"type": "assistant"`, and pretty-printed rollouts otherwise slip
-    /// past a strict-compact prefilter.
-    private static let typeKeyBytes: [UInt8] = Array("\"type\"".utf8)
-    private static let assistantValueBytes: [UInt8] = Array("\"assistant\"".utf8)
-
-    static func bufferContainsAssistantMarker(
-        _ buf: UnsafePointer<UInt8>,
-        from: Int,
-        to: Int
-    ) -> Bool {
-        let key = typeKeyBytes
-        let val = assistantValueBytes
-        var i = from
-        let keyLimit = to - key.count
-        while i <= keyLimit {
-            if !matches(buf, at: i, pattern: key) {
-                i += 1
-                continue
-            }
-            var j = i + key.count
-            while j < to, isJSONWhitespace(buf[j]) { j += 1 }
-            guard j < to, buf[j] == 0x3A else {  // ':'
-                i += 1
-                continue
-            }
-            j += 1
-            while j < to, isJSONWhitespace(buf[j]) { j += 1 }
-            if j + val.count <= to, matches(buf, at: j, pattern: val) {
-                return true
-            }
-            i += 1
-        }
-        return false
-    }
-
-    private static func matches(
-        _ buf: UnsafePointer<UInt8>, at start: Int, pattern: [UInt8]
-    ) -> Bool {
-        for k in 0..<pattern.count where buf[start + k] != pattern[k] { return false }
-        return true
-    }
-
-    private static func isJSONWhitespace(_ b: UInt8) -> Bool {
-        b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D
-    }
-
-    /// Manual parser for the `YYYY-MM-DDTHH:MM:SS[.fff]Z` shape Claude Code
-    /// writes to JSONL. Foundation's `ISO8601DateFormatter` allocates on
-    /// every call and walks Calendar+locale, costing tens of µs per parse.
-    /// Across the cold-start workload (~44k assistant lines) that alone is
-    /// over a second of pure formatter overhead. This path is digit-math +
-    /// `timegm`, sub-µs/line. Returns nil for any unexpected shape so the
-    /// caller can fall back to the Foundation formatter, keeping forward
-    /// compatibility if the upstream timestamp format ever shifts.
-    static func parseISODate(_ s: String) -> Date? {
-        let bytes = Array(s.utf8)
-        if bytes.count < 20 { return nil }
-        // Fixed-offset digit check on the date+time skeleton. Bails on the
-        // first wrong separator so a slightly different shape ("+00:00"
-        // timezones, etc.) falls through to the formatter path.
-        guard bytes[4] == 0x2D, bytes[7] == 0x2D, bytes[10] == 0x54,
-            bytes[13] == 0x3A, bytes[16] == 0x3A
-        else { return nil }
-        func d(_ i: Int) -> Int { Int(bytes[i] &- 0x30) }
-        for idx in [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18] {
-            let v = bytes[idx]
-            if v < 0x30 || v > 0x39 { return nil }
-        }
-        let year = d(0) * 1000 + d(1) * 100 + d(2) * 10 + d(3)
-        let month = d(5) * 10 + d(6)
-        let day = d(8) * 10 + d(9)
-        let hour = d(11) * 10 + d(12)
-        let minute = d(14) * 10 + d(15)
-        let second = d(17) * 10 + d(18)
-        var i = 19
-        var frac: Double = 0
-        if i < bytes.count && bytes[i] == 0x2E {  // '.'
-            i += 1
-            var num = 0
-            var div = 1
-            while i < bytes.count, bytes[i] >= 0x30, bytes[i] <= 0x39 {
-                num = num * 10 + Int(bytes[i] &- 0x30)
-                div *= 10
-                i += 1
-            }
-            if div > 1 { frac = Double(num) / Double(div) }
-        }
-        guard i < bytes.count, bytes[i] == 0x5A else { return nil }  // 'Z'
-        var tmStruct = tm()
-        tmStruct.tm_year = Int32(year - 1900)
-        tmStruct.tm_mon = Int32(month - 1)
-        tmStruct.tm_mday = Int32(day)
-        tmStruct.tm_hour = Int32(hour)
-        tmStruct.tm_min = Int32(minute)
-        tmStruct.tm_sec = Int32(second)
-        let epoch = timegm(&tmStruct)
-        if epoch == -1 { return nil }
-        return Date(timeIntervalSince1970: TimeInterval(epoch) + frac)
-    }
-
-    /// Parses a JSON timestamp, fast path first, Foundation for the shapes it
-    /// rejects by design: an offset such as `+00:00` in place of `Z`, or more
-    /// than three fractional digits. Both occur — Anthropic's usage endpoint
-    /// sends `2026-09-10T12:20:00.061389+00:00` — so every caller needs the
-    /// fallback, which is why it lives here rather than at each call site.
-    static func parseTimestamp(_ text: String) -> Date? {
-        parseISODate(text)
-            ?? isoFormatter.date(from: text)
-            ?? isoFormatterNoFrac.date(from: text)
-    }
-
-    private let limitsProbe: ClaudeLimitsProbe?
-    nonisolated private let profile: ClaudeProfileSource
-
     init(
-        claudeDir: URL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/projects"),
+        adapter: sending any SourceAdapter,
         retainDays: Int = 2,
         pollInterval: Duration = .seconds(60),
-        persistenceURL: URL? = nil,
-        pricingOverride: [String: ModelPricing]? = nil,
-        limitsProbe: ClaudeLimitsProbe? = nil,
-        profile: ClaudeProfileSource = ClaudeProfileSource()
+        persistenceURL: URL? = nil
     ) {
-        self.claudeDir = claudeDir
+        let descriptor = adapter.descriptor
+        self.adapter = adapter
+        self.id = descriptor.id
+        self.root = descriptor.root
+        self.watcherLabel = descriptor.watcherLabel
+        self.signals = descriptor.signals
         self.retainDays = retainDays
         self.pollInterval = pollInterval
         self.persistenceURL = persistenceURL
-        self.pricingOverride = pricingOverride
-        self.limitsProbe = limitsProbe
-        self.profile = profile
     }
 
-    /// Claude Code keeps no limit state on disk, so the windows come from the
-    /// probe rather than from anything this reader parsed.
-    nonisolated func currentWindows() -> [UsageWindow] {
-        limitsProbe?.currentWindows() ?? []
-    }
+    nonisolated func currentWindows() -> [UsageWindow] { signals.currentWindows() }
 
-    /// The plan comes from the CLI's own config file rather than the usage
-    /// endpoint, which carries no such field — so it is readable whether or
-    /// not the user turned the limits probe on.
-    nonisolated func currentPlan() -> String? { profile.currentPlan() }
+    nonisolated func currentPlan() -> String? { signals.currentPlan() }
 
-    nonisolated func currentPlanTier() -> String? { profile.currentPlanTier() }
+    nonisolated func currentPlanTier() -> String? { signals.currentPlanTier() }
 
     func applyPriceCatalog(_ catalog: PriceCatalog) {
-        priceCatalog = catalog.table(for: .anthropic)
-        // Re-arm the log: a model the previous catalog lacked may now resolve,
-        // and the operator wants to see that it healed.
-        loggedUnpricedModels.removeAll()
-    }
-
-    /// Claude Code writes `<synthetic>` as the model for assistant turns it
-    /// produced locally (interrupts, error notices). Every such event carries
-    /// all-zero usage, so it is legitimately unpriced — warning about it would
-    /// fire on every run and train the operator to ignore the real warnings.
-    private static let nonBillableModels: Set<String> = ["<synthetic>"]
-
-    /// Reports an unpriced model once per model: its tokens contribute $0 to the
-    /// day's cost, which is otherwise indistinguishable from a quiet day.
-    private func logUnpricedModelOnce(for model: String) {
-        guard !Self.nonBillableModels.contains(model) else { return }
-        guard !loggedUnpricedModels.contains(model) else { return }
-        guard Pricing.price(for: model, override: pricingOverride, catalog: priceCatalog) == nil
-        else { return }
-        loggedUnpricedModels.insert(model)
-        sissyLog(
-            "sissy: no rate for '\(model)' in any pricing source — its tokens "
-                + "bill at $0; add a `pricingOverride` entry in server.json")
+        adapter.applyPriceCatalog(catalog)
     }
 
     func start(onChange: @escaping @Sendable (DayTotals, DayTotals?) async -> Void) async {
         self.onChange = onChange
-        // Ahead of the restored-snapshot emit below, so the first frame a
-        // relaunch replays already carries the plan.
-        profile.refresh()
         let loaded = loadAndApplyPersistedState()
+        // Ahead of the restored-snapshot emit below, so the first frame a
+        // relaunch replays already carries what the adapter reads out of band
+        // — a plan the log itself will not name again until the next turn.
+        if adapter.prepareToStart() { persistDirty = true }
         // If we restored a snapshot, fire the callback immediately. Without
         // this emit the first frame waits for the next JSONL append — minutes
-        // of idle between Claude turns — and the panel sits on its empty-day
+        // of idle between turns — and the panel sits on its empty-day
         // placeholder despite valid totals being in memory.
         if loaded {
             let (today, prev) = current()
@@ -359,8 +255,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
 
     func stop() async {
         // Force a final flush so a clean SIGTERM never loses unsaved offset
-        // progress. Best-effort: save errors are swallowed (consistent with
-        // the per-save site) — nothing actionable on the shutdown path.
+        // progress. Best-effort: a save failure is logged where it happens and
+        // nothing on the shutdown path can act on it.
         saveSnapshotIfDirty(force: true)
         fsWatcher?.stop()
         fsWatcher = nil
@@ -372,17 +268,20 @@ actor ClaudeCodeUsageReader: UsageProvider {
         // aggregator (and therefore every provider) alive for the rest of
         // the process — irrelevant for a normal app lifetime, but
         // it shows up as a leak in test harnesses that boot+stop many
-        // readers within one process.
+        // providers within one process.
         onChange = nil
     }
 
-    /// Boots an FSEvents watcher rooted at `claudeDir`. FSEvents wakes are
+    /// Boots an FSEvents watcher rooted at the source tree. FSEvents wakes are
     /// the primary trigger for JSONL ingest; the surviving `pollTask` runs
     /// at the configured cadence (default 60s) as a safety net for missed
-    /// events and midnight rollover with no JSONL activity.
+    /// events and midnight rollover with no JSONL activity. The stream is
+    /// rooted at the tree, so subdirectories a CLI creates on demand — a new
+    /// project folder, Codex's dated rollout dirs — are followed without
+    /// restarting it.
     private func startFSWatcher() {
-        let watcher = FSWatcher(label: "sissy.usage.fswatch")
-        let ok = watcher.start(path: claudeDir, latency: Self.fsEventsLatency) { [weak self] event in
+        let watcher = FSWatcher(label: watcherLabel)
+        let ok = watcher.start(path: root, latency: Self.fsEventsLatency) { [weak self] event in
             await self?.ingestEventPaths(
                 event.urls, rescanAll: event.rescanAll, rootChanged: event.rootChanged)
         }
@@ -390,7 +289,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
             fsWatcher = watcher
         }
         // On failure (e.g. unsupported filesystem) we fall back to pure
-        // polling — the `pollTask` below still runs. No fatal here.
+        // polling — the `pollTask` still runs. No fatal here.
     }
 
     /// FSEvents callback target. Ingests new bytes from each `.jsonl` URL and
@@ -414,8 +313,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
                 if ingestNewLines(in: url) { dirty = true }
             }
         } else {
-            // Dedup via Set: a single Claude turn can produce multiple events
-            // for the same JSONL within the 1s coalesce window.
+            // Dedup via Set: a single turn can produce multiple events for the
+            // same JSONL within the 1s coalesce window.
             var seen = Set<URL>()
             for url in urls where url.pathExtension == "jsonl" {
                 if !seen.insert(url).inserted { continue }
@@ -424,8 +323,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
             // Keep watchedCounter (which decides whether the panel says "no
             // session logs found") in sync with reality. Without this, an
             // FSEvents-only run that starts against an empty tree and then
-            // sees the first Claude turn would still report files=0 because
-            // the counter only updates on enumerate() calls.
+            // sees the first turn would still report files=0 because the
+            // counter only updates on enumerate() calls.
             watchedCounter.store(max(watchedCounter.load(), fileOffsets.count))
         }
         let todayKey = Calendar.current.startOfDay(for: Date())
@@ -467,10 +366,8 @@ actor ClaudeCodeUsageReader: UsageProvider {
     func isWarm() -> Bool { coldScanComplete }
 
     private func poll() async {
-        // Cheap by construction: the source stats the file and re-parses only
-        // when it actually moved, and no more often than its own floor.
-        profile.refresh()
-        // Newest files first so the active project's JSONL — the only one
+        adapter.willPoll()
+        // Newest files first so the active session's JSONL — the only one
         // that can contain today's usage — is parsed before any historical
         // file. Combined with the throttled emit below this means the
         // menubar gets a usable frame within ~100 ms of launch even on
@@ -523,7 +420,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
             // Calendar day rolled since the last emit and nothing wrote a
             // new JSONL line. Force a synthetic emit so the menubar
             // resets to a fresh "today=0, prev=yesterday" frame instead
-            // of holding the stale frame until the next Claude turn. Covers
+            // of holding the stale frame until the next turn. Covers
             // both the trivial case (Mac stays awake across midnight) and
             // the wake-after-sleep case (system slept across one or more
             // midnights, first poll after wake observes the day shift).
@@ -538,10 +435,13 @@ actor ClaudeCodeUsageReader: UsageProvider {
         saveSnapshotIfDirty()
     }
 
+    /// Every `.jsonl` under the tree, newest first. Any name is accepted —
+    /// Codex writes `rollout-*.jsonl` and Claude Code a UUID, and a fork that
+    /// renames either still gets read.
     private func enumerateJSONLSortedByMTime() -> [URL] {
         guard
             let it = FileManager.default.enumerator(
-                at: claudeDir,
+                at: root,
                 includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
                 options: [.skipsHiddenFiles]
             )
@@ -566,74 +466,6 @@ actor ClaudeCodeUsageReader: UsageProvider {
         return candidates.map(\.url)
     }
 
-    private func parseLine(_ data: Data) -> UsageEvent? {
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            obj["type"] as? String == "assistant",
-            let msg = obj["message"] as? [String: Any],
-            let usage = msg["usage"] as? [String: Any],
-            let model = msg["model"] as? String,
-            let tsStr = obj["timestamp"] as? String
-        else { return nil }
-
-        guard let ts = Self.parseTimestamp(tsStr) else { return nil }
-
-        let cutoff = Date().addingTimeInterval(Double(-retainDays * 86400))
-        if ts < cutoff { return nil }
-
-        // Claude Code logs the same assistant turn 2-3 times per JSONL file
-        // (streaming chunks share the same final usage). Dedupe by requestId.
-        let dedupeKey: String
-        if let rid = obj["requestId"] as? String, !rid.isEmpty {
-            dedupeKey = "rid:\(rid)"
-        } else if let mid = msg["id"] as? String, !mid.isEmpty {
-            dedupeKey = "mid:\(mid)"
-        } else if let uuid = obj["uuid"] as? String, !uuid.isEmpty {
-            dedupeKey = "uuid:\(uuid)"
-        } else {
-            return nil
-        }
-        if seenRequestKeys[dedupeKey] != nil { return nil }
-        seenRequestKeys[dedupeKey] = Calendar.current.startOfDay(for: ts)
-
-        let input = UsageReaderShared.tokenCount(usage["input_tokens"])
-        let output = UsageReaderShared.tokenCount(usage["output_tokens"])
-        let cacheRead = UsageReaderShared.tokenCount(usage["cache_read_input_tokens"])
-
-        // Cache writes bill at two rates: 5-minute (1.25× input) and 1-hour
-        // (2× input). Prefer the nested `cache_creation` split; fall back to
-        // the aggregate `cache_creation_input_tokens` priced entirely at the
-        // 5m rate for pre-split logs. The nested sum equals the aggregate on
-        // every Claude Code line observed, so token totals are unaffected.
-        let cacheCreation5m: Int
-        let cacheCreation1h: Int
-        if let split = usage["cache_creation"] as? [String: Any] {
-            cacheCreation5m = UsageReaderShared.tokenCount(split["ephemeral_5m_input_tokens"])
-            cacheCreation1h = UsageReaderShared.tokenCount(split["ephemeral_1h_input_tokens"])
-        } else {
-            cacheCreation5m = UsageReaderShared.tokenCount(usage["cache_creation_input_tokens"])
-            cacheCreation1h = 0
-        }
-        let cacheCreation = cacheCreation5m + cacheCreation1h
-        logUnpricedModelOnce(for: model)
-        let cost = Pricing.cost(
-            model: model,
-            input: input,
-            output: output,
-            cacheRead: cacheRead,
-            cacheCreation: (fiveMinute: cacheCreation5m, oneHour: cacheCreation1h),
-            override: pricingOverride,
-            catalog: priceCatalog
-        )
-        return UsageEvent(
-            timestamp: ts,
-            inputTokens: input,
-            outputTokens: output,
-            cacheReadTokens: cacheRead,
-            cacheCreationTokens: cacheCreation,
-            cost: cost
-        )
-    }
-
     private func ingest(_ event: UsageEvent) {
         let key = Calendar.current.startOfDay(for: event.timestamp)
         let totalTokens =
@@ -654,11 +486,25 @@ actor ClaudeCodeUsageReader: UsageProvider {
         dailyTotals = dailyTotals.filter { $0.key >= cutoff }
         // Evict dedup keys for days that have aged out so the set's memory
         // footprint stays bounded across long-running sessions.
-        seenRequestKeys = seenRequestKeys.filter { $0.value >= cutoff }
+        seenEventKeys = seenEventKeys.filter { $0.value >= cutoff }
         let retained = UsageReaderShared.retainedFiles(
             mtimes: fileMTimes, cutoff: cutoff.timeIntervalSince1970)
         fileOffsets = fileOffsets.filter { retained.contains($0.key) }
         fileMTimes = fileMTimes.filter { retained.contains($0.key) }
+        adapter.trim(retaining: retained)
+    }
+
+    /// Hands one line to the adapter and buckets whatever it makes of it.
+    private func consume(_ data: Data, url: URL, byteOffset: UInt64) -> Bool {
+        let line = SourceLine(
+            data: data,
+            url: url,
+            byteOffset: byteOffset,
+            retainCutoff: Date().addingTimeInterval(Double(-retainDays * 86400))
+        )
+        guard let event = adapter.event(from: line, seen: &seenEventKeys) else { return false }
+        ingest(event)
+        return true
     }
 
     private func ingestNewLines(in url: URL) -> Bool {
@@ -693,11 +539,13 @@ actor ClaudeCodeUsageReader: UsageProvider {
         // chunk in the file.
         var chunkBaseAbs: UInt64 = readFrom
         var totalRead: UInt64 = 0
-        // Buffer for a line that straddles a chunk boundary. Parses without
-        // the byte-level marker prefilter — at most one carry per chunk, and
-        // `parseLine` rejects non-assistant lines cheaply via the `type`
-        // string match.
+        // Buffer for a line that straddles a chunk boundary, and where it
+        // started in the file — a dedup key built from the offset has to name
+        // the line's own start, not the chunk it finished in. Parses without
+        // the byte-level prefilter: at most one carry per chunk, and the
+        // adapter rejects a line it cannot use cheaply.
         var carry = Data()
+        var carryStartAbs: UInt64 = readFrom
 
         while true {
             let chunk: Data
@@ -718,23 +566,23 @@ actor ClaudeCodeUsageReader: UsageProvider {
                 var i = 0
                 while i < n {
                     if base[i] == 0x0A {
+                        let absLineStart =
+                            carry.isEmpty ? chunkBaseAbs + UInt64(lineStart) : carryStartAbs
                         if !carry.isEmpty {
                             // Stitch the trailing bytes of the previous chunk
                             // onto the head of this line.
                             if i > lineStart {
                                 carry.append(chunk.subdata(in: lineStart..<i))
                             }
-                            if let event = parseLine(carry) {
-                                ingest(event)
+                            if consume(carry, url: url, byteOffset: absLineStart) {
                                 anyIngested = true
                             }
                             carry.removeAll(keepingCapacity: true)
                         } else if i > lineStart,
-                            Self.bufferContainsAssistantMarker(base, from: lineStart, to: i)
+                            adapter.lineMayCount(base, from: lineStart, to: i)
                         {
                             let lineData = chunk.subdata(in: lineStart..<i)
-                            if let event = parseLine(lineData) {
-                                ingest(event)
+                            if consume(lineData, url: url, byteOffset: absLineStart) {
                                 anyIngested = true
                             }
                         }
@@ -745,6 +593,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
                 }
                 // Anything past the last newline carries to the next chunk.
                 if lineStart < n {
+                    if carry.isEmpty { carryStartAbs = chunkBaseAbs + UInt64(lineStart) }
                     carry.append(chunk.subdata(in: lineStart..<n))
                 }
             }
@@ -764,16 +613,16 @@ actor ClaudeCodeUsageReader: UsageProvider {
     }
 
     /// Reads the persisted snapshot and applies it if every per-file mtime
-    /// still matches the disk. Any mismatch (rotation, truncation, deleted
-    /// file) discards the snapshot entirely and falls back to a cold rescan
-    /// — cheap enough (<1 s on a 350 MB tree) that partial reconciliation
-    /// isn't worth the complexity.
+    /// still matches the disk, and the adapter accepts its own slice of it.
+    /// Any mismatch (rotation, truncation, deleted file) discards the snapshot
+    /// entirely and falls back to a cold rescan — cheap enough (<1 s on a
+    /// 350 MB tree) that partial reconciliation isn't worth the complexity.
     private func loadAndApplyPersistedState() -> Bool {
         guard let url = persistenceURL else { return false }
         let outcome = UsageStatePersistence.load(from: url)
         guard case .ok(let snapshot) = outcome else { return false }
 
-        let expectedHash = UsageStatePersistence.hashDataDir(claudeDir)
+        let expectedHash = UsageStatePersistence.hashDataDir(root)
         guard snapshot.claudeDataDirHash == expectedHash else { return false }
         guard snapshot.retainDays == retainDays else { return false }
 
@@ -827,10 +676,14 @@ actor ClaudeCodeUsageReader: UsageProvider {
             if dayKey < cutoffDay { continue }
             newKeys[k.key] = dayKey
         }
+        // Last, and before anything is committed: an adapter that cannot
+        // resume from this snapshot costs a cold scan, not a wrong resume with
+        // the offsets already at EOF.
+        guard adapter.resume(from: snapshot, offsets: newOffsets) else { return false }
         fileOffsets = newOffsets
         fileMTimes = newMTimes
         dailyTotals = newDaily
-        seenRequestKeys = newKeys
+        seenEventKeys = newKeys
         return true
     }
 
@@ -871,7 +724,7 @@ actor ClaudeCodeUsageReader: UsageProvider {
         // days are safe to drop because by the time a restart happens any
         // duplicate write for that day has already been seen and counted in
         // the in-process set.
-        let todayKeys: [UsageStateSnapshot.DedupKey] = seenRequestKeys.compactMap {
+        let todayKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap {
             (key, day) -> UsageStateSnapshot.DedupKey? in
             guard day == todayKey else { return nil }
             return UsageStateSnapshot.DedupKey(key: key, day: dayFmt.string(from: day))
@@ -880,20 +733,23 @@ actor ClaudeCodeUsageReader: UsageProvider {
         let snapshot = UsageStateSnapshot(
             schemaVersion: UsageStateSnapshot.currentSchemaVersion,
             savedAt: now,
-            claudeDataDirHash: UsageStatePersistence.hashDataDir(claudeDir),
+            claudeDataDirHash: UsageStatePersistence.hashDataDir(root),
             retainDays: retainDays,
             files: files,
             dailyTotals: daily,
-            dedupKeysToday: todayKeys
+            dedupKeysToday: todayKeys,
+            codexResume: adapter.resumeState()
         )
         do {
             try UsageStatePersistence.save(snapshot, to: url)
             lastSaveAt = now
             persistDirty = false
         } catch {
-            // Disk full / permission denied / etc. Keep in-memory state and
-            // retry next throttle. Don't log per save — the throttle bounds
-            // log spam; rare and recoverable.
+            // Retried on the next dirty save rather than propagated: a
+            // snapshot is an optimisation, and losing one costs a cold scan,
+            // not a reading. Logged because the failure is otherwise
+            // invisible and every later launch pays for it.
+            sissyLog("sissy: \(id) snapshot save failed at \(url.path): \(error)")
         }
     }
 }

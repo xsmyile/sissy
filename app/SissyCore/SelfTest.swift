@@ -265,22 +265,22 @@ func runSelfTest() {
     print("=== ServerConfig ===")
     runServerConfigTests()
 
-    print("=== ClaudeCodeUsageReader.parseISODate ===")
+    print("=== UsageReaderShared.parseISODate ===")
     runISODateTests()
 
-    print("=== ClaudeCodeUsageReader.bufferContainsAssistantMarker ===")
+    print("=== ClaudeCodeAdapter.bufferContainsAssistantMarker ===")
     runAssistantMarkerTests()
 
     print("=== UsageStatePersistence ===")
     runPersistenceTests()
 
-    print("=== ClaudeCodeUsageReader.streamingIngest ===")
+    print("=== ClaudeCodeAdapter.streamingIngest ===")
     runStreamingIngestTests()
 
     print("=== OpenAIPricing ===")
     runOpenAIPricingTests()
 
-    print("=== CodexUsageReader.streamingIngest ===")
+    print("=== CodexAdapter.streamingIngest ===")
     runCodexParserTests()
     runCodexModelBackfillTest()
     runCodexLegacySnapshotTest()
@@ -398,7 +398,7 @@ private func runServerConfigTests() {
 
 private func runISODateTests() {
     // Fractional seconds round-trip
-    let withFrac = ClaudeCodeUsageReader.parseISODate("2026-05-19T10:01:38.269Z")
+    let withFrac = UsageReaderShared.parseISODate("2026-05-19T10:01:38.269Z")
     expect("iso with frac non-nil", withFrac != nil, true)
     if let d = withFrac {
         // 1779184898.269 derived from epoch math; allow ms slack against fp.
@@ -406,41 +406,41 @@ private func runISODateTests() {
         expect("iso with frac value within 1ms", delta < 0.001, true)
     }
     // No fractional
-    let noFrac = ClaudeCodeUsageReader.parseISODate("2026-05-19T10:01:38Z")
+    let noFrac = UsageReaderShared.parseISODate("2026-05-19T10:01:38Z")
     expect("iso no frac non-nil", noFrac != nil, true)
     if let d = noFrac {
         expect("iso no frac value", Int(d.timeIntervalSince1970), 1_779_184_898)
     }
     // Wrong shape (offset timezone) falls back to nil so caller hits formatter
-    expect("iso offset tz returns nil", ClaudeCodeUsageReader.parseISODate("2026-05-19T10:01:38+02:00"), nil)
-    expect("iso missing Z returns nil", ClaudeCodeUsageReader.parseISODate("2026-05-19T10:01:38"), nil)
-    expect("iso too short returns nil", ClaudeCodeUsageReader.parseISODate("2026-05-19"), nil)
-    expect("iso bad separator returns nil", ClaudeCodeUsageReader.parseISODate("2026/05/19T10:01:38Z"), nil)
-    expect("iso non-digit returns nil", ClaudeCodeUsageReader.parseISODate("20XX-05-19T10:01:38Z"), nil)
+    expect("iso offset tz returns nil", UsageReaderShared.parseISODate("2026-05-19T10:01:38+02:00"), nil)
+    expect("iso missing Z returns nil", UsageReaderShared.parseISODate("2026-05-19T10:01:38"), nil)
+    expect("iso too short returns nil", UsageReaderShared.parseISODate("2026-05-19"), nil)
+    expect("iso bad separator returns nil", UsageReaderShared.parseISODate("2026/05/19T10:01:38Z"), nil)
+    expect("iso non-digit returns nil", UsageReaderShared.parseISODate("20XX-05-19T10:01:38Z"), nil)
     // Leap day
-    let leap = ClaudeCodeUsageReader.parseISODate("2024-02-29T12:00:00Z")
+    let leap = UsageReaderShared.parseISODate("2024-02-29T12:00:00Z")
     expect("iso leap day non-nil", leap != nil, true)
 
     // What the fast path rejects, parseTimestamp must still accept: this is
     // the exact shape Anthropic's usage endpoint sends.
-    let offset = ClaudeCodeUsageReader.parseTimestamp("2026-09-10T12:20:00.061389+00:00")
+    let offset = UsageReaderShared.parseTimestamp("2026-09-10T12:20:00.061389+00:00")
     expect("timestamp with offset and micros non-nil", offset != nil, true)
     if let d = offset {
         expect("timestamp with offset value", Int(d.timeIntervalSince1970), 1_789_042_800)
     }
     expect(
         "timestamp with frac and Z",
-        ClaudeCodeUsageReader.parseTimestamp("2026-05-19T10:01:38.269Z") != nil,
+        UsageReaderShared.parseTimestamp("2026-05-19T10:01:38.269Z") != nil,
         true
     )
-    expect("timestamp rejects a non-date", ClaudeCodeUsageReader.parseTimestamp("not a date"), nil)
+    expect("timestamp rejects a non-date", UsageReaderShared.parseTimestamp("not a date"), nil)
 }
 
 private func runAssistantMarkerTests() {
     func has(_ s: String) -> Bool {
         var bytes = Array(s.utf8)
         return bytes.withUnsafeMutableBufferPointer { buf in
-            ClaudeCodeUsageReader.bufferContainsAssistantMarker(buf.baseAddress!, from: 0, to: buf.count)
+            ClaudeCodeAdapter.bufferContainsAssistantMarker(buf.baseAddress!, from: 0, to: buf.count)
         }
     }
     expect("marker present compact", has("{\"type\":\"assistant\",\"x\":1}"), true)
@@ -589,7 +589,7 @@ private func runStreamingIngestTests() {
     let sem = DispatchSemaphore(value: 0)
     let box = TestBox<(tokens: Int, cost: Decimal)>((0, 0))
     Task {
-        let reader = ClaudeCodeUsageReader(
+        let reader = LocalUsageProvider.claudeCode(
             claudeDir: tempDir,
             retainDays: 2,
             pollInterval: .seconds(60),
@@ -793,7 +793,7 @@ private func runOpenAIPricingTests() {
 
     // `output_tokens` is gross — reasoning is a sub-breakdown, NOT additive.
     // Verified on real rollouts: `total_tokens == input_tokens + output_tokens`
-    // regardless of reasoning_output_tokens. CodexUsageReader passes
+    // regardless of reasoning_output_tokens. CodexAdapter passes
     // `output_tokens` straight through (no `+ reasoning`), matching ccusage.
     let onlyOutput = OpenAIPricing.cost(
         model: "gpt-5", input: 1_000_000, output: 100_000, cacheRead: 0)
@@ -840,7 +840,7 @@ private func runCodexParserTests() {
     let sem = DispatchSemaphore(value: 0)
     let box = TestBox<(tokens: Int, cost: Decimal)>((0, 0))
     Task {
-        let reader = CodexUsageReader(
+        let reader = LocalUsageProvider.codex(
             codexDir: tempDir,
             retainDays: 2,
             pollInterval: .seconds(60),
@@ -877,7 +877,7 @@ private func runCodexParserTests() {
         // persistence URL it cold-scans from offset 0 — same result as the
         // first reader because the per-turn `last_token_usage` events sum
         // identically regardless of how many times the reader reboots.
-        let reader = CodexUsageReader(
+        let reader = LocalUsageProvider.codex(
             codexDir: tempDir,
             retainDays: 2,
             pollInterval: .seconds(60),
@@ -1181,7 +1181,7 @@ func runKeychainTimeoutTests() {
 /// how a resumed reader ended up showing the Codex row with no badge. The
 /// auth file is what answers before the next turn.
 func runCodexAuthFallbackTest() {
-    print("=== CodexUsageReader.authFallback ===")
+    print("=== CodexAdapter.authFallback ===")
     let fm = FileManager.default
     let tempDir = fm.temporaryDirectory.appendingPathComponent(
         "sissy-codex-auth-\(UUID().uuidString)"
@@ -1220,7 +1220,7 @@ func runCodexAuthFallbackTest() {
     let sem = DispatchSemaphore(value: 0)
     let box = TestBox<String?>(nil)
     Task {
-        let reader = CodexUsageReader(
+        let reader = LocalUsageProvider.codex(
             codexDir: sessionsDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: nil)
         await reader.start { _, _ in }
@@ -1239,7 +1239,7 @@ func runCodexAuthFallbackTest() {
 /// `primary`/`secondary` key, and a bucket whose `resets_at` has passed
 /// describes a window that no longer exists.
 func runCodexRateLimitTest() {
-    print("=== CodexUsageReader.rateLimits ===")
+    print("=== CodexAdapter.rateLimits ===")
     let fm = FileManager.default
     let tempDir = fm.temporaryDirectory.appendingPathComponent(
         "sissy-codex-limits-\(UUID().uuidString)"
@@ -1278,7 +1278,7 @@ func runCodexRateLimitTest() {
     let box = TestBox<[UsageWindow]>([])
     let planBox = TestBox<String?>(nil)
     Task {
-        let reader = CodexUsageReader(
+        let reader = LocalUsageProvider.codex(
             codexDir: tempDir,
             retainDays: 2,
             pollInterval: .seconds(60),
@@ -1307,7 +1307,7 @@ func runCodexRateLimitTest() {
 /// whole time. A cold scan gets the same answer in seconds, so the assertion
 /// is that the totals survive the discard.
 func runCodexLegacySnapshotTest() {
-    print("=== CodexUsageReader.legacySnapshot ===")
+    print("=== CodexAdapter.legacySnapshot ===")
     let fm = FileManager.default
     let tempDir = fm.temporaryDirectory.appendingPathComponent(
         "sissy-codex-legacy-\(UUID().uuidString)"
@@ -1332,7 +1332,7 @@ func runCodexLegacySnapshotTest() {
 
     let sem1 = DispatchSemaphore(value: 0)
     Task {
-        let r = CodexUsageReader(
+        let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
         await r.start { _, _ in }
@@ -1367,7 +1367,7 @@ func runCodexLegacySnapshotTest() {
     let sem2 = DispatchSemaphore(value: 0)
     let observed = TestBox<Decimal>(0)
     Task {
-        let r = CodexUsageReader(
+        let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
         await r.start { _, _ in }
@@ -1390,7 +1390,7 @@ func runCodexLegacySnapshotTest() {
 /// only from the CLI's own event stream, so a reader that resumed at EOF with
 /// nothing persisted showed no gauges at all until the next turn.
 func runCodexWindowPersistenceTest() {
-    print("=== CodexUsageReader.windowPersistence ===")
+    print("=== CodexAdapter.windowPersistence ===")
     let fm = FileManager.default
     let tempDir = fm.temporaryDirectory.appendingPathComponent(
         "sissy-codex-windows-\(UUID().uuidString)"
@@ -1415,7 +1415,7 @@ func runCodexWindowPersistenceTest() {
 
     let sem1 = DispatchSemaphore(value: 0)
     Task {
-        let r = CodexUsageReader(
+        let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
         await r.start { _, _ in }
@@ -1430,7 +1430,7 @@ func runCodexWindowPersistenceTest() {
     let box = TestBox<[UsageWindow]>([])
     let planBox = TestBox<String?>(nil)
     Task {
-        let r = CodexUsageReader(
+        let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
         await r.start { _, _ in }
@@ -1459,7 +1459,7 @@ func runCodexWindowPersistenceTest() {
 /// the persisted offset but on a session that declared a non-default model in
 /// an earlier turn_context would mis-price as `gpt-5-codex`.
 func runCodexModelBackfillTest() {
-    print("=== CodexUsageReader.modelBackfill ===")
+    print("=== CodexAdapter.modelBackfill ===")
     let fm = FileManager.default
     let tempDir = fm.temporaryDirectory.appendingPathComponent(
         "sissy-codex-backfill-\(UUID().uuidString)"
@@ -1485,7 +1485,7 @@ func runCodexModelBackfillTest() {
 
     let sem1 = DispatchSemaphore(value: 0)
     Task {
-        let r = CodexUsageReader(
+        let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
         await r.start { _, _ in }
@@ -1513,7 +1513,7 @@ func runCodexModelBackfillTest() {
     let sem2 = DispatchSemaphore(value: 0)
     let observed = TestBox<Decimal>(0)
     Task {
-        let r = CodexUsageReader(
+        let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
         await r.start { _, _ in }

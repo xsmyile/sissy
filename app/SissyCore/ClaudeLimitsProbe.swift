@@ -230,7 +230,7 @@ actor ClaudeLimitsProbe {
             return Date(timeIntervalSince1970: epoch)
         }
         if let text = raw as? String {
-            return ClaudeCodeUsageReader.parseTimestamp(text)
+            return UsageReaderShared.parseTimestamp(text)
         }
         return nil
     }

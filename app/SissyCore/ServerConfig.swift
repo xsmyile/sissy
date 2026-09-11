@@ -1,7 +1,7 @@
 import Foundation
 
 /// Per-provider on/off toggles surfaced to the user via `server.json`.
-/// `nil` is the "let Sissy decide" state: ClaudeCodeUsageReader is
+/// `nil` is the "let Sissy decide" state: Claude Code is
 /// always on (it's the v0.1.0 baseline), and Codex is auto-detected from
 /// disk activity. Explicit `false` forces off even if data exists; explicit
 /// `true` forces on even if no recent activity is detected.
