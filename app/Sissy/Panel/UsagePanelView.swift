@@ -92,6 +92,7 @@ struct UsagePanelView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: Self.powerButtonSize, height: Self.powerButtonSize)
                 .foregroundStyle(state.mode == .off ? Color.secondary : Color.orange)
+                .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .glassEffect(
@@ -129,6 +130,7 @@ struct UsagePanelView: View {
             }
             .frame(width: Self.powerButtonSize, height: Self.powerButtonSize)
             .foregroundStyle(server.isOn ? Color.green : Color.secondary)
+            .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .glassEffect(
