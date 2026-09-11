@@ -19,18 +19,27 @@ final class ClaudeLimitsCopyTests: XCTestCase {
     }
 
     func testTheVisibleCaptionSaysWhatTheSwitchIsFor() {
-        XCTAssertTrue(ClaudeLimitsCopy.caption.contains("5-hour and weekly"))
+        XCTAssertTrue(
+            ClaudeLimitsCopy.caption.contains("5-hour and weekly"),
+            "the line on screen stopped saying what the switch actually shows"
+        )
     }
 
     /// Reading someone's keychain is worth a promise in writing, even when the
     /// promise is a click away rather than on screen.
     func testTheDetailKeepsTheReadOnlyGuarantee() {
-        XCTAssertTrue(ClaudeLimitsCopy.detail.contains("never writes or refreshes"))
+        XCTAssertTrue(
+            ClaudeLimitsCopy.detail.contains("never writes or refreshes"),
+            "the read-only promise about the user's keychain went missing"
+        )
     }
 
     /// Every re-sign re-prompts, so someone who has just updated Sissy meets
     /// the dialog again and needs it to read as expected rather than as a fault.
     func testTheDetailSetsTheExpectationAfterAnUpdate() {
-        XCTAssertTrue(ClaudeLimitsCopy.detail.contains("after an update"))
+        XCTAssertTrue(
+            ClaudeLimitsCopy.detail.contains("after an update"),
+            "nothing left to tell someone the re-prompt after an update is expected"
+        )
     }
 }

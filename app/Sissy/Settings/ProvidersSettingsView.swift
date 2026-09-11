@@ -71,6 +71,10 @@ enum ClaudeLimitsCopy {
         "Sissy reads the token Claude Code already keeps in your keychain — only ever "
         + "reads it, never writes or refreshes it. macOS asks again whenever Sissy's own "
         + "binary changes, so expect the prompt after an update."
+
+    /// What the button reads as to a screen reader, where the glyph says
+    /// nothing — the one reader who cannot see an `info.circle` and guess.
+    static let detailButtonLabel = "What Sissy reads"
 }
 
 /// Where each provider's numbers come from, and what it is doing about them.
@@ -147,7 +151,7 @@ struct ProvidersSettingsView: View {
             Image(systemName: "info.circle")
         }
         .buttonStyle(.borderless)
-        .accessibilityLabel("What Sissy reads")
+        .accessibilityLabel(ClaudeLimitsCopy.detailButtonLabel)
         .popover(isPresented: $showingLimitsDetail, arrowEdge: .bottom) {
             Text(ClaudeLimitsCopy.detail)
                 .font(.callout)
