@@ -19,6 +19,10 @@ final class UsageEngineHost {
     /// panel open.
     private(set) var isWarm: Bool = false
     private(set) var filesWatched: Int = 0
+    /// Every provider Sissy knows about, metering or not. The Providers tab
+    /// renders these; the two scalars above are the panel header's summary of
+    /// the same list, so they cannot disagree with it.
+    private(set) var providers: [ProviderReadiness] = []
     /// Whether the Claude Code limit probe is on. Read from `server.json`,
     /// which the engine owns: the app keeps no second copy, because the one
     /// it used to keep could disagree with the file the probe actually booted
@@ -68,6 +72,15 @@ final class UsageEngineHost {
         Task { await engine.stop() }
     }
 
+    /// Re-reads what each provider is doing. The readiness poll below stops
+    /// once the scan is warm, so a surface that opens later asks for itself
+    /// rather than keeping a timer alive for the whole session.
+    func refreshProviders() {
+        guard let engine else { return }
+        let host = self
+        Task { host.apply(await engine.providerReadiness()) }
+    }
+
     func setClaudeLimits(_ enabled: Bool) {
         guard let engine, enabled != claudeLimits else { return }
         claudeLimits = enabled
@@ -83,16 +96,25 @@ final class UsageEngineHost {
         model?.applyFrame(frame)
     }
 
+    /// Folds the per-provider list into the two scalars the panel header
+    /// reads. Only a metering provider has a scan, and an empty list is warm:
+    /// a run with every provider switched off has nothing left to wait for,
+    /// and must not pin the header in its cold-start placeholder.
+    private func apply(_ readiness: [ProviderReadiness]) {
+        providers = readiness
+        let scans = readiness.compactMap(\.scan)
+        filesWatched = scans.reduce(0) { $0 + $1.filesWatched }
+        isWarm = scans.allSatisfy(\.isWarm)
+    }
+
     private func pollReadiness() {
         readinessTask?.cancel()
         let host = self
         readinessTask = Task {
             while !Task.isCancelled {
                 guard let engine = host.engine else { return }
-                let readiness = await engine.readiness()
-                host.filesWatched = readiness.filesWatched
-                host.isWarm = readiness.isWarm
-                if readiness.isWarm { return }
+                host.apply(await engine.providerReadiness())
+                if host.isWarm { return }
                 try? await Task.sleep(for: Self.readinessPollInterval)
             }
         }
