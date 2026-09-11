@@ -81,8 +81,8 @@ targets:
         CODE_SIGN_STYLE: Automatic
       configs:
         # `.dev` bundle id on Debug so a release Sissy.app and a locally
-        # built dev Sissy.app can coexist — different LaunchAgent label,
-        # different Application Support subdir, different default port.
+        # built dev Sissy.app can coexist — different legacy LaunchAgent
+        # label, different Application Support subdir.
         # Release keeps the canonical bundle id so existing installs
         # upgrade cleanly.
         Debug:

@@ -11,7 +11,7 @@ name: pricing-oracle
 # split, whether Codex reasoning tokens are double-counted.
 #
 # Runs on a fixed synthetic fixture rather than real logs, so the comparison is
-# exact and reproducible. On real logs the two tools differ by ~0.06% on cost:
+# exact and reproducible. On real logs the two tools differ by ~0.35% on cost:
 # sub-agent (`isSidechain`) entries are written more than once and the tools
 # collapse a handful of them differently. See AGENTS.md.
 on:

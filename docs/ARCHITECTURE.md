@@ -43,7 +43,9 @@ version check.
 `tokens` / `cost` / `burn` are pre-formatted strings. That shape is inherited
 from rendering into 128×64 pixels, and it is why `UsageFormat` in the app
 re-implements its own formatters: every surface Sissy has now has room for a
-decimal and a full cent. Only `burn` is still read off the frame.
+decimal and a full cent. `burn` is read off the frame as-is; `tokens` and
+`cost` are read only in the branch where no provider has spent anything today,
+where both formatters agree on "0" anyway.
 
 `providers` carries the raw per-provider slices — tokens as `Int`, cost as
 `Decimal` — so the header subtitle, the panel's per-provider rows and each

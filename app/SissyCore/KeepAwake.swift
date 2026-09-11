@@ -12,10 +12,9 @@ enum KeepAwakeMode: String, Sendable, Codable {
 }
 
 /// The mode together with whether the Mac is actually being held awake right
-/// now. The two are the same thing under `on` and will not be under the agent
-/// mode, where Sissy watches without always holding — which is also what makes
-/// a refused assertion visible instead of silent: the mode stays where the user
-/// put it and `active` says what came of it.
+/// now. They come apart when power management refuses the assertion, which is
+/// the reason for carrying both: the mode stays where the user put it and
+/// `active` says what came of it, so a refusal is visible instead of silent.
 struct KeepAwakeState: Sendable, Equatable {
     let mode: KeepAwakeMode
     let active: Bool

@@ -44,8 +44,9 @@ if args.contains("--refresh-catalog") {
     // Puts a live LiteLLM catalog in the cache and exits. The pricing-oracle
     // job needs Sissy priced from the same upstream snapshot `ccusage` reads,
     // so that a disagreement means a convention diverged rather than the
-    // embedded seed simply being older. Booting the server and grepping its
-    // log for the refresh line did that until there was a server to boot.
+    // embedded seed simply being older. The oracle used to boot the daemon in
+    // server mode and grep its log for the refresh line; this replaced that
+    // when the server went.
     let sem = DispatchSemaphore(value: 0)
     var status: Int32 = 0
     Task.detached {
@@ -95,7 +96,7 @@ do {
 if args.contains("--scan") {
     // Optional provider filter (`--scan-provider claude-code|codex|all`,
     // default all). Lets the ccusage drift CI job dump just the Codex
-    // totals as JSON without spinning up an HTTP server.
+    // totals as JSON without launching the app.
     let scanFilter: String = {
         guard let idx = args.firstIndex(of: "--scan-provider"),
             idx + 1 < args.count
