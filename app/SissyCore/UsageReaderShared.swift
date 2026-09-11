@@ -57,6 +57,23 @@ enum UsageReaderShared {
         return allowed ? raw : nil
     }
 
+    /// The files still worth tracking, given each one's last-known mtime.
+    ///
+    /// A file whose last write fell out of the retain window has nothing left
+    /// to contribute: its events are already outside the day buckets the
+    /// readers keep. Tracking it anyway costs a stat on every poll and a row
+    /// in every save, and the enumerator re-admits it precisely *because* it
+    /// still has an offset — so the set only ever grew for as long as the
+    /// process ran. `loadAndApplyPersistedState` already drops these when it
+    /// reads a snapshot; this is the same rule applied while running.
+    ///
+    /// A file with no recorded mtime is not retained: nothing can vouch for
+    /// when it was last written, and re-reading it from zero is what the
+    /// enumerator would do for it anyway.
+    static func retainedFiles(mtimes: [URL: TimeInterval], cutoff: TimeInterval) -> Set<URL> {
+        Set(mtimes.lazy.filter { $0.value >= cutoff }.map(\.key))
+    }
+
     /// `yyyy-MM-dd` day-bucket key formatter. POSIX locale + Gregorian
     /// calendar so the key is stable across locale changes that would
     /// otherwise shift digit shaping.

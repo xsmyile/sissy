@@ -72,4 +72,35 @@ final class UsageBoundaryTests: XCTestCase {
             UsageWindow(minutes: 300, usedPercent: 104.6, resetsAt: .now))
         XCTAssertEqual(window.usedPercent, 104.6)
     }
+
+    // MARK: Per-file tracking
+
+    private static let fresh = URL(fileURLWithPath: "/tmp/fresh.jsonl")
+    private static let aged = URL(fileURLWithPath: "/tmp/aged.jsonl")
+
+    /// The maps only ever shrank at relaunch: the enumerator re-admits an
+    /// aged-out file *because* it still has an offset, so a session left
+    /// running kept stat-ing every file it had ever read and writing a row
+    /// for each into every snapshot.
+    func testRetainedFilesDropsOneWrittenBeforeTheCutoff() {
+        let retained = UsageReaderShared.retainedFiles(
+            mtimes: [Self.fresh: 2_000, Self.aged: 500],
+            cutoff: 1_000
+        )
+        XCTAssertEqual(retained, [Self.fresh])
+    }
+
+    func testRetainedFilesKeepsOneWrittenExactlyAtTheCutoff() {
+        let retained = UsageReaderShared.retainedFiles(
+            mtimes: [Self.fresh: 1_000],
+            cutoff: 1_000
+        )
+        XCTAssertEqual(retained, [Self.fresh])
+    }
+
+    /// Nothing can vouch for when it was last written, and the enumerator
+    /// would read it from zero anyway.
+    func testRetainedFilesDropsOneWithNoRecordedMTime() {
+        XCTAssertTrue(UsageReaderShared.retainedFiles(mtimes: [:], cutoff: 1_000).isEmpty)
+    }
 }
