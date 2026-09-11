@@ -205,8 +205,9 @@ the expect-it-again-after-an-update note sit behind an `info.circle` popover. A
 button rather than a `help` tooltip, which only a hovering pointer ever finds.
 
 There is no on/off switch on the page yet — turning a provider off at runtime
-means stopping a live reader, and nothing has ever called `stop()`. A row that is
-off therefore says where the switch that turned it off lives.
+means stopping a live tail, and turning it back on means building a new one: a
+provider that has stopped stays stopped, the same rule the engine follows. A row
+that is off therefore says where the switch that turned it off lives.
 
 ## Lifecycle and login items
 
@@ -253,6 +254,18 @@ An engine runs once: `UsageEngine.lifecycle` goes `idle → running → stopped`
 engine already torn down, with no handle left to cancel either. The app builds a
 fresh engine when it needs one, so reviving a stopped instance would only ever
 mean two of them metering the same trees.
+
+Each provider carries the same three states for the same reason, one level down.
+`UsageEngine.stop()` cancels the boot task and then stops every provider, so both
+arrive while a cold scan may still be walking a tree — and a scan is nothing but
+suspensions, one per `Task.yield()` and one per emit. `LocalUsageProvider.start()`
+re-reads `lifecycle` (and `Task.isCancelled`) after the scan rather than taking it
+for a complete pass: resuming past that point used to expose a half-built `prev`
+and arm an FSEvents stream plus a 60 s loop that the teardown had no handle left
+to cancel. The same read is what answers an FSEvents batch that was already in
+flight when the watcher was released — one carrying `rootChanged` would otherwise
+build a fresh stream after shutdown — and what makes a `stop()` actually interrupt
+a cold scan instead of only a cancelled boot task doing so.
 
 ## Operational notes
 
