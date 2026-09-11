@@ -7,6 +7,14 @@ import SwiftUI
 struct UsagePanelView: View {
     let model: SissyModel
 
+    /// Gives the popover a first responder on open, which is what makes
+    /// Escape close it: AppKit routes `cancelOperation:` through the
+    /// responder chain, and a panel of buttons has nothing that takes focus
+    /// on its own unless Full Keyboard Access is on. The effect is disabled
+    /// because the target is the whole panel — a focus ring around all of it
+    /// would say nothing.
+    @FocusState private var panelFocused: Bool
+
     private static let width: CGFloat = 340
     private static let footerTick: TimeInterval = 1
     private static let secondaryWindowOpacity: Double = 0.55
@@ -41,6 +49,10 @@ struct UsagePanelView: View {
             footer(live)
         }
         .frame(width: Self.width)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($panelFocused)
+        .defaultFocus($panelFocused, true)
     }
 
     // MARK: Header

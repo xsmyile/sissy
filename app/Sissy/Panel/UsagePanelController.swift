@@ -9,34 +9,26 @@ import SwiftUI
 /// the hosted view own the whole surface including the chevron region. The
 /// status item stays an `NSStatusItem` so the panel has a button to anchor to.
 ///
-/// Click-outside dismissal is *not* free here — see `outsideClickMonitor`.
+/// `.transient` needs no help here. Measured on macOS 26: showing the popover
+/// from a status-item click makes the app active and the popover window key,
+/// and AppKit then closes it on the next interaction outside it and drops
+/// activation on the way out. Taking key costs the app in front no menu bar —
+/// `_NSPopoverWindow` is an `NSPanel` carrying `.nonactivatingPanel`, which is
+/// what the system's own menu bar extras use. This class carried a global
+/// mouse-event monitor for a while, on the reading that an accessory app never
+/// activates and so never sees the click that dismisses a transient popover;
+/// the monitor duplicated what AppKit was already doing.
 @MainActor
-final class UsagePanelController: NSObject {
+final class UsagePanelController {
     private let popover = NSPopover()
     private var hostingController: NSHostingController<UsagePanelView>?
-    /// Closes the panel on a click that landed in another application.
-    ///
-    /// `.transient` dismisses only on events AppKit delivers to this process,
-    /// and this app is an accessory that never activates to show the panel —
-    /// so the click that lands on someone else's window is never ours to see
-    /// and the panel stayed open behind whatever the user clicked next. A
-    /// global monitor sees exactly those events: clicks inside the panel, and
-    /// on the status item, are delivered to us and never reach it.
-    ///
-    /// Activating the app on open would also make `.transient` work, and is
-    /// what most menubar apps do — but this one deliberately never takes
-    /// focus from the app in front (see `AppDelegate`'s activation yield), and
-    /// opening a read-only panel is no reason to start.
-    private var outsideClickMonitor: Any?
 
     var isOpen: Bool { popover.isShown }
 
     init(model: SissyModel) {
-        super.init()
         popover.behavior = .transient
         popover.animates = true
         popover.hasFullSizeContent = true
-        popover.delegate = self
 
         let root = UsagePanelView(model: model)
         let controller = NSHostingController(rootView: root)
@@ -51,35 +43,10 @@ final class UsagePanelController: NSObject {
             return
         }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
-            // Event monitors added to the main run loop fire on the main
-            // thread, which is what lets this hop straight onto the actor
-            // instead of deferring the dismissal by a run-loop turn.
-            MainActor.assumeIsolated { self?.close() }
-        }
     }
 
     func close() {
-        if popover.isShown {
-            popover.performClose(nil)
-        }
-        removeOutsideClickMonitor()
-    }
-
-    private func removeOutsideClickMonitor() {
-        guard let outsideClickMonitor else { return }
-        NSEvent.removeMonitor(outsideClickMonitor)
-        self.outsideClickMonitor = nil
-    }
-}
-
-extension UsagePanelController: NSPopoverDelegate {
-    /// Drops the monitor on every close, not only the ones this class asked
-    /// for: `.transient` still dismisses on in-app events, and nothing
-    /// guarantees that route came through `close()`.
-    func popoverDidClose(_ notification: Notification) {
-        removeOutsideClickMonitor()
+        guard popover.isShown else { return }
+        popover.performClose(nil)
     }
 }
