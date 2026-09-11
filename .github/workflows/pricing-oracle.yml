@@ -1,6 +1,6 @@
 name: pricing-oracle
 
-# Asserts that the daemon's token accounting and cost agree with `ccusage`, the
+# Asserts that the engine's token accounting and cost agree with `ccusage`, the
 # tool users cross-check Sissy against.
 #
 # This replaced a script that policed hand-maintained rate tables. There are no
@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   oracle:
-    name: sissy-serverd vs ccusage
+    name: sissy-cli vs ccusage
     runs-on: macos-26
     timeout-minutes: 20
     steps:
@@ -38,12 +38,12 @@ jobs:
       - name: Install build tools
         run: brew install xcodegen xcbeautify
 
-      - name: Build daemon
+      - name: Build the CLI
         working-directory: app
         run: |
           set -o pipefail
           xcodegen generate
-          xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+          xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
             -configuration Debug build CODE_SIGNING_ALLOWED=NO | xcbeautify
 
       - name: Build the fixture
@@ -76,7 +76,7 @@ jobs:
           # snapshot to Sissy's cache means a mismatch below is a convention
           # diverging rather than the embedded seed simply being older than
           # upstream.
-          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
             -configuration Debug -showBuildSettings 2>/dev/null \
             | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
           echo "DD=$DD" >> "$GITHUB_ENV"
@@ -85,14 +85,14 @@ jobs:
           # them land a usable catalog, so a transient upstream slowdown the
           # fetch is designed to absorb does not turn into a red oracle.
           status=0
-          "$DD/sissy-serverd" --refresh-catalog > "$RUNNER_TEMP/refresh.log" 2>&1 || status=$?
+          "$DD/sissy-cli" --refresh-catalog > "$RUNNER_TEMP/refresh.log" 2>&1 || status=$?
           cat "$RUNNER_TEMP/refresh.log"
           exit "$status"
 
       - name: Compare against ccusage
         run: |
           FIX="$RUNNER_TEMP/oracle"
-          CODEX_HOME="$FIX/codex" "$DD/sissy-serverd" \
+          CODEX_HOME="$FIX/codex" "$DD/sissy-cli" \
             --config "$RUNNER_TEMP/oracle.json" --scan > "$RUNNER_TEMP/sissy.json"
           CLAUDE_CONFIG_DIR="$FIX/claude" npx -y ccusage@latest claude --json \
             > "$RUNNER_TEMP/ccu-claude.json"
@@ -147,5 +147,5 @@ jobs:
               for f in failures:
                   print(f"::error::{f}")
               sys.exit(1)
-          print("sissy-serverd and ccusage agree exactly")
+          print("sissy-cli and ccusage agree exactly")
           PY

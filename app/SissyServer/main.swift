@@ -162,13 +162,13 @@ if args.contains("--scan") {
     exit(0)
 }
 
-// No flag, nothing to do. `sissy-serverd` used to be a LaunchAgent; the app
-// runs the engine in-process now and this binary exists for CI — the
-// self-test, the ccusage oracle's scan, the pricing seed and the catalog
-// refresh. Saying so beats exiting silently on a typo'd flag.
+// No flag, nothing to do. This binary used to be a LaunchAgent; the app runs
+// the engine in-process now and it exists for CI — the self-test, the ccusage
+// oracle's scan, the pricing seed and the catalog refresh. Saying so beats
+// exiting silently on a typo'd flag.
 daemonLog(
     """
-    sissy-serverd: no mode given. This binary is a CI tool, not a service.
+    sissy-cli: no mode given. This binary is a CI tool, not a service.
       --self-test         pure formatter, pricing and parser assertions
       --scan              today's totals as JSON, optionally --scan-provider <id>
       --dump-seed         regenerate PricingSeed.swift from a live LiteLLM fetch

@@ -27,7 +27,7 @@ jobs:
           ruff format --check scripts/
 
   app:
-    name: app + daemon (Xcode build + self-test)
+    name: app + cli (Xcode build + self-test)
     runs-on: macos-26
     defaults:
       run:
@@ -54,31 +54,31 @@ jobs:
           xcrun swift-format lint --recursive --strict \
             app/Sissy app/SissyServer app/SissyTests
 
-      - name: Build daemon
+      - name: Build the CLI
         run: |
           set -o pipefail
-          xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+          xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
             -configuration Debug build CODE_SIGNING_ALLOWED=NO \
             | xcbeautify --renderer github-actions
 
-      - name: Daemon self-test
+      - name: CLI self-test
         run: |
-          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
             -configuration Debug -showBuildSettings 2>/dev/null \
             | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
-          "$DD/sissy-serverd" --self-test
+          "$DD/sissy-cli" --self-test
 
       - name: Codex parser smoke (--scan against fixture)
         timeout-minutes: 3
         run: |
-          # End-to-end check that the daemon's Codex parser produces a
+          # End-to-end check that the engine's Codex parser produces a
           # deterministic token total on a known fixture. The fixture is
           # generated inline with a fresh timestamp so it never ages out of
           # the retain window. Asserts the field-mapping math (uncached =
           # input - cached, output = gross, never re-add reasoning) one more
           # time at the CLI surface — pure unit coverage already lives in
           # --self-test.
-          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
             -configuration Debug -showBuildSettings 2>/dev/null \
             | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
           FIXTURE_HOME="$RUNNER_TEMP/codex-home"
@@ -93,7 +93,7 @@ jobs:
           # Sum: event1 (4697+361+9600) + event2 (18435+546+9600) = 43_239
           # `output` is already gross (includes reasoning); we never re-add it.
           EXPECTED=43239
-          OUT=$(CODEX_HOME="$FIXTURE_HOME" "$DD/sissy-serverd" --scan --scan-provider codex)
+          OUT=$(CODEX_HOME="$FIXTURE_HOME" "$DD/sissy-cli" --scan --scan-provider codex)
           echo "$OUT"
           GOT=$(echo "$OUT" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['codex']['tokens'])")
           if [ "$GOT" != "$EXPECTED" ]; then

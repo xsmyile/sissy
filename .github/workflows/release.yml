@@ -114,27 +114,27 @@ jobs:
       # ship behind a green CI run that didn't include the latest
       # commit. Cheap (<5 min) compared to the cost of shipping a DMG
       # that fails its own --self-test.
-      - name: Build daemon (Debug)
+      - name: Build the CLI (Debug)
         working-directory: app
         run: |
           set -o pipefail
-          xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+          xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
             -configuration Debug build CODE_SIGNING_ALLOWED=NO \
             | xcbeautify --renderer github-actions
 
-      - name: Daemon self-test
+      - name: CLI self-test
         working-directory: app
         run: |
-          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
             -configuration Debug -showBuildSettings 2>/dev/null \
             | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
-          "$DD/sissy-serverd" --self-test
+          "$DD/sissy-cli" --self-test
 
       - name: Codex parser smoke (--scan against fixture)
         working-directory: app
         timeout-minutes: 3
         run: |
-          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
             -configuration Debug -showBuildSettings 2>/dev/null \
             | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
           FIXTURE_HOME="$RUNNER_TEMP/codex-home"
@@ -149,7 +149,7 @@ jobs:
           # `output` is already gross (includes reasoning); we never re-add it.
           # Sum: event1 (4697+361+9600) + event2 (18435+546+9600) = 43_239
           EXPECTED=43239
-          OUT=$(CODEX_HOME="$FIXTURE_HOME" "$DD/sissy-serverd" --scan --scan-provider codex)
+          OUT=$(CODEX_HOME="$FIXTURE_HOME" "$DD/sissy-cli" --scan --scan-provider codex)
           echo "$OUT"
           GOT=$(echo "$OUT" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['codex']['tokens'])")
           [ "$GOT" = "$EXPECTED" ] || { echo "Codex parser drift: expected $EXPECTED, got $GOT" >&2; exit 1; }
@@ -357,6 +357,13 @@ jobs:
           set -euo pipefail
           mkdir -p Casks
           rm -f Casks/.gitkeep
+          # The `uninstall launchctl:` stanza and the LaunchAgents zap path
+          # name an agent nothing registers any more. They stay because the
+          # machines that need them are exactly the ones that never ran the
+          # in-app retirement: a user who uninstalls before ever launching
+          # 0.1.10 would otherwise keep a login item starting a binary the
+          # DMG no longer contains. Drop them with the bundled plists, a
+          # release after 0.1.10.
           cat > Casks/sissy.rb << 'CASK'
           cask "sissy" do
             version "__VERSION__"

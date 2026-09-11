@@ -69,10 +69,10 @@ work.
 | 3 | `refactor(app)`: render the engine's frame types | merged (#54) |
 | 4 | `refactor(app)`: run the engine in-process, retire the LaunchAgent | merged (#55) |
 | 4a | `fix`: the release path, and a retirement that could not retire | merged (#56) |
-| 5 | `refactor`: drop the wire | **in review** |
+| 5 | `refactor`: drop the wire | merged (#57) |
 | 6 | `refactor`: drop the OLED residue | folded into 5 |
 | 7 | `chore`: notices and acknowledgements | folded into 5 |
-| 8 | `ci`: drop the daemon scheme | todo |
+| 8 | `ci`: rename the daemon scheme | **in review** |
 | 9 | `docs`: architecture and the rules that go with it | todo |
 
 The order of 2 → 4 → 5 is not cosmetic: it is the sequence in which CI never
@@ -218,12 +218,20 @@ client or a NIO handler. They were true when written and are now the kind of
 thing a reader would trust.
 
 **8 — CI and scripts.** The `sissy-serverd` scheme steps in `ci.yml`,
-`release.yml` and `pricing-oracle.yml`, and the scheme's own rename. The
-signing arms and `dev-build-app.sh` were done early in 4a — the script keeps
-its reason to exist, narrowed: `SMAppService` still demands a normally signed
-bundle for the login item and for the retirement. The Homebrew cask's
-`uninstall launchctl:` and its `~/Library/LaunchAgents/…plist` zap path stay for
-at least one release to clean up existing installs.
+`release.yml` and `pricing-oracle.yml`, and the scheme's own rename to
+`sissy-cli`. The signing arms and `dev-build-app.sh` were done early in 4a —
+the script keeps its reason to exist, narrowed: `SMAppService` still demands a
+normally signed bundle for the login item and for the retirement. The Homebrew
+cask's `uninstall launchctl:` and its `~/Library/LaunchAgents/…plist` zap path
+stay for at least one release to clean up existing installs, with a comment in
+`release.yml` saying whose machines they are still for.
+
+The tool's **bundle id moved too**, `com.radonforge.sissy.server` →
+`com.radonforge.sissy.cli`. The old string is now the label of the *retired*
+LaunchAgent — `LegacyAgentRetirement.labels` looks it up, the cask zaps it —
+and a CI binary answering to the same id is how a retirement ends up pointed at
+the wrong thing. Nothing reads it but `SissyPaths.isDev`, which only tests the
+`.dev` suffix.
 
 **9 — docs.** `docs/ARCHITECTURE.md`, and four conventions in `AGENTS.md` that
 stop being true: the daemon-ownership rule, the port rule, the bearer-token
