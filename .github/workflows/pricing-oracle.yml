@@ -72,31 +72,22 @@ jobs:
       - name: Refresh the pricing catalog
         working-directory: app
         run: |
-          # ccusage always prices from current LiteLLM. Booting the daemon once
-          # writes the same snapshot to its cache, so a mismatch below means a
-          # convention diverged rather than the embedded seed simply being older
-          # than upstream.
+          # ccusage always prices from current LiteLLM. Writing the same
+          # snapshot to Sissy's cache means a mismatch below is a convention
+          # diverging rather than the embedded seed simply being older than
+          # upstream.
           DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-serverd \
             -configuration Debug -showBuildSettings 2>/dev/null \
             | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
           echo "DD=$DD" >> "$GITHUB_ENV"
-          "$DD/sissy-serverd" --config "$RUNNER_TEMP/oracle.json" > "$RUNNER_TEMP/boot.log" 2>&1 &
-          pid=$!
-          # Either line means a live catalog reached the cache: the daemon
-          # fetches synchronously before the backfill when it starts cold, and
-          # only falls back to the periodic refresh when a cache already existed.
-          READY="pricing catalog (refreshed|fetched before backfill)"
-          # Must outlast the client's own retry budget (3 attempts x 20s request
-          # timeout + ~7s of backoff), or a transient upstream slowdown that the
-          # daemon is designed to absorb turns into a red oracle instead.
-          for _ in $(seq 1 120); do
-            grep -qE "$READY" "$RUNNER_TEMP/boot.log" && break
-            sleep 1
-          done
-          kill -TERM "$pid" 2>/dev/null || true
-          wait "$pid" 2>/dev/null || true
-          cat "$RUNNER_TEMP/boot.log"
-          grep -qE "$READY" "$RUNNER_TEMP/boot.log"
+          # `--refresh-catalog` carries its own retry budget (3 attempts x 20s
+          # request timeout + ~7s of backoff) and exits non-zero if none of
+          # them land a usable catalog, so a transient upstream slowdown the
+          # fetch is designed to absorb does not turn into a red oracle.
+          status=0
+          "$DD/sissy-serverd" --refresh-catalog > "$RUNNER_TEMP/refresh.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/refresh.log"
+          exit "$status"
 
       - name: Compare against ccusage
         run: |
