@@ -14,8 +14,6 @@ final class UsagePanelSnapshotTests: XCTestCase {
             tokens: tokens,
             cost: cost,
             burn: burn,
-            primary: tokens,
-            primaryLabel: "TOKENS",
             providers: providers,
             prevTokens: prev,
             prevCost: prev.map { Decimal($0) },
