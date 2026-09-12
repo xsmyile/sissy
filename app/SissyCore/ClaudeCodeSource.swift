@@ -142,7 +142,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
         b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D
     }
 
-    func event(from line: SourceLine, seen: inout [String: Date]) -> UsageEvent? {
+    func event(from line: SourceLine, seen: inout [String: SeenEvent]) -> UsageEvent? {
         guard let obj = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any],
             obj["type"] as? String == "assistant",
             let msg = obj["message"] as? [String: Any],
@@ -155,8 +155,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
 
         if ts < line.retainCutoff { return nil }
 
-        // Claude Code logs the same assistant turn 2-3 times per JSONL file
-        // (streaming chunks share the same final usage). Dedupe by requestId.
+        // Claude Code logs the same assistant turn 2-4 times per JSONL file
+        // while the answer streams. Dedupe by requestId.
         let dedupeKey: String
         if let rid = obj["requestId"] as? String, !rid.isEmpty {
             dedupeKey = "rid:\(rid)"
@@ -167,11 +167,17 @@ final class ClaudeCodeAdapter: SourceAdapter {
         } else {
             return nil
         }
-        if seen[dedupeKey] != nil { return nil }
-        seen[dedupeKey] = Calendar.current.startOfDay(for: ts)
+
+        let output = UsageReaderShared.tokenCount(usage["output_tokens"])
+        if let billed = seen[dedupeKey] {
+            guard let already = billed.billedOutputTokens, output > already else { return nil }
+            seen[dedupeKey]?.billedOutputTokens = output
+            return streamedRemainder(model: model, at: ts, outputTokens: output - already)
+        }
+        seen[dedupeKey] = SeenEvent(
+            day: Calendar.current.startOfDay(for: ts), billedOutputTokens: output)
 
         let input = UsageReaderShared.tokenCount(usage["input_tokens"])
-        let output = UsageReaderShared.tokenCount(usage["output_tokens"])
         let cacheRead = UsageReaderShared.tokenCount(usage["cache_read_input_tokens"])
 
         // Cache writes bill at two rates: 5-minute (1.25× input) and 1-hour
@@ -207,6 +213,35 @@ final class ClaudeCodeAdapter: SourceAdapter {
             cacheReadTokens: cacheRead,
             cacheCreationTokens: cacheCreation,
             cost: cost
+        )
+    }
+
+    /// What a later copy of a message already counted once still owes.
+    ///
+    /// Only the output count grows between the copies: the input and cache
+    /// counts were fixed when the request was made and every copy repeats
+    /// them, so a remainder that carried them again would bill the same cache
+    /// read two, three, four times. Measured on a day of real logs against
+    /// `ccusage`, which lands on all four token counts exactly this way.
+    private func streamedRemainder(model: String, at timestamp: Date, outputTokens: Int)
+        -> UsageEvent
+    {
+        UsageEvent(
+            timestamp: timestamp,
+            model: model,
+            inputTokens: 0,
+            outputTokens: outputTokens,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            cost: Pricing.cost(
+                model: model,
+                input: 0,
+                output: outputTokens,
+                cacheRead: 0,
+                cacheCreation: (fiveMinute: 0, oneHour: 0),
+                override: pricingOverride,
+                catalog: priceCatalog
+            )
         )
     }
 }

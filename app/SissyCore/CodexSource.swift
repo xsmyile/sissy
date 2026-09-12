@@ -170,7 +170,7 @@ final class CodexAdapter: SourceAdapter {
     /// Routes a JSONL line to the right parser. `turn_context` lines update
     /// the per-file model state; `event_msg/token_count` lines produce a
     /// billable `UsageEvent`. Any other shape is silently dropped.
-    func event(from line: SourceLine, seen: inout [String: Date]) -> UsageEvent? {
+    func event(from line: SourceLine, seen: inout [String: SeenEvent]) -> UsageEvent? {
         // Try token_count first (most lines past the prefilter) and fall
         // through to turn_context only on miss. turn_context is sparse —
         // one per turn — so the redundant parse on hit is fine.
@@ -220,7 +220,9 @@ final class CodexAdapter: SourceAdapter {
 
     /// Parses a `token_count` event line. Returns nil for any non-billable
     /// shape, dedup hit, or event outside the retain window.
-    private func parseTokenCount(_ line: SourceLine, seen: inout [String: Date]) -> UsageEvent? {
+    private func parseTokenCount(_ line: SourceLine, seen: inout [String: SeenEvent])
+        -> UsageEvent?
+    {
         guard let obj = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any],
             obj["type"] as? String == "event_msg",
             let payload = obj["payload"] as? [String: Any],
@@ -255,7 +257,7 @@ final class CodexAdapter: SourceAdapter {
         // persistence — `trim()` evicts older keys.
         let dedupKey = "codex:\(line.url.path):\(line.byteOffset)"
         if seen[dedupKey] != nil { return nil }
-        seen[dedupKey] = Calendar.current.startOfDay(for: ts)
+        seen[dedupKey] = SeenEvent(day: Calendar.current.startOfDay(for: ts))
 
         let input = UsageReaderShared.tokenCount(last["input_tokens"])
         let cached = UsageReaderShared.tokenCount(last["cached_input_tokens"])
