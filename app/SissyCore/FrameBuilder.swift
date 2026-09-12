@@ -40,6 +40,20 @@ struct UsageWindow: Sendable, Equatable, Codable {
 /// Raw per-provider slice carried on the frame so the app derives both the
 /// menubar header total and the panel's per-provider rows from a single
 /// payload rather than from two counts that can disagree.
+/// One project's share of a day.
+///
+/// `path` is the repository's absolute path, raw — the app renders the last
+/// component and keeps the rest for the tooltip, the same division every other
+/// field on a slice uses. It is personal data: a client's name is a
+/// directory's name, so it stays on the machine.
+struct ProjectTotals: Sendable, Equatable, Identifiable {
+    let path: String
+    let tokens: Int
+    let cost: Decimal
+
+    var id: String { path }
+}
+
 struct ProviderSlice: Sendable, Equatable, Identifiable {
     let id: String
     let tokens: Int
@@ -55,6 +69,10 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     /// Limit tier the plan is metered at (`max_5x`), for the one vendor that
     /// publishes one. Only ever set alongside `plan`.
     let planTier: String?
+    /// How this provider's day splits across projects. Empty for a provider
+    /// whose format names no working directory, which reads the same as a
+    /// provider that has spent nothing.
+    let projects: [ProjectTotals]
 
     init(
         id: String,
@@ -62,7 +80,8 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         cost: Decimal,
         windows: [UsageWindow] = [],
         plan: String? = nil,
-        planTier: String? = nil
+        planTier: String? = nil,
+        projects: [ProjectTotals] = []
     ) {
         self.id = id
         self.tokens = tokens
@@ -70,6 +89,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         self.windows = windows
         self.plan = plan
         self.planTier = plan == nil ? nil : planTier
+        self.projects = projects
     }
 }
 
@@ -93,6 +113,11 @@ struct FrameData: Sendable, Equatable {
     /// What the archive holds for the last week, or nil when there is no
     /// archive to read — switched off, or on and still empty.
     let history: UsageHistoryRollup?
+    /// Today's spend by project, summed across every provider and ordered by
+    /// cost. One repository is one row wherever the work ran — a worktree
+    /// counts against the checkout it was cut from — and a line naming no
+    /// directory is not given a row at all rather than inventing one.
+    let projects: [ProjectTotals]
 }
 
 enum FrameBuilder {
@@ -148,8 +173,28 @@ enum FrameBuilder {
             prevTokens: prev?.totalTokens,
             prevCost: prev?.totalCost,
             keepAwake: keepAwake,
-            history: history
+            history: history,
+            projects: combinedProjects(providers)
         )
+    }
+
+    /// One row per project across every provider, ordered by cost and then by
+    /// path so two projects that cost the same never trade places between
+    /// frames.
+    static func combinedProjects(_ slices: [ProviderSlice]) -> [ProjectTotals] {
+        var tokens: [String: Int] = [:]
+        var cost: [String: Decimal] = [:]
+        for slice in slices {
+            for project in slice.projects {
+                tokens[project.path, default: 0] += project.tokens
+                cost[project.path, default: 0] += project.cost
+            }
+        }
+        return tokens.keys
+            .map { ProjectTotals(path: $0, tokens: tokens[$0] ?? 0, cost: cost[$0] ?? 0) }
+            .sorted {
+                $0.cost == $1.cost ? $0.path < $1.path : $0.cost > $1.cost
+            }
     }
 
     /// Stable order: claude-code first (v0.1.0 baseline), then codex, then

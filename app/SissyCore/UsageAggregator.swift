@@ -144,7 +144,8 @@ actor UsageAggregator {
                 cost: s.today.totalCost,
                 windows: p.currentWindows(),
                 plan: p.currentPlan(),
-                planTier: p.currentPlanTier()
+                planTier: p.currentPlanTier(),
+                projects: p.currentProjects()
             )
         }
         return FrameBuilder.activeSlices(raw)

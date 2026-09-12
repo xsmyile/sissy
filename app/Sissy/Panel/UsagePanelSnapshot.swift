@@ -14,6 +14,10 @@ struct UsagePanelSnapshot: Equatable {
     let burn: String
     let delta: TokenDelta?
     let providers: [ProviderRow]
+    /// Today's spend by project, the busiest first and the tail folded into
+    /// one row. Empty when nothing today names a project, and the panel then
+    /// draws no section rather than a heading over nothing.
+    let projects: [ProjectRow]
     /// The archive line, absent when there is no archive to show.
     let history: HistoryRow?
 
@@ -62,6 +66,20 @@ struct UsagePanelSnapshot: Equatable {
 
     /// One rate-limit gauge. `fraction` is clamped for the bar while
     /// `percent` is not, so a window past 100% still reads as what it is.
+    struct ProjectRow: Equatable, Identifiable {
+        let id: String
+        /// The repository's own name — the last component of its path, which
+        /// is what the user calls it.
+        let name: String
+        /// Full path, for the tooltip only. Nil on the folded row, which
+        /// stands for several. A project path is a client's name as often as
+        /// not, so the row shows the name and keeps the rest for a hover.
+        let path: String?
+        let tokens: String
+        let cost: String
+        let share: Double
+    }
+
     struct WindowRow: Equatable, Identifiable {
         let id: Int
         let label: String
@@ -79,6 +97,7 @@ struct UsagePanelSnapshot: Equatable {
             burn: frame.burn,
             delta: makeDelta(today: totalTokens, prevTokens: frame.prevTokens),
             providers: makeRows(frame.providers, totalTokens: totalTokens),
+            projects: makeProjects(frame.projects, totalCost: totalCost),
             history: makeHistory(frame.history, now: now)
         )
     }
@@ -125,6 +144,50 @@ struct UsagePanelSnapshot: Equatable {
                 windows: slice.windows.map(makeWindow)
             )
         }
+    }
+
+    /// Rows a popover can hold. Past this the answer is a report, and a
+    /// report needs more than the two days the tail retains.
+    private static let projectRowLimit = 5
+
+    /// The busiest projects, with everything below them folded into one row
+    /// so the section's rows still add up to the day.
+    private static func makeProjects(
+        _ projects: [ProjectTotals],
+        totalCost: Decimal
+    ) -> [ProjectRow] {
+        guard !projects.isEmpty else { return [] }
+        let share = { (cost: Decimal) -> Double in
+            guard totalCost > 0 else { return 0 }
+            return NSDecimalNumber(decimal: cost).doubleValue
+                / NSDecimalNumber(decimal: totalCost).doubleValue
+        }
+        guard projects.count > projectRowLimit else {
+            return projects.map { project in
+                ProjectRow(
+                    id: project.path,
+                    name: UsageFormat.projectName(project.path),
+                    path: project.path,
+                    tokens: UsageFormat.tokens(project.tokens),
+                    cost: UsageFormat.cost(project.cost),
+                    share: share(project.cost)
+                )
+            }
+        }
+        let shown = Array(projects.prefix(projectRowLimit - 1))
+        let rest = projects.dropFirst(projectRowLimit - 1)
+        let restTokens = rest.reduce(0) { $0 + $1.tokens }
+        let restCost = rest.reduce(Decimal(0)) { $0 + $1.cost }
+        return makeProjects(Array(shown), totalCost: totalCost) + [
+            ProjectRow(
+                id: "sissy.projects.rest",
+                name: UsageFormat.projectsFolded(count: rest.count),
+                path: nil,
+                tokens: UsageFormat.tokens(restTokens),
+                cost: UsageFormat.cost(restCost),
+                share: share(restCost)
+            )
+        ]
     }
 
     private static func makeWindow(_ window: UsageWindow) -> WindowRow {

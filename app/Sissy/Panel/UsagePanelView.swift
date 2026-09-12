@@ -46,6 +46,10 @@ struct UsagePanelView: View {
                     Divider()
                     providers(snapshot.providers)
                 }
+                if !snapshot.projects.isEmpty {
+                    Divider()
+                    projects(snapshot.projects)
+                }
                 if let history = snapshot.history {
                     Divider()
                     historyRow(history)
@@ -256,6 +260,42 @@ struct UsagePanelView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    // MARK: Projects
+
+    /// Where the day's money went, under the providers that spent it. The
+    /// question is the same one either way — a provider row says which tool,
+    /// a project row says which work — so the rows are the same shape, one
+    /// step quieter.
+    private func projects(_ rows: [UsagePanelSnapshot.ProjectRow]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("By project")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            ForEach(rows) { row in
+                projectRow(row)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private func projectRow(_ row: UsagePanelSnapshot.ProjectRow) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Text(row.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                Text("\(row.tokens) · \(row.cost)")
+                    .font(.system(size: 12))
+                    .monospacedDigit()
+            }
+            shareBar(row.share, tint: .secondary)
+        }
+        .help(row.path ?? "")
     }
 
     // MARK: Providers

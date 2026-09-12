@@ -40,3 +40,14 @@ final class AtomicPlan: @unchecked Sendable {
     func load() -> String? { lock.withLock { value } }
     func store(_ v: String?) { lock.withLock { value = v } }
 }
+
+/// Same handoff again for today's project split: the provider recomputes it on
+/// its actor at every emit, while `UsageProvider.currentProjects()` is read
+/// from the aggregator without an actor hop — the same reason the windows and
+/// the plan travel this way.
+final class AtomicProjects: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: [ProjectTotals] = []
+    func load() -> [ProjectTotals] { lock.withLock { value } }
+    func store(_ v: [ProjectTotals]) { lock.withLock { value = v } }
+}

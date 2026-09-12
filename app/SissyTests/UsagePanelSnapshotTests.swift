@@ -9,7 +9,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
         tokens: String = "26K",
         cost: String = "0.09",
         burn: String = "1.5K",
-        history: UsageHistoryRollup? = nil
+        history: UsageHistoryRollup? = nil,
+        projects: [ProjectTotals] = []
     ) -> FrameData {
         FrameData(
             tokens: tokens,
@@ -19,7 +20,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
             prevTokens: prev,
             prevCost: prev.map { Decimal($0) },
             keepAwake: .off,
-            history: history
+            history: history,
+            projects: projects
         )
     }
 
