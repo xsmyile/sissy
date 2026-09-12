@@ -59,6 +59,24 @@ struct SourceDescriptor: Sendable {
     let signals: SourceSignals
 }
 
+/// What the dedup ledger remembers about a key it has already counted.
+///
+/// The day is what the ledger is trimmed by. The output count is what makes a
+/// repeat something other than a line to drop: Claude Code writes the same
+/// message several times while the answer streams, and `output_tokens` grows
+/// with each write while the input and cache counts — fixed when the request
+/// was made — repeat unchanged. A reader that keeps the first copy bills the
+/// first partial and never the rest of the answer.
+struct SeenEvent: Equatable, Sendable {
+    var day: Date
+    /// Output tokens already billed for this key, or nil for a key restored
+    /// from a snapshot written before the ledger carried one. Nil claims the
+    /// key and owes nothing further: the amount cannot be recovered, and
+    /// under-counting one day's in-flight messages once, on the first launch
+    /// after an upgrade, beats billing them twice.
+    var billedOutputTokens: Int?
+}
+
 /// One CLI's log format, behind the tail every local provider shares.
 ///
 /// An adapter owns exactly three things: which bytes on a line are worth
@@ -83,7 +101,7 @@ protocol SourceAdapter: AnyObject {
     /// format's business, while the ledger is the provider's because the
     /// provider is what persists and trims it. Events older than
     /// `line.retainCutoff` are dropped without claiming a key.
-    func event(from line: SourceLine, seen: inout [String: Date]) -> UsageEvent?
+    func event(from line: SourceLine, seen: inout [String: SeenEvent]) -> UsageEvent?
 
     /// Swap in a freshly fetched rate catalog. The adapter takes the slice
     /// matching its upstream vendor.
@@ -169,7 +187,7 @@ actor LocalUsageProvider: UsageProvider {
     /// across long-running sessions) and lets the persistence layer
     /// store only today's keys without losing the streaming-across-restart
     /// safety net.
-    private var seenEventKeys: [String: Date] = [:]
+    private var seenEventKeys: [String: SeenEvent] = [:]
     private var pollTask: Task<Void, Never>?
     private var onChange: (@Sendable (DayTotals, DayTotals?) async -> Void)?
     nonisolated private let watchedCounter = AtomicIntCounter()
@@ -590,7 +608,7 @@ actor LocalUsageProvider: UsageProvider {
         historySuppressedDays = historySuppressedDays.filter { $0 >= cutoff }
         // Evict dedup keys for days that have aged out so the set's memory
         // footprint stays bounded across long-running sessions.
-        seenEventKeys = seenEventKeys.filter { $0.value >= cutoff }
+        seenEventKeys = seenEventKeys.filter { $0.value.day >= cutoff }
         let retained = UsageReaderShared.retainedFiles(
             mtimes: fileMTimes, cutoff: cutoff.timeIntervalSince1970)
         fileOffsets = fileOffsets.filter { retained.contains($0.key) }
@@ -773,12 +791,12 @@ actor LocalUsageProvider: UsageProvider {
             let cost = Decimal(string: t.cost) ?? 0
             newDaily[dayKey] = DayTotals(totalTokens: t.tokens, totalCost: cost)
         }
-        var newKeys: [String: Date] = [:]
+        var newKeys: [String: SeenEvent] = [:]
         for k in snapshot.dedupKeysToday {
             guard let dayDate = dayFmt.date(from: k.day) else { continue }
             let dayKey = cal.startOfDay(for: dayDate)
             if dayKey < cutoffDay { continue }
-            newKeys[k.key] = dayKey
+            newKeys[k.key] = SeenEvent(day: dayKey, billedOutputTokens: k.outputTokens)
         }
         // Last, and before anything is committed: an adapter that cannot
         // resume from this snapshot costs a cold scan, not a wrong resume with
@@ -1013,10 +1031,13 @@ actor LocalUsageProvider: UsageProvider {
         // days are safe to drop because by the time a restart happens any
         // duplicate write for that day has already been seen and counted in
         // the in-process set.
-        let todayKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap {
-            (key, day) -> UsageStateSnapshot.DedupKey? in
-            guard day == todayKey else { return nil }
-            return UsageStateSnapshot.DedupKey(key: key, day: dayFmt.string(from: day))
+        let todayKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap { key, entry in
+            guard entry.day == todayKey else { return nil }
+            return UsageStateSnapshot.DedupKey(
+                key: key,
+                day: dayFmt.string(from: entry.day),
+                outputTokens: entry.billedOutputTokens
+            )
         }
 
         let snapshot = UsageStateSnapshot(

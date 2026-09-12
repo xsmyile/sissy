@@ -132,6 +132,11 @@ struct UsageStateSnapshot: Codable, Equatable {
     struct DedupKey: Codable, Equatable {
         var key: String
         var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
+        /// Output tokens already billed for the key, absent in a snapshot
+        /// written before a repeat could owe the difference. Optional rather
+        /// than version-gated for the reason `historyResume` is: a
+        /// `schemaVersion` bump discards both providers' snapshots.
+        var outputTokens: Int?
     }
 }
 
