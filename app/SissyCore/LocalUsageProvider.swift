@@ -2,6 +2,10 @@ import Foundation
 
 struct UsageEvent: Sendable, Equatable {
     let timestamp: Date
+    /// The model the adapter priced this event at, carried on the event
+    /// because that is the only place it is known: the tail sees bytes and a
+    /// cost, and the archive needs a row per model.
+    let model: String
     let inputTokens: Int
     let outputTokens: Int
     let cacheReadTokens: Int
@@ -135,10 +139,31 @@ actor LocalUsageProvider: UsageProvider {
     /// persistence entirely — used by `--scan` and tests that want a fresh
     /// provider without touching the user's saved state.
     private let persistenceURL: URL?
+    /// Parent of the archive tree, following the config that named the trees
+    /// being metered exactly as the snapshot does. Nil turns the archive off
+    /// entirely — a retention of zero days, `--scan`, and any test that has no
+    /// business writing one. Retention itself is the engine's: it prunes every
+    /// provider directory there is, including one whose provider is switched
+    /// off and therefore never built.
+    private let historyRoot: URL?
 
     private var fileOffsets: [URL: UInt64] = [:]
     private var fileMTimes: [URL: TimeInterval] = [:]
     private var dailyTotals: [Date: DayTotals] = [:]
+    /// The same days as `dailyTotals`, split by model, which is the grain the
+    /// archive keeps. Fed by the same `ingest` and trimmed by the same
+    /// `trim()`, so the two cannot describe different days.
+    private var dailyModelTotals: [Date: [String: UsageHistoryTotals]] = [:]
+    /// Days whose archive file is behind what is in memory.
+    private var historyDirtyDays: Set<Date> = []
+    /// Days this process must not write, because it cannot vouch for them: a
+    /// snapshot restored totals for a day it carries no per-model rows for,
+    /// which is what the first launch after the archive shipped looks like.
+    /// Writing one then would freeze a day that counts only from the upgrade
+    /// onwards. A missing day is recoverable — a wrong one, once it ages out
+    /// of the retain window, is permanent.
+    private var historySuppressedDays: Set<Date> = []
+    private var lastHistorySaveAt: Date = .distantPast
     /// Dedup keys tagged with the event day. The day tag lets `trim()` evict
     /// keys older than the retain window (previously the set grew unbounded
     /// across long-running sessions) and lets the persistence layer
@@ -213,7 +238,8 @@ actor LocalUsageProvider: UsageProvider {
         adapter: sending any SourceAdapter,
         retainDays: Int = 2,
         pollInterval: Duration = .seconds(60),
-        persistenceURL: URL? = nil
+        persistenceURL: URL? = nil,
+        historyRoot: URL? = nil
     ) {
         let descriptor = adapter.descriptor
         self.adapter = adapter
@@ -224,6 +250,7 @@ actor LocalUsageProvider: UsageProvider {
         self.retainDays = retainDays
         self.pollInterval = pollInterval
         self.persistenceURL = persistenceURL
+        self.historyRoot = historyRoot
     }
 
     nonisolated func currentWindows() -> [UsageWindow] { signals.currentWindows() }
@@ -241,6 +268,7 @@ actor LocalUsageProvider: UsageProvider {
         lifecycle = .running
         self.onChange = onChange
         let loaded = loadAndApplyPersistedState()
+        if !loaded { suppressTheDayAColdScanCuts() }
         // Ahead of the restored-snapshot emit below, so the first frame a
         // relaunch replays already carries what the adapter reads out of band
         // — a plan the log itself will not name again until the next turn.
@@ -298,6 +326,7 @@ actor LocalUsageProvider: UsageProvider {
         // progress. Best-effort: a save failure is logged where it happens and
         // nothing on the shutdown path can act on it.
         saveSnapshotIfDirty(force: true)
+        saveHistoryIfDirty(force: true)
         fsWatcher?.stop()
         fsWatcher = nil
         pollTask?.cancel()
@@ -388,6 +417,7 @@ actor LocalUsageProvider: UsageProvider {
         }
         trim()
         saveSnapshotIfDirty()
+        saveHistoryIfDirty()
     }
 
     func current() -> (today: DayTotals, prev: DayTotals?) {
@@ -481,6 +511,7 @@ actor LocalUsageProvider: UsageProvider {
         // loss therefore bounds progress loss to one throttle window; a
         // graceful SIGTERM forces a final flush via `stop()`.
         saveSnapshotIfDirty()
+        saveHistoryIfDirty()
     }
 
     /// Every `.jsonl` under the tree, newest first. Any name is accepted —
@@ -526,12 +557,25 @@ actor LocalUsageProvider: UsageProvider {
             totalTokens: existing.totalTokens + totalTokens,
             totalCost: existing.totalCost + event.cost
         )
+        guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
+        var byModel = dailyModelTotals[key] ?? [:]
+        byModel[event.model, default: UsageHistoryTotals()].add(event)
+        dailyModelTotals[key] = byModel
+        historyDirtyDays.insert(key)
     }
 
     private func trim() {
         let cal = Calendar.current
         let cutoff = cal.startOfDay(for: Date().addingTimeInterval(Double(-retainDays * 86400)))
+        // A day that leaves the retain window is a day nothing will rewrite,
+        // so anything of it still only in memory would be lost rather than
+        // frozen. Only then — otherwise the throttle would never hold.
+        if historyDirtyDays.contains(where: { $0 < cutoff }) {
+            saveHistoryIfDirty(force: true)
+        }
         dailyTotals = dailyTotals.filter { $0.key >= cutoff }
+        dailyModelTotals = dailyModelTotals.filter { $0.key >= cutoff }
+        historySuppressedDays = historySuppressedDays.filter { $0 >= cutoff }
         // Evict dedup keys for days that have aged out so the set's memory
         // footprint stays bounded across long-running sessions.
         seenEventKeys = seenEventKeys.filter { $0.value >= cutoff }
@@ -732,7 +776,173 @@ actor LocalUsageProvider: UsageProvider {
         fileMTimes = newMTimes
         dailyTotals = newDaily
         seenEventKeys = newKeys
+        restoreModelTotals(from: snapshot)
         return true
+    }
+
+    /// Seeds the day-by-model totals from the snapshot that has just restored
+    /// the day totals beside them, and marks every day it seeded dirty so the
+    /// first flush writes the archive back to the moment the offsets describe.
+    ///
+    /// The snapshot is the only thing that may seed them. It is written from
+    /// the same in-memory state as the archive and read back with the offsets
+    /// that produced it, so a day resumed from here continues at exactly the
+    /// byte the last run stopped at — where the day file on disk can be a
+    /// throttle window behind or ahead of that byte, depending on which of the
+    /// two writes was interrupted. Reconciling it is what the dirty mark is
+    /// for: the day is rewritten whole from a seed that matches the offsets,
+    /// which is why neither write order nor a failed write can leave the two
+    /// disagreeing.
+    ///
+    /// A day the snapshot has totals for but no rows for is a day this process
+    /// cannot vouch for: the events behind those totals are already consumed,
+    /// so a file written from here would hold what came after the upgrade and
+    /// call it the day.
+    private func restoreModelTotals(from snapshot: UsageStateSnapshot) {
+        guard historyRoot != nil else { return }
+        let cal = Calendar.current
+        let dayFmt = UsageReaderShared.dayFormatter
+        var restored: [Date: [String: UsageHistoryTotals]] = [:]
+        for row in snapshot.historyResume?.dailyModelTotals ?? [] {
+            guard let dayDate = dayFmt.date(from: row.day) else { continue }
+            let dayKey = cal.startOfDay(for: dayDate)
+            guard dailyTotals[dayKey] != nil else { continue }
+            restored[dayKey, default: [:]][row.model] = UsageHistoryTotals(
+                inputTokens: row.inputTokens,
+                outputTokens: row.outputTokens,
+                cacheReadTokens: row.cacheReadTokens,
+                cacheCreationTokens: row.cacheCreationTokens,
+                cost: Decimal(string: row.cost) ?? 0
+            )
+        }
+        for day in dailyTotals.keys {
+            guard let totals = restored[day] else {
+                historySuppressedDays.insert(day)
+                dropArchivedDayIfShort(day)
+                continue
+            }
+            dailyModelTotals[day] = totals
+            historyDirtyDays.insert(day)
+        }
+    }
+
+    /// Removes the file for a suppressed day that an earlier run had already
+    /// written short — the archive was switched off, or the build that wrote
+    /// it kept no split, and the day went on being metered afterwards.
+    ///
+    /// The snapshot's own total for the day is the proof: a file below it is
+    /// wrong, and it cannot be corrected from here, because the rows it would
+    /// need are exactly what this day has none of. A week that says the day is
+    /// missing is readable; one that quietly counts a fraction of it is not.
+    private func dropArchivedDayIfShort(_ day: Date) {
+        guard let historyRoot, let metered = dailyTotals[day] else { return }
+        let dayKey = UsageReaderShared.dayFormatter.string(from: day)
+        guard let stored = UsageHistoryStore.load(provider: id, day: dayKey, in: historyRoot),
+            stored.totalTokens < metered.totalTokens
+        else { return }
+        do {
+            try FileManager.default.removeItem(
+                at: UsageHistoryStore.url(provider: id, day: dayKey, in: historyRoot))
+            sissyLog("sissy: \(id) dropped a short archive day — \(dayKey)")
+        } catch {
+            sissyLog("sissy: \(id) could not drop the short archive day \(dayKey): \(error)")
+        }
+    }
+
+    /// Keeps the archive off the one day a cold scan cannot see whole.
+    ///
+    /// The retain window is a rolling 48 hours, not two calendar days, so the
+    /// oldest day a scan reaches starts mid-afternoon: every event before the
+    /// cutoff is refused at parse time. Archiving that day would freeze a
+    /// fraction of it as the day — and where a previous run had already
+    /// written it complete, a scan forced by a lost snapshot would replace a
+    /// whole day with a part of one. Every later day is whole, because a day
+    /// is inside the window for the whole of itself and the whole of the next.
+    private func suppressTheDayAColdScanCuts() {
+        guard historyRoot != nil else { return }
+        let cal = Calendar.current
+        historySuppressedDays.insert(
+            cal.startOfDay(for: Date().addingTimeInterval(Double(-retainDays * 86400))))
+    }
+
+    /// Forgets every archived day before today, on the one ask there is for
+    /// it. The files are gone by the time this lands; what it clears is the
+    /// memory that would put them back — a straggler event stamped yesterday,
+    /// arriving minutes after midnight, would otherwise rewrite a day the user
+    /// asked Sissy to forget.
+    ///
+    /// Today survives, and its file went with the rest, so it is left dirty:
+    /// the dialog promises today keeps counting, and a day still being counted
+    /// has to be back on disk at the next flush rather than at the next
+    /// relaunch.
+    func forgetArchivedDays() async {
+        let today = Calendar.current.startOfDay(for: Date())
+        for day in dailyModelTotals.keys where day < today {
+            historySuppressedDays.insert(day)
+        }
+        dailyModelTotals = dailyModelTotals.filter { $0.key >= today }
+        historyDirtyDays = Set(dailyModelTotals.keys)
+    }
+
+    /// Throttled whole-day writes, on the same schedule and for the same
+    /// reasons as the snapshot's. Each dirty day is written complete, so a
+    /// rewrite replaces rather than accumulates.
+    ///
+    /// A day file may be left behind or ahead of the snapshot beside it — the
+    /// two are written under their own throttles and either can fail on its
+    /// own — and neither costs anything, because the archive is a projection
+    /// of what the snapshot carries rather than a second record: a resume
+    /// seeds the day from the snapshot and rewrites the file whole from there.
+    ///
+    /// A day is only ever replaced by a reading at least as complete as the
+    /// one it holds. What a cold scan derives is bounded by the tree as it is
+    /// now, and the commonest reason a snapshot goes stale is a session log
+    /// that is no longer there — so a re-derivation can be short where the run
+    /// that archived the day was not, and that day is past, which means
+    /// nothing will ever grow it back.
+    ///
+    /// A day whose write fails is kept dirty and retried on the next flush;
+    /// the others are still attempted, because one unwritable day must not
+    /// cost the day that is about to leave the retain window.
+    private func saveHistoryIfDirty(force: Bool = false) {
+        guard let historyRoot, !historyDirtyDays.isEmpty else { return }
+        let now = Date()
+        if !force && now.timeIntervalSince(lastHistorySaveAt) < Self.saveThrottle { return }
+        let dayFmt = UsageReaderShared.dayFormatter
+        var unwritten: Set<Date> = []
+        for day in historyDirtyDays {
+            guard let totals = dailyModelTotals[day], !totals.isEmpty else { continue }
+            let record = UsageHistoryDay(
+                day: dayFmt.string(from: day),
+                provider: id,
+                updatedAt: now,
+                totals: totals
+            )
+            guard archivedTokens(for: record.day, in: historyRoot) <= record.totalTokens else {
+                continue
+            }
+            do {
+                try UsageHistoryStore.save(record, in: historyRoot)
+            } catch {
+                // Same call as the snapshot's: the day stays dirty and the
+                // next flush retries it. Logged because an archive that
+                // silently stops growing is indistinguishable from a quiet
+                // week.
+                sissyLog(
+                    "sissy: \(id) history save failed for \(record.day) at "
+                        + "\(historyRoot.path): \(error)")
+                unwritten.insert(day)
+            }
+        }
+        historyDirtyDays = unwritten
+        lastHistorySaveAt = now
+    }
+
+    /// What the archive already holds for a day, or zero when it holds
+    /// nothing it can read — an unreadable file is one this build must not
+    /// treat as a total it has to beat.
+    private func archivedTokens(for day: String, in historyRoot: URL) -> Int {
+        UsageHistoryStore.load(provider: id, day: day, in: historyRoot)?.totalTokens ?? 0
     }
 
     /// Throttled atomic save. `force=true` bypasses throttle (used by stop).
@@ -768,6 +978,22 @@ actor LocalUsageProvider: UsageProvider {
                 cost: NSDecimalNumber(decimal: v.totalCost).stringValue
             )
         }
+        var modelTotals: [UsageStateSnapshot.DailyModelTotal] = []
+        for (day, byModel) in dailyModelTotals {
+            let dayString = dayFmt.string(from: day)
+            for (model, totals) in byModel {
+                modelTotals.append(
+                    UsageStateSnapshot.DailyModelTotal(
+                        day: dayString,
+                        model: model,
+                        inputTokens: totals.inputTokens,
+                        outputTokens: totals.outputTokens,
+                        cacheReadTokens: totals.cacheReadTokens,
+                        cacheCreationTokens: totals.cacheCreationTokens,
+                        cost: NSDecimalNumber(decimal: totals.cost).stringValue
+                    ))
+            }
+        }
         // Persist today's keys only — by design (see field doc above), older
         // days are safe to drop because by the time a restart happens any
         // duplicate write for that day has already been seen and counted in
@@ -786,6 +1012,8 @@ actor LocalUsageProvider: UsageProvider {
             files: files,
             dailyTotals: daily,
             dedupKeysToday: todayKeys,
+            historyResume: modelTotals.isEmpty
+                ? nil : UsageStateSnapshot.HistoryResume(dailyModelTotals: modelTotals),
             codexResume: adapter.resumeState()
         )
         do {

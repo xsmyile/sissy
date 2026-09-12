@@ -62,6 +62,24 @@ enum UsageFormat {
         return resetsAt.formatted(.dateTime.weekday(.abbreviated))
     }
 
+    /// Names the window the archive line covers. The asked-for width while
+    /// the archive reaches back across all of it, and the first day it holds
+    /// once it does not — a total labelled "Last 7 days" on an install three
+    /// days old is a number nobody can read correctly.
+    static func historyWindowLabel(
+        days: Int,
+        earliestDay: Date?,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        let today = calendar.startOfDay(for: now)
+        let start = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today)
+        guard let earliestDay, let start,
+            calendar.startOfDay(for: earliestDay) > start
+        else { return "Last \(days) days" }
+        return "Since \(earliestDay.formatted(.dateTime.day().month(.abbreviated)))"
+    }
+
     private static let minutesPerHour = 60
     private static let minutesPerDay = 1440
 

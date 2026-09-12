@@ -41,6 +41,15 @@ struct UsageStateSnapshot: Codable, Equatable {
     /// lifetime. Today-only keeps the file small (~tens of KB) while still
     /// protecting against the assistant-turn-streamed-across-restart edge.
     var dedupKeysToday: [DedupKey]
+    /// What the archive resumes from, absent in a snapshot written before it
+    /// existed.
+    ///
+    /// The archive is a projection of this rather than a second record: a day
+    /// file is rewritten whole from what this restored plus whatever the
+    /// offsets beside it have not read yet, so the two cannot end up
+    /// disagreeing about a day no matter which of their writes a crash
+    /// interrupted.
+    var historyResume: HistoryResume?
     /// State only the Codex reader can resume from, absent in a snapshot
     /// written before it existed.
     ///
@@ -50,6 +59,17 @@ struct UsageStateSnapshot: Codable, Equatable {
     /// "this snapshot predates the field", which the Codex reader answers with
     /// a cold scan of its own tree and every other reader ignores.
     var codexResume: CodexResume?
+
+    /// Grouped the way `CodexResume` is, and for the same reason: absence is
+    /// one question, and within the block empty and missing mean the same
+    /// thing — a day that is in `dailyTotals` with no rows here is a day the
+    /// snapshot cannot vouch for, whether because it predates the archive or
+    /// because it was already suppressed when this was written, and the reader
+    /// leaves it unwritten rather than archiving it short.
+    struct HistoryResume: Codable, Equatable {
+        /// Per-model split of `dailyTotals`, at the grain the archive keeps.
+        var dailyModelTotals: [DailyModelTotal]
+    }
 
     /// Grouped so the absence above is one question rather than three, and so
     /// each collection can be non-optional: within a resume block, empty and
@@ -96,6 +116,16 @@ struct UsageStateSnapshot: Codable, Equatable {
     struct DailyTotal: Codable, Equatable {
         var day: String  // YYYY-MM-DD in the local calendar at save time.
         var tokens: Int
+        var cost: String  // Decimal as String — see top-of-file note.
+    }
+
+    struct DailyModelTotal: Codable, Equatable {
+        var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
+        var model: String
+        var inputTokens: Int
+        var outputTokens: Int
+        var cacheReadTokens: Int
+        var cacheCreationTokens: Int
         var cost: String  // Decimal as String — see top-of-file note.
     }
 

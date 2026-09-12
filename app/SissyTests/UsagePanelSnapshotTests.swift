@@ -8,7 +8,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
         prev: Int? = nil,
         tokens: String = "26K",
         cost: String = "0.09",
-        burn: String = "1.5K"
+        burn: String = "1.5K",
+        history: UsageHistoryRollup? = nil
     ) -> FrameData {
         FrameData(
             tokens: tokens,
@@ -17,7 +18,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
             providers: providers,
             prevTokens: prev,
             prevCost: prev.map { Decimal($0) },
-            keepAwake: .off
+            keepAwake: .off,
+            history: history
         )
     }
 
@@ -219,5 +221,41 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("codex", 0, "0")])
         )
         XCTAssertEqual(snapshot.providers.first?.share, 0)
+    }
+
+    // MARK: Archive line
+
+    func testTheArchiveLineCarriesTheWindowItCovers() {
+        let now = Date()
+        let earliest = Calendar.current.date(
+            byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: now))
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(
+                providers: [slice("codex", 10, "1.00")],
+                history: UsageHistoryRollup(
+                    days: 7, earliestDay: earliest, tokens: 2_500_000,
+                    cost: Decimal(string: "41.5")!)
+            ),
+            now: now
+        )
+        XCTAssertEqual(snapshot.history?.label, "Last 7 days")
+        XCTAssertEqual(snapshot.history?.tokens, "2.5M")
+        XCTAssertEqual(snapshot.history?.cost, "$41.50")
+    }
+
+    /// The headline is already today. A second line saying the same thing, a
+    /// few seconds behind it, reads as a disagreement.
+    func testTheArchiveLineIsAbsentWhileItOnlyReachesBackToToday() {
+        let now = Date()
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(
+                providers: [slice("codex", 10, "1.00")],
+                history: UsageHistoryRollup(
+                    days: 7, earliestDay: Calendar.current.startOfDay(for: now),
+                    tokens: 10, cost: 1)
+            ),
+            now: now
+        )
+        XCTAssertNil(snapshot.history)
     }
 }

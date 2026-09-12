@@ -90,6 +90,9 @@ struct FrameData: Sendable, Equatable {
     /// including when off: the app renders the control from this, and "off"
     /// and "nothing reported" must not collapse into the same value.
     let keepAwake: KeepAwakeState
+    /// What the archive holds for the last week, or nil when there is no
+    /// archive to read — switched off, or on and still empty.
+    let history: UsageHistoryRollup?
 }
 
 enum FrameBuilder {
@@ -132,7 +135,8 @@ enum FrameBuilder {
         prev: DayTotals?,
         hoursElapsed: Double,
         providers: [ProviderSlice] = [],
-        keepAwake: KeepAwakeState = .off
+        keepAwake: KeepAwakeState = .off,
+        history: UsageHistoryRollup? = nil
     ) -> FrameData {
         let tokens = fmtTokens(today.totalTokens)
         let burn = fmtBurn(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
@@ -143,7 +147,8 @@ enum FrameBuilder {
             providers: providers,
             prevTokens: prev?.totalTokens,
             prevCost: prev?.totalCost,
-            keepAwake: keepAwake
+            keepAwake: keepAwake,
+            history: history
         )
     }
 

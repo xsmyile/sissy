@@ -25,6 +25,11 @@ protocol UsageProvider: AnyObject, Sendable {
     /// the FSEvents stream. Idempotent.
     func stop() async
 
+    /// Drops whatever the provider still holds of the days the archive has
+    /// just been told to forget. Today is untouched — it is still being
+    /// counted, and the archive takes it back on the next flush.
+    func forgetArchivedDays() async
+
     /// Latest `(today, prev)` totals as observed by this provider. `prev` is
     /// suppressed (nil) until the cold scan has finished — see
     /// `LocalUsageProvider.coldScanComplete` for the trend-flicker
@@ -76,6 +81,10 @@ protocol UsageProvider: AnyObject, Sendable {
 }
 
 extension UsageProvider {
+    /// A provider that keeps no archive has nothing that could rewrite a day
+    /// the user deleted.
+    func forgetArchivedDays() async {}
+
     nonisolated func currentWindows() -> [UsageWindow] { [] }
     nonisolated func currentPlan() -> String? { nil }
     nonisolated func currentPlanTier() -> String? { nil }

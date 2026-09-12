@@ -14,6 +14,20 @@ actor UsageEngine {
     let aggregator: UsageAggregator
 
     private let configURL: URL
+    /// Where the archive lives, which is beside the config that named the
+    /// trees it was read from — the rule the snapshots already follow.
+    private let stateDir: URL
+    /// Last archive rollup and when it was taken. The day files are written by
+    /// the providers on their own throttle, so the frame re-reads them rather
+    /// than being told; the cache is what keeps a burst of frames from turning
+    /// into a burst of directory walks.
+    private var historyRollup: UsageHistoryRollup?
+    private var historyRollupAt: Date = .distantPast
+    /// Day the archive was last pruned for. Retention is measured in days, so
+    /// the answer changes only when the day does — and a Mac that stays up for
+    /// a month has to keep the promise the setting makes without waiting for a
+    /// relaunch to enforce it.
+    private var lastHistoryPruneDay: Date?
     /// Handle on the aggregator boot Task so `stop()` can cancel an
     /// in-flight cold scan. Without this the engine kept walking
     /// `~/.claude/projects` after everything else had shut down and only
@@ -40,6 +54,14 @@ actor UsageEngine {
     /// user asked for — which is `config.keepAwake`. They differ when power
     /// management refuses the assertion, and the panel shows both.
     private var keepAwakeActive = false
+    /// Days the panel's archive line covers. A week is what makes "more than
+    /// today" legible in a row that has to fit beside the per-provider rows.
+    static let historyWindowDays = 7
+    /// How long a rollup is reused before the day files are read again. Long
+    /// enough that frames do not walk the archive, short enough that the line
+    /// is never visibly behind the day it includes.
+    private static let historyRollupTTL: TimeInterval = 2
+
     /// An engine runs once. `stopped` is terminal on purpose: the app builds a
     /// fresh engine when it needs one, so reviving this instance would leave
     /// two of them metering the same trees.
@@ -92,6 +114,8 @@ actor UsageEngine {
         // a test — takes its reading with it instead of resuming from the
         // install's own and writing a foreign tree back into it.
         let stateDir = configURL.deletingLastPathComponent()
+        self.stateDir = stateDir
+        let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
         let claudeDir = config.resolvedClaudeDataDir
         let codexDir = config.resolvedCodexDataDir
@@ -121,6 +145,7 @@ actor UsageEngine {
                     claudeDir: claudeDir,
                     pollInterval: pollInterval,
                     persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
+                    historyRoot: historyRoot,
                     pricingOverride: config.pricingOverride,
                     limitsProbe: limitsProbe
                 ))
@@ -131,6 +156,7 @@ actor UsageEngine {
                     codexDir: codexDir,
                     pollInterval: pollInterval,
                     persistenceURL: UsageStatePersistence.forProvider("codex", in: stateDir),
+                    historyRoot: historyRoot,
                     pricingOverride: config.pricingOverride
                 ))
         }
@@ -162,6 +188,7 @@ actor UsageEngine {
             sissyLog("sissy: remote pricing disabled — using the embedded rate seed")
         }
         guard lifecycle == .running else { return }
+        pruneHistoryIfDue(now: Date())
         sissyLog("sissy: claude limits — \(config.claudeLimits ? "on" : "off")")
         if config.claudeLimits {
             await startClaudeLimitsProbe()
@@ -304,14 +331,76 @@ actor UsageEngine {
         // emit or from `currentReading()`. Rebuilding them here would race
         // actor reentrancy and could ship a frame whose scalars and breakdown
         // disagree.
+        pruneHistoryIfDue(now: now)
         let frame = FrameBuilder.build(
             today: today,
             prev: prev,
             hoursElapsed: hoursElapsed,
             providers: slices,
-            keepAwake: KeepAwakeState(mode: config.keepAwake, active: keepAwakeActive)
+            keepAwake: KeepAwakeState(mode: config.keepAwake, active: keepAwakeActive),
+            history: currentHistory(now: now)
         )
         await onFrame?(frame)
+    }
+
+    /// What the archive holds for the last week, cached for a beat.
+    ///
+    /// Nil when the archive is switched off, and when it is on but empty —
+    /// a line saying a week came to nothing is a line about a feature rather
+    /// than about usage, so the panel drops it until there is something in it.
+    private func currentHistory(now: Date) -> UsageHistoryRollup? {
+        guard config.resolvedHistoryRetentionDays > 0 else { return nil }
+        let rollup: UsageHistoryRollup
+        if let historyRollup, now.timeIntervalSince(historyRollupAt) < Self.historyRollupTTL {
+            rollup = historyRollup
+        } else {
+            rollup = UsageHistoryStore.rollup(days: Self.historyWindowDays, in: stateDir, now: now)
+            historyRollup = rollup
+            historyRollupAt = now
+        }
+        return rollup.tokens > 0 ? rollup : nil
+    }
+
+    /// Prunes the archive to what `historyRetentionDays` allows, once for each
+    /// day the engine is alive across.
+    ///
+    /// The engine owns this rather than the tails: a provider the user has
+    /// switched off is never built, and the days it recorded would otherwise
+    /// sit in the archive past a retention that was supposed to bound them.
+    /// It runs at boot and on the frame path: boot is what bounds an archive
+    /// whose providers are all switched off and emitting nothing, and the
+    /// frame path is what enforces retention on a Mac that stays up across a
+    /// day boundary. The guard makes every call after the day's first free.
+    private func pruneHistoryIfDue(now: Date) {
+        let today = Calendar.current.startOfDay(for: now)
+        guard lastHistoryPruneDay != today else { return }
+        lastHistoryPruneDay = today
+        UsageHistoryStore.prune(
+            keeping: config.resolvedHistoryRetentionDays, in: stateDir, now: now)
+    }
+
+    /// Deletes the archive, on the one explicit ask there is for it.
+    ///
+    /// The providers keep counting: what they hold in memory is today, and
+    /// today is a day the user has not asked to forget. It reaches disk again
+    /// on the next flush, which is why the rollup is invalidated rather than
+    /// zeroed — the next frame reads whatever is actually there.
+    ///
+    /// The providers are told first. Each flushes on its own task, so a flush
+    /// landing in the suspension between the two would write a past day back
+    /// out after the files were gone, and nothing would remove it again — the
+    /// user's deletion would fail with nothing to show for it.
+    func deleteHistory() async {
+        await aggregator.forgetArchivedDays()
+        do {
+            try UsageHistoryStore.removeAll(in: stateDir)
+            sissyLog("sissy: usage history deleted")
+        } catch {
+            sissyLog("sissy: failed to delete usage history at \(stateDir.path): \(error)")
+        }
+        historyRollup = nil
+        historyRollupAt = .distantPast
+        await reemit()
     }
 
     /// Picks the rate catalog the cold backfill will run against, then starts

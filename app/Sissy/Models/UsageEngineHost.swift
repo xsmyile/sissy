@@ -28,6 +28,10 @@ final class UsageEngineHost {
     /// it used to keep could disagree with the file the probe actually booted
     /// from.
     private(set) var claudeLimits: Bool = false
+    /// Days the archive is kept for, as `server.json` resolves it. Read from
+    /// the same place and for the same reason as `claudeLimits`: Settings
+    /// says what the engine is actually doing, not what the app assumed.
+    private(set) var historyRetentionDays: Int = UsageHistoryStore.defaultRetentionDays
 
     @ObservationIgnored private weak var model: SissyModel?
     @ObservationIgnored private var engine: UsageEngine?
@@ -58,6 +62,7 @@ final class UsageEngineHost {
         let engine = UsageEngine(config: config)
         self.engine = engine
         claudeLimits = config.claudeLimits
+        historyRetentionDays = config.resolvedHistoryRetentionDays
         let host = self
         bootTask = Task {
             await engine.start { frame in
@@ -99,6 +104,13 @@ final class UsageEngineHost {
     func setKeepAwake(mode: KeepAwakeMode) {
         guard let engine else { return }
         Task { await engine.setKeepAwake(mode: mode.rawValue) }
+    }
+
+    /// Deletes the archive. The engine re-emits once it is gone, which is
+    /// what takes the panel's archive line away with it.
+    func deleteUsageHistory() {
+        guard let engine else { return }
+        Task { await engine.deleteHistory() }
     }
 
     private func deliver(_ frame: FrameData) {

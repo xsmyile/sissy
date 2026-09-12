@@ -41,6 +41,10 @@ struct UsagePanelView: View {
                     Divider()
                     providers(snapshot.providers)
                 }
+                if let history = snapshot.history {
+                    Divider()
+                    historyRow(history)
+                }
             } else {
                 placeholder
             }
@@ -180,6 +184,25 @@ struct UsagePanelView: View {
         case .down: return .red
         case .flat: return .secondary
         }
+    }
+
+    // MARK: History
+
+    /// One line, under the day's own numbers, for what came before it. It is
+    /// deliberately the quietest thing in the panel: the archive answers a
+    /// question asked at the end of a month, not one asked while working.
+    private func historyRow(_ row: UsagePanelSnapshot.HistoryRow) -> some View {
+        HStack(spacing: 6) {
+            Text(row.label)
+                .font(.system(size: 12))
+            Spacer(minLength: 0)
+            Text("\(row.tokens) · \(row.cost)")
+                .font(.system(size: 12))
+                .monospacedDigit()
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     // MARK: Providers

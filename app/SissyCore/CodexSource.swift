@@ -282,6 +282,7 @@ final class CodexAdapter: SourceAdapter {
         )
         return UsageEvent(
             timestamp: ts,
+            model: model,
             inputTokens: uncached,
             outputTokens: output,
             cacheReadTokens: cached,
@@ -347,13 +348,15 @@ extension LocalUsageProvider {
         retainDays: Int = 2,
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
+        historyRoot: URL? = nil,
         pricingOverride: [String: ModelPricing]? = nil
     ) -> LocalUsageProvider {
         LocalUsageProvider(
             adapter: CodexAdapter(codexDir: codexDir, pricingOverride: pricingOverride),
             retainDays: retainDays,
             pollInterval: pollInterval,
-            persistenceURL: persistenceURL
+            persistenceURL: persistenceURL,
+            historyRoot: historyRoot
         )
     }
 }
