@@ -8,7 +8,39 @@ import IOKit.pwr_mgt
 /// expects it to still be that way the next time Sissy launches.
 enum KeepAwakeMode: String, Sendable, Codable {
     case off
+    /// Held only while agents are demonstrably working. The signal is Sissy's
+    /// own: a day total that grew is a turn that landed, which is the thing no
+    /// generic `caffeinate` can know.
+    case auto
     case on
+}
+
+/// How long each mode's hold survives without help.
+///
+/// Values rather than constants so a test can run a whole idle window inside a
+/// test run; `default` is what ships.
+struct KeepAwakePolicy: Sendable, Equatable {
+    /// Silence that ends an automatic hold.
+    ///
+    /// Comfortably wider than the tail's own coalescing
+    /// (`UsageReaderShared.pollEmitThrottle`) because the two measure different
+    /// things: that throttle is how finely arrivals are reported, this is how
+    /// long a gap between turns is allowed to be. Turns are minutes apart —
+    /// a model thinking, a build running, a diff being read — and a window
+    /// near the throttle would let go in the middle of an exchange.
+    let idleWindow: TimeInterval
+
+    /// The longest a manual hold runs before switching itself off.
+    ///
+    /// `auto` has none on purpose: its idle window already bounds it, and
+    /// cutting a hold out from under agents that are demonstrably still
+    /// working is the exact failure the automatic mode exists to prevent. A
+    /// manual hold has no such evidence behind it — it is a switch someone
+    /// flipped, and a switch nobody flips back must not hold a Mac awake for
+    /// a week.
+    let manualCeiling: TimeInterval
+
+    static let `default` = Self(idleWindow: 10 * 60, manualCeiling: 8 * 60 * 60)
 }
 
 /// The mode together with whether the Mac is actually being held awake right

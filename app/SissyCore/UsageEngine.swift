@@ -50,6 +50,8 @@ actor UsageEngine {
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
     private let keepAwake = KeepAwake()
+    /// How long a hold in each mode survives without help.
+    private let keepAwakePolicy: KeepAwakePolicy
     /// Whether the Mac is being held awake right now, as opposed to what the
     /// user asked for — which is `config.keepAwake`. They differ when power
     /// management refuses the assertion, and the panel shows both.
@@ -64,6 +66,21 @@ actor UsageEngine {
     /// user asked for it — which is `config.keepScreenAwake`. Same split as
     /// `keepAwakeActive` draws against the mode, for the same reason.
     private var keepAwakeCoversScreen = false
+    /// Which `applyKeepAwake` call currently speaks for the engine. Bumped on
+    /// entry so a call that returns to find a newer stamp knows it was
+    /// overtaken while suspended.
+    private var keepAwakeGeneration = 0
+    /// When a turn last landed, which is what `auto` holds the Mac against.
+    /// `nil` until one does: an automatic hold begins when the agents do, not
+    /// when Sissy launches.
+    private var lastAgentActivityAt: Date?
+    /// Today's total as of the last reading, so the next one can tell growth
+    /// — a turn landing — from a rebuild of the same numbers.
+    private var lastSeenTokens: Int?
+    /// Wakes when the hold in force is due to end. Owned here so `stop()` has
+    /// something to cancel rather than leaving a sleeper against a torn-down
+    /// engine.
+    private var keepAwakeDeadlineTask: Task<Void, Never>?
     /// Days the panel's archive line covers. A week is what makes "more than
     /// today" legible in a row that has to fit beside the per-provider rows.
     static let historyWindowDays = 7
@@ -113,10 +130,12 @@ actor UsageEngine {
     init(
         config: ServerConfig,
         configURL: URL = ServerConfig.defaultURL,
-        limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe()
+        limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe(),
+        keepAwakePolicy: KeepAwakePolicy = .default
     ) {
         self.config = config
         self.configURL = configURL
+        self.keepAwakePolicy = keepAwakePolicy
 
         // The snapshots live beside the config that named the trees they were
         // read from. `ServerConfig.defaultURL` puts both in the support dir, so
@@ -223,6 +242,8 @@ actor UsageEngine {
         // anything else is torn down.
         bootTask?.cancel()
         priceCatalogTask?.cancel()
+        keepAwakeDeadlineTask?.cancel()
+        keepAwakeDeadlineTask = nil
         // Released first, before the awaits below: the kernel drops a dead
         // process's assertions on its own, but `stop()` is also reachable
         // without an exit, and a Mac held awake by something that has shut
@@ -303,21 +324,45 @@ actor UsageEngine {
         await reemit()
     }
 
-    /// Drives the assertion to whatever the stored mode asks for.
+    /// Whether the Mac should be held right now.
     ///
-    /// The desired state is read back after the hop into the `KeepAwake`
-    /// actor, never taken from before it: a second mode change can land while
-    /// this one is suspended, and the flag the frame reports has to describe
-    /// where the user left the switch rather than where this call found it.
-    /// The later call owns both the assertion and the flag — the calls reach
-    /// `KeepAwake` in order, so it is the one that says how the Mac ends up —
-    /// which is why an overtaken call stops here instead of reporting a hold
-    /// that has already been released.
+    /// `on` is the switch and `auto` is the evidence: a hold the agents earn
+    /// by working, and lose by going quiet for `idleWindow`. Both die with the
+    /// lifecycle, because quitting Sissy has to let the Mac sleep again.
+    private var keepAwakeWanted: Bool {
+        guard lifecycle == .running else { return false }
+        switch config.keepAwake {
+        case .off: return false
+        case .on: return true
+        case .auto: return automaticHoldEarned
+        }
+    }
+
+    private var automaticHoldEarned: Bool {
+        guard let last = lastAgentActivityAt else { return false }
+        return Date().timeIntervalSince(last) < keepAwakePolicy.idleWindow
+    }
+
+    /// Drives the assertion to whatever the mode, and in `auto` the agents,
+    /// ask for.
+    ///
+    /// Whether this call still speaks for the engine is decided by a
+    /// generation stamp rather than by re-reading the decision: a second call
+    /// can land while this one is suspended in the `KeepAwake` actor, and the
+    /// later one owns both the assertion and the flags — the calls reach the
+    /// actor in order, so it is the one that says how the Mac ends up. The
+    /// stamp is what makes that test exact under `auto`, where the answer also
+    /// changes on its own as the idle window runs out: comparing the decision
+    /// instead would let a call that nothing overtook mistake the passing of
+    /// time for a newer call, and return leaving an assertion held that no
+    /// flag admits to.
     private func applyKeepAwake() async {
-        let wanted = config.keepAwake == .on && lifecycle == .running
+        keepAwakeGeneration &+= 1
+        let generation = keepAwakeGeneration
+        let wanted = keepAwakeWanted
         let hold = await keepAwake.apply(
             holding: wanted, includingScreen: config.keepScreenAwake)
-        guard wanted == (config.keepAwake == .on && lifecycle == .running) else { return }
+        guard generation == keepAwakeGeneration else { return }
         keepAwakeActive = hold.system && wanted
         keepAwakeCoversScreen = hold.screen && wanted
         keepAwakeSince = keepAwakeActive ? (keepAwakeSince ?? Date()) : nil
@@ -325,6 +370,89 @@ actor UsageEngine {
             "sissy: keep-awake \(config.keepAwake.rawValue) — "
                 + (keepAwakeActive ? "holding" : "not holding")
                 + (keepAwakeCoversScreen ? ", screen on" : ""))
+        rearmKeepAwakeDeadline()
+    }
+
+    /// When the hold in force runs out on its own, and `nil` when nothing is
+    /// holding or nothing would end it.
+    private var keepAwakeDeadline: Date? {
+        guard keepAwakeActive, let since = keepAwakeSince else { return nil }
+        switch config.keepAwake {
+        case .off: return nil
+        case .auto: return (lastAgentActivityAt ?? since) + keepAwakePolicy.idleWindow
+        case .on: return since + keepAwakePolicy.manualCeiling
+        }
+    }
+
+    /// Wakes the engine when the hold is due to end.
+    ///
+    /// A loop rather than a task per emit: `auto` pushes its deadline forward
+    /// on every turn that lands, and re-creating this each time would build a
+    /// task several times a second while agents work. Waking at the old
+    /// deadline and finding it has moved costs one comparison instead.
+    private func rearmKeepAwakeDeadline() {
+        keepAwakeDeadlineTask?.cancel()
+        keepAwakeDeadlineTask = nil
+        guard keepAwakeDeadline != nil else { return }
+        let me = self
+        keepAwakeDeadlineTask = Task {
+            while !Task.isCancelled {
+                guard let deadline = await me.currentKeepAwakeDeadline() else { return }
+                let remaining = deadline.timeIntervalSinceNow
+                guard remaining > 0 else {
+                    await me.keepAwakeDeadlinePassed()
+                    return
+                }
+                try? await Task.sleep(for: .seconds(remaining))
+            }
+        }
+    }
+
+    private func currentKeepAwakeDeadline() -> Date? { keepAwakeDeadline }
+
+    /// What a hold that ran out does about it.
+    ///
+    /// `auto` simply lets go and says so on the next frame. A manual hold
+    /// switches itself off instead of quietly releasing: "on and holding
+    /// nothing" already means power management refused the assertion, and a
+    /// second cause wearing the same face would leave the panel saying
+    /// something that is true of two different Macs. A switch back in the off
+    /// position is unambiguous, and clicking it again is one gesture.
+    private func keepAwakeDeadlinePassed() async {
+        guard lifecycle == .running else { return }
+        if config.keepAwake == .on {
+            sissyLog("sissy: keep-awake reached its ceiling and switched itself off")
+            await setKeepAwake(mode: KeepAwakeMode.off.rawValue)
+        } else {
+            await applyKeepAwake()
+            await reemit()
+        }
+    }
+
+    /// Records that agents are working, which in `auto` is what earns the
+    /// hold.
+    ///
+    /// A day total that grew is a turn that landed. Reading growth rather than
+    /// the arrival of an emit is what keeps the signal honest: `reemit` runs
+    /// this path for a setting the user changed, and the tail emits again at
+    /// midnight when the day rolls over, and neither is an agent working.
+    /// The first reading of a run only sets the baseline — it is a cold scan
+    /// reporting what happened before Sissy was launched, not something
+    /// happening now.
+    private func noteAgentActivity(_ today: DayTotals) {
+        defer { lastSeenTokens = today.totalTokens }
+        guard let previous = lastSeenTokens, today.totalTokens > previous else { return }
+        lastAgentActivityAt = Date()
+    }
+
+    /// Takes or releases the automatic hold when the agents change the answer.
+    ///
+    /// Only when the decision actually moves, so the common case — a turn
+    /// landing while the hold is already in force — never reaches the
+    /// assertion and never suspends the emit that called it.
+    private func refreshAutomaticHold() async {
+        guard config.keepAwake == .auto, automaticHoldEarned != keepAwakeActive else { return }
+        await applyKeepAwake()
     }
 
     private func startClaudeLimitsProbe() async {
@@ -355,6 +483,8 @@ actor UsageEngine {
         slices: [ProviderSlice]
     ) async {
         hasReading = true
+        noteAgentActivity(today)
+        await refreshAutomaticHold()
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
         let hoursElapsed = max(now.timeIntervalSince(startOfDay) / 3600, 1.0 / 60.0)

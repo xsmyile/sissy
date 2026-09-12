@@ -175,12 +175,23 @@ final class SissyModel {
             mode: pending.mode, active: reported.active, since: reported.since)
     }
 
+    /// Which armed mode the panel's button puts the switch back into.
+    ///
+    /// The button toggles and there are three modes, so the one it returns to
+    /// is the one the user last had — chosen from the menu, or carried across
+    /// a relaunch by the first frame that reports an armed mode. It is UI
+    /// state and not a setting: the mode itself lives in `server.json`, and a
+    /// second copy of it here could disagree with the file the assertions are
+    /// taken from.
+    private(set) var preferredKeepAwakeMode: KeepAwakeMode = .on
+
     func setKeepScreenAwake(_ enabled: Bool) {
         engine.setKeepScreenAwake(enabled)
     }
 
     func setKeepAwake(_ mode: KeepAwakeMode) {
         guard mode != keepAwake.mode else { return }
+        if mode != .off { preferredKeepAwakeMode = mode }
         pendingKeepAwake = PendingKeepAwake(mode: mode, askedAt: Date())
         engine.setKeepAwake(mode: mode)
     }
@@ -192,6 +203,7 @@ final class SissyModel {
         if let pending = pendingKeepAwake, frame.keepAwake.mode == pending.mode {
             pendingKeepAwake = nil
         }
+        if frame.keepAwake.mode != .off { preferredKeepAwakeMode = frame.keepAwake.mode }
         currentFrame = frame
         lastFrameAt = Date()
     }
