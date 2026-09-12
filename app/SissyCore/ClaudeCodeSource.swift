@@ -142,6 +142,13 @@ final class ClaudeCodeAdapter: SourceAdapter {
         b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D
     }
 
+    /// One assistant line's contribution, which is the whole turn the first
+    /// time its key is seen and the growth in output on every copy after.
+    ///
+    /// A copy carrying no more output than was already billed owes nothing,
+    /// and that covers one carrying *less*: a request id whose count goes
+    /// backwards is not something this layer can act on, and re-reading a
+    /// file from an earlier offset walks the same copies again by design.
     func event(from line: SourceLine, seen: inout [String: SeenEvent]) -> UsageEvent? {
         guard let obj = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any],
             obj["type"] as? String == "assistant",
@@ -155,8 +162,6 @@ final class ClaudeCodeAdapter: SourceAdapter {
 
         if ts < line.retainCutoff { return nil }
 
-        // Claude Code logs the same assistant turn 2-4 times per JSONL file
-        // while the answer streams. Dedupe by requestId.
         let dedupeKey: String
         if let rid = obj["requestId"] as? String, !rid.isEmpty {
             dedupeKey = "rid:\(rid)"
@@ -223,6 +228,12 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// them, so a remainder that carried them again would bill the same cache
     /// read two, three, four times. Measured on a day of real logs against
     /// `ccusage`, which lands on all four token counts exactly this way.
+    ///
+    /// The remainder carries its own copy's timestamp, so a turn that streams
+    /// across local midnight is billed partly to each day rather than moved
+    /// whole to the later one. Both days are right about what was spent in
+    /// them, and the earlier one may already be archived by the time the
+    /// later copy lands — a day the tail has closed is not one it reopens.
     private func streamedRemainder(model: String, at timestamp: Date, outputTokens: Int)
         -> UsageEvent
     {
