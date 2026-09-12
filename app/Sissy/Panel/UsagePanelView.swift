@@ -15,7 +15,12 @@ struct UsagePanelView: View {
     @FocusState private var panelFocused: Bool
 
     private static let width: CGFloat = 340
-    private static let footerTick: TimeInterval = 1
+    /// Cadence for both readouts the panel keeps on its own clock: the
+    /// footer's age and the keep-awake control's duration. A second is finer
+    /// than the duration needs — it changes by the minute — but the tick is
+    /// what decides how late a change lands, and a minute-long one would show
+    /// the wrong minute for most of it.
+    private static let clockTick: TimeInterval = 1
     private static let secondaryWindowOpacity: Double = 0.55
     private static let controlButtonSize: CGFloat = 26
     private static let sissySize: CGFloat = 24
@@ -81,23 +86,45 @@ struct UsagePanelView: View {
 
             Spacer(minLength: 0)
 
-            keepAwakeButton
+            keepAwakeControl
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
 
-    /// The panel's one control, styled as a switch rather than a footer
-    /// glyph: it says what the machine is doing, and a link's styling made it
-    /// read as navigation.
+    /// The panel's one control, with how long the hold has been in force
+    /// beside it.
+    ///
+    /// The elapsed reading sits outside the button rather than inside its
+    /// tooltip because a tooltip is only true while it is open: `.help` is
+    /// rebuilt when the body is, and a panel whose model has not changed
+    /// would offer an hour-old duration to someone hovering now. The instant
+    /// it counts from is fixed, so the clock runs off `TimelineView` and owes
+    /// nothing to the next frame arriving.
+    private var keepAwakeControl: some View {
+        let state = model.keepAwake
+        return HStack(spacing: 6) {
+            if let since = state.since {
+                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+                    Text(UsageFormat.held(context.date.timeIntervalSince(since)))
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            keepAwakeButton(state)
+        }
+    }
+
+    /// Styled as a switch rather than a footer glyph: it says what the
+    /// machine is doing, and a link's styling made it read as navigation.
     ///
     /// Colour carries the two axes separately. The glass tints while the Mac
     /// is actually being held; a mode that is on and holding nothing — power
     /// management refused the assertion — keeps the amber glyph without the
     /// tinted glass, so "switched on" and "holding" stay legible apart.
-    private var keepAwakeButton: some View {
-        let state = model.keepAwake
-        return Button {
+    private func keepAwakeButton(_ state: KeepAwakeState) -> some View {
+        Button {
             model.setKeepAwake(state.mode == .on ? .off : .on)
         } label: {
             Image(systemName: "cup.and.saucer.fill")
@@ -118,7 +145,8 @@ struct UsagePanelView: View {
         switch (state.mode, state.active) {
         case (.off, _): return "Keep this Mac and its screen awake"
         case (.on, true):
-            return "Keeping this Mac and its screen awake, so it will not lock "
+            let since = state.since.map { " since \($0.formatted(.dateTime.hour().minute()))" } ?? ""
+            return "Keeping this Mac and its screen awake\(since), so it will not lock "
                 + "· click to allow sleep"
         case (.on, false): return "Switched on · the Mac is not being held awake"
         }
@@ -343,7 +371,7 @@ struct UsagePanelView: View {
     private func footer(_ live: SissyModel.LiveFrame?) -> some View {
         HStack(spacing: 6) {
             if let live {
-                TimelineView(.periodic(from: .now, by: Self.footerTick)) { context in
+                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
                     Text("updated " + UsageFormat.age(context.date.timeIntervalSince(live.at)))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)

@@ -171,7 +171,8 @@ final class SissyModel {
             reported.mode != pending.mode,
             Date().timeIntervalSince(pending.askedAt) < Self.keepAwakeAckWindow
         else { return reported }
-        return KeepAwakeState(mode: pending.mode, active: reported.active)
+        return KeepAwakeState(
+            mode: pending.mode, active: reported.active, since: reported.since)
     }
 
     func setKeepAwake(_ mode: KeepAwakeMode) {

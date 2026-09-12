@@ -85,15 +85,20 @@ keychain and polls the endpoint Claude Code's `/usage` reads. That costs a
 one-time macOS keychain authorization, so it stays off until the user asks for it
 in Settings.
 
-`keepAwake` carries `{mode, active}` and is never optional, including when off:
-the panel draws its control from this, and "off" and "nothing reported" must not
-collapse into the same value. `mode` is where the user left the switch and
+`keepAwake` carries `{mode, active, since}` and is never optional, including when
+off: the panel draws its control from this, and "off" and "nothing reported" must
+not collapse into the same value. `mode` is where the user left the switch and
 survives in `server.json`; `active` is whether the Mac is being held awake right
-now. The hold covers the screen as well, but `active` follows the system
-assertion, which is what that claim is about: a refused display assertion leaves
-a Mac that stays up behind a screen that dims, and says so in the log rather than
-retracting the hold that did take. A system assertion that could not be taken
-drops the display one with it, so a false `active` always means nothing is held.
+now; `since` is when the hold in force was taken, `nil` whenever nothing is held
+and in memory only — a hold dies with the process, so a relaunch that resumes the
+mode reports a fresh instant rather than the one from the run before. The panel
+counts up from it on its own clock, which is why it is a `Date` and not a
+duration: frames arrive when usage changes, not once a second. The hold covers
+the screen as well, but `active` follows the system assertion, which is what
+that claim is about: a refused display assertion leaves a Mac that stays up
+behind a screen that dims, and says so in the log rather than retracting the
+hold that did take. A system assertion that could not be taken drops the display
+one with it, so a false `active` always means nothing is held.
 The two come apart — power management can refuse an assertion — and the panel
 renders them as two properties of one glyph, tint for the mode and fill for the
 effect, so "switched on and holding nothing" is readable at a glance rather than

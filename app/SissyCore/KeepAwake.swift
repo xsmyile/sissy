@@ -18,6 +18,24 @@ enum KeepAwakeMode: String, Sendable, Codable {
 struct KeepAwakeState: Sendable, Equatable {
     let mode: KeepAwakeMode
     let active: Bool
+    /// When the hold in force right now was taken, and `nil` whenever nothing
+    /// is being held.
+    ///
+    /// In memory only, like the assertions it describes. A hold does not
+    /// survive the process, so neither does its instant: a relaunch that
+    /// resumes the mode takes a fresh hold and this says so. It reads as
+    /// "held since", never as "switched on since", which is the same
+    /// distinction `active` already draws against `mode`.
+    let since: Date?
+
+    /// Normalises the pair rather than trusting callers to: an instant
+    /// without a hold is a stopwatch running on a Mac that is free to sleep,
+    /// and the panel would render it as one.
+    init(mode: KeepAwakeMode, active: Bool, since: Date? = nil) {
+        self.mode = mode
+        self.active = active
+        self.since = active ? since : nil
+    }
 
     static let off = Self(mode: .off, active: false)
 }

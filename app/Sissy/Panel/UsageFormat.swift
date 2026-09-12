@@ -35,6 +35,24 @@ enum UsageFormat {
         return "\(minutes / 60)h ago"
     }
 
+    /// How long the keep-awake hold has been in force, for the panel's
+    /// control.
+    ///
+    /// A stopwatch where `age` is a reassurance, which is why the two do not
+    /// share an implementation: this one keeps both units past the hour,
+    /// because the distance between a hold taken an hour ago and one taken
+    /// this morning is the whole point of showing it. Seconds stay out — a
+    /// hold ticking by the second reads as something counting down to an
+    /// event, and nothing here expires.
+    static func held(_ interval: TimeInterval) -> String {
+        let minutes = max(Int(interval) / secondsPerMinute, 0)
+        if minutes < 1 { return "<1m" }
+        if minutes < minutesPerHour { return "\(minutes)m" }
+        let hours = minutes / minutesPerHour
+        let remainder = minutes % minutesPerHour
+        return remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
+    }
+
     /// Compact name for a rate-limit window, derived from its length so a
     /// vendor that ships a bucket Sissy has never seen still gets a label.
     static func windowLabel(minutes: Int) -> String {
@@ -80,6 +98,7 @@ enum UsageFormat {
         return "Since \(earliestDay.formatted(.dateTime.day().month(.abbreviated)))"
     }
 
+    private static let secondsPerMinute = 60
     private static let minutesPerHour = 60
     private static let minutesPerDay = 1440
 
