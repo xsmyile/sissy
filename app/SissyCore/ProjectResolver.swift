@@ -33,13 +33,6 @@ import Foundation
 /// its label, never a total its tokens, and re-walking every line to catch it
 /// would cost the walk this cache exists to avoid.
 ///
-/// A directory that no longer exists cannot be resolved and becomes its own
-/// project. The tail resolves as it reads, so live counting sees the directory
-/// while it is still there; a cold scan re-deriving a past day may not, and a
-/// deleted worktree then reads as a project of its own rather than folding
-/// back into its checkout. Measured on a real tree: replaying a past day found
-/// four such directories, all worktrees that had since been removed.
-///
 /// Only ever touched from inside a provider's actor, which is what lets it
 /// hold a plain mutable cache — the same arrangement `SourceAdapter` has.
 final class ProjectResolver {
