@@ -93,12 +93,15 @@ now; `since` is when the hold in force was taken, `nil` whenever nothing is held
 and in memory only — a hold dies with the process, so a relaunch that resumes the
 mode reports a fresh instant rather than the one from the run before. The panel
 counts up from it on its own clock, which is why it is a `Date` and not a
-duration: frames arrive when usage changes, not once a second. The hold covers
-the screen as well, but `active` follows the system assertion, which is what
-that claim is about: a refused display assertion leaves a Mac that stays up
-behind a screen that dims, and says so in the log rather than retracting the
-hold that did take. A system assertion that could not be taken drops the display
-one with it, so a false `active` always means nothing is held.
+duration: frames arrive when usage changes, not once a second. `coversScreen`
+is whether the screen is being held lit alongside the Mac — the effect, where
+`keepScreenAwake` in `server.json` is the setting, so a display assertion power
+management refused stops the panel promising a screen that is already dimming.
+`active` follows the system assertion alone, which is what that claim is about:
+a refused display assertion leaves a Mac that stays up behind a screen that
+dims, and says so in the log rather than retracting the hold that did take. A
+system assertion that could not be taken drops the display one with it, so a
+false `active` always means nothing is held.
 The two come apart — power management can refuse an assertion — and the panel
 renders them as two properties of one glyph, tint for the mode and fill for the
 effect, so "switched on and holding nothing" is readable at a glance rather than
@@ -132,12 +135,12 @@ compiled into the app too.
 | `CodexAuth.swift`               | Reads the `chatgpt_plan_type` claim out of `~/.codex/auth.json`, for the boot before the first turn; touches no other field in it |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow`, plus `fmtTokens` / `fmtBurn` / `fmtCost` and the slice ordering |
-| `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` and `PreventUserIdleDisplaySleep` assertions, plus `KeepAwakeMode` / `KeepAwakeState`; the mode persists in `server.json`, the assertions die with the process |
+| `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` assertion and, when `keepScreenAwake` asks for it, the `PreventUserIdleDisplaySleep` one, plus `KeepAwakeMode` / `KeepAwakeState` / `KeepAwakeHold`; the mode and the screen setting persist in `server.json`, the assertions die with the process |
 | `Pricing.swift`                 | Anthropic cost math, `ModelPricing`, `PricingTable`; no rate table of its own |
 | `OpenAIPricing.swift`           | OpenAI cost math, same override → catalog → seed precedence |
 | `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM rates at runtime; renders the seed for `--dump-seed` |
 | `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — offline / first-run floor |
-| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`, `historyRetentionDays`, `keepAwake`. The engine owns the file, and saves it through a staging file so it is owner-only before it answers to its own name |
+| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`, `historyRetentionDays`, `keepAwake`, `keepScreenAwake`. The engine owns the file, and saves it through a staging file so it is owner-only before it answers to its own name |
 | `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude Code stays on the legacy `usage-state.json` for upgrade smoothness. The snapshots sit beside the `server.json` that named the trees they were read from, so a config pointed elsewhere — `--config`, a test — takes its reading with it. Carries two optional resume blocks: `historyResume` (the archive's per-model split) and `codexResume` |
 | `UsageHistory.swift`            | The archive: one directory per provider under `history/`, one whole-file JSON per local day, a row per model. Versioned apart from the snapshot so a schema bump cannot delete it, rewritten whole so a re-derived day replaces rather than doubles, pruned to `historyRetentionDays` across every provider directory — the engine's call, since a provider that is off has no tail to make it |
 | `SissyPaths.swift`              | Support-dir and logs-dir resolution (`.dev` bundle id → dev tree) |

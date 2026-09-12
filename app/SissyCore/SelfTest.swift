@@ -320,7 +320,8 @@ private func runFrameBuildTests() {
             ProviderSlice(id: "claude-code", tokens: 33_121_400, cost: Decimal(string: "23.99")!),
             ProviderSlice(id: "codex", tokens: 0, cost: 0),
         ],
-        keepAwake: KeepAwakeState(mode: .on, active: true, since: heldSince)
+        keepAwake: KeepAwakeState(
+            mode: .on, active: true, since: heldSince, coversScreen: true)
     )
     expect("frame providers count", frame.providers.count, 2)
     expect("frame providers[0].id", frame.providers[0].id, "claude-code")
@@ -330,6 +331,7 @@ private func runFrameBuildTests() {
     expect("frame keep-awake mode", frame.keepAwake.mode, .on)
     expect("frame keep-awake active", frame.keepAwake.active, true)
     expect("frame keep-awake since", frame.keepAwake.since, heldSince)
+    expect("frame keep-awake covers screen", frame.keepAwake.coversScreen, true)
     // Both nil together or neither: a half-present pair would render a
     // day-over-day delta measured against a zero nobody observed.
     expect("frame prev tokens absent", frame.prevTokens == nil, true)

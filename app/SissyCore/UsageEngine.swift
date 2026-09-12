@@ -60,6 +60,10 @@ actor UsageEngine {
     /// already in force keeps the instant it started from, so what the panel
     /// counts up from is the Mac's, never the last time this ran.
     private var keepAwakeSince: Date?
+    /// Whether the screen is being held lit too, as opposed to whether the
+    /// user asked for it — which is `config.keepScreenAwake`. Same split as
+    /// `keepAwakeActive` draws against the mode, for the same reason.
+    private var keepAwakeCoversScreen = false
     /// Days the panel's archive line covers. A week is what makes "more than
     /// today" legible in a row that has to fit beside the per-provider rows.
     static let historyWindowDays = 7
@@ -281,6 +285,24 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// Switch whether the hold covers the screen and persist it.
+    ///
+    /// Applied through the same path as the mode, so flipping it under a
+    /// running hold drops or adds the screen half without disturbing the
+    /// system assertion underneath.
+    func setKeepScreenAwake(enabled: Bool) async {
+        guard enabled != config.keepScreenAwake else { return }
+        config.keepScreenAwake = enabled
+        do {
+            try ServerConfig.save(config, to: configURL)
+        } catch {
+            sissyLog(
+                "sissy: failed to persist keepScreenAwake to \(configURL.path): \(error)")
+        }
+        await applyKeepAwake()
+        await reemit()
+    }
+
     /// Drives the assertion to whatever the stored mode asks for.
     ///
     /// The desired state is read back after the hop into the `KeepAwake`
@@ -293,13 +315,16 @@ actor UsageEngine {
     /// that has already been released.
     private func applyKeepAwake() async {
         let wanted = config.keepAwake == .on && lifecycle == .running
-        let held = await keepAwake.apply(holding: wanted)
+        let hold = await keepAwake.apply(
+            holding: wanted, includingScreen: config.keepScreenAwake)
         guard wanted == (config.keepAwake == .on && lifecycle == .running) else { return }
-        keepAwakeActive = held && wanted
+        keepAwakeActive = hold.system && wanted
+        keepAwakeCoversScreen = hold.screen && wanted
         keepAwakeSince = keepAwakeActive ? (keepAwakeSince ?? Date()) : nil
         sissyLog(
             "sissy: keep-awake \(config.keepAwake.rawValue) — "
-                + (keepAwakeActive ? "holding" : "not holding"))
+                + (keepAwakeActive ? "holding" : "not holding")
+                + (keepAwakeCoversScreen ? ", screen on" : ""))
     }
 
     private func startClaudeLimitsProbe() async {
@@ -345,7 +370,10 @@ actor UsageEngine {
             hoursElapsed: hoursElapsed,
             providers: slices,
             keepAwake: KeepAwakeState(
-                mode: config.keepAwake, active: keepAwakeActive, since: keepAwakeSince),
+                mode: config.keepAwake,
+                active: keepAwakeActive,
+                since: keepAwakeSince,
+                coversScreen: keepAwakeCoversScreen),
             history: currentHistory(now: now)
         )
         await onFrame?(frame)

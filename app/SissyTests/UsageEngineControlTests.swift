@@ -205,6 +205,46 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertNil(released.since)
     }
 
+    /// The screen half is a setting the engine owns, so it has to reach the
+    /// file and the assertions the same way the mode does — and reach the
+    /// frame, which is where the panel words its control from.
+    func testTheScreenSettingReachesTheFileAndTheFrame() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(codex: false, keepAwake: .on)
+        let firstFrame = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [firstFrame], timeout: 5)
+        addTeardownBlock { await engine.stop() }
+        XCTAssertEqual(frames.all.last?.keepAwake.coversScreen, true, "the default dropped the screen")
+
+        let dropped = frames.expectation(forFrameCount: frames.count + 1)
+        await engine.setKeepScreenAwake(enabled: false)
+        await fulfillment(of: [dropped], timeout: 5)
+
+        let state = try XCTUnwrap(frames.all.last?.keepAwake)
+        XCTAssertTrue(state.active, "dropping the screen released the whole hold")
+        XCTAssertFalse(state.coversScreen)
+        XCTAssertEqual(try ServerConfig.load(from: configURL).keepScreenAwake, false)
+    }
+
+    /// Nothing is held when the switch is off, so the screen half has nothing
+    /// to report either — a frame saying otherwise would word the panel's
+    /// control around a screen assertion that does not exist.
+    func testTheScreenIsNotCoveredWhileTheSwitchIsOff() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(codex: false)
+        let firstFrame = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [firstFrame], timeout: 5)
+        addTeardownBlock { await engine.stop() }
+
+        let state = try XCTUnwrap(frames.all.last?.keepAwake)
+        XCTAssertFalse(state.active)
+        XCTAssertFalse(state.coversScreen)
+    }
+
     func testAModeTheEngineDoesNotKnowIsIgnored() async {
         let engine = makeEngine()
         await engine.start { _ in }
