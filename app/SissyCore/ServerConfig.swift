@@ -41,6 +41,15 @@ struct ServerConfig: Sendable, Codable {
     /// setting, not a hold: a user who switched their Mac to never sleep
     /// expects that to survive Sissy restarting at login.
     var keepAwake: KeepAwakeMode
+    /// Whether the keep-awake hold covers the screen as well as the Mac.
+    ///
+    /// On, which is the hold someone switching keep-awake on from the panel
+    /// expects. Off is for the Mac left running agents unattended: the display
+    /// sleeps and the Mac locks itself on its usual schedule while the system
+    /// assertion keeps the work going. A `server.json` written before this key
+    /// existed decodes through the partial-config path below and lands on the
+    /// default, which is the behaviour it already had.
+    var keepScreenAwake: Bool
 
     static let defaults = ServerConfig(
         claudeDataDir: "~/.claude/projects",
@@ -51,7 +60,8 @@ struct ServerConfig: Sendable, Codable {
         providers: .defaults,
         claudeLimits: false,
         historyRetentionDays: nil,
-        keepAwake: .off
+        keepAwake: .off,
+        keepScreenAwake: true
     )
 
     static var defaultURL: URL {
@@ -88,6 +98,7 @@ struct ServerConfig: Sendable, Codable {
         // value written by a newer build must not cost the user every other
         // setting in here.
         merged.keepAwake = (obj["keepAwake"] as? String).flatMap(KeepAwakeMode.init(rawValue:)) ?? .off
+        if let v = obj["keepScreenAwake"] as? Bool { merged.keepScreenAwake = v }
         if let prov = obj["providers"] as? [String: Any] {
             var toggles = ProviderToggles.defaults
             toggles.claudeCode = prov["claudeCode"] as? Bool

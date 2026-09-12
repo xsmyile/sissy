@@ -20,15 +20,15 @@ final class KeepAwakeTests: XCTestCase {
     override func setUp() {
         super.setUp()
         let keepAwake = keepAwake
-        addTeardownBlock { _ = await keepAwake.apply(holding: false) }
+        addTeardownBlock { _ = await keepAwake.apply(holding: false, includingScreen: true) }
     }
 
     func testHoldingTakesTheSystemAndTheDisplayAssertion() async {
         let baseline = heldAssertionNames()
 
-        let active = await keepAwake.apply(holding: true)
+        let hold = await keepAwake.apply(holding: true, includingScreen: true)
 
-        XCTAssertTrue(active)
+        XCTAssertEqual(hold, KeepAwakeHold(system: true, screen: true))
         XCTAssertEqual(
             namesAdded(since: baseline),
             [Self.systemAssertionName, Self.displayAssertionName].sorted())
@@ -36,11 +36,11 @@ final class KeepAwakeTests: XCTestCase {
 
     func testReleasingGivesBothBack() async {
         let baseline = heldAssertionNames()
-        _ = await keepAwake.apply(holding: true)
+        _ = await keepAwake.apply(holding: true, includingScreen: true)
 
-        let active = await keepAwake.apply(holding: false)
+        let hold = await keepAwake.apply(holding: false, includingScreen: true)
 
-        XCTAssertFalse(active)
+        XCTAssertEqual(hold, .none)
         XCTAssertEqual(namesAdded(since: baseline), [])
     }
 
@@ -50,9 +50,9 @@ final class KeepAwakeTests: XCTestCase {
     func testReleasingWhatWasNeverHeldChangesNothing() async {
         let baseline = heldAssertionNames()
 
-        let active = await keepAwake.apply(holding: false)
+        let hold = await keepAwake.apply(holding: false, includingScreen: true)
 
-        XCTAssertFalse(active)
+        XCTAssertEqual(hold, .none)
         XCTAssertEqual(namesAdded(since: baseline), [])
     }
 
@@ -61,10 +61,48 @@ final class KeepAwakeTests: XCTestCase {
     /// being turned off.
     func testHoldingTwiceStacksNothing() async {
         let baseline = heldAssertionNames()
-        _ = await keepAwake.apply(holding: true)
+        _ = await keepAwake.apply(holding: true, includingScreen: true)
 
-        _ = await keepAwake.apply(holding: true)
+        _ = await keepAwake.apply(holding: true, includingScreen: true)
 
+        XCTAssertEqual(
+            namesAdded(since: baseline),
+            [Self.systemAssertionName, Self.displayAssertionName].sorted())
+    }
+
+    /// The system assertion is the hold and the display one is an addition to
+    /// it, so switching the screen half off must leave a Mac that is still
+    /// being kept awake — not a Mac free to idle behind a dimmed screen.
+    func testHoldingWithoutTheScreenTakesTheSystemAssertionAlone() async {
+        let baseline = heldAssertionNames()
+
+        let hold = await keepAwake.apply(holding: true, includingScreen: false)
+
+        XCTAssertEqual(hold, KeepAwakeHold(system: true, screen: false))
+        XCTAssertEqual(namesAdded(since: baseline), [Self.systemAssertionName])
+    }
+
+    /// The setting is live: someone who switches the screen off while agents
+    /// are running gets the display released under a hold that never lifts.
+    func testDroppingTheScreenUnderARunningHoldKeepsTheMacAwake() async {
+        let baseline = heldAssertionNames()
+        _ = await keepAwake.apply(holding: true, includingScreen: true)
+
+        let hold = await keepAwake.apply(holding: true, includingScreen: false)
+
+        XCTAssertEqual(hold, KeepAwakeHold(system: true, screen: false))
+        XCTAssertEqual(namesAdded(since: baseline), [Self.systemAssertionName])
+    }
+
+    /// And back, without the Mac blinking awake in between: the system
+    /// assertion is never released to add the screen one.
+    func testAddingTheScreenBackTakesTheDisplayAssertionAgain() async {
+        let baseline = heldAssertionNames()
+        _ = await keepAwake.apply(holding: true, includingScreen: false)
+
+        let hold = await keepAwake.apply(holding: true, includingScreen: true)
+
+        XCTAssertEqual(hold, KeepAwakeHold(system: true, screen: true))
         XCTAssertEqual(
             namesAdded(since: baseline),
             [Self.systemAssertionName, Self.displayAssertionName].sorted())

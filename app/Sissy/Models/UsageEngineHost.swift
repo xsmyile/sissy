@@ -32,6 +32,11 @@ final class UsageEngineHost {
     /// the same place and for the same reason as `claudeLimits`: Settings
     /// says what the engine is actually doing, not what the app assumed.
     private(set) var historyRetentionDays: Int = UsageHistoryStore.defaultRetentionDays
+    /// Whether the keep-awake hold is set to cover the screen. Read from
+    /// `server.json` for the same reason as `claudeLimits`: the engine owns
+    /// that file, and a second copy in the app could disagree with the one the
+    /// assertions are actually taken from.
+    private(set) var keepScreenAwake: Bool = true
 
     @ObservationIgnored private weak var model: SissyModel?
     @ObservationIgnored private var engine: UsageEngine?
@@ -63,6 +68,7 @@ final class UsageEngineHost {
         self.engine = engine
         claudeLimits = config.claudeLimits
         historyRetentionDays = config.resolvedHistoryRetentionDays
+        keepScreenAwake = config.keepScreenAwake
         let host = self
         bootTask = Task {
             await engine.start { frame in
@@ -111,6 +117,12 @@ final class UsageEngineHost {
     func deleteUsageHistory() {
         guard let engine else { return }
         Task { await engine.deleteHistory() }
+    }
+
+    func setKeepScreenAwake(_ enabled: Bool) {
+        guard let engine, enabled != keepScreenAwake else { return }
+        keepScreenAwake = enabled
+        Task { await engine.setKeepScreenAwake(enabled: enabled) }
     }
 
     private func deliver(_ frame: FrameData) {

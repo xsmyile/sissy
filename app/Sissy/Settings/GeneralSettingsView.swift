@@ -38,6 +38,17 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Toggle("Keep the screen on too", isOn: keepScreenAwakeBinding)
+                Text(
+                    "Applies while keep awake is on. Off lets the display sleep and the Mac "
+                        + "lock itself on its usual schedule, with the Mac still held awake "
+                        + "underneath for the agents."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Animate Sissy", isOn: sissyMotionBinding)
                 Text(
                     "A blink when new usage lands, in the menu bar and in the panel, "
@@ -94,6 +105,13 @@ struct GeneralSettingsView: View {
         Binding(
             get: { model.loginItem.isEnabled },
             set: { model.setLaunchAtLogin($0) }
+        )
+    }
+
+    private var keepScreenAwakeBinding: Binding<Bool> {
+        Binding(
+            get: { model.engine.keepScreenAwake },
+            set: { model.setKeepScreenAwake($0) }
         )
     }
 

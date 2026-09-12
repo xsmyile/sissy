@@ -175,6 +175,10 @@ final class SissyModel {
             mode: pending.mode, active: reported.active, since: reported.since)
     }
 
+    func setKeepScreenAwake(_ enabled: Bool) {
+        engine.setKeepScreenAwake(enabled)
+    }
+
     func setKeepAwake(_ mode: KeepAwakeMode) {
         guard mode != keepAwake.mode else { return }
         pendingKeepAwake = PendingKeepAwake(mode: mode, askedAt: Date())

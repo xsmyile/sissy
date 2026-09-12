@@ -93,7 +93,8 @@ The app writes `~/Library/Application Support/Sissy/server.json`; every key is o
 | `providers` | auto-detect | force `claudeCode` / `codex` on or off |
 | `claudeDataDir`, `codexDataDir` | `~/.claude/projects`, `~/.codex/sessions` | where to look |
 | `claudeLimits` | `false` | read the CLI's OAuth token to show the 5-hour and weekly windows |
-| `keepAwake` | `off` | `on` holds power assertions so neither the Mac nor its screen idles off — a lit screen never locks itself, and a closed lid sleeps anyway |
+| `keepAwake` | `off` | `on` holds a power assertion so the Mac does not idle off — a closed lid sleeps anyway |
+| `keepScreenAwake` | on | whether that hold covers the screen too; `false` lets the display sleep and the Mac lock itself while the Mac stays awake |
 | `remotePricing` | on | fetch rates at runtime; `false` pins to the built-in snapshot and goes fully offline |
 | `pricingOverride` | none | per-model rates that win over both sources |
 | `historyRetentionDays` | `90` | days of the day-by-model history kept under `history/`; `0` records none, and deleting what is there is the button in Settings |

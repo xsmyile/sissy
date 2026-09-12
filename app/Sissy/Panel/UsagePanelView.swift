@@ -145,14 +145,23 @@ struct UsagePanelView: View {
     /// the assertion holds off *idle* sleep and nothing else: a MacBook closed
     /// on a running agent sleeps anyway, and someone who learns that from a
     /// lost run blames Sissy for it.
+    ///
+    /// The screen clause follows `coversScreen`, which is the effect and not
+    /// the setting, so a display assertion power management refused stops this
+    /// promising a screen that is already dimming. The off state claims
+    /// nothing about the screen at all — what a click would hold depends on a
+    /// setting this tooltip is not the place to teach.
     private func keepAwakeHelp(_ state: KeepAwakeState) -> String {
         switch (state.mode, state.active) {
         case (.off, _):
-            return "Keep this Mac and its screen awake · closing the lid still sleeps it"
+            return "Keep this Mac awake · closing the lid still sleeps it"
         case (.on, true):
             let since = state.since.map { " since \($0.formatted(.dateTime.hour().minute()))" } ?? ""
-            return "Keeping this Mac and its screen awake\(since), so it will not lock. "
-                + "Closing the lid still sleeps it · click to allow sleep"
+            let what =
+                state.coversScreen
+                ? "Keeping this Mac and its screen awake\(since), so it will not lock."
+                : "Keeping this Mac awake\(since) — the screen still sleeps and locks."
+            return what + " Closing the lid sleeps it anyway · click to allow sleep"
         case (.on, false):
             return "Switched on · the Mac is not being held awake"
         }
