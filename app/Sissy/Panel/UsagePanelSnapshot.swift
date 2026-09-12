@@ -162,33 +162,34 @@ struct UsagePanelSnapshot: Equatable {
             return NSDecimalNumber(decimal: cost).doubleValue
                 / NSDecimalNumber(decimal: totalCost).doubleValue
         }
-        guard projects.count > projectRowLimit else {
-            return projects.map { project in
-                ProjectRow(
-                    id: project.path,
-                    name: UsageFormat.projectName(project.path),
-                    path: project.path,
-                    tokens: UsageFormat.tokens(project.tokens),
-                    cost: UsageFormat.cost(project.cost),
-                    share: share(project.cost)
-                )
-            }
-        }
-        let shown = Array(projects.prefix(projectRowLimit - 1))
-        let rest = projects.dropFirst(projectRowLimit - 1)
-        let restTokens = rest.reduce(0) { $0 + $1.tokens }
-        let restCost = rest.reduce(Decimal(0)) { $0 + $1.cost }
-        return makeProjects(Array(shown), totalCost: totalCost) + [
+        let fits = projects.count <= projectRowLimit
+        let shown = fits ? projects : Array(projects.prefix(projectRowLimit - 1))
+        var rows = shown.map { project in
             ProjectRow(
-                id: "sissy.projects.rest",
+                id: project.path,
+                name: UsageFormat.projectName(project.path),
+                path: project.path,
+                tokens: UsageFormat.tokens(project.tokens),
+                cost: UsageFormat.cost(project.cost),
+                share: share(project.cost)
+            )
+        }
+        guard !fits else { return rows }
+        let rest = projects.dropFirst(projectRowLimit - 1)
+        let restCost = rest.reduce(Decimal(0)) { $0 + $1.cost }
+        rows.append(
+            ProjectRow(
+                id: Self.foldedProjectRowID,
                 name: UsageFormat.projectsFolded(count: rest.count),
                 path: nil,
-                tokens: UsageFormat.tokens(restTokens),
+                tokens: UsageFormat.tokens(rest.reduce(0) { $0 + $1.tokens }),
                 cost: UsageFormat.cost(restCost),
                 share: share(restCost)
-            )
-        ]
+            ))
+        return rows
     }
+
+    private static let foldedProjectRowID = "sissy.projects.rest"
 
     private static func makeWindow(_ window: UsageWindow) -> WindowRow {
         WindowRow(

@@ -35,6 +35,57 @@ final class UsageHistoryStoreTests: XCTestCase {
         )
     }
 
+    /// A file written before the archive carried projects has to be
+    /// replaceable by a reading that splits the same model across projects,
+    /// or every day on disk freezes on the upgrade.
+    func testADayFromBeforeProjectsIsCoveredByAReadingThatSplitsTheModel() {
+        let stored = day(rows: [UsageHistoryRow(model: "opus", project: nil): 100])
+        let reading = day(rows: [
+            UsageHistoryRow(model: "opus", project: "/a"): 60,
+            UsageHistoryRow(model: "opus", project: "/b"): 40,
+        ])
+
+        XCTAssertTrue(stored.isCoveredBy(reading))
+    }
+
+    /// Once a day names a project anywhere, its no-project rows are held to
+    /// their own key. Reading them at the model grain would let a scan that
+    /// lost the no-project bucket pass by counting a project row's tokens
+    /// towards it twice.
+    func testAReadingThatLostTheNoProjectBucketDoesNotCoverADayThatNamesProjects() {
+        let stored = day(rows: [
+            UsageHistoryRow(model: "opus", project: nil): 100,
+            UsageHistoryRow(model: "opus", project: "/a"): 50,
+        ])
+        let reading = day(rows: [UsageHistoryRow(model: "opus", project: "/a"): 150])
+
+        XCTAssertFalse(
+            stored.isCoveredBy(reading),
+            "a reading missing the no-project rows replaced a day that had them")
+    }
+
+    func testADayIsCoveredByAReadingThatGrewEveryRow() {
+        let stored = day(rows: [
+            UsageHistoryRow(model: "opus", project: nil): 100,
+            UsageHistoryRow(model: "opus", project: "/a"): 50,
+        ])
+        let reading = day(rows: [
+            UsageHistoryRow(model: "opus", project: nil): 100,
+            UsageHistoryRow(model: "opus", project: "/a"): 70,
+        ])
+
+        XCTAssertTrue(stored.isCoveredBy(reading))
+    }
+
+    private func day(rows: [UsageHistoryRow: Int]) -> UsageHistoryDay {
+        UsageHistoryDay(
+            day: "2026-09-11",
+            provider: ProviderID.claudeCode,
+            updatedAt: Date(),
+            totals: rows.mapValues { UsageHistoryTotals(inputTokens: $0) }
+        )
+    }
+
     private func write(
         provider: String,
         day dayKey: String,
