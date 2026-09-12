@@ -134,6 +134,22 @@ final class UsageProjectSplitTests: XCTestCase {
         XCTAssertEqual(day.models.map(\.project), [repo.path])
     }
 
+    /// Codex reaches the resolver down its own path, from the rollout's
+    /// `session_meta`, so a scratch directory has to go unnamed there too
+    /// rather than only on the Claude Code side.
+    func testCodexWorkOutsideAnyRepositoryIsCountedButNotNamed() async throws {
+        let loose = base.appendingPathComponent("scratch/one-off")
+        try FileManager.default.createDirectory(at: loose, withIntermediateDirectories: true)
+        try writeRollout("rollout-a.jsonl", cwd: loose.path, turns: 1)
+        try await runCodexTail()
+
+        let day = try archivedToday(ProviderID.codex)
+        XCTAssertEqual(day.models.map(\.project), [nil], "a scratch directory was named a project")
+        XCTAssertEqual(
+            day.models.first?.inputTokens, Self.tokensPerTurn,
+            "the spend went missing along with its name")
+    }
+
     func testCodexKeepsTheProjectAcrossARelaunch() async throws {
         let repo = try makeRepository("norace")
         try writeRollout("rollout-a.jsonl", cwd: repo.path, turns: 1)
