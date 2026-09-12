@@ -118,6 +118,31 @@ struct FrameData: Sendable, Equatable {
     /// counts against the checkout it was cut from — and a line naming no
     /// directory is not given a row at all rather than inventing one.
     let projects: [ProjectTotals]
+
+    /// Defaulted so a frame can be built without naming the split: a caller
+    /// that has none is saying there is none, and every test and future field
+    /// that does not care about projects should not have to say so.
+    init(
+        tokens: String,
+        cost: String,
+        burn: String,
+        providers: [ProviderSlice],
+        prevTokens: Int?,
+        prevCost: Decimal?,
+        keepAwake: KeepAwakeState,
+        history: UsageHistoryRollup?,
+        projects: [ProjectTotals] = []
+    ) {
+        self.tokens = tokens
+        self.cost = cost
+        self.burn = burn
+        self.providers = providers
+        self.prevTokens = prevTokens
+        self.prevCost = prevCost
+        self.keepAwake = keepAwake
+        self.history = history
+        self.projects = projects
+    }
 }
 
 enum FrameBuilder {
