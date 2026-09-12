@@ -86,6 +86,12 @@ actor UsageEngine {
         self.config = config
         self.configURL = configURL
 
+        // The snapshots live beside the config that named the trees they were
+        // read from. `ServerConfig.defaultURL` puts both in the support dir, so
+        // the app is unchanged; a config pointed somewhere else — `--config`,
+        // a test — takes its reading with it instead of resuming from the
+        // install's own and writing a foreign tree back into it.
+        let stateDir = configURL.deletingLastPathComponent()
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
         let claudeDir = config.resolvedClaudeDataDir
         let codexDir = config.resolvedCodexDataDir
@@ -114,7 +120,7 @@ actor UsageEngine {
                 LocalUsageProvider.claudeCode(
                     claudeDir: claudeDir,
                     pollInterval: pollInterval,
-                    persistenceURL: UsageStatePersistence.defaultURL,
+                    persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
                     pricingOverride: config.pricingOverride,
                     limitsProbe: limitsProbe
                 ))
@@ -124,7 +130,7 @@ actor UsageEngine {
                 LocalUsageProvider.codex(
                     codexDir: codexDir,
                     pollInterval: pollInterval,
-                    persistenceURL: UsageStatePersistence.forProvider("codex"),
+                    persistenceURL: UsageStatePersistence.forProvider("codex", in: stateDir),
                     pricingOverride: config.pricingOverride
                 ))
         }

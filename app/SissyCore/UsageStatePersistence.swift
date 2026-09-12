@@ -113,16 +113,20 @@ enum UsageStatePersistence {
     /// `ServerConfig.defaultURL` convention; both live in
     /// `~/Library/Application Support/Sissy/` as recommended by Apple's
     /// File System Programming Guide for app-managed support data.
-    static var defaultURL: URL {
-        SissyPaths.appSupportDir.appendingPathComponent("usage-state.json")
+    ///
+    /// `directory` is what keeps that "next to" true when the config is not the
+    /// install's own: a snapshot describes the trees one config named, so it
+    /// follows that config rather than the support dir.
+    static func defaultURL(in directory: URL = SissyPaths.appSupportDir) -> URL {
+        directory.appendingPathComponent("usage-state.json")
     }
 
     /// Per-provider snapshot path (`usage-state-<id>.json`). Each provider
     /// writes its own file so a schema change in one can quarantine itself
     /// without invalidating the others. Claude Code is the exception — it
     /// stays on the unqualified `usage-state.json` legacy path.
-    static func forProvider(_ id: String) -> URL {
-        SissyPaths.appSupportDir.appendingPathComponent("usage-state-\(id).json")
+    static func forProvider(_ id: String, in directory: URL = SissyPaths.appSupportDir) -> URL {
+        directory.appendingPathComponent("usage-state-\(id).json")
     }
 
     /// Hash a provider's resolved data dir so a future swap (user edits
