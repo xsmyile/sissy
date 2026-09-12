@@ -141,14 +141,20 @@ struct UsagePanelView: View {
         .help(keepAwakeHelp(state))
     }
 
+    /// Names the lid in every wording that claims the Mac stays up, because
+    /// the assertion holds off *idle* sleep and nothing else: a MacBook closed
+    /// on a running agent sleeps anyway, and someone who learns that from a
+    /// lost run blames Sissy for it.
     private func keepAwakeHelp(_ state: KeepAwakeState) -> String {
         switch (state.mode, state.active) {
-        case (.off, _): return "Keep this Mac and its screen awake"
+        case (.off, _):
+            return "Keep this Mac and its screen awake · closing the lid still sleeps it"
         case (.on, true):
             let since = state.since.map { " since \($0.formatted(.dateTime.hour().minute()))" } ?? ""
-            return "Keeping this Mac and its screen awake\(since), so it will not lock "
-                + "· click to allow sleep"
-        case (.on, false): return "Switched on · the Mac is not being held awake"
+            return "Keeping this Mac and its screen awake\(since), so it will not lock. "
+                + "Closing the lid still sleeps it · click to allow sleep"
+        case (.on, false):
+            return "Switched on · the Mac is not being held awake"
         }
     }
 
