@@ -206,7 +206,8 @@ final class CodexAdapter: SourceAdapter {
             let cwd = payload["cwd"] as? String,
             !cwd.isEmpty
         else { return }
-        fileProjects[url] = projects.project(for: cwd)
+        guard let project = projects.project(for: cwd) else { return }
+        fileProjects[url] = project
     }
 
     /// Updates per-file model from a `turn_context` line. Idempotent; called

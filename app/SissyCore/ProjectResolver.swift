@@ -9,7 +9,19 @@ import Foundation
 /// from the working directory to the first `.git`: a directory means the
 /// repository root is right there, a *file* means a worktree, and its
 /// `gitdir:` line names `<main>/.git/worktrees/<name>`, which puts the work on
-/// `<main>`. A directory inside no repository at all is its own project.
+/// `<main>`.
+///
+/// **A walk that names no repository answers nil.** Sissy does not invent a
+/// project out of a path it cannot verify: a scratch directory a CLI made for
+/// one conversation is not a project, and neither is a worktree that has since
+/// been deleted — its money belonged to the checkout it was cut from, and
+/// calling it a project of its own is a wrong answer wearing a real name.
+/// Unattributed usage still counts in every total; it is only denied a row.
+///
+/// The walk does not need the starting directory to exist, so a worktree kept
+/// inside its own repository still resolves after deletion. One kept beside
+/// it does not — measured across a real history, 2 219M tokens of deleted
+/// directories still resolve and 2 827M have nothing left to resolve to.
 ///
 /// Results are cached per working directory: a real day names a hundred or so
 /// distinct ones across thousands of lines, and the walk costs a `stat` per
@@ -38,22 +50,21 @@ final class ProjectResolver {
     private static let gitEntryName = ".git"
 
     private let fileManager: FileManager
-    private var cache: [String: String] = [:]
+    private var cache: [String: String?] = [:]
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
     }
 
-    func project(for workingDirectory: String) -> String {
+    func project(for workingDirectory: String) -> String? {
         if let hit = cache[workingDirectory] { return hit }
         let resolved = resolve(workingDirectory)
         cache[workingDirectory] = resolved
         return resolved
     }
 
-    private func resolve(_ workingDirectory: String) -> String {
-        let start = URL(fileURLWithPath: workingDirectory).standardizedFileURL
-        var directory = start
+    private func resolve(_ workingDirectory: String) -> String? {
+        var directory = URL(fileURLWithPath: workingDirectory).standardizedFileURL
         while true {
             let entry = directory.appendingPathComponent(Self.gitEntryName)
             var isDirectory: ObjCBool = false
@@ -62,7 +73,7 @@ final class ProjectResolver {
                 return mainCheckout(ofWorktreePointer: entry) ?? directory.path
             }
             let parent = directory.deletingLastPathComponent().standardizedFileURL
-            if parent.path == directory.path { return start.path }
+            if parent.path == directory.path { return nil }
             directory = parent
         }
     }

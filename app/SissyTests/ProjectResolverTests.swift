@@ -67,11 +67,31 @@ final class ProjectResolverTests: XCTestCase {
         XCTAssertEqual(resolver.project(for: submodule.path), submodule.path)
     }
 
-    func testADirectoryInNoRepositoryIsItsOwnProject() throws {
+    /// A CLI makes one of these for a single conversation. It is not a project
+    /// and must not be given the name of one.
+    func testADirectoryInNoRepositoryIsNotAProject() throws {
         let loose = root.appendingPathComponent("scratch/notes")
         try FileManager.default.createDirectory(at: loose, withIntermediateDirectories: true)
 
-        XCTAssertEqual(resolver.project(for: loose.path), loose.path)
+        XCTAssertNil(resolver.project(for: loose.path))
+    }
+
+    /// The walk never stats the starting directory, so a worktree kept inside
+    /// its own repository still counts against it after being deleted.
+    func testAWorktreeDeletedFromInsideItsRepositoryStillResolves() throws {
+        let repo = try makeRepository("norace")
+
+        XCTAssertEqual(
+            resolver.project(for: repo.appendingPathComponent(".git-worktrees/gone").path),
+            repo.path)
+    }
+
+    /// One kept beside the repository rather than inside it has nothing left
+    /// to resolve to, and a dead path is not a project.
+    func testAWorktreeDeletedFromBesideItsRepositoryIsNotAProject() throws {
+        _ = try makeRepository("sissy")
+
+        XCTAssertNil(resolver.project(for: root.appendingPathComponent("rockfish").path))
     }
 
     func testAResolvedDirectoryIsNotWalkedTwice() throws {
