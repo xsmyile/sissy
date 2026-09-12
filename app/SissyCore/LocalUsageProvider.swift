@@ -895,11 +895,16 @@ actor LocalUsageProvider: UsageProvider {
     /// seeds the day from the snapshot and rewrites the file whole from there.
     ///
     /// A day is only ever replaced by a reading at least as complete as the
-    /// one it holds. What a cold scan derives is bounded by the tree as it is
-    /// now, and the commonest reason a snapshot goes stale is a session log
-    /// that is no longer there — so a re-derivation can be short where the run
-    /// that archived the day was not, and that day is past, which means
-    /// nothing will ever grow it back.
+    /// one it holds, model by model. What a cold scan derives is bounded by
+    /// the tree as it is now, and the commonest reason a snapshot goes stale
+    /// is a session log that is no longer there — so a re-derivation can be
+    /// short where the run that archived the day was not, and that day is
+    /// past, which means nothing will ever grow it back. The comparison is
+    /// per model because a scan that lost one model's log while another model
+    /// went on spending adds up to more than the file and still knows less
+    /// than it. A file this build cannot read is left alone for the same
+    /// reason, one step further along: there is no reading here that knows
+    /// what it holds.
     ///
     /// A day whose write fails is kept dirty and retried on the next flush;
     /// the others are still attempted, because one unwritable day must not
@@ -918,8 +923,13 @@ actor LocalUsageProvider: UsageProvider {
                 updatedAt: now,
                 totals: totals
             )
-            guard archivedTokens(for: record.day, in: historyRoot) <= record.totalTokens else {
+            switch UsageHistoryStore.stored(provider: id, day: record.day, in: historyRoot) {
+            case .unreadable:
                 continue
+            case .day(let onDisk) where !onDisk.isCoveredBy(record):
+                continue
+            case .absent, .day:
+                break
             }
             do {
                 try UsageHistoryStore.save(record, in: historyRoot)
@@ -936,13 +946,6 @@ actor LocalUsageProvider: UsageProvider {
         }
         historyDirtyDays = unwritten
         lastHistorySaveAt = now
-    }
-
-    /// What the archive already holds for a day, or zero when it holds
-    /// nothing it can read — an unreadable file is one this build must not
-    /// treat as a total it has to beat.
-    private func archivedTokens(for day: String, in historyRoot: URL) -> Int {
-        UsageHistoryStore.load(provider: id, day: day, in: historyRoot)?.totalTokens ?? 0
     }
 
     /// Throttled atomic save. `force=true` bypasses throttle (used by stop).

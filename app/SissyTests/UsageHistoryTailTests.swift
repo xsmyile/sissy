@@ -27,19 +27,21 @@ final class UsageHistoryTailTests: XCTestCase {
 
     private static let tokensPerTurn = 1_000_000
     private static let model = "claude-sonnet-4-6"
+    private static let otherModel = "claude-opus-4-1"
 
     private var today: String {
         UsageReaderShared.dayFormatter.string(from: Date())
     }
 
     private func writeTurn(
-        _ name: String, requestId: String, at when: Date = Date(), in url: URL? = nil
+        _ name: String, requestId: String, at when: Date = Date(), in url: URL? = nil,
+        model: String = UsageHistoryTailTests.model
     ) throws {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         let line = """
             {"type":"assistant","timestamp":"\(iso.string(from: when))",\
-            "requestId":"\(requestId)","message":{"model":"\(Self.model)",\
+            "requestId":"\(requestId)","message":{"model":"\(model)",\
             "usage":{"input_tokens":\(Self.tokensPerTurn),"output_tokens":0,\
             "cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
             """
@@ -135,7 +137,7 @@ final class UsageHistoryTailTests: XCTestCase {
     /// tree.
     func testADeletedDayIsNotRewrittenByAnEventThatStillBelongsToIt() async throws {
         let yesterday = try XCTUnwrap(
-            Calendar.current.date(byAdding: .hour, value: -25, to: Date()))
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
         let yesterdayKey = UsageReaderShared.dayFormatter.string(from: yesterday)
         try writeTurn("a.jsonl", requestId: "r1", at: yesterday)
         let provider = LocalUsageProvider.claudeCode(
@@ -234,7 +236,7 @@ final class UsageHistoryTailTests: XCTestCase {
     /// could still see the whole day wrote.
     func testAColdScanDoesNotReplaceAnArchivedDayWithAShorterReading() async throws {
         let yesterday = try XCTUnwrap(
-            Calendar.current.date(byAdding: .hour, value: -25, to: Date()))
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
         let yesterdayKey = UsageReaderShared.dayFormatter.string(from: yesterday)
         try writeTurn("a.jsonl", requestId: "r1", at: yesterday)
         try writeTurn("b.jsonl", requestId: "r2", at: yesterday)
@@ -268,6 +270,53 @@ final class UsageHistoryTailTests: XCTestCase {
         XCTAssertNil(archivedToday(), "a day known to be short was left in the archive")
     }
 
+    /// The aggregate a day adds up to is not what "at least as complete"
+    /// means. A scan that can no longer see one model's session log, on a day
+    /// where another model went on spending past what the whole day held, adds
+    /// up to more than the file and knows less than it — so the file stays.
+    func testAColdScanThatLostAModelDoesNotReplaceTheDayByOutspendingItOnAnother()
+        async throws
+    {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        let yesterdayKey = UsageReaderShared.dayFormatter.string(from: yesterday)
+        try writeTurn("opus.jsonl", requestId: "r1", at: yesterday, model: Self.otherModel)
+        try writeTurn("sonnet.jsonl", requestId: "r2", at: yesterday)
+        try await runTail(archiving: true)
+        XCTAssertEqual(
+            archived(yesterdayKey)?.models.count, 2,
+            "the day this test re-derives was never archived with both models")
+
+        try FileManager.default.removeItem(at: logDir.appendingPathComponent("opus.jsonl"))
+        try writeTurn("sonnet-more.jsonl", requestId: "r3", at: yesterday)
+        try writeTurn("sonnet-yet-more.jsonl", requestId: "r4", at: yesterday)
+        try await runTail(archiving: true)
+
+        let day = try XCTUnwrap(archived(yesterdayKey))
+        XCTAssertEqual(
+            day.models.count, 2,
+            "a scan that outspent the day on one model dropped the model it could not see")
+        XCTAssertEqual(
+            day.totalsByModel[Self.otherModel]?.inputTokens, Self.tokensPerTurn,
+            "the model whose log was gone lost the tokens the archive already held for it")
+    }
+
+    /// A day file this build cannot decode — one a later Sissy wrote, or a
+    /// corrupted one — is not a day to be replaced: every reading this build
+    /// can offer knows less about it than it holds.
+    func testADayFileThisBuildCannotReadIsLeftWhereItIs() async throws {
+        let url = UsageHistoryStore.url(provider: ProviderID.claudeCode, day: today, in: stateDir)
+        try forgeUnreadableArchivedToday(at: url)
+        let before = try Data(contentsOf: url)
+
+        try writeTurn("a.jsonl", requestId: "r1")
+        try await runTail(archiving: true)
+
+        XCTAssertEqual(
+            try Data(contentsOf: url), before,
+            "a day file this build cannot read was overwritten")
+    }
+
     private func archived(_ day: String) -> UsageHistoryDay? {
         UsageHistoryStore.load(provider: ProviderID.claudeCode, day: day, in: stateDir)
     }
@@ -292,6 +341,20 @@ final class UsageHistoryTailTests: XCTestCase {
             ),
             in: stateDir
         )
+    }
+
+    /// A day written by a schema this build does not know. Raw JSON rather
+    /// than an encoded `UsageHistoryDay`, because the type can only ever write
+    /// the version this build is.
+    private func forgeUnreadableArchivedToday(at url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let forged = """
+            {"schemaVersion":\(UsageHistoryDay.currentSchemaVersion + 1),\
+            "day":"\(today)","provider":"\(ProviderID.claudeCode)",\
+            "updatedAt":"2026-01-01T00:00:00Z","models":[]}
+            """
+        try forged.write(to: url, atomically: true, encoding: .utf8)
     }
 }
 

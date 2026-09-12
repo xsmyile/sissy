@@ -114,6 +114,17 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         }
         return out
     }
+
+    /// True when `other` accounts for at least as much of every model this
+    /// day holds. Model by model rather than on the day's total, because a
+    /// re-derivation that lost one model's session log while another model
+    /// went on spending sums higher and still knows less.
+    func isCoveredBy(_ other: Self) -> Bool {
+        let theirs = other.totalsByModel
+        return totalsByModel.allSatisfy { model, totals in
+            (theirs[model]?.totalTokens ?? 0) >= totals.totalTokens
+        }
+    }
 }
 
 /// What a window of the archive adds up to.
@@ -180,6 +191,24 @@ enum UsageHistoryStore {
     /// schema this build does not know.
     static func load(provider: String, day: String, in parent: URL) -> UsageHistoryDay? {
         decode(at: url(provider: provider, day: day, in: parent))
+    }
+
+    /// What the archive holds for a day, with "nothing" told apart from
+    /// "nothing this build can read". A writer needs the difference: a file
+    /// left by a schema this build does not know, or one that has been
+    /// corrupted, is not a day to be replaced — every reading available here
+    /// knows less about it than it holds.
+    enum Stored: Equatable {
+        case absent
+        case unreadable
+        case day(UsageHistoryDay)
+    }
+
+    static func stored(provider: String, day: String, in parent: URL) -> Stored {
+        let url = url(provider: provider, day: day, in: parent)
+        guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
+        guard let decoded = decode(at: url) else { return .unreadable }
+        return .day(decoded)
     }
 
     /// What the archive holds for the `days` most recent local days, ending
