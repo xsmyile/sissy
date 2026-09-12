@@ -27,6 +27,12 @@ actor ClaudeLimitsProbe {
     ]
 
     nonisolated private let windows = AtomicWindows()
+    /// Where the CLI's token comes from. Injectable for the same reason
+    /// `ClaudeCredentialsStore.loadOffPool` takes a `lookup`: reading the
+    /// keychain is what can raise a system dialog, and a test of the switch
+    /// that starts this probe has to be able to answer for one without
+    /// putting it on a screen.
+    private let credentialsSource: @Sendable (Duration) async -> ClaudeCredentialsLookup
     private var pollTask: Task<Void, Never>?
     /// Last condition logged, so a poll that keeps failing the same way says
     /// so once instead of every five minutes — and a *different* failure
@@ -41,6 +47,14 @@ actor ClaudeLimitsProbe {
     /// re-signed, or the item recreated by the CLI — and to put a dialog in
     /// front of someone who did not just ask for one.
     private var cached: ClaudeCredentials?
+
+    init(
+        credentials: @escaping @Sendable (Duration) async -> ClaudeCredentialsLookup = {
+            await ClaudeCredentialsStore.loadOffPool(timeout: $0)
+        }
+    ) {
+        self.credentialsSource = credentials
+    }
 
     /// Live windows, expired buckets dropped — a window past its reset
     /// describes a period that no longer exists, same rule the Codex reader
@@ -94,7 +108,7 @@ actor ClaudeLimitsProbe {
             return await fetchWindows(using: cached, onRefresh: onRefresh)
         }
         let credentials: ClaudeCredentials
-        switch await ClaudeCredentialsStore.loadOffPool(timeout: Self.keychainTimeout) {
+        switch await credentialsSource(Self.keychainTimeout) {
         case .found(let found):
             credentials = found
             cached = found
