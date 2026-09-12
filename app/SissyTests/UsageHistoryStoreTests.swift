@@ -40,9 +40,13 @@ final class UsageHistoryStoreTests: XCTestCase {
         day dayKey: String,
         models: [String: UsageHistoryTotals]
     ) throws {
+        let rows = Dictionary(
+            uniqueKeysWithValues: models.map {
+                (UsageHistoryRow(model: $0.key, project: nil), $0.value)
+            })
         try UsageHistoryStore.save(
             UsageHistoryDay(
-                day: dayKey, provider: provider, updatedAt: Date(), totals: models),
+                day: dayKey, provider: provider, updatedAt: Date(), totals: rows),
             in: root
         )
     }
@@ -60,7 +64,7 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertEqual(loaded?.models.first?.model, "claude-sonnet-4-6")
         XCTAssertEqual(loaded?.models.first?.inputTokens, 1_200)
         XCTAssertEqual(
-            loaded?.totalsByModel["claude-sonnet-4-6"]?.cost, Decimal(string: "0.0375"),
+            loaded?.totals(forModel: "claude-sonnet-4-6").cost, Decimal(string: "0.0375"),
             "money went through a Double on its way to disk")
     }
 

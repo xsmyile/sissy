@@ -6,6 +6,11 @@ struct UsageEvent: Sendable, Equatable {
     /// because that is the only place it is known: the tail sees bytes and a
     /// cost, and the archive needs a row per model.
     let model: String
+    /// Repository the work was in, resolved from the working directory the
+    /// line named. Nil when it named none — an adapter reading a format that
+    /// does not carry one, or a line written outside any directory Sissy can
+    /// resolve.
+    let project: String?
     let inputTokens: Int
     let outputTokens: Int
     let cacheReadTokens: Int
@@ -171,7 +176,7 @@ actor LocalUsageProvider: UsageProvider {
     /// The same days as `dailyTotals`, split by model, which is the grain the
     /// archive keeps. Fed by the same `ingest` and trimmed by the same
     /// `trim()`, so the two cannot describe different days.
-    private var dailyModelTotals: [Date: [String: UsageHistoryTotals]] = [:]
+    private var dailyModelTotals: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
     /// Days whose archive file is behind what is in memory.
     private var historyDirtyDays: Set<Date> = []
     /// Days this process must not write, because it cannot vouch for them: a
@@ -588,9 +593,10 @@ actor LocalUsageProvider: UsageProvider {
             totalCost: existing.totalCost + event.cost
         )
         guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
-        var byModel = dailyModelTotals[key] ?? [:]
-        byModel[event.model, default: UsageHistoryTotals()].add(event)
-        dailyModelTotals[key] = byModel
+        var byRow = dailyModelTotals[key] ?? [:]
+        byRow[UsageHistoryRow(model: event.model, project: event.project), default: .init()]
+            .add(event)
+        dailyModelTotals[key] = byRow
         historyDirtyDays.insert(key)
     }
 
@@ -832,12 +838,14 @@ actor LocalUsageProvider: UsageProvider {
         guard historyRoot != nil else { return }
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
-        var restored: [Date: [String: UsageHistoryTotals]] = [:]
+        var restored: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
         for row in snapshot.historyResume?.dailyModelTotals ?? [] {
             guard let dayDate = dayFmt.date(from: row.day) else { continue }
             let dayKey = cal.startOfDay(for: dayDate)
             guard dailyTotals[dayKey] != nil else { continue }
-            restored[dayKey, default: [:]][row.model] = UsageHistoryTotals(
+            restored[dayKey, default: [:]][
+                UsageHistoryRow(model: row.model, project: row.project)
+            ] = UsageHistoryTotals(
                 inputTokens: row.inputTokens,
                 outputTokens: row.outputTokens,
                 cacheReadTokens: row.cacheReadTokens,
@@ -1012,13 +1020,14 @@ actor LocalUsageProvider: UsageProvider {
             )
         }
         var modelTotals: [UsageStateSnapshot.DailyModelTotal] = []
-        for (day, byModel) in dailyModelTotals {
+        for (day, byRow) in dailyModelTotals {
             let dayString = dayFmt.string(from: day)
-            for (model, totals) in byModel {
+            for (row, totals) in byRow {
                 modelTotals.append(
                     UsageStateSnapshot.DailyModelTotal(
                         day: dayString,
-                        model: model,
+                        model: row.model,
+                        project: row.project,
                         inputTokens: totals.inputTokens,
                         outputTokens: totals.outputTokens,
                         cacheReadTokens: totals.cacheReadTokens,

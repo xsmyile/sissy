@@ -32,6 +32,9 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// Models already reported as unpriced. Keeps the warning to one line per
     /// model per run instead of one per ingested event.
     private var loggedUnpricedModels: Set<String> = []
+    /// Claude Code names the working directory on every assistant line,
+    /// so the resolver's cache is what keeps this off the per-line path.
+    private let projects = ProjectResolver()
     private let profile: ClaudeProfileSource
 
     init(
@@ -173,11 +176,16 @@ final class ClaudeCodeAdapter: SourceAdapter {
             return nil
         }
 
+        let project = (obj["cwd"] as? String).flatMap {
+            $0.isEmpty ? nil : projects.project(for: $0)
+        }
+
         let output = UsageReaderShared.tokenCount(usage["output_tokens"])
         if let billed = seen[dedupeKey] {
             guard let already = billed.billedOutputTokens, output > already else { return nil }
             seen[dedupeKey]?.billedOutputTokens = output
-            return streamedRemainder(model: model, at: ts, outputTokens: output - already)
+            return streamedRemainder(
+                model: model, project: project, at: ts, outputTokens: output - already)
         }
         seen[dedupeKey] = SeenEvent(
             day: Calendar.current.startOfDay(for: ts), billedOutputTokens: output)
@@ -213,6 +221,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
         return UsageEvent(
             timestamp: ts,
             model: model,
+            project: project,
             inputTokens: input,
             outputTokens: output,
             cacheReadTokens: cacheRead,
@@ -234,12 +243,13 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// whole to the later one. Both days are right about what was spent in
     /// them, and the earlier one may already be archived by the time the
     /// later copy lands — a day the tail has closed is not one it reopens.
-    private func streamedRemainder(model: String, at timestamp: Date, outputTokens: Int)
-        -> UsageEvent
-    {
+    private func streamedRemainder(
+        model: String, project: String?, at timestamp: Date, outputTokens: Int
+    ) -> UsageEvent {
         UsageEvent(
             timestamp: timestamp,
             model: model,
+            project: project,
             inputTokens: 0,
             outputTokens: outputTokens,
             cacheReadTokens: 0,

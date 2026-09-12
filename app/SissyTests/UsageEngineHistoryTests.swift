@@ -72,13 +72,14 @@ final class UsageEngineHistoryTests: XCTestCase {
                 provider: ProviderID.claudeCode,
                 updatedAt: Date(),
                 totals: [
-                    "claude-sonnet-4-6": UsageHistoryTotals(
-                        inputTokens: Self.archivedTokens,
-                        outputTokens: 0,
-                        cacheReadTokens: 0,
-                        cacheCreationTokens: 0,
-                        cost: Decimal(string: "1.25") ?? 0
-                    )
+                    UsageHistoryRow(model: "claude-sonnet-4-6", project: nil):
+                        UsageHistoryTotals(
+                            inputTokens: Self.archivedTokens,
+                            outputTokens: 0,
+                            cacheReadTokens: 0,
+                            cacheCreationTokens: 0,
+                            cost: Decimal(string: "1.25") ?? 0
+                        )
                 ]
             ),
             in: tempDir
@@ -213,7 +214,10 @@ final class UsageEngineHistoryTests: XCTestCase {
                 day: UsageReaderShared.dayFormatter.string(from: staleDay),
                 provider: ProviderID.codex,
                 updatedAt: Date(),
-                totals: ["gpt-5": UsageHistoryTotals(inputTokens: 10, cost: 1)]
+                totals: [
+                    UsageHistoryRow(model: "gpt-5", project: nil):
+                        UsageHistoryTotals(inputTokens: 10, cost: 1)
+                ]
             ),
             in: tempDir
         )

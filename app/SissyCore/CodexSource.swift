@@ -51,6 +51,13 @@ final class CodexAdapter: SourceAdapter {
     /// agent; keeping per-file state preserves that correctly.
     private var fileModels: [URL: String] = [:]
 
+    /// Per-file project, resolved from the `cwd` on the rollout's
+    /// `session_meta`. Per file because Codex names it once, on the first
+    /// line, which a resumed reader is already past — the same reason
+    /// `fileModels` is kept and persisted.
+    private var fileProjects: [URL: String] = [:]
+    private let projects = ProjectResolver()
+
     /// Default model id used when a rollout's `turn_context` never named one
     /// (older Codex versions wrote `model_provider` but no `model`). Matches
     /// what ccusage falls back to for the same reason.
@@ -129,6 +136,10 @@ final class CodexAdapter: SourceAdapter {
     /// candidate line.
     private static let turnContextMarker: [UInt8] = Array("\"turn_context\"".utf8)
 
+    /// `session_meta` is the rollout's first line and the only one naming the
+    /// working directory the session was started in.
+    private static let sessionMetaMarker: [UInt8] = Array("\"session_meta\"".utf8)
+
     /// Linear scan for `marker` within `buf[from..<to]`. Cheap substring
     /// prefilter run before paying the JSON-parse cost on a candidate line.
     private static func bufferContainsMarker(
@@ -162,9 +173,16 @@ final class CodexAdapter: SourceAdapter {
         bufferContainsMarker(buf, from: from, to: to, marker: turnContextMarker)
     }
 
+    static func bufferContainsSessionMetaMarker(
+        _ buf: UnsafePointer<UInt8>, from: Int, to: Int
+    ) -> Bool {
+        bufferContainsMarker(buf, from: from, to: to, marker: sessionMetaMarker)
+    }
+
     func lineMayCount(_ buf: UnsafePointer<UInt8>, from: Int, to: Int) -> Bool {
         Self.bufferContainsTokenCountMarker(buf, from: from, to: to)
             || Self.bufferContainsTurnContextMarker(buf, from: from, to: to)
+            || Self.bufferContainsSessionMetaMarker(buf, from: from, to: to)
     }
 
     /// Routes a JSONL line to the right parser. `turn_context` lines update
@@ -176,7 +194,19 @@ final class CodexAdapter: SourceAdapter {
         // one per turn — so the redundant parse on hit is fine.
         if let event = parseTokenCount(line, seen: &seen) { return event }
         applyTurnContext(line.data, url: line.url)
+        applySessionMeta(line.data, url: line.url)
         return nil
+    }
+
+    /// Records the project a rollout belongs to from its `session_meta` line.
+    private func applySessionMeta(_ data: Data, url: URL) {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            obj["type"] as? String == "session_meta",
+            let payload = obj["payload"] as? [String: Any],
+            let cwd = payload["cwd"] as? String,
+            !cwd.isEmpty
+        else { return }
+        fileProjects[url] = projects.project(for: cwd)
     }
 
     /// Updates per-file model from a `turn_context` line. Idempotent; called
@@ -285,6 +315,7 @@ final class CodexAdapter: SourceAdapter {
         return UsageEvent(
             timestamp: ts,
             model: model,
+            project: fileProjects[line.url],
             inputTokens: uncached,
             outputTokens: output,
             cacheReadTokens: cached,
@@ -298,6 +329,7 @@ final class CodexAdapter: SourceAdapter {
     /// would be a model map for a file nothing reads.
     func trim(retaining files: Set<URL>) {
         fileModels = fileModels.filter { files.contains($0.key) }
+        fileProjects = fileProjects.filter { files.contains($0.key) }
     }
 
     /// Restores the state that has no cheap way back.
@@ -320,6 +352,7 @@ final class CodexAdapter: SourceAdapter {
             let fileURL = URL(fileURLWithPath: entry.path)
             guard offsets[fileURL] != nil else { continue }
             fileModels[fileURL] = entry.model
+            fileProjects[fileURL] = entry.project
         }
         latestPlan.store(resume.plan)
         guard !resume.rateLimitWindows.isEmpty else { return true }
@@ -330,8 +363,12 @@ final class CodexAdapter: SourceAdapter {
 
     func resumeState() -> UsageStateSnapshot.CodexResume? {
         UsageStateSnapshot.CodexResume(
-            fileModels: fileModels.map {
-                UsageStateSnapshot.FileModel(path: $0.key.path, model: $0.value)
+            fileModels: Set(fileModels.keys).union(fileProjects.keys).map { url in
+                UsageStateSnapshot.FileModel(
+                    path: url.path,
+                    model: fileModels[url] ?? Self.defaultModel,
+                    project: fileProjects[url]
+                )
             },
             // Raw, not `live()`: a bucket that expires between save and load
             // is dropped on read anyway, and filtering here would throw away
