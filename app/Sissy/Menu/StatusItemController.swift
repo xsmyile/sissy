@@ -3,8 +3,8 @@ import Observation
 import SwiftUI
 
 /// Owns the app's status item: the icon, the left-click that opens the usage
-/// panel, and a right-click menu that holds nothing the panel or the settings
-/// window already own.
+/// panel, and a right-click menu that holds the keep-awake mode and nothing
+/// else the panel or the settings window already own.
 @MainActor
 final class StatusItemController: NSObject {
     let statusItem: NSStatusItem
@@ -82,14 +82,62 @@ final class StatusItemController: NSObject {
         }
     }
 
+    /// The three keep-awake modes, in the order the menu lists them: what the
+    /// Mac does by itself, then the two ways Sissy can stop it.
+    private static let keepAwakeItems: [(mode: KeepAwakeMode, title: String)] = [
+        (.off, "Never"),
+        (.auto, "While agents are working"),
+        (.on, "Always"),
+    ]
+
+    /// The menu holds nothing the panel already owns, with one exception: the
+    /// keep-awake mode.
+    ///
+    /// It is here because a hold nobody can see is a battery complaint with no
+    /// path back to its cause, and the menu bar is the one surface that is
+    /// always there — the panel has to be opened to say anything. Three modes
+    /// also do not fit the panel's button, and a radio group is what macOS
+    /// uses for a choice of one; the button stays the switch and this is where
+    /// what it switches into is chosen.
     private func buildMenu() {
         menu.autoenablesItems = false
         menu.delegate = self
+
+        let header = NSMenuItem()
+        header.title = "Keep awake"
+        header.isEnabled = false
+        menu.addItem(header)
+
+        for item in Self.keepAwakeItems {
+            let entry = NSMenuItem(
+                title: item.title, action: #selector(handleKeepAwake(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.indentationLevel = 1
+            entry.representedObject = item.mode.rawValue
+            menu.addItem(entry)
+        }
+
+        menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit Sissy", action: #selector(handleQuit), keyEquivalent: "q")
         quit.target = self
         quit.keyEquivalentModifierMask = [.command]
         menu.addItem(quit)
+    }
+
+    /// Ticks the mode in force and says underneath it what the Mac is actually
+    /// doing, which are two different things: an automatic mode with no agents
+    /// working is selected and holding nothing, and so is a mode whose
+    /// assertion power management refused.
+    private func refreshKeepAwakeItems() {
+        let state = model.keepAwake
+        for entry in menu.items {
+            guard let raw = entry.representedObject as? String,
+                let mode = KeepAwakeMode(rawValue: raw)
+            else { continue }
+            entry.state = mode == state.mode ? .on : .off
+        }
+        menu.items.first?.title = state.active ? "Keep awake — holding" : "Keep awake"
     }
 
     /// Re-arming observation bridge. `@Observable` exposes no
@@ -169,6 +217,13 @@ final class StatusItemController: NSObject {
         statusItem.menu = nil
     }
 
+    @objc private func handleKeepAwake(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+            let mode = KeepAwakeMode(rawValue: raw)
+        else { return }
+        model.setKeepAwake(mode)
+    }
+
     @objc private func handleQuit() {
         NSApp.terminate(nil)
     }
@@ -177,8 +232,12 @@ final class StatusItemController: NSObject {
 extension StatusItemController: NSMenuDelegate {
     // NSMenuDelegate is `@MainActor` on macOS 26's Swift 6 AppKit so the
     // methods can be implemented as MainActor-isolated directly.
+    /// The marks are refreshed on open rather than kept live: the menu is the
+    /// only place that reads them, and a closed menu observing every frame
+    /// would redraw items nobody is looking at.
     func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
+        refreshKeepAwakeItems()
     }
 
     func menuDidClose(_ menu: NSMenu) {

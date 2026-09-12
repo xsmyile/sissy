@@ -88,7 +88,9 @@ in Settings.
 `keepAwake` carries `{mode, active, since}` and is never optional, including when
 off: the panel draws its control from this, and "off" and "nothing reported" must
 not collapse into the same value. `mode` is where the user left the switch and
-survives in `server.json`; `active` is whether the Mac is being held awake right
+survives in `server.json` — `auto` is the one the agents drive, held while
+Sissy's own reading grows and released `KeepAwakePolicy.idleWindow` after it
+stops, which is a thing no generic `caffeinate` can know; `active` is whether the Mac is being held awake right
 now; `since` is when the hold in force was taken, `nil` whenever nothing is held
 and in memory only — a hold dies with the process, so a relaunch that resumes the
 mode reports a fresh instant rather than the one from the run before. The panel
@@ -135,7 +137,7 @@ compiled into the app too.
 | `CodexAuth.swift`               | Reads the `chatgpt_plan_type` claim out of `~/.codex/auth.json`, for the boot before the first turn; touches no other field in it |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow`, plus `fmtTokens` / `fmtBurn` / `fmtCost` and the slice ordering |
-| `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` assertion and, when `keepScreenAwake` asks for it, the `PreventUserIdleDisplaySleep` one, plus `KeepAwakeMode` / `KeepAwakeState` / `KeepAwakeHold`; the mode and the screen setting persist in `server.json`, the assertions die with the process |
+| `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` assertion and, when `keepScreenAwake` asks for it, the `PreventUserIdleDisplaySleep` one, plus `KeepAwakeMode` / `KeepAwakeState` / `KeepAwakeHold` / `KeepAwakePolicy`; the mode and the screen setting persist in `server.json`, the assertions die with the process |
 | `Pricing.swift`                 | Anthropic cost math, `ModelPricing`, `PricingTable`; no rate table of its own |
 | `OpenAIPricing.swift`           | OpenAI cost math, same override → catalog → seed precedence |
 | `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM rates at runtime; renders the seed for `--dump-seed` |

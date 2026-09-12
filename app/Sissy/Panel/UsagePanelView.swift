@@ -120,12 +120,20 @@ struct UsagePanelView: View {
     /// machine is doing, and a link's styling made it read as navigation.
     ///
     /// Colour carries the two axes separately. The glass tints while the Mac
-    /// is actually being held; a mode that is on and holding nothing — power
-    /// management refused the assertion — keeps the amber glyph without the
-    /// tinted glass, so "switched on" and "holding" stay legible apart.
+    /// is actually being held; a mode that is armed and holding nothing keeps
+    /// the amber glyph without the tinted glass, so "armed" and "holding" stay
+    /// legible apart. That second state has two causes — an automatic hold
+    /// waiting for the agents to do something, and an assertion power
+    /// management refused — and they look alike because they are alike: the
+    /// Mac is free to sleep either way. The tooltip is what separates them,
+    /// and the menu is what says which mode is selected.
+    ///
+    /// Toggling, not cycling: three modes do not fit a button, so this one
+    /// puts the switch back where the menu last left it rather than stepping
+    /// through them.
     private func keepAwakeButton(_ state: KeepAwakeState) -> some View {
         Button {
-            model.setKeepAwake(state.mode == .on ? .off : .on)
+            model.setKeepAwake(state.mode == .off ? model.preferredKeepAwakeMode : .off)
         } label: {
             Image(systemName: "cup.and.saucer.fill")
                 .font(.system(size: 11, weight: .semibold))
@@ -155,13 +163,15 @@ struct UsagePanelView: View {
         switch (state.mode, state.active) {
         case (.off, _):
             return "Keep this Mac awake · closing the lid still sleeps it"
-        case (.on, true):
+        case (_, true):
             let since = state.since.map { " since \($0.formatted(.dateTime.hour().minute()))" } ?? ""
             let what =
                 state.coversScreen
                 ? "Keeping this Mac and its screen awake\(since), so it will not lock."
                 : "Keeping this Mac awake\(since) — the screen still sleeps and locks."
             return what + " Closing the lid sleeps it anyway · click to allow sleep"
+        case (.auto, false):
+            return "Waiting for the agents · the Mac will be held while they work"
         case (.on, false):
             return "Switched on · the Mac is not being held awake"
         }
