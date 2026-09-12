@@ -53,6 +53,48 @@ final class SissyMotionTests: XCTestCase {
         )
     }
 
+    /// Every frame the blink draws is a write to `button.image`, and AppKit
+    /// answers each one by re-capturing the status item into a bitmap. The
+    /// hold is four byte-identical frames, so drawing it once is four of those
+    /// captures Sissy does not pay for and nobody could have seen.
+    func testTheBlinkDrawsTheShutEyeHoldOnce() {
+        let motion = SissyMenuBarMotion.blink
+        let drawn = stride(from: 0, to: Int(motion.duration * 1000), by: 1)
+            .compactMap { motion.step(at: .milliseconds($0))?.index }
+
+        XCTAssertEqual(Set(drawn).intersection(6...9), [6])
+        XCTAssertEqual(Set(drawn).count, 20, "the blink draws a frame it did not draw before")
+    }
+
+    /// Collapsing the hold must not shorten the blink: the frame that stands
+    /// in for it is drawn for the whole of the time all four used to fill.
+    func testTheHoldKeepsTheTimeItsFramesFilled() {
+        let step = SissyMenuBarMotion.blink.step(at: .milliseconds(108))
+
+        XCTAssertEqual(step?.index, 6)
+        XCTAssertEqual(step?.endsAt ?? 0, 10 / SissyMenuBarMotion.framesPerSecond, accuracy: 0.0001)
+    }
+
+    /// Neither half may inherit the blink's collapse: each begins or ends
+    /// inside the hold, and a half that skipped to its far edge would jump.
+    func testTheHalvesStillStartAndStopOnTheirOwnFrame() {
+        let closing = SissyMenuBarMotion.eyeClose
+        let opening = SissyMenuBarMotion.eyeOpen
+
+        XCTAssertEqual(closing.step(at: .milliseconds(108))?.index, 6)
+        XCTAssertEqual(
+            closing.step(at: .milliseconds(108))?.endsAt ?? 0,
+            7 / SissyMenuBarMotion.framesPerSecond,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(opening.step(at: .zero)?.index, 9)
+        XCTAssertEqual(
+            opening.step(at: .zero)?.endsAt ?? 0,
+            1 / SissyMenuBarMotion.framesPerSecond,
+            accuracy: 0.0001
+        )
+    }
+
     /// The clamp is what leaves the last frame something to land on: a
     /// deadline past the motion's end would sleep beyond its own playback.
     func testAFrameNeverOutlastsTheMotion() {

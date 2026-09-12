@@ -7,7 +7,8 @@ import Foundation
 /// silhouette — so a gesture starts and ends without a jump, whatever
 /// interrupts it. Frames 6 through 9 are byte-identical: that is the shut-eye
 /// hold, and it is why the closing half stops at 6 and the opening half starts
-/// at 9 instead of replaying it.
+/// at 9 instead of replaying it. `step(at:)` reports the hold as one frame for
+/// the same reason, so the blink draws it once and holds.
 enum SissyMenuBarMotion: Sendable {
     /// Shut and open again: Sissy noticing new numbers.
     case blink
@@ -43,16 +44,33 @@ enum SissyMenuBarMotion: Sendable {
     /// whole sequence needs no range arithmetic of its own. Both surfaces that
     /// play Sissy go through here: the timing is the one thing they must
     /// not each reinvent.
+    ///
+    /// A frame is reported once for as long as it is drawn, which for the
+    /// shut-eye hold is four frames' worth of time. Redrawing it costs more
+    /// than the identical pixels suggest — AppKit answers a write to
+    /// `button.image` by re-capturing the whole status item into a bitmap.
     func step(at elapsed: Duration) -> Step? {
         let components = elapsed.components
         let seconds = Double(components.seconds) + Double(components.attoseconds) / 1e18
         guard seconds >= 0, seconds < duration else { return nil }
 
         let offset = min(Int(seconds * Self.framesPerSecond), frameRange.count - 1)
+        let drawn = drawnFrames(from: frameRange.lowerBound + offset)
         return Step(
-            index: frameRange.lowerBound + offset,
-            endsAt: min(Double(offset + 1) / Self.framesPerSecond, duration)
+            index: drawn.lowerBound,
+            endsAt: min(
+                Double(drawn.upperBound - frameRange.lowerBound) / Self.framesPerSecond,
+                duration
+            )
         )
+    }
+
+    /// The frames `index` is drawn across: the shut-eye hold entire, anything
+    /// else alone. Clamped to the motion, so a half that begins or ends inside
+    /// the hold still starts and stops on its own frame.
+    private func drawnFrames(from index: Int) -> Range<Int> {
+        let hold = Self.shutEyeHold.clamped(to: frameRange)
+        return hold.contains(index) ? hold : index..<(index + 1)
     }
 
     /// One frame of a running motion, as `step(at:)` reports it.
@@ -89,4 +107,5 @@ enum SissyMenuBarMotion: Sendable {
     private static let blinkDuration: TimeInterval = 0.380
     private static let shutEyeFirst = 6
     private static let shutEyeLast = 9
+    private static let shutEyeHold = shutEyeFirst..<(shutEyeLast + 1)
 }
