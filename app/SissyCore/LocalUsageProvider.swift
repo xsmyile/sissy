@@ -227,6 +227,18 @@ actor LocalUsageProvider: UsageProvider {
     /// `stop()`. Five seconds keeps SSD churn low on a long-running process.
     private static let saveThrottle: TimeInterval = 5
 
+    /// The oldest instant a line may carry and still count.
+    ///
+    /// A rolling window of absolute time rather than a span of calendar days,
+    /// and derived in one place so every reader of it agrees: the day the
+    /// parser cuts, the day the buckets drop and the day the archive refuses
+    /// to freeze are all the same day.
+    private var retainWindowStart: Date {
+        Date().addingTimeInterval(-Double(retainDays) * Self.secondsPerDay)
+    }
+
+    private static let secondsPerDay: TimeInterval = 86_400
+
     /// FSEvents coalescing window. Higher = more batching (lower CPU, more
     /// notifications coalesced into one wake); lower = snappier UI updates.
     /// 1.0 s matches the previous polling cadence — users experienced no
@@ -525,7 +537,7 @@ actor LocalUsageProvider: UsageProvider {
                 options: [.skipsHiddenFiles]
             )
         else { return [] }
-        let cutoff = Date().addingTimeInterval(Double(-retainDays * 86400))
+        let cutoff = retainWindowStart
         // Carry mtime through so we can sort the candidate set without a
         // second `attributesOfItem` pass.
         var candidates: [(url: URL, mtime: TimeInterval)] = []
@@ -566,7 +578,7 @@ actor LocalUsageProvider: UsageProvider {
 
     private func trim() {
         let cal = Calendar.current
-        let cutoff = cal.startOfDay(for: Date().addingTimeInterval(Double(-retainDays * 86400)))
+        let cutoff = cal.startOfDay(for: retainWindowStart)
         // A day that leaves the retain window is a day nothing will rewrite,
         // so anything of it still only in memory would be lost rather than
         // frozen. Only then — otherwise the throttle would never hold.
@@ -592,7 +604,7 @@ actor LocalUsageProvider: UsageProvider {
             data: data,
             url: url,
             byteOffset: byteOffset,
-            retainCutoff: Date().addingTimeInterval(Double(-retainDays * 86400))
+            retainCutoff: retainWindowStart
         )
         guard let event = adapter.event(from: line, seen: &seenEventKeys) else { return false }
         ingest(event)
@@ -719,7 +731,7 @@ actor LocalUsageProvider: UsageProvider {
         guard snapshot.retainDays == retainDays else { return false }
 
         let fm = FileManager.default
-        let cutoffDate = Date().addingTimeInterval(Double(-retainDays * 86400))
+        let cutoffDate = retainWindowStart
         var newOffsets: [URL: UInt64] = [:]
         var newMTimes: [URL: TimeInterval] = [:]
         var stale = false
@@ -862,7 +874,7 @@ actor LocalUsageProvider: UsageProvider {
         guard historyRoot != nil else { return }
         let cal = Calendar.current
         historySuppressedDays.insert(
-            cal.startOfDay(for: Date().addingTimeInterval(Double(-retainDays * 86400))))
+            cal.startOfDay(for: retainWindowStart))
     }
 
     /// Forgets every archived day before today, on the one ask there is for
