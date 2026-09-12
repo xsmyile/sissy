@@ -16,8 +16,7 @@ final class SissyModelKeepAwakeTests: XCTestCase {
             prevTokens: nil,
             prevCost: nil,
             keepAwake: keepAwake,
-            history: nil,
-            projects: []
+            history: nil
         )
     }
 
