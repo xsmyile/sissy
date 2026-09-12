@@ -297,7 +297,7 @@ final class UsageHistoryTailTests: XCTestCase {
             day.models.count, 2,
             "a scan that outspent the day on one model dropped the model it could not see")
         XCTAssertEqual(
-            day.totalsByModel[Self.otherModel]?.inputTokens, Self.tokensPerTurn,
+            day.totals(forModel: Self.otherModel).inputTokens, Self.tokensPerTurn,
             "the model whose log was gone lost the tokens the archive already held for it")
     }
 
@@ -330,7 +330,7 @@ final class UsageHistoryTailTests: XCTestCase {
                 provider: ProviderID.claudeCode,
                 updatedAt: Date(),
                 totals: [
-                    Self.model: UsageHistoryTotals(
+                    UsageHistoryRow(model: Self.model, project: nil): UsageHistoryTotals(
                         inputTokens: inputTokens,
                         outputTokens: 0,
                         cacheReadTokens: 0,

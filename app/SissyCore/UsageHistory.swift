@@ -1,5 +1,16 @@
 import Foundation
 
+/// The grain the archive keeps a day at: one row per model per project.
+///
+/// The project is optional because a line can name no working directory, and
+/// because every row written before the archive carried the dimension decodes
+/// without one. Both cases mean the same thing at read time — usage that
+/// belongs to no project Sissy can name — which is why they are one value.
+struct UsageHistoryRow: Hashable, Sendable {
+    let model: String
+    let project: String?
+}
+
 /// One model's metered usage within one day, as it accumulates in memory.
 /// The four token counts are kept apart because the export (#43) names them
 /// apart, and because a total can always be derived from them while the
@@ -33,11 +44,11 @@ struct UsageHistoryTotals: Equatable, Sendable {
 /// read is left where it is rather than quarantined — an archive that deletes
 /// what it does not understand is not an archive.
 ///
-/// A row per model, because a store keeping only a per-provider daily total
-/// cannot produce the model column the export needs, and re-deriving one means
-/// re-reading logs that may be gone. A project dimension lands the same way the
-/// grain did — as an added optional field on the row, which older files decode
-/// as absent — so it needs no version bump when it arrives.
+/// A row per model per project, because a store keeping only a per-provider
+/// daily total cannot produce the columns the export and the report need, and
+/// re-deriving them means re-reading logs that may be gone. The project landed
+/// after the model, as an added optional field that older files decode as
+/// absent — no version bump, exactly as this note anticipated.
 struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// Bump only when a row's numbers stop meaning what they meant. A reader
     /// skips a version it does not know; it never rewrites one.
@@ -58,6 +69,13 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
 
     struct Entry: Codable, Equatable, Sendable {
         var model: String
+        /// Absolute path of the repository the work was in. Absent for a line
+        /// that named no working directory, and for every row written before
+        /// the archive carried the dimension. A path is personal data — a
+        /// client's name is a directory's name — so it stays on the machine:
+        /// the panel renders the last component, and anything that carries it
+        /// off the machine has to say so.
+        var project: String?
         var inputTokens: Int
         var outputTokens: Int
         var cacheReadTokens: Int
@@ -72,7 +90,10 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         }
     }
 
-    init(day: String, provider: String, updatedAt: Date, totals: [String: UsageHistoryTotals]) {
+    init(
+        day: String, provider: String, updatedAt: Date,
+        totals: [UsageHistoryRow: UsageHistoryTotals]
+    ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.day = day
         self.provider = provider
@@ -80,9 +101,10 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         self.models =
             totals
             .filter { $0.value.totalTokens > 0 || $0.value.cost > 0 }
-            .map { model, t in
+            .map { row, t in
                 Entry(
-                    model: model,
+                    model: row.model,
+                    project: row.project,
                     inputTokens: t.inputTokens,
                     outputTokens: t.outputTokens,
                     cacheReadTokens: t.cacheReadTokens,
@@ -90,7 +112,9 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
                     cost: NSDecimalNumber(decimal: t.cost).stringValue
                 )
             }
-            .sorted { $0.model < $1.model }
+            .sorted {
+                ($0.model, $0.project ?? "") < ($1.model, $1.project ?? "")
+            }
     }
 
     /// What the day adds up to across its rows. A writer compares against it
@@ -101,10 +125,10 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
 
     /// The rows back as running totals, so a reader that resumes a day
     /// continues the count the last run left rather than starting it again.
-    var totalsByModel: [String: UsageHistoryTotals] {
-        var out: [String: UsageHistoryTotals] = [:]
+    var totalsByRow: [UsageHistoryRow: UsageHistoryTotals] {
+        var out: [UsageHistoryRow: UsageHistoryTotals] = [:]
         for entry in models {
-            out[entry.model] = UsageHistoryTotals(
+            out[UsageHistoryRow(model: entry.model, project: entry.project)] = UsageHistoryTotals(
                 inputTokens: entry.inputTokens,
                 outputTokens: entry.outputTokens,
                 cacheReadTokens: entry.cacheReadTokens,
@@ -115,14 +139,37 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         return out
     }
 
-    /// True when `other` accounts for at least as much of every model this
-    /// day holds. Model by model rather than on the day's total, because a
-    /// re-derivation that lost one model's session log while another model
-    /// went on spending sums higher and still knows less.
+    /// What one model spent across every project the day holds for it.
+    func totals(forModel model: String) -> UsageHistoryTotals {
+        var out = UsageHistoryTotals()
+        for (row, totals) in totalsByRow where row.model == model {
+            out.inputTokens += totals.inputTokens
+            out.outputTokens += totals.outputTokens
+            out.cacheReadTokens += totals.cacheReadTokens
+            out.cacheCreationTokens += totals.cacheCreationTokens
+            out.cost += totals.cost
+        }
+        return out
+    }
+
+    /// True when `other` accounts for at least as much of every row this day
+    /// holds. Row by row rather than on the day's total, because a
+    /// re-derivation that lost one session log while other work went on
+    /// spending sums higher and still knows less.
+    ///
+    /// A stored row naming no project is compared against the whole model
+    /// instead: that is a row from before the archive carried projects, and
+    /// the reading replacing it splits the same model across several rows.
+    /// Held to its own key it could never be covered again, and every day
+    /// already on disk would freeze on the upgrade.
     func isCoveredBy(_ other: Self) -> Bool {
-        let theirs = other.totalsByModel
-        return totalsByModel.allSatisfy { model, totals in
-            (theirs[model]?.totalTokens ?? 0) >= totals.totalTokens
+        let theirs = other.totalsByRow
+        return totalsByRow.allSatisfy { row, totals in
+            let covering =
+                row.project == nil
+                ? other.totals(forModel: row.model).totalTokens
+                : (theirs[row]?.totalTokens ?? 0)
+            return covering >= totals.totalTokens
         }
     }
 }

@@ -173,7 +173,7 @@ final class ClaudeStreamedTurnTests: XCTestCase {
         let record = try XCTUnwrap(
             UsageHistoryStore.load(provider: ProviderID.claudeCode, day: day, in: stateDir),
             "the tail archived nothing for today")
-        return try XCTUnwrap(record.totalsByModel[Self.model], "no row for the model under test")
+        return record.totals(forModel: Self.model)
     }
 
     /// Rewrites the snapshot the way a build that predates the field left it.

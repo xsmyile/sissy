@@ -107,6 +107,11 @@ struct UsageStateSnapshot: Codable, Equatable {
     struct FileModel: Codable, Equatable {
         var path: String
         var model: String
+        /// Repository the rollout's `session_meta` named, absent in a snapshot
+        /// written before the field. Per file for the reason the model is:
+        /// Codex names it once, on the first line, and a resumed reader is
+        /// past it.
+        var project: String?
     }
 
     struct FileEntry: Codable, Equatable {
@@ -128,6 +133,11 @@ struct UsageStateSnapshot: Codable, Equatable {
     struct DailyModelTotal: Codable, Equatable {
         var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
         var model: String
+        /// Repository the work was in, absent in a snapshot written before the
+        /// split carried one. Resumed alongside the model for the same reason
+        /// the model is: the offsets are at EOF, so a day's rows cannot be
+        /// re-derived from lines nothing will read again.
+        var project: String?
         var inputTokens: Int
         var outputTokens: Int
         var cacheReadTokens: Int
