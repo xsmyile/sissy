@@ -81,9 +81,19 @@ tooltip, because "Team 5x" is a plan nobody sells.
 
 Claude Code publishes no limit state on disk, so its windows come from
 `ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the login
-keychain and polls the endpoint Claude Code's `/usage` reads. That costs a
-one-time macOS keychain authorization, so it stays off until the user asks for it
-in Settings.
+keychain and polls the endpoint Claude Code's `/usage` reads. That costs a macOS
+keychain authorization, so it stays off until the user asks for it in Settings —
+and **only that asking may raise the dialog**. Every other read is silent:
+`ClaudeCredentialsStore.load(allowingInteraction:)` builds a query carrying an
+`LAContext` with `interactionNotAllowed` *and* `kSecUseAuthenticationUIFail`,
+resolved by name at runtime because the SDK deprecates the constant while still
+honouring it and nothing replaces it for the legacy keychain Claude Code writes
+into, where the context alone can still raise Allow/Deny. Such a read answers
+`.interactionRequired`, which is **not** `.denied`: nobody was asked, so the
+probe keeps polling and the limits simply stay hidden until the grant comes back
+or the user flips the switch. The grant lapses often — it is bound to Sissy's
+signature, so every re-signed build is a new one — and before this the lapse
+reached the user as a stack of dialogs at login.
 
 `keepAwake` carries `{mode, active, since}` and is never optional, including when
 off: the panel draws its control from this, and "off" and "nothing reported" must
@@ -132,7 +142,7 @@ compiled into the app too.
 | `UsageReaderShared.swift`       | Tuning constants the tail and its adapters share (`ingestChunkSize`, `pollEmitThrottle`, mtime slack), the token-count bound, and `parseTimestamp` — the one timestamp parser every source and the probe use |
 | `UsageAtomics.swift`            | The three lock boxes a provider is read through from outside its actor (`AtomicIntCounter`, `AtomicWindows`, `AtomicPlan`) |
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429; off unless `claudeLimits` is set |
-| `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it. One lookup runs at a time and every caller waits on that one under its own budget, so an unanswered authorization dialog parks neither the probe nor a second dispatch thread, and the answer reaches whoever is still waiting when it finally comes |
+| `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it. `allowingInteraction` is the caller declaring itself a user action, and it is the only thing that lets macOS put a dialog on screen; a silent read answers `.interactionRequired` rather than `.denied`. One lookup runs at a time and every caller waits on that one under its own budget, so an unanswered authorization dialog parks neither the probe nor a second dispatch thread, and the answer reaches whoever is still waiting when it finally comes |
 | `ClaudeProfile.swift`           | Reads the plan out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain, so it answers with `claudeLimits` off |
 | `CodexAuth.swift`               | Reads the `chatgpt_plan_type` claim out of `~/.codex/auth.json`, for the boot before the first turn; touches no other field in it |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
@@ -296,6 +306,9 @@ a cold scan instead of only a cancelled boot task doing so.
 - **Permissions**: first run asks for nothing. A permission is requested when the
   user switches on the module that needs it — the `claudeLimits` toggle is the worked
   example, and the keychain prompt happens when the switch is flipped, not at boot.
+  That is enforced rather than intended: every read the app makes on its own is
+  built so macOS cannot prompt for it, and a grant that has lapsed leaves the
+  limits hidden instead of raising a dialog nobody asked for.
 - **No third-party code ships.** The last dependency was SwiftNIO, which the
   WebSocket server needed. `CREDITS.md` credits the projects Sissy *reads*
   (`ccusage`, LiteLLM), which is courtesy rather than obligation; `AboutTests` fails

@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 /// Read-only view of the OAuth credentials Claude Code keeps in the login
@@ -22,6 +23,15 @@ enum ClaudeCredentialsLookup: Sendable {
     case found(ClaudeCredentials)
     case absent
     case denied
+    /// The item is there and this read was not allowed to ask for it.
+    ///
+    /// Emphatically not `.denied`: nobody was asked and nobody refused. It is
+    /// what a background read meets when the grant has gone stale — Sissy
+    /// re-signed, or the CLI rewrote the item — and the only honest answer is
+    /// to show no limits and wait, because the alternative is a dialog in
+    /// front of someone who did not just ask for one. A caller that *is* a
+    /// user action reads again with interaction allowed.
+    case interactionRequired
     case unreadable(OSStatus)
     /// The lookup outlived its budget. `SecItemCopyMatching` blocks while
     /// macOS decides whether to authorize, and that decision can wait on a
@@ -66,10 +76,16 @@ enum ClaudeCredentialsStore {
     /// `lookup` exists so the abandonment can be tested without a keychain:
     /// the blocking call is the one piece of external I/O here, and nothing
     /// else in this path can stand in for a dialog nobody answers.
+    ///
+    /// `allowingInteraction` is the caller saying whether it is a user action.
+    /// It is the only thing that decides whether macOS may put a dialog on
+    /// screen, and every scheduled read passes `false`.
     static func loadOffPool(
         timeout: Duration,
-        lookup: @Sendable @escaping () -> ClaudeCredentialsLookup = { load() }
+        allowingInteraction: Bool,
+        lookup: (@Sendable (Bool) -> ClaudeCredentialsLookup)? = nil
     ) async -> ClaudeCredentialsLookup {
+        let run = lookup ?? { load(allowingInteraction: $0) }
         let id = UUID()
         var deadline: Task<Void, Never>?
         let outcome = await withCheckedContinuation { continuation in
@@ -86,7 +102,9 @@ enum ClaudeCredentialsStore {
                 gate.giveUp(id)
             }
             if mine {
-                DispatchQueue.global(qos: .utility).async { gate.finish(lookup()) }
+                DispatchQueue.global(qos: .utility).async {
+                    gate.finish(run(allowingInteraction))
+                }
             }
         }
         deadline?.cancel()
@@ -95,15 +113,10 @@ enum ClaudeCredentialsStore {
 
     private static let gate = KeychainLookupGate()
 
-    static func load() -> ClaudeCredentialsLookup {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+    static func load(allowingInteraction: Bool) -> ClaudeCredentialsLookup {
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let status = SecItemCopyMatching(
+            makeQuery(allowingInteraction: allowingInteraction) as CFDictionary, &item)
 
         switch status {
         case errSecSuccess:
@@ -113,11 +126,59 @@ enum ClaudeCredentialsStore {
             return .found(parsed)
         case errSecItemNotFound:
             return .absent
-        case errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed:
+        // Nobody was asked, so nobody refused: this is the answer a read that
+        // was forbidden to interact gets, and the caller decides whether a
+        // user action is available to ask properly.
+        case errSecInteractionNotAllowed:
+            return .interactionRequired
+        case errSecUserCanceled, errSecAuthFailed:
             return .denied
         default:
             return .unreadable(status)
         }
+    }
+
+    /// The lookup's query, with the two independent suppressors a silent read
+    /// needs.
+    ///
+    /// `LAContext.interactionNotAllowed` covers the modern path, and it is not
+    /// enough on its own: an item in the *legacy* keychain — which is where
+    /// Claude Code writes — can still raise the Allow/Deny panel through it.
+    /// `kSecUseAuthenticationUIFail` is what closes that door, and it is
+    /// resolved by name at runtime because the SDK deprecates the constant
+    /// while still honouring it, and there is no replacement that covers this
+    /// case. A build that cannot resolve either name still reads — it just
+    /// reads the way it always did — so a missing symbol costs the silence,
+    /// never the feature.
+    static func makeQuery(allowingInteraction: Bool) -> [String: Any] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        guard !allowingInteraction else { return query }
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        query[kSecUseAuthenticationContext as String] = context
+        if let key = securityConstant(authenticationUIName),
+            let fail = securityConstant(authenticationUIFailName)
+        {
+            query[key] = fail
+        }
+        return query
+    }
+
+    static let authenticationUIName = "kSecUseAuthenticationUI"
+    static let authenticationUIFailName = "kSecUseAuthenticationUIFail"
+
+    /// Reads a `Security` string constant out of the already-loaded framework
+    /// rather than referencing it, so a deprecation does not become a warning
+    /// on every build for a value that still works.
+    private static func securityConstant(_ name: String) -> String? {
+        let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
+        guard let symbol = dlsym(rtldDefault, name) else { return nil }
+        return symbol.assumingMemoryBound(to: CFString?.self).pointee as String?
     }
 
     static func parse(_ data: Data) -> ClaudeCredentials? {

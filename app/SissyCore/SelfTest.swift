@@ -1159,7 +1159,9 @@ func runKeychainTimeoutTests() {
     let delivered = DispatchSemaphore(value: 0)
     let answered = TestBox<Bool>(false)
     Task {
-        let result = await ClaudeCredentialsStore.loadOffPool(timeout: .seconds(5)) { .absent }
+        let result = await ClaudeCredentialsStore.loadOffPool(
+            timeout: .seconds(5), allowingInteraction: false
+        ) { _ in .absent }
         if case .absent = result { answered.value = true }
         delivered.signal()
     }
@@ -1171,7 +1173,9 @@ func runKeychainTimeoutTests() {
     let gaveUp = TestBox<Bool>(false)
     Task {
         let started = Date()
-        let result = await ClaudeCredentialsStore.loadOffPool(timeout: .milliseconds(200)) {
+        let result = await ClaudeCredentialsStore.loadOffPool(
+            timeout: .milliseconds(200), allowingInteraction: false
+        ) { _ in
             Thread.sleep(forTimeInterval: 1.5)
             return .absent
         }

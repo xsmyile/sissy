@@ -69,8 +69,10 @@ enum ClaudeLimitsCopy {
 
     static let detail =
         "Sissy reads the token Claude Code already keeps in your keychain — only ever "
-        + "reads it, never writes or refreshes it. macOS asks again whenever Sissy's own "
-        + "binary changes, so expect the prompt after an update."
+        + "reads it, never writes or refreshes it. That permission is tied to Sissy's own "
+        + "binary, so it lapses after an update. Sissy never asks again on its own: the "
+        + "limits go quiet instead, and switching this off and back on is what asks for "
+        + "them."
 
     /// What the button reads as to a screen reader, where the glyph says
     /// nothing — the one reader who cannot see an `info.circle` and guess.

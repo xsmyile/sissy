@@ -32,7 +32,15 @@ actor ClaudeLimitsProbe {
     /// keychain is what can raise a system dialog, and a test of the switch
     /// that starts this probe has to be able to answer for one without
     /// putting it on a screen.
-    private let credentialsSource: @Sendable (Duration) async -> ClaudeCredentialsLookup
+    private let credentialsSource: @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup
+    /// Whether the next credential read may put a dialog on screen.
+    ///
+    /// Set only by a `start` the user asked for, and spent on the first read
+    /// that needs it. Everything after that — every poll, and every launch
+    /// that merely finds the setting already on — reads silently, which is the
+    /// difference between a permission asked for when a switch is flipped and
+    /// a stack of dialogs waiting on a Mac nobody was sitting at.
+    private var mayInteract = false
     private var pollTask: Task<Void, Never>?
     /// Last condition logged, so a poll that keeps failing the same way says
     /// so once instead of every five minutes — and a *different* failure
@@ -49,8 +57,8 @@ actor ClaudeLimitsProbe {
     private var cached: ClaudeCredentials?
 
     init(
-        credentials: @escaping @Sendable (Duration) async -> ClaudeCredentialsLookup = {
-            await ClaudeCredentialsStore.loadOffPool(timeout: $0)
+        credentials: @escaping @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup = {
+            await ClaudeCredentialsStore.loadOffPool(timeout: $0, allowingInteraction: $1)
         }
     ) {
         self.credentialsSource = credentials
@@ -63,8 +71,14 @@ actor ClaudeLimitsProbe {
 
     /// Starts the poll loop. `onRefresh` fires only when the windows actually
     /// changed, so a steady state costs no emits. Idempotent.
-    func start(onRefresh: @Sendable @escaping () async -> Void) {
+    ///
+    /// `userInitiated` says whether someone just flipped the switch. Only that
+    /// start is allowed to raise the keychain dialog; the one a launch makes
+    /// because the setting was already on reads silently and shows no limits
+    /// if the grant has gone stale.
+    func start(userInitiated: Bool, onRefresh: @Sendable @escaping () async -> Void) {
         if pollTask != nil { return }
+        mayInteract = userInitiated
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -108,7 +122,9 @@ actor ClaudeLimitsProbe {
             return await fetchWindows(using: cached, onRefresh: onRefresh)
         }
         let credentials: ClaudeCredentials
-        switch await credentialsSource(Self.keychainTimeout) {
+        let interactive = mayInteract
+        mayInteract = false
+        switch await credentialsSource(Self.keychainTimeout, interactive) {
         case .found(let found):
             credentials = found
             cached = found
@@ -124,6 +140,17 @@ actor ClaudeLimitsProbe {
                     + "Claude Code limits stay hidden. Grant it in Keychain Access, or turn "
                     + "the setting off")
             stop()
+            return Self.refreshInterval
+        // Alive, deliberately. Nobody refused anything — this read was simply
+        // not allowed to ask, and the grant it wants back can return without
+        // Sissy doing a thing: the CLI rewrites the item, or the user allows
+        // it in Keychain Access. Stopping here would make a stale grant
+        // indistinguishable from a refusal, and both would need a relaunch.
+        case .interactionRequired:
+            report(
+                "the keychain will not release \(ClaudeCredentialsStore.keychainService) "
+                    + "without asking, and this read did not ask; Claude limits stay hidden "
+                    + "until you switch them off and on again")
             return Self.refreshInterval
         case .unreadable(let status):
             report("could not read Claude credentials (OSStatus \(status))")

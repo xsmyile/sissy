@@ -220,7 +220,7 @@ actor UsageEngine {
         pruneHistoryIfDue(now: Date())
         sissyLog("sissy: claude limits — \(config.claudeLimits ? "on" : "off")")
         if config.claudeLimits {
-            await startClaudeLimitsProbe()
+            await startClaudeLimitsProbe(userInitiated: false)
         }
         await applyKeepAwake()
         guard lifecycle == .running else { return }
@@ -285,7 +285,7 @@ actor UsageEngine {
                 "sissy: failed to persist claudeLimits to \(configURL.path): \(error)")
         }
         if enabled {
-            await startClaudeLimitsProbe()
+            await startClaudeLimitsProbe(userInitiated: true)
         } else {
             await claudeLimitsProbe.stop()
         }
@@ -455,9 +455,13 @@ actor UsageEngine {
         await applyKeepAwake()
     }
 
-    private func startClaudeLimitsProbe() async {
+    /// `userInitiated` is the difference between someone flipping the switch
+    /// and a launch finding it already on. Only the first may raise the
+    /// keychain dialog — that is the whole of the rule that a permission is
+    /// asked for when the module is switched on and never at boot.
+    private func startClaudeLimitsProbe(userInitiated: Bool) async {
         let me = self
-        await claudeLimitsProbe.start {
+        await claudeLimitsProbe.start(userInitiated: userInitiated) {
             await me.reemit()
         }
     }
