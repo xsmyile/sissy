@@ -65,6 +65,19 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertTrue(stored.isCoveredBy(reading))
     }
 
+    /// The decision this rule makes on purpose, pinned so it is not made
+    /// again by accident: a reading whose model total is unchanged replaces
+    /// the day even though its rows are attributed differently. Nothing in
+    /// the rows separates "these tokens were resolved" from "these tokens
+    /// went and others arrived", and the total is what says the day is not
+    /// written short.
+    func testAReattributedDayWithTheSameModelTotalIsAccepted() {
+        let stored = day(rows: [UsageHistoryRow(model: "opus", project: nil): 100])
+        let reading = day(rows: [UsageHistoryRow(model: "opus", project: "/a"): 100])
+
+        XCTAssertTrue(stored.isCoveredBy(reading))
+    }
+
     /// The model's own total is what says something went missing, whatever
     /// the rows it was spread across.
     func testAReadingThatKnowsLessOfAModelDoesNotCoverTheDay() {
