@@ -152,31 +152,31 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         return out
     }
 
-    /// True when `other` accounts for at least as much of every row this day
-    /// holds. Row by row rather than on the day's total, because a
-    /// re-derivation that lost one session log while other work went on
-    /// spending sums higher and still knows less.
+    /// True when `other` knows at least as much of this day as it holds.
     ///
-    /// A day whose rows name no project *at all* is compared model by model
-    /// instead: that is a file written before the archive carried projects,
-    /// and the reading replacing it splits the same model across several rows,
-    /// so held to its own key it could never be covered again and every day
-    /// already on disk would freeze on the upgrade.
+    /// Two tests, and a reading has to pass both.
     ///
-    /// The test is the whole day's, never the single row's. A day that names a
-    /// project anywhere is compared row by row, including its rows that name
-    /// none: reading those at the model grain would let a re-derivation that
-    /// lost the no-project bucket pass by counting a project row's tokens
-    /// towards it twice, which is the short write this rule exists to refuse.
+    /// **Every model, at the model's own total.** A row naming no project is
+    /// usage Sissy could not attribute, and a reading that attributes it has
+    /// not lost it — it has resolved it, which is what a re-scan on a machine
+    /// whose directories are all still there does. Held to the no-project key
+    /// itself, such a reading could never cover the day and the file would
+    /// freeze on the first launch that knows about projects. The model total
+    /// is what says whether anything actually went missing.
+    ///
+    /// **Every row that names a project, at its own key.** The model total
+    /// alone is the hole: a scan that lost one project's session log while
+    /// another project went on spending sums higher and still knows less
+    /// about the one it lost.
     func isCoveredBy(_ other: Self) -> Bool {
         let theirs = other.totalsByRow
-        let predatesProjects = models.allSatisfy { $0.project == nil }
+        let models = Set(self.models.map(\.model))
+        let modelsCovered = models.allSatisfy {
+            other.totals(forModel: $0).totalTokens >= totals(forModel: $0).totalTokens
+        }
+        guard modelsCovered else { return false }
         return totalsByRow.allSatisfy { row, totals in
-            let covering =
-                predatesProjects
-                ? other.totals(forModel: row.model).totalTokens
-                : (theirs[row]?.totalTokens ?? 0)
-            return covering >= totals.totalTokens
+            row.project == nil || (theirs[row]?.totalTokens ?? 0) >= totals.totalTokens
         }
     }
 }
