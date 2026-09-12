@@ -80,6 +80,8 @@ Your session logs never leave the machine; Sissy reads them and renders a number
 - LiteLLM's price list on `raw.githubusercontent.com`, once a day;
 - `api.anthropic.com/api/oauth/usage`, only with Claude Code limits enabled, using the OAuth token the CLI already stored, read-only, never refreshed, never written back.
 
+Sissy keeps one record of its own: a day-by-model tally under `~/Library/Application Support/Sissy/history/`, so the panel can show more than today. It is the totals, not your prompts — Settings ▸ General names the folder and deletes it, and `historyRetentionDays` bounds how far back it goes.
+
 No analytics, no crash reporting, no account.
 
 ## Configuration
@@ -94,6 +96,7 @@ The app writes `~/Library/Application Support/Sissy/server.json`; every key is o
 | `keepAwake` | `off` | `on` holds power assertions so neither the Mac nor its screen idles off — a lit screen never locks itself, and a closed lid sleeps anyway |
 | `remotePricing` | on | fetch rates at runtime; `false` pins to the built-in snapshot and goes fully offline |
 | `pricingOverride` | none | per-model rates that win over both sources |
+| `historyRetentionDays` | `90` | days of the day-by-model history kept under `history/`; `0` records none, and deleting what is there is the button in Settings |
 | `pollIntervalSeconds` | `60` | safety-net poll between filesystem events |
 
 ## Build from source
