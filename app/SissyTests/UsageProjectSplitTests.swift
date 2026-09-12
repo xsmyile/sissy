@@ -90,6 +90,21 @@ final class UsageProjectSplitTests: XCTestCase {
         XCTAssertEqual(day.models.map(\.project), [nil])
     }
 
+    /// A directory in no repository is not a project, so its spend is counted
+    /// and left unattributed rather than given a row named after a path.
+    func testWorkOutsideAnyRepositoryIsCountedButNotNamed() async throws {
+        let loose = base.appendingPathComponent("scratch/one-off")
+        try FileManager.default.createDirectory(at: loose, withIntermediateDirectories: true)
+        try writeTurn("a.jsonl", requestId: "r1", cwd: loose.path)
+        try await runClaudeTail()
+
+        let day = try archivedToday(ProviderID.claudeCode)
+        XCTAssertEqual(day.models.map(\.project), [nil], "a scratch directory was named a project")
+        XCTAssertEqual(
+            day.models.first?.inputTokens, Self.tokensPerTurn,
+            "the spend went missing along with its name")
+    }
+
     /// The offsets are at EOF after a restart, so nothing re-reads the lines
     /// that named the directory. Without the split in the snapshot a fresh
     /// process shows a day it has already counted as belonging to nobody.

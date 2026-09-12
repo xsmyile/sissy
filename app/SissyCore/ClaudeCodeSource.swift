@@ -176,8 +176,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
             return nil
         }
 
-        let project = (obj["cwd"] as? String).flatMap {
-            $0.isEmpty ? nil : projects.project(for: $0)
+        let project = (obj["cwd"] as? String).flatMap { cwd -> String? in
+            cwd.isEmpty ? nil : projects.project(for: cwd)
         }
 
         let output = UsageReaderShared.tokenCount(usage["output_tokens"])
