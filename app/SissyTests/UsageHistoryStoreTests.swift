@@ -48,20 +48,50 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertTrue(stored.isCoveredBy(reading))
     }
 
-    /// Once a day names a project anywhere, its no-project rows are held to
-    /// their own key. Reading them at the model grain would let a scan that
-    /// lost the no-project bucket pass by counting a project row's tokens
-    /// towards it twice.
-    func testAReadingThatLostTheNoProjectBucketDoesNotCoverADayThatNamesProjects() {
+    /// A no-project row is usage Sissy could not attribute, not usage it
+    /// counted twice. A re-scan on a machine whose directories are still
+    /// there resolves it, and that reading knows more about the day, not
+    /// less — it has to be allowed to replace it.
+    func testAReadingThatAttributesWhatTheDayCouldNotCoversIt() {
         let stored = day(rows: [
             UsageHistoryRow(model: "opus", project: nil): 100,
             UsageHistoryRow(model: "opus", project: "/a"): 50,
         ])
-        let reading = day(rows: [UsageHistoryRow(model: "opus", project: "/a"): 150])
+        let reading = day(rows: [
+            UsageHistoryRow(model: "opus", project: "/a"): 100,
+            UsageHistoryRow(model: "opus", project: "/b"): 50,
+        ])
+
+        XCTAssertTrue(stored.isCoveredBy(reading))
+    }
+
+    /// The model's own total is what says something went missing, whatever
+    /// the rows it was spread across.
+    func testAReadingThatKnowsLessOfAModelDoesNotCoverTheDay() {
+        let stored = day(rows: [
+            UsageHistoryRow(model: "opus", project: nil): 100,
+            UsageHistoryRow(model: "opus", project: "/a"): 50,
+        ])
+        let reading = day(rows: [UsageHistoryRow(model: "opus", project: "/a"): 120])
 
         XCTAssertFalse(
             stored.isCoveredBy(reading),
-            "a reading missing the no-project rows replaced a day that had them")
+            "a reading 30 tokens short of the model replaced the day")
+    }
+
+    /// And the model total alone is not enough: a scan that lost one
+    /// project's log while another went on spending sums higher and still
+    /// knows less about the one it lost.
+    func testAReadingThatLostANamedProjectDoesNotCoverTheDay() {
+        let stored = day(rows: [
+            UsageHistoryRow(model: "opus", project: "/a"): 100,
+            UsageHistoryRow(model: "opus", project: "/b"): 50,
+        ])
+        let reading = day(rows: [UsageHistoryRow(model: "opus", project: "/b"): 200])
+
+        XCTAssertFalse(
+            stored.isCoveredBy(reading),
+            "a reading that outspent the day on one project dropped the other")
     }
 
     func testADayIsCoveredByAReadingThatGrewEveryRow() {
