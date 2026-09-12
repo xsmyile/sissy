@@ -34,12 +34,18 @@ struct UsageStateSnapshot: Codable, Equatable {
     var retainDays: Int
     var files: [FileEntry]
     var dailyTotals: [DailyTotal]
-    /// Dedup keys for the current day only (`startOfDay(today)` ≤ eventDay).
-    /// Older keys aren't worth persisting — by the time a relaunch
-    /// happens, yesterday's streaming chunks have long since been flushed
-    /// and any duplicate write would have been seen within the same process
-    /// lifetime. Today-only keeps the file small (~tens of KB) while still
-    /// protecting against the assistant-turn-streamed-across-restart edge.
+    /// Dedup keys for every day still inside the retain window, which is what
+    /// the ledger itself is trimmed to.
+    ///
+    /// It held today's alone until a turn that streams across local midnight
+    /// showed what that costs: the key's day is the *event's*, so at 00:00 an
+    /// in-flight turn stops matching "today" and drops out of every later
+    /// snapshot while copies of it are still arriving. A relaunch then meets
+    /// the next copy as a first sighting and bills the whole turn again —
+    /// input, cache read, and the output already paid for.
+    ///
+    /// The name is the on-disk one and stays: renaming it would cost every
+    /// install its ledger once, on the upgrade, to fix a word.
     var dedupKeysToday: [DedupKey]
     /// What the archive resumes from, absent in a snapshot written before it
     /// existed.

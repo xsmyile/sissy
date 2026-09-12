@@ -102,6 +102,31 @@ final class ClaudeStreamedTurnTests: XCTestCase {
             "a turn whose billed count was unknown was billed a second time")
     }
 
+    /// A turn streaming across local midnight is a turn whose day stops being
+    /// today while copies of it are still arriving, which is the same shape as
+    /// a turn on any day that is not today. Its ledger key has to reach the
+    /// snapshot or the relaunch bills the whole turn a second time — the
+    /// input, the cache read, and the output already paid for.
+    func testARelaunchBillsATurnFromADayThatIsNoLongerTodayOnlyOnce() async throws {
+        let earlier = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        try append(outputs: [Self.firstCopyOutput], at: earlier)
+        try await runTail()
+
+        try append(outputs: [Self.finalCopyOutput], at: earlier)
+        try await runTail()
+
+        let totals = try billed(on: earlier)
+        XCTAssertEqual(
+            totals.inputTokens, Self.inputTokens,
+            "the relaunch billed the turn's input a second time")
+        XCTAssertEqual(
+            totals.cacheReadTokens, Self.cacheReadTokens,
+            "the relaunch billed the turn's cache read a second time")
+        XCTAssertEqual(
+            totals.outputTokens, Self.finalCopyOutput,
+            "the relaunch billed the output it had already paid for")
+    }
+
     private func runTail() async throws {
         let provider = LocalUsageProvider.claudeCode(
             claudeDir: logDir,
@@ -116,10 +141,10 @@ final class ClaudeStreamedTurnTests: XCTestCase {
 
     /// Appends copies of one turn to the session file, in the order the CLI
     /// writes them: same request id, same message id, growing output.
-    private func append(outputs: [Int]) throws {
+    private func append(outputs: [Int], at when: Date = Date()) throws {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
-        let stamp = iso.string(from: Date())
+        let stamp = iso.string(from: when)
         let body =
             outputs
             .map { output in
@@ -143,8 +168,8 @@ final class ClaudeStreamedTurnTests: XCTestCase {
         }
     }
 
-    private func billed() throws -> UsageHistoryTotals {
-        let day = UsageReaderShared.dayFormatter.string(from: Date())
+    private func billed(on when: Date = Date()) throws -> UsageHistoryTotals {
+        let day = UsageReaderShared.dayFormatter.string(from: when)
         let record = try XCTUnwrap(
             UsageHistoryStore.load(provider: ProviderID.claudeCode, day: day, in: stateDir),
             "the tail archived nothing for today")

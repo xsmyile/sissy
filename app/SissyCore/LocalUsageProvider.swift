@@ -1027,12 +1027,9 @@ actor LocalUsageProvider: UsageProvider {
                     ))
             }
         }
-        // Persist today's keys only — by design (see field doc above), older
-        // days are safe to drop because by the time a restart happens any
-        // duplicate write for that day has already been seen and counted in
-        // the in-process set.
-        let todayKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap { key, entry in
-            guard entry.day == todayKey else { return nil }
+        let retainedCutoff = cal.startOfDay(for: retainWindowStart)
+        let retainedKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap { key, entry in
+            guard entry.day >= retainedCutoff else { return nil }
             return UsageStateSnapshot.DedupKey(
                 key: key,
                 day: dayFmt.string(from: entry.day),
@@ -1047,7 +1044,7 @@ actor LocalUsageProvider: UsageProvider {
             retainDays: retainDays,
             files: files,
             dailyTotals: daily,
-            dedupKeysToday: todayKeys,
+            dedupKeysToday: retainedKeys,
             historyResume: modelTotals.isEmpty
                 ? nil : UsageStateSnapshot.HistoryResume(dailyModelTotals: modelTotals),
             codexResume: adapter.resumeState()
