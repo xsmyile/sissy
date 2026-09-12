@@ -34,12 +34,28 @@ final class ClaudeLimitsCopyTests: XCTestCase {
         )
     }
 
-    /// Every re-sign re-prompts, so someone who has just updated Sissy meets
-    /// the dialog again and needs it to read as expected rather than as a fault.
+    /// A permission bound to the binary lapses on every update, so someone who
+    /// has just updated Sissy needs that to read as expected rather than as a
+    /// fault.
     func testTheDetailSetsTheExpectationAfterAnUpdate() {
         XCTAssertTrue(
             ClaudeLimitsCopy.detail.contains("after an update"),
-            "nothing left to tell someone the re-prompt after an update is expected"
+            "nothing left to tell someone the permission lapses after an update"
+        )
+    }
+
+    /// The promise this whole change exists to keep: Sissy does not re-ask by
+    /// itself. A copy that still said macOS would ask again would describe an
+    /// app that raises dialogs at launch, which is the behaviour that was
+    /// removed.
+    func testTheDetailPromisesSissyNeverReAsksOnItsOwn() {
+        XCTAssertTrue(
+            ClaudeLimitsCopy.detail.contains("never asks again on its own"),
+            "the promise that a launch raises no dialog went missing"
+        )
+        XCTAssertTrue(
+            ClaudeLimitsCopy.detail.contains("off and back on"),
+            "nothing left to tell someone how to ask for the limits back"
         )
     }
 }
