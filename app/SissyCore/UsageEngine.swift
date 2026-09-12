@@ -54,6 +54,12 @@ actor UsageEngine {
     /// user asked for — which is `config.keepAwake`. They differ when power
     /// management refuses the assertion, and the panel shows both.
     private var keepAwakeActive = false
+    /// When the hold in force was taken, and `nil` while nothing is held.
+    ///
+    /// It belongs to the hold rather than to the call that applied it: a hold
+    /// already in force keeps the instant it started from, so what the panel
+    /// counts up from is the Mac's, never the last time this ran.
+    private var keepAwakeSince: Date?
     /// Days the panel's archive line covers. A week is what makes "more than
     /// today" legible in a row that has to fit beside the per-provider rows.
     static let historyWindowDays = 7
@@ -290,6 +296,7 @@ actor UsageEngine {
         let held = await keepAwake.apply(holding: wanted)
         guard wanted == (config.keepAwake == .on && lifecycle == .running) else { return }
         keepAwakeActive = held && wanted
+        keepAwakeSince = keepAwakeActive ? (keepAwakeSince ?? Date()) : nil
         sissyLog(
             "sissy: keep-awake \(config.keepAwake.rawValue) — "
                 + (keepAwakeActive ? "holding" : "not holding"))
@@ -337,7 +344,8 @@ actor UsageEngine {
             prev: prev,
             hoursElapsed: hoursElapsed,
             providers: slices,
-            keepAwake: KeepAwakeState(mode: config.keepAwake, active: keepAwakeActive),
+            keepAwake: KeepAwakeState(
+                mode: config.keepAwake, active: keepAwakeActive, since: keepAwakeSince),
             history: currentHistory(now: now)
         )
         await onFrame?(frame)

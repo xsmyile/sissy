@@ -29,6 +29,28 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.age(-3), "just now")
     }
 
+    func testHeldUnderAMinuteSaysSoRatherThanCountingSeconds() {
+        XCTAssertEqual(UsageFormat.held(59), "<1m")
+    }
+
+    func testHeldTruncatesToWholeMinutes() {
+        XCTAssertEqual(UsageFormat.held(12 * 60 + 45), "12m")
+    }
+
+    func testHeldKeepsBothUnitsPastTheHour() {
+        XCTAssertEqual(UsageFormat.held(3600 + 12 * 60), "1h 12m")
+    }
+
+    func testHeldDropsAnEmptyMinutePart() {
+        XCTAssertEqual(UsageFormat.held(3 * 3600), "3h")
+    }
+
+    /// A hold stamped a moment ahead of this Mac's clock must not count
+    /// backwards — the control is reporting a Mac that is being held now.
+    func testHeldAheadOfTheClockStaysBelowAMinute() {
+        XCTAssertEqual(UsageFormat.held(-30), "<1m")
+    }
+
     func testWindowLabelNamesTheSessionWindowInHours() {
         XCTAssertEqual(UsageFormat.windowLabel(minutes: 300), "5h")
     }

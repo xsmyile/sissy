@@ -171,6 +171,40 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertEqual(heldSystemAssertions(), baseline, "a teardown left the Mac held awake")
     }
 
+    /// The panel counts up from this rather than being told a duration, so
+    /// the frame has to carry the instant the hold started — and carry nothing
+    /// once the hold is gone, or the control would run a stopwatch over a Mac
+    /// that is free to sleep.
+    func testTheHoldSaysWhenItWasTaken() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(codex: false)
+        let firstFrame = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [firstFrame], timeout: 5)
+        addTeardownBlock { await engine.stop() }
+        XCTAssertNil(frames.all.last?.keepAwake.since, "an idle Mac reported a hold")
+
+        let before = Date()
+        let onFrame = frames.expectation(forFrameCount: frames.count + 1)
+        await engine.setKeepAwake(mode: KeepAwakeMode.on.rawValue)
+        await fulfillment(of: [onFrame], timeout: 5)
+
+        let held = try XCTUnwrap(frames.all.last?.keepAwake)
+        XCTAssertTrue(held.active)
+        let since = try XCTUnwrap(held.since)
+        XCTAssertGreaterThanOrEqual(since, before)
+        XCTAssertLessThanOrEqual(since, Date())
+
+        let offFrame = frames.expectation(forFrameCount: frames.count + 1)
+        await engine.setKeepAwake(mode: KeepAwakeMode.off.rawValue)
+        await fulfillment(of: [offFrame], timeout: 5)
+
+        let released = try XCTUnwrap(frames.all.last?.keepAwake)
+        XCTAssertFalse(released.active)
+        XCTAssertNil(released.since)
+    }
+
     func testAModeTheEngineDoesNotKnowIsIgnored() async {
         let engine = makeEngine()
         await engine.start { _ in }
