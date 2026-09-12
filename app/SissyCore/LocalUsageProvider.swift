@@ -193,6 +193,9 @@ actor LocalUsageProvider: UsageProvider {
     /// store only today's keys without losing the streaming-across-restart
     /// safety net.
     private var seenEventKeys: [String: SeenEvent] = [:]
+    /// Today's project split, republished on every emit so the aggregator
+    /// can read it without an actor hop.
+    private let publishedProjects = AtomicProjects()
     private var pollTask: Task<Void, Never>?
     private var onChange: (@Sendable (DayTotals, DayTotals?) async -> Void)?
     nonisolated private let watchedCounter = AtomicIntCounter()
@@ -455,10 +458,16 @@ actor LocalUsageProvider: UsageProvider {
         saveHistoryIfDirty()
     }
 
+    /// What today and yesterday add up to right now.
+    ///
+    /// Every emit goes through here, which is why this is also where the
+    /// project split is republished: recomputing it per emit costs a walk over
+    /// today's rows, where doing it per event would cost a lock per line.
     func current() -> (today: DayTotals, prev: DayTotals?) {
         let cal = Calendar.current
         let todayKey = cal.startOfDay(for: Date())
         let prevKey = cal.date(byAdding: .day, value: -1, to: todayKey)!
+        publishedProjects.store(projectTotals(on: todayKey))
         // Suppress `prev` until the cold backfill scan finishes — see
         // `coldScanComplete` for the rationale (avoid a spurious delta
         // mid-scan when yesterday's total is half-rebuilt).
@@ -470,6 +479,25 @@ actor LocalUsageProvider: UsageProvider {
     }
 
     nonisolated func filesWatched() -> Int { watchedCounter.load() }
+
+    nonisolated func currentProjects() -> [ProjectTotals] { publishedProjects.load() }
+
+    /// One day's rows folded down to a total per project. A row naming no
+    /// project is left out rather than grouped under a made-up one: the panel
+    /// shows where the money went, and "nowhere nameable" is not an answer a
+    /// row should assert.
+    private func projectTotals(on day: Date) -> [ProjectTotals] {
+        var tokens: [String: Int] = [:]
+        var cost: [String: Decimal] = [:]
+        for (row, totals) in dailyModelTotals[day] ?? [:] {
+            guard let project = row.project else { continue }
+            tokens[project, default: 0] += totals.totalTokens
+            cost[project, default: 0] += totals.cost
+        }
+        return tokens.keys.map {
+            ProjectTotals(path: $0, tokens: tokens[$0] ?? 0, cost: cost[$0] ?? 0)
+        }
+    }
 
     /// True once the initial backfill scan has finished. Lets callers gate
     /// behavior that depends on `today.totalTokens` reflecting the full

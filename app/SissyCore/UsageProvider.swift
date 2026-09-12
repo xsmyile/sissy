@@ -71,6 +71,15 @@ protocol UsageProvider: AnyObject, Sendable {
     /// names nothing a reader could place.
     nonisolated func currentPlanTier() -> String?
 
+    /// How the provider's day splits across projects, as of its last emit.
+    /// Empty for a provider whose format names no working directory.
+    ///
+    /// Nonisolated for the reason the windows are: the aggregator reads it
+    /// while building a slice, inside the hop that produced the totals beside
+    /// it, and an actor hop here would pair a breakdown from one moment with
+    /// totals from another.
+    nonisolated func currentProjects() -> [ProjectTotals]
+
     /// Swap in a freshly fetched rate catalog. Each provider takes the slice
     /// matching its upstream vendor and consults it between the user's
     /// `pricingOverride` and the embedded generated seed. Called once before
@@ -88,4 +97,5 @@ extension UsageProvider {
     nonisolated func currentWindows() -> [UsageWindow] { [] }
     nonisolated func currentPlan() -> String? { nil }
     nonisolated func currentPlanTier() -> String? { nil }
+    nonisolated func currentProjects() -> [ProjectTotals] { [] }
 }

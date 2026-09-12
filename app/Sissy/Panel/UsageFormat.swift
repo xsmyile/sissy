@@ -154,4 +154,20 @@ enum UsageFormat {
         default: return id
         }
     }
+
+    /// What a project is called: the last component of its path, which is the
+    /// repository's own name. Two unrelated repositories sharing a basename
+    /// render the same label and are told apart by the tooltip — the accepted
+    /// cost of a row that reads like the name the user uses.
+    static func projectName(_ path: String) -> String {
+        let name = (path as NSString).lastPathComponent
+        return name.isEmpty ? path : name
+    }
+
+    /// Always plural: the fold only happens past the row limit, and folding a
+    /// single leftover would save no row, so the folded row never stands for
+    /// fewer than two projects.
+    static func projectsFolded(count: Int) -> String {
+        "\(count) more projects"
+    }
 }
