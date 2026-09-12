@@ -38,10 +38,11 @@ struct PanelSissy: View {
     /// Bumped only when a blink is due, and compared against the generation
     /// playback has already consumed.
     ///
-    /// The popover reuses one `NSHostingController` for the app's lifetime, so
-    /// this state outlives every close and `.task(id:)` — which also fires on
-    /// reappearance, not only on a change — would otherwise replay the last
-    /// blink each time the panel opens, gate and cooldown bypassed.
+    /// `.task(id:)` fires on appearance, not only on a change, and the panel
+    /// appears every time it is opened — `UsagePanelController` builds its host
+    /// on open and drops it on close, so this state starts at zero each time.
+    /// The comparison is what keeps that first fire silent: without it every
+    /// open would play a blink, gate and cooldown bypassed.
     @State private var blinkGeneration: UInt = 0
     @State private var playedGeneration: UInt = 0
     @State private var lastBlinkAt: Date = .distantPast
