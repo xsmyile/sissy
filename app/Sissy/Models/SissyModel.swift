@@ -209,6 +209,13 @@ final class SissyModel {
         }
     }
 
+    /// Forgets everything the archive kept. Nothing else in Sissy deletes a
+    /// user's data, so it is reachable only from Settings and only behind a
+    /// confirmation.
+    func deleteUsageHistory() {
+        engine.deleteUsageHistory()
+    }
+
     func openLogs() {
         let url = SissyPaths.logsDir
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

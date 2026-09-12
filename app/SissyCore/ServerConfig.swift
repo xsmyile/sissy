@@ -30,6 +30,12 @@ struct ServerConfig: Sendable, Codable {
     /// makes the one-time macOS keychain prompt expected rather than something
     /// a first launch springs on someone who never asked for limits.
     var claudeLimits: Bool
+    /// How many days of the day-by-model archive Sissy keeps. `nil` means the
+    /// default; `0` stops it recording and reporting, and leaves what is
+    /// already there for the Settings button, which is the one place a user
+    /// asks for their own data to be deleted. Clamped on read, so a
+    /// hand-edited absurdity cannot turn "keep some days" into "keep forever".
+    var historyRetentionDays: Int?
     /// Whether Sissy holds a power assertion so the Mac does not idle to
     /// sleep. Persisted here rather than kept in memory because it is a
     /// setting, not a hold: a user who switched their Mac to never sleep
@@ -44,6 +50,7 @@ struct ServerConfig: Sendable, Codable {
         remotePricing: nil,
         providers: .defaults,
         claudeLimits: false,
+        historyRetentionDays: nil,
         keepAwake: .off
     )
 
@@ -76,6 +83,7 @@ struct ServerConfig: Sendable, Codable {
         if let v = obj["pollIntervalSeconds"] as? Double { merged.pollIntervalSeconds = v }
         if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
         if let v = obj["claudeLimits"] as? Bool { merged.claudeLimits = v }
+        if let v = obj["historyRetentionDays"] as? Int { merged.historyRetentionDays = v }
         // An unknown mode reads as off rather than failing the whole file: a
         // value written by a newer build must not cost the user every other
         // setting in here.
@@ -130,6 +138,14 @@ struct ServerConfig: Sendable, Codable {
             try? FileManager.default.removeItem(at: staging)
             throw error
         }
+    }
+
+    /// Retention in days, bounded. Reading it anywhere else than through
+    /// here would let an unset value and a hand-edited one disagree about
+    /// what the archive keeps.
+    var resolvedHistoryRetentionDays: Int {
+        guard let historyRetentionDays else { return UsageHistoryStore.defaultRetentionDays }
+        return min(max(historyRetentionDays, 0), UsageHistoryStore.maxRetentionDays)
     }
 
     var resolvedClaudeDataDir: URL {

@@ -114,6 +114,32 @@ final class UsageFormatTests: XCTestCase {
         )
     }
 
+    // MARK: Archive window
+
+    func testAWindowTheArchiveReachesBackAcrossIsNamedByItsWidth() throws {
+        let clock = try fixedClock()
+        let earliest = try XCTUnwrap(
+            clock.calendar.date(byAdding: .day, value: -6, to: clock.now))
+        XCTAssertEqual(
+            UsageFormat.historyWindowLabel(
+                days: 7, earliestDay: earliest, now: clock.now, calendar: clock.calendar),
+            "Last 7 days"
+        )
+    }
+
+    /// Three days of data under a "Last 7 days" label is a daily average a
+    /// reader computes wrong and cannot tell they did.
+    func testAWindowTheArchiveFallsShortOfIsNamedByItsFirstDay() throws {
+        let clock = try fixedClock()
+        let earliest = try XCTUnwrap(
+            clock.calendar.date(byAdding: .day, value: -2, to: clock.now))
+        XCTAssertEqual(
+            UsageFormat.historyWindowLabel(
+                days: 7, earliestDay: earliest, now: clock.now, calendar: clock.calendar),
+            "Since \(earliest.formatted(.dateTime.day().month(.abbreviated)))"
+        )
+    }
+
     /// A fixed instant in a fixed zone: "same calendar day" is a question the
     /// answer to which depends on both, so neither can come from the machine
     /// running the test.

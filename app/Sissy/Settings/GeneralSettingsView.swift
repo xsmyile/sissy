@@ -5,6 +5,18 @@ import SwiftUI
 struct GeneralSettingsView: View {
     let model: SissyModel
 
+    @State private var confirmingDelete = false
+
+    private var historyCaption: String {
+        let days = model.engine.historyRetentionDays
+        guard days > 0 else {
+            return "Switched off in server.json, so Sissy records nothing beyond the day it "
+                + "is counting. Delete removes what an earlier run left."
+        }
+        return "A day-by-model record kept in history/ for \(days) days, so the panel can show "
+            + "more than today. Nothing in it leaves this Mac."
+    }
+
     var body: some View {
         Form {
             Section {
@@ -49,7 +61,27 @@ struct GeneralSettingsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+
+                LabeledContent("Usage history") {
+                    Button("Delete") { confirmingDelete = true }
+                        .buttonStyle(.link)
+                }
+                Text(historyCaption)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
+        }
+        .confirmationDialog(
+            "Delete the usage history Sissy has recorded?",
+            isPresented: $confirmingDelete
+        ) {
+            Button("Delete", role: .destructive) { model.deleteUsageHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Today keeps counting. The days before it are gone, and the session logs "
+                    + "they were read from may have been rotated since."
+            )
         }
         .formStyle(.grouped)
         // `SMAppService` is the only record of the login item, so the switch

@@ -201,6 +201,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
         )
         return UsageEvent(
             timestamp: ts,
+            model: model,
             inputTokens: input,
             outputTokens: output,
             cacheReadTokens: cacheRead,
@@ -220,6 +221,7 @@ extension LocalUsageProvider {
         retainDays: Int = 2,
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
+        historyRoot: URL? = nil,
         pricingOverride: [String: ModelPricing]? = nil,
         limitsProbe: ClaudeLimitsProbe? = nil,
         profile: ClaudeProfileSource = ClaudeProfileSource()
@@ -233,7 +235,8 @@ extension LocalUsageProvider {
             ),
             retainDays: retainDays,
             pollInterval: pollInterval,
-            persistenceURL: persistenceURL
+            persistenceURL: persistenceURL,
+            historyRoot: historyRoot
         )
     }
 }

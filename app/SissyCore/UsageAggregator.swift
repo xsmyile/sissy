@@ -73,6 +73,12 @@ actor UsageAggregator {
         for p in providers { await p.applyPriceCatalog(catalog) }
     }
 
+    /// Fans the archive deletion out, so no provider can rewrite a day the
+    /// user has just asked Sissy to forget.
+    func forgetArchivedDays() async {
+        for p in providers { await p.forgetArchivedDays() }
+    }
+
     /// What a frame would be built from right now.
     ///
     /// Both halves are recomputed here rather than replayed: a rate-limit

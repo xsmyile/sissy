@@ -14,6 +14,8 @@ struct UsagePanelSnapshot: Equatable {
     let burn: String
     let delta: TokenDelta?
     let providers: [ProviderRow]
+    /// The archive line, absent when there is no archive to show.
+    let history: HistoryRow?
 
     /// Day-over-day change in tokens. Absent when the frame carries no
     /// yesterday yet, or when yesterday was zero and a percentage would be
@@ -28,6 +30,16 @@ struct UsagePanelSnapshot: Equatable {
         case up
         case down
         case flat
+    }
+
+    /// What the archive adds up to over its window. `label` says which days
+    /// that is: a window the archive does not reach back across is named by
+    /// the day it starts on instead, so a three-day-old install does not
+    /// present three days as a week.
+    struct HistoryRow: Equatable {
+        let label: String
+        let tokens: String
+        let cost: String
     }
 
     struct ProviderRow: Equatable, Identifiable {
@@ -58,7 +70,7 @@ struct UsagePanelSnapshot: Equatable {
         let resetsAt: Date
     }
 
-    static func make(frame: FrameData) -> Self {
+    static func make(frame: FrameData, now: Date = Date()) -> Self {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
         return Self(
@@ -66,7 +78,23 @@ struct UsagePanelSnapshot: Equatable {
             cost: frame.providers.isEmpty ? "$\(frame.cost)" : UsageFormat.cost(totalCost),
             burn: frame.burn,
             delta: makeDelta(today: totalTokens, prevTokens: frame.prevTokens),
-            providers: makeRows(frame.providers, totalTokens: totalTokens)
+            providers: makeRows(frame.providers, totalTokens: totalTokens),
+            history: makeHistory(frame.history, now: now)
+        )
+    }
+
+    /// Nothing until the archive reaches past today: a window whose only day
+    /// is the one the headline already prints is a second opinion on the same
+    /// number, and the two are read seconds apart.
+    private static func makeHistory(_ rollup: UsageHistoryRollup?, now: Date) -> HistoryRow? {
+        guard let rollup, rollup.tokens > 0, let earliest = rollup.earliestDay,
+            earliest < Calendar.current.startOfDay(for: now)
+        else { return nil }
+        return HistoryRow(
+            label: UsageFormat.historyWindowLabel(
+                days: rollup.days, earliestDay: rollup.earliestDay, now: now),
+            tokens: UsageFormat.tokens(rollup.tokens),
+            cost: UsageFormat.cost(rollup.cost)
         )
     }
 
