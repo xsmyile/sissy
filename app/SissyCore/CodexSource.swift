@@ -361,6 +361,13 @@ final class CodexAdapter: SourceAdapter {
         return true
     }
 
+    /// What has no cheap way back after a relaunch.
+    ///
+    /// A file appears here once either its model or its project is known. One
+    /// whose `session_meta` named a directory but whose `turn_context` has not
+    /// been read yet carries `defaultModel` — the same value the live path
+    /// prices it at until that line lands, so the entry records no more than
+    /// the reader would answer anyway.
     func resumeState() -> UsageStateSnapshot.CodexResume? {
         UsageStateSnapshot.CodexResume(
             fileModels: Set(fileModels.keys).union(fileProjects.keys).map { url in

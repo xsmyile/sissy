@@ -132,6 +132,35 @@ final class UsageProjectSplitTests: XCTestCase {
         XCTAssertEqual(day.models.first?.project, repo.path)
     }
 
+    /// `historyRetentionDays: 0` switches the archive off, which is a promise
+    /// about what Sissy writes to disk. The panel's split is read live, and a
+    /// disk-retention setting must not quietly take it away as well.
+    func testTheSplitIsStillReadableWithTheArchiveSwitchedOff() async throws {
+        let legion = try makeRepository("legion")
+        let vedite = try makeRepository("vedite")
+        try writeTurn("a.jsonl", requestId: "r1", cwd: legion.path)
+        try writeTurn("b.jsonl", requestId: "r2", cwd: vedite.path)
+
+        let provider = LocalUsageProvider.claudeCode(
+            claudeDir: logDir,
+            retainDays: 2,
+            pollInterval: .seconds(60),
+            persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
+            historyRoot: nil
+        )
+        await provider.start { _, _ in }
+        let split = provider.currentProjects()
+        await provider.stop()
+
+        XCTAssertEqual(
+            Set(split.map(\.path)), [legion.path, vedite.path],
+            "switching the archive off blanked the live split too")
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: UsageHistoryStore.directory(in: stateDir).path),
+            "the archive wrote a file after being switched off")
+    }
+
     private func runClaudeTail() async throws {
         let provider = LocalUsageProvider.claudeCode(
             claudeDir: logDir,

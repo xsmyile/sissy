@@ -110,13 +110,15 @@ final class UsageHistoryTailTests: XCTestCase {
             "the second run wrote the day it could see rather than the day that happened")
     }
 
-    /// The first launch after the archive shipped: offsets resume at the end
-    /// of files whose events were never archived, so a day written from there
+    /// The first launch after the archive shipped: the snapshot predates the
+    /// per-model rows entirely, and the offsets resume at the end of files
+    /// whose events were never counted into any, so a day written from there
     /// would count from the upgrade onwards and freeze that as the day. A day
     /// Sissy cannot vouch for is a day it does not write.
-    func testADayTheArchiveNeverSawIsLeftUnwrittenRatherThanUndercounted() async throws {
+    func testADayNoSnapshotHasRowsForIsLeftUnwrittenRatherThanUndercounted() async throws {
         try writeTurn("a.jsonl", requestId: "r1")
         try await runTail(archiving: false)
+        try stripHistoryRowsFromSnapshot()
 
         try writeTurn("b.jsonl", requestId: "r2")
         try await runTail(archiving: true)
@@ -124,6 +126,24 @@ final class UsageHistoryTailTests: XCTestCase {
         XCTAssertNil(
             archivedToday(),
             "a resumed day was archived with only what came after the upgrade")
+    }
+
+    /// Turning the archive off stops Sissy writing to disk; it does not stop
+    /// it counting. The rows stay in the snapshot either way — the panel
+    /// splits today by them — so the day the archive comes back to is the
+    /// whole day, not the part of it that happened after the switch.
+    func testSwitchingTheArchiveOffAndBackOnKeepsTheDayWhole() async throws {
+        try writeTurn("a.jsonl", requestId: "r1")
+        try await runTail(archiving: true)
+
+        try writeTurn("b.jsonl", requestId: "r2")
+        try await runTail(archiving: false)
+        try await runTail(archiving: true)
+
+        XCTAssertEqual(
+            archivedToday()?.totals(forModel: Self.model).inputTokens,
+            Self.tokensPerTurn * 2,
+            "the day came back holding only what was metered after the switch")
     }
 
     /// The delete button is the one place Sissy forgets something on purpose,
@@ -253,18 +273,18 @@ final class UsageHistoryTailTests: XCTestCase {
             "a scan that could see half of a past day froze that half as the day")
     }
 
-    /// Switching the archive off and back on leaves a file an earlier run
-    /// wrote for a day that went on being metered without it. The day cannot
-    /// be rebuilt — the rows it would need are exactly what a suppressed day
-    /// has none of — and a week that quietly counts a fraction of a day is
-    /// worse than one that says the day is missing.
-    func testADayLeftShortByATailThatStoppedArchivingIsDropped() async throws {
+    /// A file an earlier run wrote for a day no snapshot has rows for any
+    /// more. The day cannot be rebuilt — the rows it would need are exactly
+    /// what a suppressed day has none of — and a week that quietly counts a
+    /// fraction of a day is worse than one that says the day is missing.
+    func testADayLeftShortWithNoRowsToRebuildItFromIsDropped() async throws {
         try writeTurn("a.jsonl", requestId: "r1")
         try await runTail(archiving: true)
         XCTAssertNotNil(archivedToday(), "the day this test drops was never archived")
 
         try writeTurn("b.jsonl", requestId: "r2")
         try await runTail(archiving: false)
+        try stripHistoryRowsFromSnapshot()
         try await runTail(archiving: true)
 
         XCTAssertNil(archivedToday(), "a day known to be short was left in the archive")
@@ -315,6 +335,17 @@ final class UsageHistoryTailTests: XCTestCase {
         XCTAssertEqual(
             try Data(contentsOf: url), before,
             "a day file this build cannot read was overwritten")
+    }
+
+    /// Rewrites the snapshot the way a build that predates the per-model rows
+    /// left it: day totals, no split to rebuild them from.
+    private func stripHistoryRowsFromSnapshot() throws {
+        let url = UsageStatePersistence.defaultURL(in: stateDir)
+        let raw = try JSONSerialization.jsonObject(with: try Data(contentsOf: url))
+        var root = try XCTUnwrap(raw as? [String: Any], "the snapshot is not an object")
+        XCTAssertNotNil(root["historyResume"], "the run under test recorded no rows")
+        root["historyResume"] = nil
+        try JSONSerialization.data(withJSONObject: root).write(to: url, options: [.atomic])
     }
 
     private func archived(_ day: String) -> UsageHistoryDay? {

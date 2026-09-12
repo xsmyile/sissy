@@ -620,11 +620,11 @@ actor LocalUsageProvider: UsageProvider {
             totalTokens: existing.totalTokens + totalTokens,
             totalCost: existing.totalCost + event.cost
         )
-        guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
         var byRow = dailyModelTotals[key] ?? [:]
         byRow[UsageHistoryRow(model: event.model, project: event.project), default: .init()]
             .add(event)
         dailyModelTotals[key] = byRow
+        guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
         historyDirtyDays.insert(key)
     }
 
@@ -862,8 +862,11 @@ actor LocalUsageProvider: UsageProvider {
     /// cannot vouch for: the events behind those totals are already consumed,
     /// so a file written from here would hold what came after the upgrade and
     /// call it the day.
+    ///
+    /// The rows are restored whether or not the archive is on. They are what
+    /// the panel splits today by, and a disk-retention setting must not
+    /// quietly take a live answer away with it.
     private func restoreModelTotals(from snapshot: UsageStateSnapshot) {
-        guard historyRoot != nil else { return }
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
         var restored: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
@@ -883,12 +886,13 @@ actor LocalUsageProvider: UsageProvider {
         }
         for day in dailyTotals.keys {
             guard let totals = restored[day] else {
+                guard historyRoot != nil else { continue }
                 historySuppressedDays.insert(day)
                 dropArchivedDayIfShort(day)
                 continue
             }
             dailyModelTotals[day] = totals
-            historyDirtyDays.insert(day)
+            if historyRoot != nil { historyDirtyDays.insert(day) }
         }
     }
 

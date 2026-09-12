@@ -15,6 +15,12 @@ import Foundation
 /// distinct ones across thousands of lines, and the walk costs a `stat` per
 /// level.
 ///
+/// The cache holds for the life of the process and is never invalidated, so a
+/// directory `git init`-ed or turned into a worktree after Sissy first
+/// resolved it keeps the answer it had until the next launch. That costs a row
+/// its label, never a total its tokens, and re-walking every line to catch it
+/// would cost the walk this cache exists to avoid.
+///
 /// A directory that no longer exists cannot be resolved and becomes its own
 /// project. The tail resolves as it reads, so live counting sees the directory
 /// while it is still there; a cold scan re-deriving a past day may not, and a

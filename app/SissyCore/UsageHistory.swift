@@ -157,16 +157,23 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// re-derivation that lost one session log while other work went on
     /// spending sums higher and still knows less.
     ///
-    /// A stored row naming no project is compared against the whole model
-    /// instead: that is a row from before the archive carried projects, and
-    /// the reading replacing it splits the same model across several rows.
-    /// Held to its own key it could never be covered again, and every day
+    /// A day whose rows name no project *at all* is compared model by model
+    /// instead: that is a file written before the archive carried projects,
+    /// and the reading replacing it splits the same model across several rows,
+    /// so held to its own key it could never be covered again and every day
     /// already on disk would freeze on the upgrade.
+    ///
+    /// The test is the whole day's, never the single row's. A day that names a
+    /// project anywhere is compared row by row, including its rows that name
+    /// none: reading those at the model grain would let a re-derivation that
+    /// lost the no-project bucket pass by counting a project row's tokens
+    /// towards it twice, which is the short write this rule exists to refuse.
     func isCoveredBy(_ other: Self) -> Bool {
         let theirs = other.totalsByRow
+        let predatesProjects = models.allSatisfy { $0.project == nil }
         return totalsByRow.allSatisfy { row, totals in
             let covering =
-                row.project == nil
+                predatesProjects
                 ? other.totals(forModel: row.model).totalTokens
                 : (theirs[row]?.totalTokens ?? 0)
             return covering >= totals.totalTokens
