@@ -168,14 +168,26 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// alone is the hole: a scan that lost one project's session log while
     /// another project went on spending sums higher and still knows less
     /// about the one it lost.
+    /// What neither test can tell apart is a day whose unattributed tokens
+    /// were *resolved* into a project from one whose unattributed tokens went
+    /// missing while the same model grew by at least as much somewhere else.
+    /// Both leave the model's total where it was, and nothing in the rows says
+    /// which happened. The day is not written short either way — that total is
+    /// what says so — but on the second the money moves to the wrong project.
+    /// It needs a line of today's tree to vanish and the same model to grow
+    /// over it in the same pass, and the alternative is freezing every day
+    /// that a re-scan could have attributed properly.
     func isCoveredBy(_ other: Self) -> Bool {
+        let mine = totalsByRow
         let theirs = other.totalsByRow
-        let models = Set(self.models.map(\.model))
-        let modelsCovered = models.allSatisfy {
-            other.totals(forModel: $0).totalTokens >= totals(forModel: $0).totalTokens
+        var minePerModel: [String: Int] = [:]
+        var theirsPerModel: [String: Int] = [:]
+        for (row, totals) in mine { minePerModel[row.model, default: 0] += totals.totalTokens }
+        for (row, totals) in theirs { theirsPerModel[row.model, default: 0] += totals.totalTokens }
+        guard minePerModel.allSatisfy({ (theirsPerModel[$0.key] ?? 0) >= $0.value }) else {
+            return false
         }
-        guard modelsCovered else { return false }
-        return totalsByRow.allSatisfy { row, totals in
+        return mine.allSatisfy { row, totals in
             row.project == nil || (theirs[row]?.totalTokens ?? 0) >= totals.totalTokens
         }
     }
