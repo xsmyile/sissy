@@ -133,7 +133,7 @@ compiled into the app too.
 | `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM rates at runtime; renders the seed for `--dump-seed` |
 | `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — offline / first-run floor |
 | `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`, `keepAwake`. The engine owns the file, and saves it through a staging file so it is owner-only before it answers to its own name |
-| `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude Code stays on the legacy `usage-state.json` for upgrade smoothness |
+| `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude Code stays on the legacy `usage-state.json` for upgrade smoothness. The snapshots sit beside the `server.json` that named the trees they were read from, so a config pointed elsewhere — `--config`, a test — takes its reading with it |
 | `SissyPaths.swift`              | Support-dir and logs-dir resolution (`.dev` bundle id → dev tree) |
 | `SissyLog.swift`                | `sissyLog`, stderr plus `Library/Logs/Sissy/sissy.err.log`, capped as it is written (one generation kept); every message is escaped to a single line, because some carry text the CLIs wrote |
 | `main.swift`                    | The tool's entry point: `--self-test` / `--scan` / `--scan-provider` / `--config` / `--dump-seed` / `--refresh-catalog`. No flag prints the list and exits 2 |
