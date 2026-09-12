@@ -78,7 +78,11 @@ actor UsageEngine {
         let dataDir: URL
     }
 
-    init(config: ServerConfig, configURL: URL = ServerConfig.defaultURL) {
+    init(
+        config: ServerConfig,
+        configURL: URL = ServerConfig.defaultURL,
+        limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe()
+    ) {
         self.config = config
         self.configURL = configURL
 
@@ -99,7 +103,6 @@ actor UsageEngine {
                 id: ProviderID.claudeCode, activation: claudeActivation, dataDir: claudeDir),
             ResolvedProvider(id: ProviderID.codex, activation: codexActivation, dataDir: codexDir),
         ]
-        let limitsProbe = ClaudeLimitsProbe()
         self.claudeLimitsProbe = limitsProbe
         var providers: [any UsageProvider] = []
         if claudeActivation.isMetering {
