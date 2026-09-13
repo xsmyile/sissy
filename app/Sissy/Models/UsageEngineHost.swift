@@ -37,6 +37,19 @@ final class UsageEngineHost {
     /// that file, and a second copy in the app could disagree with the one the
     /// assertions are actually taken from.
     private(set) var keepScreenAwake: Bool = true
+    /// The keep-awake mode `server.json` holds, for the window before the
+    /// first frame carries one.
+    ///
+    /// The engine takes the hold in `start()`, ahead of the readers' first
+    /// pass, so there is a stretch — a price-catalog fetch and a cold scan —
+    /// where the Mac is already being held and no frame has said so yet.
+    /// Answering `off` across it is not a cosmetic lie: the panel and Settings
+    /// render the mode as a radio group, which asserts a mode nobody chose,
+    /// and `SissyModel.setKeepAwake` drops a request that matches what the app
+    /// wrongly believes it is already in — so the click that would release the
+    /// Mac reaches nothing. The frame is the record once one exists; this
+    /// stands in until then, which is why it is kept in step at both ends.
+    private(set) var keepAwakeMode: KeepAwakeMode = .off
 
     @ObservationIgnored private weak var model: SissyModel?
     @ObservationIgnored private var engine: UsageEngine?
@@ -69,6 +82,7 @@ final class UsageEngineHost {
         claudeLimits = config.claudeLimits
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
+        keepAwakeMode = config.keepAwake
         let host = self
         bootTask = Task {
             await engine.start { frame in
@@ -117,6 +131,7 @@ final class UsageEngineHost {
 
     func setKeepAwake(mode: KeepAwakeMode) {
         guard let engine else { return }
+        keepAwakeMode = mode
         Task { await engine.setKeepAwake(mode: mode.rawValue) }
     }
 
@@ -134,6 +149,7 @@ final class UsageEngineHost {
     }
 
     private func deliver(_ frame: FrameData) {
+        if frame.keepAwake.mode != keepAwakeMode { keepAwakeMode = frame.keepAwake.mode }
         model?.applyFrame(frame)
     }
 
