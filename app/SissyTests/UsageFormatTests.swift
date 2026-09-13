@@ -24,9 +24,20 @@ final class UsageFormatTests: XCTestCase {
     }
 
     /// A frame whose timestamp is ahead of this Mac's clock must not render a
-    /// negative age; the footer's job is to say the reading is live.
+    /// negative age; the line's job is to say the reading is live.
     func testAgeAheadOfTheClockReadsAsJustNow() {
         XCTAssertEqual(UsageFormat.age(-3), "just now")
+    }
+
+    func testReadingDatesTheReadingWhileNothingIsInFlight() {
+        XCTAssertEqual(UsageFormat.reading(age: 41, refreshing: false), "updated 41s ago")
+    }
+
+    /// The age goes away while a refresh is running rather than ticking on
+    /// beside the word: it is about to be replaced, and a reading that says
+    /// both is contradicting itself.
+    func testReadingDropsTheAgeWhileRefreshing() {
+        XCTAssertEqual(UsageFormat.reading(age: 41, refreshing: true), "refreshing…")
     }
 
     func testHeldUnderAMinuteSaysSoRatherThanCountingSeconds() {

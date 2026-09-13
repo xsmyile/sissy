@@ -147,7 +147,7 @@ struct UsagePanelView: View {
                 .font(.system(size: PanelMetrics.headlineMeta))
                 .foregroundStyle(.secondary)
         } else if let live {
-            readingLine(live)
+            readingLine(live, refreshing: !model.engine.refreshing.isEmpty)
         }
     }
 
@@ -156,12 +156,15 @@ struct UsagePanelView: View {
     /// `TimelineView` rather than a value recomputed with the body: the
     /// instant it counts from is fixed, so the line stays true while the
     /// panel sits open and the engine emits nothing.
-    private func readingLine(_ live: SissyModel.LiveFrame) -> some View {
+    private func readingLine(_ live: SissyModel.LiveFrame, refreshing: Bool) -> some View {
         TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
-            Text("updated " + UsageFormat.age(context.date.timeIntervalSince(live.at)))
-                .font(.system(size: PanelMetrics.headlineMeta))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+            Text(
+                UsageFormat.reading(
+                    age: context.date.timeIntervalSince(live.at), refreshing: refreshing)
+            )
+            .font(.system(size: PanelMetrics.headlineMeta))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -207,7 +210,7 @@ struct UsagePanelView: View {
                 }
 
                 if let live {
-                    readingLine(live)
+                    readingLine(live, refreshing: model.engine.refreshing.contains(row.id))
                 }
             }
 

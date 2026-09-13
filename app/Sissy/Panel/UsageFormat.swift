@@ -23,8 +23,19 @@ enum UsageFormat {
         String(format: "$%.2f", NSDecimalNumber(decimal: cost).doubleValue)
     }
 
-    /// Coarse age of the last frame, for the panel's footer. Deliberately
-    /// one unit and no seconds past a minute: the footer is a reassurance that
+    /// The line under a header's title: when the reading on screen landed, or
+    /// that it is being fetched again right now.
+    ///
+    /// One function for both headers, so home and a provider's page cannot
+    /// word the same state differently. The age is dropped rather than shown
+    /// beside the word: it is about to be replaced, and a number counting up
+    /// next to "refreshing" is the reading contradicting itself.
+    static func reading(age interval: TimeInterval, refreshing: Bool) -> String {
+        refreshing ? "refreshing…" : "updated " + age(interval)
+    }
+
+    /// Coarse age of the last frame, for the panel's header. Deliberately
+    /// one unit and no seconds past a minute: the line is a reassurance that
     /// the reading is live, not a stopwatch.
     static func age(_ interval: TimeInterval) -> String {
         let seconds = Int(interval.rounded())
