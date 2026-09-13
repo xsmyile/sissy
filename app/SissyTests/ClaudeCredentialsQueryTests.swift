@@ -54,6 +54,53 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
         }
     }
 
+    /// The query's suppressors leave the legacy keychain's ACL panel alone, so
+    /// this switch is the one that actually keeps a launch quiet. It is
+    /// resolved by name, which makes its absence the same silent failure as a
+    /// renamed constant — and it is deprecated, so the day it stops resolving
+    /// will not be announced.
+    func testTheLegacyKeychainInteractionSwitchStillResolves() {
+        let name = ClaudeCredentialsStore.userInteractionName
+
+        XCTAssertEqual(name, "SecKeychainSetUserInteractionAllowed")
+        XCTAssertNotNil(dlsym(UnsafeMutableRawPointer(bitPattern: -2), name))
+    }
+
+    /// A suppressed read answers `errSecAuthFailed`, the same status a user
+    /// clicking Deny produces. Reading it as a refusal would stop the probe on
+    /// every launch, which is the failure `.interactionRequired` exists to
+    /// prevent: nobody was shown anything, so nobody said no.
+    func testASilentReadThatWouldHaveAskedIsNotARefusal() {
+        let outcome = ClaudeCredentialsStore.classify(
+            errSecAuthFailed, data: nil, allowingInteraction: false)
+
+        guard case .interactionRequired = outcome else {
+            return XCTFail("a read that was never allowed to ask reported \(outcome)")
+        }
+    }
+
+    /// The other half of the same status: a user action did put the panel on
+    /// screen, and this is the one path on which someone can actually refuse.
+    func testAUserActionThatWasRefusedIsARefusal() {
+        let outcome = ClaudeCredentialsStore.classify(
+            errSecAuthFailed, data: nil, allowingInteraction: true)
+
+        guard case .denied = outcome else {
+            return XCTFail("a refused user action reported \(outcome)")
+        }
+    }
+
+    func testAMissingItemIsAbsentWhicheverReadFoundIt() {
+        for interactive in [true, false] {
+            let outcome = ClaudeCredentialsStore.classify(
+                errSecItemNotFound, data: nil, allowingInteraction: interactive)
+
+            guard case .absent = outcome else {
+                return XCTFail("a missing item reported \(outcome)")
+            }
+        }
+    }
+
     private func resolve(_ name: String) -> String? {
         guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) else { return nil }
         return symbol.assumingMemoryBound(to: CFString?.self).pointee as String?

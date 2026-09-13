@@ -113,43 +113,75 @@ enum ClaudeCredentialsStore {
 
     private static let gate = KeychainLookupGate()
 
+    /// The lookup, with the legacy keychain's own Allow/Deny panel switched
+    /// off for the duration of a silent read.
+    ///
+    /// `makeQuery`'s two suppressors are not enough on their own. Measured on
+    /// macOS 27 against the item Claude Code writes: a read carrying both an
+    /// `interactionNotAllowed` `LAContext` and `kSecUseAuthenticationUIFail`
+    /// still raised the panel at launch. That panel is the *keychain's* own
+    /// ACL check — this app is not on another team's item — rather than an
+    /// authentication policy, and the only switch that reaches it is
+    /// `SecKeychainSetUserInteractionAllowed`. It is process-wide and
+    /// deprecated with no replacement, so it is resolved by name for the same
+    /// reason the constants are, thrown only around the call, and put back
+    /// before returning — the interactive read a user action makes needs the
+    /// panel. Process-wide is safe here because `loadOffPool`'s gate runs one
+    /// lookup at a time and nothing else in Sissy touches a keychain.
     static func load(allowingInteraction: Bool) -> ClaudeCredentialsLookup {
+        let suppressed = allowingInteraction ? false : setUserInteractionAllowed(false)
+        defer { if suppressed { _ = setUserInteractionAllowed(true) } }
         var item: CFTypeRef?
         let status = SecItemCopyMatching(
             makeQuery(allowingInteraction: allowingInteraction) as CFDictionary, &item)
+        return classify(status, data: item as? Data, allowingInteraction: allowingInteraction)
+    }
 
+    /// What one `SecItemCopyMatching` outcome means. Pure, because this is the
+    /// mapping that decides whether the probe keeps polling or stops for good,
+    /// and it has to be testable without a keychain.
+    ///
+    /// A suppressed read does not answer `errSecInteractionNotAllowed`: it
+    /// answers `errSecAuthFailed`, the same status a user clicking Deny
+    /// produces. `allowingInteraction` is what tells them apart. Folding them
+    /// together would read a launch nobody was allowed to ask on as a refusal
+    /// and stop the probe, which is the one thing `.interactionRequired`
+    /// exists to prevent.
+    static func classify(
+        _ status: OSStatus,
+        data: Data?,
+        allowingInteraction: Bool
+    ) -> ClaudeCredentialsLookup {
         switch status {
         case errSecSuccess:
-            guard let data = item as? Data, let parsed = parse(data) else {
+            guard let data, let parsed = parse(data) else {
                 return .unreadable(errSecDecode)
             }
             return .found(parsed)
         case errSecItemNotFound:
             return .absent
-        // Nobody was asked, so nobody refused: this is the answer a read that
-        // was forbidden to interact gets, and the caller decides whether a
-        // user action is available to ask properly.
         case errSecInteractionNotAllowed:
             return .interactionRequired
         case errSecUserCanceled, errSecAuthFailed:
-            return .denied
+            return allowingInteraction ? .denied : .interactionRequired
         default:
             return .unreadable(status)
         }
     }
 
-    /// The lookup's query, with the two independent suppressors a silent read
-    /// needs.
+    /// The query half of a silent read: the two suppressors that travel with
+    /// the lookup, alongside the process-wide one `load` throws around it.
     ///
-    /// `LAContext.interactionNotAllowed` covers the modern path, and it is not
-    /// enough on its own: an item in the *legacy* keychain — which is where
-    /// Claude Code writes — can still raise the Allow/Deny panel through it.
-    /// `kSecUseAuthenticationUIFail` is what closes that door, and it is
-    /// resolved by name at runtime because the SDK deprecates the constant
-    /// while still honouring it, and there is no replacement that covers this
-    /// case. A build that cannot resolve either name still reads — it just
-    /// reads the way it always did — so a missing symbol costs the silence,
-    /// never the feature.
+    /// `LAContext.interactionNotAllowed` covers the modern path and
+    /// `kSecUseAuthenticationUIFail` the authentication policy the SDK
+    /// deprecates while still honouring it. Neither reaches the legacy
+    /// keychain's ACL panel — measured, and the reason `load` also switches
+    /// user interaction off for the call. They stay because they are what
+    /// answers `errSecInteractionNotAllowed` rather than a bare auth failure,
+    /// which is the only outcome that says the item is there and untouched. A
+    /// build that cannot resolve either name still reads — it just reads the
+    /// way it always did — so a missing symbol costs the silence, never the
+    /// feature.
     static func makeQuery(allowingInteraction: Bool) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -171,12 +203,34 @@ enum ClaudeCredentialsStore {
 
     static let authenticationUIName = "kSecUseAuthenticationUI"
     static let authenticationUIFailName = "kSecUseAuthenticationUIFail"
+    static let userInteractionName = "SecKeychainSetUserInteractionAllowed"
+
+    private typealias SetUserInteractionAllowed = @convention(c) (UInt8) -> OSStatus
+
+    /// Throws the process-wide switch that decides whether the legacy keychain
+    /// may put its Allow/Deny panel on screen, and reports whether it was
+    /// actually thrown.
+    ///
+    /// The answer is what the caller restores against: a build that cannot
+    /// resolve the symbol reads the way it always did rather than leaving the
+    /// panel suppressed for the rest of the run.
+    static func setUserInteractionAllowed(_ allowed: Bool) -> Bool {
+        guard let symbol = dlsym(rtldDefault, userInteractionName) else { return false }
+        let set = unsafeBitCast(symbol, to: SetUserInteractionAllowed.self)
+        return set(allowed ? 1 : 0) == errSecSuccess
+    }
+
+    /// `RTLD_DEFAULT`, which is a sentinel rather than an address. Computed
+    /// because a stored pointer is not `Sendable` under strict concurrency and
+    /// there is nothing here worth storing.
+    private static var rtldDefault: UnsafeMutableRawPointer? {
+        UnsafeMutableRawPointer(bitPattern: -2)
+    }
 
     /// Reads a `Security` string constant out of the already-loaded framework
     /// rather than referencing it, so a deprecation does not become a warning
     /// on every build for a value that still works.
     private static func securityConstant(_ name: String) -> String? {
-        let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
         guard let symbol = dlsym(rtldDefault, name) else { return nil }
         return symbol.assumingMemoryBound(to: CFString?.self).pointee as String?
     }
