@@ -110,15 +110,18 @@ actor ClaudeLimitsProbe {
     /// a row explaining why the limits are missing, under a switch the user
     /// has just turned off, blames Sissy for doing what it was told.
     ///
-    /// That is also why the refusal branch of a poll stores its state *after*
-    /// calling this. A probe stopping itself because the user said no is not
-    /// the user switching the module off, and the row has to survive it —
-    /// that state is the only thing offering a way back.
-    func stop() {
+    /// `clearingState` is what separates the two kinds of stop. The user
+    /// switching the module off wants the state gone with the windows; a poll
+    /// stopping itself because the user refused the keychain has to keep it,
+    /// because that state is the only thing on screen offering a way back.
+    /// Saying so with a parameter rather than with statement order matters:
+    /// the two can interleave on this actor, and an order that reads right is
+    /// not the same as one that cannot race.
+    func stop(clearingState: Bool = true) {
         pollTask?.cancel()
         pollTask = nil
         windows.store([])
-        state.store(.quiet)
+        if clearingState { state.store(.quiet) }
         lastReported = nil
     }
 
@@ -152,7 +155,12 @@ actor ClaudeLimitsProbe {
     }
 
     /// One poll. Returns how long to wait before the next one.
-    private func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
+    ///
+    /// Internal rather than private so a test can run exactly one and assert
+    /// on what it published. Waiting on the poll loop instead means waiting on
+    /// the scheduler: the read is recorded before the outcome is classified,
+    /// so an assertion hung off the read passes or fails by luck.
+    func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
         if let cached, cached.isValid() {
             return await fetchWindows(using: cached, onRefresh: onRefresh)
         }
@@ -176,8 +184,8 @@ actor ClaudeLimitsProbe {
                 "keychain access to \(ClaudeCredentialsStore.keychainService) was refused; "
                     + "Claude Code limits stay hidden. Grant it in Keychain Access, or turn "
                     + "the setting off")
-            stop()
             state.store(.refused)
+            stop(clearingState: false)
             return Self.refreshInterval
         // Alive, deliberately. Nobody refused anything — this read was simply
         // not allowed to ask, and the grant it wants back can return without
