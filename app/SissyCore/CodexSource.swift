@@ -347,13 +347,20 @@ final class CodexAdapter: SourceAdapter {
     /// but before its matching `token_count` from pricing that turn against
     /// `defaultModel`. Entries for files the offset reconciliation dropped are
     /// skipped — they describe bytes this reader will no longer resume from.
+    ///
+    /// The project is read through the resolver again rather than trusted as
+    /// persisted. Codex names the directory once, on the rollout's first line,
+    /// so a resumed reader never sees that line again and would hand every
+    /// later turn a path an older build resolved under the older rule — which
+    /// is how a scratch directory came back as a project one turn after the
+    /// archive had stopped naming it.
     func resume(from snapshot: UsageStateSnapshot, offsets: [URL: UInt64]) -> Bool {
         guard let resume = snapshot.codexResume else { return false }
         for entry in resume.fileModels {
             let fileURL = URL(fileURLWithPath: entry.path)
             guard offsets[fileURL] != nil else { continue }
             fileModels[fileURL] = entry.model
-            fileProjects[fileURL] = entry.project
+            fileProjects[fileURL] = entry.project.flatMap { projects.project(for: $0) }
         }
         latestPlan.store(resume.plan)
         guard !resume.rateLimitWindows.isEmpty else { return true }
