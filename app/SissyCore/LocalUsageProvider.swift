@@ -99,6 +99,13 @@ struct SeenEvent: Equatable, Sendable {
 protocol SourceAdapter: AnyObject {
     var descriptor: SourceDescriptor { get }
 
+    /// The one resolver this provider answers project questions with, the
+    /// adapter's own because the adapter is what reads a working directory off
+    /// a line. The provider borrows it for the paths it reads back off disk:
+    /// two resolvers would disagree about a deleted checkout as soon as one of
+    /// them had seen it alive and the other had not.
+    var projects: ProjectResolver { get }
+
     /// True when the bytes of one line are worth a JSON parse. Run on the raw
     /// chunk before any allocation: on both formats the overwhelming majority
     /// of lines carry no usage at all.
@@ -798,6 +805,12 @@ actor LocalUsageProvider: UsageProvider {
         let outcome = UsageStatePersistence.load(from: url)
         guard case .ok(let snapshot) = outcome else { return false }
 
+        // Before the first guard below, and deliberately: which directory was
+        // a checkout of which repository is true whatever the offsets beside
+        // it turn out to be worth, and a snapshot refused here is followed by
+        // the cold scan that needs it most.
+        adapter.projects.adopt(snapshot.projectCheckouts ?? [])
+
         let expectedHash = UsageStatePersistence.hashDataDir(root)
         guard snapshot.claudeDataDirHash == expectedHash else { return false }
         guard snapshot.retainDays == retainDays else { return false }
@@ -886,12 +899,6 @@ actor LocalUsageProvider: UsageProvider {
     /// The rows are restored whether or not the archive is on. They are what
     /// the panel splits today by, and a disk-retention setting must not
     /// quietly take a live answer away with it.
-    /// Reads a project path that came off disk again, for the one thing the
-    /// adapters' own resolvers never see: rows an earlier build persisted. The
-    /// cache is per-instance, so this is the provider's own hundred or so
-    /// paths, not a second copy of the tail's.
-    private let projects = ProjectResolver()
-
     private func restoreModelTotals(from snapshot: UsageStateSnapshot) {
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
@@ -902,7 +909,7 @@ actor LocalUsageProvider: UsageProvider {
             guard dailyTotals[dayKey] != nil else { continue }
             let key = UsageHistoryRow(
                 model: row.model,
-                project: row.project.flatMap { projects.project(for: $0) }
+                project: row.project.flatMap { adapter.projects.project(for: $0) }
             )
             restored[dayKey, default: [:]][key, default: .init()].add(
                 UsageHistoryTotals(
@@ -1026,7 +1033,8 @@ actor LocalUsageProvider: UsageProvider {
             case .unreadable:
                 continue
             case .day(let onDisk)
-            where !onDisk.reattributed(by: { projects.project(for: $0) }).isCoveredBy(record):
+            where !onDisk.reattributed(by: { adapter.projects.project(for: $0) })
+                .isCoveredBy(record):
                 continue
             case .absent, .day:
                 break
@@ -1098,6 +1106,7 @@ actor LocalUsageProvider: UsageProvider {
                     ))
             }
         }
+        let checkouts = adapter.projects.rememberedCheckouts()
         let retainedCutoff = cal.startOfDay(for: retainWindowStart)
         let retainedKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap { key, entry in
             guard entry.day >= retainedCutoff else { return nil }
@@ -1118,7 +1127,8 @@ actor LocalUsageProvider: UsageProvider {
             dedupKeysToday: retainedKeys,
             historyResume: modelTotals.isEmpty
                 ? nil : UsageStateSnapshot.HistoryResume(dailyModelTotals: modelTotals),
-            codexResume: adapter.resumeState()
+            codexResume: adapter.resumeState(),
+            projectCheckouts: checkouts.isEmpty ? nil : checkouts
         )
         do {
             try UsageStatePersistence.save(snapshot, to: url)

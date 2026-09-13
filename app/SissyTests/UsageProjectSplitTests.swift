@@ -152,10 +152,11 @@ final class UsageProjectSplitTests: XCTestCase {
 
     /// Codex names the directory once, on the rollout's first line, so a
     /// resumed reader is past it and the persisted path is all later turns
-    /// have. Trusted as written it outlives the rule that would now reject it:
-    /// the worktree is deleted between the two runs, and the turn after the
-    /// resume still has to stop naming it.
-    func testCodexDoesNotResumeAProjectThatNoLongerNamesARepository() async throws {
+    /// have. That path is read through the resolver again rather than trusted
+    /// — and a checkout the resolver read a `.git` entry from keeps the
+    /// repository that entry named once the directory is gone, which is the
+    /// whole point of carrying the checkouts between runs.
+    func testCodexKeepsTheRepositoryARolloutStartedInAfterItIsDeleted() async throws {
         let repo = try makeRepository("gone")
         try writeRollout("rollout-a.jsonl", cwd: repo.path, turns: 1)
         try await runCodexTail()
@@ -166,10 +167,30 @@ final class UsageProjectSplitTests: XCTestCase {
         try await runCodexTail()
 
         let day = try archivedToday(ProviderID.codex)
-        XCTAssertEqual(day.models.map(\.project), [nil], "the resumed turn kept a dead path")
+        XCTAssertEqual(
+            day.models.map(\.project), [repo.path],
+            "the resumed turn lost the repository it was verified to be in")
         XCTAssertEqual(
             day.models.first?.inputTokens, Self.tokensPerTurn * 2,
             "the resumed turn went missing along with its name")
+    }
+
+    /// The path a build that made a project out of any directory left behind
+    /// is not a checkout and was never read off a `.git` entry, so nothing
+    /// remembers it and re-reading it still answers nothing. Carrying real
+    /// checkouts between runs must not carry invented ones with them.
+    func testAPersistedPathThatWasNeverACheckoutStillNamesNothing() async throws {
+        let scratch = base.appendingPathComponent("scratch/ques")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        try writeRollout("rollout-a.jsonl", cwd: scratch.path, turns: 1)
+        try await runCodexTail()
+
+        try FileManager.default.removeItem(at: scratch)
+        try appendTurn(to: "rollout-a.jsonl")
+        try await runCodexTail()
+
+        let day = try archivedToday(ProviderID.codex)
+        XCTAssertEqual(day.models.map(\.project), [nil], "a scratch directory came back as a project")
     }
 
     func testCodexKeepsTheProjectAcrossARelaunch() async throws {
