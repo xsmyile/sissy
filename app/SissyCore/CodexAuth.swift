@@ -59,7 +59,8 @@ enum CodexAuthSource {
             account: ProviderAccount(
                 email: UsageReaderShared.sanitizedDisplayText(claims[emailClaimKey] as? String),
                 organization: organization(in: auth),
-                renewsAt: UsageReaderShared.parseTimestamp(auth[renewalClaimKey] as? String ?? "")
+                renewsAt: (auth[renewalClaimKey] as? String)
+                    .flatMap(UsageReaderShared.parseTimestamp)
             )
         )
     }
