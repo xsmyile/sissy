@@ -37,6 +37,11 @@ final class UsageEngineHost {
     /// that file, and a second copy in the app could disagree with the one the
     /// assertions are actually taken from.
     private(set) var keepScreenAwake: Bool = true
+    private(set) var agentHooks: Bool = false
+    /// Set when the switch is on but a configuration file could not be
+    /// rewritten — the name of the CLI whose file was left alone, so Settings
+    /// can say which one rather than claiming the switch took effect.
+    private(set) var agentHooksRefused: [String] = []
     /// The keep-awake mode `server.json` holds, for the window before the
     /// first frame carries one.
     ///
@@ -101,6 +106,11 @@ final class UsageEngineHost {
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
         keepAwakeMode = config.keepAwake
+        agentHooks = config.agentHooks
+        // Re-affirmed at every launch rather than written once: the CLIs
+        // rewrite these files themselves, and a line that has gone has to come
+        // back without the user noticing it was missing.
+        if config.agentHooks { applyAgentHooks(true) }
         let host = self
         bootTask = Task {
             await engine.start { frame in
@@ -179,6 +189,42 @@ final class UsageEngineHost {
     func deleteUsageHistory() {
         guard let engine else { return }
         Task { await engine.deleteHistory() }
+    }
+
+    func setAgentHooks(_ enabled: Bool) {
+        guard let engine, enabled != agentHooks else { return }
+        agentHooks = enabled
+        applyAgentHooks(enabled)
+        Task { await engine.setAgentHooks(enabled: enabled) }
+    }
+
+    /// Registers or unregisters the hook with both CLIs.
+    ///
+    /// Nothing here is fatal to metering: a file Sissy could not rewrite is
+    /// named back to the user and left exactly as it was found.
+    private func applyAgentHooks(_ enabled: Bool) {
+        guard let home = AgentHookInstaller.userHome else {
+            agentHooksRefused = [AgentHookCopy.unknownHome]
+            return
+        }
+        let installer = AgentHookInstaller(
+            stateDirectory: ServerConfig.defaultURL.deletingLastPathComponent(),
+            targets: AgentHookInstaller.targets(home: home))
+        guard enabled else {
+            _ = installer.remove()
+            agentHooksRefused = []
+            return
+        }
+        guard let script = Bundle.main.url(forResource: "session-start", withExtension: "sh") else {
+            agentHooksRefused = [AgentHookCopy.missingScript]
+            return
+        }
+        let report = installer.install(bundledScript: script)
+        agentHooksRefused =
+            report
+            .filter { _, outcome in outcome != .written && outcome != .unchanged }
+            .keys.map(\.name)
+            .sorted()
     }
 
     func setKeepScreenAwake(_ enabled: Bool) {

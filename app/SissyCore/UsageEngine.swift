@@ -337,6 +337,19 @@ actor UsageEngine {
 
     /// Switch whether the hold covers the screen and persist it.
     ///
+    /// Records the choice. Registering and unregistering the hook itself is
+    /// the app's, because it needs the script out of the app bundle — the
+    /// engine only owns what `server.json` says.
+    func setAgentHooks(enabled: Bool) async {
+        guard enabled != config.agentHooks else { return }
+        config.agentHooks = enabled
+        do {
+            try ServerConfig.save(config, to: configURL)
+        } catch {
+            sissyLog("sissy: failed to persist agentHooks to \(configURL.path): \(error)")
+        }
+    }
+
     /// Applied through the same path as the mode, so flipping it under a
     /// running hold drops or adds the screen half without disturbing the
     /// system assertion underneath.

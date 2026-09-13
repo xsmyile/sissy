@@ -50,6 +50,15 @@ struct ServerConfig: Sendable, Codable {
     /// existed decodes through the partial-config path below and lands on the
     /// default, which is the behaviour it already had.
     var keepScreenAwake: Bool
+    /// Whether Sissy registers a `SessionStart` hook with the CLIs it meters,
+    /// so a session writes down which repository its directory belongs to
+    /// while that directory still exists.
+    ///
+    /// Off unless the user asks for it. It is the only thing Sissy writes
+    /// outside its own directory, and a first launch that edited two other
+    /// programs' configuration files would be exactly the surprise the rest of
+    /// the app is built to avoid.
+    var agentHooks: Bool
 
     static let defaults = ServerConfig(
         claudeDataDir: "~/.claude/projects",
@@ -61,7 +70,8 @@ struct ServerConfig: Sendable, Codable {
         claudeLimits: false,
         historyRetentionDays: nil,
         keepAwake: .off,
-        keepScreenAwake: true
+        keepScreenAwake: true,
+        agentHooks: false
     )
 
     static var defaultURL: URL {
@@ -99,6 +109,7 @@ struct ServerConfig: Sendable, Codable {
         // setting in here.
         merged.keepAwake = (obj["keepAwake"] as? String).flatMap(KeepAwakeMode.init(rawValue:)) ?? .off
         if let v = obj["keepScreenAwake"] as? Bool { merged.keepScreenAwake = v }
+        if let v = obj["agentHooks"] as? Bool { merged.agentHooks = v }
         if let prov = obj["providers"] as? [String: Any] {
             var toggles = ProviderToggles.defaults
             toggles.claudeCode = prov["claudeCode"] as? Bool

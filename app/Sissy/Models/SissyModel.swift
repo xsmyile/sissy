@@ -216,6 +216,10 @@ final class SissyModel {
     /// taken from.
     private(set) var preferredKeepAwakeMode: KeepAwakeMode = .on
 
+    func setAgentHooks(_ enabled: Bool) {
+        engine.setAgentHooks(enabled)
+    }
+
     func setKeepScreenAwake(_ enabled: Bool) {
         engine.setKeepScreenAwake(enabled)
     }
