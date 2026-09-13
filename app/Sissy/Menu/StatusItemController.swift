@@ -3,8 +3,8 @@ import Observation
 import SwiftUI
 
 /// Owns the app's status item: the icon, the left-click that opens the usage
-/// panel, and a right-click menu that holds the keep-awake mode and nothing
-/// else the panel or the settings window already own.
+/// panel, and a right-click menu that holds the keep-awake mode — deliberately
+/// alongside the panel and Settings — and quit.
 @MainActor
 final class StatusItemController: NSObject {
     let statusItem: NSStatusItem
@@ -82,16 +82,14 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// The menu holds nothing the panel already owns, with one exception: the
-    /// keep-awake mode.
+    /// The keep-awake mode, which the panel and Settings also carry, and quit.
     ///
-    /// It is here because a hold nobody can see is a battery complaint with no
-    /// path back to its cause, and the menu bar is the one surface that is
-    /// always there — the panel has to be opened to say anything. The panel's
-    /// button offers the same three modes on a press, so this is no longer the
-    /// only way to reach them; it is the way that needs no panel. A radio
-    /// group is what macOS uses for a choice of one, and the words come from
-    /// `UsageFormat` so the two menus cannot name the same mode differently.
+    /// The duplication is the point: a hold nobody can see is a battery
+    /// complaint with no path back to its cause, and the menu bar is the one
+    /// surface that is always there — every other way to reach the mode needs
+    /// a window opened first. A radio group is what macOS uses for a choice of
+    /// one, and the words come from `UsageFormat` so no two surfaces can name
+    /// the same mode differently.
     private func buildMenu() {
         menu.autoenablesItems = false
         menu.delegate = self
