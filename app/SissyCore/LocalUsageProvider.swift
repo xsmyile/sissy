@@ -1065,7 +1065,6 @@ actor LocalUsageProvider: UsageProvider {
 
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
-        let todayKey = cal.startOfDay(for: now)
 
         let files: [UsageStateSnapshot.FileEntry] = fileOffsets.map { (k, v) in
             UsageStateSnapshot.FileEntry(
