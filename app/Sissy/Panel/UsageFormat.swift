@@ -104,7 +104,8 @@ enum UsageFormat {
                 : "Keeping this Mac awake\(since) — the screen still sleeps and locks."
             return what + " Closing the lid sleeps it anyway · click to allow sleep" + modes
         case (.auto, false):
-            return "Waiting for the agents · the Mac will be held while they work" + modes
+            return "Waiting for the agents · the Mac will be held while they work · "
+                + "closing the lid sleeps it anyway" + modes
         case (.on, false):
             return "Switched on · the Mac is not being held awake" + modes
         }

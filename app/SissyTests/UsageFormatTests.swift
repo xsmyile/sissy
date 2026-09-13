@@ -353,14 +353,18 @@ final class UsageFormatTests: XCTestCase {
     // MARK: Keep awake
 
     /// Three surfaces list the modes from this one function — the panel
-    /// button's menu, the status item's menu and Settings — so the failure it
-    /// exists to prevent is two of them wording the same mode differently, or
-    /// a mode nobody named.
-    func testEveryKeepAwakeModeIsNamedAndNamedOnce() {
+    /// button's menu, the status item's menu and Settings. That a mode is
+    /// named at all is the compiler's job, since `keepAwakeTitle` switches
+    /// exhaustively; what it cannot catch is two modes answering the same
+    /// words, which renders a radio group nobody can choose from.
+    func testNoTwoKeepAwakeModesShareAName() {
         let titles = KeepAwakeMode.allCases.map(UsageFormat.keepAwakeTitle)
 
         XCTAssertEqual(Set(titles).count, titles.count)
-        XCTAssertFalse(titles.contains(where: \.isEmpty))
+    }
+
+    func testNoKeepAwakeModeIsNamedWithNothing() {
+        XCTAssertFalse(KeepAwakeMode.allCases.map(UsageFormat.keepAwakeTitle).contains(where: \.isEmpty))
     }
 
     /// The button is a two-position switch over three modes, so the tooltip is
@@ -404,6 +408,7 @@ final class UsageFormatTests: XCTestCase {
             KeepAwakeState.off,
             KeepAwakeState(mode: .on, active: true, since: Date()),
             KeepAwakeState(mode: .auto, active: true, since: Date(), coversScreen: true),
+            KeepAwakeState(mode: .auto, active: false),
         ]
 
         for state in states {
