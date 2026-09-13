@@ -63,7 +63,7 @@ final class CodexAdapter: SourceAdapter {
     /// line, which a resumed reader is already past — the same reason
     /// `fileModels` is kept and persisted.
     private var fileProjects: [URL: String] = [:]
-    private let projects = ProjectResolver()
+    let projects = ProjectResolver()
 
     /// Default model id used when a rollout's `turn_context` never named one
     /// (older Codex versions wrote `model_provider` but no `model`). Matches

@@ -38,7 +38,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
     private var loggedUnpricedModels: Set<String> = []
     /// Claude Code names the working directory on every assistant line,
     /// so the resolver's cache is what keeps this off the per-line path.
-    private let projects = ProjectResolver()
+    let projects = ProjectResolver()
     private let profile: ClaudeProfileSource
 
     init(

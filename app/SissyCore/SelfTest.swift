@@ -487,6 +487,9 @@ private func runPersistenceTests() {
         ],
         dedupKeysToday: [
             .init(key: "rid:abc", day: "2026-05-19")
+        ],
+        projectCheckouts: [
+            .init(directory: "/Users/d/work/grampus", project: "/Users/d/dev/sissy")
         ]
     )
 
@@ -506,6 +509,7 @@ private func runPersistenceTests() {
         expect("roundtrip files", loaded.files, snapshot.files)
         expect("roundtrip totals", loaded.dailyTotals, snapshot.dailyTotals)
         expect("roundtrip dedup", loaded.dedupKeysToday, snapshot.dedupKeysToday)
+        expect("roundtrip checkouts", loaded.projectCheckouts, snapshot.projectCheckouts)
         // Decimal precision survives the String round-trip.
         if let row = loaded.dailyTotals.first,
             let dec = Decimal(string: row.cost)
