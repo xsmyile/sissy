@@ -38,30 +38,51 @@ struct PanelProviderPage: View {
     // MARK: Identity
 
     /// Who this is, under the name the header already prints: the address the
-    /// CLI is signed in as, and the organisation and renewal where the vendor
-    /// says. Every field comes off a file the adapter was already reading, so
-    /// the line costs no new source and no permission.
+    /// CLI is signed in as, the organisation and renewal where the vendor
+    /// says, and the plan that account is on. Every field comes off a file the
+    /// adapter was already reading, so the block costs no new source and no
+    /// permission.
+    ///
+    /// The plan sits here rather than against the provider's name in the
+    /// header, because it qualifies the account and not the CLI: "Team
+    /// Premium" is something this address is on, and beside a title it read as
+    /// a label on the app.
     @ViewBuilder
     private var identity: some View {
-        if let account = row.account {
+        if row.account != nil || row.plan != nil {
             VStack(alignment: .leading, spacing: 2) {
-                if let email = account.email {
+                if let email = row.account?.email {
                     Text(email)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
                 }
-                if let details = account.details {
+                organisation
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, PanelMetrics.gutter)
+            .padding(.vertical, 10)
+        }
+    }
+
+    /// The organisation and the plan on one line, either of which can be the
+    /// only one there: a personal account names no organisation, and an
+    /// API-key user is on no plan.
+    @ViewBuilder
+    private var organisation: some View {
+        if row.account?.details != nil || row.plan != nil {
+            HStack(spacing: 6) {
+                if let details = row.account?.details {
                     Text(details)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                if let plan = row.plan {
+                    PlanBadge(plan: plan, tier: row.planTier)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, PanelMetrics.gutter)
-            .padding(.vertical, 10)
         }
     }
 
