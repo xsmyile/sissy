@@ -47,11 +47,13 @@ struct PanelOverview: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(snapshot.cost)
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .font(
+                        .system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded)
+                    )
                     .monospacedDigit()
                     .contentTransition(.numericText())
                 Text(subline)
-                    .font(.system(size: 12))
+                    .font(.system(size: PanelMetrics.headlineMeta))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 Spacer(minLength: 0)
@@ -61,8 +63,8 @@ struct PanelOverview: View {
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.top, 9)
+        .padding(.bottom, 8)
         .animation(.default, value: snapshot.cost)
     }
 
@@ -81,14 +83,16 @@ struct PanelOverview: View {
     /// the next hour, and it reads the same for everyone. It names its
     /// provider because it can be either of them.
     private func headroom(_ row: UsagePanelSnapshot.HeadroomRow) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("\(Self.headroomPercent(row.window))%")
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .font(
+                        .system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded)
+                    )
                     .monospacedDigit()
                     .contentTransition(.numericText())
                 Text("headroom")
-                    .font(.system(size: 12))
+                    .font(.system(size: PanelMetrics.headlineMeta))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Text(
@@ -117,7 +121,7 @@ struct PanelOverview: View {
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
+        .padding(.vertical, 9)
         .animation(.default, value: row.window.percent)
     }
 
