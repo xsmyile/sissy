@@ -7,6 +7,18 @@ struct GeneralSettingsView: View {
 
     @State private var confirmingDelete = false
 
+    /// What the two armed modes cost, with both bounds read off the policy the
+    /// engine runs rather than written out here. A caption claiming ten
+    /// minutes while the engine waits fifteen is worse than no caption, and
+    /// these are the only numbers in the app that say when a hold ends.
+    private var keepAwakeCaption: String {
+        let idle = UsageFormat.countdown(KeepAwakePolicy.default.idleWindow)
+        let ceiling = UsageFormat.countdown(KeepAwakePolicy.default.manualCeiling)
+        return "While agents are working holds the Mac only while a turn has landed in the "
+            + "last \(idle), and lets go after. Always holds it until you switch it off, "
+            + "\(ceiling) at the outside. Closing the lid sleeps the Mac under either."
+    }
+
     private var historyCaption: String {
         let days = model.engine.historyRetentionDays
         guard days > 0 else {
@@ -38,9 +50,18 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Picker("Keep awake", selection: keepAwakeModeBinding) {
+                    ForEach(KeepAwakeMode.allCases, id: \.self) { mode in
+                        Text(UsageFormat.keepAwakeTitle(mode)).tag(mode)
+                    }
+                }
+                Text(keepAwakeCaption)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
                 Toggle("Keep the screen on too", isOn: keepScreenAwakeBinding)
                 Text(
-                    "Applies while keep awake is on. Off lets the display sleep and the Mac "
+                    "Applies whenever the Mac is being held. Off lets the display sleep and the Mac "
                         + "lock itself on its usual schedule, with the Mac still held awake "
                         + "underneath for the agents."
                 )
@@ -105,6 +126,13 @@ struct GeneralSettingsView: View {
         Binding(
             get: { model.loginItem.isEnabled },
             set: { model.setLaunchAtLogin($0) }
+        )
+    }
+
+    private var keepAwakeModeBinding: Binding<KeepAwakeMode> {
+        Binding(
+            get: { model.keepAwake.mode },
+            set: { model.setKeepAwake($0) }
         )
     }
 
