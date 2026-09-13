@@ -169,9 +169,7 @@ struct PanelOverview: View {
     /// click away from the wording and the fix.
     private func legendRow(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(ProviderPalette.tint(for: row.id))
-                .frame(width: 7, height: 7)
+            ProviderMark(id: row.id)
             Text(row.name)
                 .font(.system(size: 12, weight: .medium))
             if let plan = row.plan {

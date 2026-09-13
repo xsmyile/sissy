@@ -34,13 +34,22 @@ struct AcknowledgementsView: View {
         ),
     ]
 
+    /// Not a credit, and deliberately not in the list above: the list is for
+    /// projects Sissy reads, and this is about two pictures it draws. The
+    /// marks identify whose account a row is about, which is nominative use;
+    /// saying so out loud is cheaper than leaving a reader to wonder whether
+    /// Sissy is something either vendor made.
+    private static let trademarkNotice =
+        "The Claude and OpenAI marks are used to identify which CLI a row is about. "
+        + "They are the trademarks of Anthropic and OpenAI, who have nothing to do with Sissy."
+
     private static let creditsURL = URL(
         string: "https://github.com/xsmyile/sissy/blob/master/CREDITS.md")!
 
     private static let sheetWidth: CGFloat = 520
     /// Shorter than it was: the licence text it used to scroll is gone, and
     /// a sheet sized for it would be mostly empty space.
-    private static let sheetHeight: CGFloat = 280
+    private static let sheetHeight: CGFloat = 330
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -67,6 +76,12 @@ struct AcknowledgementsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+            Text(Self.trademarkNotice)
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
