@@ -20,6 +20,9 @@ struct UsagePanelSnapshot: Equatable {
     let projects: [ProjectRow]
     /// The archive line, absent when there is no archive to show.
     let history: HistoryRow?
+    /// The one gauge the Overview leads on, absent when no provider reports a
+    /// window at all.
+    let headroom: HeadroomRow?
 
     /// Day-over-day change in tokens. Absent when the frame carries no
     /// yesterday yet, or when yesterday was zero and a percentage would be
@@ -46,6 +49,24 @@ struct UsagePanelSnapshot: Equatable {
         let cost: String
     }
 
+    /// The tightest rate-limit window Sissy can see, and whose it is.
+    ///
+    /// One bar rather than every provider's every window, because the
+    /// question it answers is single: is there room to keep working. The
+    /// answer is whichever window has the least of it left — a session bucket
+    /// at 20% says nothing while the weekly one behind it sits at 95%, and a
+    /// headline that led on the roomier of the two would be reassuring and
+    /// wrong. Ties go to the shorter window, which is the one that binds
+    /// first.
+    ///
+    /// It names its provider because it can be either, and a gauge that does
+    /// not say whose it is cannot be acted on.
+    struct HeadroomRow: Equatable {
+        let providerID: String
+        let providerName: String
+        let window: WindowRow
+    }
+
     struct ProviderRow: Equatable, Identifiable {
         let id: String
         let name: String
@@ -60,11 +81,32 @@ struct UsagePanelSnapshot: Equatable {
         let tokens: String
         let cost: String
         let share: Double
-        /// Shortest window first. Empty puts the row back on `share`.
+        /// Shortest window first. Empty when the provider reports none, which
+        /// its page answers with a sentence rather than a blank block.
         let windows: [WindowRow]
         /// What to say and offer when the limits are missing for a reason the
         /// user can act on. Nil the rest of the time, which is most of it.
         let notice: LimitsNotice?
+        /// Who this provider is signed in as, worded. Nil when its own files
+        /// name nobody.
+        let account: AccountRow?
+        /// This provider's own share of the day by project, folded the same
+        /// way the combined list is. Empty for a provider whose format names
+        /// no working directory.
+        let projects: [ProjectRow]
+    }
+
+    /// An account as the provider page prints it: the address on its own
+    /// line, everything else worded and joined under it.
+    ///
+    /// The seat is deliberately absent — `UsageFormat.plan` has already
+    /// folded it into the badge for the one vendor that publishes one, and a
+    /// line repeating what the badge above it says is a line nobody reads.
+    struct AccountRow: Equatable {
+        let email: String?
+        /// Organisation and renewal, joined. Nil when the vendor answered for
+        /// neither.
+        let details: String?
     }
 
     /// A limits problem worded, with whether a refresh can do anything about
@@ -80,8 +122,6 @@ struct UsagePanelSnapshot: Equatable {
         let action: String?
     }
 
-    /// One rate-limit gauge. `fraction` is clamped for the bar while
-    /// `percent` is not, so a window past 100% still reads as what it is.
     struct ProjectRow: Equatable, Identifiable {
         let id: String
         /// The repository's own name — the last component of its path, which
@@ -96,6 +136,8 @@ struct UsagePanelSnapshot: Equatable {
         let share: Double
     }
 
+    /// One rate-limit gauge. `fraction` is clamped for the bar while
+    /// `percent` is not, so a window past 100% still reads as what it is.
     struct WindowRow: Equatable, Identifiable {
         let id: Int
         let label: String
@@ -131,15 +173,45 @@ struct UsagePanelSnapshot: Equatable {
     static func make(frame: FrameData, now: Date = Date()) -> Self {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
+        let rows = makeRows(frame.providers, totalTokens: totalTokens, now: now)
         return Self(
             tokens: frame.providers.isEmpty ? frame.tokens : UsageFormat.tokens(totalTokens),
             cost: frame.providers.isEmpty ? "$\(frame.cost)" : UsageFormat.cost(totalCost),
             burn: frame.burn,
             delta: makeDelta(today: totalTokens, prevTokens: frame.prevTokens),
-            providers: makeRows(frame.providers, totalTokens: totalTokens, now: now),
+            providers: rows,
             projects: makeProjects(frame.projects, totalCost: totalCost),
-            history: makeHistory(frame.history, now: now)
+            history: makeHistory(frame.history, now: now),
+            headroom: makeHeadroom(rows)
         )
+    }
+
+    /// The window with the least headroom left, across every provider.
+    ///
+    /// Read off the rows rather than off the slices so the gauge the Overview
+    /// leads on and the gauge its provider's page repeats are the same
+    /// object, down to the pace: two derivations of one reading is two
+    /// readings that can disagree by a rounding.
+    private static func makeHeadroom(_ rows: [ProviderRow]) -> HeadroomRow? {
+        var tightest: HeadroomRow?
+        for row in rows {
+            for window in row.windows {
+                guard let held = tightest else {
+                    tightest = HeadroomRow(
+                        providerID: row.id, providerName: row.name, window: window)
+                    continue
+                }
+                let binds =
+                    window.percent == held.window.percent
+                    ? window.id < held.window.id
+                    : window.percent > held.window.percent
+                if binds {
+                    tightest = HeadroomRow(
+                        providerID: row.id, providerName: row.name, window: window)
+                }
+            }
+        }
+        return tightest
     }
 
     /// Nothing until the archive reaches past today: a window whose only day
@@ -185,9 +257,22 @@ struct UsagePanelSnapshot: Equatable {
                 share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0,
                 windows: slice.windows.map { makeWindow($0, now: now) },
                 notice: UsageFormat.limitsNotice(slice.limitsState)
-                    .map { LimitsNotice(message: $0.message, action: $0.action) }
+                    .map { LimitsNotice(message: $0.message, action: $0.action) },
+                account: makeAccount(slice.account, now: now),
+                projects: makeProjects(slice.projects, totalCost: slice.cost)
             )
         }
+    }
+
+    /// The account as a page prints it, or nil when the vendor answered for
+    /// nothing a page would show. An account carrying only a seat is that
+    /// case: the badge above already says it.
+    private static func makeAccount(_ account: ProviderAccount?, now: Date) -> AccountRow? {
+        guard let account else { return nil }
+        let details = UsageFormat.accountDetails(
+            organization: account.organization, renewsAt: account.renewsAt, now: now)
+        guard account.email != nil || details != nil else { return nil }
+        return AccountRow(email: account.email, details: details)
     }
 
     /// Rows a popover can hold. Past this the answer is a report, and a

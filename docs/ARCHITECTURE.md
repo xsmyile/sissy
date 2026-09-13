@@ -191,6 +191,26 @@ Settings… item (⌘,) and, in code, only through `SettingsLink`, which takes n
 action closure and is why the panel footer aims the window at a tab through
 `SissyModel.settingsTab`.
 
+**The panel is two surfaces behind one popover.** `Panel/PanelOverview.swift`
+answers what today costs and whether there is room to keep working — the day's
+cost, one headroom gauge, the split by provider as a single stacked bar, the
+projects, the archive line. `Panel/PanelProviderPage.swift` answers what one
+account is doing: its windows, who it is signed in as, its own day and its own
+projects, and the refresh, which is a different action on each provider.
+`UsagePanelView` is the shell around them — a contextual header, a `switch` on
+the open page, a footer — and that `switch` is the whole implementation of the
+rule that only the selected page exists. A `TabView` would hold every page's
+view graph live, which is precisely the cost `UsagePanelController` drops its
+host on close to avoid. `Panel/PanelComponents.swift` holds what both pages
+draw, so a bar or a badge cannot drift a point between them.
+
+The one gauge the Overview leads on is the window with the *least* headroom
+across every provider, ties going to the shorter window. A session bucket with
+room left says nothing while the weekly one behind it is nearly spent, so a
+headline led by the roomier of the two would be reassuring and wrong. It is read
+off the provider rows rather than off the slices, so the Overview's gauge and
+the same gauge repeated on that provider's page are one object down to the pace.
+
 `Models/Preferences.swift` holds only what the app itself remembers
 (`sissyMotion`, `retiredServerAgent`) in `preferences.json`. Everything about
 metering lives in `server.json`, which the engine owns — the app reads

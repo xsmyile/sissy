@@ -40,13 +40,16 @@ Either way: launch Sissy and it starts tailing. It lives in the menu bar — no 
 
 ## What you see
 
-The menu bar carries today's token total. Click it for a panel with
+The menu bar carries today's token total. Click it for the overview:
 
-- the running total and what it has cost so far,
-- the swing against yesterday,
-- one row per CLI with its tokens and cost, carrying either a gauge per rate-limit window and the time it resets, or, for a CLI that reports no limits, its share of the day.
+- what today has cost, with its tokens and burn rate beside it, and the swing against yesterday,
+- **headroom** — how much is left of the tightest rate-limit window across every CLI, with a mark for where even consumption would have put it by now,
+- the day split across the CLIs as one bar, and where the money went by project,
+- what the archive adds up to before today.
 
-The cup beside the panel's power button is **keep awake**: switch it on and the Mac stops idling to sleep under a running agent. It lights the same way the power button does, and the mode is remembered until you switch it off — including across a restart. It does not override closing the lid, and the hold lasts only while Sissy is running: quit and the Mac sleeps normally again.
+Click a CLI in that split for its own page: the account it is signed in as, every rate-limit window it reports with the time each resets, its own day, and its own projects. The refresh there re-reads what no log line carries — on Claude Code that is the token itself, and macOS may ask for permission.
+
+The cup in the panel's header is **keep awake**: switch it on and the Mac stops idling to sleep under a running agent. It lights the same way the power button does, and the mode is remembered until you switch it off — including across a restart. It does not override closing the lid, and the hold lasts only while Sissy is running: quit and the Mac sleeps normally again.
 
 Right-click for the short menu; **Settings…** (⌘,) holds *Start at login* and the Claude Code limits opt-in.
 

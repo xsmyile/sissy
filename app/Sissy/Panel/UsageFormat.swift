@@ -240,6 +240,68 @@ enum UsageFormat {
         }
     }
 
+    /// Everything on the account line except the address: the organisation
+    /// the seat belongs to, and when the subscription renews.
+    ///
+    /// Nil rather than an empty string when neither vendor answered, so the
+    /// caller drops the line instead of drawing a blank one. A renewal
+    /// already past is dropped on its own: the claim is read off a file the
+    /// CLI refreshes on its own schedule, so a stale date is the ordinary
+    /// case and "renewed 3 Aug" answers nothing.
+    static func accountDetails(
+        organization: String?,
+        renewsAt: Date?,
+        now: Date = Date()
+    ) -> String? {
+        var parts: [String] = []
+        if let organization, !organization.isEmpty { parts.append(organization) }
+        if let renewsAt, renewsAt > now {
+            parts.append("renews " + renewsAt.formatted(.dateTime.day().month(.abbreviated)))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// Why a provider's page shows no limit windows, when nothing went wrong.
+    ///
+    /// The blank is not a fault and must not read as one. On Codex the
+    /// windows ride the CLI's own events, so an idle session simply has not
+    /// sent one. On Claude Code a switch in Settings is what turns them on at
+    /// all, and `limitsEnabled` is what stops this telling someone who has
+    /// already flipped it to go and flip it — a reading that has not landed
+    /// yet and a module that was never switched on look identical from here,
+    /// and only the app knows which it is.
+    static func noWindowsCaption(_ id: String, limitsEnabled: Bool) -> String {
+        switch id {
+        case ProviderID.claudeCode where !limitsEnabled:
+            return "Switch on Claude Code limits in Settings to see this account's windows."
+        case ProviderID.claudeCode:
+            return "Waiting for the first reading of this account's windows."
+        case ProviderID.codex:
+            return "Codex reports its limits on its own turns — the next one fills this in."
+        default:
+            return "This provider reports no subscription limits."
+        }
+    }
+
+    /// What pressing refresh on a provider actually does, said before it is
+    /// pressed.
+    ///
+    /// The two are not the same action and the button must not pretend they
+    /// are: on Claude Code it re-reads the keychain with the dialog allowed,
+    /// which is a permission prompt someone is about to meet. On Codex the
+    /// limits ride the CLI's own events, so no button can make them arrive —
+    /// all a refresh can honestly touch is the account and the plan.
+    static func refreshHelp(_ id: String) -> String {
+        switch id {
+        case ProviderID.claudeCode:
+            return "Read the limits again · may ask for keychain access"
+        case ProviderID.codex:
+            return "Read the account again · the limits arrive with the next Codex turn"
+        default:
+            return "Read this provider again"
+        }
+    }
+
     static func providerName(_ id: String) -> String {
         switch id {
         case ProviderID.claudeCode: return "Claude Code"
