@@ -9,11 +9,36 @@ import Security
 /// tokens rotate on use, so spending one here would invalidate the copy the
 /// CLI holds and sign the user out of their own terminal. An expired access
 /// token is simply skipped until the CLI renews it.
-struct ClaudeCredentials: Sendable {
+struct ClaudeCredentials: Sendable, Equatable {
     let accessToken: String
-    let expiresAt: Date
+    /// When the token dies, for the source that says so.
+    ///
+    /// Nil for a managed token: `claude setup-token` publishes no expiry
+    /// anywhere Sissy can read it, so the endpoint's own 401 is the only
+    /// thing that knows one has died. Treating an absent expiry as "not
+    /// expired" is what keeps that 401 the single place a dead token is
+    /// handled, rather than a clock here and a status code there.
+    let expiresAt: Date?
+    let origin: ClaudeTokenOrigin
 
-    func isValid(at moment: Date = Date()) -> Bool { expiresAt > moment }
+    func isValid(at moment: Date = Date()) -> Bool {
+        guard let expiresAt else { return true }
+        return expiresAt > moment
+    }
+}
+
+/// Which keychain item a token came out of.
+///
+/// It travels with the token because it is what decides how a rejection is
+/// worded. A 401 on the CLI's token is nobody's problem — the CLI renews on
+/// its own schedule and the next poll succeeds. A 401 on the one the user
+/// pasted is theirs to fix, and saying so is the only way they find out it
+/// died.
+enum ClaudeTokenOrigin: Sendable, Equatable {
+    /// Claude Code's own item, read with permission and never written.
+    case cli
+    /// The long-lived token the user gave Sissy, in an item Sissy owns.
+    case managed
 }
 
 /// Outcome of a keychain lookup. Absence and refusal are different states:
@@ -133,12 +158,29 @@ enum ClaudeCredentialsStore {
     /// API has no getter, and `true` is the state every process starts in and
     /// the only one anything else in Sissy would want.
     static func load(allowingInteraction: Bool) -> ClaudeCredentialsLookup {
+        let result = copyMatching(
+            makeQuery(allowingInteraction: allowingInteraction),
+            allowingInteraction: allowingInteraction)
+        return classify(
+            result.status, data: result.data, allowingInteraction: allowingInteraction)
+    }
+
+    /// One `SecItemCopyMatching` under the suppression above.
+    ///
+    /// Separate from `load` because `ClaudeTokenStore` reads an item Sissy
+    /// owns and parses something else out of it, while needing this exact
+    /// handling of the panel: an item Sissy wrote is on its own ACL and reads
+    /// silently, right up until Sissy is re-signed, and at that point a
+    /// background read has to fail rather than interrupt.
+    static func copyMatching(
+        _ query: [String: Any],
+        allowingInteraction: Bool
+    ) -> (status: OSStatus, data: Data?) {
         let suppressed = allowingInteraction ? false : setUserInteractionAllowed(false)
         defer { if suppressed { _ = setUserInteractionAllowed(true) } }
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(
-            makeQuery(allowingInteraction: allowingInteraction) as CFDictionary, &item)
-        return classify(status, data: item as? Data, allowingInteraction: allowingInteraction)
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        return (status, item as? Data)
     }
 
     /// What one `SecItemCopyMatching` outcome means. Pure, because this is the
@@ -154,11 +196,12 @@ enum ClaudeCredentialsStore {
     static func classify(
         _ status: OSStatus,
         data: Data?,
-        allowingInteraction: Bool
+        allowingInteraction: Bool,
+        decode: (Data) -> ClaudeCredentials? = ClaudeCredentialsStore.parse
     ) -> ClaudeCredentialsLookup {
         switch status {
         case errSecSuccess:
-            guard let data, let parsed = parse(data) else {
+            guard let data, let parsed = decode(data) else {
                 return .unreadable(errSecDecode)
             }
             return .found(parsed)
@@ -186,10 +229,13 @@ enum ClaudeCredentialsStore {
     /// build that cannot resolve either name still reads — it just reads the
     /// way it always did — so a missing symbol costs the silence, never the
     /// feature.
-    static func makeQuery(allowingInteraction: Bool) -> [String: Any] {
+    static func makeQuery(
+        service: String = keychainService,
+        allowingInteraction: Bool
+    ) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
+            kSecAttrService as String: service,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
@@ -250,7 +296,8 @@ enum ClaudeCredentialsStore {
         let seconds = rawExpiry > secondsUpperBound ? rawExpiry / 1000 : rawExpiry
         return ClaudeCredentials(
             accessToken: token,
-            expiresAt: Date(timeIntervalSince1970: seconds)
+            expiresAt: Date(timeIntervalSince1970: seconds),
+            origin: .cli
         )
     }
 }

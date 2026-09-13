@@ -39,7 +39,8 @@ final class UsageEngineHistoryTests: XCTestCase {
         return UsageEngine(
             config: config,
             configURL: configURL,
-            limitsProbe: ClaudeLimitsProbe { _, _ in .absent }
+            limitsProbe: ClaudeLimitsProbe(
+                credentials: { _, _ in .absent }, managedToken: { _, _ in .absent })
         )
     }
 

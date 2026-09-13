@@ -68,6 +68,8 @@ Claude Code is always on. Codex is picked up whenever its session directory exis
 
 Codex reports its limits only on its own turn events, so those gauges are always one turn behind. Claude Code's come from an opt-in read of the token the CLI already stored; until you enable it, the panel shows cost and tokens only.
 
+That read costs a macOS keychain prompt, and more often than you would expect: Claude Code rewrites the item every time it refreshes its own login, and the permission you granted goes with it. To be asked once instead, run `claude setup-token` and paste the result into **Settings ▸ Providers ▸ Claude token**. Sissy checks it against the endpoint before storing it, keeps it in a keychain item of its own, and then never reads Claude Code's item at all. The token never leaves your Mac, and never appears in a log, in the diagnostics you can copy, or in an export.
+
 Adding a CLI is one `UsageProvider` implementation. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## How it works
@@ -81,7 +83,7 @@ There is no price table in the source. Rates come from [LiteLLM](https://github.
 Your session logs never leave the machine; Sissy reads them and renders a number. It listens on no port and makes exactly two kinds of outbound request:
 
 - LiteLLM's price list on `raw.githubusercontent.com`, once a day;
-- `api.anthropic.com/api/oauth/usage`, only with Claude Code limits enabled, using the OAuth token the CLI already stored, read-only, never refreshed, never written back.
+- `api.anthropic.com/api/oauth/usage`, only with Claude Code limits enabled, using either the OAuth token the CLI already stored — read-only, never refreshed, never written back — or the `claude setup-token` credential you gave Sissy, if you gave it one.
 
 Sissy keeps one record of its own: a day-by-model tally under `~/Library/Application Support/Sissy/history/`, so the panel can show more than today. It is the totals, not your prompts — Settings ▸ General names the folder and deletes it, and `historyRetentionDays` bounds how far back it goes.
 

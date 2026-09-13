@@ -63,16 +63,26 @@ struct ProviderRowSnapshot: Equatable {
 enum ClaudeLimitsCopy {
     static let title = "Show Claude Code limits"
 
-    static let caption =
-        "Shows Claude Code's 5-hour and weekly windows next to Codex's. "
-        + "macOS will ask for your permission."
+    /// Conditional because the warning stops being true the moment a token is
+    /// on file. A caption that promised a permission prompt to someone who had
+    /// just removed the need for one would be the same broken promise as the
+    /// unwarned prompt, pointing the other way.
+    static func caption(hasToken: Bool) -> String {
+        let purpose = "Shows Claude Code's 5-hour and weekly windows next to Codex's. "
+        return purpose
+            + (hasToken
+                ? "Sissy uses the token you gave it, so macOS will not ask."
+                : "macOS will ask for your permission.")
+    }
 
     static let detail =
         "Sissy reads the token Claude Code already keeps in your keychain — only ever "
         + "reads it, never writes or refreshes it. That permission is tied to Sissy's own "
-        + "binary, so it lapses after an update. Sissy never asks again on its own: the "
-        + "limits go quiet instead, and switching this off and back on is what asks for "
-        + "them."
+        + "binary, so it lapses after an update, and sooner than that: Claude Code rewrites "
+        + "the item every time it refreshes its own login, roughly hourly, and the "
+        + "permission goes with it. Sissy never asks again on its own: the limits go quiet "
+        + "instead, and switching this off and back on is what asks for them. Give Sissy a "
+        + "token of its own below and it stops reading Claude Code's item at all."
 
     /// What the button reads as to a screen reader, where the glyph says
     /// nothing — the one reader who cannot see an `info.circle` and guess.
@@ -84,6 +94,7 @@ struct ProvidersSettingsView: View {
     let model: SissyModel
 
     @State private var showingLimitsDetail = false
+    @State private var showingTokenSheet = false
 
     private static let markSize: CGFloat = 18
     /// Wide enough that the detail reads as a paragraph rather than a column.
@@ -96,6 +107,7 @@ struct ProvidersSettingsView: View {
                     row(readiness)
                     if readiness.id == ProviderID.claudeCode {
                         claudeLimits
+                        claudeToken
                     }
                 }
             }
@@ -103,7 +115,11 @@ struct ProvidersSettingsView: View {
         .formStyle(.grouped)
         // The readiness poll stops once the scan is warm, so a window opened
         // afterwards would render whatever the last tick left behind.
-        .task { model.engine.refreshProviders() }
+        .task {
+            model.engine.refreshProviders()
+            model.engine.refreshClaudeTokenPresence()
+        }
+        .sheet(isPresented: $showingTokenSheet) { ClaudeTokenSheet(model: model) }
     }
 
     @ViewBuilder
@@ -136,7 +152,36 @@ struct ProvidersSettingsView: View {
                 detailButton
             }
         }
-        Text(ClaudeLimitsCopy.caption)
+        Text(ClaudeLimitsCopy.caption(hasToken: model.engine.claudeTokenPresent))
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
+    /// The token row, shown whether or not the limits switch is on.
+    ///
+    /// Deliberately not gated on the switch: pasting a token *before* flipping
+    /// it is the one order in which Claude Code's own keychain item is never
+    /// touched at all, and hiding this until the switch is on would force
+    /// every user through the dialog once before offering them the way out
+    /// of it.
+    @ViewBuilder
+    private var claudeToken: some View {
+        let present = model.engine.claudeTokenPresent
+        LabeledContent {
+            HStack(spacing: 8) {
+                Button(present ? ClaudeTokenCopy.replace : ClaudeTokenCopy.set) {
+                    showingTokenSheet = true
+                }
+                if present {
+                    Button(ClaudeTokenCopy.remove) {
+                        Task { await model.engine.removeClaudeToken() }
+                    }
+                }
+            }
+        } label: {
+            Text(ClaudeTokenCopy.rowTitle)
+        }
+        Text(present ? ClaudeTokenCopy.usingManaged : ClaudeTokenCopy.usingCLI)
             .font(.callout)
             .foregroundStyle(.secondary)
     }

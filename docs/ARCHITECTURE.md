@@ -93,7 +93,24 @@ into, where the context alone can still raise Allow/Deny. Such a read answers
 probe keeps polling and the limits simply stay hidden until the grant comes back
 or the user flips the switch. The grant lapses often — it is bound to Sissy's
 signature, so every re-signed build is a new one — and before this the lapse
-reached the user as a stack of dialogs at login.
+reached the user as a stack of dialogs at login. It lapses sooner than that
+anyway: Claude Code rewrites the item on every token refresh and the ACL goes
+with it, so an Allow lasts a token cycle rather than a build.
+
+`ClaudeTokenStore` is the way out of that cycle. The user runs `claude
+setup-token`, pastes the result into Settings › Providers, and Sissy files it in
+a keychain item of its own — one nothing but Sissy rewrites, which moves the
+ceiling from a token cycle to a re-signing. It is read first and Claude Code's
+item is reached only when no managed token exists at all; a managed token that
+is present but unreadable is an answer, since falling through would raise the
+dialog the paste was meant to end. Whether the item exists is asked without
+reading it, because the file keychain authorizes a read of the *value*, so
+Settings can still say a token is on file on a build whose grant has lapsed.
+`setup-token` publishes neither an expiry nor a scope list, so
+`ClaudeLimitsProbe.verify` runs the real usage request before storing a paste,
+and a later 401 — or the 403 naming the `user:profile` scope the endpoint
+insists on — becomes `.tokenRejected` and stops the poll, because a credential
+known to be dead is not worth a request every five minutes.
 
 `keepAwake` carries `{mode, active, since}` and is never optional, including when
 off: the panel draws its control from this, and "off" and "nothing reported" must
@@ -142,6 +159,7 @@ compiled into the app too.
 | `UsageReaderShared.swift`       | Tuning constants the tail and its adapters share (`ingestChunkSize`, `pollEmitThrottle`, mtime slack), the token-count bound, and `parseTimestamp` — the one timestamp parser every source and the probe use |
 | `UsageAtomics.swift`            | The three lock boxes a provider is read through from outside its actor (`AtomicIntCounter`, `AtomicWindows`, `AtomicPlan`) |
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429; off unless `claudeLimits` is set |
+| `ClaudeTokenStore.swift`        | The long-lived `claude setup-token` credential the user pasted, in a keychain item Sissy owns. Read ahead of Claude Code's item, and the reason the limits stop costing an hourly dialog. Presence is asked without decrypting the value, so it answers even on a build whose grant has lapsed. The first secret Sissy holds: never logged, never on the frame, never in diagnostics or an export |
 | `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it. `allowingInteraction` is the caller declaring itself a user action, and it is the only thing that lets macOS put a dialog on screen; a silent read answers `.interactionRequired` rather than `.denied`. One lookup runs at a time and every caller waits on that one under its own budget, so an unanswered authorization dialog parks neither the probe nor a second dispatch thread, and the answer reaches whoever is still waiting when it finally comes |
 | `ClaudeProfile.swift`           | Reads the plan out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain, so it answers with `claudeLimits` off |
 | `CodexAuth.swift`               | Reads the `chatgpt_plan_type` claim out of `~/.codex/auth.json`, for the boot before the first turn; touches no other field in it |

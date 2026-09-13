@@ -42,10 +42,13 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         _ reads: Reads,
         answering outcome: @escaping @Sendable () -> ClaudeCredentialsLookup
     ) -> ClaudeLimitsProbe {
-        ClaudeLimitsProbe { _, allowingInteraction in
-            reads.record(allowingInteraction)
-            return outcome()
-        }
+        ClaudeLimitsProbe(
+            credentials: { _, allowingInteraction in
+                reads.record(allowingInteraction)
+                return outcome()
+            },
+            managedToken: { _, _ in .absent }
+        )
     }
 
     /// The rule the whole issue is about: a launch that merely finds the
@@ -126,7 +129,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
             (.absent, .signedOut),
         ]
         for (lookup, expected) in cases {
-            let probe = ClaudeLimitsProbe { _, _ in lookup }
+            let probe = ClaudeLimitsProbe(credentials: { _, _ in lookup }, managedToken: { _, _ in .absent })
 
             _ = await probe.refreshOnce {}
 
@@ -137,11 +140,12 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     /// A transient failure is not something to put on a row: the last reading
     /// stays up with its age, which is what the panel already does.
     func testAFailureNobodyCanActOnLeavesTheStateAlone() async {
-        let probe = ClaudeLimitsProbe { _, _ in .denied }
+        let probe = ClaudeLimitsProbe(credentials: { _, _ in .denied }, managedToken: { _, _ in .absent })
         _ = await probe.refreshOnce {}
         XCTAssertEqual(probe.currentLimitsState(), .refused)
 
-        let transient = ClaudeLimitsProbe { _, _ in .timedOut }
+        let transient = ClaudeLimitsProbe(
+            credentials: { _, _ in .timedOut }, managedToken: { _, _ in .absent })
         _ = await transient.refreshOnce {}
         XCTAssertEqual(transient.currentLimitsState(), .quiet)
     }
@@ -151,7 +155,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     /// way back erased itself. The two stops are told apart by a parameter
     /// rather than by statement order, because they can interleave.
     func testARefusalSurvivesTheStopItTriggers() async {
-        let probe = ClaudeLimitsProbe { _, _ in .denied }
+        let probe = ClaudeLimitsProbe(credentials: { _, _ in .denied }, managedToken: { _, _ in .absent })
 
         _ = await probe.refreshOnce {}
 
@@ -161,7 +165,8 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     /// The other stop. A row explaining why the limits are missing, under a
     /// switch the user has just turned off, blames Sissy for obeying.
     func testSwitchingTheModuleOffClearsTheState() async {
-        let probe = ClaudeLimitsProbe { _, _ in .interactionRequired }
+        let probe = ClaudeLimitsProbe(
+            credentials: { _, _ in .interactionRequired }, managedToken: { _, _ in .absent })
         _ = await probe.refreshOnce {}
         XCTAssertEqual(probe.currentLimitsState(), .needsAuthorization)
 

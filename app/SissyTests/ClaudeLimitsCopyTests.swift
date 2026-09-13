@@ -13,16 +13,29 @@ import XCTest
 final class ClaudeLimitsCopyTests: XCTestCase {
     func testTheVisibleCaptionWarnsThatMacOSWillAsk() {
         XCTAssertTrue(
-            ClaudeLimitsCopy.caption.contains("macOS will ask"),
+            ClaudeLimitsCopy.caption(hasToken: false).contains("macOS will ask"),
             "the line on screen stopped warning about the permission prompt"
         )
     }
 
-    func testTheVisibleCaptionSaysWhatTheSwitchIsFor() {
-        XCTAssertTrue(
-            ClaudeLimitsCopy.caption.contains("5-hour and weekly"),
-            "the line on screen stopped saying what the switch actually shows"
+    /// The warning is only honest while it is true. Once a token is on file
+    /// the switch touches no foreign keychain item and nothing asks, and a
+    /// caption still promising a dialog would send someone looking for one
+    /// that is never coming.
+    func testTheCaptionStopsPromisingADialogOnceATokenIsOnFile() {
+        XCTAssertFalse(
+            ClaudeLimitsCopy.caption(hasToken: true).contains("macOS will ask"),
+            "the caption still warned about a prompt that a stored token removes"
         )
+    }
+
+    func testTheVisibleCaptionSaysWhatTheSwitchIsFor() {
+        for hasToken in [true, false] {
+            XCTAssertTrue(
+                ClaudeLimitsCopy.caption(hasToken: hasToken).contains("5-hour and weekly"),
+                "the line on screen stopped saying what the switch actually shows"
+            )
+        }
     }
 
     /// Reading someone's keychain is worth a promise in writing, even when the
@@ -41,6 +54,16 @@ final class ClaudeLimitsCopyTests: XCTestCase {
         XCTAssertTrue(
             ClaudeLimitsCopy.detail.contains("after an update"),
             "nothing left to tell someone the permission lapses after an update"
+        )
+    }
+
+    /// The detail is the only place someone learns there is a way out of the
+    /// hourly dialog at all. A popover that described the prompt without
+    /// naming the cure would leave the feature undiscoverable.
+    func testTheDetailPointsAtTheTokenThatEndsTheAsking() {
+        XCTAssertTrue(
+            ClaudeLimitsCopy.detail.contains("token of its own"),
+            "nothing left to tell someone a stored token removes the prompt"
         )
     }
 

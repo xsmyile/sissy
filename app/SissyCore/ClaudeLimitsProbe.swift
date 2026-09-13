@@ -17,6 +17,9 @@ actor ClaudeLimitsProbe {
     private static let refreshInterval: Duration = .seconds(300)
     private static let rateLimitedBackoff: Duration = .seconds(1800)
     private static let keychainTimeout: Duration = .seconds(20)
+    /// Scope the endpoint insists on. A token minted without it answers 403
+    /// naming it, which is the one 403 a user can act on.
+    static let requiredScope = "user:profile"
 
     /// Response key to window length. Anthropic publishes finer buckets
     /// (`seven_day_opus`, `seven_day_sonnet`); the panel shows the two that
@@ -37,6 +40,15 @@ actor ClaudeLimitsProbe {
     /// that starts this probe has to be able to answer for one without
     /// putting it on a screen.
     private let credentialsSource: @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup
+    /// The token the user pasted, if there is one. Read first and through the
+    /// same gate as the CLI's item, so the two cannot queue two dispatch
+    /// threads behind one dialog.
+    private let managedSource: @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup
+    /// The one piece of external I/O on this path. Injectable for the same
+    /// reason the credential reads are: what a 401 costs — the poll stops,
+    /// the row asks for a new token — cannot be asserted against a live
+    /// endpoint without a dead token to hand.
+    private let transport: ClaudeUsageTransport
     /// Whether the next credential read may put a dialog on screen.
     ///
     /// Set only by a `start` the user asked for, and spent on the first read
@@ -63,9 +75,21 @@ actor ClaudeLimitsProbe {
     init(
         credentials: @escaping @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup = {
             await ClaudeCredentialsStore.loadOffPool(timeout: $0, allowingInteraction: $1)
-        }
+        },
+        managedToken: @escaping @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup = {
+            await ClaudeCredentialsStore.loadOffPool(timeout: $0, allowingInteraction: $1) {
+                ClaudeTokenStore.load(allowingInteraction: $0)
+            }
+        },
+        transport: @escaping ClaudeUsageTransport = ClaudeLimitsProbe.liveTransport
     ) {
         self.credentialsSource = credentials
+        self.managedSource = managedToken
+        self.transport = transport
+    }
+
+    static let liveTransport: ClaudeUsageTransport = { request in
+        try await URLSession.shared.data(for: request)
     }
 
     /// Live windows, expired buckets dropped — a window past its reset
@@ -117,11 +141,23 @@ actor ClaudeLimitsProbe {
     /// Saying so with a parameter rather than with statement order matters:
     /// the two can interleave on this actor, and an order that reads right is
     /// not the same as one that cannot race.
+    ///
+    /// The cached token follows the same division, and has to. A token the
+    /// user pasted publishes no expiry, so it never falls out of the cache on
+    /// its own: a module switched off, its token removed and switched on
+    /// again would otherwise keep spending a credential Sissy was told to
+    /// forget. A stop the probe imposed on *itself* keeps the token instead,
+    /// because dropping it would have the next read publish `.quiet` on its
+    /// way to failing the same way, flickering the very row that is asking
+    /// for a new one.
     func stop(clearingState: Bool = true) {
         pollTask?.cancel()
         pollTask = nil
         windows.store([])
-        if clearingState { state.store(.quiet) }
+        if clearingState {
+            state.store(.quiet)
+            cached = nil
+        }
         lastReported = nil
     }
 
@@ -138,12 +174,19 @@ actor ClaudeLimitsProbe {
     /// Deliberately not `stop()` first: that drops the published windows, and
     /// a refresh that blanks the gauges it is trying to restore reads as a
     /// failure for as long as the request takes.
-    func refresh(onRefresh: @Sendable @escaping () async -> Void) {
+    /// `userInitiated` is false for the one caller that is a user action but
+    /// must still not ask: changing the stored token. Removing one falls the
+    /// probe back to Claude Code's item, and a Settings button that nobody
+    /// pointed at the keychain raising its dialog would be a third gesture
+    /// where `UsageEngine.refreshProvider` says there are two. A silent read
+    /// answers `.interactionRequired` instead, and the panel's notice row is
+    /// what offers the permission back.
+    func refresh(userInitiated: Bool = true, onRefresh: @Sendable @escaping () async -> Void) {
         pollTask?.cancel()
         pollTask = nil
         cached = nil
         lastReported = nil
-        start(userInitiated: true, onRefresh: onRefresh)
+        start(userInitiated: userInitiated, onRefresh: onRefresh)
     }
 
     /// Logs `message` the first time this condition is seen, and again only
@@ -152,6 +195,36 @@ actor ClaudeLimitsProbe {
         if lastReported == message { return }
         lastReported = message
         sissyLog("sissy: \(message)")
+    }
+
+    /// Which token this poll runs on, and which item it came out of.
+    ///
+    /// The token the user pasted wins, because pasting it is the user saying
+    /// they want it used. Only its *absence* falls through to Claude Code's
+    /// own item: a managed token that exists and cannot be read is an answer,
+    /// and continuing to the CLI's item would raise a dialog for a permission
+    /// the user had already worked around.
+    ///
+    /// Both reads take the same `interactive`, and spending it costs nothing
+    /// when the managed item is absent — authorizing a read is what raises a
+    /// dialog, and an item that is not there authorizes nothing.
+    private func resolveCredentials(
+        interactive: Bool
+    ) async -> (ClaudeCredentialsLookup, ClaudeTokenOrigin) {
+        let managed = await managedSource(Self.keychainTimeout, interactive)
+        if case .absent = managed {
+            return (await credentialsSource(Self.keychainTimeout, interactive), .cli)
+        }
+        return (managed, .managed)
+    }
+
+    /// The keychain item an outcome is about, so a message names the thing the
+    /// user would have to go and find.
+    private static func itemName(_ origin: ClaudeTokenOrigin) -> String {
+        switch origin {
+        case .cli: return ClaudeCredentialsStore.keychainService
+        case .managed: return ClaudeTokenStore.keychainService
+        }
     }
 
     /// One poll. Returns how long to wait before the next one.
@@ -167,7 +240,8 @@ actor ClaudeLimitsProbe {
         let credentials: ClaudeCredentials
         let interactive = mayInteract
         mayInteract = false
-        switch await credentialsSource(Self.keychainTimeout, interactive) {
+        let (lookup, origin) = await resolveCredentials(interactive: interactive)
+        switch lookup {
         case .found(let found):
             credentials = found
             cached = found
@@ -181,7 +255,7 @@ actor ClaudeLimitsProbe {
             return Self.refreshInterval
         case .denied:
             report(
-                "keychain access to \(ClaudeCredentialsStore.keychainService) was refused; "
+                "keychain access to \(Self.itemName(origin)) was refused; "
                     + "Claude Code limits stay hidden. Grant it in Keychain Access, or turn "
                     + "the setting off")
             state.store(.refused)
@@ -195,7 +269,7 @@ actor ClaudeLimitsProbe {
         case .interactionRequired:
             state.store(.needsAuthorization)
             report(
-                "the keychain will not release \(ClaudeCredentialsStore.keychainService) "
+                "the keychain will not release \(Self.itemName(origin)) "
                     + "without asking, and this read did not ask; Claude limits stay hidden "
                     + "until you switch them off and on again")
             return Self.refreshInterval
@@ -209,9 +283,9 @@ actor ClaudeLimitsProbe {
             return Self.refreshInterval
         }
 
-        guard credentials.isValid() else {
+        if let expiresAt = credentials.expiresAt, expiresAt <= Date() {
             report(
-                "the Claude Code access token expired at \(credentials.expiresAt); waiting for "
+                "the Claude Code access token expired at \(expiresAt); waiting for "
                     + "the CLI to renew it")
             return Self.refreshInterval
         }
@@ -248,6 +322,10 @@ actor ClaudeLimitsProbe {
         } catch ClaudeLimitsError.rateLimited {
             report("Claude usage endpoint returned 429; backing off for \(Self.rateLimitedBackoff)")
             return Self.rateLimitedBackoff
+        } catch ClaudeLimitsError.unauthorized {
+            return reject(credentials.origin, .unauthorized)
+        } catch ClaudeLimitsError.missingScope {
+            return reject(credentials.origin, .missingScope)
         } catch ClaudeLimitsError.badStatus(let code) {
             report("Claude usage endpoint returned HTTP \(code)")
             return Self.refreshInterval
@@ -257,17 +335,112 @@ actor ClaudeLimitsProbe {
         }
     }
 
-    private func fetch(token: String) async throws -> [UsageWindow] {
-        var request = URLRequest(url: Self.usageURL, timeoutInterval: Self.requestTimeout)
+    /// What a token the endpoint will not accept costs, which is not the same
+    /// thing for the two items it can come from.
+    ///
+    /// The CLI's token rotates on its own, so a 401 on it is a stale copy and
+    /// the cure is to read the item again on the next poll. The one the user
+    /// pasted does not rotate and nothing will fix it but another paste — so
+    /// the poll stops rather than asking a dead token for limits every five
+    /// minutes, which is how a third-party poller earns a persistent 429.
+    /// `stop(clearingState:)` is what keeps both the state and the token
+    /// across that stop.
+    private func reject(_ origin: ClaudeTokenOrigin, _ rejection: Rejection) -> Duration {
+        switch origin {
+        case .managed:
+            state.store(.tokenRejected)
+            report(
+                "the Claude token you gave Sissy \(rejection.reason); replace it in Settings › "
+                    + "Providers with a fresh `claude setup-token`")
+            stop(clearingState: false)
+        case .cli:
+            cached = nil
+            report("Claude Code's own token \(rejection.reason); \(rejection.cliOutlook)")
+        }
+        return Self.refreshInterval
+    }
+
+    /// Why a token was turned away, and what that means for the CLI's own.
+    ///
+    /// The outlook is not shared: a 401 is a copy that went stale and the CLI
+    /// renews it on its own, while a missing scope is baked into the token at
+    /// minting and no renewal will add one. One wording for both would promise
+    /// a fix that cannot arrive.
+    enum Rejection {
+        case unauthorized
+        case missingScope
+
+        var reason: String {
+            switch self {
+            case .unauthorized: return "was rejected (HTTP 401)"
+            case .missingScope: return "does not carry the \(requiredScope) scope"
+            }
+        }
+
+        var cliOutlook: String {
+            switch self {
+            case .unauthorized: return "waiting for the CLI to renew it"
+            case .missingScope:
+                return "which renewing it will not change; Claude limits stay hidden"
+            }
+        }
+    }
+
+    /// The one request this whole type makes, built in one place so the poll
+    /// and the check a paste runs cannot ask the endpoint different questions
+    /// — a token accepted by the second and refused by the first would be the
+    /// worst outcome this feature has.
+    private static func usageRequest(token: String) -> URLRequest {
+        var request = URLRequest(url: usageURL, timeoutInterval: requestTimeout)
         request.httpMethod = "GET"
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue(Self.betaHeader, forHTTPHeaderField: "anthropic-beta")
+        request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return request
+    }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+    /// Whether the endpoint accepts a token, asked before it is stored.
+    ///
+    /// `claude setup-token` publishes no expiry and no scope list anywhere
+    /// Sissy can read, so the endpoint is the only thing that can tell a good
+    /// paste from a bad one. Running that check at the moment of pasting is
+    /// what stops a mistyped or under-scoped token from becoming gauges that
+    /// simply never arrive.
+    static func verify(
+        token: String,
+        transport: ClaudeUsageTransport = ClaudeLimitsProbe.liveTransport
+    ) async -> ClaudeTokenVerification {
+        do {
+            let (data, response) = try await transport(usageRequest(token: token))
+            guard let http = response as? HTTPURLResponse else { return .accepted }
+            switch http.statusCode {
+            case 200:
+                return parse(
+                    (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+                ).isEmpty ? .acceptedWithoutWindows : .accepted
+            case 401:
+                return .rejected
+            case 403 where mentionsRequiredScope(data):
+                return .missingScope
+            case 429:
+                return .rateLimited
+            default:
+                return .failed("The endpoint answered HTTP \(http.statusCode).")
+            }
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private func fetch(token: String) async throws -> [UsageWindow] {
+        let (data, response) = try await transport(Self.usageRequest(token: token))
         if let http = response as? HTTPURLResponse {
             if http.statusCode == 429 { throw ClaudeLimitsError.rateLimited }
+            if http.statusCode == 401 { throw ClaudeLimitsError.unauthorized }
+            if http.statusCode == 403, Self.mentionsRequiredScope(data) {
+                throw ClaudeLimitsError.missingScope
+            }
             guard http.statusCode == 200 else {
                 throw ClaudeLimitsError.badStatus(http.statusCode)
             }
@@ -290,6 +463,18 @@ actor ClaudeLimitsProbe {
                     + shapes.joined(separator: ", "))
         }
         return windows
+    }
+
+    /// Whether a 403 is the one a user can act on.
+    ///
+    /// The endpoint answers 403 naming the scope it wanted when a token was
+    /// minted without `user:profile`, which is a token to replace rather than
+    /// a transient failure. Every other 403 is left as a plain bad status,
+    /// because guessing at it would tell a user to re-paste a token that was
+    /// never the problem.
+    static func mentionsRequiredScope(_ data: Data) -> Bool {
+        guard let body = String(data: data, encoding: .utf8) else { return false }
+        return body.contains(requiredScope)
     }
 
     /// Buckets that report no `utilization`, or no reset, are dropped: a
@@ -324,8 +509,38 @@ actor ClaudeLimitsProbe {
     }
 }
 
+/// One request against the usage endpoint. The seam the tests replace.
+typealias ClaudeUsageTransport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
+
+/// What the endpoint said about a token someone just pasted.
+///
+/// Every case is worded for the person holding the token: it either works, or
+/// it names the next thing they can do about it. `acceptedWithoutWindows` is
+/// deliberately not a failure — the token authenticated, and a plan that
+/// publishes no buckets is an account fact rather than a bad paste.
+enum ClaudeTokenVerification: Sendable, Equatable {
+    case accepted
+    case acceptedWithoutWindows
+    case rejected
+    case missingScope
+    case rateLimited
+    case failed(String)
+
+    var isUsable: Bool {
+        switch self {
+        case .accepted, .acceptedWithoutWindows: return true
+        case .rejected, .missingScope, .rateLimited, .failed: return false
+        }
+    }
+}
+
 enum ClaudeLimitsError: Error {
     case rateLimited
+    /// The token is not accepted. Separate from `badStatus` because it is the
+    /// only status whose meaning depends on which item the token came from.
+    case unauthorized
+    /// The token works but was minted without the scope the endpoint wants.
+    case missingScope
     case badStatus(Int)
     case malformedPayload
 }

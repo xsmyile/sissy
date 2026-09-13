@@ -28,6 +28,21 @@ final class UsageEngineHost {
     /// it used to keep could disagree with the file the probe actually booted
     /// from.
     private(set) var claudeLimits: Bool = false
+    /// Whether the user has given Sissy a long-lived Claude token.
+    ///
+    /// Asked of the keychain without reading the secret, which is what keeps
+    /// this free of any authorization: the file keychain gates a read of the
+    /// *value*, so asking whether the item exists cannot raise a dialog. That
+    /// matters most on a re-signed build, where Settings still has to be able
+    /// to say a token is on file even though reading it would prompt.
+    ///
+    /// Answered off the main thread and published when it lands, never read
+    /// inline: `SecItemCopyMatching` is an XPC round trip into `securityd`,
+    /// and every other keychain call in Sissy is kept off the main thread for
+    /// that reason. It starts `false` because "not asked yet" and "no token"
+    /// lead to the same screen, and the answer arrives before anyone reads
+    /// it.
+    private(set) var claudeTokenPresent: Bool = false
     /// Days the archive is kept for, as `server.json` resolves it. Read from
     /// the same place and for the same reason as `claudeLimits`: Settings
     /// says what the engine is actually doing, not what the app assumed.
@@ -108,6 +123,7 @@ final class UsageEngineHost {
             }
         }
         pollReadiness()
+        refreshClaudeTokenPresence()
     }
 
     /// Stops metering and waits for it, so the readers get their final offset
@@ -134,6 +150,66 @@ final class UsageEngineHost {
         guard let engine else { return }
         let host = self
         Task { host.apply(await engine.providerReadiness()) }
+    }
+
+    /// Checks a pasted token against the endpoint, and files it only if it
+    /// works.
+    ///
+    /// Verify-then-store rather than store-then-discover: a token that is
+    /// never going to be accepted must not become gauges that quietly never
+    /// arrive, which is the failure the whole managed-token path exists to
+    /// end. The value is normalized once here so what was checked and what
+    /// was stored are the same bytes.
+    func setClaudeToken(_ token: String) async -> ClaudeTokenVerification {
+        let normalized = ClaudeTokenStore.normalize(token)
+        guard !normalized.isEmpty else { return .failed(ClaudeTokenCopy.emptyPaste) }
+        let verdict = await ClaudeLimitsProbe.verify(token: normalized)
+        guard verdict.isUsable else { return verdict }
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try ClaudeTokenStore.save(normalized)
+            }.value
+        } catch {
+            return .failed(ClaudeTokenCopy.saveFailed(error))
+        }
+        claudeTokenPresent = true
+        await engine?.claudeTokenChanged()
+        return verdict
+    }
+
+    /// Forgets the token, and has the probe stop using the copy it cached.
+    ///
+    /// Telling the engine is the point: without it the probe would keep
+    /// polling on a token the user has just told Sissy to forget, for as long
+    /// as the process lives. `claudeTokenChanged` rather than
+    /// `refreshProvider`, because this must not be a third way to raise the
+    /// keychain dialog.
+    @discardableResult
+    func removeClaudeToken() async -> Bool {
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try ClaudeTokenStore.delete()
+            }.value
+        } catch {
+            sissyLog("sissy: could not remove the stored Claude token: \(error)")
+            return false
+        }
+        claudeTokenPresent = false
+        await engine?.claudeTokenChanged()
+        return true
+    }
+
+    /// Re-reads whether a token is on file, off the main thread.
+    ///
+    /// Called where the answer is about to be shown rather than on a timer:
+    /// it can only change through this app's own Settings, or through someone
+    /// deleting the item in Keychain Access.
+    func refreshClaudeTokenPresence() {
+        Task {
+            claudeTokenPresent = await Task.detached(priority: .utility) {
+                ClaudeTokenStore.isPresent()
+            }.value
+        }
     }
 
     func setClaudeLimits(_ enabled: Bool) {

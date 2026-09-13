@@ -87,6 +87,11 @@ enum ProviderLimitsState: Sendable, Equatable {
     /// No credentials at all: the CLI is not signed in, which is not
     /// something Sissy can fix from here.
     case signedOut
+    /// The long-lived token the user gave Sissy is no longer accepted. Only
+    /// the endpoint knows that — `claude setup-token` publishes no expiry —
+    /// so this is what a 401 becomes, and the fix is a paste rather than a
+    /// retry, which is why it carries no action.
+    case tokenRejected
 }
 
 /// Who a provider is signed in as.

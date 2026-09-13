@@ -350,6 +350,8 @@ enum UsageFormat {
             return ("Keychain access was refused, so the limits stay hidden", "Try again")
         case .signedOut:
             return ("Claude Code is not signed in on this Mac", nil)
+        case .tokenRejected:
+            return ("Sissy's Claude token was rejected — replace it in Settings", nil)
         }
     }
 

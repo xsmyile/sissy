@@ -321,6 +321,23 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// The token the user gave Sissy changed, so the probe must stop spending
+    /// the copy it cached.
+    ///
+    /// Deliberately **not** `refreshProvider`: that gesture is allowed to
+    /// raise the keychain dialog and this one must not. Removing a token
+    /// falls the probe back to Claude Code's item, and a Settings button
+    /// nobody pointed at the keychain raising its dialog would be a third
+    /// gesture where the rule above says there are two. The silent read
+    /// answers `.interactionRequired`, the panel's notice row offers the
+    /// permission back, and it is asked for by the control that promised it.
+    func claudeTokenChanged() async {
+        guard lifecycle == .running, config.claudeLimits else { return }
+        let me = self
+        await claudeLimitsProbe.refresh(userInitiated: false) { await me.reemit() }
+        await reemit()
+    }
+
     /// Switch the keep-awake mode and persist it, so the choice survives a
     /// restart.
     func setKeepAwake(mode raw: String) async {
