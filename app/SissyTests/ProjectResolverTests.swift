@@ -87,11 +87,82 @@ final class ProjectResolverTests: XCTestCase {
     }
 
     /// One kept beside the repository rather than inside it has nothing left
-    /// to resolve to, and a dead path is not a project.
-    func testAWorktreeDeletedFromBesideItsRepositoryIsNotAProject() throws {
+    /// to resolve to, and a dead path this resolver never saw alive is not a
+    /// project.
+    func testAWorktreeDeletedBesideItsRepositoryAndNeverSeenAliveIsNotAProject() throws {
         _ = try makeRepository("sissy")
 
         XCTAssertNil(resolver.project(for: root.appendingPathComponent("rockfish").path))
+    }
+
+    /// The one a run did read a `.git` entry from keeps the answer that entry
+    /// gave. Attribution is a fact about the work, not about whether Sissy
+    /// happened to read the line before the worktree was thrown away.
+    func testAWorktreeSeenAliveStillNamesItsRepositoryOnceDeleted() throws {
+        let main = try makeRepository("sissy")
+        let worktree = try makeWorktree("grampus", of: main)
+        XCTAssertEqual(resolver.project(for: worktree.path), main.path)
+
+        let nextRun = try relaunch(after: worktree)
+
+        XCTAssertEqual(nextRun.project(for: worktree.path), main.path)
+    }
+
+    /// A worktree is worked in from its subdirectories as much as from its
+    /// root, and they are gone with it.
+    func testADirectoryUnderAGoneWorktreeResolvesThroughIt() throws {
+        let main = try makeRepository("sissy")
+        let worktree = try makeWorktree("grampus", of: main)
+        XCTAssertEqual(resolver.project(for: worktree.path), main.path)
+
+        let nextRun = try relaunch(after: worktree)
+
+        XCTAssertEqual(
+            nextRun.project(for: worktree.appendingPathComponent("app").path), main.path)
+    }
+
+    /// Gone is a fact about the path. A directory still on disk that names no
+    /// repository any more is answered by the disk, whatever it used to be.
+    func testADirectoryStillOnDiskIsAnsweredByTheDiskRatherThanByWhatItWas() throws {
+        let repo = try makeRepository("legion")
+        XCTAssertEqual(resolver.project(for: repo.path), repo.path)
+        let remembered = resolver.rememberedCheckouts()
+        try FileManager.default.removeItem(at: repo.appendingPathComponent(".git"))
+
+        let nextRun = ProjectResolver()
+        nextRun.adopt(remembered)
+
+        XCTAssertNil(nextRun.project(for: repo.path))
+    }
+
+    /// Two gone checkouts can both contain the directory. The closer one is
+    /// the one the work was in.
+    func testTheDeepestGoneCheckoutIsTheOneThatAnswers() throws {
+        let outer = try makeRepository("alpha")
+        let other = try makeRepository("beta")
+        let inner = outer.appendingPathComponent("worktrees/x")
+        try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
+        try "gitdir: \(other.path)/.git/worktrees/x\n"
+            .write(to: inner.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(resolver.project(for: outer.path), outer.path)
+        XCTAssertEqual(resolver.project(for: inner.path), other.path)
+
+        let nextRun = try relaunch(after: outer)
+
+        XCTAssertEqual(nextRun.project(for: inner.appendingPathComponent("app").path), other.path)
+    }
+
+    /// What is carried between runs is bounded, so a year of worktrees cannot
+    /// grow the snapshot without end.
+    func testWhatIsCarriedBetweenRunsIsBounded() {
+        let many = (1...(ProjectResolver.maxRememberedCheckouts + 10)).map {
+            ProjectCheckout(directory: "/Users/d/gone/\($0)", project: "/Users/d/dev/sissy")
+        }
+
+        resolver.adopt(many)
+
+        XCTAssertEqual(
+            resolver.rememberedCheckouts().count, ProjectResolver.maxRememberedCheckouts)
     }
 
     func testAResolvedDirectoryIsNotWalkedTwice() throws {
@@ -105,6 +176,17 @@ final class ProjectResolverTests: XCTestCase {
         XCTAssertEqual(
             resolver.project(for: nested.path), repo.path,
             "the answer was re-derived from a tree that had moved under it")
+    }
+
+    /// What the next launch sees: a resolver with no cache of its own, seeded
+    /// with what this one wrote into the snapshot, after `gone` has been
+    /// deleted the way a worktree is.
+    private func relaunch(after gone: URL) throws -> ProjectResolver {
+        let remembered = resolver.rememberedCheckouts()
+        try FileManager.default.removeItem(at: gone)
+        let next = ProjectResolver()
+        next.adopt(remembered)
+        return next
     }
 
     private func makeRepository(_ name: String) throws -> URL {
