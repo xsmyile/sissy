@@ -278,9 +278,23 @@ enum FrameBuilder {
         )
     }
 
-    /// One row per project across every provider, ordered by cost and then by
-    /// path so two projects that cost the same never trade places between
-    /// frames.
+    /// The one order every list of projects is shown in: dearest first, then
+    /// by path so two that cost the same never trade places between frames.
+    ///
+    /// It lives here rather than at each list's source because a provider
+    /// folds its day out of a dictionary, whose key order is arbitrary and not
+    /// even stable across launches. Every surface that shows projects has to
+    /// apply this, and the one that keeps only the first few rows has to apply
+    /// it *before* it drops any: a prefix of an arbitrary order folds away
+    /// whichever project happened to hash first, which can be the day's
+    /// largest.
+    static func orderedProjects(_ projects: [ProjectTotals]) -> [ProjectTotals] {
+        projects.sorted {
+            $0.cost == $1.cost ? $0.path < $1.path : $0.cost > $1.cost
+        }
+    }
+
+    /// One row per project across every provider.
     static func combinedProjects(_ slices: [ProviderSlice]) -> [ProjectTotals] {
         var tokens: [String: Int] = [:]
         var cost: [String: Decimal] = [:]
@@ -290,11 +304,10 @@ enum FrameBuilder {
                 cost[project.path, default: 0] += project.cost
             }
         }
-        return tokens.keys
-            .map { ProjectTotals(path: $0, tokens: tokens[$0] ?? 0, cost: cost[$0] ?? 0) }
-            .sorted {
-                $0.cost == $1.cost ? $0.path < $1.path : $0.cost > $1.cost
-            }
+        return orderedProjects(
+            tokens.keys.map {
+                ProjectTotals(path: $0, tokens: tokens[$0] ?? 0, cost: cost[$0] ?? 0)
+            })
     }
 
     /// Stable order: claude-code first (v0.1.0 baseline), then codex, then
