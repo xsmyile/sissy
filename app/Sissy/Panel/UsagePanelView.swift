@@ -79,7 +79,12 @@ struct UsagePanelView: View {
                         row: open, limitsEnabled: model.engine.claudeLimits
                     ) { model.refreshProvider(open.id) }
                 } else {
-                    PanelOverview(snapshot: snapshot) { page = .provider($0) }
+                    PanelOverview(
+                        snapshot: snapshot,
+                        meteringProviders: model.engine.providers.count {
+                            $0.activation.isMetering
+                        }
+                    ) { page = .provider($0) }
                 }
             } else {
                 placeholder
