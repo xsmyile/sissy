@@ -16,7 +16,7 @@ enum AgentHookOutcome: Equatable, Sendable {
     /// untouched, which is the only safe answer: repairing another program's
     /// configuration is not Sissy's to attempt.
     case unreadable
-    case failed(String)
+    case failed
 }
 
 /// Puts Sissy's SessionStart entry into the CLIs' own hook configuration, and
@@ -112,13 +112,13 @@ struct AgentHookInstaller {
             try createDirectory(inboxURL)
         } catch {
             sissyLog("sissy: agent hooks: could not lay down the script: \(error)")
-            return targets.reduce(into: [:]) { $0[$1] = .failed("\(error)") }
+            return targets.reduce(into: [:]) { $0[$1] = .failed }
         }
         guard let command = shellCommand() else {
             sissyLog(
                 "sissy: agent hooks: refusing to install — "
                     + "the hook path does not survive being quoted for a shell")
-            return targets.reduce(into: [:]) { $0[$1] = .failed("unquotable path") }
+            return targets.reduce(into: [:]) { $0[$1] = .failed }
         }
         let entry: [String: Any] = [
             Self.hooksKey: [
@@ -147,17 +147,6 @@ struct AgentHookInstaller {
             try? fileManager.removeItem(at: url)
         }
         return report
-    }
-
-    /// Whether both targets currently carry the entry this build would write.
-    func isInstalled() -> Bool {
-        guard let command = shellCommand() else { return false }
-        return targets.allSatisfy { target in
-            guard let groups = try? read(target.url)?.groups else { return false }
-            return groups.contains { group in
-                Self.commands(in: group).contains(command)
-            }
-        }
     }
 
     /// The line the CLIs run.
@@ -235,15 +224,38 @@ struct AgentHookInstaller {
             attributes: [.posixPermissions: 0o700])
     }
 
-    private func read(_ url: URL) throws -> (root: [String: Any], groups: [[String: Any]])? {
-        let resolved = url.resolvingSymlinksInPath()
-        guard fileManager.fileExists(atPath: resolved.path) else { return ([:], []) }
-        let data = try Data(contentsOf: resolved)
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
+    /// What the file said, and which version of it said so.
+    ///
+    /// The identity comes from `fstat` on the descriptor the bytes were read
+    /// through, not from a later `stat` of the path. That is the whole point:
+    /// a check made after the read would describe whatever is on disk by then,
+    /// so a rewrite that landed in between would be confirmed rather than
+    /// caught, and the document built from the older bytes would go over it.
+    private struct Snapshot {
+        let root: [String: Any]
+        let groups: [[String: Any]]
+        /// Nil when there was no file, which is itself a state the write has
+        /// to find unchanged.
+        let identity: Identity?
+    }
+
+    private func read(_ url: URL) throws -> Snapshot? {
+        let descriptor = open(url.path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            guard errno == ENOENT else { throw CocoaError(.fileReadUnknown) }
+            return Snapshot(root: [:], groups: [], identity: nil)
         }
+        defer { close(descriptor) }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { throw CocoaError(.fileReadUnknown) }
+        let data = try FileHandle(fileDescriptor: descriptor, closeOnDealloc: false).readToEnd()
+        guard let data,
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
         let hooks = root[Self.hooksKey] as? [String: Any] ?? [:]
-        return (root, hooks[Self.event] as? [[String: Any]] ?? [])
+        return Snapshot(
+            root: root, groups: hooks[Self.event] as? [[String: Any]] ?? [],
+            identity: Identity(info))
     }
 
     private func edit(
@@ -251,27 +263,27 @@ struct AgentHookInstaller {
     ) -> AgentHookOutcome {
         let resolved = target.url.resolvingSymlinksInPath()
         do {
-            guard let (root, groups) = try read(target.url) else {
+            guard let snapshot = try read(resolved) else {
                 sissyLog(
                     "sissy: agent hooks: \(target.name)'s configuration is not JSON this build "
                         + "can rewrite — left untouched")
                 return .unreadable
             }
-            let wanted = transform(groups)
-            let existed = fileManager.fileExists(atPath: resolved.path)
-            if Self.sameCommands(groups, wanted) && existed { return .unchanged }
+            let wanted = transform(snapshot.groups)
+            let existed = snapshot.identity != nil
+            if Self.sameCommands(snapshot.groups, wanted) && existed { return .unchanged }
             if wanted.isEmpty && !existed { return .unchanged }
 
-            var hooks = root[Self.hooksKey] as? [String: Any] ?? [:]
+            var hooks = snapshot.root[Self.hooksKey] as? [String: Any] ?? [:]
             hooks[Self.event] = wanted.isEmpty ? nil : wanted
-            var updated = root
+            var updated = snapshot.root
             updated[Self.hooksKey] = hooks.isEmpty ? nil : hooks
             if existed { try backUp(resolved, of: target) }
-            try write(updated, to: resolved, expecting: existed ? try identity(of: resolved) : nil)
+            try write(updated, to: resolved, expecting: snapshot.identity)
             return wanted.contains(where: Self.isSissys) ? .written : .removed
         } catch {
             sissyLog("sissy: agent hooks: could not update \(target.name)'s configuration: \(error)")
-            return .failed("\(error)")
+            return .failed
         }
     }
 
@@ -295,16 +307,19 @@ struct AgentHookInstaller {
         let inode: UInt64
         let size: Int64
         let modified: Double
+
+        init(_ info: stat) {
+            inode = info.st_ino
+            size = info.st_size
+            modified =
+                Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1e9
+        }
     }
 
-    private func identity(of url: URL) throws -> Identity {
+    private func identity(of url: URL) -> Identity? {
         var info = stat()
-        guard stat(url.path, &info) == 0 else {
-            throw CocoaError(.fileReadNoSuchFile)
-        }
-        return Identity(
-            inode: info.st_ino, size: info.st_size,
-            modified: Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1e9)
+        guard stat(url.path, &info) == 0 else { return nil }
+        return Identity(info)
     }
 
     private func write(_ object: [String: Any], to url: URL, expecting: Identity?) throws {
@@ -318,7 +333,9 @@ struct AgentHookInstaller {
         try data.write(to: staging, options: [.atomic])
         try fileManager.setAttributes(
             [.posixPermissions: mode ?? NSNumber(value: 0o600)], ofItemAtPath: staging.path)
-        if let expecting, (try? identity(of: url)) != expecting {
+        // Nil is the state "there was no file", which a second writer creating
+        // one in the meantime changes just as much as an edit does.
+        guard identity(of: url) == expecting else {
             try? fileManager.removeItem(at: staging)
             throw CocoaError(.fileWriteFileExists)
         }

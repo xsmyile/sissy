@@ -29,7 +29,6 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertEqual(installer.install(bundledScript: bundledScript)[target], .written)
 
         XCTAssertTrue(commands(in: target.url).contains { $0.contains(AgentHookInstaller.marker) })
-        XCTAssertTrue(installer.isInstalled())
     }
 
     func testTheScriptAndInboxAreLaidDownPrivately() throws {
@@ -104,6 +103,49 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: installer.inboxURL.path))
     }
 
+    /// Claude Code rewrites this file itself, from memory, while Sissy may be
+    /// re-affirming. The identity the write is pinned to comes from `fstat` on
+    /// the descriptor the bytes were read through, so a rewrite that lands in
+    /// between is caught rather than confirmed — the earlier spelling stat'd
+    /// the path again after the read and would have described, and then
+    /// overwritten, the newer file.
+    func testAConcurrentRewriterNeverLosesItsChangeOrAForeignEntry() throws {
+        let (installer, target) = make("race")
+        try writeConfiguration(
+            ["hooks": ["SessionStart": [["hooks": [["type": "command", "command": "orca-hook.sh"]]]]]],
+            to: target.url)
+        let stop = DispatchSemaphore(value: 0)
+        let rewriter = Thread {
+            var revision = 0
+            while stop.wait(timeout: .now()) == .timedOut {
+                revision += 1
+                guard let data = try? Data(contentsOf: target.url),
+                    var document = (try? JSONSerialization.jsonObject(with: data))
+                        as? [String: Any]
+                else { continue }
+                document["revision"] = revision
+                let staging = target.url.deletingLastPathComponent()
+                    .appendingPathComponent("rewriter-\(revision).tmp")
+                try? JSONSerialization.data(withJSONObject: document).write(to: staging)
+                _ = rename(staging.path, target.url.path)
+            }
+        }
+        rewriter.start()
+        defer { stop.signal() }
+
+        for _ in 0..<60 {
+            _ = installer.install(bundledScript: bundledScript)
+            _ = installer.remove()
+            XCTAssertNoThrow(
+                try JSONSerialization.jsonObject(with: try Data(contentsOf: target.url)))
+            XCTAssertTrue(commands(in: target.url).contains("orca-hook.sh"))
+        }
+
+        let leftovers = try FileManager.default.contentsOfDirectory(
+            atPath: target.url.deletingLastPathComponent().path)
+        XCTAssertTrue(leftovers.allSatisfy { !$0.contains(".sissy-") })
+    }
+
     /// Repairing another program's configuration is not Sissy's to attempt, and
     /// a file being mid-edit is the likeliest reason it will not parse.
     func testAConfigurationThatWillNotParseIsLeftExactlyAsItWas() throws {
@@ -114,7 +156,6 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertEqual(installer.install(bundledScript: bundledScript)[target], .unreadable)
 
         XCTAssertEqual(try String(contentsOf: target.url, encoding: .utf8), garbage)
-        XCTAssertFalse(installer.isInstalled())
     }
 
     /// A dotfiles-managed settings file is usually a symlink, and an atomic

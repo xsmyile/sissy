@@ -21,6 +21,9 @@ export PATH
 umask 077
 
 payload=$(head -c 65536)
+# Whatever is past the cap still has to be consumed, or a caller writing
+# a larger payload blocks on a full pipe until its own hook timeout.
+cat >/dev/null 2>&1 || :
 exec >/dev/null 2>&1
 
 script_dir=$(dirname "$0")
