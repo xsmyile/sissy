@@ -395,9 +395,9 @@ actor LocalUsageProvider: UsageProvider {
         // Force a final flush so a clean SIGTERM never loses unsaved offset
         // progress. Best-effort: a save failure is logged where it happens and
         // nothing on the shutdown path can act on it.
+        adapter.projects.ledger.saveIfDirty()
         saveSnapshotIfDirty(force: true)
         saveHistoryIfDirty(force: true)
-        adapter.projects.ledger.saveIfDirty()
         fsWatcher?.stop()
         fsWatcher = nil
         pollTask?.cancel()
@@ -487,9 +487,9 @@ actor LocalUsageProvider: UsageProvider {
             await cb(today, prev)
         }
         trim()
+        adapter.projects.ledger.saveIfDirty()
         saveSnapshotIfDirty()
         saveHistoryIfDirty()
-        adapter.projects.ledger.saveIfDirty()
     }
 
     /// What today and yesterday add up to right now.
@@ -615,9 +615,9 @@ actor LocalUsageProvider: UsageProvider {
         // last save AND `saveThrottle` seconds have elapsed. SIGKILL/power
         // loss therefore bounds progress loss to one throttle window; a
         // graceful SIGTERM forces a final flush via `stop()`.
+        adapter.projects.ledger.saveIfDirty()
         saveSnapshotIfDirty()
         saveHistoryIfDirty()
-        adapter.projects.ledger.saveIfDirty()
     }
 
     /// Every `.jsonl` under the tree, newest first. Any name is accepted —
