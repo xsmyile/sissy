@@ -339,6 +339,11 @@ actor LocalUsageProvider: UsageProvider {
         // the ones still on disk are recognised only if git has been asked
         // about them first.
         adapter.projects.ledger.refreshKnownRepositories()
+        // The pass that matters: the resolver caches its answer per directory
+        // for the life of the process, including the nil, so a checkout the
+        // cold scan below asks about is pinned to whatever the ledger knew
+        // before it started.
+        adapter.projects.ledger.ingestInbox()
         // Ahead of the restored-snapshot emit below, so the first frame a
         // relaunch replays already carries what the adapter reads out of band
         // — a plan the log itself will not name again until the next turn.
@@ -549,6 +554,11 @@ actor LocalUsageProvider: UsageProvider {
         // Before a byte is read, so a worktree alive right now is answered for
         // whenever its lines are read — which may be after it is deleted.
         adapter.projects.ledger.refreshKnownRepositories()
+        // Only reaches directories this process has not resolved yet, for the
+        // reason the call in `start()` documents. It costs one listing of a
+        // directory that is usually empty, and it is what keeps a session
+        // opened an hour ago from waiting for a relaunch.
+        adapter.projects.ledger.ingestInbox()
         // Newest files first so the active session's JSONL — the only one
         // that can contain today's usage — is parsed before any historical
         // file. Combined with the throttled emit below this means the
