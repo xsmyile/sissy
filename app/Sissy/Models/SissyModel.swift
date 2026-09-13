@@ -184,7 +184,10 @@ final class SissyModel {
             Date().timeIntervalSince(pending.askedAt) < Self.keepAwakeAckWindow
         else { return reported }
         return KeepAwakeState(
-            mode: pending.mode, active: reported.active, since: reported.since)
+            mode: pending.mode,
+            active: reported.active,
+            since: reported.since,
+            coversScreen: reported.coversScreen)
     }
 
     /// Which armed mode the panel's button puts the switch back into.
