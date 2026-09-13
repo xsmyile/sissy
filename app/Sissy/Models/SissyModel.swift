@@ -169,8 +169,16 @@ final class SissyModel {
     private static let keepAwakeAckWindow: TimeInterval = 5
 
     /// The keep-awake state as the panel should draw it.
+    ///
+    /// Falls back to the mode the engine booted with rather than to `off`,
+    /// because the engine takes its hold before the readers have produced a
+    /// frame to report it in. `active` stays false across that window — the
+    /// hold is the engine's to confirm — but the mode is a setting the app can
+    /// read straight from `server.json`, and getting it wrong there costs more
+    /// than a cold tint: see `UsageEngineHost.keepAwakeMode`.
     var keepAwake: KeepAwakeState {
-        let reported = currentFrame?.keepAwake ?? .off
+        let reported =
+            currentFrame?.keepAwake ?? KeepAwakeState(mode: engine.keepAwakeMode, active: false)
         guard let pending = pendingKeepAwake,
             reported.mode != pending.mode,
             Date().timeIntervalSince(pending.askedAt) < Self.keepAwakeAckWindow
