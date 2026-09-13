@@ -41,6 +41,11 @@ struct UsagePanelView: View {
     /// the wrong minute for most of it.
     private static let clockTick: TimeInterval = 1
     private static let controlButtonSize: CGFloat = 26
+    /// Larger than the legend's, because the header's title is 13 pt semibold
+    /// against the legend's 12 pt medium and it sits between a back chevron
+    /// and a 26 pt button. A mark sized for the quieter row reads as an
+    /// afterthought here.
+    private static let headerMarkSize: CGFloat = 16
     private static let sissySize: CGFloat = 24
 
     private static var dateLine: String {
@@ -146,7 +151,7 @@ struct UsagePanelView: View {
             .foregroundStyle(.secondary)
             .help("Back to today")
 
-            ProviderMark(id: row.id)
+            ProviderMark(id: row.id, size: Self.headerMarkSize)
 
             Text(row.name)
                 .font(.system(size: 13, weight: .semibold))
