@@ -49,9 +49,9 @@ The menu bar carries today's token total. Click it for the overview:
 
 Click a CLI in that split for its own page: the account it is signed in as, every rate-limit window it reports with the time each resets, its own day, and its own projects. The refresh there re-reads what no log line carries — on Claude Code that is the token itself, and macOS may ask for permission.
 
-The cup in the panel's header is **keep awake**: switch it on and the Mac stops idling to sleep under a running agent. It lights the same way the power button does, and the mode is remembered until you switch it off — including across a restart. It does not override closing the lid, and the hold lasts only while Sissy is running: quit and the Mac sleeps normally again.
+The cup in the panel's header is **keep awake**: click it and the Mac stops idling to sleep under a running agent. It holds three modes — *never*, *while agents are working*, *always* — and a click switches between off and whichever of the two you last chose. To pick one, right-click the cup, right-click the menu bar icon, or open Settings. *While agents are working* is the mode no generic caffeinate can offer: Sissy holds the Mac while turns are landing and lets go ten minutes after they stop, so nothing has to be switched back. *Always* stops after eight hours. Neither overrides closing the lid, and the hold lasts only while Sissy is running: quit and the Mac sleeps normally again.
 
-Right-click for the short menu; **Settings…** (⌘,) holds *Start at login* and the Claude Code limits opt-in.
+Right-click for the short menu; **Settings…** (⌘,) holds *Start at login*, the keep-awake mode and the Claude Code limits opt-in.
 
 <p align="center">
   <img src="assets/usage-panel.png" alt="Sissy's usage panel" width="420" />
