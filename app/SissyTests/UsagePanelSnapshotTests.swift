@@ -308,7 +308,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("claude-code", 1, "1.00"), slice("codex", 1, "1.00")])
         )
-        XCTAssertEqual(snapshot.providers.map(\.name), ["Claude Code", "Codex"])
+        XCTAssertEqual(snapshot.providers.map(\.name), ["Claude", "Codex"])
     }
 
     func testRowShareIsZeroWhenNothingWasSpent() {

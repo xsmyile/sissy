@@ -415,9 +415,25 @@ enum UsageFormat {
         }
     }
 
+    /// What a provider's row is called.
+    ///
+    /// The name of the account, not of the CLI that logs it — which is why
+    /// Anthropic's is "Claude" and not "Claude Code". The row carries an
+    /// address, an organisation and a plan, and every one of those belongs to
+    /// a Claude account rather than to the binary that wrote the JSONL; the
+    /// status feed this will grow is `status.claude.com`, which is the same
+    /// account's service. It also puts the pair on one footing, since "Codex"
+    /// is already how that one is said.
+    ///
+    /// Everything that talks about the *CLI* keeps the CLI's full name:
+    /// whose token is in the keychain, what is not signed in on this Mac,
+    /// which switch turns the limits on. Those sentences are about Claude
+    /// Code, and shortening them there would make them wrong — a Mac with
+    /// Claude open in a browser and no CLI installed is exactly the case
+    /// "Claude is not signed in" would misreport.
     static func providerName(_ id: String) -> String {
         switch id {
-        case ProviderID.claudeCode: return "Claude Code"
+        case ProviderID.claudeCode: return "Claude"
         case ProviderID.codex: return "Codex"
         default: return id
         }
