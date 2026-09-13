@@ -150,6 +150,28 @@ final class UsageProjectSplitTests: XCTestCase {
             "the spend went missing along with its name")
     }
 
+    /// Codex names the directory once, on the rollout's first line, so a
+    /// resumed reader is past it and the persisted path is all later turns
+    /// have. Trusted as written it outlives the rule that would now reject it:
+    /// the worktree is deleted between the two runs, and the turn after the
+    /// resume still has to stop naming it.
+    func testCodexDoesNotResumeAProjectThatNoLongerNamesARepository() async throws {
+        let repo = try makeRepository("gone")
+        try writeRollout("rollout-a.jsonl", cwd: repo.path, turns: 1)
+        try await runCodexTail()
+        XCTAssertEqual(try archivedToday(ProviderID.codex).models.map(\.project), [repo.path])
+
+        try FileManager.default.removeItem(at: repo)
+        try appendTurn(to: "rollout-a.jsonl")
+        try await runCodexTail()
+
+        let day = try archivedToday(ProviderID.codex)
+        XCTAssertEqual(day.models.map(\.project), [nil], "the resumed turn kept a dead path")
+        XCTAssertEqual(
+            day.models.first?.inputTokens, Self.tokensPerTurn * 2,
+            "the resumed turn went missing along with its name")
+    }
+
     func testCodexKeepsTheProjectAcrossARelaunch() async throws {
         let repo = try makeRepository("norace")
         try writeRollout("rollout-a.jsonl", cwd: repo.path, turns: 1)
