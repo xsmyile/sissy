@@ -225,7 +225,7 @@ struct SectionLabel: View {
 
 /// One project's share of a day: the repository's own name, what it cost, and
 /// a bar for its share. The path stays in the tooltip — a client's name is a
-/// directory's name.
+/// directory's name — and the remainder row puts its reason there instead.
 struct ProjectRowView: View {
     let row: UsagePanelSnapshot.ProjectRow
 
@@ -243,6 +243,6 @@ struct ProjectRowView: View {
             }
             ShareBar(share: row.share, tint: .secondary)
         }
-        .help(row.path ?? "")
+        .help(row.tooltip ?? "")
     }
 }
