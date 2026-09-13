@@ -33,6 +33,14 @@ struct UsageHistoryTotals: Equatable, Sendable {
         cacheCreationTokens += event.cacheCreationTokens
         cost += event.cost
     }
+
+    mutating func add(_ other: Self) {
+        inputTokens += other.inputTokens
+        outputTokens += other.outputTokens
+        cacheReadTokens += other.cacheReadTokens
+        cacheCreationTokens += other.cacheCreationTokens
+        cost += other.cost
+    }
 }
 
 /// One provider's day, as it is kept on disk.
@@ -88,6 +96,16 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         var totalTokens: Int {
             inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
         }
+
+        var totals: UsageHistoryTotals {
+            UsageHistoryTotals(
+                inputTokens: inputTokens,
+                outputTokens: outputTokens,
+                cacheReadTokens: cacheReadTokens,
+                cacheCreationTokens: cacheCreationTokens,
+                cost: Decimal(string: cost) ?? 0
+            )
+        }
     }
 
     init(
@@ -128,15 +146,36 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     var totalsByRow: [UsageHistoryRow: UsageHistoryTotals] {
         var out: [UsageHistoryRow: UsageHistoryTotals] = [:]
         for entry in models {
-            out[UsageHistoryRow(model: entry.model, project: entry.project)] = UsageHistoryTotals(
-                inputTokens: entry.inputTokens,
-                outputTokens: entry.outputTokens,
-                cacheReadTokens: entry.cacheReadTokens,
-                cacheCreationTokens: entry.cacheCreationTokens,
-                cost: Decimal(string: entry.cost) ?? 0
-            )
+            out[UsageHistoryRow(model: entry.model, project: entry.project), default: .init()]
+                .add(entry.totals)
         }
         return out
+    }
+
+    /// This day with every project path read through `resolve` again.
+    ///
+    /// The archive keeps the working directory it saw, and that stays a
+    /// record. What a path *means* is the resolver's answer now, and that
+    /// moves underneath a file already written: a worktree deleted since names
+    /// no repository any more, so a row wearing its name is a project an older
+    /// build invented before the rule said not to. Re-reading where the day is
+    /// used, rather than rewriting the file, is what keeps the record honest
+    /// and the answer current — and on a machine where the directory is still
+    /// there it folds the row into the checkout it was cut from instead of
+    /// dropping the name, which a migration would have thrown away for good.
+    /// A repository on an unmounted disk is the case that settles it: it reads
+    /// as unattributed while the disk is away and comes back whole, where a
+    /// rewrite would have destroyed the attribution on the first launch.
+    ///
+    /// Two rows can land on one key — a deleted worktree and its subdirectory
+    /// both answer nothing — so the totals are summed, never replaced.
+    func reattributed(by resolve: (String) -> String?) -> Self {
+        var totals: [UsageHistoryRow: UsageHistoryTotals] = [:]
+        for entry in models {
+            let row = UsageHistoryRow(model: entry.model, project: entry.project.flatMap(resolve))
+            totals[row, default: .init()].add(entry.totals)
+        }
+        return Self(day: day, provider: provider, updatedAt: updatedAt, totals: totals)
     }
 
     /// What one model spent across every project the day holds for it.
