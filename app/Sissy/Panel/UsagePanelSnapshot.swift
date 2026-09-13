@@ -14,9 +14,10 @@ struct UsagePanelSnapshot: Equatable {
     let burn: String
     let delta: TokenDelta?
     let providers: [ProviderRow]
-    /// Today's spend by project, the busiest first and the tail folded into
-    /// one row. Empty when nothing today names a project, and the panel then
-    /// draws no section rather than a heading over nothing.
+    /// Today's spend by project, the busiest first, the tail folded into one
+    /// row and whatever named no repository in a last row of its own. Empty
+    /// when nothing today names a project, and the panel then draws no section
+    /// rather than a heading over nothing.
     let projects: [ProjectRow]
     /// The archive line, absent when there is no archive to show.
     let history: HistoryRow?
@@ -127,10 +128,11 @@ struct UsagePanelSnapshot: Equatable {
         /// The repository's own name — the last component of its path, which
         /// is what the user calls it.
         let name: String
-        /// Full path, for the tooltip only. Nil on the folded row, which
-        /// stands for several. A project path is a client's name as often as
-        /// not, so the row shows the name and keeps the rest for a hover.
-        let path: String?
+        /// What the row hovers: a repository's full path, or why a row that is
+        /// not a repository is there. Nil on the folded row, which stands for
+        /// several. A project path is a client's name as often as not, so the
+        /// row shows the name and keeps the rest for a hover.
+        let tooltip: String?
         let tokens: String
         let cost: String
         let share: Double
@@ -180,7 +182,8 @@ struct UsagePanelSnapshot: Equatable {
             burn: frame.burn,
             delta: makeDelta(today: totalTokens, prevTokens: frame.prevTokens),
             providers: rows,
-            projects: makeProjects(frame.projects, totalCost: totalCost),
+            projects: makeProjects(
+                frame.projects, totalTokens: totalTokens, totalCost: totalCost),
             history: makeHistory(frame.history, now: now),
             headroom: makeHeadroom(rows)
         )
@@ -259,7 +262,8 @@ struct UsagePanelSnapshot: Equatable {
                 notice: UsageFormat.limitsNotice(slice.limitsState)
                     .map { LimitsNotice(message: $0.message, action: $0.action) },
                 account: makeAccount(slice.account, now: now),
-                projects: makeProjects(slice.projects, totalCost: slice.cost)
+                projects: makeProjects(
+                    slice.projects, totalTokens: slice.tokens, totalCost: slice.cost)
             )
         }
     }
@@ -280,9 +284,16 @@ struct UsagePanelSnapshot: Equatable {
     private static let projectRowLimit = 5
 
     /// The busiest projects, with everything below them folded into one row
-    /// so the section's rows still add up to the day.
+    /// and whatever named no repository in a row after that, so the section
+    /// adds up to the total the header prints.
+    ///
+    /// The limit bounds the repositories, not the section: the remainder is
+    /// not a project competing for a slot, it is the rest of the day. It is
+    /// drawn only under rows that do name repositories — a section whose one
+    /// row says "unattributed" is the header total with a second caption.
     private static func makeProjects(
         _ projects: [ProjectTotals],
+        totalTokens: Int,
         totalCost: Decimal
     ) -> [ProjectRow] {
         guard !projects.isEmpty else { return [] }
@@ -297,28 +308,43 @@ struct UsagePanelSnapshot: Equatable {
             ProjectRow(
                 id: project.path,
                 name: UsageFormat.projectName(project.path),
-                path: project.path,
+                tooltip: project.path,
                 tokens: UsageFormat.tokens(project.tokens),
                 cost: UsageFormat.cost(project.cost),
                 share: share(project.cost)
             )
         }
-        guard !fits else { return rows }
-        let rest = projects.dropFirst(projectRowLimit - 1)
-        let restCost = rest.reduce(Decimal(0)) { $0 + $1.cost }
+        if !fits {
+            let rest = projects.dropFirst(projectRowLimit - 1)
+            let restCost = rest.reduce(Decimal(0)) { $0 + $1.cost }
+            rows.append(
+                ProjectRow(
+                    id: Self.foldedProjectRowID,
+                    name: UsageFormat.projectsFolded(count: rest.count),
+                    tooltip: nil,
+                    tokens: UsageFormat.tokens(rest.reduce(0) { $0 + $1.tokens }),
+                    cost: UsageFormat.cost(restCost),
+                    share: share(restCost)
+                ))
+        }
+        let namedTokens = projects.reduce(0) { $0 + $1.tokens }
+        let namedCost = projects.reduce(Decimal(0)) { $0 + $1.cost }
+        guard totalTokens > namedTokens else { return rows }
+        let unnamedCost = totalCost - namedCost
         rows.append(
             ProjectRow(
-                id: Self.foldedProjectRowID,
-                name: UsageFormat.projectsFolded(count: rest.count),
-                path: nil,
-                tokens: UsageFormat.tokens(rest.reduce(0) { $0 + $1.tokens }),
-                cost: UsageFormat.cost(restCost),
-                share: share(restCost)
+                id: Self.unattributedRowID,
+                name: UsageFormat.projectsUnattributed,
+                tooltip: UsageFormat.projectsUnattributedReason,
+                tokens: UsageFormat.tokens(totalTokens - namedTokens),
+                cost: UsageFormat.cost(unnamedCost),
+                share: share(unnamedCost)
             ))
         return rows
     }
 
     private static let foldedProjectRowID = "sissy.projects.rest"
+    private static let unattributedRowID = "sissy.projects.unattributed"
 
     private static func makeWindow(_ window: UsageWindow, now: Date) -> WindowRow {
         WindowRow(
