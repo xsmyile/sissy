@@ -197,6 +197,12 @@ struct UsagePanelView: View {
     /// The age goes under the name for the same reason it goes under Sissy's:
     /// it is a property of the reading on screen, so it belongs beside what it
     /// dates. Here that puts it under the refresh button that resets it.
+    ///
+    /// The plan badge is not here. It is a fact about the account, not about
+    /// the page, and it reads as a qualifier on the provider's name when it
+    /// sits against one — so it went down to the organisation line, which is
+    /// the other half of the same sentence. The Overview's legend keeps its
+    /// own badge: that row has no identity block to put one in.
     private func providerHeader(
         _ row: UsagePanelSnapshot.ProviderRow, live: SissyModel.LiveFrame?
     ) -> some View {
@@ -216,15 +222,9 @@ struct UsagePanelView: View {
             ProviderMark(id: row.id, size: Self.headerMarkSize, textSize: nil)
 
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(row.name)
-                        .font(.system(size: Self.headerTitleSize, weight: .semibold))
-                        .lineLimit(1)
-
-                    if let plan = row.plan {
-                        PlanBadge(plan: plan, tier: row.planTier)
-                    }
-                }
+                Text(row.name)
+                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
+                    .lineLimit(1)
 
                 if let live {
                     readingLine(
