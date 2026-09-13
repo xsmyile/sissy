@@ -172,8 +172,10 @@ struct PanelOverview: View {
             ProviderMark(id: row.id)
             Text(row.name)
                 .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
             if let plan = row.plan {
                 PlanBadge(plan: plan, tier: row.planTier)
+                    .layoutPriority(-1)
             }
             if let notice = row.notice {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -185,6 +187,7 @@ struct PanelOverview: View {
             Text("\(row.tokens) · \(row.cost)")
                 .font(.system(size: 12))
                 .monospacedDigit()
+                .fixedSize()
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)

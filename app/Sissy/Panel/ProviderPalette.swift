@@ -49,13 +49,42 @@ enum ProviderPalette {
 /// be rather than at the mark's.
 struct ProviderMark: View {
     let id: String
-    var size: CGFloat = 13
+    var size: CGFloat = PanelMetrics.markSize
+    /// The size of the text this mark sits beside, which is what decides how
+    /// far down it has to move to look level with it.
+    var textSize: CGFloat = PanelMetrics.rowText
 
-    /// A dot reads as a dot at about half the width a mark needs, and a dot
-    /// blown up to a mark's box reads as a bullet hole.
-    private static let dotRatio: CGFloat = 0.54
+    /// A dot reads as a dot at about a third of the width a mark needs, and a
+    /// dot blown up to a mark's box reads as a bullet hole.
+    private static let dotRatio: CGFloat = 0.44
+
+    /// How far below a line box's centre the capitals actually sit.
+    ///
+    /// A run like "Claude Code" has no descenders, so its ink fills the band
+    /// from the baseline to the cap height while the box it is laid out in
+    /// reserves room under the baseline as well. Centring a mark on that box
+    /// therefore centres it on empty space, and the mark reads high — measured
+    /// at 0.38 pt against 13 pt text, which is small and is exactly the amount
+    /// that makes a row look not-quite-level.
+    ///
+    /// Read off the font rather than fixed, because the amount scales with the
+    /// text: the same row at another size would need another number, and a
+    /// constant would be right once.
+    static func capCentreOffset(forTextSize textSize: CGFloat) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: textSize)
+        return (font.ascender + font.descender - font.capHeight) / 2
+    }
 
     var body: some View {
+        content
+            .alignmentGuide(VerticalAlignment.center) { dimension in
+                dimension[VerticalAlignment.center]
+                    - Self.capCentreOffset(forTextSize: textSize)
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let mark = ProviderPalette.mark(for: id) {
             mark
                 .resizable()
