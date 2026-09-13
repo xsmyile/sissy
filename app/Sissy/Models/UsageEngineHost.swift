@@ -200,6 +200,10 @@ final class UsageEngineHost {
 
     /// Registers or unregisters the hook with both CLIs.
     ///
+    /// Off the main actor: it reads and rewrites two files and spawns `sh -n`
+    /// to check what it is about to write, and it runs at every launch. This
+    /// app already measures its own main-thread cost in single percent points.
+    ///
     /// Nothing here is fatal to metering: a file Sissy could not rewrite is
     /// named back to the user and left exactly as it was found.
     private func applyAgentHooks(_ enabled: Bool) {
@@ -207,24 +211,25 @@ final class UsageEngineHost {
             agentHooksRefused = [AgentHookCopy.unknownHome]
             return
         }
-        let installer = AgentHookInstaller(
-            stateDirectory: ServerConfig.defaultURL.deletingLastPathComponent(),
-            targets: AgentHookInstaller.targets(home: home))
-        guard enabled else {
-            _ = installer.remove()
-            agentHooksRefused = []
+        let script = Bundle.main.url(forResource: "session-start", withExtension: "sh")
+        guard let script else {
+            if enabled { agentHooksRefused = [AgentHookCopy.missingScript] }
             return
         }
-        guard let script = Bundle.main.url(forResource: "session-start", withExtension: "sh") else {
-            agentHooksRefused = [AgentHookCopy.missingScript]
-            return
+        let stateDirectory = ServerConfig.defaultURL.deletingLastPathComponent()
+        let targets = AgentHookInstaller.targets(home: home)
+        let host = self
+        Task.detached(priority: .utility) {
+            let installer = AgentHookInstaller(stateDirectory: stateDirectory, targets: targets)
+            let report =
+                enabled ? installer.install(bundledScript: script) : installer.remove()
+            let refused =
+                report
+                .filter { _, outcome in outcome != .written && outcome != .unchanged }
+                .keys.map(\.name)
+                .sorted()
+            await MainActor.run { host.agentHooksRefused = enabled ? refused : [] }
         }
-        let report = installer.install(bundledScript: script)
-        agentHooksRefused =
-            report
-            .filter { _, outcome in outcome != .written && outcome != .unchanged }
-            .keys.map(\.name)
-            .sorted()
     }
 
     func setKeepScreenAwake(_ enabled: Bool) {
