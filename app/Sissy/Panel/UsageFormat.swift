@@ -45,6 +45,20 @@ enum UsageFormat {
         return held(holding) + " · " + reading
     }
 
+    /// The providers block's one-line recap: how many of the CLIs Sissy is
+    /// metering have spent anything today.
+    ///
+    /// Honest by construction — the frame carries a slice only for a provider
+    /// that spent tokens today, and `metering` counts the ones a reader was
+    /// actually built for, so a CLI switched off is in neither number.
+    ///
+    /// Nil below two providers, where it is not a recap but a restatement of
+    /// the single row beneath it.
+    static func providersRecap(used: Int, metering: Int) -> String? {
+        guard metering > 1 else { return nil }
+        return "\(used) of \(metering) used today"
+    }
+
     /// Coarse age of the last frame, for the panel's header. Deliberately
     /// one unit and no seconds past a minute: the line is a reassurance that
     /// the reading is live, not a stopwatch.

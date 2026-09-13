@@ -66,6 +66,16 @@ final class UsageFormatTests: XCTestCase {
             UsageFormat.keepAwakeHolding(900), "Keep awake — holding · " + UsageFormat.held(900))
     }
 
+    func testProvidersRecapCountsTheDayAgainstWhatIsMetered() {
+        XCTAssertEqual(UsageFormat.providersRecap(used: 1, metering: 2), "1 of 2 used today")
+    }
+
+    /// With one provider the recap restates the single row under it, which is
+    /// a line that costs space and answers nothing.
+    func testProvidersRecapStaysQuietForASingleProvider() {
+        XCTAssertNil(UsageFormat.providersRecap(used: 1, metering: 1))
+    }
+
     func testHeldUnderAMinuteSaysSoRatherThanCountingSeconds() {
         XCTAssertEqual(UsageFormat.held(59), "<1m")
     }

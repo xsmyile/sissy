@@ -9,6 +9,11 @@ import SwiftUI
 /// and they pushed the projects, which are what the app is for, below the fold.
 struct PanelOverview: View {
     let snapshot: UsagePanelSnapshot
+    /// How many CLIs Sissy has a reader for, which is the denominator of the
+    /// providers block's recap. It is not on the snapshot because the frame
+    /// does not carry it: a provider that spent nothing today has no slice,
+    /// and that is exactly the provider the recap is about.
+    let meteringProviders: Int
     let openProvider: (String) -> Void
 
     var body: some View {
@@ -143,7 +148,7 @@ struct PanelOverview: View {
     /// page, which is where its gauges, its account and its own projects live.
     private var providers: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionLabel(text: "By provider")
+            SectionLabel(text: providersLabel)
             StackedShareBar(rows: snapshot.providers)
             ForEach(snapshot.providers) { row in
                 Button {
@@ -157,6 +162,17 @@ struct PanelOverview: View {
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
+    }
+
+    /// The block's label, with the day's recap folded into it rather than
+    /// given a row: "did I use both of them today" is a question about the
+    /// list underneath, not a line that stands on its own.
+    private var providersLabel: String {
+        guard
+            let recap = UsageFormat.providersRecap(
+                used: snapshot.providers.count, metering: meteringProviders)
+        else { return "By provider" }
+        return "By provider · " + recap
     }
 
     /// A legend row carries the *fact* that something needs attention even
