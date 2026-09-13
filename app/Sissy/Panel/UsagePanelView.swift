@@ -35,7 +35,7 @@ struct UsagePanelView: View {
     }
 
     /// Cadence for both readouts the panel keeps on its own clock: the
-    /// footer's age and the keep-awake control's duration. A second is finer
+    /// header's age and the keep-awake control's duration. A second is finer
     /// than the duration needs — it changes by the minute — but the tick is
     /// what decides how late a change lands, and a minute-long one would show
     /// the wrong minute for most of it.
@@ -48,11 +48,6 @@ struct UsagePanelView: View {
     private static let headerMarkSize: CGFloat = 18
     private static let headerTitleSize: CGFloat = 13
     private static let sissySize: CGFloat = 24
-
-    private static var dateLine: String {
-        "Today · "
-            + Date.now.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
-    }
 
     /// The provider the current page is about, when there is one and the frame
     /// still carries it.
@@ -75,7 +70,7 @@ struct UsagePanelView: View {
             if let open {
                 providerHeader(open)
             } else {
-                header
+                header(live)
             }
             Divider()
             if let snapshot {
@@ -90,7 +85,7 @@ struct UsagePanelView: View {
                 placeholder
             }
             Divider()
-            footer(live)
+            footer()
         }
         .frame(width: PanelMetrics.width)
         .focusable()
@@ -104,7 +99,7 @@ struct UsagePanelView: View {
 
     // MARK: Header
 
-    private var header: some View {
+    private func header(_ live: SissyModel.LiveFrame?) -> some View {
         let menuHeader = model.menuSnapshot.header
         return HStack(spacing: 10) {
             PanelSissy(
@@ -116,11 +111,9 @@ struct UsagePanelView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(menuHeader.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
                     .lineLimit(1)
-                Text(menuHeader.subtitle ?? Self.dateLine)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                secondLine(subtitle: menuHeader.subtitle, live: live)
             }
 
             Spacer(minLength: 0)
@@ -129,6 +122,39 @@ struct UsagePanelView: View {
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
+    }
+
+    /// What the header says under its title: why there is no reading, or when
+    /// the one on screen landed.
+    ///
+    /// The two never compete. `subtitle` is set exactly while no frame has
+    /// arrived, which is the same condition that leaves `live` nil, so the
+    /// line is the age whenever there is an age to give and the reason
+    /// otherwise. The date it replaced answered a question nobody opened the
+    /// panel to ask.
+    @ViewBuilder
+    private func secondLine(subtitle: String?, live: SissyModel.LiveFrame?) -> some View {
+        if let subtitle {
+            Text(subtitle)
+                .font(.system(size: PanelMetrics.headlineMeta))
+                .foregroundStyle(.secondary)
+        } else if let live {
+            readingLine(live)
+        }
+    }
+
+    /// When the reading on screen landed, on its own clock.
+    ///
+    /// `TimelineView` rather than a value recomputed with the body: the
+    /// instant it counts from is fixed, so the line stays true while the
+    /// panel sits open and the engine emits nothing.
+    private func readingLine(_ live: SissyModel.LiveFrame) -> some View {
+        TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+            Text("updated " + UsageFormat.age(context.date.timeIntervalSince(live.at)))
+                .font(.system(size: PanelMetrics.headlineMeta))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// The header a provider page carries instead: the way back, whose page
@@ -305,19 +331,8 @@ struct UsagePanelView: View {
 
     // MARK: Footer
 
-    /// Carries the age of the frame only while one is live: the panel body
-    /// already says what it is waiting for, and repeating it in the footer
-    /// read as two problems.
-    private func footer(_ live: SissyModel.LiveFrame?) -> some View {
+    private func footer() -> some View {
         HStack(spacing: 6) {
-            if let live {
-                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
-                    Text("updated " + UsageFormat.age(context.date.timeIntervalSince(live.at)))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             Spacer(minLength: 0)
 
             settingsLink("gearshape", help: "Settings", tab: .general)
