@@ -157,7 +157,8 @@ struct UsagePanelSnapshot: Equatable {
         now: Date
     ) -> [ProviderRow] {
         slices.map { slice in
-            let plan = UsageFormat.plan(slice.plan, tier: slice.planTier)
+            let plan = UsageFormat.plan(
+                slice.plan, tier: slice.planTier, seat: slice.account?.seat)
             return ProviderRow(
                 id: slice.id,
                 name: UsageFormat.providerName(slice.id),

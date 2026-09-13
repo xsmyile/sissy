@@ -71,6 +71,14 @@ protocol UsageProvider: AnyObject, Sendable {
     /// names nothing a reader could place.
     nonisolated func currentPlanTier() -> String?
 
+    /// Who the provider is signed in as, off the same file its plan came
+    /// from. Nil for a provider whose format names nobody; the default
+    /// implementation covers those.
+    ///
+    /// Nonisolated for the reason the plan is: the aggregator reads it while
+    /// the emitting provider still holds its actor.
+    nonisolated func currentAccount() -> ProviderAccount?
+
     /// How the provider's day splits across projects, as of its last emit.
     /// Empty for a provider whose format names no working directory.
     ///
@@ -97,5 +105,6 @@ extension UsageProvider {
     nonisolated func currentWindows() -> [UsageWindow] { [] }
     nonisolated func currentPlan() -> String? { nil }
     nonisolated func currentPlanTier() -> String? { nil }
+    nonisolated func currentAccount() -> ProviderAccount? { nil }
     nonisolated func currentProjects() -> [ProjectTotals] { [] }
 }

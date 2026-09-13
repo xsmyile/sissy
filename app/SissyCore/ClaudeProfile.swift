@@ -54,11 +54,18 @@ final class ClaudeProfileSource: @unchecked Sendable {
     private var lastParsedAt: Date = .distantPast
     private var lastMTime: TimeInterval = 0
 
-    /// Plan and its limit tier, held together so a tier can never outlive the
-    /// plan it decorates.
+    /// `oauthAccount.seatTier` names which seat of a Team plan the account
+    /// holds. Unprefixed, unlike the two above.
+    private static let seatKey = "seatTier"
+    private static let emailKey = "emailAddress"
+    private static let organizationKey = "organizationName"
+
+    /// Plan, its limit tier and the account they belong to, held together so
+    /// neither a tier nor an identity can outlive the plan it decorates.
     struct Profile: Sendable, Equatable {
         let plan: String
         let tier: String?
+        let account: ProviderAccount?
     }
 
     /// Outcome of reading the config file, on the same reasoning as
@@ -86,6 +93,11 @@ final class ClaudeProfileSource: @unchecked Sendable {
     /// Limit tier the account is metered at (`max_5x`), when the CLI names one
     /// and a plan came with it.
     func currentPlanTier() -> String? { lock.withLock { profile?.tier } }
+
+    /// Address, organisation and seat, when the CLI's config names them. Nil
+    /// for the same accounts `currentPlan()` answers nil for — there is no
+    /// `oauthAccount` to read either way.
+    func currentAccount() -> ProviderAccount? { lock.withLock { profile?.account } }
 
     /// Re-reads the file when it has changed on disk and the floor has
     /// passed. A file that has stopped naming a plan clears the held one — a
@@ -128,7 +140,18 @@ final class ClaudeProfileSource: @unchecked Sendable {
         let tier = UsageReaderShared.sanitizedPlanToken(
             stripping(tierPrefix, from: account["userRateLimitTier"] as? String)
         )
-        return .found(Profile(plan: plan, tier: tier))
+        return .found(
+            Profile(
+                plan: plan,
+                tier: tier,
+                account: ProviderAccount(
+                    email: UsageReaderShared.sanitizedDisplayText(account[emailKey] as? String),
+                    organization: UsageReaderShared.sanitizedDisplayText(
+                        account[organizationKey] as? String),
+                    seat: UsageReaderShared.sanitizedPlanToken(account[seatKey] as? String)
+                )
+            )
+        )
     }
 
     private static func stripping(_ prefix: String, from raw: String?) -> String? {

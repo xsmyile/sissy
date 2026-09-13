@@ -54,6 +54,48 @@ struct ProjectTotals: Sendable, Equatable, Identifiable {
     var id: String { path }
 }
 
+/// Who a provider is signed in as.
+///
+/// Every field comes off a file its adapter was already reading for the plan,
+/// so an account costs no new source, no new poll and no permission. Every
+/// field is optional because the two vendors answer for different halves of
+/// it, and a provider that answers for none of it carries no account at all
+/// rather than an identity of four blanks.
+///
+/// It is personal data — an address and an organisation's name are the same
+/// class as a project path, which `AGENTS.md` already rules on. It stays on
+/// the machine: `DiagnosticsReport` names the fields it prints rather than
+/// dumping a slice, and there is a test that holds it to that.
+struct ProviderAccount: Sendable, Equatable {
+    /// The address the CLI is signed in as.
+    let email: String?
+    /// Organisation the seat belongs to, where the vendor names one.
+    let organization: String?
+    /// Seat within that organisation, as the vendor's own token
+    /// (`team_tier_1`). Raw rather than a label, the same division `plan`
+    /// draws: `UsageFormat` is what decides whether it can word one.
+    let seat: String?
+    /// When the subscription renews, for the one vendor that says.
+    let renewsAt: Date?
+
+    /// Fails when the vendor answered for nothing, so "signed in as nobody"
+    /// and "no account line" are the same absence rather than an empty row.
+    init?(
+        email: String? = nil,
+        organization: String? = nil,
+        seat: String? = nil,
+        renewsAt: Date? = nil
+    ) {
+        guard email != nil || organization != nil || seat != nil || renewsAt != nil else {
+            return nil
+        }
+        self.email = email
+        self.organization = organization
+        self.seat = seat
+        self.renewsAt = renewsAt
+    }
+}
+
 struct ProviderSlice: Sendable, Equatable, Identifiable {
     let id: String
     let tokens: Int
@@ -73,6 +115,8 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     /// whose format names no working directory, which reads the same as a
     /// provider that has spent nothing.
     let projects: [ProjectTotals]
+    /// Who this provider is signed in as, when its own files say.
+    let account: ProviderAccount?
 
     init(
         id: String,
@@ -81,7 +125,8 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         windows: [UsageWindow] = [],
         plan: String? = nil,
         planTier: String? = nil,
-        projects: [ProjectTotals] = []
+        projects: [ProjectTotals] = [],
+        account: ProviderAccount? = nil
     ) {
         self.id = id
         self.tokens = tokens
@@ -90,6 +135,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         self.plan = plan
         self.planTier = plan == nil ? nil : planTier
         self.projects = projects
+        self.account = account
     }
 }
 

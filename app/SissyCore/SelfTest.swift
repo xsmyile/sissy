@@ -288,6 +288,7 @@ func runSelfTest() {
     runCodexRateLimitTest()
     runCodexAuthFallbackTest()
     runClaudeLimitsParseTests()
+    runProviderAccountTests()
     runKeychainTimeoutTests()
     runKeychainGateTests()
     runSissyLogTests()
@@ -990,7 +991,7 @@ func runClaudeLimitsParseTests() {
     expect(
         "profile plan and tier both strip their vendor prefix",
         ClaudeProfileSource.read(profileBlob),
-        .found(ClaudeProfileSource.Profile(plan: "max", tier: "max_5x"))
+        .found(ClaudeProfileSource.Profile(plan: "max", tier: "max_5x", account: nil))
     )
 
     let apiKeyProfile = Data(#"{"hasCompletedOnboarding":true}"#.utf8)
@@ -1006,7 +1007,7 @@ func runClaudeLimitsParseTests() {
     expect(
         "an unprefixed organizationType passes through without a tier",
         ClaudeProfileSource.read(unprefixedProfile),
-        .found(ClaudeProfileSource.Profile(plan: "team", tier: nil))
+        .found(ClaudeProfileSource.Profile(plan: "team", tier: nil, account: nil))
     )
 
     // The file belongs to another program, so its value is narrowed to the
@@ -1027,7 +1028,7 @@ func runClaudeLimitsParseTests() {
     expect(
         "a refused tier keeps the plan and reports no tier",
         ClaudeProfileSource.read(oddTierProfile),
-        .found(ClaudeProfileSource.Profile(plan: "pro", tier: nil))
+        .found(ClaudeProfileSource.Profile(plan: "pro", tier: nil, account: nil))
     )
 
     expect("plan token accepts snake_case", UsageReaderShared.sanitizedPlanToken("edu_plus"), "edu_plus")
@@ -1072,19 +1073,19 @@ func runClaudeLimitsParseTests() {
     .replacingOccurrences(of: "/", with: "_")
     .replacingOccurrences(of: "=", with: "")
     let authBlob = Data(#"{"tokens":{"id_token":"header.\#(authPayload).signature"}}"#.utf8)
-    expect("codex plan read from the auth file", CodexAuthSource.parsePlan(authBlob), "plus")
+    expect("codex plan read from the auth file", CodexAuthSource.parse(authBlob)?.plan, "plus")
 
     let apiKeyAuth = Data(#"{"OPENAI_API_KEY":"sk-test","auth_mode":"apikey"}"#.utf8)
     expect(
         "an auth file with no id_token names no plan",
-        CodexAuthSource.parsePlan(apiKeyAuth) == nil,
+        CodexAuthSource.parse(apiKeyAuth) == nil,
         true
     )
 
     let truncatedAuth = Data(#"{"tokens":{"id_token":"header.payload"}}"#.utf8)
     expect(
         "a token that is not three parts names no plan",
-        CodexAuthSource.parsePlan(truncatedAuth) == nil,
+        CodexAuthSource.parse(truncatedAuth) == nil,
         true
     )
 
@@ -1961,4 +1962,78 @@ private func runPriceCatalogTests() {
     // The embedded seed must be a usable catalog, not the bootstrap stub.
     expect("seed is usable", PricingSeed.anthropic.isEmpty, false)
     expect("seed carries openai rates", PricingSeed.openai.isEmpty, false)
+}
+
+/// The account each provider is signed in as, and the seat that words a Team
+/// plan. Both come out of files the adapters already read for the plan, so the
+/// fixtures here are the measured shapes of those files and nothing more.
+func runProviderAccountTests() {
+    let claudeBlob = Data(
+        #"""
+        {"oauthAccount":{"organizationType":"claude_team","userRateLimitTier":"default_claude_max_5x","seatTier":"team_tier_1","emailAddress":"someone@example.com","organizationName":"Example Ltd"}}
+        """#.utf8
+    )
+    expect(
+        "the claude profile carries the account beside the plan",
+        ClaudeProfileSource.read(claudeBlob),
+        .found(
+            ClaudeProfileSource.Profile(
+                plan: "team",
+                tier: "max_5x",
+                account: ProviderAccount(
+                    email: "someone@example.com",
+                    organization: "Example Ltd",
+                    seat: "team_tier_1"
+                )
+            )
+        )
+    )
+
+    // An account of nothing is no account: a row has nothing to render, and
+    // an empty identity would claim the file answered when it did not.
+    let bareProfile = Data(#"{"oauthAccount":{"organizationType":"claude_pro"}}"#.utf8)
+    expect(
+        "a profile naming nobody carries no account",
+        ClaudeProfileSource.read(bareProfile),
+        .found(ClaudeProfileSource.Profile(plan: "pro", tier: nil, account: nil))
+    )
+
+    // Measured shape of the id_token's claims: the address is top-level, the
+    // organisation and the renewal sit under the namespace key.
+    let codexClaims = Data(
+        #"""
+        {"email":"someone@example.com","https://api.openai.com/auth":{"chatgpt_plan_type":"plus","chatgpt_subscription_active_until":"2026-07-08T14:02:21+00:00","organizations":[{"title":"Work","is_default":false},{"title":"Personal","is_default":true}]}}
+        """#.utf8
+    )
+    .base64EncodedString()
+    .replacingOccurrences(of: "+", with: "-")
+    .replacingOccurrences(of: "/", with: "_")
+    .replacingOccurrences(of: "=", with: "")
+    let codexBlob = Data(#"{"tokens":{"id_token":"header.\#(codexClaims).signature"}}"#.utf8)
+    let codex = CodexAuthSource.parse(codexBlob)
+    expect("codex reads the address off the id_token", codex?.account?.email, "someone@example.com")
+    expect("codex takes the organisation the account defaults to", codex?.account?.organization, "Personal")
+    expect(
+        "codex reads when the subscription renews",
+        codex?.account?.renewsAt,
+        UsageReaderShared.parseTimestamp("2026-07-08T14:02:21+00:00")
+    )
+
+    expect(
+        "display text refuses a field longer than the bound",
+        UsageReaderShared.sanitizedDisplayText(
+            String(repeating: "a", count: UsageReaderShared.maxDisplayTextLength + 1)
+        ) == nil,
+        true
+    )
+    expect(
+        "display text refuses one that is only whitespace",
+        UsageReaderShared.sanitizedDisplayText("   ") == nil,
+        true
+    )
+    expect(
+        "display text keeps a row to one line",
+        UsageReaderShared.sanitizedDisplayText("Example\nLtd"),
+        "ExampleLtd"
+    )
 }

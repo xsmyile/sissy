@@ -23,6 +23,28 @@ enum UsageReaderShared {
     /// Claude Code applies to its own tier tokens (`^[a-z][a-z0-9_]{0,63}$`).
     static let maxPlanTokenLength = 64
 
+    /// Longest free-text field accepted off a vendor's own file. Past this it
+    /// is not a name, and a panel row is 340 points wide.
+    static let maxDisplayTextLength = 128
+
+    /// Narrows a free-text field — an address, an organisation's name — to
+    /// something a row can render.
+    ///
+    /// Deliberately not `sanitizedPlanToken`: these are not tokens, so the
+    /// only rules are that the value is not blank and not long enough to be
+    /// something other than a name. Control characters go because a row is
+    /// one line, and a file Sissy does not own is where the value came from.
+    static func sanitizedDisplayText(_ raw: String?) -> String? {
+        guard let raw, raw.count <= maxDisplayTextLength else { return nil }
+        let cleaned =
+            raw
+            .filter { character in
+                !character.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+            }
+            .trimmingCharacters(in: .whitespaces)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
     /// Largest per-field token count accepted off a session log.
     ///
     /// The counts are summed into a per-day total with Swift's trapping

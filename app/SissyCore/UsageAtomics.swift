@@ -41,6 +41,15 @@ final class AtomicPlan: @unchecked Sendable {
     func store(_ v: String?) { lock.withLock { value = v } }
 }
 
+/// Same handoff for the account a provider is signed in as. Read out of the
+/// vendor's own file on the provider's actor, answered from outside it.
+final class AtomicAccount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: ProviderAccount?
+    func load() -> ProviderAccount? { lock.withLock { value } }
+    func store(_ v: ProviderAccount?) { lock.withLock { value = v } }
+}
+
 /// Same handoff again for today's project split: the provider recomputes it on
 /// its actor at every emit, while `UsageProvider.currentProjects()` is read
 /// from the aggregator without an actor hop — the same reason the windows and

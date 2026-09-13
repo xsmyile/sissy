@@ -11,6 +11,7 @@ private struct ClaudeCodeSignals: SourceSignals {
     func currentWindows() -> [UsageWindow] { limitsProbe?.currentWindows() ?? [] }
     func currentPlan() -> String? { profile.currentPlan() }
     func currentPlanTier() -> String? { profile.currentPlanTier() }
+    func currentAccount() -> ProviderAccount? { profile.currentAccount() }
 }
 
 /// Claude Code's `~/.claude/projects/**/*.jsonl`: one `assistant` line per
