@@ -6,6 +6,10 @@ import XCTest
 /// the Overview leads on, and the account and project split a provider's own
 /// page prints.
 final class PanelPagesTests: XCTestCase {
+    /// Built the way the engine builds one, so the combined project list is
+    /// the slices summed rather than something a fixture asserted into
+    /// existence — a frame whose providers spend on projects and whose
+    /// `projects` is empty cannot happen outside a test.
     private func frame(_ providers: [ProviderSlice]) -> FrameData {
         FrameData(
             tokens: "26K",
@@ -16,7 +20,7 @@ final class PanelPagesTests: XCTestCase {
             prevCost: nil,
             keepAwake: .off,
             history: nil,
-            projects: []
+            projects: FrameBuilder.combinedProjects(providers)
         )
     }
 
