@@ -146,9 +146,7 @@ struct UsagePanelView: View {
             .foregroundStyle(.secondary)
             .help("Back to today")
 
-            Circle()
-                .fill(ProviderPalette.tint(for: row.id))
-                .frame(width: 7, height: 7)
+            ProviderMark(id: row.id)
 
             Text(row.name)
                 .font(.system(size: 13, weight: .semibold))

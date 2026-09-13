@@ -85,7 +85,7 @@ struct ProvidersSettingsView: View {
 
     @State private var showingLimitsDetail = false
 
-    private static let tintDotSize: CGFloat = 8
+    private static let markSize: CGFloat = 15
     /// Wide enough that the detail reads as a paragraph rather than a column.
     private static let detailPopoverWidth: CGFloat = 280
 
@@ -115,9 +115,7 @@ struct ProvidersSettingsView: View {
             Label {
                 Text(snapshot.name)
             } icon: {
-                Circle()
-                    .fill(ProviderPalette.tint(for: readiness.id))
-                    .frame(width: Self.tintDotSize, height: Self.tintDotSize)
+                ProviderMark(id: readiness.id, size: Self.markSize)
             }
         }
         Text(snapshot.detail)
