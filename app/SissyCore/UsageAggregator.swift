@@ -127,14 +127,6 @@ actor UsageAggregator {
         }
     }
 
-    /// Breakdown slices for the frame: every provider that spent tokens today,
-    /// in canonical order. Providers with no usage today (still-warming or
-    /// simply unused) are omitted so the panel shows the day's actual per-CLI
-    /// split instead of stale `$0` rows.
-    ///
-    /// Rate-limit windows are read through each provider's nonisolated
-    /// accessor. Awaiting the provider here would deadlock: the emit that
-    /// leads here runs while the provider still holds its own actor.
     /// Hands one provider the chance to re-read its own out-of-band files.
     /// Unknown ids are a no-op: the caller names a provider that may not be
     /// built on this run.
@@ -143,6 +135,14 @@ actor UsageAggregator {
         await provider.refreshSignals()
     }
 
+    /// Breakdown slices for the frame: every provider that spent tokens today,
+    /// in canonical order. Providers with no usage today (still-warming or
+    /// simply unused) are omitted so the panel shows the day's actual per-CLI
+    /// split instead of stale `$0` rows.
+    ///
+    /// Rate-limit windows are read through each provider's nonisolated
+    /// accessor. Awaiting the provider here would deadlock: the emit that
+    /// leads here runs while the provider still holds its own actor.
     private func currentProviderSlices() -> [ProviderSlice] {
         let raw = providers.compactMap { p -> ProviderSlice? in
             guard let s = perProvider[p.id] else { return nil }
