@@ -163,9 +163,14 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// and the answer current — and on a machine where the directory is still
     /// there it folds the row into the checkout it was cut from instead of
     /// dropping the name, which a migration would have thrown away for good.
-    /// A repository on an unmounted disk is the case that settles it: it reads
-    /// as unattributed while the disk is away and comes back whole, where a
-    /// rewrite would have destroyed the attribution on the first launch.
+    /// A repository on an unmounted disk is the case that settles it: the file
+    /// keeps the path either way, so the attribution survives, where a rewrite
+    /// would have destroyed it on the first launch without the disk. What it
+    /// costs is the label until the next launch, not the next mount — the
+    /// resolver pins an answer for the life of the process, so a path it first
+    /// read while the disk was away stays unattributed for the rest of the
+    /// run. The alternative is re-walking a path that answers nothing on every
+    /// flush, which is the common case, not the rare one.
     ///
     /// Two rows can land on one key — a deleted worktree and its subdirectory
     /// both answer nothing — so the totals are summed, never replaced.
