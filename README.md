@@ -36,7 +36,7 @@ brew install --cask xsmyile/sissy/sissy
 
 Grab the latest `Sissy-x.y.z.dmg` from [Releases](../../releases/latest), open it, and drag **Sissy** into Applications.
 
-Either way: launch Sissy and it starts tailing. It lives in the menu bar — no dock icon, no window — and asks for nothing on first run. The build is Developer ID signed and notarized, so there's no `xattr` workaround and no right-click → Open.
+Either way: launch Sissy and it starts tailing. It lives in the menu bar — no dock icon, no window — and asks for nothing on first run. Nothing it does reaches outside its own folder unless you switch it on: the one thing that can is **Name projects even when Sissy is off**, in Settings → General, which adds a line to `~/.claude/settings.json` and `~/.codex/hooks.json` so a session says which repository it is working in before the directory can be deleted. Switching it off takes both lines back out. The build is Developer ID signed and notarized, so there's no `xattr` workaround and no right-click → Open.
 
 ## What you see
 
