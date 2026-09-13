@@ -35,6 +35,58 @@ final class UsageHistoryStoreTests: XCTestCase {
         )
     }
 
+    /// The day an older build wrote naming a directory that is no longer a
+    /// repository. Re-read, the row answers nothing and the day stops
+    /// claiming a project Sissy cannot verify.
+    func testADayReattributesAPathThatNamesNoRepositoryAnyMore() {
+        let stored = day(rows: [
+            UsageHistoryRow(model: "opus", project: "/gone"): 100,
+            UsageHistoryRow(model: "opus", project: "/live"): 50,
+        ])
+
+        let reread = stored.reattributed { $0 == "/live" ? "/live" : nil }
+
+        XCTAssertEqual(reread.totalsByRow[UsageHistoryRow(model: "opus", project: nil)]?.inputTokens, 100)
+        XCTAssertEqual(
+            reread.totalsByRow[UsageHistoryRow(model: "opus", project: "/live")]?.inputTokens, 50)
+        XCTAssertEqual(reread.totalTokens, stored.totalTokens, "re-reading a day moved its money")
+    }
+
+    /// A deleted worktree and a subdirectory of it were two rows and answer
+    /// one key. Summed, not replaced — otherwise re-reading loses a row.
+    func testTwoRowsThatReattributeToOneKeyAreSummed() {
+        let stored = day(rows: [
+            UsageHistoryRow(model: "opus", project: "/gone"): 100,
+            UsageHistoryRow(model: "opus", project: "/gone/app"): 50,
+        ])
+
+        let reread = stored.reattributed { _ in nil }
+
+        XCTAssertEqual(reread.models.count, 1)
+        XCTAssertEqual(reread.totalsByRow[UsageHistoryRow(model: "opus", project: nil)]?.inputTokens, 150)
+    }
+
+    /// The freeze this unblocks: the day on disk names an invented project,
+    /// the corrected reading cannot, and held to the stored key it would
+    /// refuse the write for good. Re-read first, it covers.
+    func testAReattributedDayIsCoveredByTheReadingThatNoLongerNamesTheProject() {
+        let stored = day(rows: [UsageHistoryRow(model: "opus", project: "/gone"): 100])
+        let reading = day(rows: [UsageHistoryRow(model: "opus", project: nil): 100])
+
+        XCTAssertFalse(stored.isCoveredBy(reading), "the freeze this exists to lift")
+        XCTAssertTrue(stored.reattributed { _ in nil }.isCoveredBy(reading))
+    }
+
+    /// A repository on an unmounted disk answers nothing while it is away.
+    /// The file is never rewritten, so the attribution comes back with it.
+    func testAPathThatResolvesAgainKeepsItsRow() {
+        let stored = day(rows: [UsageHistoryRow(model: "opus", project: "/vol/repo"): 100])
+
+        let reread = stored.reattributed { $0 }
+
+        XCTAssertEqual(reread.models.map(\.project), ["/vol/repo"])
+    }
+
     /// A file written before the archive carried projects has to be
     /// replaceable by a reading that splits the same model across projects,
     /// or every day on disk freezes on the upgrade.

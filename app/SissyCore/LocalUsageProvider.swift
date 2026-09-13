@@ -866,6 +866,12 @@ actor LocalUsageProvider: UsageProvider {
     /// The rows are restored whether or not the archive is on. They are what
     /// the panel splits today by, and a disk-retention setting must not
     /// quietly take a live answer away with it.
+    /// Reads a project path that came off disk again, for the one thing the
+    /// adapters' own resolvers never see: rows an earlier build persisted. The
+    /// cache is per-instance, so this is the provider's own hundred or so
+    /// paths, not a second copy of the tail's.
+    private let projects = ProjectResolver()
+
     private func restoreModelTotals(from snapshot: UsageStateSnapshot) {
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
@@ -874,15 +880,18 @@ actor LocalUsageProvider: UsageProvider {
             guard let dayDate = dayFmt.date(from: row.day) else { continue }
             let dayKey = cal.startOfDay(for: dayDate)
             guard dailyTotals[dayKey] != nil else { continue }
-            restored[dayKey, default: [:]][
-                UsageHistoryRow(model: row.model, project: row.project)
-            ] = UsageHistoryTotals(
-                inputTokens: row.inputTokens,
-                outputTokens: row.outputTokens,
-                cacheReadTokens: row.cacheReadTokens,
-                cacheCreationTokens: row.cacheCreationTokens,
-                cost: Decimal(string: row.cost) ?? 0
+            let key = UsageHistoryRow(
+                model: row.model,
+                project: row.project.flatMap { projects.project(for: $0) }
             )
+            restored[dayKey, default: [:]][key, default: .init()].add(
+                UsageHistoryTotals(
+                    inputTokens: row.inputTokens,
+                    outputTokens: row.outputTokens,
+                    cacheReadTokens: row.cacheReadTokens,
+                    cacheCreationTokens: row.cacheCreationTokens,
+                    cost: Decimal(string: row.cost) ?? 0
+                ))
         }
         for day in dailyTotals.keys {
             guard let totals = restored[day] else {
@@ -996,7 +1005,8 @@ actor LocalUsageProvider: UsageProvider {
             switch UsageHistoryStore.stored(provider: id, day: record.day, in: historyRoot) {
             case .unreadable:
                 continue
-            case .day(let onDisk) where !onDisk.isCoveredBy(record):
+            case .day(let onDisk)
+            where !onDisk.reattributed(by: { projects.project(for: $0) }).isCoveredBy(record):
                 continue
             case .absent, .day:
                 break
