@@ -65,20 +65,19 @@ struct UsageStateSnapshot: Codable, Equatable {
     /// "this snapshot predates the field", which the Codex reader answers with
     /// a cold scan of its own tree and every other reader ignores.
     var codexResume: CodexResume?
-    /// Directories the resolver has read a `.git` entry from, so a checkout
-    /// deleted between the turn that wrote a line and the scan that reads it
-    /// still names the repository it belonged to.
+    /// Directories a `.git` entry was read from, as an install that predates
+    /// `ProjectLedger` left them here.
     ///
-    /// Optional for the reason `codexResume` is, and restored before anything
-    /// else in the snapshot is even looked at: every other field describes
-    /// token math this build may have to redo, while this one is a reading of
-    /// the disk that was true when it was taken. A snapshot refused for a
-    /// stale offset or an adapter that cannot resume from it still knows which
-    /// directory was whose, and a cold scan is exactly when that matters.
+    /// Read on load and never written again: the ledger is its own file with
+    /// its own schema, because this one is quarantined whenever the way a cost
+    /// is derived changes — and a memory of which directory was whose has
+    /// nothing to do with cost, while the cold scan that bump forces is
+    /// exactly when it is needed. The field stays so an upgrade inherits what
+    /// the old build knew instead of starting blind.
     ///
-    /// It holds no usage — no tokens, no cost, no times — and it is bounded by
-    /// `ProjectResolver.maxRememberedCheckouts`. What it does hold is paths,
-    /// which are personal data like every other project path Sissy keeps.
+    /// It holds no usage — no tokens, no cost, no times. What it does hold is
+    /// paths, which are personal data like every other project path Sissy
+    /// keeps.
     var projectCheckouts: [ProjectCheckout]?
 
     /// Grouped the way `CodexResume` is, and for the same reason: absence is

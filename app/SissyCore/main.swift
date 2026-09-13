@@ -113,17 +113,23 @@ if args.contains("--scan") {
         // comparing this output against `ccusage` measures Sissy's real
         // behaviour rather than a set of defaults nobody runs.
         var providers: [any UsageProvider] = []
+        // The install's own ledger, so a scan attributes what the app would
+        // rather than only what is still on disk at the moment it runs.
+        let projectLedger = ProjectLedger(
+            url: ProjectLedger.defaultURL(in: configURL.deletingLastPathComponent()))
         if scanFilter == "all" || scanFilter == "claude-code" {
             providers.append(
                 LocalUsageProvider.claudeCode(
                     claudeDir: config.resolvedClaudeDataDir,
-                    pricingOverride: config.pricingOverride))
+                    pricingOverride: config.pricingOverride,
+                    ledger: projectLedger))
         }
         if scanFilter == "all" || scanFilter == "codex" {
             providers.append(
                 LocalUsageProvider.codex(
                     codexDir: config.resolvedCodexDataDir,
-                    pricingOverride: config.pricingOverride))
+                    pricingOverride: config.pricingOverride,
+                    ledger: projectLedger))
         }
         // No fetch here — `--scan` stays offline and fast. The cached catalog
         // only exists once something has refreshed it; otherwise the embedded

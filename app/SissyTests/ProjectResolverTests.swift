@@ -7,13 +7,15 @@ import XCTest
 /// stubbed file system could not show.
 final class ProjectResolverTests: XCTestCase {
     private var root: URL!
+    private var ledger: ProjectLedger!
     private var resolver: ProjectResolver!
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("sissy-projects-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        resolver = ProjectResolver()
+        ledger = ProjectLedger()
+        resolver = ProjectResolver(ledger: ledger)
     }
 
     override func tearDownWithError() throws {
@@ -126,11 +128,10 @@ final class ProjectResolverTests: XCTestCase {
     func testADirectoryStillOnDiskIsAnsweredByTheDiskRatherThanByWhatItWas() throws {
         let repo = try makeRepository("legion")
         XCTAssertEqual(resolver.project(for: repo.path), repo.path)
-        let remembered = resolver.rememberedCheckouts()
+        let remembered = ledger.all()
         try FileManager.default.removeItem(at: repo.appendingPathComponent(".git"))
 
-        let nextRun = ProjectResolver()
-        nextRun.adopt(remembered)
+        let nextRun = relaunch(adopting: remembered)
 
         XCTAssertNil(nextRun.project(for: repo.path))
     }
@@ -155,14 +156,13 @@ final class ProjectResolverTests: XCTestCase {
     /// What is carried between runs is bounded, so a year of worktrees cannot
     /// grow the snapshot without end.
     func testWhatIsCarriedBetweenRunsIsBounded() {
-        let many = (1...(ProjectResolver.maxRememberedCheckouts + 10)).map {
+        let many = (1...(ProjectLedger.maxCheckouts + 10)).map {
             ProjectCheckout(directory: "/Users/d/gone/\($0)", project: "/Users/d/dev/sissy")
         }
 
-        resolver.adopt(many)
+        ledger.adopt(many)
 
-        XCTAssertEqual(
-            resolver.rememberedCheckouts().count, ProjectResolver.maxRememberedCheckouts)
+        XCTAssertEqual(ledger.all().count, ProjectLedger.maxCheckouts)
     }
 
     func testAResolvedDirectoryIsNotWalkedTwice() throws {
@@ -182,11 +182,15 @@ final class ProjectResolverTests: XCTestCase {
     /// with what this one wrote into the snapshot, after `gone` has been
     /// deleted the way a worktree is.
     private func relaunch(after gone: URL) throws -> ProjectResolver {
-        let remembered = resolver.rememberedCheckouts()
+        let remembered = ledger.all()
         try FileManager.default.removeItem(at: gone)
-        let next = ProjectResolver()
+        return relaunch(adopting: remembered)
+    }
+
+    private func relaunch(adopting remembered: [ProjectCheckout]) -> ProjectResolver {
+        let next = ProjectLedger()
         next.adopt(remembered)
-        return next
+        return ProjectResolver(ledger: next)
     }
 
     private func makeRepository(_ name: String) throws -> URL {

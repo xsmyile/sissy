@@ -37,18 +37,21 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// model per run instead of one per ingested event.
     private var loggedUnpricedModels: Set<String> = []
     /// Claude Code names the working directory on every assistant line,
-    /// so the resolver's cache is what keeps this off the per-line path.
-    let projects = ProjectResolver()
+    /// so the resolver's cache is what keeps this off the per-line path. The
+    /// ledger behind it is the process's, not this adapter's.
+    let projects: ProjectResolver
     private let profile: ClaudeProfileSource
 
     init(
         claudeDir: URL,
         pricingOverride: [String: ModelPricing]?,
         limitsProbe: ClaudeLimitsProbe?,
-        profile: ClaudeProfileSource
+        profile: ClaudeProfileSource,
+        ledger: ProjectLedger
     ) {
         self.pricingOverride = pricingOverride
         self.profile = profile
+        self.projects = ProjectResolver(ledger: ledger)
         self.descriptor = SourceDescriptor(
             id: "claude-code",
             root: claudeDir,
@@ -294,14 +297,16 @@ extension LocalUsageProvider {
         historyRoot: URL? = nil,
         pricingOverride: [String: ModelPricing]? = nil,
         limitsProbe: ClaudeLimitsProbe? = nil,
-        profile: ClaudeProfileSource = ClaudeProfileSource()
+        profile: ClaudeProfileSource = ClaudeProfileSource(),
+        ledger: ProjectLedger = ProjectLedger()
     ) -> LocalUsageProvider {
         LocalUsageProvider(
             adapter: ClaudeCodeAdapter(
                 claudeDir: claudeDir,
                 pricingOverride: pricingOverride,
                 limitsProbe: limitsProbe,
-                profile: profile
+                profile: profile,
+                ledger: ledger
             ),
             retainDays: retainDays,
             pollInterval: pollInterval,

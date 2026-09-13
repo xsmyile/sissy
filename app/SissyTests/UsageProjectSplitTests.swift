@@ -220,7 +220,8 @@ final class UsageProjectSplitTests: XCTestCase {
             retainDays: 2,
             pollInterval: .seconds(60),
             persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
-            historyRoot: nil
+            historyRoot: nil,
+            ledger: ledger()
         )
         await provider.start { _, _ in }
         let split = provider.currentProjects()
@@ -241,7 +242,8 @@ final class UsageProjectSplitTests: XCTestCase {
             retainDays: 2,
             pollInterval: .seconds(60),
             persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
-            historyRoot: stateDir
+            historyRoot: stateDir,
+            ledger: ledger()
         )
         await provider.start { _, _ in }
         await provider.stop()
@@ -253,10 +255,18 @@ final class UsageProjectSplitTests: XCTestCase {
             retainDays: 2,
             pollInterval: .seconds(60),
             persistenceURL: UsageStatePersistence.forProvider(ProviderID.codex, in: stateDir),
-            historyRoot: stateDir
+            historyRoot: stateDir,
+            ledger: ledger()
         )
         await provider.start { _, _ in }
         await provider.stop()
+    }
+
+    /// The install's ledger, read fresh the way a relaunch reads it. Every
+    /// tail here shares the one file for the reason the app's do: what a
+    /// directory was is one answer, not one per provider and not one per run.
+    private func ledger() -> ProjectLedger {
+        ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
     }
 
     private func archivedToday(_ provider: String) throws -> UsageHistoryDay {
