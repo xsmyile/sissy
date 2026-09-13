@@ -34,12 +34,14 @@ final class UsageFormatTests: XCTestCase {
             UsageFormat.reading(age: 41, holding: nil, refreshing: false), "updated 41s ago")
     }
 
-    /// The hold rides the same line rather than a readout of its own, and
-    /// leads it: it is the older fact of the two.
-    func testReadingCarriesTheHoldAheadOfTheAge() {
+    /// The hold trails the age so that a clause which comes and goes cannot
+    /// shove the one that is always there: the line is left-aligned, and a
+    /// leading hold moves "updated" sideways every time it appears or gains a
+    /// unit.
+    func testReadingTrailsTheHoldBehindTheAge() {
         XCTAssertEqual(
             UsageFormat.reading(age: 41, holding: 900, refreshing: false),
-            UsageFormat.held(900) + " · updated 41s ago")
+            "updated 41s ago · awake " + UsageFormat.held(900))
     }
 
     /// A refresh re-reads the provider, not the power assertion, so the hold
@@ -47,7 +49,7 @@ final class UsageFormatTests: XCTestCase {
     func testRefreshingKeepsTheHoldAndDropsOnlyTheAge() {
         XCTAssertEqual(
             UsageFormat.reading(age: 41, holding: 900, refreshing: true),
-            UsageFormat.held(900) + " · refreshing…")
+            "refreshing… · awake " + UsageFormat.held(900))
     }
 
     /// The age goes away while a refresh is running rather than ticking on
