@@ -120,14 +120,18 @@ enum ClaudeCredentialsStore {
     /// macOS 27 against the item Claude Code writes: a read carrying both an
     /// `interactionNotAllowed` `LAContext` and `kSecUseAuthenticationUIFail`
     /// still raised the panel at launch. That panel is the *keychain's* own
-    /// ACL check — this app is not on another team's item — rather than an
-    /// authentication policy, and the only switch that reaches it is
-    /// `SecKeychainSetUserInteractionAllowed`. It is process-wide and
+    /// ACL check — Sissy is not on the ACL of an item another team wrote —
+    /// rather than an authentication policy, and the only switch that reaches
+    /// it is `SecKeychainSetUserInteractionAllowed`. It is process-wide and
     /// deprecated with no replacement, so it is resolved by name for the same
     /// reason the constants are, thrown only around the call, and put back
     /// before returning — the interactive read a user action makes needs the
     /// panel. Process-wide is safe here because `loadOffPool`'s gate runs one
     /// lookup at a time and nothing else in Sissy touches a keychain.
+    ///
+    /// The restore is to `true` rather than to whatever was there before: the
+    /// API has no getter, and `true` is the state every process starts in and
+    /// the only one anything else in Sissy would want.
     static func load(allowingInteraction: Bool) -> ClaudeCredentialsLookup {
         let suppressed = allowingInteraction ? false : setUserInteractionAllowed(false)
         defer { if suppressed { _ = setUserInteractionAllowed(true) } }
@@ -214,7 +218,7 @@ enum ClaudeCredentialsStore {
     /// The answer is what the caller restores against: a build that cannot
     /// resolve the symbol reads the way it always did rather than leaving the
     /// panel suppressed for the rest of the run.
-    static func setUserInteractionAllowed(_ allowed: Bool) -> Bool {
+    private static func setUserInteractionAllowed(_ allowed: Bool) -> Bool {
         guard let symbol = dlsym(rtldDefault, userInteractionName) else { return false }
         let set = unsafeBitCast(symbol, to: SetUserInteractionAllowed.self)
         return set(allowed ? 1 : 0) == errSecSuccess
