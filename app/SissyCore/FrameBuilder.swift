@@ -50,8 +50,19 @@ struct ProjectTotals: Sendable, Equatable, Identifiable {
     let path: String
     let tokens: Int
     let cost: Decimal
+    /// The account this repository is pushed to, when its `origin` names a
+    /// forge. Nil for a repository with no such remote and for one whose
+    /// checkout is gone, both of which keep the row the plain name it has.
+    let owner: String?
 
     var id: String { path }
+
+    init(path: String, tokens: Int, cost: Decimal, owner: String? = nil) {
+        self.path = path
+        self.tokens = tokens
+        self.cost = cost
+        self.owner = owner
+    }
 }
 
 /// Why a provider's rate-limit windows are missing, when they are.
@@ -298,15 +309,18 @@ enum FrameBuilder {
     static func combinedProjects(_ slices: [ProviderSlice]) -> [ProjectTotals] {
         var tokens: [String: Int] = [:]
         var cost: [String: Decimal] = [:]
+        var owner: [String: String] = [:]
         for slice in slices {
             for project in slice.projects {
                 tokens[project.path, default: 0] += project.tokens
                 cost[project.path, default: 0] += project.cost
+                if let named = project.owner { owner[project.path] = named }
             }
         }
         return orderedProjects(
             tokens.keys.map {
-                ProjectTotals(path: $0, tokens: tokens[$0] ?? 0, cost: cost[$0] ?? 0)
+                ProjectTotals(
+                    path: $0, tokens: tokens[$0] ?? 0, cost: cost[$0] ?? 0, owner: owner[$0])
             })
     }
 

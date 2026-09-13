@@ -232,10 +232,20 @@ struct ProjectRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
-                Text(row.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 0) {
+                    if let owner = row.owner {
+                        Text(owner + "/")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .layoutPriority(-1)
+                    }
+                    Text(row.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
                 Spacer(minLength: 0)
                 Text("\(row.tokens) · \(row.cost)")
                     .font(.system(size: 12))

@@ -61,6 +61,8 @@ final class ProjectResolver {
     private static let worktreeMarker = "/.git/worktrees/"
     private static let gitdirPrefix = "gitdir:"
     private static let gitEntryName = ".git"
+    private static let originSection = "[remote \"origin\"]"
+    private static let urlKey = "url"
 
     /// How many gone checkouts are worth carrying. A real history names a few
     /// hundred over a year of worktrees; past that the oldest are dropped, and
@@ -70,6 +72,7 @@ final class ProjectResolver {
 
     private let fileManager: FileManager
     private var cache: [String: String?] = [:]
+    private var owners: [String: String?] = [:]
     /// Most recently confirmed first, which is also the order the cap drops
     /// from: a checkout still being worked in is re-confirmed on every launch.
     private var checkouts: [ProjectCheckout] = []
@@ -95,6 +98,31 @@ final class ProjectResolver {
     }
 
     func rememberedCheckouts() -> [ProjectCheckout] { checkouts }
+
+    /// The account a repository belongs to on the forge it is pushed to —
+    /// `radonforge` for `radonforge/website` — read from its `origin` remote.
+    ///
+    /// It exists because a repository's own name is not unique: `website`
+    /// under two different accounts is two projects rendering one label, and
+    /// the path that tells them apart is in a tooltip nobody hovers. The owner
+    /// is the shortest thing that separates them.
+    ///
+    /// Nil whenever the answer would be invented. A repository with no
+    /// `origin`, one whose `origin` is a path on this Mac rather than a forge,
+    /// and a checkout that has since been deleted all answer nothing, and the
+    /// row keeps the name it has today. Read fresh rather than persisted: a
+    /// remote can be renamed or removed, and what a path means is today's
+    /// answer.
+    ///
+    /// A forge that nests groups — `gitlab.com/group/sub/repo` — answers
+    /// `sub`, which is the account the repository sits directly under rather
+    /// than the whole hierarchy. That is the label the user types.
+    func repositoryOwner(for project: String) -> String? {
+        if let hit = owners[project] { return hit }
+        let resolved = readRepositoryOwner(project)
+        owners[project] = resolved
+        return resolved
+    }
 
     private func resolve(_ workingDirectory: String) -> String? {
         let start = URL(fileURLWithPath: workingDirectory).standardizedFileURL
@@ -181,6 +209,67 @@ final class ProjectResolver {
                 .path
         }
         return nil
+    }
+
+    /// The `url` of the `origin` remote, or nil when the repository has no
+    /// `.git/config` on disk — which is also the answer for a checkout that
+    /// has been deleted since its rows were counted.
+    private func originURL(ofRepository project: String) -> String? {
+        let config = URL(fileURLWithPath: project)
+            .appendingPathComponent(Self.gitEntryName)
+            .appendingPathComponent("config")
+        guard let text = try? String(contentsOf: config, encoding: .utf8) else { return nil }
+        var inOrigin = false
+        for line in text.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") {
+                inOrigin = trimmed == Self.originSection
+                continue
+            }
+            guard inOrigin, let separator = trimmed.firstIndex(of: "=") else { continue }
+            let key = trimmed[trimmed.startIndex..<separator].trimmingCharacters(in: .whitespaces)
+            guard key == Self.urlKey else { continue }
+            let value = trimmed[trimmed.index(after: separator)...]
+                .trimmingCharacters(in: .whitespaces)
+            return value.isEmpty ? nil : value
+        }
+        return nil
+    }
+
+    private func readRepositoryOwner(_ project: String) -> String? {
+        guard let url = originURL(ofRepository: project) else { return nil }
+        return Self.owner(ofRemoteURL: url)
+    }
+
+    /// The segment before the repository name in a remote that names a forge.
+    ///
+    /// Both shapes git writes are accepted: an SCP-like `git@host:owner/repo`
+    /// and a URL `scheme://[user@]host/owner/repo`. Anything naming a path on
+    /// this Mac answers nil rather than the enclosing folder — a bare path
+    /// with no scheme and no `host:`, and equally a `file://` URL, whose host
+    /// is empty and whose first segment is a directory rather than an account.
+    static func owner(ofRemoteURL remote: String) -> String? {
+        let trimmed = remote.trimmingCharacters(in: .whitespaces)
+        let path: String
+        if let scheme = trimmed.range(of: "://") {
+            let afterScheme = trimmed[scheme.upperBound...]
+            guard let slash = afterScheme.firstIndex(of: "/"), slash != afterScheme.startIndex
+            else { return nil }
+            path = String(afterScheme[afterScheme.index(after: slash)...])
+        } else if let colon = trimmed.firstIndex(of: ":") {
+            let host = trimmed[trimmed.startIndex..<colon]
+            guard !host.isEmpty, !host.contains("/") else { return nil }
+            path = String(trimmed[trimmed.index(after: colon)...])
+        } else {
+            return nil
+        }
+        let segments =
+            path
+            .split(separator: "/")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard segments.count >= 2 else { return nil }
+        return segments[segments.count - 2]
     }
 }
 

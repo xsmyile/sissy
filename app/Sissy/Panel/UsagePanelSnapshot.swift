@@ -128,6 +128,15 @@ struct UsagePanelSnapshot: Equatable {
         /// The repository's own name — the last component of its path, which
         /// is what the user calls it.
         let name: String
+        /// The account the repository is pushed to, drawn quiet in front of
+        /// the name. Nil when the repository names no forge, and on the two
+        /// rows that stand for no repository at all.
+        ///
+        /// It prefixes the name rather than replacing it: two accounts can
+        /// hold a `website` each, and without this the panel draws one label
+        /// twice. The name still comes from the directory, so a row never
+        /// changes what it was already called.
+        let owner: String?
         /// What the row hovers: a repository's full path, or why a row that is
         /// not a repository is there. Nil on the folded row, which stands for
         /// several. A project path is a client's name as often as not, so the
@@ -316,6 +325,7 @@ struct UsagePanelSnapshot: Equatable {
             ProjectRow(
                 id: project.path,
                 name: UsageFormat.projectName(project.path),
+                owner: project.owner,
                 tooltip: project.path,
                 tokens: UsageFormat.tokens(project.tokens),
                 cost: UsageFormat.cost(project.cost),
@@ -329,6 +339,7 @@ struct UsagePanelSnapshot: Equatable {
                 ProjectRow(
                     id: Self.foldedProjectRowID,
                     name: UsageFormat.projectsFolded(count: rest.count),
+                    owner: nil,
                     tooltip: nil,
                     tokens: UsageFormat.tokens(rest.reduce(0) { $0 + $1.tokens }),
                     cost: UsageFormat.cost(restCost),
@@ -350,6 +361,7 @@ struct UsagePanelSnapshot: Equatable {
             ProjectRow(
                 id: Self.unattributedRowID,
                 name: UsageFormat.projectsUnattributed,
+                owner: nil,
                 tooltip: UsageFormat.projectsUnattributedReason,
                 tokens: UsageFormat.tokens(totalTokens - namedTokens),
                 cost: UsageFormat.cost(unnamedCost),

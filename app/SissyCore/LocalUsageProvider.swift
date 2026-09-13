@@ -522,7 +522,12 @@ actor LocalUsageProvider: UsageProvider {
             cost[project, default: 0] += totals.cost
         }
         return tokens.keys.map {
-            ProjectTotals(path: $0, tokens: tokens[$0] ?? 0, cost: cost[$0] ?? 0)
+            ProjectTotals(
+                path: $0,
+                tokens: tokens[$0] ?? 0,
+                cost: cost[$0] ?? 0,
+                owner: adapter.projects.repositoryOwner(for: $0)
+            )
         }
     }
 
