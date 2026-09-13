@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The usage panel shown on a left-click of the status item: a header, a page,
-/// and a footer.
+/// The usage panel shown on a left-click of the status item: a header and the
+/// page it belongs to.
 ///
 /// The panel holds two surfaces because it answers two questions. `PanelOverview`
 /// is what today costs and whether there is room to keep working;
@@ -84,8 +84,6 @@ struct UsagePanelView: View {
             } else {
                 placeholder
             }
-            Divider()
-            footer()
         }
         .frame(width: PanelMetrics.width)
         .focusable()
@@ -118,10 +116,20 @@ struct UsagePanelView: View {
 
             Spacer(minLength: 0)
 
-            keepAwakeControl
+            headerControls
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
+    }
+
+    /// The app's own switches, which is why they are here and not on a
+    /// provider's page: what the Mac is doing about sleep, and the way into
+    /// Settings. Neither is about an account.
+    private var headerControls: some View {
+        HStack(spacing: 6) {
+            keepAwakeControl
+            settingsButton
+        }
     }
 
     /// What the header says under its title: why there is no reading, or when
@@ -278,6 +286,38 @@ struct UsagePanelView: View {
         .contextMenu { keepAwakeModes }
     }
 
+    /// The same circle as the keep-awake switch beside it, and grey where that
+    /// one colours: this is the way out of the panel rather than something the
+    /// panel is doing, so it takes the shape and gives up the tint.
+    ///
+    /// It came up from a footer that had nothing else left in it once the
+    /// reading's age moved under the title. It belongs to home alone — a
+    /// provider's page puts its refresh in this corner, and two round buttons
+    /// that mean different things in the same place is how a header stops
+    /// being read.
+    ///
+    /// `SettingsLink` is the only public way to open the `Settings` scene and
+    /// it takes no action closure, so the simultaneous gesture is what aims
+    /// the window at a tab.
+    ///
+    /// Filled and a point larger than the cup, which is what makes the two
+    /// weigh the same: rendered side by side, an outline gear reads lighter
+    /// than a filled cup at every size, and a filled one only catches up at
+    /// 12.
+    private var settingsButton: some View {
+        SettingsLink {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+                .foregroundStyle(.secondary)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular, in: .circle)
+        .help("Settings")
+        .simultaneousGesture(TapGesture().onEnded { model.settingsTab = .general })
+    }
+
     /// The three modes as a radio group, which is what an inline `Picker` in a
     /// menu renders to — the same shape as the status item's own menu, from
     /// the same words, so the two cannot drift.
@@ -327,36 +367,5 @@ struct UsagePanelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 14)
-    }
-
-    // MARK: Footer
-
-    private func footer() -> some View {
-        HStack(spacing: 6) {
-            Spacer(minLength: 0)
-
-            settingsLink("gearshape", help: "Settings", tab: .general)
-        }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 10)
-    }
-
-    /// `SettingsLink` is the only public way to open the `Settings` scene, and
-    /// it takes no action closure — the simultaneous gesture is what lets a
-    /// footer button aim the window at its own tab.
-    private func settingsLink(_ symbol: String, help: String, tab: SettingsTab) -> some View {
-        SettingsLink {
-            footerIcon(symbol)
-        }
-        .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .help(help)
-        .simultaneousGesture(TapGesture().onEnded { model.settingsTab = tab })
-    }
-
-    private func footerIcon(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 12))
-            .frame(width: 16, height: 16)
     }
 }
