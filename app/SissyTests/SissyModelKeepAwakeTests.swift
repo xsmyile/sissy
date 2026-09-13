@@ -86,16 +86,34 @@ final class SissyModelKeepAwakeTests: XCTestCase {
         XCTAssertEqual(model.preferredKeepAwakeMode, .auto)
     }
 
+    /// What a click arms before anything has told the app otherwise. The
+    /// tooltip names this, so it is a promise rather than an internal default.
+    func testTheColdTargetIsThePermanentMode() {
+        XCTAssertEqual(SissyModel().preferredKeepAwakeMode, .on)
+    }
+
     /// A hold does not survive the process but the mode does, so the target is
     /// re-learned from the first frame that reports an armed mode rather than
-    /// defaulting to the permanent one on every relaunch.
+    /// staying at the cold default for the rest of the run.
     func testARelaunchLearnsTheTargetFromTheFirstArmedFrame() {
         let model = SissyModel()
-
-        XCTAssertEqual(model.preferredKeepAwakeMode, .on)
         model.applyFrame(frame(KeepAwakeState(mode: .auto, active: false)))
 
         XCTAssertEqual(model.preferredKeepAwakeMode, .auto)
+    }
+
+    /// The optimistic window lies about the mode and must lie about nothing
+    /// else. Dropping `coversScreen` there tells someone who just switched
+    /// modes under a screen-covering hold that their screen is about to lock,
+    /// for as long as the window lasts.
+    func testAPendingRequestKeepsTheRunningHoldsScreenClause() {
+        let model = SissyModel()
+        model.applyFrame(
+            frame(KeepAwakeState(mode: .on, active: true, since: Date(), coversScreen: true)))
+        model.setKeepAwake(.auto)
+
+        XCTAssertEqual(model.keepAwake.mode, .auto)
+        XCTAssertTrue(model.keepAwake.coversScreen)
     }
 
     /// Switching off is not a choice of mode. The engine does it on its own
