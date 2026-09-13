@@ -77,6 +77,12 @@ final class ProjectLedger: @unchecked Sendable {
     private let url: URL?
     private let fileManager: FileManager
     private let lock = NSLock()
+    /// Held for the whole of a save, so the two providers cannot both reach
+    /// the file with a document each: the one that wrote second would decide
+    /// what is on disk, and the one that wrote the newer document has already
+    /// cleared `dirty`, so nothing would rewrite it. Taken outside `lock` and
+    /// never the other way round, which is the only order either is taken in.
+    private let writeLock = NSLock()
     /// Most recently confirmed first, which is also the order the cap drops
     /// from: a checkout still being worked in is re-confirmed on every launch.
     private var checkouts: [ProjectCheckout] = []
@@ -183,25 +189,31 @@ final class ProjectLedger: @unchecked Sendable {
         }
     }
 
+    /// Flushed **ahead of** the tail's snapshot, which writes its own
+    /// `projectCheckouts` back as nil: an install being migrated off that
+    /// field has its only copy of the memory here until this returns, and the
+    /// other order loses it to any process that dies in between.
     func saveIfDirty(now: Date = Date()) {
         guard let url else { return }
-        let document: Document? = lock.withLock {
-            guard dirty, writable else { return nil }
-            dirty = false
-            return Document(
-                schemaVersion: Self.currentSchemaVersion, updatedAt: now, checkouts: checkouts)
-        }
-        guard let document else { return }
-        do {
-            try fileManager.createDirectory(
-                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            encoder.dateEncodingStrategy = .iso8601
-            try encoder.encode(document).write(to: url, options: [.atomic])
-        } catch {
-            lock.withLock { dirty = true }
-            sissyLog("sissy: project ledger save failed at \(url.path): \(error)")
+        writeLock.withLock {
+            let document: Document? = lock.withLock {
+                guard dirty, writable else { return nil }
+                dirty = false
+                return Document(
+                    schemaVersion: Self.currentSchemaVersion, updatedAt: now, checkouts: checkouts)
+            }
+            guard let document else { return }
+            do {
+                try fileManager.createDirectory(
+                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.sortedKeys]
+                encoder.dateEncodingStrategy = .iso8601
+                try encoder.encode(document).write(to: url, options: [.atomic])
+            } catch {
+                lock.withLock { dirty = true }
+                sissyLog("sissy: project ledger save failed at \(url.path): \(error)")
+            }
         }
     }
 
@@ -245,8 +257,14 @@ final class ProjectLedger: @unchecked Sendable {
         let stamp = Int(Date().timeIntervalSince1970)
         let target = url.deletingLastPathComponent()
             .appendingPathComponent("\(url.lastPathComponent).corrupt-\(stamp).json")
-        try? fileManager.moveItem(at: url, to: target)
-        sissyLog("sissy: project ledger at \(url.path) did not decode — quarantined")
+        do {
+            try fileManager.moveItem(at: url, to: target)
+            sissyLog("sissy: project ledger at \(url.path) did not decode — quarantined")
+        } catch {
+            sissyLog(
+                "sissy: project ledger at \(url.path) did not decode and could not be moved "
+                    + "aside (\(error)) — this run starts empty and will overwrite it")
+        }
     }
 
     private func cap() {
