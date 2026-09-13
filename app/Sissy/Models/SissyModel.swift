@@ -142,6 +142,10 @@ final class SissyModel {
         engine.setClaudeLimits(enabled)
     }
 
+    func refreshProvider(_ id: String) {
+        engine.refreshProvider(id)
+    }
+
     // MARK: Keep awake
 
     /// A mode the app has asked for and the engine has not answered yet.

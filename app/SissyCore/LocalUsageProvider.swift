@@ -41,6 +41,7 @@ protocol SourceSignals: Sendable {
     func currentPlan() -> String?
     func currentPlanTier() -> String?
     func currentAccount() -> ProviderAccount?
+    func currentLimitsState() -> ProviderLimitsState
 }
 
 extension SourceSignals {
@@ -48,6 +49,7 @@ extension SourceSignals {
     func currentPlan() -> String? { nil }
     func currentPlanTier() -> String? { nil }
     func currentAccount() -> ProviderAccount? { nil }
+    func currentLimitsState() -> ProviderLimitsState { .quiet }
 }
 
 /// The facts `LocalUsageProvider` copies out of its adapter at init, so it can
@@ -122,6 +124,11 @@ protocol SourceAdapter: AnyObject {
     /// Ran at the top of every poll, for out-of-band state that goes stale.
     func willPoll()
 
+    /// Re-reads the out-of-band state on demand, for the one surface that
+    /// asks: a user pressing refresh. True when something changed that the
+    /// next snapshot should carry.
+    func refreshOutOfBandState() -> Bool
+
     /// Drops per-file state for files the provider no longer tracks, so an
     /// adapter's own maps age out with the offsets they describe.
     func trim(retaining files: Set<URL>)
@@ -140,6 +147,7 @@ protocol SourceAdapter: AnyObject {
 extension SourceAdapter {
     func prepareToStart() -> Bool { false }
     func willPoll() {}
+    func refreshOutOfBandState() -> Bool { false }
     func trim(retaining files: Set<URL>) {}
     func resume(from snapshot: UsageStateSnapshot, offsets: [URL: UInt64]) -> Bool { true }
     func resumeState() -> UsageStateSnapshot.CodexResume? { nil }
@@ -300,6 +308,14 @@ actor LocalUsageProvider: UsageProvider {
     nonisolated func currentPlanTier() -> String? { signals.currentPlanTier() }
 
     nonisolated func currentAccount() -> ProviderAccount? { signals.currentAccount() }
+
+    nonisolated func currentLimitsState() -> ProviderLimitsState { signals.currentLimitsState() }
+
+    /// Hands the adapter the chance to re-read its own out-of-band files. The
+    /// engine re-emits afterwards, so nothing is published from here.
+    func refreshSignals() async {
+        if adapter.refreshOutOfBandState() { persistDirty = true }
+    }
 
     func applyPriceCatalog(_ catalog: PriceCatalog) {
         adapter.applyPriceCatalog(catalog)

@@ -50,6 +50,16 @@ final class AtomicAccount: @unchecked Sendable {
     func store(_ v: ProviderAccount?) { lock.withLock { value = v } }
 }
 
+/// Same handoff for why a provider's windows are missing. Written by the
+/// limits probe's own task, read by the aggregator while a provider is
+/// mid-emit.
+final class AtomicLimitsState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: ProviderLimitsState = .quiet
+    func load() -> ProviderLimitsState { lock.withLock { value } }
+    func store(_ v: ProviderLimitsState) { lock.withLock { value = v } }
+}
+
 /// Same handoff again for today's project split: the provider recomputes it on
 /// its actor at every emit, while `UsageProvider.currentProjects()` is read
 /// from the aggregator without an actor hop — the same reason the windows and

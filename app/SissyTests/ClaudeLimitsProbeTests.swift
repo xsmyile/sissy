@@ -112,4 +112,73 @@ final class ClaudeLimitsProbeTests: XCTestCase {
 
         XCTAssertEqual(reads.all, [true, true], "a refusal left the poll loop running")
     }
+
+    /// The state is what the panel acts on, so it has to name the outcome the
+    /// probe actually met rather than collapsing every failure into "no
+    /// limits".
+    func testEachOutcomeTheUserCanActOnReachesTheFrame() async {
+        let cases: [(ClaudeCredentialsLookup, ProviderLimitsState)] = [
+            (.interactionRequired, .needsAuthorization),
+            (.denied, .refused),
+            (.absent, .signedOut),
+        ]
+        for (lookup, expected) in cases {
+            let reads = Reads()
+            let probe = makeProbe(reads) { lookup }
+            let first = reads.expectation(forReadCount: 1)
+
+            await probe.start(userInitiated: false) {}
+            await fulfillment(of: [first], timeout: 5)
+
+            XCTAssertEqual(probe.currentLimitsState(), expected)
+            await probe.stop()
+        }
+    }
+
+    /// A transient failure is not something to put on a row: the last reading
+    /// stays up with its age, which is what the panel already does.
+    func testAFailureNobodyCanActOnStaysQuiet() async {
+        let reads = Reads()
+        let probe = makeProbe(reads) { .timedOut }
+        let first = reads.expectation(forReadCount: 1)
+
+        await probe.start(userInitiated: false) {}
+        await fulfillment(of: [first], timeout: 5)
+
+        XCTAssertEqual(probe.currentLimitsState(), .quiet)
+    }
+
+    /// The refresh exists because none of this was reachable from a running
+    /// probe: `start` returns early while the poll task lives, so without its
+    /// own entry point the second read never happened at all — let alone with
+    /// the dialog allowed.
+    func testARefreshReadsAgainAndIsAllowedToAsk() async {
+        let reads = Reads()
+        let probe = makeProbe(reads) { .interactionRequired }
+        let first = reads.expectation(forReadCount: 1)
+        await probe.start(userInitiated: false) {}
+        await fulfillment(of: [first], timeout: 5)
+
+        let second = reads.expectation(forReadCount: 2)
+        await probe.refresh {}
+        await fulfillment(of: [second], timeout: 5)
+
+        XCTAssertEqual(reads.all.prefix(2).map { $0 }, [false, true])
+        await probe.stop()
+    }
+
+    /// Switching the module off has to clear the state with the windows: a
+    /// row explaining why limits are missing, under a switch the user just
+    /// turned off, blames Sissy for doing what it was told.
+    func testStoppingClearsTheStateWithTheWindows() async {
+        let reads = Reads()
+        let probe = makeProbe(reads) { .denied }
+        let first = reads.expectation(forReadCount: 1)
+        await probe.start(userInitiated: false) {}
+        await fulfillment(of: [first], timeout: 5)
+
+        await probe.stop()
+
+        XCTAssertEqual(probe.currentLimitsState(), .quiet)
+    }
 }

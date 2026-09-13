@@ -107,6 +107,14 @@ final class UsageEngineHost {
         Task { await engine.setClaudeLimits(enabled: enabled) }
     }
 
+    /// Re-reads one provider's out-of-band state. On Claude Code this is the
+    /// gesture that may raise the keychain dialog, which is why it is only
+    /// ever reached from a click.
+    func refreshProvider(_ id: String) {
+        guard let engine else { return }
+        Task { await engine.refreshProvider(id: id) }
+    }
+
     func setKeepAwake(mode: KeepAwakeMode) {
         guard let engine else { return }
         Task { await engine.setKeepAwake(mode: mode.rawValue) }

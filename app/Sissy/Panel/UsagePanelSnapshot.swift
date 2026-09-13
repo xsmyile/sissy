@@ -62,6 +62,22 @@ struct UsagePanelSnapshot: Equatable {
         let share: Double
         /// Shortest window first. Empty puts the row back on `share`.
         let windows: [WindowRow]
+        /// What to say and offer when the limits are missing for a reason the
+        /// user can act on. Nil the rest of the time, which is most of it.
+        let notice: LimitsNotice?
+    }
+
+    /// A limits problem worded, with whether a refresh can do anything about
+    /// it.
+    ///
+    /// The two halves are separate because they do not always agree: a
+    /// refusal is worth saying and worth retrying, an unsigned CLI is worth
+    /// saying and Sissy cannot fix it from here.
+    struct LimitsNotice: Equatable {
+        let message: String
+        /// Title for the control beside it, nil when there is nothing this
+        /// app can do.
+        let action: String?
     }
 
     /// One rate-limit gauge. `fraction` is clamped for the bar while
@@ -167,7 +183,9 @@ struct UsagePanelSnapshot: Equatable {
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
                 share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0,
-                windows: slice.windows.map { makeWindow($0, now: now) }
+                windows: slice.windows.map { makeWindow($0, now: now) },
+                notice: UsageFormat.limitsNotice(slice.limitsState)
+                    .map { LimitsNotice(message: $0.message, action: $0.action) }
             )
         }
     }

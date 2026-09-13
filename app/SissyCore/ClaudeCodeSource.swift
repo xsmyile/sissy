@@ -12,6 +12,9 @@ private struct ClaudeCodeSignals: SourceSignals {
     func currentPlan() -> String? { profile.currentPlan() }
     func currentPlanTier() -> String? { profile.currentPlanTier() }
     func currentAccount() -> ProviderAccount? { profile.currentAccount() }
+    func currentLimitsState() -> ProviderLimitsState {
+        limitsProbe?.currentLimitsState() ?? .quiet
+    }
 }
 
 /// Claude Code's `~/.claude/projects/**/*.jsonl`: one `assistant` line per

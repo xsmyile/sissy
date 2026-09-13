@@ -27,6 +27,10 @@ actor ClaudeLimitsProbe {
     ]
 
     nonisolated private let windows = AtomicWindows()
+    /// Why the windows are missing, when they are. Published beside them and
+    /// read the same way, so the row that draws the gauges and the row that
+    /// explains their absence come off one payload.
+    nonisolated private let state = AtomicLimitsState()
     /// Where the CLI's token comes from. Injectable for the same reason
     /// `ClaudeCredentialsStore.loadOffPool` takes a `lookup`: reading the
     /// keychain is what can raise a system dialog, and a test of the switch
@@ -69,6 +73,8 @@ actor ClaudeLimitsProbe {
     /// applies to its own.
     nonisolated func currentWindows() -> [UsageWindow] { windows.live() }
 
+    nonisolated func currentLimitsState() -> ProviderLimitsState { state.load() }
+
     /// Starts the poll loop. `onRefresh` fires only when the windows actually
     /// changed, so a steady state costs no emits. Idempotent.
     ///
@@ -100,12 +106,41 @@ actor ClaudeLimitsProbe {
     /// gauges up until each bucket outlived its own reset — five hours for the
     /// session window, a week for the other. `lastReported` goes with them so
     /// turning the setting back on logs what it found instead of deduping
-    /// against a poll from before the stop.
+    /// against a poll from before the stop, and so does the published state:
+    /// a row explaining why the limits are missing, under a switch the user
+    /// has just turned off, blames Sissy for doing what it was told.
+    ///
+    /// That is also why the refusal branch of a poll stores its state *after*
+    /// calling this. A probe stopping itself because the user said no is not
+    /// the user switching the module off, and the row has to survive it —
+    /// that state is the only thing offering a way back.
     func stop() {
         pollTask?.cancel()
         pollTask = nil
         windows.store([])
+        state.store(.quiet)
         lastReported = nil
+    }
+
+    /// Re-reads the credentials with the dialog allowed and polls at once.
+    ///
+    /// The gesture behind a user asking for their limits back, and the only
+    /// other thing besides flipping the switch that may put a keychain dialog
+    /// on screen. Three things stand between a running probe and a fresh read
+    /// and this clears all of them: the poll task, which makes `start` a
+    /// no-op while it lives; the cached token, which returns before the
+    /// keychain is touched at all; and the deduped log line, so the outcome
+    /// of the read the user just asked for is actually recorded.
+    ///
+    /// Deliberately not `stop()` first: that drops the published windows, and
+    /// a refresh that blanks the gauges it is trying to restore reads as a
+    /// failure for as long as the request takes.
+    func refresh(onRefresh: @Sendable @escaping () async -> Void) {
+        pollTask?.cancel()
+        pollTask = nil
+        cached = nil
+        lastReported = nil
+        start(userInitiated: true, onRefresh: onRefresh)
     }
 
     /// Logs `message` the first time this condition is seen, and again only
@@ -128,7 +163,9 @@ actor ClaudeLimitsProbe {
         case .found(let found):
             credentials = found
             cached = found
+            state.store(.quiet)
         case .absent:
+            state.store(.signedOut)
             report(
                 "no Claude Code credentials in the keychain under "
                     + "\(ClaudeCredentialsStore.keychainService); limits stay hidden until you "
@@ -140,6 +177,7 @@ actor ClaudeLimitsProbe {
                     + "Claude Code limits stay hidden. Grant it in Keychain Access, or turn "
                     + "the setting off")
             stop()
+            state.store(.refused)
             return Self.refreshInterval
         // Alive, deliberately. Nobody refused anything — this read was simply
         // not allowed to ask, and the grant it wants back can return without
@@ -147,6 +185,7 @@ actor ClaudeLimitsProbe {
         // it in Keychain Access. Stopping here would make a stale grant
         // indistinguishable from a refusal, and both would need a relaunch.
         case .interactionRequired:
+            state.store(.needsAuthorization)
             report(
                 "the keychain will not release \(ClaudeCredentialsStore.keychainService) "
                     + "without asking, and this read did not ask; Claude limits stay hidden "

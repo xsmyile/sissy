@@ -79,6 +79,12 @@ protocol UsageProvider: AnyObject, Sendable {
     /// the emitting provider still holds its actor.
     nonisolated func currentAccount() -> ProviderAccount?
 
+    /// Why this provider's windows are missing, when they are. `.quiet` for a
+    /// provider that publishes no limits and for one whose limits are fine.
+    ///
+    /// Nonisolated for the reason the windows are.
+    nonisolated func currentLimitsState() -> ProviderLimitsState
+
     /// How the provider's day splits across projects, as of its last emit.
     /// Empty for a provider whose format names no working directory.
     ///
@@ -87,6 +93,12 @@ protocol UsageProvider: AnyObject, Sendable {
     /// it, and an actor hop here would pair a breakdown from one moment with
     /// totals from another.
     nonisolated func currentProjects() -> [ProjectTotals]
+
+    /// Re-reads whatever this provider keeps out of band — the files it reads
+    /// for a plan and an account, which no log line carries. What a user
+    /// pressing refresh on this provider reaches; a provider with nothing out
+    /// of band takes the default and does nothing.
+    func refreshSignals() async
 
     /// Swap in a freshly fetched rate catalog. Each provider takes the slice
     /// matching its upstream vendor and consults it between the user's
@@ -101,10 +113,12 @@ extension UsageProvider {
     /// A provider that keeps no archive has nothing that could rewrite a day
     /// the user deleted.
     func forgetArchivedDays() async {}
+    func refreshSignals() async {}
 
     nonisolated func currentWindows() -> [UsageWindow] { [] }
     nonisolated func currentPlan() -> String? { nil }
     nonisolated func currentPlanTier() -> String? { nil }
     nonisolated func currentAccount() -> ProviderAccount? { nil }
+    nonisolated func currentLimitsState() -> ProviderLimitsState { .quiet }
     nonisolated func currentProjects() -> [ProjectTotals] { [] }
 }

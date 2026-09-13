@@ -130,7 +130,15 @@ final class CodexAdapter: SourceAdapter {
     /// source: no rollout line carries an address, and nothing persists one.
     /// It is also why it cannot make this return true, which means "the next
     /// snapshot has something new to carry".
-    func prepareToStart() -> Bool {
+    func prepareToStart() -> Bool { readAuthFile() }
+
+    /// The same read, on demand. Codex's *limits* cannot be refreshed at all —
+    /// they ride the CLI's own `token_count` events and a reader at EOF has
+    /// nothing left to re-read — so this is the whole of what a refresh on
+    /// this provider can honestly do, and the surface has to say so.
+    func refreshOutOfBandState() -> Bool { readAuthFile() }
+
+    private func readAuthFile() -> Bool {
         let url = CodexAuthSource.defaultURL(sessionsDir: codexDir)
         guard let identity = CodexAuthSource.load(at: url) else { return false }
         latestAccount.store(identity.account)

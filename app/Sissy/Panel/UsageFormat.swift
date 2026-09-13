@@ -220,6 +220,26 @@ enum UsageFormat {
         return (String(tier[tier.startIndex..<separator]), suffix)
     }
 
+    /// What a provider row says when its limits are missing for a reason
+    /// somebody can act on, and what the control beside it offers.
+    ///
+    /// Every wording names what to do rather than what failed: the log
+    /// already had the diagnosis and nobody read it. `.quiet` is the common
+    /// case and says nothing at all — a row that explains itself every time
+    /// it is fine is a row nobody reads when it is not.
+    static func limitsNotice(_ state: ProviderLimitsState) -> (message: String, action: String?)? {
+        switch state {
+        case .quiet:
+            return nil
+        case .needsAuthorization:
+            return ("Sissy needs your permission to read Claude Code's token again", "Allow")
+        case .refused:
+            return ("Keychain access was refused, so the limits stay hidden", "Try again")
+        case .signedOut:
+            return ("Claude Code is not signed in on this Mac", nil)
+        }
+    }
+
     static func providerName(_ id: String) -> String {
         switch id {
         case ProviderID.claudeCode: return "Claude Code"

@@ -54,6 +54,30 @@ struct ProjectTotals: Sendable, Equatable, Identifiable {
     var id: String { path }
 }
 
+/// Why a provider's rate-limit windows are missing, when they are.
+///
+/// On the frame because the panel is the only surface where any of it can be
+/// acted on. Until now the probe wrote these to the log — "switch them off and
+/// on again", in a file nobody reads, on a Mac whose gauges had silently gone.
+///
+/// Only the states a user can do something about. A request that failed and a
+/// keychain that did not answer in time are both transient and both leave the
+/// last reading on screen with its age, which is already the honest answer.
+enum ProviderLimitsState: Sendable, Equatable {
+    /// Working, or switched off. Either way the row has nothing to say.
+    case quiet
+    /// The credentials are there and no read was allowed to ask for them,
+    /// which is what a re-signed build meets. One user action recovers it.
+    case needsAuthorization
+    /// The user was asked and said no. Distinct from the above because
+    /// re-asking on a timer would be harassment, and because it also stops
+    /// the probe — recovering needs a restart, not just a read.
+    case refused
+    /// No credentials at all: the CLI is not signed in, which is not
+    /// something Sissy can fix from here.
+    case signedOut
+}
+
 /// Who a provider is signed in as.
 ///
 /// Every field comes off a file its adapter was already reading for the plan,
@@ -117,6 +141,9 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     let projects: [ProjectTotals]
     /// Who this provider is signed in as, when its own files say.
     let account: ProviderAccount?
+    /// Why this provider's windows are missing, when they are and when the
+    /// user can do something about it.
+    let limitsState: ProviderLimitsState
 
     init(
         id: String,
@@ -126,7 +153,8 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         plan: String? = nil,
         planTier: String? = nil,
         projects: [ProjectTotals] = [],
-        account: ProviderAccount? = nil
+        account: ProviderAccount? = nil,
+        limitsState: ProviderLimitsState = .quiet
     ) {
         self.id = id
         self.tokens = tokens
@@ -136,6 +164,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         self.planTier = plan == nil ? nil : planTier
         self.projects = projects
         self.account = account
+        self.limitsState = limitsState
     }
 }
 
