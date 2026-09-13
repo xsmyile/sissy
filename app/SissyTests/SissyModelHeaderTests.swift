@@ -10,12 +10,34 @@ import XCTest
 /// still working, one is a fault worth acting on, one is an ordinary empty
 /// morning.
 final class SissyModelHeaderTests: XCTestCase {
-    func testAReadingNamesSissyAndOwesTheLineBackToTheDate() {
+    func testAReadingNamesSissyAndOwesTheLineBackToTheReadingsAge() {
         let header = SissyModel.HeaderSnapshot.make(hasFrame: true, isWarm: true, filesWatched: 12)
 
         XCTAssertFalse(header.isAsleep)
         XCTAssertEqual(header.title, "Sissy")
-        XCTAssertNil(header.subtitle, "an awake Sissy owes the line back to the date")
+        XCTAssertNil(header.subtitle, "an awake Sissy owes the line back to the reading's age")
+    }
+
+    /// The one state that earns a sentence in the title: the Mac is being
+    /// held, and it is being held because agents are working.
+    func testAnAutomaticHoldSaysWhySissyIsUp() {
+        let header = SissyModel.HeaderSnapshot.make(
+            hasFrame: true, isWarm: true, filesWatched: 12, holdingForAgents: true)
+
+        XCTAssertFalse(header.isAsleep)
+        XCTAssertEqual(header.title, "Sissy is up with the agents")
+    }
+
+    /// Sissy asleep is Sissy with no reading, and a hold does not make one
+    /// arrive — the sentence about the agents must not overwrite the one
+    /// saying why the panel is empty.
+    func testAHoldNeverOverwritesTheReasonThereIsNoReading() {
+        let header = SissyModel.HeaderSnapshot.make(
+            hasFrame: false, isWarm: true, filesWatched: 98, holdingForAgents: true)
+
+        XCTAssertTrue(header.isAsleep)
+        XCTAssertEqual(header.title, "Sissy is sleeping")
+        XCTAssertEqual(header.subtitle, "Nothing spent yet today")
     }
 
     /// Warmth is what separates this from the two below: until the readers

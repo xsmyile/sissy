@@ -30,8 +30,19 @@ enum UsageFormat {
     /// word the same state differently. The age is dropped rather than shown
     /// beside the word: it is about to be replaced, and a number counting up
     /// next to "refreshing" is the reading contradicting itself.
-    static func reading(age interval: TimeInterval, refreshing: Bool) -> String {
-        refreshing ? "refreshing…" : "updated " + age(interval)
+    ///
+    /// `holding` is how long the Mac has been held awake, which rides this
+    /// line rather than a readout of its own beside the cup: a bare duration
+    /// next to a button is a number with no noun, and here it is one clause
+    /// of the sentence that already dates everything else on screen. A
+    /// refresh does not take it away — the hold is not the thing being
+    /// re-read.
+    static func reading(
+        age interval: TimeInterval, holding: TimeInterval?, refreshing: Bool
+    ) -> String {
+        let reading = refreshing ? "refreshing…" : "updated " + age(interval)
+        guard let holding else { return reading }
+        return held(holding) + " · " + reading
     }
 
     /// Coarse age of the last frame, for the panel's header. Deliberately

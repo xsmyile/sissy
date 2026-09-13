@@ -87,9 +87,23 @@ final class SissyModel {
         /// "found it, the day is empty" are the same blank panel otherwise.
         /// The third is the common one first thing in the morning, and the
         /// only one of the three that is not a fault.
-        static func make(hasFrame: Bool, isWarm: Bool, filesWatched: Int) -> Self {
+        ///
+        /// The title is a sentence about what Sissy is doing in every case but
+        /// one, where it degenerates to her name — which is the case the panel
+        /// spends nearly all its time in. `holdingForAgents` fills it: the
+        /// automatic mode holding the Mac is the only state where a sentence
+        /// about the agents is true, because a manual hold is a switch the
+        /// user threw and has nothing to do with them. The duration of the
+        /// hold is not here; it belongs beside the reading's age, under this.
+        static func make(
+            hasFrame: Bool, isWarm: Bool, filesWatched: Int, holdingForAgents: Bool = false
+        ) -> Self {
             guard !hasFrame else {
-                return Self(isAsleep: false, title: "Sissy", subtitle: nil)
+                return Self(
+                    isAsleep: false,
+                    title: holdingForAgents ? "Sissy is up with the agents" : "Sissy",
+                    subtitle: nil
+                )
             }
             guard isWarm else {
                 return Self(
@@ -128,10 +142,12 @@ final class SissyModel {
     static let sissySleepingAssetName = "SissyMenuBarSleepingTemplate"
 
     var menuSnapshot: MenuSnapshot {
+        let hold = keepAwake
         let header = HeaderSnapshot.make(
             hasFrame: currentFrame != nil,
             isWarm: engine.isWarm,
-            filesWatched: engine.filesWatched
+            filesWatched: engine.filesWatched,
+            holdingForAgents: hold.mode == .auto && hold.active
         )
         return MenuSnapshot(header: header, statusIcon: StatusIconSnapshot(isAsleep: header.isAsleep))
     }
