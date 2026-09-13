@@ -45,7 +45,8 @@ struct UsagePanelView: View {
     /// against the legend's 12 pt medium and it sits between a back chevron
     /// and a 26 pt button. A mark sized for the quieter row reads as an
     /// afterthought here.
-    private static let headerMarkSize: CGFloat = 16
+    private static let headerMarkSize: CGFloat = 18
+    private static let headerTitleSize: CGFloat = 13
     private static let sissySize: CGFloat = 24
 
     private static var dateLine: String {
@@ -151,10 +152,11 @@ struct UsagePanelView: View {
             .foregroundStyle(.secondary)
             .help("Back to today")
 
-            ProviderMark(id: row.id, size: Self.headerMarkSize)
+            ProviderMark(
+                id: row.id, size: Self.headerMarkSize, textSize: Self.headerTitleSize)
 
             Text(row.name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: Self.headerTitleSize, weight: .semibold))
                 .lineLimit(1)
 
             if let plan = row.plan {

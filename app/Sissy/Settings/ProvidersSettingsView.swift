@@ -85,7 +85,7 @@ struct ProvidersSettingsView: View {
 
     @State private var showingLimitsDetail = false
 
-    private static let markSize: CGFloat = 15
+    private static let markSize: CGFloat = 18
     /// Wide enough that the detail reads as a paragraph rather than a column.
     private static let detailPopoverWidth: CGFloat = 280
 
@@ -115,7 +115,7 @@ struct ProvidersSettingsView: View {
             Label {
                 Text(snapshot.name)
             } icon: {
-                ProviderMark(id: readiness.id, size: Self.markSize)
+                ProviderMark(id: readiness.id, size: Self.markSize, textSize: NSFont.systemFontSize)
             }
         }
         Text(snapshot.detail)

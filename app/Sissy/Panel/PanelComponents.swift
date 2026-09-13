@@ -18,6 +18,15 @@ enum PanelMetrics {
     static let headlineNumber: CGFloat = 18
     /// Everything that qualifies a headline number rather than being one.
     static let headlineMeta: CGFloat = 11
+    /// A provider's mark where it labels a row, and the text it sits beside.
+    ///
+    /// Sized against the text rather than against the dot it replaced: a mark
+    /// has to be read as a picture, which takes more room than a disc that
+    /// only had to be a colour. A legend row is the narrowest place one
+    /// appears — it also carries a plan badge and the day's figures — so it
+    /// takes the smaller of the two sizes the panel uses.
+    static let markSize: CGFloat = 14
+    static let rowText: CGFloat = 12
 }
 
 /// The panel's one bar, in both the jobs it does: a share of the day, and a
