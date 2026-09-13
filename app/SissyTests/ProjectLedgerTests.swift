@@ -49,6 +49,39 @@ final class ProjectLedgerTests: XCTestCase {
         XCTAssertEqual(ProjectResolver(ledger: shared).project(for: worktree.path), main.path)
     }
 
+    /// It knows nothing about a repository until something resolves against
+    /// it, and then it knows every worktree git lists for it.
+    func testResolvingARepositoryRecordsTheWorktreesGitListsForIt() throws {
+        let main = try makeRepository("sissy")
+        _ = try makeWorktree("grampus", of: main)
+        _ = try makeWorktree("rockfish", of: main)
+        let ledger = ProjectLedger()
+
+        _ = ProjectResolver(ledger: ledger).project(for: main.path)
+
+        XCTAssertEqual(
+            Set(ledger.all().map(\.directory)),
+            [
+                main.path,
+                root.appendingPathComponent("grampus").standardizedFileURL.path,
+                root.appendingPathComponent("rockfish").standardizedFileURL.path,
+            ])
+    }
+
+    /// A repository's worktree list is taken on trust for a window, so the
+    /// tail's own cadence cannot turn into a directory read per line.
+    func testARepositorysWorktreeListIsNotReReadWithinTheWindow() throws {
+        let main = try makeRepository("sissy")
+        let ledger = ProjectLedger()
+        let now = Date()
+        ledger.harvestWorktrees(of: main.path, now: now)
+
+        _ = try makeWorktree("grampus", of: main)
+        ledger.harvestWorktrees(of: main.path, now: now.addingTimeInterval(1))
+
+        XCTAssertEqual(ledger.all().map(\.directory), [])
+    }
+
     /// Gone is a fact about the path: a directory still on disk is answered by
     /// the disk, whatever the ledger remembers about it.
     func testADirectoryStillOnDiskIsNotAnsweredFor() throws {
@@ -121,6 +154,10 @@ final class ProjectLedgerTests: XCTestCase {
         try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
         try "gitdir: \(main.path)/.git/worktrees/\(name)\n"
             .write(to: worktree.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        let admin = main.appendingPathComponent(".git/worktrees/\(name)")
+        try FileManager.default.createDirectory(at: admin, withIntermediateDirectories: true)
+        try "\(worktree.standardizedFileURL.path)/.git\n"
+            .write(to: admin.appendingPathComponent("gitdir"), atomically: true, encoding: .utf8)
         return worktree.standardizedFileURL
     }
 }

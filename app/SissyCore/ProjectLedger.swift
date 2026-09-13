@@ -26,6 +26,22 @@ struct ProjectCheckout: Codable, Equatable, Sendable {
 /// memory per adapter did: Codex remembered nothing at all, because none of
 /// the directories its own lines name is a repository.
 ///
+/// **It learns from git, not only from the lines it reads.** A worktree is
+/// recorded the moment anything resolves against the repository it was cut
+/// from, by reading the list git itself keeps in
+/// `<repo>/.git/worktrees/*/gitdir` — so the answer is banked while the
+/// worktree is alive instead of being looked for once it is gone. Without
+/// that, learning is a race against `git worktree remove` that the tail loses
+/// whenever it is not running: measured 2026-09-13, a cold read of that day's
+/// Claude Code logs could name 66% of its tokens and the day before 21%,
+/// because the directories the work happened in had been deleted by the time
+/// anything read the lines naming them.
+///
+/// What it still cannot answer for is a checkout created *and* deleted while
+/// Sissy was not running: git has pruned its side, the logs name the path and
+/// nothing else, and there is no reading left to remember. That is the
+/// residual hole, and closing it needs a source outside this machine's state.
+///
 /// Shared across the providers' actors, so the state sits behind a lock — and
 /// no file I/O happens while that lock is held.
 final class ProjectLedger: @unchecked Sendable {
@@ -35,9 +51,17 @@ final class ProjectLedger: @unchecked Sendable {
     /// asked for ten years. At a worktree-per-hour this is a year of them,
     /// and the file is a path pair each.
     static let maxCheckouts = 4096
+    /// How long a repository's worktree list is taken on trust before it is
+    /// read again. Shorter than the tail's poll so every poll refreshes it,
+    /// and short enough that a worktree has to be created and destroyed
+    /// inside half a minute to slip past.
+    static let worktreeScanInterval: TimeInterval = 30
     static let currentSchemaVersion = 1
 
     private static let fileName = "project-checkouts.json"
+    private static let gitEntryName = ".git"
+    private static let worktreesDirName = "worktrees"
+    private static let worktreePointerName = "gitdir"
 
     /// The ledger's own file, beside the snapshot that used to carry this.
     static func defaultURL(in directory: URL) -> URL {
@@ -56,6 +80,7 @@ final class ProjectLedger: @unchecked Sendable {
     /// Most recently confirmed first, which is also the order the cap drops
     /// from: a checkout still being worked in is re-confirmed on every launch.
     private var checkouts: [ProjectCheckout] = []
+    private var scannedAt: [String: Date] = [:]
     private var dirty = false
     /// False once the file on disk is found to be a schema this build does not
     /// know. The run keeps its own memory and refuses to write over one a
@@ -116,6 +141,48 @@ final class ProjectLedger: @unchecked Sendable {
 
     func all() -> [ProjectCheckout] { lock.withLock { checkouts } }
 
+    /// Records every worktree git currently lists for a repository, so each one
+    /// is already answered for by the time it is deleted.
+    ///
+    /// `<repo>/.git/worktrees/<name>/gitdir` names the worktree's own `.git`
+    /// file, which is the pointer the walk would have read had it got there
+    /// first. A pointer naming a relative path is skipped rather than guessed
+    /// at — git writes an absolute one, and a reading that has to be
+    /// reconstructed is not a reading.
+    func harvestWorktrees(of repository: String, now: Date = Date()) {
+        guard claimScan(of: repository, now: now) else { return }
+        let admin = URL(fileURLWithPath: repository)
+            .appendingPathComponent(Self.gitEntryName)
+            .appendingPathComponent(Self.worktreesDirName)
+        let entries =
+            (try? fileManager.contentsOfDirectory(
+                at: admin, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+            )) ?? []
+        for entry in entries {
+            let pointer = entry.appendingPathComponent(Self.worktreePointerName)
+            guard let text = try? String(contentsOf: pointer, encoding: .utf8) else { continue }
+            let target = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard target.hasPrefix("/") else { continue }
+            let directory = URL(fileURLWithPath: target)
+                .deletingLastPathComponent()
+                .standardizedFileURL
+                .path
+            guard directory != repository else { continue }
+            remember(ProjectCheckout(directory: directory, project: repository))
+        }
+    }
+
+    /// Re-reads the worktree list of every repository the ledger already
+    /// names. Run at launch and on the tail's own cadence, which is what turns
+    /// harvesting from something that happens when a line is read into
+    /// something that happens before one is.
+    func refreshKnownRepositories(now: Date = Date()) {
+        let repositories = Set(lock.withLock { checkouts.map(\.project) })
+        for repository in repositories {
+            harvestWorktrees(of: repository, now: now)
+        }
+    }
+
     func saveIfDirty(now: Date = Date()) {
         guard let url else { return }
         let document: Document? = lock.withLock {
@@ -135,6 +202,18 @@ final class ProjectLedger: @unchecked Sendable {
         } catch {
             lock.withLock { dirty = true }
             sissyLog("sissy: project ledger save failed at \(url.path): \(error)")
+        }
+    }
+
+    private func claimScan(of repository: String, now: Date) -> Bool {
+        lock.withLock {
+            if let last = scannedAt[repository],
+                now.timeIntervalSince(last) < Self.worktreeScanInterval
+            {
+                return false
+            }
+            scannedAt[repository] = now
+            return true
         }
     }
 

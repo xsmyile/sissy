@@ -334,6 +334,11 @@ actor LocalUsageProvider: UsageProvider {
         self.onChange = onChange
         let loaded = loadAndApplyPersistedState()
         if !loaded { suppressTheDayAColdScanCuts() }
+        // Ahead of the cold scan the line above may have just forced: the scan
+        // is what reads lines naming checkouts that have to be recognised, and
+        // the ones still on disk are recognised only if git has been asked
+        // about them first.
+        adapter.projects.ledger.refreshKnownRepositories()
         // Ahead of the restored-snapshot emit below, so the first frame a
         // relaunch replays already carries what the adapter reads out of band
         // — a plan the log itself will not name again until the next turn.
@@ -541,6 +546,9 @@ actor LocalUsageProvider: UsageProvider {
     private func poll() async {
         guard lifecycle == .running else { return }
         adapter.willPoll()
+        // Before a byte is read, so a worktree alive right now is answered for
+        // whenever its lines are read — which may be after it is deleted.
+        adapter.projects.ledger.refreshKnownRepositories()
         // Newest files first so the active session's JSONL — the only one
         // that can contain today's usage — is parsed before any historical
         // file. Combined with the throttled emit below this means the

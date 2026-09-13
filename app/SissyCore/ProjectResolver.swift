@@ -27,6 +27,10 @@ import Foundation
 /// attribution a property of the work rather than of when Sissy happened to
 /// read the line.
 ///
+/// Landing on a repository is also what tells the ledger to read git's own
+/// worktree list for it, so the sibling worktrees are answered for before they
+/// are deleted rather than looked up after.
+///
 /// Results are cached per working directory: a real day names a hundred or so
 /// distinct ones across thousands of lines, and the walk costs a `stat` per
 /// level.
@@ -113,6 +117,7 @@ final class ProjectResolver {
                 if project != directory.path {
                     ledger.remember(ProjectCheckout(directory: project, project: project))
                 }
+                ledger.harvestWorktrees(of: project)
                 return project
             }
             let parent = directory.deletingLastPathComponent().standardizedFileURL

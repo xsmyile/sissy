@@ -110,6 +110,38 @@ final class ProjectResolverTests: XCTestCase {
         XCTAssertEqual(nextRun.project(for: worktree.path), main.path)
     }
 
+    /// The failure the ledger exists for, and the one a resolver alone cannot
+    /// answer: a worktree is cut, worked in, and deleted before anything reads
+    /// the lines naming it. Nothing ever walked that directory — but git
+    /// listed it under the repository it was cut from, and the repository was
+    /// walked.
+    func testAWorktreeOnlyGitEverNamedIsAnsweredForOnceDeleted() throws {
+        let main = try makeRepository("sissy")
+        let worktree = try makeWorktree("grampus", of: main)
+        XCTAssertEqual(resolver.project(for: main.path), main.path)
+
+        try FileManager.default.removeItem(at: worktree)
+        try FileManager.default.removeItem(
+            at: main.appendingPathComponent(".git/worktrees/grampus"))
+
+        XCTAssertEqual(
+            resolver.project(for: worktree.appendingPathComponent("app").path), main.path,
+            "git named the worktree while it was alive and nothing wrote it down")
+    }
+
+    /// A worktree is created after the repository has already been resolved,
+    /// which is every worktree on a Mac where Sissy is already running.
+    func testAWorktreeCutAfterTheRepositoryWasResolvedIsStillAnsweredFor() throws {
+        let main = try makeRepository("sissy")
+        XCTAssertEqual(resolver.project(for: main.path), main.path)
+
+        let worktree = try makeWorktree("rockfish", of: main)
+        ledger.refreshKnownRepositories(now: Date().addingTimeInterval(scanIntervalPassed))
+        try FileManager.default.removeItem(at: worktree)
+
+        XCTAssertEqual(resolver.project(for: worktree.path), main.path)
+    }
+
     /// A worktree is worked in from its subdirectories as much as from its
     /// root, and they are gone with it.
     func testADirectoryUnderAGoneWorktreeResolvesThroughIt() throws {
@@ -181,6 +213,9 @@ final class ProjectResolverTests: XCTestCase {
     /// What the next launch sees: a resolver with no cache of its own, seeded
     /// with what this one wrote into the snapshot, after `gone` has been
     /// deleted the way a worktree is.
+    /// Past the window a repository's worktree list is taken on trust for.
+    private var scanIntervalPassed: TimeInterval { ProjectLedger.worktreeScanInterval + 1 }
+
     private func relaunch(after gone: URL) throws -> ProjectResolver {
         let remembered = ledger.all()
         try FileManager.default.removeItem(at: gone)
@@ -200,12 +235,20 @@ final class ProjectResolverTests: XCTestCase {
         return repo.standardizedFileURL
     }
 
+    /// Both halves of what `git worktree add` leaves behind: the pointer in
+    /// the worktree and the entry in the repository's admin directory naming
+    /// it back. The second is what lets a worktree be recognised without ever
+    /// having been worked in.
     private func makeWorktree(_ name: String, of main: URL) throws -> URL {
         let worktree = root.appendingPathComponent(name)
         try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
         try "gitdir: \(main.path)/.git/worktrees/\(name)\n"
             .write(
                 to: worktree.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        let admin = main.appendingPathComponent(".git/worktrees/\(name)")
+        try FileManager.default.createDirectory(at: admin, withIntermediateDirectories: true)
+        try "\(worktree.standardizedFileURL.path)/.git\n"
+            .write(to: admin.appendingPathComponent("gitdir"), atomically: true, encoding: .utf8)
         return worktree.standardizedFileURL
     }
 }
