@@ -113,7 +113,7 @@ Consumed by the `/commit` skill. Run before each commit; `--no-checks` to skip.
 ```yaml
 quality-gates:
   format: xcrun swift-format lint --recursive --strict app/Sissy app/SissyCore app/SissyTests
-  lint: swiftlint lint --quiet --lenient && shellcheck scripts/*.sh
+  lint: swiftlint lint --quiet --lenient && shellcheck scripts/*.sh app/Sissy/Resources/*.sh
 ```
 
 `test:` is intentionally omitted — `xcodebuild test` is too slow per-commit; CI catches it.
