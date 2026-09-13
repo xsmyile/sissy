@@ -196,6 +196,10 @@ final class PanelPagesTests: XCTestCase {
     /// The page prints this provider's own split, which the slice already
     /// carries. The Overview's list is the two summed, and repeating it here
     /// would answer a question nobody asked on this page.
+    ///
+    /// The slice arrives cheapest-first on purpose. A provider folds its day
+    /// out of a dictionary, so the order it hands over is arbitrary, and a
+    /// fixture that happens to pass them dearest-first asserts nothing.
     func testAProviderPageCarriesItsOwnProjectSplit() throws {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame([
@@ -203,13 +207,54 @@ final class PanelPagesTests: XCTestCase {
                     "claude-code",
                     cost: "3.00",
                     projects: [
-                        ProjectTotals(path: "/src/sissy", tokens: 800, cost: Decimal(2)),
                         ProjectTotals(path: "/src/legion", tokens: 200, cost: Decimal(1)),
+                        ProjectTotals(path: "/src/sissy", tokens: 800, cost: Decimal(2)),
                     ])
             ]))
 
         let projects = try XCTUnwrap(snapshot.providers.first?.projects)
         XCTAssertEqual(projects.map(\.name), ["sissy", "legion"])
+    }
+
+    /// Both surfaces read one project list through one ordering, so a page
+    /// and the Overview behind it never disagree about which project the day
+    /// went to.
+    func testAPageAndTheOverviewAgreeOnTheOrder() throws {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame([
+                slice(
+                    "claude-code",
+                    cost: "3.00",
+                    projects: [
+                        ProjectTotals(path: "/src/website", tokens: 200, cost: Decimal(1)),
+                        ProjectTotals(path: "/src/sissy", tokens: 800, cost: Decimal(2)),
+                    ])
+            ]))
+
+        let page = try XCTUnwrap(snapshot.providers.first?.projects)
+        XCTAssertEqual(page.map(\.name), snapshot.projects.map(\.name))
+    }
+
+    /// The fold keeps the dearest projects and pushes the rest into one row.
+    /// Folding a prefix of an unordered list would hide the day's largest
+    /// spender behind "N more projects" whenever it hashed late.
+    func testTheFoldKeepsTheDearestProjectsNotTheFirstToArrive() throws {
+        let cheap = (1...6).map {
+            ProjectTotals(path: "/src/small-\($0)", tokens: 1, cost: Decimal(1))
+        }
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame([
+                slice(
+                    "claude-code",
+                    tokens: 806,
+                    cost: "56.00",
+                    projects: cheap + [
+                        ProjectTotals(path: "/src/sissy", tokens: 800, cost: Decimal(50))
+                    ])
+            ]))
+
+        let page = try XCTUnwrap(snapshot.providers.first?.projects)
+        XCTAssertEqual(page.first?.name, "sissy")
     }
 
     /// Shares on the page are of that provider's own day, not of the

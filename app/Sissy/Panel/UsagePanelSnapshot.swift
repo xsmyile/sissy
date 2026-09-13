@@ -291,11 +291,19 @@ struct UsagePanelSnapshot: Equatable {
     /// not a project competing for a slot, it is the rest of the day. It is
     /// drawn only under rows that do name repositories — a section whose one
     /// row says "unattributed" is the header total with a second caption.
+    ///
+    /// Ordered here rather than taken on trust, because this is the function
+    /// that *drops* rows: a prefix over an order nobody established folds the
+    /// day's largest project into "3 more projects" as readily as its
+    /// smallest. A provider folds its own day out of a dictionary, whose key
+    /// order is arbitrary, so the Overview's list came out ordered — it is
+    /// summed through `combinedProjects` — and a provider's own page did not.
     private static func makeProjects(
-        _ projects: [ProjectTotals],
+        _ unordered: [ProjectTotals],
         totalTokens: Int,
         totalCost: Decimal
     ) -> [ProjectRow] {
+        let projects = FrameBuilder.orderedProjects(unordered)
         guard !projects.isEmpty else { return [] }
         let share = { (cost: Decimal) -> Double in
             guard totalCost > 0 else { return 0 }
