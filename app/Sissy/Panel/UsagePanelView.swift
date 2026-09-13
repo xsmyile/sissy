@@ -419,39 +419,53 @@ struct UsagePanelView: View {
     /// Green under the mark and red over it, which is the whole reading: the
     /// bar says where you are, the mark says where even consumption would have
     /// put you, and the colour says which of the two is ahead.
+    ///
+    /// The two branches exist for the compositing group, not for the mark.
+    /// Cutting the gap needs one; a bar without a mark must not pay for one,
+    /// and the project rows and the share bars are most of the bars the panel
+    /// draws.
+    @ViewBuilder
     private func shareBar(
         _ share: Double,
         tint: Color,
         pace: UsagePanelSnapshot.Pace? = nil
     ) -> some View {
         GeometryReader { geometry in
-            let centre = pace.map { paceMarkCentre($0, in: geometry.size.width) }
-            ZStack(alignment: .leading) {
+            let fill = max(geometry.size.width * share, share > 0 ? 3 : 0)
+            if let pace {
+                let centre = paceMarkCentre(pace, in: geometry.size.width)
                 ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.quaternary)
-                    Capsule()
-                        .fill(tint.gradient)
-                        .frame(width: max(geometry.size.width * share, share > 0 ? 3 : 0))
-                    if let centre {
+                    ZStack(alignment: .leading) {
+                        barBody(fill: fill, tint: tint)
                         Capsule()
                             .frame(width: Self.paceMarkGap)
                             .offset(x: centre - Self.paceMarkGap / 2)
                             .blendMode(.destinationOut)
                     }
-                }
-                .compositingGroup()
+                    .compositingGroup()
 
-                if let centre, let pace {
                     Capsule()
                         .fill(pace.isOverPace ? Color.red : Color.green)
                         .frame(width: Self.paceMarkWidth)
                         .offset(x: centre - Self.paceMarkWidth / 2)
                 }
+            } else {
+                ZStack(alignment: .leading) {
+                    barBody(fill: fill, tint: tint)
+                }
             }
         }
         .frame(height: 5)
         .animation(.default, value: share)
+    }
+
+    @ViewBuilder
+    private func barBody(fill: CGFloat, tint: Color) -> some View {
+        Capsule()
+            .fill(.quaternary)
+        Capsule()
+            .fill(tint.gradient)
+            .frame(width: fill)
     }
 
     // MARK: Placeholder
