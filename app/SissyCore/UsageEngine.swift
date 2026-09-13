@@ -292,6 +292,29 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// What a user pressing refresh on one provider reaches.
+    ///
+    /// Deliberately one door with two behaviours behind it, because the
+    /// action is not the same action: on Claude Code it re-reads the keychain
+    /// with the dialog allowed and polls the usage endpoint at once, which is
+    /// the second and last gesture permitted to ask for that permission. On
+    /// Codex it re-reads `auth.json` — the plan, the account — and nothing
+    /// else, because Codex's limits arrive only on the CLI's own events and
+    /// no button can make a turn happen.
+    ///
+    /// The probe is only reached when the setting is on: a refresh must not
+    /// be a second way to switch a module on, or the permission would be
+    /// asked for by a control that never promised to.
+    func refreshProvider(id: String) async {
+        guard lifecycle == .running else { return }
+        if id == ProviderID.claudeCode, config.claudeLimits {
+            let me = self
+            await claudeLimitsProbe.refresh { await me.reemit() }
+        }
+        await aggregator.refreshSignals(for: id)
+        await reemit()
+    }
+
     /// Switch the keep-awake mode and persist it, so the choice survives a
     /// restart.
     func setKeepAwake(mode raw: String) async {

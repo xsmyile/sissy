@@ -331,6 +331,10 @@ struct UsagePanelView: View {
                     .monospacedDigit()
             }
 
+            if let notice = row.notice {
+                limitsNotice(notice, for: row.id)
+            }
+
             if row.windows.isEmpty {
                 shareBar(row.share, tint: tint)
                 Text("\(Int((row.share * 100).rounded()))% of today")
@@ -342,6 +346,34 @@ struct UsagePanelView: View {
                     windowRow(window, tint: tint)
                         .opacity(index == 0 ? 1 : Self.secondaryWindowOpacity)
                 }
+            }
+        }
+    }
+
+    /// Why this provider's limits are missing, and the one click that can do
+    /// something about it.
+    ///
+    /// On the row rather than in the log, which is where it used to be: a
+    /// grant that lapses on every re-signed build left the gauges gone and the
+    /// only cure buried in Settings behind a switch the user had to know to
+    /// flip twice. A state nothing can be done about renders without a button
+    /// rather than with a dead one.
+    @ViewBuilder
+    private func limitsNotice(_ notice: UsagePanelSnapshot.LimitsNotice, for id: String)
+        -> some View
+    {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(notice.message)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let action = notice.action {
+                Spacer(minLength: 0)
+                Button(action) { model.refreshProvider(id) }
+                    .font(.system(size: 11))
+                    .buttonStyle(.borderless)
+                    .layoutPriority(1)
             }
         }
     }

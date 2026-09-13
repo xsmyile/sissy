@@ -143,6 +143,29 @@ final class UsageFormatTests: XCTestCase {
             UsageFormat.plan("team", tier: "max_5x", seat: "team_tier_1")?.tier, "Max 5x")
     }
 
+    /// Every notice names what to do. The one state Sissy cannot fix offers
+    /// no control rather than a button that would do nothing.
+    func testALapsedGrantOffersTheOneClickThatRecoversIt() {
+        let notice = UsageFormat.limitsNotice(.needsAuthorization)
+        XCTAssertEqual(notice?.action, "Allow")
+    }
+
+    func testARefusalOffersARetryRatherThanNothing() {
+        XCTAssertEqual(UsageFormat.limitsNotice(.refused)?.action, "Try again")
+    }
+
+    func testACLIThatIsNotSignedInOffersNoControl() {
+        let notice = UsageFormat.limitsNotice(.signedOut)
+        XCTAssertNotNil(notice?.message)
+        XCTAssertNil(notice?.action)
+    }
+
+    /// The common case, and the reason a row that is fine says nothing: one
+    /// that explains itself every time is one nobody reads when it matters.
+    func testWorkingLimitsSayNothing() {
+        XCTAssertNil(UsageFormat.limitsNotice(.quiet))
+    }
+
     func testPlanLabelCapitalisesAVendorToken() {
         XCTAssertEqual(UsageFormat.plan("plus", tier: nil)?.label, "Plus")
         XCTAssertEqual(UsageFormat.plan("max", tier: nil)?.label, "Max")

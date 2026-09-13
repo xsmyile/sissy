@@ -135,6 +135,14 @@ actor UsageAggregator {
     /// Rate-limit windows are read through each provider's nonisolated
     /// accessor. Awaiting the provider here would deadlock: the emit that
     /// leads here runs while the provider still holds its own actor.
+    /// Hands one provider the chance to re-read its own out-of-band files.
+    /// Unknown ids are a no-op: the caller names a provider that may not be
+    /// built on this run.
+    func refreshSignals(for id: String) async {
+        guard let provider = providers.first(where: { $0.id == id }) else { return }
+        await provider.refreshSignals()
+    }
+
     private func currentProviderSlices() -> [ProviderSlice] {
         let raw = providers.compactMap { p -> ProviderSlice? in
             guard let s = perProvider[p.id] else { return nil }
@@ -146,7 +154,8 @@ actor UsageAggregator {
                 plan: p.currentPlan(),
                 planTier: p.currentPlanTier(),
                 projects: p.currentProjects(),
-                account: p.currentAccount()
+                account: p.currentAccount(),
+                limitsState: p.currentLimitsState()
             )
         }
         return FrameBuilder.activeSlices(raw)
