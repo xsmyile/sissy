@@ -166,6 +166,79 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertNil(UsageFormat.limitsNotice(.quiet))
     }
 
+    // MARK: Account line
+
+    /// The order and the separator are ours; the date's own rendering is
+    /// Foundation's and depends on the reader's locale, so the assertion
+    /// stops where our decision does.
+    func testTheAccountLineJoinsTheOrganisationAndTheRenewal() throws {
+        let line = try XCTUnwrap(
+            UsageFormat.accountDetails(
+                organization: "Radonforge",
+                renewsAt: Date(timeIntervalSince1970: 1_792_000_000),
+                now: Date(timeIntervalSince1970: 1_789_000_000)))
+
+        XCTAssertTrue(line.hasPrefix("Radonforge · renews "), line)
+        XCTAssertGreaterThan(line.count, "Radonforge · renews ".count)
+    }
+
+    func testTheOrganisationStandsAloneWhenNoRenewalIsKnown() {
+        XCTAssertEqual(
+            UsageFormat.accountDetails(organization: "Radonforge", renewsAt: nil), "Radonforge")
+    }
+
+    /// The claim is read off a file the CLI refreshes on its own schedule, so
+    /// a date already past is the ordinary case rather than a fact — and
+    /// "renews 3 Aug" printed in September answers nothing.
+    func testARenewalAlreadyPastIsDropped() {
+        XCTAssertNil(
+            UsageFormat.accountDetails(
+                organization: nil, renewsAt: Date(timeIntervalSince1970: 1_700_000_000),
+                now: Date(timeIntervalSince1970: 1_789_000_000)))
+    }
+
+    func testAVendorThatAnswersForNeitherHalfCarriesNoLine() {
+        XCTAssertNil(UsageFormat.accountDetails(organization: nil, renewsAt: nil))
+    }
+
+    // MARK: An empty limits block
+
+    /// A reading that has not landed and a module nobody switched on look
+    /// identical from the frame, and only one of them is something to do
+    /// about — telling a user to flip a switch they already flipped sends
+    /// them to a screen that disagrees with the sentence.
+    func testAnEmptyLimitsBlockSendsYouToTheSwitchOnlyWhenItIsOff() {
+        XCTAssertTrue(
+            UsageFormat.noWindowsCaption(ProviderID.claudeCode, limitsEnabled: false)
+                .contains("Settings"))
+        XCTAssertFalse(
+            UsageFormat.noWindowsCaption(ProviderID.claudeCode, limitsEnabled: true)
+                .contains("Settings"))
+    }
+
+    /// Codex has no such switch, so its sentence does not move.
+    func testCodexSaysItsLimitsArriveOnItsOwnTurns() {
+        let off = UsageFormat.noWindowsCaption(ProviderID.codex, limitsEnabled: false)
+        XCTAssertEqual(off, UsageFormat.noWindowsCaption(ProviderID.codex, limitsEnabled: true))
+        XCTAssertTrue(off.contains("own turns"))
+    }
+
+    // MARK: Refresh
+
+    /// The button must say which of the two actions it is before it is
+    /// pressed: one of them raises a system permission dialog.
+    func testRefreshWarnsThatClaudeMayAskForTheKeychain() {
+        XCTAssertTrue(UsageFormat.refreshHelp(ProviderID.claudeCode).contains("keychain"))
+    }
+
+    /// No button can make a Codex limit arrive — they ride the CLI's own
+    /// turns — so the tooltip promises the account and nothing more.
+    func testRefreshOnCodexDoesNotPromiseFreshLimits() {
+        let help = UsageFormat.refreshHelp(ProviderID.codex)
+        XCTAssertTrue(help.contains("next Codex turn"))
+        XCTAssertFalse(help.contains("keychain"))
+    }
+
     func testPlanLabelCapitalisesAVendorToken() {
         XCTAssertEqual(UsageFormat.plan("plus", tier: nil)?.label, "Plus")
         XCTAssertEqual(UsageFormat.plan("max", tier: nil)?.label, "Max")

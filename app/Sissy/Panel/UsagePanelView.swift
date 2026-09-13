@@ -1,10 +1,25 @@
 import SwiftUI
 
-/// Usage panel shown on a left-click of the status item. Reads the live
-/// frame through `SissyModel`; every number it prints comes from
-/// `UsagePanelSnapshot` so the panel and the pull-down menu cannot disagree.
+/// The usage panel shown on a left-click of the status item: a header, a page,
+/// and a footer.
+///
+/// The panel holds two surfaces because it answers two questions. `PanelOverview`
+/// is what today costs and whether there is room to keep working;
+/// `PanelProviderPage` is what one account is doing. A `switch` rather than a
+/// `TabView` is the whole implementation of "only the selected page exists" —
+/// `UsagePanelController` drops the host on close because a retained view graph
+/// costs a layout and a rasterization on every frame the engine emits, and
+/// three live pages would hand that back while the panel is open.
+///
+/// Every number it prints comes from `UsagePanelSnapshot`, so the panel and the
+/// pull-down menu cannot disagree.
 struct UsagePanelView: View {
     let model: SissyModel
+
+    /// Which surface is on screen. Local to the view rather than on the model:
+    /// the panel is dropped when it closes, and a page selection that outlived
+    /// it would reopen on a provider the user last glanced at instead of home.
+    @State private var page: Page = .overview
 
     /// Gives the popover a first responder on open, which is what makes
     /// Escape close it: AppKit routes `cancelOperation:` through the
@@ -14,14 +29,17 @@ struct UsagePanelView: View {
     /// would say nothing.
     @FocusState private var panelFocused: Bool
 
-    private static let width: CGFloat = 340
+    enum Page: Equatable {
+        case overview
+        case provider(String)
+    }
+
     /// Cadence for both readouts the panel keeps on its own clock: the
     /// footer's age and the keep-awake control's duration. A second is finer
     /// than the duration needs — it changes by the minute — but the tick is
     /// what decides how late a change lands, and a minute-long one would show
     /// the wrong minute for most of it.
     private static let clockTick: TimeInterval = 1
-    private static let secondaryWindowOpacity: Double = 0.55
     private static let controlButtonSize: CGFloat = 26
     private static let sissySize: CGFloat = 24
 
@@ -30,29 +48,37 @@ struct UsagePanelView: View {
             + Date.now.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 
-    private func makeSnapshot(_ frame: FrameData) -> UsagePanelSnapshot {
-        UsagePanelSnapshot.make(frame: frame)
+    /// The provider the current page is about, when there is one and the frame
+    /// still carries it.
+    ///
+    /// A provider can leave the frame while its page is open — the slices are
+    /// today's spenders, and a day rolls over — so the page falls back home
+    /// rather than rendering a row that no longer exists.
+    static func openRow(_ page: Page, in providers: [UsagePanelSnapshot.ProviderRow])
+        -> UsagePanelSnapshot.ProviderRow?
+    {
+        guard case .provider(let id) = page else { return nil }
+        return providers.first { $0.id == id }
     }
 
     var body: some View {
         let live = model.liveFrame
-        let snapshot = live.map { makeSnapshot($0.frame) }
+        let snapshot = live.map { UsagePanelSnapshot.make(frame: $0.frame) }
+        let open = Self.openRow(page, in: snapshot?.providers ?? [])
         return VStack(alignment: .leading, spacing: 0) {
-            header
+            if let open {
+                providerHeader(open)
+            } else {
+                header
+            }
             Divider()
             if let snapshot {
-                headline(snapshot)
-                if !snapshot.providers.isEmpty {
-                    Divider()
-                    providers(snapshot.providers)
-                }
-                if !snapshot.projects.isEmpty {
-                    Divider()
-                    projects(snapshot.projects)
-                }
-                if let history = snapshot.history {
-                    Divider()
-                    historyRow(history)
+                if let open {
+                    PanelProviderPage(
+                        row: open, limitsEnabled: model.engine.claudeLimits
+                    ) { model.refreshProvider(open.id) }
+                } else {
+                    PanelOverview(snapshot: snapshot) { page = .provider($0) }
                 }
             } else {
                 placeholder
@@ -60,11 +86,14 @@ struct UsagePanelView: View {
             Divider()
             footer(live)
         }
-        .frame(width: Self.width)
+        .frame(width: PanelMetrics.width)
         .focusable()
         .focusEffectDisabled()
         .focused($panelFocused)
         .defaultFocus($panelFocused, true)
+        .onChange(of: open == nil) { _, gone in
+            if gone { page = .overview }
+        }
     }
 
     // MARK: Header
@@ -92,7 +121,59 @@ struct UsagePanelView: View {
 
             keepAwakeControl
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 12)
+    }
+
+    /// The header a provider page carries instead: the way back, whose page
+    /// this is, and the refresh.
+    ///
+    /// One header rather than two stacked, which is what a navigation level
+    /// reads as. Sissy and the keep-awake switch belong to the app rather than
+    /// to an account, so they stay home — one click away, which is where a
+    /// global control can sit once the panel has somewhere to go.
+    private func providerHeader(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                page = .overview
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Back to today")
+
+            Circle()
+                .fill(ProviderPalette.tint(for: row.id))
+                .frame(width: 7, height: 7)
+
+            Text(row.name)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+
+            if let plan = row.plan {
+                PlanBadge(plan: plan, tier: row.planTier)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                model.refreshProvider(row.id)
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .glassEffect(.regular, in: .circle)
+            .help(UsageFormat.refreshHelp(row.id))
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
     }
 
@@ -181,325 +262,6 @@ struct UsagePanelView: View {
         }
     }
 
-    // MARK: Headline
-
-    private func headline(_ snapshot: UsagePanelSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(snapshot.tokens)
-                    .font(.system(size: 30, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                Text("tokens")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                if let delta = snapshot.delta {
-                    deltaChip(delta)
-                }
-            }
-            Text(subline(snapshot))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
-        .animation(.default, value: snapshot.tokens)
-    }
-
-    private func subline(_ snapshot: UsagePanelSnapshot) -> String {
-        snapshot.burn == FrameBuilder.placeholder
-            ? snapshot.cost : "\(snapshot.cost) · \(snapshot.burn)/h"
-    }
-
-    private func deltaChip(_ delta: UsagePanelSnapshot.TokenDelta) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: deltaSymbol(delta.direction))
-                .font(.system(size: 9, weight: .bold))
-            Text("\(delta.percent)%")
-                .font(.system(size: 11, weight: .medium))
-                .monospacedDigit()
-            Text("vs yesterday")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-        }
-        .foregroundStyle(deltaTint(delta.direction))
-    }
-
-    private func deltaSymbol(_ direction: UsagePanelSnapshot.DeltaDirection) -> String {
-        switch direction {
-        case .up: return "arrow.up.right"
-        case .down: return "arrow.down.right"
-        case .flat: return "equal"
-        }
-    }
-
-    private func deltaTint(_ direction: UsagePanelSnapshot.DeltaDirection) -> Color {
-        switch direction {
-        case .up: return .green
-        case .down: return .red
-        case .flat: return .secondary
-        }
-    }
-
-    // MARK: History
-
-    /// One line, under the day's own numbers, for what came before it. It is
-    /// deliberately the quietest thing in the panel: the archive answers a
-    /// question asked at the end of a month, not one asked while working.
-    private func historyRow(_ row: UsagePanelSnapshot.HistoryRow) -> some View {
-        HStack(spacing: 6) {
-            Text(row.label)
-                .font(.system(size: 12))
-            Spacer(minLength: 0)
-            Text("\(row.tokens) · \(row.cost)")
-                .font(.system(size: 12))
-                .monospacedDigit()
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    // MARK: Projects
-
-    /// Where the day's money went, under the providers that spent it. The
-    /// question is the same one either way — a provider row says which tool,
-    /// a project row says which work — so the rows are the same shape, one
-    /// step quieter.
-    private func projects(_ rows: [UsagePanelSnapshot.ProjectRow]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("By project")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            ForEach(rows) { row in
-                projectRow(row)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    private func projectRow(_ row: UsagePanelSnapshot.ProjectRow) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Text(row.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 0)
-                Text("\(row.tokens) · \(row.cost)")
-                    .font(.system(size: 12))
-                    .monospacedDigit()
-            }
-            shareBar(row.share, tint: .secondary)
-        }
-        .help(row.path ?? "")
-    }
-
-    // MARK: Providers
-
-    private func providers(_ rows: [UsagePanelSnapshot.ProviderRow]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(rows) { row in
-                providerRow(row)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    /// A provider shows its subscription windows when the CLI reports them,
-    /// and its share of the day when it does not. Never both: the two bars
-    /// carry percentages of different things, and side by side neither reads.
-    private func providerRow(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
-        let tint = ProviderPalette.tint(for: row.id)
-        return VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(tint)
-                    .frame(width: 7, height: 7)
-                Text(row.name)
-                    .font(.system(size: 12, weight: .medium))
-                if let plan = row.plan {
-                    planBadge(plan, tier: row.planTier)
-                }
-                Spacer(minLength: 0)
-                Text("\(row.tokens) · \(row.cost)")
-                    .font(.system(size: 12))
-                    .monospacedDigit()
-            }
-
-            if let notice = row.notice {
-                limitsNotice(notice, for: row.id)
-            }
-
-            if row.windows.isEmpty {
-                shareBar(row.share, tint: tint)
-                Text("\(Int((row.share * 100).rounded()))% of today")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            } else {
-                ForEach(Array(row.windows.enumerated()), id: \.element.id) { index, window in
-                    windowRow(window, tint: tint)
-                        .opacity(index == 0 ? 1 : Self.secondaryWindowOpacity)
-                }
-            }
-        }
-    }
-
-    /// Why this provider's limits are missing, and the one click that can do
-    /// something about it.
-    ///
-    /// On the row rather than in the log, which is where it used to be: a
-    /// grant that lapses on every re-signed build left the gauges gone and the
-    /// only cure buried in Settings behind a switch the user had to know to
-    /// flip twice. A state nothing can be done about renders without a button
-    /// rather than with a dead one.
-    @ViewBuilder
-    private func limitsNotice(_ notice: UsagePanelSnapshot.LimitsNotice, for id: String)
-        -> some View
-    {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(notice.message)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let action = notice.action {
-                Spacer(minLength: 0)
-                Button(action) { model.refreshProvider(id) }
-                    .font(.system(size: 11))
-                    .buttonStyle(.borderless)
-                    .layoutPriority(1)
-            }
-        }
-    }
-
-    /// The account's plan, badged rather than set as plain text beside the
-    /// name: "Codex Plus" reads as a product OpenAI sells, and the pill is
-    /// what says the word is an attribute of the account instead. It yields
-    /// its width first — of the three things on this line, the plan is the
-    /// one a reader can still infer once it is gone.
-    ///
-    /// `tier` is present only when the account is metered at some other
-    /// plan's limits, which is a sentence and not a badge.
-    private func planBadge(_ plan: String, tier: String?) -> some View {
-        Text(plan)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(Capsule().fill(.quaternary))
-            .layoutPriority(-1)
-            .help(tier.map { "\($0) rate limits" } ?? plan)
-    }
-
-    /// The bar, its reading, and — once the window is old enough to project
-    /// from — the line that says whether that reading is ahead or behind.
-    private func windowRow(
-        _ window: UsagePanelSnapshot.WindowRow,
-        tint: Color
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
-                shareBar(window.fraction, tint: tint, pace: window.pace)
-
-                Text("\(window.percent)%")
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .frame(width: 32, alignment: .trailing)
-
-                Text("\(window.label) · \(UsageFormat.resetLabel(window.resetsAt))")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: 74, alignment: .trailing)
-            }
-
-            if let pace = window.pace {
-                Text(
-                    UsageFormat.paceCaption(
-                        deltaPercent: pace.deltaPercent, runsOutAt: pace.runsOutAt)
-                )
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-        }
-    }
-
-    /// Width of the pace mark itself, and of the hole cut for it.
-    ///
-    /// The mark is punched out of the bar rather than painted over it: at
-    /// 5 pt tall, a line drawn on top of a fill of similar weight disappears
-    /// into it, and the gap is what makes two points of colour read.
-    private static let paceMarkWidth: CGFloat = 2
-    private static let paceMarkGap: CGFloat = 5
-
-    /// Where the mark's centre lands, kept a half-gap inside the bar so a
-    /// window in its last minutes draws a whole mark instead of half of one.
-    private func paceMarkCentre(_ pace: UsagePanelSnapshot.Pace, in width: CGFloat) -> CGFloat {
-        let inset = Self.paceMarkGap / 2
-        guard width > Self.paceMarkGap else { return width / 2 }
-        return min(max(width * pace.expectedFraction, inset), width - inset)
-    }
-
-    /// Green under the mark and red over it, which is the whole reading: the
-    /// bar says where you are, the mark says where even consumption would have
-    /// put you, and the colour says which of the two is ahead.
-    ///
-    /// The two branches exist for the compositing group, not for the mark.
-    /// Cutting the gap needs one; a bar without a mark must not pay for one,
-    /// and the project rows and the share bars are most of the bars the panel
-    /// draws.
-    @ViewBuilder
-    private func shareBar(
-        _ share: Double,
-        tint: Color,
-        pace: UsagePanelSnapshot.Pace? = nil
-    ) -> some View {
-        GeometryReader { geometry in
-            let fill = max(geometry.size.width * share, share > 0 ? 3 : 0)
-            if let pace {
-                let centre = paceMarkCentre(pace, in: geometry.size.width)
-                ZStack(alignment: .leading) {
-                    ZStack(alignment: .leading) {
-                        barBody(fill: fill, tint: tint)
-                        Capsule()
-                            .frame(width: Self.paceMarkGap)
-                            .offset(x: centre - Self.paceMarkGap / 2)
-                            .blendMode(.destinationOut)
-                    }
-                    .compositingGroup()
-
-                    Capsule()
-                        .fill(pace.isOverPace ? Color.red : Color.green)
-                        .frame(width: Self.paceMarkWidth)
-                        .offset(x: centre - Self.paceMarkWidth / 2)
-                }
-            } else {
-                ZStack(alignment: .leading) {
-                    barBody(fill: fill, tint: tint)
-                }
-            }
-        }
-        .frame(height: 5)
-        .animation(.default, value: share)
-    }
-
-    @ViewBuilder
-    private func barBody(fill: CGFloat, tint: Color) -> some View {
-        Capsule()
-            .fill(.quaternary)
-        Capsule()
-            .fill(tint.gradient)
-            .frame(width: fill)
-    }
-
     // MARK: Placeholder
 
     private var placeholderDetail: String {
@@ -524,7 +286,7 @@ struct UsagePanelView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 14)
     }
 
@@ -547,7 +309,7 @@ struct UsagePanelView: View {
 
             settingsLink("gearshape", help: "Settings", tab: .general)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 10)
     }
 
