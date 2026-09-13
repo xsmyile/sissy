@@ -105,11 +105,18 @@ final class ClaudeProfileSource: @unchecked Sendable {
     /// payload that would not parse leaves both the reading and the
     /// bookkeeping untouched, so the next poll tries again instead of
     /// treating a failed read as an answer.
-    func refresh(now: Date = Date()) {
+    /// `userInitiated` is the caller saying someone just asked for this, which
+    /// is the one thing allowed past the floor. The floor exists so a poll
+    /// every minute does not re-parse 300 KB for a value that changes on the
+    /// order of never; a person pressing refresh is not that, and making them
+    /// wait a quarter of an hour for the answer is the button failing at its
+    /// only job. The mtime gate still applies either way — an unchanged file
+    /// has nothing new to say to anyone.
+    func refresh(now: Date = Date(), userInitiated: Bool = false) {
         let (parsedBefore, knownMTime, dueAt) = lock.withLock {
             (lastParsedAt != .distantPast, lastMTime, lastParsedAt + Self.minimumReparseInterval)
         }
-        if parsedBefore && now < dueAt { return }
+        if parsedBefore && !userInitiated && now < dueAt { return }
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
             let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970
         else { return }

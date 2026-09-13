@@ -76,6 +76,16 @@ final class ClaudeCodeAdapter: SourceAdapter {
         return false
     }
 
+    /// A refresh on this provider is mostly the keychain and the usage
+    /// endpoint, which the engine drives. This is the rest of it: the plan,
+    /// the seat and the account all come out of the CLI's config file, and a
+    /// user who just changed their plan is exactly who presses the button.
+    /// False because none of it is in the snapshot.
+    func refreshOutOfBandState() -> Bool {
+        profile.refresh(userInitiated: true)
+        return false
+    }
+
     /// Claude Code writes `<synthetic>` as the model for assistant turns it
     /// produced locally (interrupts, error notices). Every such event carries
     /// all-zero usage, so it is legitimately unpriced — warning about it would

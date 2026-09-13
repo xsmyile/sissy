@@ -2019,6 +2019,28 @@ func runProviderAccountTests() {
         UsageReaderShared.parseTimestamp("2026-07-08T14:02:21+00:00")
     )
 
+    // The floor keeps a poll every minute off a 300 KB file; a person pressing
+    // refresh is the one caller it must not apply to.
+    let profileURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sissy-selftest-profile-\(UUID().uuidString).json")
+    try? Data(#"{"oauthAccount":{"organizationType":"claude_pro"}}"#.utf8).write(to: profileURL)
+    let source = ClaudeProfileSource(url: profileURL)
+    source.refresh()
+    expect("the profile source reads a plan", source.currentPlan(), "pro")
+
+    try? Data(#"{"oauthAccount":{"organizationType":"claude_max"}}"#.utf8).write(to: profileURL)
+    // Stamped forward by hand: both writes land inside the mtime tolerance
+    // otherwise, and the file would read as unchanged for reasons that have
+    // nothing to do with the floor under test.
+    try? FileManager.default.setAttributes(
+        [.modificationDate: Date().addingTimeInterval(1)], ofItemAtPath: profileURL.path)
+    source.refresh()
+    expect("a poll inside the floor does not re-read", source.currentPlan(), "pro")
+
+    source.refresh(userInitiated: true)
+    expect("a user asking reads again", source.currentPlan(), "max")
+    try? FileManager.default.removeItem(at: profileURL)
+
     expect(
         "display text refuses a field longer than the bound",
         UsageReaderShared.sanitizedDisplayText(
