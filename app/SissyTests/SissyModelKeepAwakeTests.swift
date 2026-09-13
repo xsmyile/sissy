@@ -71,4 +71,42 @@ final class SissyModelKeepAwakeTests: XCTestCase {
 
         XCTAssertEqual(model.keepAwake, .off)
     }
+
+    /// What the panel's button arms when it is clicked out of `off`. The menu
+    /// on that button is the only place the choice is made, so a choice it
+    /// does not carry forward means the click after a switch-off silently
+    /// takes the other mode — a bounded hold becoming a permanent one.
+    func testTheButtonArmsTheModeLastChosen() {
+        let model = SissyModel()
+        model.setKeepAwake(.auto)
+        model.applyFrame(frame(KeepAwakeState(mode: .auto, active: true, since: Date())))
+        model.setKeepAwake(.off)
+        model.applyFrame(frame(.off))
+
+        XCTAssertEqual(model.preferredKeepAwakeMode, .auto)
+    }
+
+    /// A hold does not survive the process but the mode does, so the target is
+    /// re-learned from the first frame that reports an armed mode rather than
+    /// defaulting to the permanent one on every relaunch.
+    func testARelaunchLearnsTheTargetFromTheFirstArmedFrame() {
+        let model = SissyModel()
+
+        XCTAssertEqual(model.preferredKeepAwakeMode, .on)
+        model.applyFrame(frame(KeepAwakeState(mode: .auto, active: false)))
+
+        XCTAssertEqual(model.preferredKeepAwakeMode, .auto)
+    }
+
+    /// Switching off is not a choice of mode. The engine does it on its own
+    /// when a manual hold reaches its ceiling, and a target reset by that
+    /// would turn the next click into a different mode than the one the user
+    /// had running a moment earlier.
+    func testSwitchingOffLeavesTheTargetWhereItWas() {
+        let model = SissyModel()
+        model.setKeepAwake(.auto)
+        model.applyFrame(frame(.off))
+
+        XCTAssertEqual(model.preferredKeepAwakeMode, .auto)
+    }
 }
