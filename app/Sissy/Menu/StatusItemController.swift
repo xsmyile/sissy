@@ -3,12 +3,16 @@ import Observation
 import SwiftUI
 
 /// Owns the app's status item: the icon, the left-click that opens the usage
-/// panel, and a right-click menu that holds the keep-awake mode — deliberately
-/// alongside the panel and Settings — and quit.
+/// panel, and a right-click menu that says whether the Mac is being held awake,
+/// and quits.
 @MainActor
 final class StatusItemController: NSObject {
     let statusItem: NSStatusItem
     private let menu = NSMenu()
+    /// The hold readout and the rule under it, kept as references rather than
+    /// found by index: both are hidden together whenever nothing is held.
+    private let holdItem = NSMenuItem()
+    private let holdSeparator = NSMenuItem.separator()
 
     private let model: SissyModel
     private var sissyAnimator: SissyMenuBarAnimator?
@@ -82,35 +86,23 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// The keep-awake mode, which the panel and Settings also carry, and quit.
+    /// What the Mac is doing about sleep, and quit.
     ///
-    /// The duplication is the point: a hold nobody can see is a battery
-    /// complaint with no path back to its cause, and the menu bar is the one
-    /// surface that is always there — every other way to reach the mode needs
-    /// a window opened first. A radio group is what macOS uses for a choice of
-    /// one, and the words come from `UsageFormat` so no two surfaces can name
-    /// the same mode differently.
+    /// The three modes used to hang here as a radio group, on the grounds that
+    /// the menu bar is the one surface always present while every other way to
+    /// the mode needed a window opened first. The panel is one left-click away
+    /// and now says the hold in its own header, so that grounds is gone and a
+    /// third place to *change* the mode is duplication. What is kept is the
+    /// diagnostic — a hold nobody can see is a battery complaint with no path
+    /// back to its cause — and it is shown only when there is a hold to
+    /// report, because an "off" nobody switched on is not news.
     private func buildMenu() {
         menu.autoenablesItems = false
         menu.delegate = self
 
-        let header = NSMenuItem()
-        header.title = "Keep awake"
-        header.isEnabled = false
-        menu.addItem(header)
-
-        for mode in KeepAwakeMode.allCases {
-            let entry = NSMenuItem(
-                title: UsageFormat.keepAwakeTitle(mode),
-                action: #selector(handleKeepAwake(_:)),
-                keyEquivalent: "")
-            entry.target = self
-            entry.indentationLevel = 1
-            entry.representedObject = mode.rawValue
-            menu.addItem(entry)
-        }
-
-        menu.addItem(.separator())
+        holdItem.isEnabled = false
+        menu.addItem(holdItem)
+        menu.addItem(holdSeparator)
 
         let quit = NSMenuItem(title: "Quit Sissy", action: #selector(handleQuit), keyEquivalent: "q")
         quit.target = self
@@ -118,19 +110,21 @@ final class StatusItemController: NSObject {
         menu.addItem(quit)
     }
 
-    /// Ticks the mode in force and says underneath it what the Mac is actually
-    /// doing, which are two different things: an automatic mode with no agents
+    /// Says what the Mac is actually doing rather than which mode is selected,
+    /// which are two different things: an automatic mode with no agents
     /// working is selected and holding nothing, and so is a mode whose
-    /// assertion power management refused.
-    private func refreshKeepAwakeItems() {
+    /// assertion power management refused. Neither is a hold, so neither
+    /// shows a line.
+    private func refreshHoldItem() {
         let state = model.keepAwake
-        for entry in menu.items {
-            guard let raw = entry.representedObject as? String,
-                let mode = KeepAwakeMode(rawValue: raw)
-            else { continue }
-            entry.state = mode == state.mode ? .on : .off
+        guard state.active, let since = state.since else {
+            holdItem.isHidden = true
+            holdSeparator.isHidden = true
+            return
         }
-        menu.items.first?.title = state.active ? "Keep awake — holding" : "Keep awake"
+        holdItem.title = UsageFormat.keepAwakeHolding(Date().timeIntervalSince(since))
+        holdItem.isHidden = false
+        holdSeparator.isHidden = false
     }
 
     /// Re-arming observation bridge. `@Observable` exposes no
@@ -210,13 +204,6 @@ final class StatusItemController: NSObject {
         statusItem.menu = nil
     }
 
-    @objc private func handleKeepAwake(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-            let mode = KeepAwakeMode(rawValue: raw)
-        else { return }
-        model.setKeepAwake(mode)
-    }
-
     @objc private func handleQuit() {
         NSApp.terminate(nil)
     }
@@ -225,12 +212,13 @@ final class StatusItemController: NSObject {
 extension StatusItemController: NSMenuDelegate {
     // NSMenuDelegate is `@MainActor` on macOS 26's Swift 6 AppKit so the
     // methods can be implemented as MainActor-isolated directly.
-    /// The marks are refreshed on open rather than kept live: the menu is the
-    /// only place that reads them, and a closed menu observing every frame
-    /// would redraw items nobody is looking at.
+    /// The hold line is built on open rather than kept live: the menu is the
+    /// only place that reads it, and a closed menu observing every frame would
+    /// redraw an item nobody is looking at. It also means the elapsed time is
+    /// read at the moment it is shown, which is the only moment it is true.
     func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
-        refreshKeepAwakeItems()
+        refreshHoldItem()
     }
 
     func menuDidClose(_ menu: NSMenu) {
