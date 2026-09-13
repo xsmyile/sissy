@@ -116,6 +116,33 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.windowLabel(minutes: 90), "90m")
     }
 
+    /// The seat is what turns a plan nobody distinguishes into the one the
+    /// account actually pays for.
+    func testAKnownTeamSeatWordsTheBadge() {
+        XCTAssertEqual(
+            UsageFormat.plan("team", tier: "max_5x", seat: "team_tier_1")?.label, "Team Premium")
+        XCTAssertEqual(
+            UsageFormat.plan("team", tier: nil, seat: "team_standard")?.label, "Team Standard")
+    }
+
+    /// The property that makes the seat map safe to keep where every other
+    /// vendor token here is derived: an unknown seat costs a word, never a
+    /// wrong one, and never a release.
+    func testASeatThisBuildDoesNotKnowLeavesThePlanAlone() {
+        XCTAssertEqual(UsageFormat.plan("team", tier: nil, seat: "team_tier_9")?.label, "Team")
+    }
+
+    func testASeatCannotRenameAPlanItDoesNotBelongTo() {
+        XCTAssertEqual(UsageFormat.plan("pro", tier: nil, seat: "team_tier_1")?.label, "Pro")
+    }
+
+    /// The seat replaces the label and nothing else: a Team seat metered at
+    /// Max 5x still says so where it said so before.
+    func testTheTierSurvivesAWordedSeat() {
+        XCTAssertEqual(
+            UsageFormat.plan("team", tier: "max_5x", seat: "team_tier_1")?.tier, "Max 5x")
+    }
+
     func testPlanLabelCapitalisesAVendorToken() {
         XCTAssertEqual(UsageFormat.plan("plus", tier: nil)?.label, "Plus")
         XCTAssertEqual(UsageFormat.plan("max", tier: nil)?.label, "Max")

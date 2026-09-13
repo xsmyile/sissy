@@ -3,6 +3,45 @@ import XCTest
 @testable import Sissy
 
 final class DiagnosticsReportTests: XCTestCase {
+    /// The report is written to be pasted in public, and a slice now carries
+    /// an address, an organisation and a project path. It prints the fields it
+    /// names rather than the slice, and this is what holds the next field
+    /// added to that — which is the one that would otherwise leak.
+    func testAReportNamesNothingPersonalOffTheSlice() {
+        let account = ProviderAccount(
+            email: "someone@example.com",
+            organization: "Example Ltd",
+            seat: "team_tier_1"
+        )
+        let report = DiagnosticsReport.text(
+            DiagnosticsReport.Snapshot(
+                version: "0.1.9",
+                build: "12",
+                systemVersion: "Version 27.0",
+                filesWatched: 3,
+                isWarm: true,
+                claudeLimits: true,
+                providers: [
+                    ProviderSlice(
+                        id: "claude-code",
+                        tokens: 1000,
+                        cost: 1,
+                        plan: "team",
+                        projects: [
+                            ProjectTotals(path: "/Users/someone/clients/acme", tokens: 1000, cost: 1)
+                        ],
+                        account: account
+                    )
+                ],
+                ccusage: []
+            )
+        )
+
+        for secret in ["someone@example.com", "Example Ltd", "acme", "team_tier_1"] {
+            XCTAssertFalse(report.contains(secret), "the report carried \(secret)")
+        }
+    }
+
     private func snapshot(
         providers: [ProviderSlice] = [],
         filesWatched: Int = 98,

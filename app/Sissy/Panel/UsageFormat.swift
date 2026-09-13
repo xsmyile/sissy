@@ -155,15 +155,43 @@ enum UsageFormat {
     /// sells, so the badge stays "Team" and the tier goes to the row's
     /// tooltip. Folding is therefore conditional on the tier naming the plan
     /// it decorates.
-    static func plan(_ plan: String?, tier: String?) -> (label: String, tier: String?)? {
+    static func plan(_ plan: String?, tier: String?, seat: String? = nil) -> (
+        label: String, tier: String?
+    )? {
         guard let plan, let label = words(plan) else { return nil }
+        let named = seatLabel(plan: plan, seat: seat) ?? label
         let parts = tierParts(tier)
-        guard let base = parts.base else { return (label, nil) }
+        guard let base = parts.base else { return (named, nil) }
         if base == plan {
-            return (parts.multiplier.map { "\(label) \($0)" } ?? label, nil)
+            return (parts.multiplier.map { "\(named) \($0)" } ?? named, nil)
         }
-        guard let baseLabel = words(base) else { return (label, nil) }
-        return (label, parts.multiplier.map { "\(baseLabel) \($0)" } ?? baseLabel)
+        guard let baseLabel = words(base) else { return (named, nil) }
+        return (named, parts.multiplier.map { "\(baseLabel) \($0)" } ?? baseLabel)
+    }
+
+    /// Anthropic's two Team seats, and the words it sells them under. The
+    /// plan alone reads as one product where the seats are priced and
+    /// entitled differently, and "Team" is what someone on either one sees
+    /// today.
+    private static let teamSeatLabels = [
+        "team_standard": "Team Standard",
+        "team_tier_1": "Team Premium",
+    ]
+
+    private static let teamPlanToken = "team"
+
+    /// The seat the account holds, where the vendor's token names one this
+    /// build knows.
+    ///
+    /// A map, which everything else here refuses to be — with the one
+    /// property that makes this one safe: an unknown token falls back to the
+    /// plan's own label, which is exactly what renders today. A seat a vendor
+    /// ships tomorrow therefore costs a word rather than a wrong one, and no
+    /// release. It decorates `team` alone, so it cannot rename a plan the
+    /// account is not on.
+    private static func seatLabel(plan: String, seat: String?) -> String? {
+        guard plan == teamPlanToken, let seat else { return nil }
+        return teamSeatLabels[seat]
     }
 
     /// A vendor token as words: `plus` → "Plus", `edu_plus` → "Edu Plus".

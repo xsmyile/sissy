@@ -145,7 +145,8 @@ actor UsageAggregator {
                 windows: p.currentWindows(),
                 plan: p.currentPlan(),
                 planTier: p.currentPlanTier(),
-                projects: p.currentProjects()
+                projects: p.currentProjects(),
+                account: p.currentAccount()
             )
         }
         return FrameBuilder.activeSlices(raw)

@@ -6,9 +6,11 @@ import Foundation
 private struct CodexSignals: SourceSignals {
     let windows: AtomicWindows
     let plan: AtomicPlan
+    let account: AtomicAccount
 
     func currentWindows() -> [UsageWindow] { windows.live() }
     func currentPlan() -> String? { plan.load() }
+    func currentAccount() -> ProviderAccount? { account.load() }
 }
 
 /// Codex's `~/.codex/sessions/**/rollout-*.jsonl`. Codex rolls one JSONL per
@@ -45,6 +47,11 @@ final class CodexAdapter: SourceAdapter {
     /// nothing at all until the CLI has taken a turn.
     private let latestPlan: AtomicPlan
 
+    /// Who Codex is signed in as, read once from `auth.json` at start. Held
+    /// beside the plan rather than inside it: the plan has two sources and a
+    /// per-turn cadence, the account has one source and never moves.
+    private let latestAccount: AtomicAccount
+
     /// Per-file "last seen model id" so a `token_count` event resolves to the
     /// `turn_context.payload.model` that immediately preceded it in the same
     /// rollout. Codex bumps the model mid-session if the user reassigns the
@@ -66,15 +73,17 @@ final class CodexAdapter: SourceAdapter {
     init(codexDir: URL, pricingOverride: [String: ModelPricing]?) {
         let windows = AtomicWindows()
         let plan = AtomicPlan()
+        let account = AtomicAccount()
         self.codexDir = codexDir
         self.pricingOverride = pricingOverride
         self.latestWindows = windows
         self.latestPlan = plan
+        self.latestAccount = account
         self.descriptor = SourceDescriptor(
             id: "codex",
             root: codexDir,
             watcherLabel: "sissy.codex.fswatch",
-            signals: CodexSignals(windows: windows, plan: plan)
+            signals: CodexSignals(windows: windows, plan: plan, account: account)
         )
     }
 
@@ -107,8 +116,8 @@ final class CodexAdapter: SourceAdapter {
                 + "bill at $0; add a `pricingOverride` entry in server.json")
     }
 
-    /// Takes the plan from Codex's auth file when neither the snapshot nor a
-    /// rollout has named one yet.
+    /// Takes the account from Codex's auth file, and the plan too when
+    /// neither the snapshot nor a rollout has named one yet.
     ///
     /// Without this a resumed reader shows the Codex row with no plan: the
     /// offsets are at EOF, `plan_type` rides events that were already
@@ -116,10 +125,16 @@ final class CodexAdapter: SourceAdapter {
     /// answers immediately, and the first rollout event that lands overwrites
     /// it — the CLI restamps the claim per turn, this file only on a token
     /// refresh.
+    ///
+    /// The account is stored unconditionally because this file is its only
+    /// source: no rollout line carries an address, and nothing persists one.
+    /// It is also why it cannot make this return true, which means "the next
+    /// snapshot has something new to carry".
     func prepareToStart() -> Bool {
-        guard latestPlan.load() == nil else { return false }
         let url = CodexAuthSource.defaultURL(sessionsDir: codexDir)
-        guard let plan = CodexAuthSource.loadPlan(at: url) else { return false }
+        guard let identity = CodexAuthSource.load(at: url) else { return false }
+        latestAccount.store(identity.account)
+        guard latestPlan.load() == nil, let plan = identity.plan else { return false }
         latestPlan.store(plan)
         return true
     }

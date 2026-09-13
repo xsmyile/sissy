@@ -40,12 +40,14 @@ protocol SourceSignals: Sendable {
     func currentWindows() -> [UsageWindow]
     func currentPlan() -> String?
     func currentPlanTier() -> String?
+    func currentAccount() -> ProviderAccount?
 }
 
 extension SourceSignals {
     func currentWindows() -> [UsageWindow] { [] }
     func currentPlan() -> String? { nil }
     func currentPlanTier() -> String? { nil }
+    func currentAccount() -> ProviderAccount? { nil }
 }
 
 /// The facts `LocalUsageProvider` copies out of its adapter at init, so it can
@@ -296,6 +298,8 @@ actor LocalUsageProvider: UsageProvider {
     nonisolated func currentPlan() -> String? { signals.currentPlan() }
 
     nonisolated func currentPlanTier() -> String? { signals.currentPlanTier() }
+
+    nonisolated func currentAccount() -> ProviderAccount? { signals.currentAccount() }
 
     func applyPriceCatalog(_ catalog: PriceCatalog) {
         adapter.applyPriceCatalog(catalog)
