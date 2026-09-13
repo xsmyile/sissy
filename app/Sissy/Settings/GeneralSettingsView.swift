@@ -7,15 +7,17 @@ struct GeneralSettingsView: View {
 
     @State private var confirmingDelete = false
 
-    /// What the two armed modes cost, with both bounds read off the policy the
-    /// engine runs rather than written out here. A caption claiming ten
-    /// minutes while the engine waits fifteen is worse than no caption, and
-    /// these are the only numbers in the app that say when a hold ends.
+    /// What the two armed modes cost. Both the names and both the bounds are
+    /// read rather than written out: a caption that says ten minutes while the
+    /// shipped policy waits fifteen, or that calls a mode by a name the picker
+    /// above it no longer uses, is worse than no caption. These are also the
+    /// only numbers in the app that say when a hold ends.
     private var keepAwakeCaption: String {
         let idle = UsageFormat.countdown(KeepAwakePolicy.default.idleWindow)
         let ceiling = UsageFormat.countdown(KeepAwakePolicy.default.manualCeiling)
-        return "While agents are working holds the Mac only while a turn has landed in the "
-            + "last \(idle), and lets go after. Always holds it until you switch it off, "
+        return "\(UsageFormat.keepAwakeTitle(.auto)) holds the Mac only while a turn has "
+            + "landed in the last \(idle), and lets go after. "
+            + "\(UsageFormat.keepAwakeTitle(.on)) holds it until you switch it off, "
             + "\(ceiling) at the outside. Closing the lid sleeps the Mac under either."
     }
 
