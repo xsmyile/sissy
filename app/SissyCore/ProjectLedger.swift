@@ -11,6 +11,18 @@ struct ProjectCheckout: Codable, Equatable, Sendable {
     let project: String
 }
 
+/// What one pass over the inbox found.
+///
+/// `arrivedDeleted` is the measurement the inbox exists to justify: an entry
+/// whose directory was already gone by the time Sissy read it is one the tail
+/// could not have learned by itself, because there was nothing left to walk to.
+struct InboxIngest: Equatable, Sendable {
+    var read = 0
+    var learned = 0
+    var arrivedDeleted = 0
+    var rejected = 0
+}
+
 /// What Sissy knows about which directory was a checkout of which repository,
 /// and the only thing that can still answer for one that has been deleted.
 ///
@@ -37,10 +49,20 @@ struct ProjectCheckout: Codable, Equatable, Sendable {
 /// because the directories the work happened in had been deleted by the time
 /// anything read the lines naming them.
 ///
-/// What it still cannot answer for is a checkout created *and* deleted while
+/// What neither of those reaches is a checkout created *and* deleted while
 /// Sissy was not running: git has pruned its side, the logs name the path and
-/// nothing else, and there is no reading left to remember. That is the
-/// residual hole, and closing it needs a source outside this machine's state.
+/// nothing else, and there is no reading left to remember. That is what the
+/// **inbox** answers. A CLI session writes the pair down itself, from inside
+/// the directory, while it is still there — which happens whether or not Sissy
+/// is running, and is the only evidence that survives being the one thing
+/// Sissy could not have watched.
+///
+/// The inbox is written by a process Sissy does not control, so it is read as a
+/// boundary rather than as its own file: every entry is opened without
+/// following a link, checked to be a regular file this user owns, size-capped,
+/// and parsed into the same pair a walk would have produced or discarded. What
+/// survives is `adopt`ed rather than `remember`ed — evidence Sissy did not see
+/// itself goes behind what it did, never in front of it.
 ///
 /// Shared across the providers' actors, so the state sits behind a lock — and
 /// no file I/O happens while that lock is held.
@@ -56,9 +78,19 @@ final class ProjectLedger: @unchecked Sendable {
     /// and short enough that a worktree has to be created and destroyed
     /// inside half a minute to slip past.
     static let worktreeScanInterval: TimeInterval = 30
+    /// How many inbox entries one pass consumes. The inbox is foreign input,
+    /// and a pass runs on the tail's own cadence, so there is never a reason to
+    /// let one directory listing become unbounded work.
+    static let maxInboxEntriesPerPass = 256
+    /// A pair of paths and two newlines. Anything larger is not the file the
+    /// hook writes.
+    static let maxInboxEntryBytes: off_t = 8192
+    /// `PATH_MAX` on macOS. A path that cannot be opened cannot be a checkout.
+    static let maxPathBytes = 1024
     static let currentSchemaVersion = 1
 
     private static let fileName = "project-checkouts.json"
+    private static let inboxDirectoryName = "checkout-inbox"
     private static let gitEntryName = ".git"
     private static let worktreesDirName = "worktrees"
     private static let worktreePointerName = "gitdir"
@@ -68,6 +100,13 @@ final class ProjectLedger: @unchecked Sendable {
         directory.appendingPathComponent(fileName)
     }
 
+    /// Where a CLI session leaves what it read about the directory it started
+    /// in. Beside the ledger, because it is the same memory arriving by the one
+    /// road that does not require Sissy to have been running.
+    static func inboxURL(in directory: URL) -> URL {
+        directory.appendingPathComponent(inboxDirectoryName)
+    }
+
     private struct Document: Codable {
         var schemaVersion: Int
         var updatedAt: Date
@@ -75,6 +114,7 @@ final class ProjectLedger: @unchecked Sendable {
     }
 
     private let url: URL?
+    private let inbox: URL?
     private let fileManager: FileManager
     private let lock = NSLock()
     /// Held for the whole of a save, so the two providers cannot both reach
@@ -96,6 +136,7 @@ final class ProjectLedger: @unchecked Sendable {
 
     init(url: URL? = nil, fileManager: FileManager = .default) {
         self.url = url
+        self.inbox = url.map { Self.inboxURL(in: $0.deletingLastPathComponent()) }
         self.fileManager = fileManager
         load()
     }
@@ -134,14 +175,16 @@ final class ProjectLedger: @unchecked Sendable {
     /// Seeds what an earlier run read off disk. Additive and behind whatever
     /// this run has already walked to: a `.git` entry read a moment ago is a
     /// fresher answer about the same directory than one read last week.
-    func adopt(_ remembered: [ProjectCheckout]) {
+    @discardableResult
+    func adopt(_ remembered: [ProjectCheckout]) -> Int {
         lock.withLock {
             let known = Set(checkouts.map(\.directory))
             let added = remembered.filter { !known.contains($0.directory) }
-            guard !added.isEmpty else { return }
+            guard !added.isEmpty else { return 0 }
             checkouts.append(contentsOf: added)
             dirty = true
             cap()
+            return added.count
         }
     }
 
@@ -187,6 +230,118 @@ final class ProjectLedger: @unchecked Sendable {
         for repository in repositories {
             harvestWorktrees(of: repository, now: now)
         }
+    }
+
+    /// Takes in what CLI sessions left in the inbox and empties it.
+    ///
+    /// An entry is deleted once it has been read, whether or not it was
+    /// usable: it has either become a checkout the ledger now holds or been
+    /// judged unusable, and neither answer changes by asking again. That is
+    /// also what bounds the directory — there is no retention to tune and no
+    /// stamp to keep, because nothing is left to re-read.
+    ///
+    /// An entry that cannot be opened at all is left where it is. It is
+    /// nothing this run can act on, and removing a file Sissy could not even
+    /// read is a worse answer than listing it again next time.
+    @discardableResult
+    func ingestInbox() -> InboxIngest {
+        guard let inbox else { return InboxIngest() }
+        let entries =
+            (try? fileManager.contentsOfDirectory(
+                at: inbox, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+            )) ?? []
+        var report = InboxIngest()
+        var arrived: [ProjectCheckout] = []
+        for entry in entries.prefix(Self.maxInboxEntriesPerPass) {
+            guard let text = readEntry(at: entry) else { continue }
+            report.read += 1
+            try? fileManager.removeItem(at: entry)
+            guard let checkout = Self.checkout(from: text) else {
+                report.rejected += 1
+                continue
+            }
+            if !fileManager.fileExists(atPath: checkout.directory) {
+                report.arrivedDeleted += 1
+            }
+            arrived.append(checkout)
+        }
+        report.learned = adopt(arrived)
+        if report.read > 0 {
+            sissyLog(
+                "sissy: checkout inbox: read \(report.read), learned \(report.learned), "
+                    + "already deleted on arrival \(report.arrivedDeleted), "
+                    + "rejected \(report.rejected)")
+        }
+        return report
+    }
+
+    /// Reads one inbox entry through its descriptor rather than its path.
+    ///
+    /// `O_NOFOLLOW` refuses a symlink, so an entry pointed at a private key is
+    /// not read and cannot reach a log. `O_NONBLOCK` is what stops a named pipe
+    /// from holding `open(2)` open forever — that would wedge the provider
+    /// actor this runs inside and stop metering with nothing to show for it —
+    /// and the mode check is what rejects the pipe once it is open. Every other
+    /// question is asked of the descriptor already held, so there is no window
+    /// between deciding a file is safe and reading the file that answered.
+    private func readEntry(at url: URL) -> String? {
+        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0,
+            info.st_mode & S_IFMT == S_IFREG,
+            info.st_uid == getuid(),
+            info.st_nlink == 1,
+            info.st_size <= Self.maxInboxEntryBytes
+        else { return nil }
+        var bytes = [UInt8](repeating: 0, count: Int(info.st_size))
+        var filled = 0
+        while filled < bytes.count {
+            let taken = bytes[filled...].withUnsafeMutableBytes {
+                read(descriptor, $0.baseAddress, $0.count)
+            }
+            guard taken > 0 else { break }
+            filled += taken
+        }
+        guard filled == bytes.count else { return nil }
+        return String(bytes: bytes, encoding: .utf8)
+    }
+
+    /// The pair an entry claims, or nil for anything that is not exactly one.
+    ///
+    /// Strict on purpose: this is the one place a path Sissy never walked to
+    /// can enter the ledger, and from there a persisted row's label and an
+    /// export.
+    static func checkout(from text: String) -> ProjectCheckout? {
+        var lines = text.components(separatedBy: "\n")
+        if lines.last?.isEmpty == true { lines.removeLast() }
+        guard lines.count == 2,
+            let directory = path(from: lines[0], minimumComponents: 2),
+            let project = path(from: lines[1], minimumComponents: 1)
+        else { return nil }
+        return ProjectCheckout(directory: directory, project: project)
+    }
+
+    /// An absolute path with nothing in it that a path cannot contain.
+    ///
+    /// A control character would reach a log and a row label, and `..`
+    /// surviving standardization is a path that does not mean what it says.
+    ///
+    /// `minimumComponents` is two for the checkout and one for the repository,
+    /// because only the checkout is matched by prefix: a planted `/Volumes`
+    /// would re-label everything beneath it, where a repository that shallow is
+    /// merely an odd label on its own row.
+    private static func path(from line: String, minimumComponents: Int) -> String? {
+        guard line.hasPrefix("/"), line.utf8.count <= maxPathBytes,
+            !line.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F })
+        else { return nil }
+        let standardized = URL(fileURLWithPath: line).standardizedFileURL.path
+        guard standardized.hasPrefix("/"),
+            !standardized.split(separator: "/").contains(".."),
+            standardized.split(separator: "/").count >= minimumComponents
+        else { return nil }
+        return standardized
     }
 
     /// Flushed **ahead of** the tail's snapshot, which writes its own
