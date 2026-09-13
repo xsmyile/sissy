@@ -68,7 +68,7 @@ struct UsagePanelView: View {
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
         return VStack(alignment: .leading, spacing: 0) {
             if let open {
-                providerHeader(open)
+                providerHeader(open, live: live)
             } else {
                 header(live)
             }
@@ -169,10 +169,17 @@ struct UsagePanelView: View {
     /// this is, and the refresh.
     ///
     /// One header rather than two stacked, which is what a navigation level
-    /// reads as. Sissy and the keep-awake switch belong to the app rather than
-    /// to an account, so they stay home — one click away, which is where a
-    /// global control can sit once the panel has somewhere to go.
-    private func providerHeader(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
+    /// reads as. Sissy, the keep-awake switch and the way into Settings belong
+    /// to the app rather than to an account, so they stay home — one click
+    /// away, which is where a global control can sit once the panel has
+    /// somewhere to go.
+    ///
+    /// The age goes under the name for the same reason it goes under Sissy's:
+    /// it is a property of the reading on screen, so it belongs beside what it
+    /// dates. Here that puts it under the refresh button that resets it.
+    private func providerHeader(
+        _ row: UsagePanelSnapshot.ProviderRow, live: SissyModel.LiveFrame?
+    ) -> some View {
         HStack(spacing: 8) {
             Button {
                 page = .overview
@@ -186,15 +193,22 @@ struct UsagePanelView: View {
             .foregroundStyle(.secondary)
             .help("Back to today")
 
-            ProviderMark(
-                id: row.id, size: Self.headerMarkSize, textSize: Self.headerTitleSize)
+            ProviderMark(id: row.id, size: Self.headerMarkSize, textSize: nil)
 
-            Text(row.name)
-                .font(.system(size: Self.headerTitleSize, weight: .semibold))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(row.name)
+                        .font(.system(size: Self.headerTitleSize, weight: .semibold))
+                        .lineLimit(1)
 
-            if let plan = row.plan {
-                PlanBadge(plan: plan, tier: row.planTier)
+                    if let plan = row.plan {
+                        PlanBadge(plan: plan, tier: row.planTier)
+                    }
+                }
+
+                if let live {
+                    readingLine(live)
+                }
             }
 
             Spacer(minLength: 0)

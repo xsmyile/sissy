@@ -52,7 +52,11 @@ struct ProviderMark: View {
     var size: CGFloat = PanelMetrics.markSize
     /// The size of the text this mark sits beside, which is what decides how
     /// far down it has to move to look level with it.
-    var textSize: CGFloat = PanelMetrics.rowText
+    ///
+    /// Nil where the mark labels more than one line. A block of two lines is
+    /// already centred on its own middle, and a correction cut for a single
+    /// line would push the mark off it.
+    var textSize: CGFloat? = PanelMetrics.rowText
 
     /// A dot reads as a dot at about a third of the width a mark needs, and a
     /// dot blown up to a mark's box reads as a bullet hole.
@@ -76,11 +80,15 @@ struct ProviderMark: View {
     }
 
     var body: some View {
-        content
-            .alignmentGuide(VerticalAlignment.center) { dimension in
-                dimension[VerticalAlignment.center]
-                    - Self.capCentreOffset(forTextSize: textSize)
-            }
+        if let textSize {
+            content
+                .alignmentGuide(VerticalAlignment.center) { dimension in
+                    dimension[VerticalAlignment.center]
+                        - Self.capCentreOffset(forTextSize: textSize)
+                }
+        } else {
+            content
+        }
     }
 
     @ViewBuilder
