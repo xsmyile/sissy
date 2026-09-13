@@ -366,34 +366,88 @@ struct UsagePanelView: View {
             .help(tier.map { "\($0) rate limits" } ?? plan)
     }
 
+    /// The bar, its reading, and — once the window is old enough to project
+    /// from — the line that says whether that reading is ahead or behind.
     private func windowRow(
         _ window: UsagePanelSnapshot.WindowRow,
         tint: Color
     ) -> some View {
-        HStack(spacing: 8) {
-            shareBar(window.fraction, tint: tint)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                shareBar(window.fraction, tint: tint, pace: window.pace)
 
-            Text("\(window.percent)%")
-                .font(.system(size: 11))
-                .monospacedDigit()
-                .frame(width: 32, alignment: .trailing)
+                Text("\(window.percent)%")
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .frame(width: 32, alignment: .trailing)
 
-            Text("\(window.label) · \(UsageFormat.resetLabel(window.resetsAt))")
-                .font(.system(size: 11))
+                Text("\(window.label) · \(UsageFormat.resetLabel(window.resetsAt))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: 74, alignment: .trailing)
+            }
+
+            if let pace = window.pace {
+                Text(
+                    UsageFormat.paceCaption(
+                        deltaPercent: pace.deltaPercent, runsOutAt: pace.runsOutAt)
+                )
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(width: 74, alignment: .trailing)
+            }
         }
     }
 
-    private func shareBar(_ share: Double, tint: Color) -> some View {
+    /// Width of the pace mark itself, and of the hole cut for it.
+    ///
+    /// The mark is punched out of the bar rather than painted over it: at
+    /// 5 pt tall, a line drawn on top of a fill of similar weight disappears
+    /// into it, and the gap is what makes two points of colour read.
+    private static let paceMarkWidth: CGFloat = 2
+    private static let paceMarkGap: CGFloat = 5
+
+    /// Where the mark's centre lands, kept a half-gap inside the bar so a
+    /// window in its last minutes draws a whole mark instead of half of one.
+    private func paceMarkCentre(_ pace: UsagePanelSnapshot.Pace, in width: CGFloat) -> CGFloat {
+        let inset = Self.paceMarkGap / 2
+        guard width > Self.paceMarkGap else { return width / 2 }
+        return min(max(width * pace.expectedFraction, inset), width - inset)
+    }
+
+    /// Green under the mark and red over it, which is the whole reading: the
+    /// bar says where you are, the mark says where even consumption would have
+    /// put you, and the colour says which of the two is ahead.
+    private func shareBar(
+        _ share: Double,
+        tint: Color,
+        pace: UsagePanelSnapshot.Pace? = nil
+    ) -> some View {
         GeometryReader { geometry in
+            let centre = pace.map { paceMarkCentre($0, in: geometry.size.width) }
             ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(.quaternary)
-                Capsule()
-                    .fill(tint.gradient)
-                    .frame(width: max(geometry.size.width * share, share > 0 ? 3 : 0))
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.quaternary)
+                    Capsule()
+                        .fill(tint.gradient)
+                        .frame(width: max(geometry.size.width * share, share > 0 ? 3 : 0))
+                    if let centre {
+                        Capsule()
+                            .frame(width: Self.paceMarkGap)
+                            .offset(x: centre - Self.paceMarkGap / 2)
+                            .blendMode(.destinationOut)
+                    }
+                }
+                .compositingGroup()
+
+                if let centre, let pace {
+                    Capsule()
+                        .fill(pace.isOverPace ? Color.red : Color.green)
+                        .frame(width: Self.paceMarkWidth)
+                        .offset(x: centre - Self.paceMarkWidth / 2)
+                }
             }
         }
         .frame(height: 5)

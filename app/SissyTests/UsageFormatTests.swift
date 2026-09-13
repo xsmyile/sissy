@@ -51,6 +51,59 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.held(-30), "<1m")
     }
 
+    func testCountdownKeepsBothUnitsAcrossDays() {
+        XCTAssertEqual(UsageFormat.countdown(2 * 86400 + 15 * 3600), "2d 15h")
+    }
+
+    func testCountdownDropsAnEmptyHourPart() {
+        XCTAssertEqual(UsageFormat.countdown(3 * 86400), "3d")
+    }
+
+    func testCountdownFallsBackToHoursAndMinutes() {
+        XCTAssertEqual(UsageFormat.countdown(16 * 3600 + 31 * 60), "16h 31m")
+    }
+
+    func testCountdownUnderAnHourIsMinutesAlone() {
+        XCTAssertEqual(UsageFormat.countdown(48 * 60), "48m")
+    }
+
+    func testPaceCaptionWordsAReserveThatLastsUntilTheReset() {
+        XCTAssertEqual(
+            UsageFormat.paceCaption(deltaPercent: -30, runsOutAt: nil),
+            "30% in reserve · Lasts until reset"
+        )
+    }
+
+    func testPaceCaptionWordsADeficitWithItsRunOut() {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        XCTAssertEqual(
+            UsageFormat.paceCaption(
+                deltaPercent: 28,
+                runsOutAt: now.addingTimeInterval(86400 + 48 * 60),
+                now: now
+            ),
+            "28% in deficit · Runs out in 1d"
+        )
+    }
+
+    /// "0% in reserve" is a measurement of nothing; the caption has a word for
+    /// sitting on the mark.
+    func testPaceCaptionOnTheMarkSaysSoRatherThanZero() {
+        XCTAssertEqual(
+            UsageFormat.paceCaption(deltaPercent: 0, runsOutAt: nil),
+            "On pace · Lasts until reset"
+        )
+    }
+
+    /// A run-out already behind us cannot be counted down to.
+    func testPaceCaptionPastTheRunOutSaysTheHeadroomIsGone() {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        XCTAssertEqual(
+            UsageFormat.paceCaption(deltaPercent: 54, runsOutAt: now, now: now),
+            "54% in deficit · Out of headroom"
+        )
+    }
+
     func testWindowLabelNamesTheSessionWindowInHours() {
         XCTAssertEqual(UsageFormat.windowLabel(minutes: 300), "5h")
     }

@@ -79,6 +79,99 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.providers.first?.windows, [])
     }
 
+    // MARK: Pace
+
+    /// The mark's whole job: a window that has spent less than the clock has
+    /// is ahead, and the caption has to say so in the words the colour does.
+    func testAWindowUnderEvenConsumptionReportsAReserve() throws {
+        let row = try paceRow(minutes: 300, usedPercent: 20, elapsedFraction: 0.5)
+
+        XCTAssertEqual(row.pace?.deltaPercent, -30)
+        XCTAssertEqual(row.pace?.isOverPace, false)
+        XCTAssertEqual(try XCTUnwrap(row.pace?.expectedFraction), 0.5, accuracy: 0.001)
+    }
+
+    func testAWindowOverEvenConsumptionReportsADeficit() throws {
+        let row = try paceRow(minutes: 300, usedPercent: 80, elapsedFraction: 0.5)
+
+        XCTAssertEqual(row.pace?.deltaPercent, 30)
+        XCTAssertEqual(row.pace?.isOverPace, true)
+    }
+
+    /// The rate is one turn's tokens over a few minutes this early, which
+    /// extrapolates to a week's spend before lunch. A mark that swings red on
+    /// the first message is worse than no mark.
+    func testAWindowInItsFirstMinutesCarriesNoPace() throws {
+        let row = try paceRow(minutes: 10080, usedPercent: 1, elapsedFraction: 0.02)
+
+        XCTAssertNil(row.pace)
+    }
+
+    /// Under pace means the rate outlives the window, so there is no run-out
+    /// to name — and the row already prints the reset.
+    func testAWindowThatOutlivesItsResetNamesNoRunOut() throws {
+        let row = try paceRow(minutes: 300, usedPercent: 20, elapsedFraction: 0.5)
+
+        XCTAssertNil(row.pace?.runsOutAt)
+    }
+
+    /// Half the window gone and 80% of it spent: the remaining 20% lasts a
+    /// quarter of the time the first 80% took, which is 37.5 minutes of the
+    /// 150 still on the clock.
+    func testAWindowSpendingFasterThanItRefillsProjectsARunOut() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let row = try paceRow(
+            minutes: 300, usedPercent: 80, elapsedFraction: 0.5, now: now)
+
+        let runsOut = try XCTUnwrap(row.pace?.runsOutAt)
+        XCTAssertEqual(runsOut.timeIntervalSince(now), 37.5 * 60, accuracy: 1)
+    }
+
+    /// A window past 100% has no headroom left to project, and a reading in
+    /// the past is not a projection the caption can count down to.
+    func testAnExhaustedWindowRunsOutNow() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let row = try paceRow(
+            minutes: 300, usedPercent: 104, elapsedFraction: 0.5, now: now)
+
+        XCTAssertEqual(row.pace?.runsOutAt, now)
+    }
+
+    /// A window whose reset has passed describes a period that no longer
+    /// exists — the same rule the reader applies before publishing one.
+    func testAWindowPastItsResetCarriesNoPace() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let window = try XCTUnwrap(
+            UsageWindow(
+                minutes: 300, usedPercent: 50, resetsAt: now.addingTimeInterval(-60)))
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window])]),
+            now: now
+        )
+
+        XCTAssertNil(snapshot.providers.first?.windows.first?.pace)
+    }
+
+    private func paceRow(
+        minutes: Int,
+        usedPercent: Double,
+        elapsedFraction: Double,
+        now: Date = Date(timeIntervalSince1970: 1_789_000_000)
+    ) throws -> UsagePanelSnapshot.WindowRow {
+        let duration = Double(minutes) * 60
+        let window = try XCTUnwrap(
+            UsageWindow(
+                minutes: minutes,
+                usedPercent: usedPercent,
+                resetsAt: now.addingTimeInterval(duration * (1 - elapsedFraction))
+            ))
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window])]),
+            now: now
+        )
+        return try XCTUnwrap(snapshot.providers.first?.windows.first)
+    }
+
     // MARK: Plan
 
     func testProviderRowWordsTheVendorPlanToken() {
