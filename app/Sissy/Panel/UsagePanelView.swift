@@ -45,6 +45,10 @@ struct UsagePanelView: View {
     /// against the legend's 12 pt medium and it sits between a back chevron
     /// and a 26 pt button. A mark sized for the quieter row reads as an
     /// afterthought here.
+    /// How far the glass under the keep-awake switch is tinted while a hold
+    /// is in force. Enough to read as lit next to an untinted circle, short of
+    /// a filled button — it is a state, not a selection.
+    private static let heldGlassTint: Double = 0.22
     private static let headerMarkSize: CGFloat = 18
     private static let headerTitleSize: CGFloat = 13
     private static let sissySize: CGFloat = 24
@@ -253,8 +257,16 @@ struct UsagePanelView: View {
     ///
     /// Colour carries the two axes separately. The glass tints while the Mac
     /// is actually being held; a mode that is armed and holding nothing keeps
-    /// the amber glyph without the tinted glass, so "armed" and "holding" stay
-    /// legible apart. That second state has two causes — an automatic hold
+    /// the tinted glyph without the tinted glass, so "armed" and "holding"
+    /// stay legible apart.
+    ///
+    /// Blue rather than the amber it started as, for two reasons that agree.
+    /// Claude's own mark is coral and renders a few points away in the same
+    /// header, so a warm switch beside it read as something to do with that
+    /// provider. And on this platform orange is the colour of caution — the
+    /// energy-impact column, the recording dot — where blue is the colour of
+    /// a control that is engaged, which is what this is. `.blue` rather than
+    /// a literal, so it is the system's own and follows the appearance. That second state has two causes — an automatic hold
     /// waiting for the agents to do something, and an assertion power
     /// management refused — and they look alike because they are alike: the
     /// Mac is free to sleep either way. The tooltip is what separates them.
@@ -278,7 +290,7 @@ struct UsagePanelView: View {
             Image(systemName: "cup.and.saucer.fill")
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
-                .foregroundStyle(state.mode == .off ? Color.secondary : Color.orange)
+                .foregroundStyle(state.mode == .off ? Color.secondary : Color.blue)
                 .contentShape(.circle)
         } primaryAction: {
             model.setKeepAwake(state.mode == .off ? model.preferredKeepAwakeMode : .off)
@@ -287,7 +299,7 @@ struct UsagePanelView: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .glassEffect(
-            state.active ? .regular.tint(.orange.opacity(0.22)) : .regular,
+            state.active ? .regular.tint(.blue.opacity(Self.heldGlassTint)) : .regular,
             in: .circle
         )
         .help(UsageFormat.keepAwakeHelp(state, arming: model.preferredKeepAwakeMode))
