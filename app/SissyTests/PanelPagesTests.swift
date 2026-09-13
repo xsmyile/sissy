@@ -239,6 +239,46 @@ final class PanelPagesTests: XCTestCase {
         XCTAssertEqual(page.map(\.name), snapshot.projects.map(\.name))
     }
 
+    /// Two accounts can hold a repository of the same name, so the row says
+    /// whose it is. The name still comes from the directory: the owner is a
+    /// prefix, never a replacement.
+    func testAProjectRowCarriesTheAccountItsRepositoryBelongsTo() throws {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame([
+                slice(
+                    "claude-code",
+                    tokens: 300,
+                    cost: "3.00",
+                    projects: [
+                        ProjectTotals(
+                            path: "/src/website", tokens: 200, cost: Decimal(2),
+                            owner: "radonforge"),
+                        ProjectTotals(path: "/src/sissy", tokens: 100, cost: Decimal(1)),
+                    ])
+            ]))
+
+        let page = try XCTUnwrap(snapshot.providers.first?.projects)
+        XCTAssertEqual(page.map(\.name), ["website", "sissy"])
+        XCTAssertEqual(page.map(\.owner), ["radonforge", nil])
+    }
+
+    /// The rows that stand for no single repository never claim an account.
+    func testTheFoldedAndUnattributedRowsNameNoAccount() throws {
+        let owned = (1...7).map {
+            ProjectTotals(
+                path: "/src/p\($0)", tokens: 10, cost: Decimal(1), owner: "radonforge")
+        }
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame([slice("claude-code", tokens: 100, cost: "10.00", projects: owned)]))
+
+        let page = try XCTUnwrap(snapshot.providers.first?.projects)
+        XCTAssertEqual(page.count, 6)
+        XCTAssertEqual(page[4].name, "3 more projects")
+        XCTAssertNil(page[4].owner)
+        XCTAssertEqual(page[5].name, UsageFormat.projectsUnattributed)
+        XCTAssertNil(page[5].owner)
+    }
+
     /// The fold keeps the dearest projects and pushes the rest into one row.
     /// Folding a prefix of an unordered list would hide the day's largest
     /// spender behind "N more projects" whenever it hashed late.
