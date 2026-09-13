@@ -74,6 +74,20 @@ final class UsageProjectRowsTests: XCTestCase {
         XCTAssertEqual(Int((snapshot.projects.last?.share ?? 0) * 100), 25)
     }
 
+    /// The rows and the header can be read an instant apart — the split is
+    /// republished on every read of a provider's day, the totals beside it
+    /// only on an emit — so the two halves of a remainder can disagree about
+    /// its sign. That is a reading that disagrees with itself, not money.
+    func testARemainderThatCameOutNegativeIsNotDrawn() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(
+                projects: [project("/Users/d/sissy", 250, "9.00")],
+                providerTokens: 1_000,
+                providerCost: "6.00"))
+
+        XCTAssertEqual(snapshot.projects.map(\.name), ["sissy"])
+    }
+
     /// It is not a project, so it never wears a project's name or a path it
     /// could be mistaken for.
     func testTheRemainderHoversTheReasonRatherThanAPath() throws {
