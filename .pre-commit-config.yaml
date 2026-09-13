@@ -23,7 +23,7 @@ repos:
         name: shellcheck
         entry: shellcheck
         language: system
-        files: ^scripts/.*\.sh$
+        files: ^(scripts/|app/Sissy/Resources/).*\.sh$
 
       - id: actionlint
         name: actionlint
