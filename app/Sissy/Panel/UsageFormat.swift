@@ -34,15 +34,23 @@ enum UsageFormat {
     /// `holding` is how long the Mac has been held awake, which rides this
     /// line rather than a readout of its own beside the cup: a bare duration
     /// next to a button is a number with no noun, and here it is one clause
-    /// of the sentence that already dates everything else on screen. A
-    /// refresh does not take it away — the hold is not the thing being
-    /// re-read.
+    /// of the sentence that already dates everything else on screen. It
+    /// carries that noun with it, because at the end of the line it would be
+    /// a bare number again. A refresh does not take it away — the hold is not
+    /// the thing being re-read.
+    ///
+    /// It trails rather than leads for a layout reason, not a rhetorical one:
+    /// the line is left-aligned, and the hold both appears from nothing and
+    /// grows a unit at the hour. Leading, every one of those shoves the age
+    /// sideways under a title that has not moved. Trailing, the clause that
+    /// is always there stays put and the one that comes and goes does so at
+    /// the end, where nothing follows it.
     static func reading(
         age interval: TimeInterval, holding: TimeInterval?, refreshing: Bool
     ) -> String {
         let reading = refreshing ? "refreshing…" : "updated " + age(interval)
         guard let holding else { return reading }
-        return held(holding) + " · " + reading
+        return reading + " · awake " + held(holding)
     }
 
     /// The providers block's one-line recap: how many of the CLIs Sissy is
