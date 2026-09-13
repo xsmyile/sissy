@@ -82,23 +82,16 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// The three keep-awake modes, in the order the menu lists them: what the
-    /// Mac does by itself, then the two ways Sissy can stop it.
-    private static let keepAwakeItems: [(mode: KeepAwakeMode, title: String)] = [
-        (.off, "Never"),
-        (.auto, "While agents are working"),
-        (.on, "Always"),
-    ]
-
     /// The menu holds nothing the panel already owns, with one exception: the
     /// keep-awake mode.
     ///
     /// It is here because a hold nobody can see is a battery complaint with no
     /// path back to its cause, and the menu bar is the one surface that is
-    /// always there — the panel has to be opened to say anything. Three modes
-    /// also do not fit the panel's button, and a radio group is what macOS
-    /// uses for a choice of one; the button stays the switch and this is where
-    /// what it switches into is chosen.
+    /// always there — the panel has to be opened to say anything. The panel's
+    /// button offers the same three modes on a press, so this is no longer the
+    /// only way to reach them; it is the way that needs no panel. A radio
+    /// group is what macOS uses for a choice of one, and the words come from
+    /// `UsageFormat` so the two menus cannot name the same mode differently.
     private func buildMenu() {
         menu.autoenablesItems = false
         menu.delegate = self
@@ -108,12 +101,14 @@ final class StatusItemController: NSObject {
         header.isEnabled = false
         menu.addItem(header)
 
-        for item in Self.keepAwakeItems {
+        for mode in KeepAwakeMode.allCases {
             let entry = NSMenuItem(
-                title: item.title, action: #selector(handleKeepAwake(_:)), keyEquivalent: "")
+                title: UsageFormat.keepAwakeTitle(mode),
+                action: #selector(handleKeepAwake(_:)),
+                keyEquivalent: "")
             entry.target = self
             entry.indentationLevel = 1
-            entry.representedObject = item.mode.rawValue
+            entry.representedObject = mode.rawValue
             menu.addItem(entry)
         }
 

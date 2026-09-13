@@ -53,6 +53,63 @@ enum UsageFormat {
         return remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
     }
 
+    /// What each keep-awake mode is called, everywhere it is offered.
+    ///
+    /// Three surfaces list the modes — the panel button's menu, the right-click
+    /// menu and Settings — and the words have to be the same in all three or
+    /// the same setting reads as two. A `switch` rather than a table so a mode
+    /// added to the engine cannot compile until it has been named here.
+    static func keepAwakeTitle(_ mode: KeepAwakeMode) -> String {
+        switch mode {
+        case .off: return "Never"
+        case .auto: return "While agents are working"
+        case .on: return "Always"
+        }
+    }
+
+    /// The keep-awake button's tooltip: what the Mac is doing, what a click
+    /// would do to it, and where the modes a click cannot reach are.
+    ///
+    /// Names the lid in every wording that claims the Mac stays up, because
+    /// the assertion holds off *idle* sleep and nothing else: a MacBook closed
+    /// on a running agent sleeps anyway, and someone who learns that from a
+    /// lost run blames Sissy for it.
+    ///
+    /// The screen clause follows `coversScreen`, which is the effect and not
+    /// the setting, so a display assertion power management refused stops this
+    /// promising a screen that is already dimming. The off state claims
+    /// nothing about the screen at all — what a click would hold depends on a
+    /// setting this tooltip is not the place to teach.
+    ///
+    /// The off state *does* name the mode a click would arm, which is what
+    /// `arming` carries. The button is a two-position switch over three modes
+    /// and the third is invisible until it is on: someone who chose "while
+    /// agents are working", switched it off and came back to a relaunched
+    /// Sissy would otherwise get a permanent hold from a click that looked
+    /// like the one they made last time. The gesture that reaches the other
+    /// two is named on every state, and named as the right-click rather than
+    /// the press — "hold" is the verb this whole control already uses for what
+    /// it does to the Mac.
+    static func keepAwakeHelp(_ state: KeepAwakeState, arming: KeepAwakeMode) -> String {
+        let modes = " · right-click for the other modes"
+        switch (state.mode, state.active) {
+        case (.off, _):
+            return "Keep this Mac awake, \(keepAwakeTitle(arming).lowercased()) · "
+                + "closing the lid still sleeps it" + modes
+        case (_, true):
+            let since = state.since.map { " since \($0.formatted(.dateTime.hour().minute()))" } ?? ""
+            let what =
+                state.coversScreen
+                ? "Keeping this Mac and its screen awake\(since), so it will not lock."
+                : "Keeping this Mac awake\(since) — the screen still sleeps and locks."
+            return what + " Closing the lid sleeps it anyway · click to allow sleep" + modes
+        case (.auto, false):
+            return "Waiting for the agents · the Mac will be held while they work" + modes
+        case (.on, false):
+            return "Switched on · the Mac is not being held awake" + modes
+        }
+    }
+
     /// Compact name for a rate-limit window, derived from its length so a
     /// vendor that ships a bucket Sissy has never seen still gets a label.
     static func windowLabel(minutes: Int) -> String {

@@ -6,7 +6,11 @@ import IOKit.pwr_mgt
 /// Persisted in `server.json` rather than held in memory: a mode is a setting,
 /// not a transient hold, and someone who switched their Mac to never sleep
 /// expects it to still be that way the next time Sissy launches.
-enum KeepAwakeMode: String, Sendable, Codable {
+/// `CaseIterable` because three surfaces now offer the choice — the panel's
+/// button, the right-click menu and Settings — and a mode listed by hand in
+/// each of them is a mode that reaches two and misses the third. Declaration
+/// order is the order they read in: least holding first.
+enum KeepAwakeMode: String, Sendable, Codable, CaseIterable {
     case off
     /// Held only while agents are demonstrably working. The signal is Sissy's
     /// own: a day total that grew is a turn that landed, which is the thing no

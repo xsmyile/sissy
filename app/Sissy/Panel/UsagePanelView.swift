@@ -210,56 +210,64 @@ struct UsagePanelView: View {
     /// legible apart. That second state has two causes — an automatic hold
     /// waiting for the agents to do something, and an assertion power
     /// management refused — and they look alike because they are alike: the
-    /// Mac is free to sleep either way. The tooltip is what separates them,
-    /// and the menu is what says which mode is selected.
+    /// Mac is free to sleep either way. The tooltip is what separates them.
     ///
-    /// Toggling, not cycling: three modes do not fit a button, so this one
-    /// puts the switch back where the menu last left it rather than stepping
-    /// through them.
+    /// Toggling *and* choosing, from one control. A click is the switch it has
+    /// always been, so the gesture people already have does not regress, and
+    /// the three modes hang off the same button — the mode used to be
+    /// reachable only from the status item's menu, and nothing in the panel
+    /// said so.
+    ///
+    /// The right-click is the gesture the tooltip names and `.contextMenu` is
+    /// what guarantees it. AppKit's own press-and-hold on a `primaryAction`
+    /// menu normally opens it too, but that affordance is the menu indicator's
+    /// and the indicator is hidden here: a chevron does not fit a 26 pt circle
+    /// sitting beside the refresh button. Settings carries the same choice for
+    /// anyone who never finds either gesture.
     private func keepAwakeButton(_ state: KeepAwakeState) -> some View {
-        Button {
-            model.setKeepAwake(state.mode == .off ? model.preferredKeepAwakeMode : .off)
+        Menu {
+            keepAwakeModes
         } label: {
             Image(systemName: "cup.and.saucer.fill")
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
                 .foregroundStyle(state.mode == .off ? Color.secondary : Color.orange)
                 .contentShape(.circle)
+        } primaryAction: {
+            model.setKeepAwake(state.mode == .off ? model.preferredKeepAwakeMode : .off)
         }
+        .menuStyle(.button)
         .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .glassEffect(
             state.active ? .regular.tint(.orange.opacity(0.22)) : .regular,
             in: .circle
         )
-        .help(keepAwakeHelp(state))
+        .help(UsageFormat.keepAwakeHelp(state, arming: model.preferredKeepAwakeMode))
+        .contextMenu { keepAwakeModes }
     }
 
-    /// Names the lid in every wording that claims the Mac stays up, because
-    /// the assertion holds off *idle* sleep and nothing else: a MacBook closed
-    /// on a running agent sleeps anyway, and someone who learns that from a
-    /// lost run blames Sissy for it.
+    /// The three modes as a radio group, which is what an inline `Picker` in a
+    /// menu renders to — the same shape as the status item's own menu, from
+    /// the same words, so the two cannot drift.
     ///
-    /// The screen clause follows `coversScreen`, which is the effect and not
-    /// the setting, so a display assertion power management refused stops this
-    /// promising a screen that is already dimming. The off state claims
-    /// nothing about the screen at all — what a click would hold depends on a
-    /// setting this tooltip is not the place to teach.
-    private func keepAwakeHelp(_ state: KeepAwakeState) -> String {
-        switch (state.mode, state.active) {
-        case (.off, _):
-            return "Keep this Mac awake · closing the lid still sleeps it"
-        case (_, true):
-            let since = state.since.map { " since \($0.formatted(.dateTime.hour().minute()))" } ?? ""
-            let what =
-                state.coversScreen
-                ? "Keeping this Mac and its screen awake\(since), so it will not lock."
-                : "Keeping this Mac awake\(since) — the screen still sleeps and locks."
-            return what + " Closing the lid sleeps it anyway · click to allow sleep"
-        case (.auto, false):
-            return "Waiting for the agents · the Mac will be held while they work"
-        case (.on, false):
-            return "Switched on · the Mac is not being held awake"
+    /// The selection reads the mode the model reports rather than a `@State`
+    /// copy: the engine can move it on its own, when a manual hold reaches its
+    /// ceiling and switches itself off.
+    @ViewBuilder private var keepAwakeModes: some View {
+        Picker("Keep awake", selection: keepAwakeModeBinding) {
+            ForEach(KeepAwakeMode.allCases, id: \.self) { mode in
+                Text(UsageFormat.keepAwakeTitle(mode)).tag(mode)
+            }
         }
+        .pickerStyle(.inline)
+    }
+
+    private var keepAwakeModeBinding: Binding<KeepAwakeMode> {
+        Binding(
+            get: { model.keepAwake.mode },
+            set: { model.setKeepAwake($0) }
+        )
     }
 
     // MARK: Placeholder

@@ -349,4 +349,67 @@ final class UsageFormatTests: XCTestCase {
         )
         return (now, calendar)
     }
+
+    // MARK: Keep awake
+
+    /// Three surfaces list the modes from this one function — the panel
+    /// button's menu, the status item's menu and Settings — so the failure it
+    /// exists to prevent is two of them wording the same mode differently, or
+    /// a mode nobody named.
+    func testEveryKeepAwakeModeIsNamedAndNamedOnce() {
+        let titles = KeepAwakeMode.allCases.map(UsageFormat.keepAwakeTitle)
+
+        XCTAssertEqual(Set(titles).count, titles.count)
+        XCTAssertFalse(titles.contains(where: \.isEmpty))
+    }
+
+    /// The button is a two-position switch over three modes, so the tooltip is
+    /// the only thing that says which of the two armed ones a click is about
+    /// to take — and that is the difference between a hold bounded by ten
+    /// minutes of silence and one that runs for eight hours.
+    func testTheOffTooltipNamesTheModeAClickWouldArm() {
+        let automatic = UsageFormat.keepAwakeHelp(.off, arming: .auto)
+        let always = UsageFormat.keepAwakeHelp(.off, arming: .on)
+
+        XCTAssertTrue(automatic.contains(UsageFormat.keepAwakeTitle(.auto).lowercased()))
+        XCTAssertTrue(always.contains(UsageFormat.keepAwakeTitle(.on).lowercased()))
+        XCTAssertNotEqual(automatic, always)
+    }
+
+    /// The modes hang off a button with no chevron, so the tooltip is the
+    /// affordance. A state that forgets to mention the gesture is a state
+    /// where the choice is invisible again, which is the whole complaint the
+    /// menu on the button answers.
+    func testEveryKeepAwakeStateSaysWhereTheOtherModesAre() {
+        let states = [
+            KeepAwakeState.off,
+            KeepAwakeState(mode: .on, active: true, since: Date(), coversScreen: true),
+            KeepAwakeState(mode: .auto, active: true, since: Date()),
+            KeepAwakeState(mode: .auto, active: false),
+            KeepAwakeState(mode: .on, active: false),
+        ]
+
+        for state in states {
+            XCTAssertTrue(
+                UsageFormat.keepAwakeHelp(state, arming: .on).contains("right-click"),
+                "\(state.mode)/\(state.active) points nowhere for the other modes")
+        }
+    }
+
+    /// Every wording that claims the Mac stays up has to name the lid: closing
+    /// a MacBook sleeps it under all three modes, and someone who finds that
+    /// out from a lost overnight run blames Sissy for it.
+    func testEveryKeepAwakeTooltipNamesTheLid() {
+        let states = [
+            KeepAwakeState.off,
+            KeepAwakeState(mode: .on, active: true, since: Date()),
+            KeepAwakeState(mode: .auto, active: true, since: Date(), coversScreen: true),
+        ]
+
+        for state in states {
+            XCTAssertTrue(
+                UsageFormat.keepAwakeHelp(state, arming: .on).contains("lid"),
+                "\(state.mode)/\(state.active) promises a Mac that stays up without naming the lid")
+        }
+    }
 }
