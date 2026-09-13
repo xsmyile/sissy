@@ -295,7 +295,7 @@ struct UsagePanelView: View {
             }
             shareBar(row.share, tint: .secondary)
         }
-        .help(row.path ?? "")
+        .help(row.tooltip ?? "")
     }
 
     // MARK: Providers

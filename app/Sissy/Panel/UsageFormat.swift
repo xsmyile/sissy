@@ -263,4 +263,17 @@ enum UsageFormat {
     static func projectsFolded(count: Int) -> String {
         "\(count) more projects"
     }
+
+    /// What the rest of the day is called when no row can name it. Deliberately
+    /// not a name: the money was counted, and the one thing Sissy will not do
+    /// is invent a repository for it.
+    static let projectsUnattributed = "Unattributed"
+
+    /// Why a row that is not a repository is in the list, for the hover. Both
+    /// halves are real and neither is a fault: a CLI that works out of its own
+    /// scratch directory never names one, and a checkout deleted since cannot
+    /// be walked up from any more.
+    static let projectsUnattributedReason =
+        "Counted in the total, but its working directory names no repository — "
+        + "a CLI's own scratch directory, or a checkout deleted since."
 }
