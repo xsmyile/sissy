@@ -46,6 +46,17 @@ enum UsageFormat {
         return "\(minutes / 60)h ago"
     }
 
+    /// The status item's one keep-awake line, shown only while a hold is
+    /// actually in force.
+    ///
+    /// The menu stopped offering the three modes once the panel carried them:
+    /// what it keeps is the diagnostic, because a hold nobody can see is a
+    /// battery complaint with no path back to its cause, and a right-click on
+    /// the menu bar is the shortest path there is.
+    static func keepAwakeHolding(_ interval: TimeInterval) -> String {
+        "Keep awake — holding · " + held(interval)
+    }
+
     /// How long the keep-awake hold has been in force, for the panel's
     /// control.
     ///

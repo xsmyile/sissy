@@ -40,6 +40,14 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.reading(age: 41, refreshing: true), "refreshing…")
     }
 
+    /// The status item's line names the hold and how long it has run, from
+    /// the same stopwatch the panel prints, so the two cannot disagree about
+    /// a duration the user can see in both places at once.
+    func testTheMenuHoldLineNamesTheHoldAndItsDuration() {
+        XCTAssertEqual(
+            UsageFormat.keepAwakeHolding(900), "Keep awake — holding · " + UsageFormat.held(900))
+    }
+
     func testHeldUnderAMinuteSaysSoRatherThanCountingSeconds() {
         XCTAssertEqual(UsageFormat.held(59), "<1m")
     }
