@@ -50,6 +50,20 @@ final class UsageEngineHost {
     /// Mac reaches nothing. The frame is the record once one exists; this
     /// stands in until then, which is why it is kept in step at both ends.
     private(set) var keepAwakeMode: KeepAwakeMode = .off
+    /// Which providers have a refresh in flight, so a surface can say it is
+    /// refreshing rather than repeating an age that is about to change.
+    private(set) var refreshing: Set<String> = []
+
+    /// How long a refresh stays visible at the least.
+    ///
+    /// Not a delay on the work — the engine is already running by the time
+    /// this is waited on — but a floor under the *word*. A Codex refresh
+    /// re-reads one JSON file and returns inside a frame, so without a floor
+    /// the label would never paint and the click would read as a button that
+    /// does nothing, which is the complaint it exists to answer. A Claude
+    /// refresh with the limits probe on makes a network call and never
+    /// reaches the floor at all.
+    private static let refreshFloor: Duration = .milliseconds(450)
 
     @ObservationIgnored private weak var model: SissyModel?
     @ObservationIgnored private var engine: UsageEngine?
@@ -58,6 +72,10 @@ final class UsageEngineHost {
     /// rather than leaving a `start()` in flight against an engine it has
     /// already let go of.
     @ObservationIgnored private var bootTask: Task<Void, Never>?
+    /// One handle per provider with a refresh in flight, which is what makes
+    /// the work cancellable at shutdown and the button non-re-entrant: a
+    /// second click while the first is still running has nothing to start.
+    @ObservationIgnored private var refreshTasks: [String: Task<Void, Never>] = [:]
 
     /// How often the warming state is re-read while the cold scan runs. The
     /// readers emit nothing until they finish, so there is no frame to hang
@@ -101,6 +119,9 @@ final class UsageEngineHost {
         readinessTask = nil
         bootTask?.cancel()
         bootTask = nil
+        refreshTasks.values.forEach { $0.cancel() }
+        refreshTasks.removeAll()
+        refreshing.removeAll()
         guard let engine else { return }
         self.engine = nil
         await engine.stop()
@@ -124,9 +145,27 @@ final class UsageEngineHost {
     /// Re-reads one provider's out-of-band state. On Claude Code this is the
     /// gesture that may raise the keychain dialog, which is why it is only
     /// ever reached from a click.
+    ///
+    /// The engine re-emits when it is done, so the reading's age resets on its
+    /// own and nothing here has to tell the panel the numbers moved.
     func refreshProvider(_ id: String) {
-        guard let engine else { return }
-        Task { await engine.refreshProvider(id: id) }
+        guard let engine, refreshTasks[id] == nil else { return }
+        refreshing.insert(id)
+        refreshTasks[id] = Task {
+            let startedAt = ContinuousClock.now
+            await engine.refreshProvider(id: id)
+            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
+                try? await Task.sleep(for: rest)
+            }
+            refreshing.remove(id)
+            refreshTasks[id] = nil
+        }
+    }
+
+    /// What is left of the floor once the work has taken its time, and nil
+    /// once there is nothing left to wait for.
+    static func remainingFloor(elapsed: Duration) -> Duration? {
+        elapsed < refreshFloor ? refreshFloor - elapsed : nil
     }
 
     func setKeepAwake(mode: KeepAwakeMode) {
