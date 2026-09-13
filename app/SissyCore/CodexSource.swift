@@ -63,14 +63,18 @@ final class CodexAdapter: SourceAdapter {
     /// line, which a resumed reader is already past — the same reason
     /// `fileModels` is kept and persisted.
     private var fileProjects: [URL: String] = [:]
-    let projects = ProjectResolver()
+    /// The ledger behind it is the process's, not this adapter's: none of the
+    /// directories a Codex rollout names is a repository on its own, so every
+    /// checkout this resolver can recognise was read by another provider.
+    let projects: ProjectResolver
 
     /// Default model id used when a rollout's `turn_context` never named one
     /// (older Codex versions wrote `model_provider` but no `model`). Matches
     /// what ccusage falls back to for the same reason.
     static let defaultModel = "gpt-5-codex"
 
-    init(codexDir: URL, pricingOverride: [String: ModelPricing]?) {
+    init(codexDir: URL, pricingOverride: [String: ModelPricing]?, ledger: ProjectLedger) {
+        self.projects = ProjectResolver(ledger: ledger)
         let windows = AtomicWindows()
         let plan = AtomicPlan()
         let account = AtomicAccount()
@@ -426,10 +430,12 @@ extension LocalUsageProvider {
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
         historyRoot: URL? = nil,
-        pricingOverride: [String: ModelPricing]? = nil
+        pricingOverride: [String: ModelPricing]? = nil,
+        ledger: ProjectLedger = ProjectLedger()
     ) -> LocalUsageProvider {
         LocalUsageProvider(
-            adapter: CodexAdapter(codexDir: codexDir, pricingOverride: pricingOverride),
+            adapter: CodexAdapter(
+                codexDir: codexDir, pricingOverride: pricingOverride, ledger: ledger),
             retainDays: retainDays,
             pollInterval: pollInterval,
             persistenceURL: persistenceURL,

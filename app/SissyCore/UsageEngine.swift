@@ -144,6 +144,10 @@ actor UsageEngine {
         // install's own and writing a foreign tree back into it.
         let stateDir = configURL.deletingLastPathComponent()
         self.stateDir = stateDir
+        // One ledger for every provider, in its own file: what it knows is a
+        // reading of the disk rather than token math, so no schema bump that
+        // invalidates a tail's snapshot may take it with it.
+        let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
         let claudeDir = config.resolvedClaudeDataDir
@@ -176,7 +180,8 @@ actor UsageEngine {
                     persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
                     historyRoot: historyRoot,
                     pricingOverride: config.pricingOverride,
-                    limitsProbe: limitsProbe
+                    limitsProbe: limitsProbe,
+                    ledger: projectLedger
                 ))
         }
         if codexActivation.isMetering {
@@ -186,7 +191,8 @@ actor UsageEngine {
                     pollInterval: pollInterval,
                     persistenceURL: UsageStatePersistence.forProvider("codex", in: stateDir),
                     historyRoot: historyRoot,
-                    pricingOverride: config.pricingOverride
+                    pricingOverride: config.pricingOverride,
+                    ledger: projectLedger
                 ))
         }
         self.aggregator = UsageAggregator(providers: providers)

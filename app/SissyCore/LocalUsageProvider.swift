@@ -392,6 +392,7 @@ actor LocalUsageProvider: UsageProvider {
         // nothing on the shutdown path can act on it.
         saveSnapshotIfDirty(force: true)
         saveHistoryIfDirty(force: true)
+        adapter.projects.ledger.saveIfDirty()
         fsWatcher?.stop()
         fsWatcher = nil
         pollTask?.cancel()
@@ -483,6 +484,7 @@ actor LocalUsageProvider: UsageProvider {
         trim()
         saveSnapshotIfDirty()
         saveHistoryIfDirty()
+        adapter.projects.ledger.saveIfDirty()
     }
 
     /// What today and yesterday add up to right now.
@@ -607,6 +609,7 @@ actor LocalUsageProvider: UsageProvider {
         // graceful SIGTERM forces a final flush via `stop()`.
         saveSnapshotIfDirty()
         saveHistoryIfDirty()
+        adapter.projects.ledger.saveIfDirty()
     }
 
     /// Every `.jsonl` under the tree, newest first. Any name is accepted —
@@ -814,7 +817,7 @@ actor LocalUsageProvider: UsageProvider {
         // a checkout of which repository is true whatever the offsets beside
         // it turn out to be worth, and a snapshot refused here is followed by
         // the cold scan that needs it most.
-        adapter.projects.adopt(snapshot.projectCheckouts ?? [])
+        adapter.projects.ledger.adopt(snapshot.projectCheckouts ?? [])
 
         let expectedHash = UsageStatePersistence.hashDataDir(root)
         guard snapshot.claudeDataDirHash == expectedHash else { return false }
@@ -1110,7 +1113,6 @@ actor LocalUsageProvider: UsageProvider {
                     ))
             }
         }
-        let checkouts = adapter.projects.rememberedCheckouts()
         let retainedCutoff = cal.startOfDay(for: retainWindowStart)
         let retainedKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap { key, entry in
             guard entry.day >= retainedCutoff else { return nil }
@@ -1132,7 +1134,7 @@ actor LocalUsageProvider: UsageProvider {
             historyResume: modelTotals.isEmpty
                 ? nil : UsageStateSnapshot.HistoryResume(dailyModelTotals: modelTotals),
             codexResume: adapter.resumeState(),
-            projectCheckouts: checkouts.isEmpty ? nil : checkouts
+            projectCheckouts: nil
         )
         do {
             try UsageStatePersistence.save(snapshot, to: url)
