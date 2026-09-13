@@ -243,7 +243,14 @@ struct UsagePanelSnapshot: Equatable {
         }
         let namedTokens = projects.reduce(0) { $0 + $1.tokens }
         let namedCost = projects.reduce(Decimal(0)) { $0 + $1.cost }
-        guard totalTokens > namedTokens else { return rows }
+        // Both halves or neither. A provider republishes its project split on
+        // every read of its day where the totals beside it only move on an
+        // emit, so a coalesced emit can leave the rows describing a later
+        // instant than the header — and a remainder taken across the two has
+        // no sign worth trusting, since cache reads are most of the tokens and
+        // the least of the money. A reading that disagrees with itself is
+        // owed no row rather than a negative one.
+        guard totalTokens > namedTokens, totalCost >= namedCost else { return rows }
         let unnamedCost = totalCost - namedCost
         rows.append(
             ProjectRow(
