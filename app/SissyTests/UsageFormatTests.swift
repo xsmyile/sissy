@@ -30,14 +30,32 @@ final class UsageFormatTests: XCTestCase {
     }
 
     func testReadingDatesTheReadingWhileNothingIsInFlight() {
-        XCTAssertEqual(UsageFormat.reading(age: 41, refreshing: false), "updated 41s ago")
+        XCTAssertEqual(
+            UsageFormat.reading(age: 41, holding: nil, refreshing: false), "updated 41s ago")
+    }
+
+    /// The hold rides the same line rather than a readout of its own, and
+    /// leads it: it is the older fact of the two.
+    func testReadingCarriesTheHoldAheadOfTheAge() {
+        XCTAssertEqual(
+            UsageFormat.reading(age: 41, holding: 900, refreshing: false),
+            UsageFormat.held(900) + " · updated 41s ago")
+    }
+
+    /// A refresh re-reads the provider, not the power assertion, so the hold
+    /// stays put while the age goes.
+    func testRefreshingKeepsTheHoldAndDropsOnlyTheAge() {
+        XCTAssertEqual(
+            UsageFormat.reading(age: 41, holding: 900, refreshing: true),
+            UsageFormat.held(900) + " · refreshing…")
     }
 
     /// The age goes away while a refresh is running rather than ticking on
     /// beside the word: it is about to be replaced, and a reading that says
     /// both is contradicting itself.
     func testReadingDropsTheAgeWhileRefreshing() {
-        XCTAssertEqual(UsageFormat.reading(age: 41, refreshing: true), "refreshing…")
+        XCTAssertEqual(
+            UsageFormat.reading(age: 41, holding: nil, refreshing: true), "refreshing…")
     }
 
     /// The status item's line names the hold and how long it has run, from

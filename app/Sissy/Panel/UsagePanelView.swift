@@ -127,7 +127,7 @@ struct UsagePanelView: View {
     /// Settings. Neither is about an account.
     private var headerControls: some View {
         HStack(spacing: 6) {
-            keepAwakeControl
+            keepAwakeButton(model.keepAwake)
             settingsButton
         }
     }
@@ -147,7 +147,11 @@ struct UsagePanelView: View {
                 .font(.system(size: PanelMetrics.headlineMeta))
                 .foregroundStyle(.secondary)
         } else if let live {
-            readingLine(live, refreshing: !model.engine.refreshing.isEmpty)
+            readingLine(
+                live,
+                holding: model.keepAwake.since,
+                refreshing: !model.engine.refreshing.isEmpty
+            )
         }
     }
 
@@ -156,11 +160,15 @@ struct UsagePanelView: View {
     /// `TimelineView` rather than a value recomputed with the body: the
     /// instant it counts from is fixed, so the line stays true while the
     /// panel sits open and the engine emits nothing.
-    private func readingLine(_ live: SissyModel.LiveFrame, refreshing: Bool) -> some View {
+    private func readingLine(
+        _ live: SissyModel.LiveFrame, holding: Date?, refreshing: Bool
+    ) -> some View {
         TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
             Text(
                 UsageFormat.reading(
-                    age: context.date.timeIntervalSince(live.at), refreshing: refreshing)
+                    age: context.date.timeIntervalSince(live.at),
+                    holding: holding.map { context.date.timeIntervalSince($0) },
+                    refreshing: refreshing)
             )
             .font(.system(size: PanelMetrics.headlineMeta))
             .monospacedDigit()
@@ -210,7 +218,9 @@ struct UsagePanelView: View {
                 }
 
                 if let live {
-                    readingLine(live, refreshing: model.engine.refreshing.contains(row.id))
+                    readingLine(
+                        live, holding: nil,
+                        refreshing: model.engine.refreshing.contains(row.id))
                 }
             }
 
@@ -231,30 +241,6 @@ struct UsagePanelView: View {
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
-    }
-
-    /// The panel's one control, with how long the hold has been in force
-    /// beside it.
-    ///
-    /// The elapsed reading sits outside the button rather than inside its
-    /// tooltip because a tooltip is only true while it is open: `.help` is
-    /// rebuilt when the body is, and a panel whose model has not changed
-    /// would offer an hour-old duration to someone hovering now. The instant
-    /// it counts from is fixed, so the clock runs off `TimelineView` and owes
-    /// nothing to the next frame arriving.
-    private var keepAwakeControl: some View {
-        let state = model.keepAwake
-        return HStack(spacing: 6) {
-            if let since = state.since {
-                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
-                    Text(UsageFormat.held(context.date.timeIntervalSince(since)))
-                        .font(.system(size: 11))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-            }
-            keepAwakeButton(state)
-        }
     }
 
     /// Styled as a switch rather than a footer glyph: it says what the
