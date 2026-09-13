@@ -115,7 +115,10 @@ final class ClaudeLimitsProbeTests: XCTestCase {
 
     /// The state is what the panel acts on, so it has to name the outcome the
     /// probe actually met rather than collapsing every failure into "no
-    /// limits".
+    /// limits". Driven through one poll rather than through the loop: the
+    /// read is recorded before the outcome is classified, so an assertion
+    /// hung off the read count passes or fails by luck — which is exactly how
+    /// this shipped green locally and failed on CI.
     func testEachOutcomeTheUserCanActOnReachesTheFrame() async {
         let cases: [(ClaudeCredentialsLookup, ProviderLimitsState)] = [
             (.interactionRequired, .needsAuthorization),
@@ -123,27 +126,46 @@ final class ClaudeLimitsProbeTests: XCTestCase {
             (.absent, .signedOut),
         ]
         for (lookup, expected) in cases {
-            let reads = Reads()
-            let probe = makeProbe(reads) { lookup }
-            let first = reads.expectation(forReadCount: 1)
+            let probe = ClaudeLimitsProbe { _, _ in lookup }
 
-            await probe.start(userInitiated: false) {}
-            await fulfillment(of: [first], timeout: 5)
+            _ = await probe.refreshOnce {}
 
             XCTAssertEqual(probe.currentLimitsState(), expected)
-            await probe.stop()
         }
     }
 
     /// A transient failure is not something to put on a row: the last reading
     /// stays up with its age, which is what the panel already does.
-    func testAFailureNobodyCanActOnStaysQuiet() async {
-        let reads = Reads()
-        let probe = makeProbe(reads) { .timedOut }
-        let first = reads.expectation(forReadCount: 1)
+    func testAFailureNobodyCanActOnLeavesTheStateAlone() async {
+        let probe = ClaudeLimitsProbe { _, _ in .denied }
+        _ = await probe.refreshOnce {}
+        XCTAssertEqual(probe.currentLimitsState(), .refused)
 
-        await probe.start(userInitiated: false) {}
-        await fulfillment(of: [first], timeout: 5)
+        let transient = ClaudeLimitsProbe { _, _ in .timedOut }
+        _ = await transient.refreshOnce {}
+        XCTAssertEqual(transient.currentLimitsState(), .quiet)
+    }
+
+    /// The bug this caught: a refusal stops the probe, and the stop used to
+    /// clear the state it had just published — so the one thing offering a
+    /// way back erased itself. The two stops are told apart by a parameter
+    /// rather than by statement order, because they can interleave.
+    func testARefusalSurvivesTheStopItTriggers() async {
+        let probe = ClaudeLimitsProbe { _, _ in .denied }
+
+        _ = await probe.refreshOnce {}
+
+        XCTAssertEqual(probe.currentLimitsState(), .refused)
+    }
+
+    /// The other stop. A row explaining why the limits are missing, under a
+    /// switch the user has just turned off, blames Sissy for obeying.
+    func testSwitchingTheModuleOffClearsTheState() async {
+        let probe = ClaudeLimitsProbe { _, _ in .interactionRequired }
+        _ = await probe.refreshOnce {}
+        XCTAssertEqual(probe.currentLimitsState(), .needsAuthorization)
+
+        await probe.stop()
 
         XCTAssertEqual(probe.currentLimitsState(), .quiet)
     }
@@ -163,22 +185,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         await probe.refresh {}
         await fulfillment(of: [second], timeout: 5)
 
-        XCTAssertEqual(reads.all.prefix(2).map { $0 }, [false, true])
+        XCTAssertEqual(Array(reads.all.prefix(2)), [false, true])
         await probe.stop()
-    }
-
-    /// Switching the module off has to clear the state with the windows: a
-    /// row explaining why limits are missing, under a switch the user just
-    /// turned off, blames Sissy for doing what it was told.
-    func testStoppingClearsTheStateWithTheWindows() async {
-        let reads = Reads()
-        let probe = makeProbe(reads) { .denied }
-        let first = reads.expectation(forReadCount: 1)
-        await probe.start(userInitiated: false) {}
-        await fulfillment(of: [first], timeout: 5)
-
-        await probe.stop()
-
-        XCTAssertEqual(probe.currentLimitsState(), .quiet)
     }
 }
