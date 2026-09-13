@@ -13,71 +13,110 @@ enum PanelMetrics {
 /// rate-limit gauge with the mark that says where even consumption would have
 /// put it.
 ///
-/// Width of the pace mark itself, and of the hole cut for it: the mark is
-/// punched out of the bar rather than painted over it, because at 5 pt tall a
-/// line drawn on top of a fill of similar weight disappears into it, and the
-/// gap is what makes two points of colour read.
+/// The mark is punched out of the bar rather than painted over it, because at
+/// 5 pt tall a line drawn on top of a fill of similar weight disappears into
+/// it, and the gap is what makes two points of colour read. The gap has to
+/// reach the popover's material, so it cannot be painted in a background
+/// colour — a hole is the only thing that shows vibrancy through.
+///
+/// That hole is cut with Core Graphics inside a single `Canvas` rather than
+/// with SwiftUI's `.blendMode` and `.compositingGroup`. Those two modifiers
+/// make RenderBox compile a Metal shader, which on macOS 26.x took the
+/// *AppKit* status item icon down with it — measured by CodexBar, whose menu
+/// bar icon is an `NSImage` like Sissy's, and whose fix for it was this same
+/// rewrite. Sissy has not been seen to hit it; carrying a bar that cannot is
+/// cheaper than finding out.
 struct ShareBar: View {
     let share: Double
     let tint: Color
     var pace: UsagePanelSnapshot.Pace?
 
-    private static let markWidth: CGFloat = 2
-    private static let markGap: CGFloat = 5
+    var body: some View {
+        BarCanvas(share: share, tint: tint, pace: pace)
+            .frame(height: PanelMetrics.barHeight)
+            .animation(.default, value: share)
+    }
+}
+
+/// The bar's geometry, apart from its drawing, so the two placements it has to
+/// get right can be asserted without rendering anything.
+enum BarGeometry {
+    static let markWidth: CGFloat = 2
+    static let markGap: CGFloat = 5
+
+    /// A share of nothing draws nothing; any share at all draws at least a
+    /// stub, because a bar that rounds down to invisible reads as zero.
+    static func fillWidth(_ share: Double, in width: CGFloat) -> CGFloat {
+        min(max(width * share, share > 0 ? 3 : 0), width)
+    }
 
     /// Where the mark's centre lands, kept a half-gap inside the bar so a
     /// window in its last minutes draws a whole mark instead of half of one.
-    private func markCentre(_ pace: UsagePanelSnapshot.Pace, in width: CGFloat) -> CGFloat {
-        let inset = Self.markGap / 2
-        guard width > Self.markGap else { return width / 2 }
-        return min(max(width * pace.expectedFraction, inset), width - inset)
+    static func markCentre(_ expectedFraction: Double, in width: CGFloat) -> CGFloat {
+        let inset = markGap / 2
+        guard width > markGap else { return width / 2 }
+        return min(max(width * expectedFraction, inset), width - inset)
+    }
+}
+
+/// The whole bar in one `Canvas`: track, fill, the hole, and the mark in it.
+///
+/// `Animatable` on the view is what keeps the fill sliding rather than
+/// snapping — a `Canvas` closure is not interpolated the way a shape's frame
+/// is, so the view itself has to name the value SwiftUI should walk.
+private struct BarCanvas: View, Animatable {
+    var share: Double
+    var tint: Color
+    var pace: UsagePanelSnapshot.Pace?
+
+    nonisolated var animatableData: Double {
+        get { share }
+        set { share = newValue }
     }
 
     /// Green under the mark and red over it, which is the whole reading: the
     /// bar says where you are, the mark says where even consumption would
     /// have put you, and the colour says which of the two is ahead.
-    ///
-    /// The two branches exist for the compositing group, not for the mark.
-    /// Cutting the gap needs one; a bar without a mark must not pay for one,
-    /// and the project rows and the share bars are most of the bars the panel
-    /// draws.
     var body: some View {
-        GeometryReader { geometry in
-            let fill = max(geometry.size.width * share, share > 0 ? 3 : 0)
-            if let pace {
-                let centre = markCentre(pace, in: geometry.size.width)
-                ZStack(alignment: .leading) {
-                    ZStack(alignment: .leading) {
-                        body(fill: fill)
-                        Capsule()
-                            .frame(width: Self.markGap)
-                            .offset(x: centre - Self.markGap / 2)
-                            .blendMode(.destinationOut)
-                    }
-                    .compositingGroup()
+        Canvas { context, size in
+            context.fill(
+                Self.capsule(CGRect(origin: .zero, size: size)), with: .style(.quaternary))
 
-                    Capsule()
-                        .fill(pace.isOverPace ? Color.red : Color.green)
-                        .frame(width: Self.markWidth)
-                        .offset(x: centre - Self.markWidth / 2)
-                }
-            } else {
-                ZStack(alignment: .leading) {
-                    body(fill: fill)
-                }
+            let fill = BarGeometry.fillWidth(share, in: size.width)
+            if fill > 0 {
+                context.fill(
+                    Self.capsule(CGRect(x: 0, y: 0, width: fill, height: size.height)),
+                    with: .style(tint.gradient))
             }
+
+            guard let pace else { return }
+            let centre = BarGeometry.markCentre(pace.expectedFraction, in: size.width)
+
+            context.blendMode = .destinationOut
+            context.fill(
+                Self.capsule(
+                    Self.markRect(
+                        centre: centre, width: BarGeometry.markGap, height: size.height)),
+                with: .color(.white))
+
+            context.blendMode = .normal
+            context.fill(
+                Self.capsule(
+                    Self.markRect(
+                        centre: centre, width: BarGeometry.markWidth, height: size.height)),
+                with: .color(pace.isOverPace ? .red : .green))
         }
-        .frame(height: PanelMetrics.barHeight)
-        .animation(.default, value: share)
     }
 
-    @ViewBuilder
-    private func body(fill: CGFloat) -> some View {
-        Capsule()
-            .fill(.quaternary)
-        Capsule()
-            .fill(tint.gradient)
-            .frame(width: fill)
+    private static func markRect(centre: CGFloat, width: CGFloat, height: CGFloat)
+        -> CGRect
+    {
+        CGRect(x: centre - width / 2, y: 0, width: width, height: height)
+    }
+
+    private static func capsule(_ rect: CGRect) -> Path {
+        let radius = min(rect.width, rect.height) / 2
+        return Path { $0.addRoundedRect(in: rect, cornerSize: CGSize(width: radius, height: radius)) }
     }
 }
 
