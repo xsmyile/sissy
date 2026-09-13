@@ -86,6 +86,30 @@ struct UsagePanelSnapshot: Equatable {
         let percent: Int
         let fraction: Double
         let resetsAt: Date
+        /// Nil in the window's first minutes, where the projection is noise.
+        let pace: Pace?
+    }
+
+    /// Where even consumption would have put this window by now, and what the
+    /// rate so far does to it.
+    ///
+    /// A percentage says where you are; it does not say whether that is ahead
+    /// of where you should be, which is the thing that decides whether to keep
+    /// working. All of it is arithmetic over what `UsageWindow` already
+    /// carries, so the mark costs no new source, no permission and nothing
+    /// persisted.
+    struct Pace: Equatable {
+        /// Fraction of the bar the mark sits at — `elapsed / duration`, which
+        /// is where `usedPercent` would be had the window been spent evenly.
+        let expectedFraction: Double
+        /// `usedPercent − expected`, rounded and signed. Positive is spending
+        /// faster than the window refills, which is what colours the mark.
+        let deltaPercent: Int
+        /// When the rate so far exhausts the window, or nil when it does not
+        /// before the reset.
+        let runsOutAt: Date?
+
+        var isOverPace: Bool { deltaPercent > 0 }
     }
 
     static func make(frame: FrameData, now: Date = Date()) -> Self {
@@ -96,7 +120,7 @@ struct UsagePanelSnapshot: Equatable {
             cost: frame.providers.isEmpty ? "$\(frame.cost)" : UsageFormat.cost(totalCost),
             burn: frame.burn,
             delta: makeDelta(today: totalTokens, prevTokens: frame.prevTokens),
-            providers: makeRows(frame.providers, totalTokens: totalTokens),
+            providers: makeRows(frame.providers, totalTokens: totalTokens, now: now),
             projects: makeProjects(frame.projects, totalCost: totalCost),
             history: makeHistory(frame.history, now: now)
         )
@@ -129,7 +153,8 @@ struct UsagePanelSnapshot: Equatable {
 
     private static func makeRows(
         _ slices: [ProviderSlice],
-        totalTokens: Int
+        totalTokens: Int,
+        now: Date
     ) -> [ProviderRow] {
         slices.map { slice in
             let plan = UsageFormat.plan(slice.plan, tier: slice.planTier)
@@ -141,7 +166,7 @@ struct UsagePanelSnapshot: Equatable {
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
                 share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0,
-                windows: slice.windows.map(makeWindow)
+                windows: slice.windows.map { makeWindow($0, now: now) }
             )
         }
     }
@@ -191,13 +216,66 @@ struct UsagePanelSnapshot: Equatable {
 
     private static let foldedProjectRowID = "sissy.projects.rest"
 
-    private static func makeWindow(_ window: UsageWindow) -> WindowRow {
+    private static func makeWindow(_ window: UsageWindow, now: Date) -> WindowRow {
         WindowRow(
             id: window.minutes,
             label: UsageFormat.windowLabel(minutes: window.minutes),
             percent: Int(window.usedPercent.rounded()),
             fraction: min(max(window.usedPercent / 100, 0), 1),
-            resetsAt: window.resetsAt
+            resetsAt: window.resetsAt,
+            pace: makePace(window, now: now)
         )
+    }
+
+    /// A full window, as a percentage. The pace arithmetic works in the same
+    /// unit the vendor reports, so the headroom left is what is not yet spent
+    /// of this.
+    private static let fullWindowPercent: Double = 100
+
+    /// How far into a window the projection starts being worth drawing.
+    ///
+    /// Below it the rate is one turn's worth of tokens divided by a few
+    /// minutes, which extrapolates to a week's spend before lunch. A mark that
+    /// swings from green to red on the first message is worse than no mark.
+    private static let paceFloor: Double = 0.03
+
+    /// The pace for one window, or nil when the window is too young to project
+    /// from — or already past the reset it names, which describes a period
+    /// that no longer exists.
+    private static func makePace(_ window: UsageWindow, now: Date) -> Pace? {
+        let duration = Double(window.minutes) * 60
+        let remaining = window.resetsAt.timeIntervalSince(now)
+        guard duration > 0, remaining > 0 else { return nil }
+        let elapsed = min(max(duration - remaining, 0), duration)
+        let progress = elapsed / duration
+        guard progress >= paceFloor else { return nil }
+
+        let expected = progress * fullWindowPercent
+        return Pace(
+            expectedFraction: progress,
+            deltaPercent: Int((window.usedPercent - expected).rounded()),
+            runsOutAt: runOut(window, elapsed: elapsed, remaining: remaining, now: now)
+        )
+    }
+
+    /// When the rate so far exhausts the window, and nil when it does not
+    /// before the reset.
+    ///
+    /// Nothing spent means no rate and therefore no run-out, which is the same
+    /// answer as a rate slow enough to last: both are a window that survives
+    /// its own reset, and the caption says so rather than naming a date past
+    /// the one the row already prints.
+    private static func runOut(
+        _ window: UsageWindow,
+        elapsed: TimeInterval,
+        remaining: TimeInterval,
+        now: Date
+    ) -> Date? {
+        let headroom = fullWindowPercent - window.usedPercent
+        guard headroom > 0 else { return now }
+        let rate = window.usedPercent / elapsed
+        guard rate > 0 else { return nil }
+        let untilEmpty = headroom / rate
+        return untilEmpty >= remaining ? nil : now.addingTimeInterval(untilEmpty)
     }
 }

@@ -80,6 +80,51 @@ enum UsageFormat {
         return resetsAt.formatted(.dateTime.weekday(.abbreviated))
     }
 
+    /// The line under a limit bar: how far off even consumption the window is,
+    /// and what the rate so far does to it before the reset.
+    ///
+    /// "On pace" rather than "0% in reserve", which reads as a measurement of
+    /// nothing. The two words for the sign are the point — a reserve is
+    /// headroom still in hand, a deficit is headroom already spent — because
+    /// the number alone does not say which side of the mark you are on, and
+    /// the mark's colour is not available to a screen reader.
+    static func paceCaption(
+        deltaPercent: Int,
+        runsOutAt: Date?,
+        now: Date = Date()
+    ) -> String {
+        let standing: String
+        switch deltaPercent {
+        case 0: standing = "On pace"
+        case ..<0: standing = "\(-deltaPercent)% in reserve"
+        default: standing = "\(deltaPercent)% in deficit"
+        }
+        guard let runsOutAt else { return "\(standing) · Lasts until reset" }
+        let left = runsOutAt.timeIntervalSince(now)
+        guard left > 0 else { return "\(standing) · Out of headroom" }
+        return "\(standing) · Runs out in \(countdown(left))"
+    }
+
+    /// How long until something runs out, in the two largest units that apply.
+    ///
+    /// Deliberately not `held`: that one is a stopwatch on a hold that never
+    /// expires and stops at hours, while this counts down across days. "2d
+    /// 15h" and "16h 31m" are both readings someone acts on, and a weekly
+    /// window renders the first.
+    static func countdown(_ interval: TimeInterval) -> String {
+        let minutes = max(Int(interval) / secondsPerMinute, 0)
+        if minutes >= minutesPerDay {
+            let days = minutes / minutesPerDay
+            let hours = (minutes % minutesPerDay) / minutesPerHour
+            return hours == 0 ? "\(days)d" : "\(days)d \(hours)h"
+        }
+        if minutes >= minutesPerHour {
+            let rest = minutes % minutesPerHour
+            return rest == 0 ? "\(minutes / minutesPerHour)h" : "\(minutes / minutesPerHour)h \(rest)m"
+        }
+        return "\(minutes)m"
+    }
+
     /// Names the window the archive line covers. The asked-for width while
     /// the archive reaches back across all of it, and the first day it holds
     /// once it does not — a total labelled "Last 7 days" on an install three
