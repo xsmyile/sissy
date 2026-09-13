@@ -188,8 +188,8 @@ windows of its own: a left-click usage panel (`Panel/`, an `NSPopover`), a short
 right-click `NSMenu` (`Menu/StatusItemController.swift`), and the SwiftUI
 `Settings` scene (`Settings/`, tabs General/Providers/About) — reachable from the app menu's
 Settings… item (⌘,) and, in code, only through `SettingsLink`, which takes no
-action closure and is why the panel footer aims the window at a tab through
-`SissyModel.settingsTab`.
+action closure and is why the panel's own settings button aims the window at a
+tab through `SissyModel.settingsTab`.
 
 **The panel is two surfaces behind one popover.** `Panel/PanelOverview.swift`
 answers what today costs and whether there is room to keep working — the day's
@@ -197,9 +197,12 @@ cost, one headroom gauge, the split by provider as a single stacked bar, the
 projects, the archive line. `Panel/PanelProviderPage.swift` answers what one
 account is doing: its windows, who it is signed in as, its own day and its own
 projects, and the refresh, which is a different action on each provider.
-`UsagePanelView` is the shell around them — a contextual header, a `switch` on
-the open page, a footer — and that `switch` is the whole implementation of the
-rule that only the selected page exists. A `TabView` would hold every page's
+`UsagePanelView` is the shell around them — a contextual header and a `switch`
+on the open page — and that `switch` is the whole implementation of the
+rule that only the selected page exists. There is no footer: the age of the
+reading sits under the header's title, where it dates the numbers beside it,
+and the way into Settings sits beside the keep-awake switch, which is where the
+app's own controls live. A `TabView` would hold every page's
 view graph live, which is precisely the cost `UsagePanelController` drops its
 host on close to avoid. `Panel/PanelComponents.swift` holds what both pages
 draw, so a bar or a badge cannot drift a point between them.
