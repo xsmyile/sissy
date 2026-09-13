@@ -7,6 +7,17 @@ enum PanelMetrics {
     static let gutter: CGFloat = 14
     static let barHeight: CGFloat = 5
     static let secondaryWindowOpacity: Double = 0.55
+    /// The one number a headline block is about — the day's cost, and the
+    /// headroom left on the window that binds first.
+    ///
+    /// One size for both, because they are the same rank of answer and a
+    /// panel that drew the second larger than the first said otherwise. Bold
+    /// rather than semibold: it buys back at 18 pt the presence the old 22
+    /// and 26 had, and the points it gives up are the ones the block was
+    /// spending on air.
+    static let headlineNumber: CGFloat = 18
+    /// Everything that qualifies a headline number rather than being one.
+    static let headlineMeta: CGFloat = 11
 }
 
 /// The panel's one bar, in both the jobs it does: a share of the day, and a
