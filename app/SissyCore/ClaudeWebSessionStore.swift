@@ -153,7 +153,7 @@ enum ClaudeWebSessionStore {
         guard let session = String(data: data, encoding: .utf8) else { return nil }
         let normalized = normalize(session)
         guard !normalized.isEmpty else { return nil }
-        return ClaudeCredentials(accessToken: normalized, expiresAt: nil, origin: .web)
+        return ClaudeCredentials(accessToken: normalized, expiresAt: nil)
     }
 }
 

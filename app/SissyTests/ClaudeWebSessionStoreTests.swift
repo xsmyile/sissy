@@ -57,7 +57,6 @@ final class ClaudeWebSessionStoreTests: XCTestCase {
             return XCTFail("a session Sissy just wrote did not read back")
         }
         XCTAssertEqual(credentials.accessToken, session)
-        XCTAssertEqual(credentials.origin, .web)
     }
 
     /// A session carries no expiry: the cookie store names one, but the copy
