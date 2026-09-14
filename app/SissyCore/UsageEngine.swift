@@ -226,7 +226,11 @@ actor UsageEngine {
         guard lifecycle == .running else { return }
         pruneHistoryIfDue(now: Date())
         sissyLog("sissy: claude limits — \(config.claudeLimits ? "on" : "off")")
-        if config.claudeLimits {
+        // Not for a Claude Code that is switched off: there is no slice for
+        // its windows to ride on, so the poll would spend a keychain read — the
+        // one thing in Sissy that can raise a system dialog — on a reading
+        // nothing could show.
+        if config.claudeLimits && meteringClaudeCode {
             await startClaudeLimitsProbe(userInitiated: false)
         }
         await applyKeepAwake()
@@ -506,6 +510,12 @@ actor UsageEngine {
     private func refreshAutomaticHold() async {
         guard config.keepAwake == .auto, automaticHoldEarned != keepAwakeActive else { return }
         await applyKeepAwake()
+    }
+
+    private var meteringClaudeCode: Bool {
+        resolvedProviders.contains {
+            $0.id == ProviderID.claudeCode && $0.activation.isMetering
+        }
     }
 
     /// `userInitiated` is the difference between someone flipping the switch
