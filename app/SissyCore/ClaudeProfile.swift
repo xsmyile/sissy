@@ -81,7 +81,6 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     private static let usageCacheKey = "cachedUsageUtilization"
     private static let usageFetchedAtKey = "fetchedAtMs"
     private static let usageBodyKey = "utilization"
-    private static let spendKey = "spend"
 
     /// Outcome of reading the config file, on the same reasoning as
     /// `ClaudeCredentialsLookup`: naming no plan and answering nothing are
@@ -195,39 +194,18 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     /// reading that can be rendered — it is two readings. A shape that fails
     /// any of that answers nil, which leaves the row off rather than putting
     /// a number on screen that nobody can vouch for.
+    /// The credits block of the usage reply the CLI cached for itself.
+    ///
+    /// The body is the endpoint's own answer stored verbatim, so it is read
+    /// through the same parser claude.ai's live reply goes through. What is
+    /// local to this source is the age: the vendor's `fetchedAtMs`, not now.
     private static func readCredits(_ root: [String: Any]) -> ProviderCredits? {
         guard let cache = root[usageCacheKey] as? [String: Any],
             let fetchedAtMs = cache[usageFetchedAtKey] as? Double,
-            let body = cache[usageBodyKey] as? [String: Any],
-            let spend = body[spendKey] as? [String: Any],
-            let used = money(spend["used"]),
-            let cap = money(spend["limit"]),
-            used.currency == cap.currency,
-            used.exponent == cap.exponent
+            let body = cache[usageBodyKey] as? [String: Any]
         else { return nil }
-        return ProviderCredits(
-            isEnabled: spend["enabled"] as? Bool ?? true,
-            usedMinor: used.minor,
-            capMinor: cap.minor,
-            currency: used.currency,
-            exponent: used.exponent,
-            observedAt: Date(timeIntervalSince1970: fetchedAtMs / 1000)
-        )
-    }
-
-    /// One money object of the payload. The currency has to look like an
-    /// ISO 4217 code before it is carried any further: it reaches a formatter,
-    /// and a formatter handed arbitrary text out of a file is how a display
-    /// string becomes an injection.
-    private static func money(_ raw: Any?) -> (minor: Int, currency: String, exponent: Int)? {
-        guard let object = raw as? [String: Any],
-            let minor = object["amount_minor"] as? Int, minor >= 0,
-            let exponent = object["exponent"] as? Int, (0...4).contains(exponent),
-            let currency = object["currency"] as? String,
-            currency.count == 3,
-            currency.allSatisfy({ $0.isASCII && $0.isUppercase })
-        else { return nil }
-        return (minor, currency, exponent)
+        return ClaudeUsagePayload.credits(
+            body, observedAt: Date(timeIntervalSince1970: fetchedAtMs / 1000))
     }
 
     private static func stripping(_ prefix: String, from raw: String?) -> String? {
