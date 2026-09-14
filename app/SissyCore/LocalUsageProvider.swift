@@ -193,6 +193,7 @@ actor LocalUsageProvider: UsageProvider {
     /// Today's project split, republished on every emit so the aggregator
     /// can read it without an actor hop.
     private let publishedProjects = LockedValue<[ProjectTotals]>([])
+    private let publishedUsage = LockedValue(ProviderSignals())
     private var lastPublishedSignals: ProviderSignals?
     private var pollTask: Task<Void, Never>?
     private var onChange: (@Sendable (DayTotals) async -> Void)?
@@ -284,7 +285,14 @@ actor LocalUsageProvider: UsageProvider {
         self.historyRoot = historyRoot
     }
 
-    nonisolated func currentSignals() -> ProviderSignals { signals.currentSignals().live() }
+    /// The adapter's own reading, with the live-activity marker this tail
+    /// keeps for it: an adapter answers for its vendor's files, and only the
+    /// tail knows when its cold scan stopped and the day became live.
+    nonisolated func currentSignals() -> ProviderSignals {
+        var reading = signals.currentSignals().live()
+        reading.lastActivityAt = publishedUsage.load().lastActivityAt
+        return reading
+    }
 
     /// Hands the adapter the chance to re-read its own out-of-band files. The
     /// engine re-emits afterwards, so nothing is published from here.
@@ -617,6 +625,11 @@ actor LocalUsageProvider: UsageProvider {
     }
 
     private func ingest(_ event: UsageEvent) {
+        if coldScanComplete {
+            publishedUsage.update {
+                $0.lastActivityAt = max($0.lastActivityAt ?? event.timestamp, event.timestamp)
+            }
+        }
         let key = Calendar.current.startOfDay(for: event.timestamp)
         let totalTokens =
             event.inputTokens
