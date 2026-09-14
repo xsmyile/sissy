@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The test host must not start the user's engine or retire login items.
+        guard NSClassFromString("XCTestCase") == nil else { return }
         model.start()
 
         let statusController = StatusItemController(model: model)
