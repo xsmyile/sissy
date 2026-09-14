@@ -26,10 +26,11 @@ either way — offsets, mtimes, the FSEvents watcher, the safety-net poll, dedup
 day buckets, persistence, the emit throttle — and a `SourceAdapter` per log
 format owns the three things that are not: which bytes on a line are worth
 parsing, what they cost, and which of its own state has to survive a relaunch.
-Each provider pushes a `(today, prev)` pair through `onChange` whenever its
-totals move. `UsageAggregator` fans those into a
-single combined reading, `UsageEngine` builds a `FrameData` from it, and the
-engine calls the callback it was handed. The app hands it one that lands the
+Each provider pushes today's totals through `onChange` whenever its reading
+moves — new tokens, but also a plan, an account or an authorization that
+changed, none of which a token count would show. `UsageAggregator` fans those
+into a single combined reading, `UsageEngine` builds a `FrameData` from it, and
+the engine calls the callback it was handed. The app hands it one that lands the
 frame on `SissyModel`; `sissy-cli --scan` hands it one that prints JSON.
 
 `UsageEngine` is an actor and the UI is `@MainActor`. `UsageEngineHost`
@@ -45,22 +46,31 @@ are Swift values passed by reference through a callback, not a serialised
 payload — a field added to one of them needs no encoder, no decoder and no
 version check.
 
-`tokens` / `cost` / `burn` are pre-formatted strings. That shape is inherited
-from rendering into 128×64 pixels, and it is why `UsageFormat` in the app
-re-implements its own formatters: every surface Sissy has now has room for a
-decimal and a full cent. `burn` is read off the frame as-is; `tokens` and
-`cost` are read only in the branch where no provider has spent anything today,
-where both formatters agree on "0" anyway.
+`tokens` / `cost` / `burn` are the day's own numbers — `Int`, `Decimal`, and an
+optional rate in tokens per hour. They were pre-formatted strings until the
+frame stopped being rendered into 128×64 pixels, and that shape is what made the
+app carry a second set of formatters that had to be kept in step with the
+engine's by hand. Rounding is now the surface's alone, in `UsageFormat`. `burn`
+is `nil` on a day nothing has been spent on: a rate of zero is a claim about
+pace rather than the absence of one.
 
 `providers` carries the raw per-provider slices — tokens as `Int`, cost as
 `Decimal` — so the header subtitle, the panel's per-provider rows and each
 provider's gauges all derive from one payload instead of from two counts that
-can disagree. Stable order: `claude-code`, `codex`, then alphabetical.
-Providers with no spend today are omitted, so the panel shows the day's actual
-split rather than stale `$0` rows.
+can disagree. Stable order: `claude-code`, `codex`, then alphabetical. A
+provider that has spent nothing today keeps its slice: the slice is also what
+carries the plan, the account, the credits and the rate-limit gauges, and
+dropping it took a whole provider page off the panel until the next turn. A
+provider that has not produced a reading at all has no slice, because no reading
+is not a reading of zero. Everything on a slice besides the two totals and the
+project split lives on one `ProviderSignals` value, published together so a row
+cannot pair one moment's plan with another's windows.
 
 `providers[].windows` carries that CLI's subscription rate-limit windows,
-shortest first, each identified by its `minutes` rather than by its position —
+ordered shortest first here rather than by whichever producer filled them —
+the panel dims every row after the leading one, so a weekly bucket a vendor
+listed first would take the emphasis from the session one that binds sooner.
+Each is identified by its `minutes` rather than by its position —
 vendors do not agree on an order, and Codex's own `primary` bucket is not always
 the session one. `usedPercent` is a percentage of the window's allowance; a
 bucket whose reset has passed is dropped before the frame is built. Empty for a
@@ -79,9 +89,11 @@ tier names the plan it decorates — a Max account reads "Max 5x", while a Team
 seat metered at the same tier keeps "Team" and puts the tier in the row's
 tooltip, because "Team 5x" is a plan nobody sells.
 
-Claude Code publishes no limit state on disk, so its windows come from
-`ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the login
-keychain and polls the endpoint Claude Code's `/usage` reads. That costs a macOS
+Claude Code's windows come from `ClaudeLimitsProbe`, which reads the CLI's own
+OAuth token out of the login keychain and polls the endpoint Claude Code's
+`/usage` reads. (Its *credits* do not: the CLI caches that endpoint's reply in
+`.claude.json`, which `ClaudeProfileSource` reads with no prompt and no
+network — see `ClaudeProfile.swift` below.) That costs a macOS
 keychain authorization, so it stays off until the user asks for it in Settings —
 and **only that asking may raise the dialog**. Every other read is silent:
 `ClaudeCredentialsStore.load(allowingInteraction:)` builds a query carrying an
@@ -99,8 +111,14 @@ reached the user as a stack of dialogs at login.
 off: the panel draws its control from this, and "off" and "nothing reported" must
 not collapse into the same value. `mode` is where the user left the switch and
 survives in `server.json` — `auto` is the one the agents drive, held while
-Sissy's own reading grows and released `KeepAwakePolicy.idleWindow` after it
-stops, which is a thing no generic `caffeinate` can know; `active` is whether the Mac is being held awake right
+turns are landing and released `KeepAwakePolicy.idleWindow` after they stop,
+which is a thing no generic `caffeinate` can know. What counts as a turn
+landing is an event a provider saw *after* its own cold scan finished: the
+backfill streams its partial totals out so the panel counts up while it runs,
+and reading growth instead took a hold on every launch that met a busy
+morning. The window itself is measured from when the reading reached the
+engine, not from the stamp on the log line, whose clock and precision belong
+to the CLI that wrote it; `active` is whether the Mac is being held awake right
 now; `since` is when the hold in force was taken, `nil` whenever nothing is held
 and in memory only — a hold dies with the process, so a relaunch that resumes the
 mode reports a fresh instant rather than the one from the run before. The panel
@@ -128,26 +146,26 @@ compiled into the app too.
 | File | Job |
 |---|---|
 | `UsageEngine.swift`             | Actor that owns the aggregator, the limits probe and the keep-awake hold; builds each frame and calls the callback it was handed |
-| `UsageProvider.swift`           | Protocol shared by each provider (id, start/stop, current, isWarm) |
+| `UsageProvider.swift`           | Protocol shared by each provider (id, start/stop, current, isWarm, `currentSignals`) |
 | `ProviderReadiness.swift`       | `ProviderID`, and how a toggle resolves (`on` / `off` / `auto — detected` / `auto — not found`) alongside each running provider's scan progress |
 | `UsageAggregator.swift`         | Sums per-day totals across active providers and rebuilds the per-provider slices |
 | `LocalUsageProvider.swift`      | The one tail behind both trees: enumeration, offsets, mtimes, FSEvents, the poll, the dedup ledger, day buckets, snapshot load/save, archive flush, emit throttle. Also `UsageEvent`, `SourceAdapter` and `SourceDescriptor` |
 | `ClaudeCodeSource.swift`        | `ClaudeCodeAdapter`: `assistant` lines out of `~/.claude/projects/**/*.jsonl`, keyed by `requestId` — a repeat is the same answer still streaming, so it bills the growth in output and nothing else — priced against the Anthropic slice, with `cwd` resolved to a project; the plan and the probe's windows reach the provider as its `SourceSignals` |
 | `CodexSource.swift`             | `CodexAdapter`: `token_count` events out of `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`), `last_token_usage` as per-turn delta, model from `turn_context.payload.model` (fallback `gpt-5-codex`); owns the resume block |
 | `UsageReaderShared.swift`       | Tuning constants the tail and its adapters share (`ingestChunkSize`, `pollEmitThrottle`, mtime slack), the token-count bound, and `parseTimestamp` — the one timestamp parser every source and the probe use |
-| `UsageAtomics.swift`            | The three lock boxes a provider is read through from outside its actor (`AtomicIntCounter`, `AtomicWindows`, `AtomicPlan`) |
+| `UsageAtomics.swift`            | `LockedValue`, the one lock box a provider is read through from outside its actor; `ProviderSignals`, everything a source answers for besides its token totals, published as one value so a reader cannot pair fields from two moments; and `SourceSignals`, the nonisolated protocol the aggregator reads it through |
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429; off unless `claudeLimits` is set |
 | `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it. `allowingInteraction` is the caller declaring itself a user action, and it is the only thing that lets macOS put a dialog on screen; a silent read answers `.interactionRequired` rather than `.denied`. One lookup runs at a time and every caller waits on that one under its own budget, so an unanswered authorization dialog parks neither the probe nor a second dispatch thread, and the answer reaches whoever is still waiting when it finally comes |
-| `ClaudeProfile.swift`           | Reads the plan out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain, so it answers with `claudeLimits` off |
-| `CodexAuth.swift`               | Reads the `chatgpt_plan_type` claim out of `~/.codex/auth.json`, for the boot before the first turn; touches no other field in it |
+| `ClaudeProfile.swift`           | Reads the plan, the tier, the account and the vendor's own cached credits reply out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain and no network, so it answers with `claudeLimits` off. A cached reading carries the vendor's own `fetchedAt`, which the panel prints beside it |
+| `CodexAuth.swift`               | Reads the plan and the account out of the id_token in `~/.codex/auth.json`, for the boot before the first turn. The signature is deliberately not verified — every field taken is a display string off the user's own disk — and the tokens beside them are never read. Also says which of "signed out", "absent" and "will not parse" a read met, because only the first two are a reason to blank the row, plus a digest of the identity claims so a later read can tell one account from the next |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
-| `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow`, plus `fmtTokens` / `fmtBurn` / `fmtCost` and the slice ordering |
+| `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow` / `ProviderAccount` / `ProviderCredits`, the burn rate, and the slice and project ordering. No formatters: the frame carries raw numbers and the app words them |
 | `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` assertion and, when `keepScreenAwake` asks for it, the `PreventUserIdleDisplaySleep` one, plus `KeepAwakeMode` / `KeepAwakeState` / `KeepAwakeHold` / `KeepAwakePolicy`; the mode and the screen setting persist in `server.json`, the assertions die with the process |
 | `Pricing.swift`                 | Anthropic cost math, `ModelPricing`, `PricingTable`; no rate table of its own |
 | `OpenAIPricing.swift`           | OpenAI cost math, same override → catalog → seed precedence |
 | `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM rates at runtime; renders the seed for `--dump-seed` |
 | `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — offline / first-run floor |
-| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`, `historyRetentionDays`, `keepAwake`, `keepScreenAwake`. The engine owns the file, and saves it through a staging file so it is owner-only before it answers to its own name |
+| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`, `historyRetentionDays`, `keepAwake`, `keepScreenAwake`, `agentHooks` and `agentHooksRemovalPending` — the last written before either CLI's configuration is touched, so a removal the user asked for is retried at the next launch instead of being forgotten under a switch that is already off. The engine owns the file, and saves it through a staging file so it is owner-only before it answers to its own name |
 | `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude Code stays on the legacy `usage-state.json` for upgrade smoothness. The snapshots sit beside the `server.json` that named the trees they were read from, so a config pointed elsewhere — `--config`, a test — takes its reading with it. Carries two optional blocks, `historyResume` (the archive's per-model split) and `codexResume`, plus `projectCheckouts`, which is read on load and never written again — an install that predates `ProjectLedger` hands its memory over that way |
 | `UsageHistory.swift`            | The archive: one directory per provider under `history/`, one whole-file JSON per local day, a row per model per project. Versioned apart from the snapshot so a schema bump cannot delete it, rewritten whole so a re-derived day replaces rather than doubles, pruned to `historyRetentionDays` across every provider directory — the engine's call, since a provider that is off has no tail to make it |
 | `AgentHookInstaller.swift`      | Registers Sissy's `SessionStart` entry with `~/.claude/settings.json` and `~/.codex/hooks.json`, and takes it back out. Off unless the user asks. The path in the command is quoted for `sh` and the result passes `sh -n` before it is written; the home it is built from is `getpwuid`'s, not `NSHomeDirectory()`'s, which follows `CFFIXED_USER_HOME`. A file that will not parse is left untouched, a symlinked target keeps its link, the file's own mode is preserved, and the write is abandoned if the file moved between the read and the rename |

@@ -42,7 +42,7 @@ Either way: launch Sissy and it starts tailing. It lives in the menu bar — no 
 
 The menu bar carries today's token total. Click it for the overview:
 
-- what today has cost, with its tokens and burn rate beside it, and the swing against yesterday,
+- what today has cost, with its tokens and burn rate beside it,
 - **headroom** — how much is left of the tightest rate-limit window across every CLI, with a mark for where even consumption would have put it by now,
 - the day split across the CLIs as one bar, and where the money went by project,
 - what the archive adds up to before today.
