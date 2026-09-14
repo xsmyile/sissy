@@ -243,9 +243,9 @@ actor ClaudeLimitsProbe: SourceSignals {
         case .found(let found):
             cached = found
             published.update { $0.limitsState = .quiet }
-            guard found.isValid() else {
+            if let expiresAt = found.expiresAt, expiresAt <= Date() {
                 report(
-                    "the Claude Code access token expired at \(found.expiresAt); waiting for "
+                    "the Claude Code access token expired at \(expiresAt); waiting for "
                         + "the CLI to renew it")
                 return .wait(Self.refreshInterval)
             }
