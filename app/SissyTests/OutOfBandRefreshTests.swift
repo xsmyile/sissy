@@ -50,7 +50,7 @@ final class OutOfBandRefreshTests: XCTestCase {
             profile: ClaudeProfileSource(url: profileURL)
         )
         await provider.start { _ in emits.record() }
-        defer { Task { await provider.stop() } }
+        addTeardownBlock { await provider.stop() }
 
         XCTAssertNil(
             provider.currentSignals().plan,
