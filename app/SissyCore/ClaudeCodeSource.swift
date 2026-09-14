@@ -27,7 +27,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// Per-model price overrides from `ServerConfig.pricingOverride`. When a
     /// model matches an override entry (exact or longest-prefix) the override
     /// outranks both the runtime catalog and the embedded seed.
-    private let pricingOverride: [String: ModelPricing]?
+    private let pricingOverride: PricingTable?
     /// Anthropic slice of the runtime `PriceCatalog`. Sits between the user's
     /// override and the embedded generated seed, so a model that launched after
     /// this build was cut still prices correctly. Refreshed in place by
@@ -50,7 +50,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
         profile: ClaudeProfileSource,
         ledger: ProjectLedger
     ) {
-        self.pricingOverride = pricingOverride
+        self.pricingOverride = pricingOverride.map(PricingTable.init)
         self.profile = profile
         self.projects = ProjectResolver(ledger: ledger)
         self.descriptor = SourceDescriptor(

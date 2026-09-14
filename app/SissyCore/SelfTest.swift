@@ -175,7 +175,7 @@ func runSelfTest() {
     let overriddenExact = Pricing.cost(
         model: "claude-sonnet-4-6", input: 1_000_000, output: 0, cacheRead: 0,
         cacheCreation: (fiveMinute: 0, oneHour: 0),
-        override: exactOverride)
+        override: PricingTable(exactOverride))
     expect("override exact wins", overriddenExact, Decimal(string: "10.00")!)
     // Override entries match by longest-prefix the same way the built-in
     // table does, so a family-level override propagates to point releases.
@@ -186,7 +186,7 @@ func runSelfTest() {
     let overriddenPrefix = Pricing.cost(
         model: "claude-opus-4-7", input: 1_000_000, output: 0, cacheRead: 0,
         cacheCreation: (fiveMinute: 0, oneHour: 0),
-        override: prefixOverride)
+        override: PricingTable(prefixOverride))
     expect("override prefix wins", overriddenPrefix, Decimal(string: "100.00")!)
     // Unmatched models fall back to the embedded seed.
     let unrelatedOverride: [String: ModelPricing] = [
@@ -196,13 +196,13 @@ func runSelfTest() {
     let fallback = Pricing.cost(
         model: "claude-sonnet-4-6", input: 1_000_000, output: 100_000, cacheRead: 0,
         cacheCreation: (fiveMinute: 0, oneHour: 0),
-        override: unrelatedOverride)
+        override: PricingTable(unrelatedOverride))
     expect("override miss falls back", fallback, Decimal(string: "4.50")!)
     // Empty override map must not poison the fallback.
     let emptyOverride = Pricing.cost(
         model: "claude-sonnet-4-6", input: 1_000_000, output: 100_000, cacheRead: 0,
         cacheCreation: (fiveMinute: 0, oneHour: 0),
-        override: [:])
+        override: PricingTable([:]))
     expect("empty override falls back", emptyOverride, Decimal(string: "4.50")!)
     // An override without an explicit 1h rate derives it from the override's
     // own input rate (10 × 2 = 20/M), not the embedded seed. 1M 1h tokens → 20.
@@ -213,7 +213,7 @@ func runSelfTest() {
     let derived1h = Pricing.cost(
         model: "claude-sonnet-4-6", input: 0, output: 0, cacheRead: 0,
         cacheCreation: (fiveMinute: 0, oneHour: 1_000_000),
-        override: overrideDerived1h)
+        override: PricingTable(overrideDerived1h))
     expect("override 1h derived from override input", derived1h, Decimal(string: "20.00")!)
     // An override that sets `cacheCreation1hPerMTok` explicitly bypasses the
     // 2× derivation entirely — 1M 1h tokens at the literal 7/M → 7.
@@ -225,7 +225,7 @@ func runSelfTest() {
     let explicit1h = Pricing.cost(
         model: "claude-sonnet-4-6", input: 0, output: 0, cacheRead: 0,
         cacheCreation: (fiveMinute: 0, oneHour: 1_000_000),
-        override: overrideExplicit1h)
+        override: PricingTable(overrideExplicit1h))
     expect("override 1h explicit bypasses derivation", explicit1h, Decimal(string: "7.00")!)
     // Decode guard: `cacheCreation1hPerMTok` must survive JSON round-trip
     // (regression for the let-vs-var Decodable-synthesis trap). A server.json
@@ -1999,7 +1999,8 @@ private func runPriceCatalogTests() {
     expect(
         "override shadows catalog",
         Pricing.price(
-            for: "claude-opus-5", override: ["claude-opus-5": overrideRate], catalog: live),
+            for: "claude-opus-5", override: PricingTable(["claude-opus-5": overrideRate]),
+            catalog: live),
         overrideRate)
     expect(
         "seed applies when catalog misses",
