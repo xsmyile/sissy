@@ -103,6 +103,41 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: installer.inboxURL.path))
     }
 
+    /// Both CLIs merge hook groups that share a matcher, so Sissy's command
+    /// can end up in a group another tool also writes into. Removing that
+    /// group whole — which is what this did — takes a neighbour's hook out of
+    /// a file Sissy does not own, and the group's own keys with it.
+    func testRemovingAMixedGroupKeepsTheForeignCommandAndTheGroupsKeys() throws {
+        let (installer, target) = make("mixed")
+        let foreign: [String: Any] = ["type": "command", "command": "orca-hook.sh", "timeout": 42]
+        try writeConfiguration(
+            [
+                "hooks": [
+                    "SessionStart": [
+                        [
+                            "matcher": "startup",
+                            "hooks": [
+                                ["type": "command", "command": AgentHookInstaller.marker + "\ntrue"],
+                                foreign,
+                            ],
+                        ]
+                    ]
+                ]
+            ], to: target.url)
+
+        XCTAssertEqual(installer.remove()[target], .removed)
+
+        let groups = try XCTUnwrap(
+            (try configuration(of: target.url)["hooks"] as? [String: Any])?["SessionStart"]
+                as? [[String: Any]])
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?["matcher"] as? String, "startup")
+        let remaining = try XCTUnwrap(groups.first?["hooks"] as? [[String: Any]])
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining.first?["command"] as? String, "orca-hook.sh")
+        XCTAssertEqual(remaining.first?["timeout"] as? Int, 42)
+    }
+
     /// Claude Code rewrites this file itself, from memory, while Sissy may be
     /// re-affirming. The identity the write is pinned to comes from `fstat` on
     /// the descriptor the bytes were read through, so a rewrite that lands in

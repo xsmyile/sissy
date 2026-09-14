@@ -117,7 +117,9 @@ final class UsageEngineHost {
         // Re-affirmed at every launch rather than written once: the CLIs
         // rewrite these files themselves, and a line that has gone has to come
         // back without the user noticing it was missing.
-        if config.agentHooks { applyAgentHooks(true) }
+        if config.agentHooks || config.agentHooksRemovalPending {
+            applyAgentHooks(config.agentHooks)
+        }
         let host = self
         bootTask = Task {
             await engine.start { frame in
@@ -201,11 +203,16 @@ final class UsageEngineHost {
     }
 
     func setAgentHooks(_ enabled: Bool) {
-        guard let engine, enabled != agentHooks else { return }
+        guard enabled != agentHooks else { return }
         agentHooks = enabled
         applyAgentHooks(enabled)
-        Task { await engine.setAgentHooks(enabled: enabled) }
     }
+
+    /// The same pass again, on the one gesture there is for a configuration
+    /// Sissy could not write. A failed *removal* is what needs it: the switch
+    /// is already off, so nothing else on this path would ever try again until
+    /// the next launch.
+    func retryAgentHooks() { applyAgentHooks(agentHooks) }
 
     /// Registers or unregisters the hook with both CLIs.
     ///
@@ -214,8 +221,13 @@ final class UsageEngineHost {
     /// app already measures its own main-thread cost in single percent points.
     ///
     /// Nothing here is fatal to metering: a file Sissy could not rewrite is
-    /// named back to the user and left exactly as it was found.
+    /// named back to the user and left exactly as it was found — and the
+    /// intent is written to `server.json` *before* either file is touched, so
+    /// a removal interrupted half-way is retried at the next launch instead of
+    /// leaving a line in someone else's configuration under a switch that is
+    /// already off.
     private func applyAgentHooks(_ enabled: Bool) {
+        guard let engine else { return }
         // A test host is not a user launching Sissy. `xcodebuild test` runs the
         // app against this machine's real `Sissy-Dev` tree, so without this the
         // suite rewrites the developer's own `~/.claude/settings.json` and
@@ -226,8 +238,8 @@ final class UsageEngineHost {
             return
         }
         let script = Bundle.main.url(forResource: "session-start", withExtension: "sh")
-        guard let script else {
-            if enabled { agentHooksRefused = [AgentHookCopy.missingScript] }
+        if enabled && script == nil {
+            agentHooksRefused = [AgentHookCopy.missingScript]
             return
         }
         let stateDirectory = ServerConfig.defaultURL.deletingLastPathComponent()
@@ -238,17 +250,24 @@ final class UsageEngineHost {
         let previous = agentHooksTask
         agentHooksTask = Task.detached(priority: .utility) {
             await previous?.value
+            // Persist the retry before touching either foreign configuration.
+            await engine.setAgentHooks(enabled: enabled, removalPending: !enabled)
             let installer = AgentHookInstaller(stateDirectory: stateDirectory, targets: targets)
-            let report =
-                enabled ? installer.install(bundledScript: script) : installer.remove()
+            let report: [AgentHookTarget: AgentHookOutcome]
+            if enabled, let script {
+                report = installer.install(bundledScript: script)
+            } else {
+                report = installer.remove()
+            }
             let refused =
                 report
-                .filter { _, outcome in outcome != .written && outcome != .unchanged }
+                .filter { _, outcome in outcome == .failed || outcome == .unreadable }
                 .keys.map(\.name)
                 .sorted()
+            await engine.setAgentHooks(enabled: enabled, removalPending: !enabled && !refused.isEmpty)
             await MainActor.run {
                 guard host.agentHooksGeneration == generation else { return }
-                host.agentHooksRefused = enabled ? refused : []
+                host.agentHooksRefused = refused
             }
         }
     }

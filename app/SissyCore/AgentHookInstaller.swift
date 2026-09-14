@@ -127,7 +127,7 @@ struct AgentHookInstaller {
         ]
         return targets.reduce(into: [:]) { report, target in
             report[target] = edit(target) { groups in
-                var kept = groups.filter { !Self.isSissys($0) }
+                var kept = Self.removingOwnCommands(from: groups)
                 kept.append(entry)
                 return kept
             }
@@ -141,8 +141,13 @@ struct AgentHookInstaller {
     func remove() -> [AgentHookTarget: AgentHookOutcome] {
         var report: [AgentHookTarget: AgentHookOutcome] = [:]
         for target in targets {
-            report[target] = edit(target) { groups in groups.filter { !Self.isSissys($0) } }
+            report[target] = edit(target) { groups in Self.removingOwnCommands(from: groups) }
         }
+        // Only once every target is actually clear. A configuration Sissy could
+        // not rewrite still names this script on every session start, and
+        // deleting it there and then is what turns a failed removal into two
+        // CLIs running a path that no longer exists.
+        guard report.values.allSatisfy({ $0 == .removed || $0 == .unchanged }) else { return report }
         for url in [scriptURL.deletingLastPathComponent(), backupsURL, inboxURL] {
             try? fileManager.removeItem(at: url)
         }
@@ -193,12 +198,40 @@ struct AgentHookInstaller {
         return process.terminationStatus == 0
     }
 
-    private static func isSissys(_ group: [String: Any]) -> Bool {
-        commands(in: group).contains { $0.contains(marker) }
+    /// Whether one command is Sissy's, by the marker standing alone on a line
+    /// of it. A substring match would also claim a command that merely
+    /// mentions the marker — in a comment, or in a wrapper someone wrote
+    /// around this one.
+    private static func isOwnCommand(_ command: [String: Any]) -> Bool {
+        guard let text = command[commandKey] as? String else { return false }
+        return text.split(separator: "\n").contains {
+            $0.trimmingCharacters(in: .whitespaces) == marker
+        }
     }
 
-    private static func commands(in group: [String: Any]) -> [String] {
-        (group[hooksKey] as? [[String: Any]] ?? []).compactMap { $0[commandKey] as? String }
+    private static func isSissys(_ group: [String: Any]) -> Bool {
+        (group[hooksKey] as? [[String: Any]] ?? []).contains(where: isOwnCommand)
+    }
+
+    /// Drops Sissy's command, and only Sissy's.
+    ///
+    /// A matcher group is a list of commands another tool may also have
+    /// written into, and both CLIs merge groups that share a matcher. Dropping
+    /// the whole group — which is what this did — took a neighbouring hook out
+    /// with it, in a file Sissy does not own. A group Sissy's command was the
+    /// last of goes, so an empty one is not left behind; a group with anything
+    /// else in it keeps its matcher and every other key it carried.
+    private static func removingOwnCommands(from groups: [[String: Any]]) -> [[String: Any]] {
+        groups.compactMap { group in
+            guard let commands = group[hooksKey] as? [[String: Any]],
+                commands.contains(where: isOwnCommand)
+            else { return group }
+            let remaining = commands.filter { !isOwnCommand($0) }
+            guard !remaining.isEmpty else { return nil }
+            var kept = group
+            kept[hooksKey] = remaining
+            return kept
+        }
     }
 
     private func placeScript(from bundled: URL) throws {
@@ -271,7 +304,10 @@ struct AgentHookInstaller {
             }
             let wanted = transform(snapshot.groups)
             let existed = snapshot.identity != nil
-            if Self.sameCommands(snapshot.groups, wanted) && existed { return .unchanged }
+            // The whole group, not just its commands: a `timeout` or a matcher
+            // this build would write differently is still a change, and
+            // comparing the commands alone left it unwritten forever.
+            if NSArray(array: snapshot.groups).isEqual(to: wanted) && existed { return .unchanged }
             if wanted.isEmpty && !existed { return .unchanged }
 
             var hooks = snapshot.root[Self.hooksKey] as? [String: Any] ?? [:]
@@ -285,10 +321,6 @@ struct AgentHookInstaller {
             sissyLog("sissy: agent hooks: could not update \(target.name)'s configuration: \(error)")
             return .failed
         }
-    }
-
-    private static func sameCommands(_ lhs: [[String: Any]], _ rhs: [[String: Any]]) -> Bool {
-        lhs.flatMap(commands(in:)) == rhs.flatMap(commands(in:))
     }
 
     /// Under Sissy's own directory, not beside the file it copies. A spare copy

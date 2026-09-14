@@ -340,9 +340,11 @@ actor UsageEngine {
     /// Records the choice. Registering and unregistering the hook itself is
     /// the app's, because it needs the script out of the app bundle — the
     /// engine only owns what `server.json` says.
-    func setAgentHooks(enabled: Bool) async {
-        guard enabled != config.agentHooks else { return }
+    func setAgentHooks(enabled: Bool, removalPending: Bool = false) async {
+        guard enabled != config.agentHooks || removalPending != config.agentHooksRemovalPending
+        else { return }
         config.agentHooks = enabled
+        config.agentHooksRemovalPending = removalPending
         do {
             try ServerConfig.save(config, to: configURL)
         } catch {

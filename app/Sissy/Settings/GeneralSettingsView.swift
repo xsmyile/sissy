@@ -26,8 +26,19 @@ enum AgentHookCopy {
 
     static let missingScript = "Sissy's own bundle"
 
-    static func refusedCaption(_ names: [String]) -> String {
-        "Sissy could not write to \(ListFormatter.localizedString(byJoining: names))'s "
+    /// What a configuration Sissy could not rewrite is told back as, which is
+    /// not the same sentence in both directions. A failed *install* leaves the
+    /// switch on and the file as it was found, and the next launch re-affirms
+    /// anyway. A failed *removal* leaves a line in a file the user asked Sissy
+    /// to get out of, under a switch that already reads off — so it has to say
+    /// that the line is still there, and that Sissy will go back for it.
+    static func refusedCaption(_ names: [String], enabled: Bool) -> String {
+        let joined = ListFormatter.localizedString(byJoining: names)
+        guard enabled else {
+            return "Sissy could not remove its hook from \(joined). The line is still there, "
+                + "and Sissy tries again next time it starts."
+        }
+        return "Sissy could not write to \(joined)'s "
             + "configuration, so it was left as it was. The switch stays on and Sissy tries "
             + "again next time it starts."
     }
@@ -59,8 +70,8 @@ struct GeneralSettingsView: View {
 
     private var agentHooksCaption: String {
         let refused = model.engine.agentHooksRefused
-        guard model.engine.agentHooks, !refused.isEmpty else { return AgentHookCopy.caption }
-        return AgentHookCopy.refusedCaption(refused)
+        guard !refused.isEmpty else { return AgentHookCopy.caption }
+        return AgentHookCopy.refusedCaption(refused, enabled: model.engine.agentHooks)
     }
 
     /// A button rather than a tooltip, for the reason the limits switch has
@@ -164,6 +175,14 @@ struct GeneralSettingsView: View {
                 Text(agentHooksCaption)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                // Only ever reached by a configuration Sissy could not
+                // rewrite. The launch path retries on its own; this is for
+                // someone who has just fixed whatever stopped it and does not
+                // want to restart the app to find out.
+                if !model.engine.agentHooksRefused.isEmpty {
+                    Button("Retry") { model.engine.retryAgentHooks() }
+                        .buttonStyle(.link)
+                }
             }
 
             Section {
@@ -176,6 +195,11 @@ struct GeneralSettingsView: View {
                     }
                 }
                 Text(verbatim: (SissyPaths.appSupportDir.path as NSString).abbreviatingWithTildeInPath)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                Text("Session hooks: ~/.claude/settings.json and ~/.codex/hooks.json")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
