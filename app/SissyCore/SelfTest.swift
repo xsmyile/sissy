@@ -73,12 +73,27 @@ func runSelfTest() {
     expect("provider order [0]", sorted[0].id, "claude-code")
     expect("provider order [1]", sorted[1].id, "codex")
     expect("provider order [2]", sorted[2].id, "zzz")
-    let active = FrameBuilder.activeSlices([
-        ProviderSlice(id: "codex", tokens: 0, cost: 0),
+    // A provider that has spent nothing today keeps its row: the slice is also
+    // where its plan, account, credits and limits ride, and dropping it took
+    // those off the panel along with a total of zero.
+    let idle = FrameBuilder.sortProviders([
+        ProviderSlice(id: "codex", tokens: 0, cost: 0, plan: "plus"),
         ProviderSlice(id: "claude-code", tokens: 100, cost: Decimal(string: "2.00")!),
     ])
-    expect("activeSlices drops zero-token CLI", active.count, 1)
-    expect("activeSlices keeps used CLI", active.first?.id, "claude-code")
+    expect("an idle provider keeps its row", idle.count, 2)
+    expect("an idle provider keeps its plan", idle.last?.plan, "plus")
+
+    // Windows are ordered by the period they measure, whatever order the
+    // vendor listed them in: the panel dims every row after the first, so a
+    // weekly bucket drawn above a session one takes the emphasis with it.
+    let reset = Date(timeIntervalSince1970: 4_000_000_000)
+    let ordered = ProviderSlice(
+        id: "codex", tokens: 1, cost: 0,
+        windows: [
+            UsageWindow(minutes: 10_080, usedPercent: 20, resetsAt: reset),
+            UsageWindow(minutes: 300, usedPercent: 10, resetsAt: reset),
+        ].compactMap { $0 })
+    expect("slice orders its windows shortest first", ordered.windows.map(\.minutes), [300, 10_080])
     let frameWithProviders = FrameBuilder.build(
         today: DayTotals(totalTokens: 301, totalCost: Decimal(string: "3.50")!),
         hoursElapsed: 1,
@@ -915,12 +930,13 @@ func runAggregatorEmitTest() {
 
     actor EmittingProvider: UsageProvider {
         nonisolated let id = "emitter"
-        nonisolated private let box = AtomicWindows()
+        nonisolated private let box = LockedValue(ProviderSignals())
 
         init() {
             box.store(
-                [UsageWindow(minutes: 300, usedPercent: 12, resetsAt: .distantFuture)]
-                    .compactMap { $0 })
+                ProviderSignals(
+                    windows: [UsageWindow(minutes: 300, usedPercent: 12, resetsAt: .distantFuture)]
+                        .compactMap { $0 }))
         }
 
         func start(onChange: @Sendable @escaping (DayTotals) async -> Void) async {
@@ -935,7 +951,7 @@ func runAggregatorEmitTest() {
         }
         nonisolated func filesWatched() -> Int { 1 }
         func isWarm() async -> Bool { true }
-        nonisolated func currentWindows() -> [UsageWindow] { box.live() }
+        nonisolated func currentSignals() -> ProviderSignals { box.currentSignals() }
         func applyPriceCatalog(_ catalog: PriceCatalog) async {}
     }
 
@@ -1477,7 +1493,7 @@ func runCodexAuthFallbackTest() {
             codexDir: sessionsDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: nil)
         await reader.start { _ in }
-        box.value = reader.currentPlan()
+        box.value = reader.currentSignals().plan
         await reader.stop()
         sem.signal()
     }
@@ -1538,8 +1554,8 @@ func runCodexRateLimitTest() {
             persistenceURL: nil
         )
         await reader.start { _ in }
-        box.value = await reader.currentWindows()
-        planBox.value = await reader.currentPlan()
+        box.value = await reader.currentSignals().windows
+        planBox.value = await reader.currentSignals().plan
         await reader.stop()
         sem.signal()
     }
@@ -1687,8 +1703,8 @@ func runCodexWindowPersistenceTest() {
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
         await r.start { _ in }
-        box.value = r.currentWindows()
-        planBox.value = r.currentPlan()
+        box.value = r.currentSignals().windows
+        planBox.value = r.currentSignals().plan
         await r.stop()
         sem2.signal()
     }
@@ -2100,7 +2116,7 @@ func runProviderAccountTests() {
     try? Data(#"{"oauthAccount":{"organizationType":"claude_pro"}}"#.utf8).write(to: profileURL)
     let source = ClaudeProfileSource(url: profileURL)
     source.refresh()
-    expect("the profile source reads a plan", source.currentPlan(), "pro")
+    expect("the profile source reads a plan", source.currentSignals().plan, "pro")
 
     try? Data(#"{"oauthAccount":{"organizationType":"claude_max"}}"#.utf8).write(to: profileURL)
     // Stamped forward by hand: both writes land inside the mtime tolerance
@@ -2109,10 +2125,10 @@ func runProviderAccountTests() {
     try? FileManager.default.setAttributes(
         [.modificationDate: Date().addingTimeInterval(1)], ofItemAtPath: profileURL.path)
     source.refresh()
-    expect("a poll inside the floor does not re-read", source.currentPlan(), "pro")
+    expect("a poll inside the floor does not re-read", source.currentSignals().plan, "pro")
 
     source.refresh(userInitiated: true)
-    expect("a user asking reads again", source.currentPlan(), "max")
+    expect("a user asking reads again", source.currentSignals().plan, "max")
     try? FileManager.default.removeItem(at: profileURL)
 
     expect(

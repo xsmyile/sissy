@@ -1,7 +1,7 @@
 import Foundation
 
 /// Pluggable source of per-day token + cost totals. Each implementation tails
-/// one CLI's session log (Claude Code JSONL today, Codex JSONL next), parses
+/// one CLI's session log (Claude Code or Codex JSONL), parses
 /// usage events, and pushes today's totals through `onChange` whenever state
 /// changes. The aggregator fans these into a single combined frame so the
 /// frame stays unaware of multi-provider.
@@ -9,7 +9,7 @@ import Foundation
 /// Conforming types are typically actors; protocol leaves isolation up to the
 /// implementation but every stateful method is `async` so callers don't need
 /// to know.
-protocol UsageProvider: AnyObject, Sendable {
+protocol UsageProvider: AnyObject, SourceSignals {
     /// Stable identifier used as the key in the per-provider breakdown
     /// and (where applicable) as the suffix on provider-specific persistence
     /// files. Kebab-case, lowercase. Claude is the exception: it keeps the
@@ -34,59 +34,11 @@ protocol UsageProvider: AnyObject, Sendable {
     func current() async -> DayTotals
 
     /// Number of session files currently being watched. Drives the panel's
-    /// and the menubar "No JSONL detected" pill. Nonisolated so the HTTP
-    /// handler can read it without hopping into the actor mid-scan.
+    /// and menu bar readiness. Readable without waiting behind the scan.
     nonisolated func filesWatched() -> Int
 
     /// True once the cold backfill scan has completed.
     func isWarm() async -> Bool
-
-    /// Subscription rate-limit windows the CLI last reported, newest
-    /// observation wins. Empty for a provider that surfaces none — the
-    /// default implementation covers those, so a reader only overrides it
-    /// when its session log actually carries limits.
-    ///
-    /// Nonisolated on purpose: the aggregator reads this while the emitting
-    /// provider still holds its actor, so an actor hop here would deadlock
-    /// the pair.
-    nonisolated func currentWindows() -> [UsageWindow]
-
-    /// Subscription plan the vendor names for this account, as the vendor's
-    /// own lowercase token (`max`, `plus`) rather than a display label — the
-    /// app renders it, the same division `UsageFormat.providerName` already
-    /// draws, so a tier a vendor ships tomorrow still reaches the panel.
-    /// Nil for a provider that names none; the default implementation covers
-    /// those.
-    ///
-    /// Nonisolated for the same reason as `currentWindows()`: the aggregator
-    /// reads this while the emitting provider still holds its actor.
-    nonisolated func currentPlan() -> String?
-
-    /// Limit tier the plan is metered at, as the vendor's own token
-    /// (`max_5x`). Nil for every provider that publishes no such thing, which
-    /// is all of them but Claude Code. Never set without a plan: a tier alone
-    /// names nothing a reader could place.
-    nonisolated func currentPlanTier() -> String?
-
-    /// Who the provider is signed in as, off the same file its plan came
-    /// from. Nil for a provider whose format names nobody; the default
-    /// implementation covers those.
-    ///
-    /// Nonisolated for the reason the plan is: the aggregator reads it while
-    /// the emitting provider still holds its actor.
-    nonisolated func currentAccount() -> ProviderAccount?
-
-    /// What the vendor has billed against the user's spend cap, for a provider
-    /// that publishes one. Nil for every other.
-    ///
-    /// Nonisolated for the reason the windows are.
-    nonisolated func currentCredits() -> ProviderCredits?
-
-    /// Why this provider's windows are missing, when they are. `.quiet` for a
-    /// provider that publishes no limits and for one whose limits are fine.
-    ///
-    /// Nonisolated for the reason the windows are.
-    nonisolated func currentLimitsState() -> ProviderLimitsState
 
     /// How the provider's day splits across projects, as of its last emit.
     /// Empty for a provider whose format names no working directory.
@@ -118,11 +70,5 @@ extension UsageProvider {
     func forgetArchivedDays() async {}
     func refreshSignals() async {}
 
-    nonisolated func currentWindows() -> [UsageWindow] { [] }
-    nonisolated func currentPlan() -> String? { nil }
-    nonisolated func currentPlanTier() -> String? { nil }
-    nonisolated func currentAccount() -> ProviderAccount? { nil }
-    nonisolated func currentLimitsState() -> ProviderLimitsState { .quiet }
-    nonisolated func currentCredits() -> ProviderCredits? { nil }
     nonisolated func currentProjects() -> [ProjectTotals] { [] }
 }

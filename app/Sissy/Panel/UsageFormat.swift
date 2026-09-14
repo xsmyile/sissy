@@ -396,6 +396,22 @@ enum UsageFormat {
         }
     }
 
+    /// When the windows on screen were taken.
+    ///
+    /// The gauges get an age for the reason the credits row does: neither is
+    /// fetched on demand. Codex publishes its buckets on its own turns, so a
+    /// Mac left idle shows numbers from the last one; Claude's come off a poll
+    /// five minutes apart. Without this the only date on the page is the
+    /// frame's, which the *other* provider's activity moves — a Codex turn
+    /// landing made an untouched Claude window read as just updated.
+    static func windowsCaption(
+        observedAt: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        "Read " + observedLabel(observedAt, now: now, calendar: calendar)
+    }
+
     /// What pressing refresh on a provider actually does, said before it is
     /// pressed.
     ///

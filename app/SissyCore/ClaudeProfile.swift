@@ -12,10 +12,10 @@ import Foundation
 /// limits on. `.claude.json` is therefore the one source that also
 /// answers for a user who never enabled limits.
 ///
-/// A class rather than an actor because `UsageProvider.currentPlan()` is
+/// A class rather than an actor because `UsageProvider.currentSignals()` is
 /// nonisolated: the aggregator reads it while the emitting provider still
 /// holds its own actor, so an actor hop here would deadlock the pair.
-final class ClaudeProfileSource: @unchecked Sendable {
+final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     private static let fileName = ".claude.json"
     private static let configDirEnvVar = "CLAUDE_CONFIG_DIR"
 
@@ -57,8 +57,7 @@ final class ClaudeProfileSource: @unchecked Sendable {
 
     private let url: URL
     private let lock = NSLock()
-    private var profile: Profile?
-    private var credits: ProviderCredits?
+    private var signals = ProviderSignals()
     private var lastParsedAt: Date = .distantPast
     private var lastMTime: TimeInterval = 0
 
@@ -100,25 +99,11 @@ final class ClaudeProfileSource: @unchecked Sendable {
         self.url = url
     }
 
-    /// Plan last read, as the CLI's own token (`max`, `team`). Nil until a
-    /// refresh finds one, and nil for good for an API-key user or a config
-    /// file with no `oauthAccount` — which leaves the panel row without a
-    /// plan rather than guessing at one.
-    func currentPlan() -> String? { lock.withLock { profile?.plan } }
-
-    /// Limit tier the account is metered at (`max_5x`), when the CLI names one
-    /// and a plan came with it.
-    func currentPlanTier() -> String? { lock.withLock { profile?.tier } }
-
-    /// Address, organisation and seat, when the CLI's config names them. Nil
-    /// for the same accounts `currentPlan()` answers nil for — there is no
-    /// `oauthAccount` to read either way.
-    func currentAccount() -> ProviderAccount? { lock.withLock { profile?.account } }
-
-    /// Credits the vendor has billed against the user's spend cap, as of the
-    /// CLI's last fetch. Nil for an account whose config names none, which is
-    /// every account that has never turned the facility on.
-    func currentCredits() -> ProviderCredits? { lock.withLock { credits } }
+    /// Plan, tier, account and credits as the CLI's config last named them.
+    /// Every field is nil until a refresh finds one, and nil for good for an
+    /// API-key user or a config file with no `oauthAccount` — which leaves the
+    /// panel row without a plan rather than guessing at one.
+    func currentSignals() -> ProviderSignals { lock.withLock { signals } }
 
     /// Re-reads the file when it has changed on disk and the floor has
     /// passed. A file that has stopped naming a plan clears the held one — a
@@ -126,6 +111,7 @@ final class ClaudeProfileSource: @unchecked Sendable {
     /// payload that would not parse leaves both the reading and the
     /// bookkeeping untouched, so the next poll tries again instead of
     /// treating a failed read as an answer.
+    ///
     /// `userInitiated` is the caller saying someone just asked for this, which
     /// is the one thing allowed past the floor. The floor exists so a poll
     /// every minute does not re-parse 300 KB for a value that changes on the
@@ -148,8 +134,10 @@ final class ClaudeProfileSource: @unchecked Sendable {
         let reading = Self.readProfile(root)
         let billed = Self.readCredits(root)
         lock.withLock {
-            profile = if case .found(let found) = reading { found } else { nil }
-            credits = billed
+            let profile = if case .found(let found) = reading { found } else { nil as Profile? }
+            signals = ProviderSignals(
+                plan: profile?.plan, planTier: profile?.tier,
+                account: profile?.account, credits: billed)
             lastParsedAt = now
             lastMTime = mtime
         }

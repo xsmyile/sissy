@@ -37,9 +37,6 @@ struct UsageWindow: Sendable, Equatable, Codable {
     }
 }
 
-/// Raw per-provider slice carried on the frame so the app derives both the
-/// menubar header total and the panel's per-provider rows from a single
-/// payload rather than from two counts that can disagree.
 /// One project's share of a day.
 ///
 /// `path` is the repository's absolute path, raw — the app renders the last
@@ -182,57 +179,55 @@ struct ProviderCredits: Sendable, Equatable {
     var remaining: Decimal { amount(max(0, capMinor - usedMinor)) }
 }
 
+/// One provider's share of the day, and everything else its own files answer
+/// for. The frame carries these raw so the header total and the per-provider
+/// rows come off a single payload rather than two counts that can disagree.
 struct ProviderSlice: Sendable, Equatable, Identifiable {
     let id: String
     let tokens: Int
     let cost: Decimal
-    /// Empty whenever the provider reports no limits — an API-key user, or a
-    /// CLI that has not surfaced a window yet. The panel falls back to the
-    /// share-of-today bar rather than rendering an empty gauge.
-    let windows: [UsageWindow]
-    /// Vendor's own plan token (`max`, `plus`), nil when the provider names
-    /// none. Raw rather than a label so the app owns the wording — same
-    /// division as `id`, which the app turns into a display name.
-    let plan: String?
-    /// Limit tier the plan is metered at (`max_5x`), for the one vendor that
-    /// publishes one. Only ever set alongside `plan`.
-    let planTier: String?
-    /// What the vendor has billed against a spend cap, for the providers that
-    /// publish one. Nil for every other, and for an account that has never
-    /// enabled the facility.
-    let credits: ProviderCredits?
+    /// Plan, account, credits, windows and their age, as this provider last
+    /// published them.
+    let signals: ProviderSignals
     /// How this provider's day splits across projects. Empty for a provider
     /// whose format names no working directory, which reads the same as a
     /// provider that has spent nothing.
     let projects: [ProjectTotals]
-    /// Who this provider is signed in as, when its own files say.
-    let account: ProviderAccount?
-    /// Why this provider's windows are missing, when they are and when the
-    /// user can do something about it.
-    let limitsState: ProviderLimitsState
 
-    init(
-        id: String,
-        tokens: Int,
-        cost: Decimal,
-        windows: [UsageWindow] = [],
-        plan: String? = nil,
-        planTier: String? = nil,
-        credits: ProviderCredits? = nil,
-        projects: [ProjectTotals] = [],
-        account: ProviderAccount? = nil,
-        limitsState: ProviderLimitsState = .quiet
-    ) {
+    var windows: [UsageWindow] { signals.windows }
+    var plan: String? { signals.plan }
+    var planTier: String? { signals.planTier }
+    var credits: ProviderCredits? { signals.credits }
+    var account: ProviderAccount? { signals.account }
+    var limitsState: ProviderLimitsState { signals.limitsState }
+    var limitsObservedAt: Date? { signals.limitsObservedAt }
+
+    init(id: String, tokens: Int, cost: Decimal, signals: ProviderSignals, projects: [ProjectTotals] = []) {
         self.id = id
         self.tokens = tokens
         self.cost = cost
-        self.windows = windows
-        self.plan = plan
-        self.planTier = plan == nil ? nil : planTier
-        self.credits = credits
+        var ordered = signals
+        ordered.windows.sort { $0.minutes < $1.minutes }
+        if ordered.plan == nil { ordered.planTier = nil }
+        self.signals = ordered
         self.projects = projects
-        self.account = account
-        self.limitsState = limitsState
+    }
+
+    /// The field-by-field form, for the callers that name a slice's parts
+    /// rather than hand over a reading — every test, and the placeholder the
+    /// panel draws before any provider has reported.
+    init(
+        id: String, tokens: Int, cost: Decimal, windows: [UsageWindow] = [],
+        plan: String? = nil, planTier: String? = nil, credits: ProviderCredits? = nil,
+        projects: [ProjectTotals] = [], account: ProviderAccount? = nil,
+        limitsState: ProviderLimitsState = .quiet, limitsObservedAt: Date? = nil
+    ) {
+        self.init(
+            id: id, tokens: tokens, cost: cost,
+            signals: ProviderSignals(
+                windows: windows, plan: plan, planTier: planTier, account: account,
+                credits: credits, limitsState: limitsState, limitsObservedAt: limitsObservedAt),
+            projects: projects)
     }
 }
 
@@ -240,9 +235,11 @@ struct FrameData: Sendable, Equatable {
     let tokens: String
     let cost: String
     let burn: String
-    /// Per-provider totals (raw tokens + Decimal cost) for every provider with
-    /// spend today. Stable order: claude-code, codex, then alphabetical. Empty
-    /// when no provider has tokens today (none active yet, or all idle today).
+    /// One slice per provider that has produced a reading, in a stable order:
+    /// claude-code, codex, then alphabetical. A provider that spent nothing
+    /// today keeps its slice — it is also what carries the plan, the account,
+    /// the credits and the rate-limit gauges — and one that has not read yet
+    /// has none, because no reading is not a reading of zero.
     let providers: [ProviderSlice]
     /// The keep-awake mode and whether it is holding right now. Not optional,
     /// including when off: the app renders the control from this, and "off"
@@ -300,11 +297,16 @@ enum FrameBuilder {
         return "\(n)"
     }
 
+    static func burnRate(tokens: Int, hoursElapsed: Double) -> Double? {
+        guard tokens > 0, hoursElapsed.isFinite, hoursElapsed > 0 else { return nil }
+        return Double(tokens) / max(hoursElapsed, 1.0 / 60.0)
+    }
+
     static func fmtBurn(tokens: Int, hoursElapsed: Double) -> String {
-        if tokens <= 0 || hoursElapsed <= 0 { return placeholder }
-        let safeHours = max(hoursElapsed, 1.0 / 60.0)
-        let rate = Int(Double(tokens) / safeHours)
-        return fmtTokens(rate)
+        guard let rate = burnRate(tokens: tokens, hoursElapsed: hoursElapsed) else {
+            return placeholder
+        }
+        return fmtTokens(Int(rate))
     }
 
     static func fmtCost(_ c: Decimal) -> String {
@@ -321,12 +323,10 @@ enum FrameBuilder {
         keepAwake: KeepAwakeState = .off,
         history: UsageHistoryRollup? = nil
     ) -> FrameData {
-        let tokens = fmtTokens(today.totalTokens)
-        let burn = fmtBurn(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
         return FrameData(
-            tokens: tokens,
+            tokens: fmtTokens(today.totalTokens),
             cost: fmtCost(today.totalCost),
-            burn: burn,
+            burn: fmtBurn(tokens: today.totalTokens, hoursElapsed: hoursElapsed),
             providers: providers,
             keepAwake: keepAwake,
             history: history,
@@ -387,13 +387,5 @@ enum FrameBuilder {
             if lp != rp { return lp < rp }
             return lhs.id < rhs.id
         }
-    }
-
-    /// Breakdown slices for the frame: only CLIs with spend today, in canonical
-    /// order. A provider with zero tokens today is omitted so the menubar
-    /// Breakdown reflects that day's actual per-CLI split rather than every
-    /// warm reader.
-    static func activeSlices(_ slices: [ProviderSlice]) -> [ProviderSlice] {
-        sortProviders(slices.filter { $0.tokens > 0 })
     }
 }

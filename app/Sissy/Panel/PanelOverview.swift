@@ -167,7 +167,7 @@ struct PanelOverview: View {
     private var providersLabel: String {
         guard
             let recap = UsageFormat.providersRecap(
-                used: snapshot.providers.count, metering: meteringProviders)
+                used: snapshot.usedToday, metering: meteringProviders)
         else { return "By provider" }
         return "By provider · " + recap
     }

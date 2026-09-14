@@ -1,72 +1,83 @@
 import Foundation
 
-/// Lock-protected counter the reader actor shares with whoever asks how
-/// many files are being watched. Reading it without the hop matters because
-/// the actor is busy for the whole initial backfill: an `await
-/// reader.filesWatched()` queues behind that scan, and the panel's
-/// warming state would be the last thing to learn the scan had started.
-final class AtomicIntCounter: @unchecked Sendable {
+/// A value is copied under one lock, so readers cannot combine fields from
+/// different updates. Mutation stays synchronous and never holds a lock over await.
+final class LockedValue<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
-    private var value: Int = 0
-    func load() -> Int { lock.withLock { value } }
-    func store(_ v: Int) { lock.withLock { value = v } }
+    private var value: Value
+
+    init(_ value: Value) { self.value = value }
+    func load() -> Value { lock.withLock { value } }
+    func store(_ value: Value) { lock.withLock { self.value = value } }
+    func update(_ change: (inout Value) -> Void) { lock.withLock { change(&value) } }
 }
 
-/// Lock-protected window snapshot, read without entering the owning actor.
+/// Everything one source answers for besides its token totals, published as a
+/// single value.
 ///
-/// The aggregator reads these while a provider is mid-emit — that is, while
-/// the provider holds its own actor waiting on the emit callback. An `await`
-/// back into the provider there deadlocks both sides, so the read has to be
-/// synchronous, the same reason `filesWatched()` is nonisolated.
-final class AtomicWindows: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: [UsageWindow] = []
-    func load() -> [UsageWindow] { lock.withLock { value } }
-    func store(_ v: [UsageWindow]) { lock.withLock { value = v } }
-    /// Drops buckets whose reset has passed: a window past its reset
-    /// describes a period that no longer exists.
-    func live(now: Date = Date()) -> [UsageWindow] {
-        lock.withLock { value.filter { $0.resetsAt > now } }
+/// One value rather than a getter each because the fields are read together
+/// and describe one moment: a plan taken from one publication beside an
+/// account from the next is a reading that never existed. It is also what
+/// makes "has anything about this provider changed" a single comparison,
+/// which is how a lapsed authorization reaches the panel on a day where no
+/// token event will follow it.
+struct ProviderSignals: Sendable, Equatable {
+    /// Empty whenever the provider reports no limits — an API-key user, or a
+    /// CLI that has not surfaced a window yet. The panel falls back to the
+    /// share-of-today bar rather than rendering an empty gauge.
+    var windows: [UsageWindow] = []
+    /// Vendor's own plan token (`max`, `plus`), nil when the provider names
+    /// none. Raw rather than a label so the app owns the wording — same
+    /// division as a provider's `id`, which the app turns into a display name.
+    var plan: String?
+    /// Limit tier the plan is metered at (`max_5x`), for the one vendor that
+    /// publishes one. Only ever shown alongside `plan`.
+    var planTier: String?
+    /// Who this provider is signed in as, when its own files say.
+    var account: ProviderAccount?
+    /// What the vendor has billed against a spend cap, for the providers that
+    /// publish one. Nil for every other, and for an account that has never
+    /// enabled the facility.
+    var credits: ProviderCredits?
+    /// Why the windows are missing, when they are and when the user can do
+    /// something about it.
+    var limitsState: ProviderLimitsState = .quiet
+    /// When the windows beside it were taken, on the clock of whoever took
+    /// them — Sissy's for a fetch it made, the CLI's own event stamp for the
+    /// buckets it only ever reads off a rollout. Nil until a reading lands.
+    /// The panel prints it: gauges Sissy cannot refresh on demand are stale
+    /// by design, and an age is the difference between saying so and letting
+    /// a frame from the other provider imply otherwise.
+    var limitsObservedAt: Date?
+
+    /// The same reading with expired buckets dropped and the rest ordered by
+    /// the period they measure.
+    ///
+    /// A window past its reset describes a period that no longer exists. The
+    /// order is here rather than at each producer because the panel dims
+    /// every row after the first: a weekly bucket a vendor happened to list
+    /// first would take the emphasis from the session one that binds sooner.
+    func live(now: Date = Date()) -> Self {
+        var copy = self
+        copy.windows = windows.filter { $0.resetsAt > now }.sorted { $0.minutes < $1.minutes }
+        return copy
     }
 }
 
-/// Same handoff as `AtomicWindows` for a plan token: an adapter parses it on
-/// the provider's actor while `UsageProvider.currentPlan()` is read from
-/// outside it. Unlike a window a plan never expires, so there is no `live()`
-/// here.
-final class AtomicPlan: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: String?
-    func load() -> String? { lock.withLock { value } }
-    func store(_ v: String?) { lock.withLock { value = v } }
+/// What a source publishes for readers outside its own isolation.
+///
+/// Nonisolated on purpose: the aggregator reads this while the provider that
+/// just emitted still holds its own actor, so an `await` here would deadlock
+/// the pair — the provider waiting on its callback, the callback waiting on
+/// the provider. A source that publishes nothing takes the default.
+protocol SourceSignals: Sendable {
+    nonisolated func currentSignals() -> ProviderSignals
 }
 
-/// Same handoff for the account a provider is signed in as. Read out of the
-/// vendor's own file on the provider's actor, answered from outside it.
-final class AtomicAccount: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: ProviderAccount?
-    func load() -> ProviderAccount? { lock.withLock { value } }
-    func store(_ v: ProviderAccount?) { lock.withLock { value = v } }
+extension SourceSignals {
+    nonisolated func currentSignals() -> ProviderSignals { ProviderSignals() }
 }
 
-/// Same handoff for why a provider's windows are missing. Written by the
-/// limits probe's own task, read by the aggregator while a provider is
-/// mid-emit.
-final class AtomicLimitsState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: ProviderLimitsState = .quiet
-    func load() -> ProviderLimitsState { lock.withLock { value } }
-    func store(_ v: ProviderLimitsState) { lock.withLock { value = v } }
-}
-
-/// Same handoff again for today's project split: the provider recomputes it on
-/// its actor at every emit, while `UsageProvider.currentProjects()` is read
-/// from the aggregator without an actor hop — the same reason the windows and
-/// the plan travel this way.
-final class AtomicProjects: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: [ProjectTotals] = []
-    func load() -> [ProjectTotals] { lock.withLock { value } }
-    func store(_ v: [ProjectTotals]) { lock.withLock { value = v } }
+extension LockedValue: SourceSignals where Value == ProviderSignals {
+    func currentSignals() -> ProviderSignals { load().live() }
 }

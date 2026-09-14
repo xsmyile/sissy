@@ -130,7 +130,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
 
             _ = await probe.refreshOnce {}
 
-            XCTAssertEqual(probe.currentLimitsState(), expected)
+            XCTAssertEqual(probe.currentSignals().limitsState, expected)
         }
     }
 
@@ -139,11 +139,11 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     func testAFailureNobodyCanActOnLeavesTheStateAlone() async {
         let probe = ClaudeLimitsProbe { _, _ in .denied }
         _ = await probe.refreshOnce {}
-        XCTAssertEqual(probe.currentLimitsState(), .refused)
+        XCTAssertEqual(probe.currentSignals().limitsState, .refused)
 
         let transient = ClaudeLimitsProbe { _, _ in .timedOut }
         _ = await transient.refreshOnce {}
-        XCTAssertEqual(transient.currentLimitsState(), .quiet)
+        XCTAssertEqual(transient.currentSignals().limitsState, .quiet)
     }
 
     /// The bug this caught: a refusal stops the probe, and the stop used to
@@ -155,7 +155,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
 
         _ = await probe.refreshOnce {}
 
-        XCTAssertEqual(probe.currentLimitsState(), .refused)
+        XCTAssertEqual(probe.currentSignals().limitsState, .refused)
     }
 
     /// The other stop. A row explaining why the limits are missing, under a
@@ -163,11 +163,103 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     func testSwitchingTheModuleOffClearsTheState() async {
         let probe = ClaudeLimitsProbe { _, _ in .interactionRequired }
         _ = await probe.refreshOnce {}
-        XCTAssertEqual(probe.currentLimitsState(), .needsAuthorization)
+        XCTAssertEqual(probe.currentSignals().limitsState, .needsAuthorization)
 
         await probe.stop()
 
-        XCTAssertEqual(probe.currentLimitsState(), .quiet)
+        XCTAssertEqual(probe.currentSignals().limitsState, .quiet)
+    }
+
+    /// The authorization the limits ride on lapses every time Claude Code
+    /// refreshes its own token, and it lapses on a Mac that may not bill a
+    /// single token afterwards. So the loss has to be published on its own:
+    /// the poll used to notify only when the *windows* moved, which meant a
+    /// probe that could no longer read the keychain sat silent until the next
+    /// turn landed.
+    func testAStateChangeIsPublishedWithoutAnyTokenEvent() async {
+        let probe = ClaudeLimitsProbe { _, _ in .interactionRequired }
+        let notified = expectation(description: "the authorization state reached the frame")
+
+        _ = await probe.refreshOnce { notified.fulfill() }
+
+        await fulfillment(of: [notified], timeout: 5)
+        await probe.stop()
+    }
+
+    /// And its other half: a poll that met the same condition again publishes
+    /// nothing, so a steady state costs no frames.
+    func testTheSameStateTwiceIsNotPublishedTwice() async {
+        let probe = ClaudeLimitsProbe { _, _ in .interactionRequired }
+        let repeated = expectation(description: "the unchanged state was published again")
+        repeated.isInverted = true
+        _ = await probe.refreshOnce {}
+
+        _ = await probe.refreshOnce { repeated.fulfill() }
+
+        await fulfillment(of: [repeated], timeout: 0.5)
+        await probe.stop()
+    }
+
+    /// A refresh is what the panel's spinner is hung off, so it has to end
+    /// when Claude has answered rather than when the request was handed to a
+    /// task. It used to return immediately: the spinner then ran out on its
+    /// own minimum while the keychain and the network were still working, and
+    /// the row went back to "updated" over a reading that had not arrived.
+    func testARefreshIsPendingUntilTheRequestFinishes() async {
+        let gate = Gate()
+        let order = Order()
+        let started = expectation(description: "the request began")
+        let probe = ClaudeLimitsProbe { _, _ in
+            .found(ClaudeCredentials(accessToken: "t", expiresAt: .distantFuture))
+        } fetch: { _ in
+            started.fulfill()
+            await gate.wait()
+            await order.requestFinished()
+            return []
+        }
+        let finished = expectation(description: "the refresh returned")
+        Task {
+            await probe.refresh {}
+            await order.refreshReturned()
+            finished.fulfill()
+        }
+        await fulfillment(of: [started], timeout: 5)
+
+        await gate.open()
+        await fulfillment(of: [finished], timeout: 5)
+
+        let outran = await order.refreshOutranTheRequest
+        XCTAssertFalse(outran, "the refresh reported done while the request was still running")
+        await probe.stop()
+    }
+
+    /// A one-shot gate, so a test can hold a request open without blocking a
+    /// thread the runtime needs to resume it.
+    private actor Gate {
+        private var waiting: CheckedContinuation<Void, Never>?
+        private var opened = false
+
+        func wait() async {
+            guard !opened else { return }
+            await withCheckedContinuation { waiting = $0 }
+        }
+
+        func open() {
+            opened = true
+            waiting?.resume()
+            waiting = nil
+        }
+    }
+
+    /// Which of the two finished first, recorded rather than timed: a test
+    /// that waits a fixed moment to see whether something has happened yet
+    /// passes on a loaded machine by luck.
+    private actor Order {
+        private var requestDone = false
+        private(set) var refreshOutranTheRequest = false
+
+        func requestFinished() { requestDone = true }
+        func refreshReturned() { refreshOutranTheRequest = !requestDone }
     }
 
     /// The refresh exists because none of this was reachable from a running

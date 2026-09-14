@@ -236,6 +236,25 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertNil(snapshot.providers.first?.planTier)
     }
 
+    /// Documentation and the view both promise "shortest first", and the view
+    /// dims every row after the leading one. Codex publishes its buckets in
+    /// `primary`/`secondary` order, which is not that order, so a weekly
+    /// window could take the emphasis from the session one that binds first.
+    func testWindowsAreDrawnShortestFirstWhateverOrderTheyArrivedIn() throws {
+        let reset = Date().addingTimeInterval(3600)
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice(
+                    "codex", 1000, "1.00",
+                    windows: [
+                        try XCTUnwrap(UsageWindow(minutes: 10_080, usedPercent: 20, resetsAt: reset)),
+                        try XCTUnwrap(UsageWindow(minutes: 300, usedPercent: 10, resetsAt: reset)),
+                    ])
+            ]))
+
+        XCTAssertEqual(snapshot.providers.first?.windows.map(\.id), [300, 10_080])
+    }
+
     // MARK: Totals
 
     func testTotalsComeFromTheProviderSlicesNotTheFormattedScalars() {
@@ -255,6 +274,22 @@ final class UsagePanelSnapshotTests: XCTestCase {
         )
         XCTAssertEqual(snapshot.tokens, "233M")
         XCTAssertEqual(snapshot.cost, "$149")
+    }
+
+    /// A provider that has spent nothing today keeps its row: the row is also
+    /// where its plan, its account and its rate-limit gauges are drawn, and
+    /// none of those stop existing because the day's total is zero. The recap
+    /// above the rows is what counts the ones that were used.
+    func testAnIdleProviderKeepsItsRowAndIsNotCountedAsUsed() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice("claude-code", 1000, "1.00"),
+                slice("codex", 0, "0", plan: "plus"),
+            ])
+        )
+        XCTAssertEqual(snapshot.providers.map(\.id), ["claude-code", "codex"])
+        XCTAssertEqual(snapshot.providers.last?.plan, "Plus")
+        XCTAssertEqual(snapshot.usedToday, 1)
     }
 
     // MARK: Credits

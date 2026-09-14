@@ -44,10 +44,12 @@ final class UsageAggregatorTests: XCTestCase {
         XCTAssertEqual(reading.slices.reduce(0) { $0 + $1.tokens }, reading.today.totalTokens)
     }
 
-    /// A provider that has spent nothing today is left out of the breakdown, so
-    /// the panel shows the day's actual split instead of a stale `$0` row — and
-    /// the scalars still count it.
-    func testAProviderWithNothingTodayIsNotInTheBreakdown() async {
+    /// A provider that has spent nothing today keeps its slice. The slice is
+    /// what carries its plan, its account, its credits and its rate-limit
+    /// gauges, none of which stop existing because the day's total is zero —
+    /// dropping it took the whole provider page off the panel until the next
+    /// turn. The panel is what decides a zero row reads as zero.
+    func testAProviderWithNothingTodayKeepsItsSlice() async {
         let first = StubProvider(id: "a")
         let second = StubProvider(id: "b")
         let aggregator = UsageAggregator(providers: [first, second])
@@ -57,8 +59,25 @@ final class UsageAggregatorTests: XCTestCase {
 
         let reading = await aggregator.currentReading()
 
-        XCTAssertEqual(reading.slices.map(\.id), ["a"])
+        XCTAssertEqual(reading.slices.map(\.id), ["a", "b"])
+        XCTAssertEqual(reading.slices.last?.tokens, 0)
         XCTAssertEqual(reading.today.totalTokens, 10)
+    }
+
+    /// A provider that has not emitted at all is still not in the breakdown:
+    /// absence of a reading is not a reading of zero, and a row under a
+    /// provider whose cold scan has not finished would be wrong rather than
+    /// merely empty.
+    func testAProviderThatHasNotReadYetIsNotInTheBreakdown() async {
+        let first = StubProvider(id: "a")
+        let second = StubProvider(id: "b")
+        let aggregator = UsageAggregator(providers: [first, second])
+        await aggregator.start { _, _ in }
+        await first.emit(today: totals(10))
+
+        let reading = await aggregator.currentReading()
+
+        XCTAssertEqual(reading.slices.map(\.id), ["a"])
     }
 
     func testStoppingTheAggregatorStopsEveryProvider() async {

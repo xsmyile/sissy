@@ -1,18 +1,5 @@
 import Foundation
 
-/// Codex's windows and plan, both read off the CLI's own event stream and
-/// handed over through the lock boxes the adapter writes from inside the
-/// provider's actor.
-private struct CodexSignals: SourceSignals {
-    let windows: AtomicWindows
-    let plan: AtomicPlan
-    let account: AtomicAccount
-
-    func currentWindows() -> [UsageWindow] { windows.live() }
-    func currentPlan() -> String? { plan.load() }
-    func currentAccount() -> ProviderAccount? { account.load() }
-}
-
 /// Codex's `~/.codex/sessions/**/rollout-*.jsonl`. Codex rolls one JSONL per
 /// session; each `event_msg` of type `token_count` carries a
 /// `last_token_usage` block which is the *per-turn delta* (verified on real
@@ -22,6 +9,10 @@ private struct CodexSignals: SourceSignals {
 ///
 /// Model id lives in `turn_context.payload.model`, carried per-file. Falls
 /// back to `"gpt-5-codex"` when absent so pricing still resolves.
+///
+/// Windows, plan and account are published through one lock box the adapter
+/// writes from inside the provider's actor, so the aggregator can read all of
+/// them together without an actor hop.
 final class CodexAdapter: SourceAdapter {
     let descriptor: SourceDescriptor
 
@@ -36,21 +27,16 @@ final class CodexAdapter: SourceAdapter {
     /// not meaning: each bucket carries its own `window_minutes`.
     private static let rateLimitBuckets = ["primary", "secondary"]
 
-    /// Newest rate-limit observation and the event timestamp it came from.
-    /// A cold scan walks files in no particular order, so an older rollout
-    /// must not overwrite a fresher window.
-    private let latestWindows: AtomicWindows
+    /// Everything this adapter answers for besides tokens: the windows, the
+    /// plan Codex names on the same `rate_limits` block as them, and the
+    /// account `auth.json` names. One box because the three are read together
+    /// and a row pairing one turn's plan with another's windows is a reading
+    /// that never existed.
+    private let published = LockedValue(ProviderSignals())
+    /// The event timestamp the published windows came from. A cold scan walks
+    /// files in no particular order, so an older rollout must not overwrite a
+    /// fresher window.
     private var latestWindowsAt: Date?
-
-    /// Plan Codex names on the same `rate_limits` block as the windows, so it
-    /// arrives and ages exactly like them: one observation per turn, and
-    /// nothing at all until the CLI has taken a turn.
-    private let latestPlan: AtomicPlan
-
-    /// Who Codex is signed in as, read once from `auth.json` at start. Held
-    /// beside the plan rather than inside it: the plan has two sources and a
-    /// per-turn cadence, the account has one source and never moves.
-    private let latestAccount: AtomicAccount
 
     /// Per-file "last seen model id" so a `token_count` event resolves to the
     /// `turn_context.payload.model` that immediately preceded it in the same
@@ -75,19 +61,13 @@ final class CodexAdapter: SourceAdapter {
 
     init(codexDir: URL, pricingOverride: [String: ModelPricing]?, ledger: ProjectLedger) {
         self.projects = ProjectResolver(ledger: ledger)
-        let windows = AtomicWindows()
-        let plan = AtomicPlan()
-        let account = AtomicAccount()
         self.codexDir = codexDir
         self.pricingOverride = pricingOverride.map(PricingTable.init)
-        self.latestWindows = windows
-        self.latestPlan = plan
-        self.latestAccount = account
         self.descriptor = SourceDescriptor(
             id: "codex",
             root: codexDir,
             watcherLabel: "sissy.codex.fswatch",
-            signals: CodexSignals(windows: windows, plan: plan, account: account)
+            signals: published
         )
     }
 
@@ -145,9 +125,9 @@ final class CodexAdapter: SourceAdapter {
     private func readAuthFile() -> Bool {
         let url = CodexAuthSource.defaultURL(sessionsDir: codexDir)
         guard let identity = CodexAuthSource.load(at: url) else { return false }
-        latestAccount.store(identity.account)
-        guard latestPlan.load() == nil, let plan = identity.plan else { return false }
-        latestPlan.store(plan)
+        published.update { $0.account = identity.account }
+        guard published.load().plan == nil, let plan = identity.plan else { return false }
+        published.update { $0.plan = plan }
         return true
     }
 
@@ -213,23 +193,27 @@ final class CodexAdapter: SourceAdapter {
     }
 
     /// Routes a JSONL line to the right parser. `turn_context` lines update
-    /// the per-file model state; `event_msg/token_count` lines produce a
-    /// billable `UsageEvent`. Any other shape is silently dropped.
+    /// the per-file model state, `session_meta` names the working directory,
+    /// and `event_msg/token_count` lines produce a billable `UsageEvent`. Any
+    /// other shape is silently dropped.
+    ///
+    /// One parse, then a switch: the three shapes used to be tried in turn, so
+    /// a `turn_context` line paid for a `token_count` parse before its own.
     func event(from line: SourceLine, seen: inout [String: SeenEvent]) -> UsageEvent? {
-        // Try token_count first (most lines past the prefilter) and fall
-        // through to turn_context only on miss. turn_context is sparse —
-        // one per turn — so the redundant parse on hit is fine.
-        if let event = parseTokenCount(line, seen: &seen) { return event }
-        applyTurnContext(line.data, url: line.url)
-        applySessionMeta(line.data, url: line.url)
+        guard let object = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any]
+        else { return nil }
+        switch object["type"] as? String {
+        case "event_msg": return parseTokenCount(object, line: line, seen: &seen)
+        case "turn_context": applyTurnContext(object, url: line.url)
+        case "session_meta": applySessionMeta(object, url: line.url)
+        default: break
+        }
         return nil
     }
 
     /// Records the project a rollout belongs to from its `session_meta` line.
-    private func applySessionMeta(_ data: Data, url: URL) {
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            obj["type"] as? String == "session_meta",
-            let payload = obj["payload"] as? [String: Any],
+    private func applySessionMeta(_ obj: [String: Any], url: URL) {
+        guard let payload = obj["payload"] as? [String: Any],
             let cwd = payload["cwd"] as? String,
             !cwd.isEmpty
         else { return }
@@ -239,10 +223,8 @@ final class CodexAdapter: SourceAdapter {
 
     /// Updates per-file model from a `turn_context` line. Idempotent; called
     /// from the streaming reader before any subsequent `token_count` event.
-    private func applyTurnContext(_ data: Data, url: URL) {
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            obj["type"] as? String == "turn_context",
-            let payload = obj["payload"] as? [String: Any],
+    private func applyTurnContext(_ obj: [String: Any], url: URL) {
+        guard let payload = obj["payload"] as? [String: Any],
             let model = payload["model"] as? String,
             !model.isEmpty
         else { return }
@@ -257,7 +239,7 @@ final class CodexAdapter: SourceAdapter {
         // what the panel puts next to the provider whether or not there are
         // gauges under it.
         if let plan = UsageReaderShared.sanitizedPlanToken(dict["plan_type"] as? String) {
-            latestPlan.store(plan)
+            published.update { $0.plan = plan }
         }
         let windows = Self.rateLimitBuckets.compactMap { key -> UsageWindow? in
             guard let bucket = dict[key] as? [String: Any],
@@ -272,18 +254,19 @@ final class CodexAdapter: SourceAdapter {
             )
         }
         if windows.isEmpty { return }
-        latestWindows.store(windows)
+        published.update {
+            $0.windows = windows
+            $0.limitsObservedAt = observedAt
+        }
         latestWindowsAt = observedAt
     }
 
     /// Parses a `token_count` event line. Returns nil for any non-billable
     /// shape, dedup hit, or event outside the retain window.
-    private func parseTokenCount(_ line: SourceLine, seen: inout [String: SeenEvent])
+    private func parseTokenCount(_ obj: [String: Any], line: SourceLine, seen: inout [String: SeenEvent])
         -> UsageEvent?
     {
-        guard let obj = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any],
-            obj["type"] as? String == "event_msg",
-            let payload = obj["payload"] as? [String: Any],
+        guard let payload = obj["payload"] as? [String: Any],
             payload["type"] as? String == "token_count",
             let info = payload["info"] as? [String: Any],
             let last = info["last_token_usage"] as? [String: Any]
@@ -389,9 +372,12 @@ final class CodexAdapter: SourceAdapter {
             fileModels[fileURL] = entry.model
             fileProjects[fileURL] = entry.project.flatMap { projects.project(for: $0) }
         }
-        latestPlan.store(resume.plan)
+        published.update { $0.plan = resume.plan }
         guard !resume.rateLimitWindows.isEmpty else { return true }
-        latestWindows.store(resume.rateLimitWindows)
+        published.update {
+            $0.windows = resume.rateLimitWindows
+            $0.limitsObservedAt = resume.rateLimitWindowsAt
+        }
         latestWindowsAt = resume.rateLimitWindowsAt
         return true
     }
@@ -415,9 +401,9 @@ final class CodexAdapter: SourceAdapter {
             // Raw, not `live()`: a bucket that expires between save and load
             // is dropped on read anyway, and filtering here would throw away
             // one that still has seconds left.
-            rateLimitWindows: latestWindows.load(),
+            rateLimitWindows: published.load().windows,
             rateLimitWindowsAt: latestWindowsAt,
-            plan: latestPlan.load()
+            plan: published.load().plan
         )
     }
 }
