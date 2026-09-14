@@ -52,6 +52,37 @@ final class CodexAdapter: SourceAdapter {
     /// rollouts must not publish them under the new one.
     private var identityBoundaryAt: Date?
 
+    /// How long after a session's own start a `token_count` may still be one
+    /// of the turns it copied from its parent.
+    ///
+    /// A fork writes its parent's history in one burst at creation, every
+    /// event stamped within a millisecond or two of the session's start; a
+    /// turn the session actually ran takes seconds to come back. Measured
+    /// across a year of rollouts, anything from 50 ms to 3 s separates the two
+    /// exactly, so this sits in the middle of a band rather than on its edge.
+    /// It is also the pause ccusage uses to tell the same two apart.
+    private static let replayedTurnWindow: TimeInterval = 1
+
+    /// Codex's own running total as of the last `token_count` read from each
+    /// rollout. What tells a re-emitted turn from a new one: Codex writes a
+    /// final `token_count` repeating the previous turn's `last_token_usage`
+    /// verbatim, and only this staying put says the turn was already counted.
+    private var fileCumulative: [URL: UsageStateSnapshot.CodexCumulative] = [:]
+
+    /// Where each rollout is in replaying the turns it copied from a parent.
+    private var fileReplay: [URL: ReplayHead] = [:]
+
+    /// Whether a rollout is still reading turns it did not spend.
+    private enum ReplayHead {
+        /// The session named a parent and has not yet reached its own first
+        /// turn. Holds the instant of the last copied turn, so the run is
+        /// followed from one event to the next rather than from a fixed
+        /// deadline — a long history still lands inside the window.
+        case copying(through: Date)
+        /// The session named no parent, or its copied turns are behind us.
+        case counting
+    }
+
     /// Per-file "last seen model id" so a `token_count` event resolves to the
     /// `turn_context.payload.model` that immediately preceded it in the same
     /// rollout. Codex bumps the model mid-session if the user reassigns the
@@ -269,14 +300,37 @@ final class CodexAdapter: SourceAdapter {
         return nil
     }
 
-    /// Records the project a rollout belongs to from its `session_meta` line.
+    /// Records what a rollout's `session_meta` line says about itself: the
+    /// project it runs in, and whether it opens by replaying a parent's turns.
     private func applySessionMeta(_ obj: [String: Any], url: URL) {
-        guard let payload = obj["payload"] as? [String: Any],
-            let cwd = payload["cwd"] as? String,
-            !cwd.isEmpty
+        guard let payload = obj["payload"] as? [String: Any] else { return }
+        if Self.namesAParentSession(payload),
+            let start = (obj["timestamp"] as? String).flatMap(UsageReaderShared.parseTimestamp)
+        {
+            fileReplay[url] = .copying(through: start)
+        }
+        guard let cwd = payload["cwd"] as? String, !cwd.isEmpty,
+            let project = projects.project(for: cwd)
         else { return }
-        guard let project = projects.project(for: cwd) else { return }
         fileProjects[url] = project
+    }
+
+    /// Whether this session was opened from another one, and therefore starts
+    /// by writing that one's turns into its own log.
+    ///
+    /// Two shapes, because Codex has two ways of doing it: a conversation the
+    /// user forked names `forked_from_id`, and a subagent Codex spawned names
+    /// its `parent_thread_id`. Both sit in the session's own first line, which
+    /// is what keeps this a per-file question — the alternative is reading the
+    /// parent's rollout to recognise the copy, and a tail that opens a second
+    /// file to understand the one in front of it is a different design.
+    private static func namesAParentSession(_ payload: [String: Any]) -> Bool {
+        if payload["forked_from_id"] is String { return true }
+        guard let source = payload["source"] as? [String: Any],
+            let subagent = source["subagent"] as? [String: Any],
+            let spawn = subagent["thread_spawn"] as? [String: Any]
+        else { return false }
+        return spawn["parent_thread_id"] is String
     }
 
     /// Updates per-file model from a `turn_context` line. Idempotent; called
@@ -287,6 +341,45 @@ final class CodexAdapter: SourceAdapter {
             !model.isEmpty
         else { return }
         fileModels[url] = model
+    }
+
+    /// Whether this event is one of the turns the session copied from its
+    /// parent, and not one it spent.
+    ///
+    /// A fork's log opens with its parent's whole history, written in one
+    /// burst at creation and stamped accordingly. Billing it charged the user
+    /// twice for turns they had already paid for once — measured at 12% of one
+    /// month, because a session forked three times replays the same history
+    /// three more times.
+    private func isCopiedFromAParent(at timestamp: Date, in url: URL) -> Bool {
+        guard case .copying(let through) = fileReplay[url] ?? .counting else { return false }
+        let sinceLastCopy = timestamp.timeIntervalSince(through)
+        guard sinceLastCopy >= 0, sinceLastCopy <= Self.replayedTurnWindow else {
+            fileReplay[url] = .counting
+            return false
+        }
+        fileReplay[url] = .copying(through: timestamp)
+        return true
+    }
+
+    /// Whether Codex's own running total moved, and records where it now is.
+    ///
+    /// The authority on whether a `token_count` carries anything new. Codex
+    /// re-emits the previous turn's `last_token_usage` verbatim — at the end
+    /// of a session, and after an interruption — while leaving this untouched,
+    /// and a reader that trusts the per-turn block alone bills that turn
+    /// twice. An event that reports no total at all is taken at its word;
+    /// every rollout measured carries one.
+    private func advanceCumulative(_ raw: Any?, in url: URL) -> Bool {
+        guard let dict = raw as? [String: Any] else { return true }
+        let reported = UsageStateSnapshot.CodexCumulative(
+            input: UsageReaderShared.tokenCount(dict["input_tokens"]),
+            cached: UsageReaderShared.tokenCount(dict["cached_input_tokens"]),
+            output: UsageReaderShared.tokenCount(dict["output_tokens"]),
+            total: UsageReaderShared.tokenCount(dict["total_tokens"])
+        )
+        defer { fileCumulative[url] = reported }
+        return fileCumulative[url] != reported
     }
 
     private func captureWindows(_ raw: Any?, observedAt: Date) {
@@ -349,6 +442,15 @@ final class CodexAdapter: SourceAdapter {
 
         captureWindows(payload["rate_limits"], observedAt: ts)
 
+        // Both guards below run before the retain cutoff and before the
+        // dedup ledger, and the bookkeeping they keep is updated for every
+        // event whether or not it is billed: an event dropped for being too
+        // old is still the one the next event's total has to be compared
+        // against, and still the one that carries a copied run forward.
+        let copied = isCopiedFromAParent(at: ts, in: line.url)
+        let advanced = advanceCumulative(info["total_token_usage"], in: line.url)
+        if copied || !advanced { return nil }
+
         if ts < line.retainCutoff { return nil }
 
         // Dedup by file + byte offset of the line. Belt-and-suspenders since
@@ -400,6 +502,8 @@ final class CodexAdapter: SourceAdapter {
     func trim(retaining files: Set<URL>) {
         fileModels = fileModels.filter { files.contains($0.key) }
         fileProjects = fileProjects.filter { files.contains($0.key) }
+        fileCumulative = fileCumulative.filter { files.contains($0.key) }
+        fileReplay = fileReplay.filter { files.contains($0.key) }
     }
 
     /// Restores the state that has no cheap way back.
@@ -430,6 +534,8 @@ final class CodexAdapter: SourceAdapter {
             guard offsets[fileURL] != nil else { continue }
             fileModels[fileURL] = entry.model
             fileProjects[fileURL] = entry.project.flatMap { projects.project(for: $0) }
+            fileCumulative[fileURL] = entry.cumulative
+            if let through = entry.copyingThrough { fileReplay[fileURL] = .copying(through: through) }
         }
         accountFingerprint = resume.accountFingerprint
         published.update { $0.plan = resume.plan }
@@ -451,13 +557,20 @@ final class CodexAdapter: SourceAdapter {
     /// the reader would answer anyway.
     func resumeState() -> UsageStateSnapshot.CodexResume? {
         UsageStateSnapshot.CodexResume(
-            fileModels: Set(fileModels.keys).union(fileProjects.keys).map { url in
-                UsageStateSnapshot.FileModel(
-                    path: url.path,
-                    model: fileModels[url] ?? Self.defaultModel,
-                    project: fileProjects[url]
-                )
-            },
+            fileModels: Set(fileModels.keys).union(fileProjects.keys)
+                .union(fileCumulative.keys).union(fileReplay.keys).map { url in
+                    UsageStateSnapshot.FileModel(
+                        path: url.path,
+                        model: fileModels[url] ?? Self.defaultModel,
+                        project: fileProjects[url],
+                        cumulative: fileCumulative[url],
+                        copyingThrough: {
+                            guard case .copying(let through) = fileReplay[url] ?? .counting
+                            else { return nil }
+                            return through
+                        }()
+                    )
+                },
             // Raw, not `live()`: a bucket that expires between save and load
             // is dropped on read anyway, and filtering here would throw away
             // one that still has seconds left.

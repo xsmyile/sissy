@@ -133,6 +133,31 @@ struct UsageStateSnapshot: Codable, Equatable {
         /// Codex names it once, on the first line, and a resumed reader is
         /// past it.
         var project: String?
+        /// Codex's own running total as of the last `token_count` read from
+        /// this rollout. Carried so a relaunch can still tell a re-emitted
+        /// turn from a new one — the two are told apart by this not moving,
+        /// and a reader that resumed with no memory of it would bill the
+        /// repeat. Absent in a snapshot written before the field, and for a
+        /// rollout whose events carried no total.
+        var cumulative: CodexCumulative?
+        /// While a forked session is still replaying the turns it copied from
+        /// its parent, the instant of the last copied one. Nil once the
+        /// session reaches its own first turn, and for every session that
+        /// copied nothing.
+        var copyingThrough: Date?
+    }
+
+    /// Codex's `total_token_usage`, the running total it reports beside every
+    /// per-turn delta.
+    ///
+    /// Kept field by field rather than as the one scalar, because that is what
+    /// "did this advance" has to compare: two readings whose totals match by
+    /// coincidence while the breakdown moved are a turn, not a repeat.
+    struct CodexCumulative: Codable, Equatable {
+        var input: Int
+        var cached: Int
+        var output: Int
+        var total: Int
     }
 
     struct FileEntry: Codable, Equatable {
