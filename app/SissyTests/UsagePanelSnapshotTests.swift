@@ -253,7 +253,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
                     ])
             ]))
 
-        XCTAssertEqual(snapshot.providers.first?.windows.map(\.id), [300, 10_080])
+        XCTAssertEqual(snapshot.providers.first?.windows.map(\.id), ["300-", "10080-"])
     }
 
     // MARK: Totals

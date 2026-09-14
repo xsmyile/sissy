@@ -20,6 +20,7 @@ import Foundation
 actor ClaudeWebSource: SourceSignals {
     private static let host = "https://claude.ai"
     private static let organizationsPath = "/api/organizations"
+    private static let prepaidPath = "prepaid/credits"
     private static let requestTimeout: TimeInterval = 15
     private static let refreshInterval: Duration = .seconds(300)
     private static let rateLimitedBackoff: Duration = .seconds(1800)
@@ -279,11 +280,32 @@ actor ClaudeWebSource: SourceSignals {
                 try await subscriptionOrganization(session: session)
             }
         let body = try await get("\(organizationsPath)/\(org)/usage", session: session)
+        let observedAt = Date()
+        let credits = ClaudeUsagePayload.credits(body, observedAt: observedAt)
         return Reading(
             organization: org,
             windows: ClaudeUsagePayload.windows(body),
-            credits: ClaudeUsagePayload.credits(body, observedAt: Date())
+            credits: try await withBalance(credits, org: org, session: session)
         )
+    }
+
+    /// The credits with the prepaid balance beside them.
+    ///
+    /// A second request, and a failing one costs the balance rather than the
+    /// whole reading: the spend against the cap is already in hand and
+    /// dropping it because a different endpoint was unhappy would be losing
+    /// what was asked for to chase what was extra.
+    private static func withBalance(
+        _ credits: ProviderCredits?,
+        org: String,
+        session: String
+    ) async throws -> ProviderCredits? {
+        guard var credits else { return nil }
+        let body = try? await get("\(organizationsPath)/\(org)/\(prepaidPath)", session: session)
+        credits.balanceMinor = body.flatMap {
+            ClaudeUsagePayload.balance($0, currency: credits.currency)
+        }
+        return credits
     }
 
     /// The organization a subscription is metered against.

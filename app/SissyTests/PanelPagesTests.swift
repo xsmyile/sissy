@@ -100,7 +100,7 @@ final class PanelPagesTests: XCTestCase {
                 slice("claude-code", windows: [try window(10080, 50), try window(300, 50)])
             ]))
 
-        XCTAssertEqual(try XCTUnwrap(snapshot.headroom).window.id, 300)
+        XCTAssertEqual(try XCTUnwrap(snapshot.headroom).window.id, "300-")
     }
 
     func testNoProviderReportingAWindowLeavesNoHeadroomGauge() {

@@ -320,7 +320,26 @@ actor UsageEngine {
     /// needs it.
     func importClaudeWebSession() async -> Result<Void, ClaudeWebCookieImport.Failure> {
         guard lifecycle == .running else { return .success(()) }
-        switch ClaudeWebCookieImport.session() {
+        let outcome = await adoptClaudeWebSession(allowingInteraction: true)
+        await stopClaudeLimits()
+        if config.claudeLimits { await startClaudeLimits(userInitiated: true) }
+        await reemit()
+        return outcome
+    }
+
+    /// Imports and switches over, or says why it could not.
+    ///
+    /// `allowingInteraction` is the difference between the button and a launch
+    /// finding the switch already on. Only the button may raise the Safe
+    /// Storage dialog; the launch reads silently and, where the grant is
+    /// already given, has the live source running before anyone opens the
+    /// panel — which is the whole of "it just works" and costs no prompt.
+    private func adoptClaudeWebSession(
+        allowingInteraction: Bool
+    ) async -> Result<Void, ClaudeWebCookieImport.Failure> {
+        switch ClaudeWebCookieImport.session(password: {
+            ClaudeWebCookieImport.safeStoragePassword(allowingInteraction: allowingInteraction)
+        }) {
         case .failure(let why):
             sissyLog("sissy: importing the claude.ai session found none: \(why)")
             return .failure(why)
@@ -331,9 +350,6 @@ actor UsageEngine {
                 sissyLog("sissy: could not file the claude.ai session: \(error)")
                 return .failure(.undecryptable)
             }
-            await stopClaudeLimits()
-            if config.claudeLimits { await startClaudeLimits(userInitiated: true) }
-            await reemit()
             return .success(())
         }
     }
@@ -590,6 +606,13 @@ actor UsageEngine {
     /// this way", and forgetting is what takes it back.
     private func startClaudeLimits(userInitiated: Bool) async {
         let me = self
+        // The session is imported rather than asked for. A user who switched
+        // limits on has already granted the permission this needs, and making
+        // them find a second button in Settings to get the live reading is the
+        // switch failing to do what it says.
+        if !hasClaudeWebSession {
+            _ = await adoptClaudeWebSession(allowingInteraction: userInitiated)
+        }
         if hasClaudeWebSession {
             await claudeWebSource.start(userInitiated: userInitiated) { await me.reemit() }
         } else {
