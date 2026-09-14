@@ -166,7 +166,6 @@ final class AgentHookInstallerTests: XCTestCase {
         try FileManager.default.createDirectory(
             at: real.deletingLastPathComponent(), withIntermediateDirectories: true)
         try "{}".write(to: real, atomically: true, encoding: .utf8)
-        try FileManager.default.removeItem(at: target.url)
         try FileManager.default.createSymbolicLink(at: target.url, withDestinationURL: real)
 
         installer.install(bundledScript: bundledScript)
@@ -194,7 +193,7 @@ final class AgentHookInstallerTests: XCTestCase {
             XCTAssertTrue(AgentHookInstaller.isParsable(command))
             XCTAssertTrue(
                 command.contains(try XCTUnwrap(AgentHookInstaller.quoted(installer.scriptURL.path))))
-            let outcome = runShell(command)
+            let outcome = try runShell(command)
             XCTAssertEqual(outcome.status, 0)
             XCTAssertTrue(outcome.output.isEmpty)
         }
@@ -252,7 +251,10 @@ final class AgentHookInstallerTests: XCTestCase {
         ).intValue
     }
 
-    private func runShell(_ command: String) -> (status: Int32, output: String) {
+    /// Thrown rather than swallowed: a `Process` that never launched leaves this
+    /// process holding the pipe's write end, and reading to EOF then blocks for
+    /// as long as the test runner is willing to wait.
+    private func runShell(_ command: String) throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", command]
@@ -261,7 +263,7 @@ final class AgentHookInstallerTests: XCTestCase {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = Pipe()
-        try? process.run()
+        try process.run()
         try? input.fileHandleForWriting.close()
         let captured = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()

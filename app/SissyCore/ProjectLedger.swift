@@ -328,6 +328,12 @@ final class ProjectLedger: @unchecked Sendable {
     /// A control character would reach a log and a row label, and `..`
     /// surviving standardization is a path that does not mean what it says.
     ///
+    /// Standardised lexically rather than through `standardizedFileURL`, whose
+    /// stripping of a `/private` prefix depends on the path still existing — so
+    /// a checkout would normalise to one key while it was alive and another
+    /// once it was gone, which is precisely the transition this file exists to
+    /// survive. The hook already answers with a physical path.
+    ///
     /// `minimumComponents` is two for the checkout and one for the repository,
     /// because only the checkout is matched by prefix: a planted `/Volumes`
     /// would re-label everything beneath it, where a repository that shallow is
@@ -336,7 +342,7 @@ final class ProjectLedger: @unchecked Sendable {
         guard line.hasPrefix("/"), line.utf8.count <= maxPathBytes,
             !line.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F })
         else { return nil }
-        let standardized = URL(fileURLWithPath: line).standardizedFileURL.path
+        let standardized = URL(fileURLWithPath: line).standardized.path
         guard standardized.hasPrefix("/"),
             !standardized.split(separator: "/").contains(".."),
             standardized.split(separator: "/").count >= minimumComponents
