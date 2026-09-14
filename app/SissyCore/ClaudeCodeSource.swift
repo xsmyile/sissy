@@ -12,23 +12,50 @@ import Foundation
 /// config file's copy is the endpoint's reply as of the last time the CLI
 /// asked, which is only when the user typed `/usage` — pairing a live window
 /// with an hour-old spend would be two moments on one row.
-private struct ClaudeCodeSignals: SourceSignals {
+struct ClaudeCodeSignals: SourceSignals {
     let limitsProbe: ClaudeLimitsProbe?
     let webSource: ClaudeWebSource?
     let profile: ClaudeProfileSource
 
     func currentSignals() -> ProviderSignals {
-        var reading = profile.currentSignals()
-        if let web = webSource?.currentSignals() {
-            reading.windows = web.windows
-            reading.limitsState = web.limitsState
-            reading.limitsObservedAt = web.limitsObservedAt
-            if let credits = web.credits { reading.credits = credits }
-        } else if let limits = limitsProbe?.currentSignals() {
-            reading.windows = limits.windows
-            reading.limitsState = limits.limitsState
-            reading.limitsObservedAt = limits.limitsObservedAt
-        }
+        Self.merge(
+            profile: profile.currentSignals(),
+            web: webSource?.currentSignals(),
+            probe: limitsProbe?.currentSignals())
+    }
+
+    /// The config file's reading, with whichever limits reader is actually
+    /// running laid over it.
+    ///
+    /// Exactly one reader is: the engine starts one and stops both, and a
+    /// stopped one clears its reading and its state. So the answer is the one
+    /// that has produced a reading, and failing that the one with something to
+    /// say about why it has not — a stopped source is silent, a running one
+    /// that was refused still has to explain itself.
+    ///
+    /// Asking *which* rather than preferring the web source by position is the
+    /// whole of it: both are constructed at launch whether or not either runs,
+    /// so `webSource != nil` answers "was one built", never "is one reading",
+    /// and taking it for the second silently took the OAuth probe's windows
+    /// off the panel for everyone who had not imported a session.
+    ///
+    /// Static and taking its inputs so the rule is testable without two
+    /// actors, which is what it was missing when it was wrong.
+    static func merge(
+        profile: ProviderSignals,
+        web: ProviderSignals?,
+        probe: ProviderSignals?
+    ) -> ProviderSignals {
+        var reading = profile
+        let readings = [web, probe].compactMap { $0 }
+        guard
+            let live = readings.first(where: { $0.limitsObservedAt != nil })
+                ?? readings.first(where: { $0.limitsState != .quiet })
+        else { return reading }
+        reading.windows = live.windows
+        reading.limitsState = live.limitsState
+        reading.limitsObservedAt = live.limitsObservedAt
+        if let credits = live.credits { reading.credits = credits }
         return reading
     }
 }
