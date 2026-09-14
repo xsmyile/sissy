@@ -207,6 +207,11 @@ final class UsageEngineHost {
     /// Nothing here is fatal to metering: a file Sissy could not rewrite is
     /// named back to the user and left exactly as it was found.
     private func applyAgentHooks(_ enabled: Bool) {
+        // A test host is not a user launching Sissy. `xcodebuild test` runs the
+        // app against this machine's real `Sissy-Dev` tree, so without this the
+        // suite rewrites the developer's own `~/.claude/settings.json` and
+        // `~/.codex/hooks.json` every time it runs.
+        guard NSClassFromString("XCTestCase") == nil else { return }
         guard let home = AgentHookInstaller.userHome else {
             agentHooksRefused = [AgentHookCopy.unknownHome]
             return
