@@ -13,30 +13,62 @@ import Foundation
 /// Everything here is a boundary: the payload is a vendor's, undocumented, and
 /// nothing is trusted past the shape it is checked for.
 enum ClaudeUsagePayload {
-    /// Response key to window length. Anthropic publishes finer buckets
-    /// (`seven_day_opus`, `seven_day_sonnet`) and a run of codenamed ones; the
-    /// panel shows the two that apply to every plan.
+    /// Response key to window length, for the payload's older shape. Anthropic
+    /// publishes finer buckets alongside these and a run of codenamed ones;
+    /// only the two that apply to every plan are read here.
     static let buckets: [(key: String, minutes: Int)] = [
         ("five_hour", 300), ("seven_day", 10_080),
     ]
 
+    /// `limits` is the vendor's own curated list, and it is the only place
+    /// the model-scoped weekly window appears: the flat keys carry the
+    /// plan-wide buckets and nothing else, so a payload read through them
+    /// alone silently drops it.
+    private static let limitsKey = "limits"
     private static let spendKey = "spend"
 
-    /// Buckets that report no `utilization`, or no reset, are dropped: a
-    /// window without both halves cannot be drawn, and the plan-scoped
-    /// buckets the endpoint sends alongside these two arrive that way.
+    /// `kind` to window length. Anything else the vendor lists is skipped
+    /// rather than guessed at — a bucket whose period Sissy cannot name is a
+    /// gauge with no axis.
+    private static let limitKinds: [String: Int] = [
+        "session": 300, "weekly_all": 10_080, "weekly_scoped": 10_080,
+    ]
+
+    /// Every window the payload names, from `limits` where the vendor sends
+    /// it and from the flat keys where it does not.
+    ///
+    /// Buckets that report no `utilization`, or no reset, are dropped either
+    /// way: a window without both halves cannot be drawn, and an inactive
+    /// bucket arrives with a null reset.
     static func windows(_ body: [String: Any]) -> [UsageWindow] {
-        buckets.compactMap { bucket in
+        let listed = (body[limitsKey] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+        guard listed.isEmpty else { return listed.compactMap(window(fromLimit:)) }
+        return buckets.compactMap { bucket in
             guard let raw = body[bucket.key] as? [String: Any],
                 let resetsAt = parseReset(raw["resets_at"]),
                 let usedPercent = raw["utilization"] as? Double
             else { return nil }
             return UsageWindow(
-                minutes: bucket.minutes,
-                usedPercent: usedPercent,
-                resetsAt: resetsAt
-            )
+                minutes: bucket.minutes, usedPercent: usedPercent, resetsAt: resetsAt)
         }
+    }
+
+    /// One entry of `limits`. The scope is the model's display name as the
+    /// vendor spells it, which is what keeps a weekly bucket for one model
+    /// from rendering as the weekly bucket for everything.
+    private static func window(fromLimit raw: [String: Any]) -> UsageWindow? {
+        guard let kind = raw["kind"] as? String,
+            let minutes = limitKinds[kind],
+            let resetsAt = parseReset(raw["resets_at"]),
+            let percent = raw["percent"] as? Double ?? (raw["percent"] as? Int).map(Double.init)
+        else { return nil }
+        let model = (raw["scope"] as? [String: Any])?["model"] as? [String: Any]
+        return UsageWindow(
+            minutes: minutes,
+            usedPercent: percent,
+            resetsAt: resetsAt,
+            scope: (model?["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        )
     }
 
     /// What the vendor has billed against the spend cap.
@@ -45,7 +77,11 @@ enum ClaudeUsagePayload {
     /// reading is: a fetch stamps it now, and the CLI's cache carries the
     /// vendor's own `fetchedAtMs`. A number shown without its age is a claim
     /// of being current that a cache cannot make.
-    static func credits(_ body: [String: Any], observedAt: Date) -> ProviderCredits? {
+    static func credits(
+        _ body: [String: Any],
+        observedAt: Date,
+        balanceMinor: Int? = nil
+    ) -> ProviderCredits? {
         guard let spend = body[spendKey] as? [String: Any],
             let used = money(spend["used"]),
             let cap = money(spend["limit"]),
@@ -58,8 +94,21 @@ enum ClaudeUsagePayload {
             capMinor: cap.minor,
             currency: used.currency,
             exponent: used.exponent,
-            observedAt: observedAt
+            observedAt: observedAt,
+            balanceMinor: balanceMinor
         )
+    }
+
+    /// The prepaid balance, off `/prepaid/credits`. A different question from
+    /// the spend: one is what is left on the account, the other what has been
+    /// billed against the cap, and a source that answers only the second says
+    /// nothing about the first rather than guessing at zero.
+    static func balance(_ body: [String: Any], currency: String) -> Int? {
+        guard let money = (body["balance"] as? [String: Any])?["money"],
+            let parsed = self.money(money),
+            parsed.currency == currency
+        else { return nil }
+        return parsed.minor
     }
 
     /// One money object of the payload. The currency has to look like an

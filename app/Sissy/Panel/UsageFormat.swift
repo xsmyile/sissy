@@ -174,10 +174,17 @@ enum UsageFormat {
 
     /// Compact name for a rate-limit window, derived from its length so a
     /// vendor that ships a bucket Sissy has never seen still gets a label.
-    static func windowLabel(minutes: Int) -> String {
-        if minutes % minutesPerDay == 0 { return "\(minutes / minutesPerDay)d" }
-        if minutes % minutesPerHour == 0 { return "\(minutes / minutesPerHour)h" }
-        return "\(minutes)m"
+    static func windowLabel(minutes: Int, scope: String? = nil) -> String {
+        let period =
+            if minutes % minutesPerDay == 0 {
+                "\(minutes / minutesPerDay)d"
+            } else if minutes
+                % minutesPerHour == 0
+            {
+                "\(minutes / minutesPerHour)h"
+            } else { "\(minutes)m" }
+        guard let scope, !scope.isEmpty else { return period }
+        return "\(period) \(scope)"
     }
 
     /// When a window rolls over. A clock time while that is unambiguous, the
@@ -520,6 +527,9 @@ enum UsageFormat {
             parts.append("Cap reached")
         } else if credits.hasCap {
             parts.append("\(money(credits.remaining, currency: credits.currency)) left")
+        }
+        if let balance = credits.balance {
+            parts.append("\(money(balance, currency: credits.currency)) prepaid")
         }
         parts.append(observedLabel(credits.observedAt, now: now, calendar: calendar))
         return parts.joined(separator: " · ")

@@ -75,7 +75,7 @@ enum ClaudeWebCookieImport {
     /// putting it on a screen.
     static func session(
         storeURL: URL = defaultStoreURL,
-        password: () -> Result<String, Failure> = safeStoragePassword
+        password: () -> Result<String, Failure> = { safeStoragePassword(allowingInteraction: true) }
     ) -> Result<String, Failure> {
         guard FileManager.default.fileExists(atPath: storeURL.path) else {
             return .failure(.noStore)
@@ -99,23 +99,25 @@ enum ClaudeWebCookieImport {
         }
     }
 
-    /// The Safe Storage key, read the way any secret of another application's
-    /// is: this one *may* prompt, because it is the grant the switch asks for.
-    static func safeStoragePassword() -> Result<String, Failure> {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: safeStorageService,
-            kSecAttrAccount as String: safeStorageAccount,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-            let data = item as? Data,
+    /// The Safe Storage key.
+    ///
+    /// `allowingInteraction` is the caller declaring itself a user action, and
+    /// it is the only thing that lets macOS put a dialog on screen — the same
+    /// contract, through the same suppressors, as a read of Claude Code's own
+    /// item. A silent read is what lets a launch import a session whose grant
+    /// is already given without asking anyone anything; a read that would have
+    /// prompted simply answers `.noKey` and leaves the button.
+    static func safeStoragePassword(allowingInteraction: Bool) -> Result<String, Failure> {
+        var query = ClaudeCredentialsStore.makeQuery(
+            service: safeStorageService, allowingInteraction: allowingInteraction)
+        query[kSecAttrAccount as String] = safeStorageAccount
+        let result = ClaudeCredentialsStore.copyMatching(
+            query, allowingInteraction: allowingInteraction)
+        guard result.status == errSecSuccess,
+            let data = result.data,
             let secret = String(data: data, encoding: .utf8)
         else {
-            return .failure(.noKey(status))
+            return .failure(.noKey(result.status))
         }
         return .success(secret)
     }

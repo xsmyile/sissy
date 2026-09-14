@@ -20,6 +20,16 @@ struct UsageWindow: Sendable, Equatable, Codable {
     let minutes: Int
     let usedPercent: Double
     let resetsAt: Date
+    /// What the window meters, when it is not the whole plan — a model name
+    /// as the vendor spells it for display. Nil is the plan-wide window.
+    ///
+    /// A vendor can publish two windows of the same length that count
+    /// different things: measured, a weekly bucket for everything and a
+    /// weekly bucket for one model. Without this they render as one row and
+    /// the second silently replaces the first. It is the vendor's own display
+    /// string and is shown as given, so a model shipped tomorrow needs no
+    /// release. Optional so a snapshot written before it decodes unchanged.
+    var scope: String?
 
     /// Fails on a percentage or a reset Sissy cannot draw, which is what
     /// makes both producers safe: the values come off a vendor payload, and
@@ -27,13 +37,14 @@ struct UsageWindow: Sendable, Equatable, Codable {
     /// render. It validates rather than substitutes — an overage above 100%
     /// is real and the panel renders it — so a rejected bucket drops its one
     /// gauge, exactly as a bucket missing half its fields already does.
-    init?(minutes: Int, usedPercent: Double, resetsAt: Date) {
+    init?(minutes: Int, usedPercent: Double, resetsAt: Date, scope: String? = nil) {
         guard usedPercent.isFinite, (0...Self.maxUsedPercent).contains(usedPercent),
             resetsAt.timeIntervalSince1970.isFinite
         else { return nil }
         self.minutes = minutes
         self.usedPercent = usedPercent
         self.resetsAt = resetsAt
+        self.scope = scope
     }
 }
 
@@ -162,6 +173,11 @@ struct ProviderCredits: Sendable, Equatable {
     /// one is the ordinary case and a number with no age is a claim of being
     /// current.
     let observedAt: Date
+    /// Prepaid balance left, in the same units. Nil where the source cannot
+    /// answer for it: the spend against a cap and the money still on the
+    /// account are two different questions, and the CLI's cached reply only
+    /// carries the first.
+    var balanceMinor: Int?
 
     var hasCap: Bool { capMinor > 0 }
     var capReached: Bool { hasCap && usedMinor >= capMinor }
@@ -183,6 +199,8 @@ struct ProviderCredits: Sendable, Equatable {
     var used: Decimal { amount(usedMinor) }
     var cap: Decimal { amount(capMinor) }
     var remaining: Decimal { amount(max(0, capMinor - usedMinor)) }
+    /// The prepaid balance as money, when the source answered for one.
+    var balance: Decimal? { balanceMinor.map(amount) }
 }
 
 /// One provider's share of the day, and everything else its own files answer

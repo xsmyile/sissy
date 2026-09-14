@@ -168,7 +168,15 @@ struct UsagePanelSnapshot: Equatable {
     /// One rate-limit gauge. `fraction` is clamped for the bar while
     /// `percent` is not, so a window past 100% still reads as what it is.
     struct WindowRow: Equatable, Identifiable {
-        let id: Int
+        /// Period and scope together: a vendor can publish a weekly window
+        /// for everything and a weekly window for one model, and the period
+        /// alone would make them one row.
+        let id: String
+        /// The period the window measures. Carried beside the id because the
+        /// id is no longer a duration: two windows of the same length are
+        /// told apart by scope, and the tie between them is still broken by
+        /// which period binds sooner.
+        let minutes: Int
         let label: String
         let percent: Int
         let fraction: Double
@@ -233,7 +241,7 @@ struct UsagePanelSnapshot: Equatable {
                 }
                 let binds =
                     window.percent == held.window.percent
-                    ? window.id < held.window.id
+                    ? window.minutes < held.window.minutes
                     : window.percent > held.window.percent
                 if binds {
                     tightest = HeadroomRow(
@@ -409,8 +417,9 @@ struct UsagePanelSnapshot: Equatable {
 
     private static func makeWindow(_ window: UsageWindow, now: Date) -> WindowRow {
         WindowRow(
-            id: window.minutes,
-            label: UsageFormat.windowLabel(minutes: window.minutes),
+            id: "\(window.minutes)-\(window.scope ?? "")",
+            minutes: window.minutes,
+            label: UsageFormat.windowLabel(minutes: window.minutes, scope: window.scope),
             percent: Int(window.usedPercent.rounded()),
             fraction: min(max(window.usedPercent / 100, 0), 1),
             resetsAt: window.resetsAt,
