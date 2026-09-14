@@ -20,11 +20,6 @@ struct PanelOverview: View {
         VStack(alignment: .leading, spacing: 0) {
             headline
 
-            if let headroom = snapshot.headroom {
-                Divider()
-                self.headroom(headroom)
-            }
-
             if !snapshot.providers.isEmpty {
                 Divider()
                 providers
@@ -76,72 +71,6 @@ struct PanelOverview: View {
         return "\(tokens) · \(burn)/h"
     }
 
-    // MARK: Headroom
-
-    /// The one gauge the panel leads on, and the only large number left on it.
-    ///
-    /// A cost is a fact about the past that a subscription user never sees a
-    /// bill for; headroom is the thing that decides whether to keep working in
-    /// the next hour, and it reads the same for everyone. It names its
-    /// provider because it can be either of them.
-    private func headroom(_ row: UsagePanelSnapshot.HeadroomRow) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("\(Self.headroomPercent(row.window))%")
-                    .font(
-                        .system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded)
-                    )
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                Text("headroom")
-                    .font(.system(size: PanelMetrics.headlineMeta))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Text(
-                    [
-                        row.providerName, row.window.label,
-                        row.window.resetsAt.map { UsageFormat.resetLabel($0) },
-                    ]
-                    .compactMap { $0 }.joined(separator: " · ")
-                )
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-
-            ShareBar(
-                share: row.window.fraction,
-                tint: ProviderPalette.tint(for: row.providerID),
-                pace: row.window.pace
-            )
-
-            if let pace = row.window.pace {
-                Text(
-                    UsageFormat.paceCaption(
-                        deltaPercent: pace.deltaPercent, runsOutAt: pace.runsOutAt)
-                )
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-        }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 9)
-        .animation(.default, value: row.window.percent)
-    }
-
-    /// What is left of the window, as a whole percentage.
-    ///
-    /// The block deliberately does not reuse `WindowRowView`, which prints the
-    /// share *spent*: "33% headroom" set directly above a bar labelled "67%"
-    /// is the same window reported twice in opposite directions, and the two
-    /// numbers read as a contradiction at a glance. One reading per block.
-    /// A window a vendor reports past full has no headroom rather than a
-    /// negative amount of it.
-    static func headroomPercent(_ window: UsagePanelSnapshot.WindowRow) -> Int {
-        max(0, 100 - window.percent)
-    }
-
     // MARK: Providers
 
     /// The day's split, as one bar and a legend. A row opens that provider's
@@ -183,6 +112,11 @@ struct PanelOverview: View {
     /// and a user who never opens that page would be back to gauges that
     /// silently went blank. The mark is the affordance; the row is already a
     /// click away from the wording and the fix.
+    /// Where a window stops being background and starts being the reason to
+    /// stop working. Not a threshold the vendor publishes — a reading, and the
+    /// one point on this row worth a colour.
+    private static let bindingWarningPercent = 90
+
     private func legendRow(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
         HStack(spacing: 6) {
             ProviderMark(id: row.id)
@@ -200,6 +134,14 @@ struct PanelOverview: View {
                     .help(notice.message)
             }
             Spacer(minLength: 0)
+            if let binding = UsagePanelSnapshot.binding(row.windows) {
+                Text("\(binding.percent)%")
+                    .font(.system(size: 12))
+                    .monospacedDigit()
+                    .foregroundStyle(binding.percent >= Self.bindingWarningPercent ? .orange : .secondary)
+                    .fixedSize()
+                    .help("\(binding.label) · \(binding.percent)% used")
+            }
             Text("\(row.tokens) · \(row.cost)")
                 .font(.system(size: 12))
                 .monospacedDigit()

@@ -26,7 +26,6 @@ struct UsagePanelSnapshot: Equatable {
     let history: HistoryRow?
     /// The one gauge the Overview leads on, absent when no provider reports a
     /// window at all.
-    let headroom: HeadroomRow?
 
     /// What the archive adds up to over its window. `label` says which days
     /// that is: a window the archive does not reach back across is named by
@@ -38,22 +37,16 @@ struct UsagePanelSnapshot: Equatable {
         let cost: String
     }
 
-    /// The tightest rate-limit window Sissy can see, and whose it is.
+    /// The window a provider is closest to running out of, or nil when it
+    /// reports none.
     ///
-    /// One bar rather than every provider's every window, because the
-    /// question it answers is single: is there room to keep working. The
-    /// answer is whichever window has the least of it left — a session bucket
-    /// at 20% says nothing while the weekly one behind it sits at 95%, and a
-    /// headline that led on the roomier of the two would be reassuring and
-    /// wrong. Ties go to the shorter window, which is the one that binds
-    /// first.
-    ///
-    /// It names its provider because it can be either, and a gauge that does
-    /// not say whose it is cannot be acted on.
-    struct HeadroomRow: Equatable {
-        let providerID: String
-        let providerName: String
-        let window: WindowRow
+    /// The most spent, ties to the shorter period. Not the shortest outright:
+    /// a session bucket nobody has started sits at 0% with no reset, and
+    /// leading on it says nothing while the weekly one behind it is full.
+    static func binding(_ windows: [WindowRow]) -> WindowRow? {
+        windows.max {
+            $0.percent == $1.percent ? $0.minutes > $1.minutes : $0.percent < $1.percent
+        }
     }
 
     struct ProviderRow: Equatable, Identifiable {
@@ -221,37 +214,8 @@ struct UsagePanelSnapshot: Equatable {
             usedToday: frame.providers.count { $0.tokens > 0 },
             projects: makeProjects(
                 frame.projects, totalTokens: totalTokens, totalCost: totalCost),
-            history: makeHistory(frame.history, now: now),
-            headroom: makeHeadroom(rows)
+            history: makeHistory(frame.history, now: now)
         )
-    }
-
-    /// The window with the least headroom left, across every provider.
-    ///
-    /// Read off the rows rather than off the slices so the gauge the Overview
-    /// leads on and the gauge its provider's page repeats are the same
-    /// object, down to the pace: two derivations of one reading is two
-    /// readings that can disagree by a rounding.
-    private static func makeHeadroom(_ rows: [ProviderRow]) -> HeadroomRow? {
-        var tightest: HeadroomRow?
-        for row in rows {
-            for window in row.windows {
-                guard let held = tightest else {
-                    tightest = HeadroomRow(
-                        providerID: row.id, providerName: row.name, window: window)
-                    continue
-                }
-                let binds =
-                    window.percent == held.window.percent
-                    ? window.minutes < held.window.minutes
-                    : window.percent > held.window.percent
-                if binds {
-                    tightest = HeadroomRow(
-                        providerID: row.id, providerName: row.name, window: window)
-                }
-            }
-        }
-        return tightest
     }
 
     /// Nothing until the archive reaches past today: a window whose only day

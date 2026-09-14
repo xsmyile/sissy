@@ -2,9 +2,8 @@ import XCTest
 
 @testable import Sissy
 
-/// What the two panel surfaces read off one frame: the single headroom gauge
-/// the Overview leads on, and the account and project split a provider's own
-/// page prints.
+/// What the two panel surfaces read off one frame: which window a provider
+/// leads on, and the account and project split its own page prints.
 final class PanelPagesTests: XCTestCase {
     /// Built the way the engine builds one, so the combined project list is
     /// the slices summed rather than something a fixture asserted into
@@ -55,70 +54,36 @@ final class PanelPagesTests: XCTestCase {
 
     // MARK: Headroom
 
-    /// The whole reason the Overview leads on one bar rather than four: a
-    /// session bucket with room left says nothing while the weekly one behind
-    /// it is nearly spent, and a headline that led on the roomier of the two
-    /// would be reassuring and wrong.
-    func testTheHeadroomGaugeIsTheWindowWithTheLeastLeft() throws {
-        let snapshot = UsagePanelSnapshot.make(
+    /// The window a provider leads on is the one it is closest to running out
+    /// of, not the shortest it reports: a session bucket nobody has started
+    /// sits at 0% with no reset and says nothing while the weekly one behind
+    /// it is nearly spent.
+    func testTheBindingWindowIsTheOneWithTheLeastLeft() throws {
+        let windows = UsagePanelSnapshot.make(
             frame: frame([
                 slice("claude-code", windows: [try window(300, 20), try window(10080, 95)])
-            ]))
+            ])
+        ).providers[0].windows
 
-        let headroom = try XCTUnwrap(snapshot.headroom)
-        XCTAssertEqual(headroom.window.percent, 95)
-    }
-
-    /// It crosses providers, because the constraint that binds is not
-    /// necessarily the one belonging to whichever CLI is listed first.
-    func testTheTightestWindowWinsAcrossProviders() throws {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame([
-                slice("claude-code", windows: [try window(300, 30)]),
-                slice("codex", windows: [try window(300, 80)]),
-            ]))
-
-        let headroom = try XCTUnwrap(snapshot.headroom)
-        XCTAssertEqual(headroom.providerID, "codex")
-    }
-
-    /// A gauge that does not say whose it is cannot be acted on: the two
-    /// providers are recovered by different gestures and one of them is a
-    /// setting the user may never have flipped.
-    func testTheHeadroomGaugeNamesItsProvider() throws {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame([slice("codex", windows: [try window(300, 40)])]))
-
-        XCTAssertEqual(try XCTUnwrap(snapshot.headroom).providerName, "Codex")
+        XCTAssertEqual(UsagePanelSnapshot.binding(windows)?.percent, 95)
     }
 
     /// Two windows equally spent are not equally urgent — the shorter one
     /// binds first, and it is the one the user meets sooner.
     func testATieGoesToTheShorterWindow() throws {
-        let snapshot = UsagePanelSnapshot.make(
+        let windows = UsagePanelSnapshot.make(
             frame: frame([
                 slice("claude-code", windows: [try window(10080, 50), try window(300, 50)])
-            ]))
+            ])
+        ).providers[0].windows
 
-        XCTAssertEqual(try XCTUnwrap(snapshot.headroom).window.id, "300-")
+        XCTAssertEqual(UsagePanelSnapshot.binding(windows)?.id, "300-")
     }
 
-    func testNoProviderReportingAWindowLeavesNoHeadroomGauge() {
-        let snapshot = UsagePanelSnapshot.make(frame: frame([slice("codex")]))
+    func testAProviderReportingNoWindowHasNoneThatBinds() {
+        let windows = UsagePanelSnapshot.make(frame: frame([slice("codex")])).providers[0].windows
 
-        XCTAssertNil(snapshot.headroom)
-    }
-
-    /// The Overview's gauge and the same gauge repeated on that provider's
-    /// page are one object, down to the pace: deriving it twice is two
-    /// readings that can disagree by a rounding.
-    func testTheHeadroomGaugeIsTheProviderRowsOwnWindow() throws {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame([slice("codex", windows: [try window(300, 44)])]))
-
-        let headroom = try XCTUnwrap(snapshot.headroom)
-        let row = try XCTUnwrap(snapshot.providers.first { $0.id == headroom.providerID })
-        XCTAssertEqual(row.windows.first, headroom.window)
+        XCTAssertNil(UsagePanelSnapshot.binding(windows))
     }
 
     // MARK: The open page

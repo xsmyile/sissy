@@ -105,6 +105,17 @@ struct PanelProviderPage: View {
     /// are fetched when this page opens — Codex's ride the CLI's own turns and
     /// Claude's a five-minute poll — so the only other date on screen is the
     /// frame's, and that one moves when the *other* provider spends anything.
+    /// The window this provider is closest to running out of, which is the one
+    /// the block leads on.
+    ///
+    /// Emphasis followed position before — the list is sorted shortest first,
+    /// and the shortest was taken to be the one that binds. A session bucket
+    /// nobody has started breaks that: it sorts first at 0% with no reset and
+    /// takes the emphasis off a weekly window sitting at 100%.
+    private var binding: UsagePanelSnapshot.WindowRow? {
+        UsagePanelSnapshot.binding(row.windows)
+    }
+
     private var limits: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionLabel(text: "Limits")
@@ -121,9 +132,10 @@ struct PanelProviderPage: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                ForEach(Array(row.windows.enumerated()), id: \.element.id) { index, window in
+                ForEach(row.windows) { window in
                     WindowRowView(window: window, tint: tint)
-                        .opacity(index == 0 ? 1 : PanelMetrics.secondaryWindowOpacity)
+                        .opacity(
+                            window.id == binding?.id ? 1 : PanelMetrics.secondaryWindowOpacity)
                 }
 
                 if let caption = row.windowsCaption {
