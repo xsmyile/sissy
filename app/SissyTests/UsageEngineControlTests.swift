@@ -284,9 +284,31 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertNotNil(state.since)
     }
 
+    /// The cold scan streams its partial totals out so the panel counts up
+    /// while it runs, and every one of those emits grew the day's total. That
+    /// is why growth cannot be the signal: a launch on a busy day took a hold
+    /// with nothing running at all. A provider marks an event live only once
+    /// its own scan has finished, which is what the backfill's emits lack.
+    func testABackfillsOwnEmissionsEarnNoHold() async throws {
+        for index in 0..<3 {
+            try writeClaudeTurn(requestId: "r\(index)", file: "\(index).jsonl")
+        }
+        let frames = FrameRecorder()
+        let engine = makeEngine(codex: false, keepAwake: .auto, pollIntervalSeconds: 60)
+        let scanned = frames.expectation("the whole backfill is read") { frame in
+            frame.providers.reduce(0) { $0 + $1.tokens } == 3 * Self.tokensPerTurn
+        }
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [scanned], timeout: 5)
+        await engine.stop()
+
+        XCTAssertGreaterThan(frames.count, 1, "the scan emitted once, so it proves nothing")
+        XCTAssertTrue(frames.all.allSatisfy { !$0.keepAwake.active })
+    }
+
     /// A setting the user changed replays the same totals through the same
-    /// path an emit takes. It is not an agent working, and reading growth
-    /// rather than arrival is what tells the two apart.
+    /// path an emit takes. It is not an agent working, and what tells the two
+    /// apart is that a replay carries no newly observed event.
     func testAConfigChangeIsNotAgentActivity() async throws {
         try writeClaudeTurn()
         let frames = FrameRecorder()

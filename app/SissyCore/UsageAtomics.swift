@@ -49,6 +49,11 @@ struct ProviderSignals: Sendable, Equatable {
     /// by design, and an age is the difference between saying so and letting
     /// a frame from the other provider imply otherwise.
     var limitsObservedAt: Date?
+    /// The newest event this source has seen *since its cold scan finished*,
+    /// as the event was stamped. Nil through the backfill, which is what
+    /// separates a turn landing now from a reconstruction of the ones that
+    /// landed before Sissy was launched.
+    var lastActivityAt: Date?
 
     /// The same reading with expired buckets dropped and the rest ordered by
     /// the period they measure.

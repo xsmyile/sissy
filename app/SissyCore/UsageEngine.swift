@@ -74,9 +74,10 @@ actor UsageEngine {
     /// `nil` until one does: an automatic hold begins when the agents do, not
     /// when Sissy launches.
     private var lastAgentActivityAt: Date?
-    /// Today's total as of the last reading, so the next one can tell growth
-    /// — a turn landing — from a rebuild of the same numbers.
-    private var lastSeenTokens: Int?
+    /// Newest live event any provider has reported, as that provider stamped
+    /// it. Held only to tell one turn from the next — the hold itself counts
+    /// from when the reading arrived, never from a CLI's own clock.
+    private var lastObservedActivityAt: Date?
     /// Wakes when the hold in force is due to end. Owned here so `stop()` has
     /// something to cancel rather than leaving a sleeper against a torn-down
     /// engine.
@@ -476,16 +477,24 @@ actor UsageEngine {
     /// Records that agents are working, which in `auto` is what earns the
     /// hold.
     ///
-    /// A day total that grew is a turn that landed. Reading growth rather than
-    /// the arrival of an emit is what keeps the signal honest: `reemit` runs
-    /// this path for a setting the user changed, and the tail emits again at
-    /// midnight when the day rolls over, and neither is an agent working.
-    /// The first reading of a run only sets the baseline — it is a cold scan
-    /// reporting what happened before Sissy was launched, not something
-    /// happening now.
-    private func noteAgentActivity(_ today: DayTotals) {
-        defer { lastSeenTokens = today.totalTokens }
-        guard let previous = lastSeenTokens, today.totalTokens > previous else { return }
+    /// A provider stamps an event as live only once its own cold scan has
+    /// finished, so what reaches here is a turn that landed while Sissy was
+    /// watching rather than a backfill reporting what happened before it was
+    /// launched. That distinction cannot be drawn from the day total: the
+    /// scan emits its intermediate results, and each of those grew the total
+    /// too — which is how a launch on a busy day took a hold with nothing
+    /// running. `reemit` and the midnight roll-over reach this path as well,
+    /// and neither advances a provider's marker.
+    ///
+    /// The hold then counts from *now*, not from the stamp: the stamp comes
+    /// off a CLI's own log line, whose clock Sissy does not own and whose
+    /// precision it does not choose, and an idle window measured against it
+    /// would start part-spent on arrival.
+    private func noteAgentActivity(_ slices: [ProviderSlice]) {
+        guard let latest = slices.compactMap({ $0.signals.lastActivityAt }).max(),
+            latest > lastObservedActivityAt ?? .distantPast
+        else { return }
+        lastObservedActivityAt = latest
         lastAgentActivityAt = Date()
     }
 
@@ -529,8 +538,9 @@ actor UsageEngine {
         today: DayTotals,
         slices: [ProviderSlice]
     ) async {
+        guard lifecycle == .running else { return }
         hasReading = true
-        noteAgentActivity(today)
+        noteAgentActivity(slices)
         await refreshAutomaticHold()
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
