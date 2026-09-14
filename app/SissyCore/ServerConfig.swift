@@ -59,6 +59,16 @@ struct ServerConfig: Sendable, Codable {
     /// programs' configuration files would be exactly the surprise the rest of
     /// the app is built to avoid.
     var agentHooks: Bool
+    /// Whether a removal is still owed to one of those files.
+    ///
+    /// Written before either file is touched and cleared only once both are
+    /// clear, so a removal interrupted — by a crash, a quit, a file Sissy
+    /// could not rewrite — is retried at the next launch. Without it the
+    /// switch is already off and nothing would ever go back for the line left
+    /// in someone else's configuration. Like `keepScreenAwake`, a
+    /// `server.json` written before this key existed decodes through the
+    /// partial-config path below and lands on the default.
+    var agentHooksRemovalPending: Bool
 
     static let defaults = ServerConfig(
         claudeDataDir: "~/.claude/projects",
@@ -71,7 +81,8 @@ struct ServerConfig: Sendable, Codable {
         historyRetentionDays: nil,
         keepAwake: .off,
         keepScreenAwake: true,
-        agentHooks: false
+        agentHooks: false,
+        agentHooksRemovalPending: false
     )
 
     static var defaultURL: URL {
@@ -110,6 +121,7 @@ struct ServerConfig: Sendable, Codable {
         merged.keepAwake = (obj["keepAwake"] as? String).flatMap(KeepAwakeMode.init(rawValue:)) ?? .off
         if let v = obj["keepScreenAwake"] as? Bool { merged.keepScreenAwake = v }
         if let v = obj["agentHooks"] as? Bool { merged.agentHooks = v }
+        if let v = obj["agentHooksRemovalPending"] as? Bool { merged.agentHooksRemovalPending = v }
         if let prov = obj["providers"] as? [String: Any] {
             var toggles = ProviderToggles.defaults
             toggles.claudeCode = prov["claudeCode"] as? Bool
