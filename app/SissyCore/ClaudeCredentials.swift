@@ -183,7 +183,7 @@ enum ClaudeCredentialsStore {
         _ status: OSStatus,
         data: Data?,
         allowingInteraction: Bool,
-        decode: (Data) -> ClaudeCredentials? = ClaudeCredentialsStore.parse
+        decode: (Data) -> ClaudeCredentials? = Self.parse
     ) -> ClaudeCredentialsLookup {
         switch status {
         case errSecSuccess:

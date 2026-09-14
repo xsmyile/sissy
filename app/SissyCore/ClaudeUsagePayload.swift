@@ -112,11 +112,18 @@ enum ClaudeUsagePayload {
         return parsed.minor
     }
 
+    /// One money object of the payload, in the vendor's own minor units.
+    struct Money: Equatable {
+        let minor: Int
+        let currency: String
+        let exponent: Int
+    }
+
     /// One money object of the payload. The currency has to look like an
     /// ISO 4217 code before it is carried any further: it reaches a formatter,
     /// and a formatter handed arbitrary text out of a file is how a display
     /// string becomes an injection.
-    static func money(_ raw: Any?) -> (minor: Int, currency: String, exponent: Int)? {
+    static func money(_ raw: Any?) -> Money? {
         guard let object = raw as? [String: Any],
             let minor = object["amount_minor"] as? Int, minor >= 0,
             let exponent = object["exponent"] as? Int, (0...4).contains(exponent),
@@ -124,7 +131,7 @@ enum ClaudeUsagePayload {
             currency.count == 3,
             currency.allSatisfy({ $0.isASCII && $0.isUppercase })
         else { return nil }
-        return (minor, currency, exponent)
+        return Money(minor: minor, currency: currency, exponent: exponent)
     }
 
     /// `resets_at` is accepted both as epoch seconds and as an ISO-8601
