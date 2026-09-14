@@ -26,7 +26,7 @@ final class CodexAdapter: SourceAdapter {
     let descriptor: SourceDescriptor
 
     private let codexDir: URL
-    private let pricingOverride: [String: ModelPricing]?
+    private let pricingOverride: PricingTable?
     /// OpenAI slice of the runtime `PriceCatalog`. See the twin property on
     /// `ClaudeCodeAdapter` for the precedence rationale.
     private var priceCatalog: PricingTable?
@@ -79,7 +79,7 @@ final class CodexAdapter: SourceAdapter {
         let plan = AtomicPlan()
         let account = AtomicAccount()
         self.codexDir = codexDir
-        self.pricingOverride = pricingOverride
+        self.pricingOverride = pricingOverride.map(PricingTable.init)
         self.latestWindows = windows
         self.latestPlan = plan
         self.latestAccount = account

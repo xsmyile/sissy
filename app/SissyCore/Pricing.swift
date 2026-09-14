@@ -21,7 +21,11 @@ struct ModelPricing: Sendable, Equatable, Codable {
 ///
 /// The prefix order is computed once at construction. The lookup runs ~44k
 /// times during a cold backfill, and re-sorting a 100-entry dictionary per call
-/// was measurably the hot path.
+/// was measurably the hot path. That is also why a user's `pricingOverride`
+/// becomes one of these at the adapter that will consult it, rather than
+/// staying the dictionary `server.json` decoded into: a second lookup written
+/// against the raw dictionary is the same rule implemented twice, and it paid
+/// the sort this one exists to avoid.
 struct PricingTable: Sendable {
     private let exact: [String: ModelPricing]
     private let byLongestPrefix: [(prefix: String, pricing: ModelPricing)]
@@ -44,19 +48,6 @@ struct PricingTable: Sendable {
         }
         return nil
     }
-}
-
-/// Exact-then-longest-prefix lookup against a price-override table. Kept
-/// separate from `PricingTable` because an override is read straight from
-/// `server.json` on every call and is typically empty or a handful of rows, so
-/// the per-call sort costs nothing and avoids a rebuild on config reload.
-func matchPricingOverride(_ table: [String: ModelPricing], model: String) -> ModelPricing? {
-    if let p = table[model] { return p }
-    let byLength = table.sorted(by: { $0.key.count > $1.key.count })
-    for (prefix, p) in byLength where model.hasPrefix(prefix) {
-        return p
-    }
-    return nil
 }
 
 /// Anthropic token pricing.
@@ -86,10 +77,10 @@ enum Pricing {
     /// carries — the caller bills it at $0, which the readers log.
     static func price(
         for model: String,
-        override: [String: ModelPricing]? = nil,
+        override: PricingTable? = nil,
         catalog: PricingTable? = nil
     ) -> ModelPricing? {
-        if let override, let p = matchPricingOverride(override, model: model) { return p }
+        if let override, let p = override.match(model) { return p }
         if let catalog, let p = catalog.match(model) { return p }
         return PricingSeed.anthropic.match(model)
     }
@@ -112,7 +103,7 @@ enum Pricing {
         output: Int,
         cacheRead: Int,
         cacheCreation: (fiveMinute: Int, oneHour: Int),
-        override: [String: ModelPricing]? = nil,
+        override: PricingTable? = nil,
         catalog: PricingTable? = nil
     ) -> Decimal {
         guard let p = price(for: model, override: override, catalog: catalog) else { return 0 }

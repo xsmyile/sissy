@@ -13,10 +13,10 @@ import Foundation
 enum OpenAIPricing {
     static func price(
         for model: String,
-        override: [String: ModelPricing]? = nil,
+        override: PricingTable? = nil,
         catalog: PricingTable? = nil
     ) -> ModelPricing? {
-        if let override, let p = matchPricingOverride(override, model: model) { return p }
+        if let override, let p = override.match(model) { return p }
         if let catalog, let p = catalog.match(model) { return p }
         return PricingSeed.openai.match(model)
     }
@@ -26,7 +26,7 @@ enum OpenAIPricing {
         input: Int,
         output: Int,
         cacheRead: Int,
-        override: [String: ModelPricing]? = nil,
+        override: PricingTable? = nil,
         catalog: PricingTable? = nil
     ) -> Decimal {
         guard let p = price(for: model, override: override, catalog: catalog) else { return 0 }
