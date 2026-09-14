@@ -114,9 +114,9 @@ final class ClaudeCodeAdapter: SourceAdapter {
 
     /// Cheap by construction: the source stats the file and re-parses only
     /// when it actually moved, and no more often than its own floor.
-    func willPoll() { profile.refresh() }
+    func willRead() { profile.refresh() }
 
-    /// Ahead of the first frame for the same reason `willPoll` re-reads it: a
+    /// Ahead of the first frame for the same reason `willRead` re-reads it: a
     /// relaunch that resumes from a snapshot emits before any line is parsed,
     /// and the plan is what the panel badges that row with.
     func prepareToStart() -> Bool {

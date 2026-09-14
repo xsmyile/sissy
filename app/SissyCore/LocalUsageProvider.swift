@@ -112,7 +112,7 @@ protocol SourceAdapter: AnyObject {
     /// as the safety-net poll — for out-of-band state that goes stale. The
     /// adapter decides what that costs: this runs at whatever rate the CLI
     /// writes, so anything expensive behind it needs its own floor.
-    func willPoll()
+    func willRead()
 
     /// Re-reads the out-of-band state on demand, for the one surface that
     /// asks: a user pressing refresh. True when something changed that the
@@ -136,7 +136,7 @@ protocol SourceAdapter: AnyObject {
 
 extension SourceAdapter {
     func prepareToStart() -> Bool { false }
-    func willPoll() {}
+    func willRead() {}
     func refreshOutOfBandState() -> Bool { false }
     func trim(retaining files: Set<URL>) {}
     func resume(from snapshot: UsageStateSnapshot, offsets: [URL: UInt64]) -> Bool { true }
@@ -421,7 +421,7 @@ actor LocalUsageProvider: UsageProvider {
         // figure from up to two polls back: the adapter's own floor is the poll
         // interval, which made it skip alternate polls. Driven from here the
         // floor sets that cadence rather than aliasing against it.
-        adapter.willPoll()
+        adapter.willRead()
         if rootChanged {
             fsWatcher?.stop()
             fsWatcher = nil
@@ -535,7 +535,7 @@ actor LocalUsageProvider: UsageProvider {
 
     private func poll() async {
         guard lifecycle == .running else { return }
-        adapter.willPoll()
+        adapter.willRead()
         // Before a byte is read, so a worktree alive right now is answered for
         // whenever its lines are read — which may be after it is deleted.
         adapter.projects.ledger.refreshKnownRepositories()
