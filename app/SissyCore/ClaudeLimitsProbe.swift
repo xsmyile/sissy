@@ -19,13 +19,6 @@ actor ClaudeLimitsProbe: SourceSignals {
     private static let rateLimitedBackoff: Duration = .seconds(1800)
     private static let keychainTimeout: Duration = .seconds(20)
 
-    /// Response key to window length. Anthropic publishes finer buckets
-    /// (`seven_day_opus`, `seven_day_sonnet`); the panel shows the two that
-    /// apply to every plan.
-    private static let buckets: [(key: String, minutes: Int)] = [
-        ("five_hour", 300), ("seven_day", 10_080),
-    ]
-
     /// Windows, why they are missing when they are, and when the last
     /// successful reading landed — published together so the row that draws
     /// the gauges and the row that explains their absence come off one value.
@@ -353,35 +346,11 @@ actor ClaudeLimitsProbe: SourceSignals {
         return parse(payload)
     }
 
-    /// Buckets that report no `utilization`, or no reset, are dropped: a
-    /// window without both halves cannot be drawn, and the plan-scoped
-    /// buckets the endpoint sends alongside these two arrive that way.
+    /// The two windows the panel draws, off the body every Claude usage
+    /// source answers with. The parse itself lives in `ClaudeUsagePayload`,
+    /// which claude.ai and the CLI's own cache read through too.
     static func parse(_ payload: [String: Any]) -> [UsageWindow] {
-        buckets.compactMap { bucket in
-            guard let raw = payload[bucket.key] as? [String: Any],
-                let resetsAt = parseReset(raw["resets_at"]),
-                let usedPercent = raw["utilization"] as? Double
-            else { return nil }
-            return UsageWindow(
-                minutes: bucket.minutes,
-                usedPercent: usedPercent,
-                resetsAt: resetsAt
-            )
-        }
-    }
-
-    /// `resets_at` is accepted both as epoch seconds and as an ISO-8601
-    /// string: the endpoint is undocumented, so the parse does not bet on one.
-    /// The string form is measured to carry a `+00:00` offset and microsecond
-    /// precision, which only the reader's full parse accepts.
-    private static func parseReset(_ raw: Any?) -> Date? {
-        if let epoch = raw as? Double {
-            return Date(timeIntervalSince1970: epoch)
-        }
-        if let text = raw as? String {
-            return UsageReaderShared.parseTimestamp(text)
-        }
-        return nil
+        ClaudeUsagePayload.windows(payload)
     }
 }
 

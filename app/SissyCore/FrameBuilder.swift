@@ -81,9 +81,15 @@ enum ProviderLimitsState: Sendable, Equatable {
     /// re-asking on a timer would be harassment, and because it also stops
     /// the probe — recovering needs a restart, not just a read.
     case refused
-    /// No credentials at all: the CLI is not signed in, which is not
-    /// something Sissy can fix from here.
+    /// No credentials at all: the CLI is not signed in, or no claude.ai
+    /// session has been imported, which is not something Sissy can fix from
+    /// here.
     case signedOut
+    /// A session that was imported and no longer works. Distinct from
+    /// `signedOut` because there is nothing missing to supply — the user has
+    /// to import again, and only saying which of the two happened tells them
+    /// which button to press.
+    case sessionExpired
 }
 
 /// Who a provider is signed in as.
