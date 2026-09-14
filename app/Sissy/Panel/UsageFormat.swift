@@ -2,12 +2,10 @@ import Foundation
 
 /// Display formatters shared by the menubar menu and the usage panel.
 ///
-/// Intentionally diverges from the engine's `FrameBuilder.fmtTokens` /
-/// `fmtCost`: those were shaped for a 128×64 display and trade precision
-/// for width, while every surface here has room for a decimal and full cent
-/// precision. Keeping both is deliberate — unifying them would force one
-/// surface to compromise. What must not diverge is the app's own surfaces,
-/// which is why they all resolve through this one type.
+/// The only place a number on screen is worded. The frame carries the day's
+/// raw totals, so rounding is the surface's business rather than the engine's
+/// — which is what let the engine stop shipping a second set of formatters
+/// shaped for a 128×64 display nothing renders to any more.
 enum UsageFormat {
     static func tokens(_ tokens: Int) -> String {
         if tokens >= 1_000_000 {
@@ -21,6 +19,14 @@ enum UsageFormat {
 
     static func cost(_ cost: Decimal) -> String {
         String(format: "$%.2f", NSDecimalNumber(decimal: cost).doubleValue)
+    }
+
+    /// Tokens per hour, worded like any other token count. Takes a rate rather
+    /// than an optional so the absence of one stays a question the caller
+    /// answers: a day with no spend has no rate, and "0/h" is a claim about
+    /// pace rather than the absence of one.
+    static func burn(_ tokensPerHour: Double) -> String {
+        tokens(Int(tokensPerHour.rounded()))
     }
 
     /// The line under a header's title: when the reading on screen landed, or

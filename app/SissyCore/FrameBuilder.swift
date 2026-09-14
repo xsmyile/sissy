@@ -232,9 +232,15 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
 }
 
 struct FrameData: Sendable, Equatable {
-    let tokens: String
-    let cost: String
-    let burn: String
+    /// The day so far, raw. Rounding belongs to whichever surface draws it —
+    /// the frame used to carry these pre-formatted for a 128×64 display, and
+    /// keeping that shape cost the app a second set of formatters that had to
+    /// be kept in step with the engine's by hand.
+    let tokens: Int
+    let cost: Decimal
+    /// Tokens per hour so far today, nil on a day nothing has been spent on:
+    /// a rate of zero is a claim about pace rather than the absence of one.
+    let burn: Double?
     /// One slice per provider that has produced a reading, in a stable order:
     /// claude-code, codex, then alphabetical. A provider that spent nothing
     /// today keeps its slice — it is also what carries the plan, the account,
@@ -258,9 +264,9 @@ struct FrameData: Sendable, Equatable {
     /// that has none is saying there is none, and every test and future field
     /// that does not care about projects should not have to say so.
     init(
-        tokens: String,
-        cost: String,
-        burn: String,
+        tokens: Int,
+        cost: Decimal,
+        burn: Double?,
         providers: [ProviderSlice],
         keepAwake: KeepAwakeState,
         history: UsageHistoryRollup?,
@@ -277,43 +283,9 @@ struct FrameData: Sendable, Equatable {
 }
 
 enum FrameBuilder {
-    /// What a formatter prints when there is nothing to print yet. Read back
-    /// by the panel, which drops the burn line rather than showing it.
-    static let placeholder = "..."
-
-    static func fmtTokens(_ n: Int) -> String {
-        if n >= 1_000_000_000 {
-            let v = Double(n) / 1_000_000_000
-            return v < 10 ? String(format: "%.1fB", v) : "\(Int(v))B"
-        }
-        if n >= 1_000_000 {
-            let v = Double(n) / 1_000_000
-            return v < 10 ? String(format: "%.1fM", v) : "\(Int(v))M"
-        }
-        if n >= 1_000 {
-            let v = Double(n) / 1_000
-            return v < 10 ? String(format: "%.1fK", v) : "\(Int(v))K"
-        }
-        return "\(n)"
-    }
-
     static func burnRate(tokens: Int, hoursElapsed: Double) -> Double? {
         guard tokens > 0, hoursElapsed.isFinite, hoursElapsed > 0 else { return nil }
         return Double(tokens) / max(hoursElapsed, 1.0 / 60.0)
-    }
-
-    static func fmtBurn(tokens: Int, hoursElapsed: Double) -> String {
-        guard let rate = burnRate(tokens: tokens, hoursElapsed: hoursElapsed) else {
-            return placeholder
-        }
-        return fmtTokens(Int(rate))
-    }
-
-    static func fmtCost(_ c: Decimal) -> String {
-        let d = NSDecimalNumber(decimal: c).doubleValue
-        if d >= 100 { return "\(Int(d))" }
-        if d >= 10 { return String(format: "%.1f", d) }
-        return String(format: "%.2f", d)
     }
 
     static func build(
@@ -323,10 +295,11 @@ enum FrameBuilder {
         keepAwake: KeepAwakeState = .off,
         history: UsageHistoryRollup? = nil
     ) -> FrameData {
+        let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
         return FrameData(
-            tokens: fmtTokens(today.totalTokens),
-            cost: fmtCost(today.totalCost),
-            burn: fmtBurn(tokens: today.totalTokens, hoursElapsed: hoursElapsed),
+            tokens: today.totalTokens,
+            cost: today.totalCost,
+            burn: burn,
             providers: providers,
             keepAwake: keepAwake,
             history: history,

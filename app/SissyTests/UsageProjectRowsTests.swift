@@ -183,9 +183,9 @@ final class UsageProjectRowsTests: XCTestCase {
             providerCost.map { Decimal(string: $0)! }
             ?? projects.reduce(Decimal(0)) { $0 + $1.cost }
         return FrameData(
-            tokens: "1M",
-            cost: FrameBuilder.fmtCost(cost),
-            burn: "1.5K",
+            tokens: tokens,
+            cost: cost,
+            burn: 1500,
             providers: [
                 ProviderSlice(
                     id: ProviderID.claudeCode,

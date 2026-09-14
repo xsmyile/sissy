@@ -3,17 +3,18 @@ import XCTest
 @testable import Sissy
 
 final class UsagePanelSnapshotTests: XCTestCase {
+    /// The day's scalars are the slices summed unless a test says otherwise,
+    /// the way the engine builds one: a frame whose headline disagrees with
+    /// its own rows cannot happen outside a fixture.
     private func frame(
         providers: [ProviderSlice],
-        tokens: String = "26K",
-        cost: String = "0.09",
-        burn: String = "1.5K",
+        burn: Double? = 1500,
         history: UsageHistoryRollup? = nil,
         projects: [ProjectTotals] = []
     ) -> FrameData {
         FrameData(
-            tokens: tokens,
-            cost: cost,
+            tokens: providers.reduce(0) { $0 + $1.tokens },
+            cost: providers.reduce(Decimal(0)) { $0 + $1.cost },
             burn: burn,
             providers: providers,
             keepAwake: .off,
@@ -257,7 +258,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
 
     // MARK: Totals
 
-    func testTotalsComeFromTheProviderSlicesNotTheFormattedScalars() {
+    func testTheHeadlineIsTheDaysTotalAcrossEveryProvider() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [
                 slice("claude-code", 722_000_000, "478.20"),
@@ -268,12 +269,12 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.cost, "$492.56")
     }
 
-    func testFallsBackToFrameScalarsBeforeAnyProviderReports() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [], tokens: "233M", cost: "149")
-        )
-        XCTAssertEqual(snapshot.tokens, "233M")
-        XCTAssertEqual(snapshot.cost, "$149")
+    /// A day nothing has been spent on has no rate, and the headline says so
+    /// by leaving the clause out rather than printing a pace of zero.
+    func testADayWithNoSpendCarriesNoBurn() {
+        XCTAssertNil(UsagePanelSnapshot.make(frame: frame(providers: [], burn: nil)).burn)
+        XCTAssertEqual(
+            UsagePanelSnapshot.make(frame: frame(providers: [], burn: 1500)).burn, "1.5K")
     }
 
     /// A provider that has spent nothing today keeps its row: the row is also

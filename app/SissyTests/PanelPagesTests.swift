@@ -12,9 +12,9 @@ final class PanelPagesTests: XCTestCase {
     /// `projects` is empty cannot happen outside a test.
     private func frame(_ providers: [ProviderSlice]) -> FrameData {
         FrameData(
-            tokens: "26K",
-            cost: "0.09",
-            burn: "1.5K",
+            tokens: providers.reduce(0) { $0 + $1.tokens },
+            cost: providers.reduce(Decimal(0)) { $0 + $1.cost },
+            burn: 1500,
             providers: providers,
             keepAwake: .off,
             history: nil,

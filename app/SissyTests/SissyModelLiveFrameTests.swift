@@ -10,9 +10,9 @@ final class SissyModelLiveFrameTests: XCTestCase {
 
     private func frame() -> FrameData {
         FrameData(
-            tokens: "26K",
-            cost: "0.09",
-            burn: "1.5K",
+            tokens: 26_000,
+            cost: Decimal(string: "0.09")!,
+            burn: 1500,
             providers: [],
             keepAwake: .off,
             history: nil
@@ -25,7 +25,7 @@ final class SissyModelLiveFrameTests: XCTestCase {
         model.lastFrameAt = Self.landedAt
 
         XCTAssertEqual(model.liveFrame?.at, Self.landedAt)
-        XCTAssertEqual(model.liveFrame?.frame.tokens, "26K")
+        XCTAssertEqual(model.liveFrame?.frame.tokens, 26_000)
     }
 
     func testNoFrameMeansNoReading() {

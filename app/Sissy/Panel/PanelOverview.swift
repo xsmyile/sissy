@@ -72,8 +72,8 @@ struct PanelOverview: View {
 
     private var subline: String {
         let tokens = "\(snapshot.tokens) tokens"
-        return snapshot.burn == FrameBuilder.placeholder
-            ? tokens : "\(tokens) · \(snapshot.burn)/h"
+        guard let burn = snapshot.burn else { return tokens }
+        return "\(tokens) · \(burn)/h"
     }
 
     // MARK: Headroom
