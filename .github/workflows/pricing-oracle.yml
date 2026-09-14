@@ -8,7 +8,8 @@ name: pricing-oracle
 # the same source ccusage prices from, so the useful question is no longer "did a
 # table drift" but "do the two tools still agree". A failure here means a
 # *convention* diverged: which tokens count, how the 5m/1h cache-write tiers are
-# split, whether Codex reasoning tokens are double-counted.
+# split, whether Codex reasoning tokens are double-counted, and which of the
+# `token_count` events Codex writes are turns at all.
 #
 # Runs on a fixed synthetic fixture rather than real logs, so the comparison is
 # exact and reproducible. The fixture has to carry every shape whose handling
@@ -52,6 +53,13 @@ jobs:
           FIX="$RUNNER_TEMP/oracle"
           mkdir -p "$FIX/claude/projects/p" "$FIX/codex/sessions/2026/07/28"
           NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          # The Codex shapes below need an order to be coherent: a fork cannot
+          # copy a turn its parent had not taken yet.
+          T0=$(date -u -v-30S +"%Y-%m-%dT%H:%M:%S.000Z")
+          T1=$(date -u -v-20S +"%Y-%m-%dT%H:%M:%S.000Z")
+          T2=$(date -u -v-10S +"%Y-%m-%dT%H:%M:%S.000Z")
+          PARENT=019fa307-abce-79c3-9e7f-5305174c5f8d
+          FORK=019fa314-9108-7501-8e0c-5adde66a9710
           # Exercises the conventions that actually diverge: the 5m/1h
           # cache-creation split, cache reads as their own billable channel,
           # Codex `reasoning_output_tokens` being a sub-breakdown of gross output
@@ -68,10 +76,29 @@ jobs:
           {"type":"assistant","timestamp":"$NOW","requestId":"r4","message":{"id":"m4","model":"claude-opus-5","usage":{"input_tokens":200,"output_tokens":3,"cache_read_input_tokens":30000,"cache_creation_input_tokens":0}}}
           {"type":"assistant","timestamp":"$NOW","requestId":"r4","message":{"id":"m4","model":"claude-opus-5","usage":{"input_tokens":200,"output_tokens":901,"cache_read_input_tokens":30000,"cache_creation_input_tokens":0}}}
           JSONL
-          cat > "$FIX/codex/sessions/2026/07/28/rollout-o.jsonl" <<JSONL
-          {"type":"session_meta","timestamp":"$NOW","payload":{"id":"o","model_provider":"openai"}}
-          {"type":"turn_context","timestamp":"$NOW","payload":{"turn_id":"t1","model":"gpt-5.6-sol"}}
-          {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":40,"total_tokens":14658},"total_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":40,"total_tokens":14658}}}}
+          # Codex writes more `token_count` events than there are turns, and the
+          # single-event fixture this replaced billed the same either way —
+          # which is how a 1.8%-a-year over-count shipped past this job. Two
+          # shapes carry it now. The parent ends on a re-emitted turn: the same
+          # `last_token_usage` again with `total_token_usage` standing still,
+          # which is what Codex leaves when a session ends or is interrupted.
+          # The fork then copies the parent's whole history into its own log at
+          # creation — stamped at its own start, where a turn it ran takes
+          # seconds to come back — before taking one turn of its own. Only that
+          # last one is the fork's to pay for.
+          cat > "$FIX/codex/sessions/2026/07/28/rollout-2026-07-28T10-00-00-$PARENT.jsonl" <<JSONL
+          {"type":"session_meta","timestamp":"$T0","payload":{"id":"$PARENT","source":"cli","model_provider":"openai"}}
+          {"type":"turn_context","timestamp":"$T0","payload":{"turn_id":"t1","model":"gpt-5.6-sol"}}
+          {"type":"event_msg","timestamp":"$T0","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":40,"total_tokens":14658},"total_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":40,"total_tokens":14658}}}}
+          {"type":"event_msg","timestamp":"$T1","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":2100,"cached_input_tokens":1800,"output_tokens":52,"reasoning_output_tokens":8,"total_tokens":2152},"total_token_usage":{"input_tokens":16397,"cached_input_tokens":11400,"output_tokens":413,"reasoning_output_tokens":48,"total_tokens":16810}}}}
+          {"type":"event_msg","timestamp":"$T1","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":2100,"cached_input_tokens":1800,"output_tokens":52,"reasoning_output_tokens":8,"total_tokens":2152},"total_token_usage":{"input_tokens":16397,"cached_input_tokens":11400,"output_tokens":413,"reasoning_output_tokens":48,"total_tokens":16810}}}}
+          JSONL
+          cat > "$FIX/codex/sessions/2026/07/28/rollout-2026-07-28T10-05-00-$FORK.jsonl" <<JSONL
+          {"type":"session_meta","timestamp":"$T2","payload":{"id":"$FORK","forked_from_id":"$PARENT","source":"cli","model_provider":"openai"}}
+          {"type":"turn_context","timestamp":"$T2","payload":{"turn_id":"t1","model":"gpt-5.6-sol"}}
+          {"type":"event_msg","timestamp":"$T2","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":40,"total_tokens":14658},"total_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":40,"total_tokens":14658}}}}
+          {"type":"event_msg","timestamp":"$T2","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":2100,"cached_input_tokens":1800,"output_tokens":52,"reasoning_output_tokens":8,"total_tokens":2152},"total_token_usage":{"input_tokens":16397,"cached_input_tokens":11400,"output_tokens":413,"reasoning_output_tokens":48,"total_tokens":16810}}}}
+          {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":900,"cached_input_tokens":400,"output_tokens":30,"reasoning_output_tokens":5,"total_tokens":930},"total_token_usage":{"input_tokens":17297,"cached_input_tokens":11800,"output_tokens":443,"reasoning_output_tokens":53,"total_tokens":17740}}}}
           JSONL
           cat > "$RUNNER_TEMP/oracle.json" <<JSON
           {"claudeDataDir":"$FIX/claude/projects","codexDataDir":"$FIX/codex/sessions","pollIntervalSeconds":60,"providers":{"claudeCode":true,"codex":true}}
