@@ -21,6 +21,7 @@ final class DiagnosticsReportTests: XCTestCase {
                 filesWatched: 3,
                 isWarm: true,
                 claudeLimits: true,
+                claudeWebSession: true,
                 providers: [
                     ProviderSlice(
                         id: "claude-code",
@@ -47,6 +48,7 @@ final class DiagnosticsReportTests: XCTestCase {
         filesWatched: Int = 98,
         isWarm: Bool = true,
         claudeLimits: Bool = true,
+        claudeWebSession: Bool = false,
         systemVersion: String = "Version 26.0 (Build 25A354)",
         ccusage: [CcusageProbe.Install] = []
     ) -> DiagnosticsReport.Snapshot {
@@ -57,6 +59,7 @@ final class DiagnosticsReportTests: XCTestCase {
             filesWatched: filesWatched,
             isWarm: isWarm,
             claudeLimits: claudeLimits,
+            claudeWebSession: claudeWebSession,
             providers: providers,
             ccusage: ccusage
         )

@@ -1,16 +1,30 @@
 import Foundation
 
 /// Claude Code's out-of-band facts. None is anything the tail parsed: the
-/// windows come from the usage endpoint the limits probe polls, and the plan,
-/// the account and the credits from the CLI's own config file — which is why
-/// all three are readable whether or not the user turned the probe on.
+/// windows come from whichever usage source the user switched on, and the
+/// plan, the account and the credits from the CLI's own config file — which is
+/// why the last three are readable whether or not the user turned limits on.
+///
+/// An imported claude.ai session outranks the OAuth probe, and takes the
+/// credits with it. Not a chain of fallbacks: exactly one source is running,
+/// decided by whether a session was imported, and the one that is running
+/// answers for everything it can. The credits move with it because the
+/// config file's copy is the endpoint's reply as of the last time the CLI
+/// asked, which is only when the user typed `/usage` — pairing a live window
+/// with an hour-old spend would be two moments on one row.
 private struct ClaudeCodeSignals: SourceSignals {
     let limitsProbe: ClaudeLimitsProbe?
+    let webSource: ClaudeWebSource?
     let profile: ClaudeProfileSource
 
     func currentSignals() -> ProviderSignals {
         var reading = profile.currentSignals()
-        if let limits = limitsProbe?.currentSignals() {
+        if let web = webSource?.currentSignals() {
+            reading.windows = web.windows
+            reading.limitsState = web.limitsState
+            reading.limitsObservedAt = web.limitsObservedAt
+            if let credits = web.credits { reading.credits = credits }
+        } else if let limits = limitsProbe?.currentSignals() {
             reading.windows = limits.windows
             reading.limitsState = limits.limitsState
             reading.limitsObservedAt = limits.limitsObservedAt
@@ -48,6 +62,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
         claudeDir: URL,
         pricingOverride: [String: ModelPricing]?,
         limitsProbe: ClaudeLimitsProbe?,
+        webSource: ClaudeWebSource?,
         profile: ClaudeProfileSource,
         ledger: ProjectLedger
     ) {
@@ -58,7 +73,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
             id: "claude-code",
             root: claudeDir,
             watcherLabel: "sissy.usage.fswatch",
-            signals: ClaudeCodeSignals(limitsProbe: limitsProbe, profile: profile)
+            signals: ClaudeCodeSignals(
+                limitsProbe: limitsProbe, webSource: webSource, profile: profile)
         )
     }
 
@@ -299,6 +315,7 @@ extension LocalUsageProvider {
         historyRoot: URL? = nil,
         pricingOverride: [String: ModelPricing]? = nil,
         limitsProbe: ClaudeLimitsProbe? = nil,
+        webSource: ClaudeWebSource? = nil,
         profile: ClaudeProfileSource = ClaudeProfileSource(),
         ledger: ProjectLedger = ProjectLedger()
     ) -> LocalUsageProvider {
@@ -307,6 +324,7 @@ extension LocalUsageProvider {
                 claudeDir: claudeDir,
                 pricingOverride: pricingOverride,
                 limitsProbe: limitsProbe,
+                webSource: webSource,
                 profile: profile,
                 ledger: ledger
             ),

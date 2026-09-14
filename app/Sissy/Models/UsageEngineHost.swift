@@ -163,6 +163,41 @@ final class UsageEngineHost {
         Task { await engine.setClaudeLimits(enabled: enabled) }
     }
 
+    /// Whether a claude.ai session is filed, so Settings can offer the right
+    /// button. Asked without decrypting one, so it is answerable on a build
+    /// whose keychain grant has lapsed.
+    private(set) var claudeWebSession: Bool = ClaudeWebSessionStore.isPresent()
+    /// Why the last import found nothing, kept so Settings says which of the
+    /// several ways it can come up empty happened. Cleared by the next
+    /// attempt, and by a successful one.
+    private(set) var claudeWebImportFailure: ClaudeWebCookieImport.Failure?
+    private(set) var importingClaudeWebSession = false
+
+    /// Imports the session Claude.app is holding. The click that is allowed
+    /// to raise the Safe Storage dialog, and the only one.
+    func importClaudeWebSession() {
+        guard let engine, !importingClaudeWebSession else { return }
+        importingClaudeWebSession = true
+        claudeWebImportFailure = nil
+        Task { [weak self] in
+            let outcome = await engine.importClaudeWebSession()
+            guard let self else { return }
+            importingClaudeWebSession = false
+            claudeWebSession = engine.hasClaudeWebSession
+            if case .failure(let why) = outcome { claudeWebImportFailure = why }
+        }
+    }
+
+    /// Forgets it, handing the reading back to the OAuth probe.
+    func forgetClaudeWebSession() {
+        guard let engine, claudeWebSession else { return }
+        claudeWebImportFailure = nil
+        Task { [weak self] in
+            await engine.forgetClaudeWebSession()
+            self?.claudeWebSession = engine.hasClaudeWebSession
+        }
+    }
+
     /// Re-reads one provider's out-of-band state. On Claude Code this is the
     /// gesture that may raise the keychain dialog, which is why it is only
     /// ever reached from a click.

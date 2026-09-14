@@ -124,3 +124,23 @@ final class ClaudeWebSessionStoreTests: XCTestCase {
         }
     }
 }
+
+/// The session is a whole claude.ai login. Nothing that leaves the machine may
+/// carry it, and a test rather than a convention is what holds that.
+final class ClaudeWebSessionSecrecyTests: XCTestCase {
+    private static let session = "sk-ant-sid01-" + String(repeating: "s", count: 100)
+
+    func testTheDiagnosticsReportNamesTheSourceAndNotTheSession() throws {
+        let account = "test-\(UUID().uuidString)"
+        addTeardownBlock { try? ClaudeWebSessionStore.delete(account: account) }
+        try ClaudeWebSessionStore.save(Self.session, account: account)
+        let report = DiagnosticsReport.text(
+            DiagnosticsReport.Snapshot(
+                version: "0.1.9", build: "1", systemVersion: "Version 27.0",
+                filesWatched: 1, isWarm: true, claudeLimits: true, claudeWebSession: true,
+                providers: [], ccusage: []))
+        XCTAssertTrue(report.contains("claude.ai session"))
+        XCTAssertFalse(report.contains(Self.session))
+        XCTAssertFalse(report.contains(ClaudeWebSessionStore.sessionPrefix))
+    }
+}
