@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Reads the plan out of the id_token Codex keeps in `~/.codex/auth.json`.
@@ -32,6 +33,43 @@ enum CodexAuthSource {
     struct Identity: Sendable, Equatable {
         let plan: String?
         let account: ProviderAccount?
+        /// Digest of the claims that name this account, for telling one
+        /// account from the next across a relaunch. Nil when the token named
+        /// none of them, which stays "unknown" rather than becoming a key.
+        let fingerprint: String?
+    }
+
+    /// What one read of `auth.json` found.
+    ///
+    /// Four outcomes because only two of them are answers. Absence and a
+    /// signed-out file are the account genuinely being gone; a file that will
+    /// not parse is a half-written one, and treating that as a logout would
+    /// blank the row every time the CLI refreshes its token.
+    enum Reading {
+        case found(Identity)
+        /// Signed out, or driving the API directly: no tokens to read, and no
+        /// subscription behind them either.
+        case signedOut
+        case missing
+        case unreadable
+    }
+
+    static func read(at url: URL) -> Reading {
+        do {
+            let data = try Data(contentsOf: url)
+            guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .unreadable
+            }
+            let tokens = root["tokens"]
+            if root["auth_mode"] as? String == "apikey" || tokens == nil || tokens is NSNull {
+                return .signedOut
+            }
+            return parse(data).map(Reading.found) ?? .unreadable
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return .missing
+        } catch {
+            return .unreadable
+        }
     }
 
     /// `auth.json` sits beside the rollout tree in Codex's home, so the path
@@ -40,11 +78,6 @@ enum CodexAuthSource {
     /// at the same install.
     static func defaultURL(sessionsDir: URL) -> URL {
         sessionsDir.deletingLastPathComponent().appendingPathComponent(fileName)
-    }
-
-    static func load(at url: URL) -> Identity? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return parse(data)
     }
 
     static func parse(_ data: Data) -> Identity? {
@@ -61,8 +94,22 @@ enum CodexAuthSource {
                 organization: organization(in: auth),
                 renewsAt: (auth[renewalClaimKey] as? String)
                     .flatMap(UsageReaderShared.parseTimestamp)
-            )
+            ),
+            fingerprint: fingerprint(claims: claims, auth: auth)
         )
+    }
+
+    /// Persist only a digest of identity claims, never a token. A missing
+    /// identity stays unknown; it is not a reason to invent an account key.
+    private static func fingerprint(claims: [String: Any], auth: [String: Any]) -> String? {
+        let parts = [
+            claims["sub"] as? String, auth["chatgpt_account_id"] as? String,
+            claims[emailClaimKey] as? String,
+        ]
+        guard parts.contains(where: { $0 != nil }),
+            let data = try? JSONEncoder().encode(parts)
+        else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     /// The account's default organisation, by the flag OpenAI sets on it. A
