@@ -20,6 +20,11 @@ struct DiagnosticsReport {
         let filesWatched: Int
         let isWarm: Bool
         let claudeLimits: Bool
+        /// Whether the limits are being read off an imported claude.ai
+        /// session rather than Claude Code's keychain token. The fact, never
+        /// the session: which source answered is the first thing a gap needs,
+        /// and the session itself is a whole claude.ai login.
+        let claudeWebSession: Bool
         let providers: [ProviderSlice]
         /// Every `ccusage` found on disk. A gap between Sissy's cost and
         /// "what ccusage says" cannot be triaged without knowing which of the
@@ -33,7 +38,8 @@ struct DiagnosticsReport {
             "macOS \(normalize(systemVersion: snapshot.systemVersion))",
             "Readers: \(snapshot.isWarm ? "warm" : "still scanning"), "
                 + "\(snapshot.filesWatched) file(s) watched",
-            "Claude limits: \(snapshot.claudeLimits ? "on" : "off")",
+            "Claude limits: \(snapshot.claudeLimits ? "on" : "off")"
+                + (snapshot.claudeWebSession ? " (claude.ai session)" : ""),
             "Providers: \(describe(snapshot.providers))",
             "ccusage: \(describe(snapshot.ccusage))",
         ].joined(separator: "\n")
@@ -53,6 +59,7 @@ struct DiagnosticsReport {
                 filesWatched: model.engine.filesWatched,
                 isWarm: model.engine.isWarm,
                 claudeLimits: model.engine.claudeLimits,
+                claudeWebSession: model.engine.claudeWebSession,
                 providers: model.currentFrame?.providers ?? [],
                 ccusage: CcusageProbe.installs()
             )

@@ -79,11 +79,54 @@ enum ClaudeLimitsCopy {
     static let detailButtonLabel = "What Sissy reads"
 }
 
+/// The claude.ai session, and what importing it changes.
+///
+/// It says what the thing is before the button is pressed, because it is a
+/// whole browser session rather than a read-only usage token, and a user who
+/// only finds that out afterwards was not asked.
+enum ClaudeWebSessionCopy {
+    static let importTitle = "Import from Claude.app"
+    static let forgetTitle = "Forget session"
+    static let importedLabel = "Reading claude.ai"
+
+    static let caption =
+        "Claude Code's own reading only updates when you type /usage. Importing the "
+        + "session Claude.app is signed in with keeps the windows and the credits live."
+
+    static let detail =
+        "Sissy copies the claude.ai session cookie out of Claude.app into a keychain item "
+        + "of its own, and reads it back from there. macOS asks once, when you press "
+        + "Import — Claude.app's key has not changed since 2024, so the permission is not "
+        + "asked for again. The cookie is a whole claude.ai session, not a read-only "
+        + "usage token: it never leaves this Mac except as a request to claude.ai, and it "
+        + "is not in the logs, the diagnostics or the export. Forget deletes it."
+
+    static let detailButtonLabel = "What importing does"
+
+    /// One sentence per way the import can come up empty, each naming what to
+    /// do rather than what failed.
+    static func failure(_ why: ClaudeWebCookieImport.Failure) -> String {
+        switch why {
+        case .noStore:
+            return "Claude.app is not installed on this Mac."
+        case .noSession:
+            return "Claude.app is installed but not signed in."
+        case .noKey:
+            return "macOS did not let Sissy read Claude.app's key. Try Import again."
+        case .unreadableStore:
+            return "Claude.app's cookie store could not be read."
+        case .undecryptable:
+            return "Claude.app's cookies are in a format this version does not read."
+        }
+    }
+}
+
 /// Where each provider's numbers come from, and what it is doing about them.
 struct ProvidersSettingsView: View {
     let model: SissyModel
 
     @State private var showingLimitsDetail = false
+    @State private var showingWebSessionDetail = false
 
     private static let markSize: CGFloat = 18
     /// Wide enough that the detail reads as a paragraph rather than a column.
@@ -96,6 +139,7 @@ struct ProvidersSettingsView: View {
                     row(readiness)
                     if readiness.id == ProviderID.claudeCode {
                         claudeLimits
+                        if model.engine.claudeLimits { claudeWebSession }
                     }
                 }
             }
@@ -165,5 +209,59 @@ struct ProvidersSettingsView: View {
             get: { model.engine.claudeLimits },
             set: { model.setClaudeLimits($0) }
         )
+    }
+
+    /// Shown only under a switch that is already on: importing a session for
+    /// limits nobody asked to see would be a permission with nothing behind
+    /// it.
+    @ViewBuilder
+    private var claudeWebSession: some View {
+        LabeledContent {
+            HStack(spacing: 8) {
+                if model.engine.claudeWebSession {
+                    Button(ClaudeWebSessionCopy.forgetTitle) {
+                        model.engine.forgetClaudeWebSession()
+                    }
+                } else {
+                    Button(ClaudeWebSessionCopy.importTitle) {
+                        model.engine.importClaudeWebSession()
+                    }
+                    .disabled(model.engine.importingClaudeWebSession)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(
+                    model.engine.claudeWebSession
+                        ? ClaudeWebSessionCopy.importedLabel
+                        : ClaudeWebSessionCopy.importTitle)
+                webSessionDetailButton
+            }
+        }
+        if let why = model.engine.claudeWebImportFailure {
+            Text(ClaudeWebSessionCopy.failure(why))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        } else if !model.engine.claudeWebSession {
+            Text(ClaudeWebSessionCopy.caption)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var webSessionDetailButton: some View {
+        Button {
+            showingWebSessionDetail = true
+        } label: {
+            Image(systemName: "info.circle")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(ClaudeWebSessionCopy.detailButtonLabel)
+        .popover(isPresented: $showingWebSessionDetail, arrowEdge: .bottom) {
+            Text(ClaudeWebSessionCopy.detail)
+                .font(.callout)
+                .frame(width: Self.detailPopoverWidth)
+                .padding()
+        }
     }
 }

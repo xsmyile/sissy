@@ -89,13 +89,17 @@ tier names the plan it decorates — a Max account reads "Max 5x", while a Team
 seat metered at the same tier keeps "Team" and puts the tier in the row's
 tooltip, because "Team 5x" is a plan nobody sells.
 
-Claude Code's windows come from `ClaudeLimitsProbe`, which reads the CLI's own
-OAuth token out of the login keychain and polls the endpoint Claude Code's
-`/usage` reads. (Its *credits* do not: the CLI caches that endpoint's reply in
-`.claude.json`, which `ClaudeProfileSource` reads with no prompt and no
-network — see `ClaudeProfile.swift` below.) That costs a macOS
-keychain authorization, so it stays off until the user asks for it in Settings —
-and **only that asking may raise the dialog**. Every other read is silent:
+Claude Code's windows come from one of two readers, and exactly one runs. The
+default is `ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the
+login keychain and polls the endpoint Claude Code's `/usage` reads; its
+*credits* come instead from `ClaudeProfileSource`, off the reply the CLI caches
+in `.claude.json` with no prompt and no network. Importing a claude.ai session
+switches both over to `ClaudeWebSource`, which polls claude.ai itself and
+answers for the windows and the credits together — see
+`ClaudeWebCookieImport.swift` below for where the session comes from and why the
+cached reply is not an alternative to it. Either way it costs a macOS keychain
+authorization, so it stays off until the user asks for it in Settings — and
+**only that asking may raise the dialog**. Every other read is silent:
 `ClaudeCredentialsStore.load(allowingInteraction:)` builds a query carrying an
 `LAContext` with `interactionNotAllowed` *and* `kSecUseAuthenticationUIFail`,
 resolved by name at runtime because the SDK deprecates the constant while still
@@ -157,6 +161,10 @@ compiled into the app too.
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429; off unless `claudeLimits` is set |
 | `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it. `allowingInteraction` is the caller declaring itself a user action, and it is the only thing that lets macOS put a dialog on screen; a silent read answers `.interactionRequired` rather than `.denied`. One lookup runs at a time and every caller waits on that one under its own budget, so an unanswered authorization dialog parks neither the probe nor a second dispatch thread, and the answer reaches whoever is still waiting when it finally comes |
 | `ClaudeProfile.swift`           | Reads the plan, the tier, the account and the vendor's own cached credits reply out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain and no network, so it answers with `claudeLimits` off. A cached reading carries the vendor's own `fetchedAt`, which the panel prints beside it |
+| `ClaudeUsagePayload.swift`      | The one parser for the usage body Anthropic answers with, wherever it was read — the OAuth endpoint, claude.ai, or the CLI's cached copy of one. Measured to be the same object in all three, so there is no second reading of `spend` to drift |
+| `ClaudeWebCookieImport.swift`   | Reads the `sessionKey` out of Claude.app's Chromium cookie store: `Claude Safe Storage` from the keychain, PBKDF2-SHA1 + AES-128-CBC, `v10` prefix and the 32-byte domain-binding hash stripped. Only ever from the button — Claude.app is the source rather than a browser because that is where a live session is, and its key has not been rewritten since 2024 |
+| `ClaudeWebSessionStore.swift`   | The imported session, in a keychain item Sissy owns and nothing else rewrites. Presence is asked without decrypting, so Settings answers on a build whose grant lapsed. Keyed by account, so more than one is a stored row rather than a rewrite |
+| `ClaudeWebSource.swift`         | Polls `claude.ai/api/organizations/{org}/usage` for the windows and the credits; same 5-min refresh and 30-min 429 backoff as the OAuth probe. The subscription organization is the one whose `capabilities` name `chat`, and the request needs a `Claude/<version>` User-Agent — both measured |
 | `CodexAuth.swift`               | Reads the plan and the account out of the id_token in `~/.codex/auth.json`, for the boot before the first turn. The signature is deliberately not verified — every field taken is a display string off the user's own disk — and the tokens beside them are never read. Also says which of "signed out", "absent" and "will not parse" a read met, because only the first two are a reason to blank the row, plus a digest of the identity claims so a later read can tell one account from the next |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow` / `ProviderAccount` / `ProviderCredits`, the burn rate, and the slice and project ordering. No formatters: the frame carries raw numbers and the app words them |

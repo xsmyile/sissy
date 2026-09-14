@@ -46,6 +46,11 @@ actor UsageEngine {
     /// so the toggle can start it later without rebuilding the provider list;
     /// it does nothing until `start` is called.
     private let claudeLimitsProbe: ClaudeLimitsProbe
+    /// The claude.ai reader. Built whether or not a session is imported —
+    /// nothing runs until `startClaudeLimits` finds one — because the adapter
+    /// that publishes its reading is assembled once, at launch, and an import
+    /// that arrives later must not need a new provider to be seen.
+    private let claudeWebSource: ClaudeWebSource
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
@@ -132,6 +137,7 @@ actor UsageEngine {
         config: ServerConfig,
         configURL: URL = ServerConfig.defaultURL,
         limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe(),
+        webSource: ClaudeWebSource = ClaudeWebSource(),
         keepAwakePolicy: KeepAwakePolicy = .default
     ) {
         self.config = config
@@ -168,6 +174,7 @@ actor UsageEngine {
             ResolvedProvider(id: ProviderID.codex, activation: codexActivation, dataDir: codexDir),
         ]
         self.claudeLimitsProbe = limitsProbe
+        self.claudeWebSource = webSource
         var providers: [any UsageProvider] = []
         if claudeActivation.isMetering {
             // Legacy persistence URL on purpose: existing installs already
@@ -182,6 +189,7 @@ actor UsageEngine {
                     historyRoot: historyRoot,
                     pricingOverride: config.pricingOverride,
                     limitsProbe: limitsProbe,
+                    webSource: webSource,
                     ledger: projectLedger
                 ))
         }
@@ -231,7 +239,7 @@ actor UsageEngine {
         // one thing in Sissy that can raise a system dialog — on a reading
         // nothing could show.
         if config.claudeLimits && meteringClaudeCode {
-            await startClaudeLimitsProbe(userInitiated: false)
+            await startClaudeLimits(userInitiated: false)
         }
         await applyKeepAwake()
         guard lifecycle == .running else { return }
@@ -263,7 +271,7 @@ actor UsageEngine {
         // log records — `lifecycle` is already `stopped`, which is what makes
         // the wanted state false.
         await applyKeepAwake()
-        await claudeLimitsProbe.stop()
+        await stopClaudeLimits()
         await aggregator.stop()
         bootTask = nil
         priceCatalogTask = nil
@@ -283,9 +291,9 @@ actor UsageEngine {
         }
     }
 
-    /// Turn the Claude Code limit probe on or off and persist the choice.
-    /// Starting it is what triggers the one-time keychain prompt, so this is
-    /// only ever reached from an explicit user action.
+    /// Turn the Claude Code limits on or off and persist the choice. Starting
+    /// them is what triggers the one-time keychain prompt, so this is only
+    /// ever reached from an explicit user action.
     func setClaudeLimits(enabled: Bool) async {
         guard lifecycle == .running, enabled != config.claudeLimits else { return }
         config.claudeLimits = enabled
@@ -296,12 +304,53 @@ actor UsageEngine {
                 "sissy: failed to persist claudeLimits to \(configURL.path): \(error)")
         }
         if enabled {
-            await startClaudeLimitsProbe(userInitiated: true)
+            await startClaudeLimits(userInitiated: true)
         } else {
-            await claudeLimitsProbe.stop()
+            await stopClaudeLimits()
         }
         await reemit()
     }
+
+    /// Imports the claude.ai session Claude.app is holding and switches the
+    /// reading over to it.
+    ///
+    /// The one gesture allowed to raise the Safe Storage dialog, and the only
+    /// write on this path. It is deliberately not reachable from a poll or a
+    /// launch: a permission is asked for when the user asks for the thing that
+    /// needs it.
+    func importClaudeWebSession() async -> Result<Void, ClaudeWebCookieImport.Failure> {
+        guard lifecycle == .running else { return .success(()) }
+        switch ClaudeWebCookieImport.session() {
+        case .failure(let why):
+            sissyLog("sissy: importing the claude.ai session found none: \(why)")
+            return .failure(why)
+        case .success(let session):
+            do {
+                try ClaudeWebSessionStore.save(session)
+            } catch {
+                sissyLog("sissy: could not file the claude.ai session: \(error)")
+                return .failure(.undecryptable)
+            }
+            await stopClaudeLimits()
+            if config.claudeLimits { await startClaudeLimits(userInitiated: true) }
+            await reemit()
+            return .success(())
+        }
+    }
+
+    /// Forgets the imported session and hands the reading back to the OAuth
+    /// probe, which is where it was before the import.
+    func forgetClaudeWebSession() async {
+        guard lifecycle == .running else { return }
+        try? ClaudeWebSessionStore.delete()
+        await stopClaudeLimits()
+        if config.claudeLimits { await startClaudeLimits(userInitiated: false) }
+        await reemit()
+    }
+
+    /// Whether a claude.ai session is filed. Asked without decrypting one, so
+    /// Settings can say so on a build whose grant has lapsed.
+    nonisolated var hasClaudeWebSession: Bool { ClaudeWebSessionStore.isPresent() }
 
     /// What a user pressing refresh on one provider reaches.
     ///
@@ -320,7 +369,19 @@ actor UsageEngine {
         guard lifecycle == .running else { return }
         if id == ProviderID.claudeCode, config.claudeLimits {
             let me = self
-            await claudeLimitsProbe.refresh { await me.reemit() }
+            if hasClaudeWebSession {
+                // A session claude.ai has closed cannot be refreshed into
+                // working again, and re-reading the same dead string is the
+                // button failing at its only job. The notice beside it says
+                // "Import again", so that is what this does.
+                if claudeWebSource.currentSignals().limitsState == .sessionExpired {
+                    _ = await importClaudeWebSession()
+                } else {
+                    await claudeWebSource.refresh { await me.reemit() }
+                }
+            } else {
+                await claudeLimitsProbe.refresh { await me.reemit() }
+            }
         }
         await aggregator.refreshSignals(for: id)
         await reemit()
@@ -522,11 +583,26 @@ actor UsageEngine {
     /// and a launch finding it already on. Only the first may raise the
     /// keychain dialog — that is the whole of the rule that a permission is
     /// asked for when the module is switched on and never at boot.
-    private func startClaudeLimitsProbe(userInitiated: Bool) async {
+    ///
+    /// An imported session decides which reader runs, and exactly one does.
+    /// The choice is a stored session rather than a setting because that is
+    /// the thing the user actually changed: importing is what says "read it
+    /// this way", and forgetting is what takes it back.
+    private func startClaudeLimits(userInitiated: Bool) async {
         let me = self
-        await claudeLimitsProbe.start(userInitiated: userInitiated) {
-            await me.reemit()
+        if hasClaudeWebSession {
+            await claudeWebSource.start(userInitiated: userInitiated) { await me.reemit() }
+        } else {
+            await claudeLimitsProbe.start(userInitiated: userInitiated) { await me.reemit() }
         }
+    }
+
+    /// Stops both readers. Which one was running is not worth remembering:
+    /// stopping one that never started is a no-op, and asking would be a
+    /// second place for the answer to be wrong.
+    private func stopClaudeLimits() async {
+        await claudeLimitsProbe.stop()
+        await claudeWebSource.stop()
     }
 
     /// Rebuild the frame from what the aggregator holds right now, so a
