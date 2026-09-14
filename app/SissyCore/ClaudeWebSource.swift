@@ -63,11 +63,13 @@ actor ClaudeWebSource: SourceSignals {
         let credits: ProviderCredits?
     }
 
+    /// The imported session, read under the caller's own interaction rule.
+    static func storedSession(allowingInteraction: Bool) -> ClaudeCredentialsLookup {
+        ClaudeWebSessionStore.load(allowingInteraction: allowingInteraction)
+    }
+
     init(
-        sessionSource: @escaping @Sendable (Bool) async -> ClaudeCredentialsLookup = {
-            interactive in
-            ClaudeWebSessionStore.load(allowingInteraction: interactive)
-        },
+        sessionSource: @escaping @Sendable (Bool) async -> ClaudeCredentialsLookup = storedSession,
         fetchSource: @escaping @Sendable (String, String?) async throws -> Reading = fetch
     ) {
         self.sessionSource = sessionSource
