@@ -420,6 +420,28 @@ private func runISODateTests() {
         true
     )
     expect("timestamp rejects a non-date", UsageReaderShared.parseTimestamp("not a date"), nil)
+
+    // The fractional part comes off a line another program wrote, and it used
+    // to be accumulated into two `Int`s with no bound: nineteen digits after
+    // the point overflowed the divisor and trapped, killing the reader mid
+    // scan. The precision kept is capped and the rest of the digits are
+    // consumed, so the shape still parses to the same instant.
+    let overlongFraction = UsageReaderShared.parseISODate(
+        "2026-05-19T10:01:38.2690000000000000000Z")
+    expect("iso with an overlong fraction still parses", overlongFraction != nil, true)
+    if let d = overlongFraction {
+        expect(
+            "iso with an overlong fraction keeps its value",
+            abs(d.timeIntervalSince1970 - 1_779_184_898.269) < 0.001, true)
+    }
+    expect(
+        "iso with a bare point returns nil",
+        UsageReaderShared.parseISODate("2026-05-19T10:01:38.Z"), nil)
+    // Anything after the `Z` is not this shape, and the formatter path is
+    // where an unfamiliar one belongs.
+    expect(
+        "iso with trailing bytes returns nil",
+        UsageReaderShared.parseISODate("2026-05-19T10:01:38Z "), nil)
 }
 
 private func runAssistantMarkerTests() {

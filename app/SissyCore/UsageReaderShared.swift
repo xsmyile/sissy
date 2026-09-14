@@ -145,14 +145,21 @@ enum UsageReaderShared {
             i += 1
             var num = 0
             var div = 1
+            var digits = 0
             while i < bytes.count, bytes[i] >= 0x30, bytes[i] <= 0x39 {
-                num = num * 10 + Int(bytes[i] &- 0x30)
-                div *= 10
+                // Nanosecond precision is enough for Date. Consume the rest
+                // without accumulating unbounded integers from foreign input.
+                if digits < 9 {
+                    num = num * 10 + Int(bytes[i] &- 0x30)
+                    div *= 10
+                }
+                digits += 1
                 i += 1
             }
-            if div > 1 { frac = Double(num) / Double(div) }
+            guard digits > 0 else { return nil }
+            frac = Double(num) / Double(div)
         }
-        guard i < bytes.count, bytes[i] == 0x5A else { return nil }  // 'Z'
+        guard i == bytes.count - 1, bytes[i] == 0x5A else { return nil }  // 'Z'
         var tmStruct = tm()
         tmStruct.tm_year = Int32(year - 1900)
         tmStruct.tm_mon = Int32(month - 1)
@@ -166,10 +173,10 @@ enum UsageReaderShared {
     }
 
     /// Parses a JSON timestamp, fast path first, Foundation for the shapes it
-    /// rejects by design: an offset such as `+00:00` in place of `Z`, or more
-    /// than three fractional digits. Both occur — Anthropic's usage endpoint
-    /// sends `2026-09-10T12:20:00.061389+00:00` — so every caller needs the
-    /// fallback, which is why it lives here rather than at each call site.
+    /// rejects by design — chiefly an offset such as `+00:00` in place of `Z`,
+    /// which Anthropic's usage endpoint sends
+    /// (`2026-09-10T12:20:00.061389+00:00`). Every caller needs that fallback,
+    /// which is why it lives here rather than at each call site.
     static func parseTimestamp(_ text: String) -> Date? {
         parseISODate(text)
             ?? isoFormatter.date(from: text)
