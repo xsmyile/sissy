@@ -78,6 +78,32 @@ struct UsagePanelSnapshot: Equatable {
         /// way the combined list is. Empty for a provider whose format names
         /// no working directory.
         let projects: [ProjectRow]
+        /// What the vendor has billed against a spend cap, worded. Nil for a
+        /// provider that publishes none and for an account with nothing to
+        /// say — no cap set and nothing spent, which is every account that
+        /// has never turned credits on.
+        let credits: CreditsRow?
+    }
+
+    /// The credits block of a provider's page: what has been charged against
+    /// the user's own cap, in the account's currency.
+    ///
+    /// Worded here rather than in the view for the reason every other row is
+    /// — the arithmetic and the wording are what a test can hold — and kept
+    /// apart from the day's cost, which is Sissy's estimate of the tokens
+    /// rather than the vendor's charge.
+    struct CreditsRow: Equatable {
+        /// `€58.95 of €100.00`, or the spend alone when no cap is set.
+        let amount: String
+        /// Absent without a cap: a percentage of no ceiling is not a number.
+        let percent: Int?
+        let fraction: Double
+        /// What is left, when the cap says, and when the reading was taken.
+        let caption: String
+        /// True once the cap is reached, which is the one state on this row
+        /// worth a colour — it is headroom running out, not a verdict on how
+        /// much was spent.
+        let capReached: Bool
     }
 
     /// An account as the provider page prints it: the address on its own
@@ -244,9 +270,30 @@ struct UsagePanelSnapshot: Equatable {
                     .map { LimitsNotice(message: $0.message, action: $0.action) },
                 account: makeAccount(slice.account, now: now),
                 projects: makeProjects(
-                    slice.projects, totalTokens: slice.tokens, totalCost: slice.cost)
+                    slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
+                credits: makeCredits(slice.credits, now: now)
             )
         }
+    }
+
+    /// The credits row, or nil when there is nothing a reader would act on.
+    ///
+    /// An account with the facility switched off, and one that has spent
+    /// nothing against no cap, both get no row: the section exists to answer
+    /// "how much of my own ceiling have I used", and neither of those has a
+    /// ceiling or a spend to report. That is most accounts, and a permanent
+    /// "Not enabled" under every provider page is a row that never changes.
+    private static func makeCredits(_ credits: ProviderCredits?, now: Date) -> CreditsRow? {
+        guard let credits, credits.isEnabled, credits.hasCap || credits.usedMinor > 0 else {
+            return nil
+        }
+        return CreditsRow(
+            amount: UsageFormat.creditsAmount(credits),
+            percent: credits.hasCap ? Int((credits.fraction * 100).rounded()) : nil,
+            fraction: credits.fraction,
+            caption: UsageFormat.creditsCaption(credits, now: now),
+            capReached: credits.capReached
+        )
     }
 
     /// The account as a page prints it, or nil when the vendor answered for

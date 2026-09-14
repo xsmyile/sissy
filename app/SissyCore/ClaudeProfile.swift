@@ -1,6 +1,8 @@
 import Foundation
 
-/// Reads the subscription plan Claude Code records in its own config file.
+/// Reads what Claude Code records about the account in its own config file:
+/// the subscription plan, and the usage credits the vendor has billed against
+/// the user's spend cap.
 ///
 /// Nothing else on the Claude side answers for it. The usage endpoint the
 /// limits probe polls carries utilization buckets and no plan field
@@ -18,10 +20,15 @@ final class ClaudeProfileSource: @unchecked Sendable {
     private static let configDirEnvVar = "CLAUDE_CONFIG_DIR"
 
     /// Claude Code rewrites this file on nearly every interaction — project
-    /// history, feature counters — so a changed mtime is no evidence the plan
-    /// moved, while the plan itself changes on the order of never. The floor
-    /// keeps the safety-net poll from re-parsing 300 KB every minute.
-    private static let minimumReparseInterval: TimeInterval = 900
+    /// history, feature counters — so a changed mtime is no evidence anything
+    /// this type reads has moved. The floor is what keeps the safety-net poll
+    /// from re-parsing the file on every one of those writes.
+    ///
+    /// It is the tail's own cadence rather than the quarter of an hour the
+    /// plan alone justified: the credits move with every request, and a figure
+    /// a user checks against their spend cap is worth a 320 KB parse a minute,
+    /// which costs about a millisecond.
+    private static let minimumReparseInterval: TimeInterval = 60
 
     /// `oauthAccount.organizationType` prefixes the plan the CLI displays:
     /// `claude_max` against the bare `max` its own label switch takes.
@@ -51,6 +58,7 @@ final class ClaudeProfileSource: @unchecked Sendable {
     private let url: URL
     private let lock = NSLock()
     private var profile: Profile?
+    private var credits: ProviderCredits?
     private var lastParsedAt: Date = .distantPast
     private var lastMTime: TimeInterval = 0
 
@@ -67,6 +75,14 @@ final class ClaudeProfileSource: @unchecked Sendable {
         let tier: String?
         let account: ProviderAccount?
     }
+
+    /// Keys of the cached usage payload, which is the endpoint's answer stored
+    /// verbatim. Named here rather than inline because the same shape is what
+    /// `ClaudeLimitsProbe` parses off the wire.
+    private static let usageCacheKey = "cachedUsageUtilization"
+    private static let usageFetchedAtKey = "fetchedAtMs"
+    private static let usageBodyKey = "utilization"
+    private static let spendKey = "spend"
 
     /// Outcome of reading the config file, on the same reasoning as
     /// `ClaudeCredentialsLookup`: naming no plan and answering nothing are
@@ -99,6 +115,11 @@ final class ClaudeProfileSource: @unchecked Sendable {
     /// `oauthAccount` to read either way.
     func currentAccount() -> ProviderAccount? { lock.withLock { profile?.account } }
 
+    /// Credits the vendor has billed against the user's spend cap, as of the
+    /// CLI's last fetch. Nil for an account whose config names none, which is
+    /// every account that has never turned the facility on.
+    func currentCredits() -> ProviderCredits? { lock.withLock { credits } }
+
     /// Re-reads the file when it has changed on disk and the floor has
     /// passed. A file that has stopped naming a plan clears the held one — a
     /// signed-out CLI should not leave a stale plan on the row — while a
@@ -121,11 +142,14 @@ final class ClaudeProfileSource: @unchecked Sendable {
             let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970
         else { return }
         if parsedBefore && abs(mtime - knownMTime) < UsageReaderShared.mtimeTolerance { return }
-        guard let data = try? Data(contentsOf: url) else { return }
-        let reading = Self.read(data)
-        guard reading != .unreadable else { return }
+        guard let data = try? Data(contentsOf: url),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        let reading = Self.readProfile(root)
+        let billed = Self.readCredits(root)
         lock.withLock {
             profile = if case .found(let found) = reading { found } else { nil }
+            credits = billed
             lastParsedAt = now
             lastMTime = mtime
         }
@@ -139,6 +163,19 @@ final class ClaudeProfileSource: @unchecked Sendable {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return .unreadable
         }
+        return readProfile(root)
+    }
+
+    /// The credits block of a `.claude.json` payload, for a caller holding the
+    /// bytes rather than the parsed object.
+    static func readCredits(_ data: Data) -> ProviderCredits? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return readCredits(root)
+    }
+
+    private static func readProfile(_ root: [String: Any]) -> Reading {
         guard let account = root["oauthAccount"] as? [String: Any],
             let plan = UsageReaderShared.sanitizedPlanToken(
                 stripping(planPrefix, from: account["organizationType"] as? String)
@@ -159,6 +196,50 @@ final class ClaudeProfileSource: @unchecked Sendable {
                 )
             )
         )
+    }
+
+    /// The vendor's own answer for what it has billed against the spend cap,
+    /// read out of the payload the CLI cached from the usage endpoint.
+    ///
+    /// Foreign input, so it is parsed as a boundary: every field must be
+    /// present and the pair must agree on a currency and a scale, because a
+    /// used amount in one denomination against a cap in another is not a
+    /// reading that can be rendered — it is two readings. A shape that fails
+    /// any of that answers nil, which leaves the row off rather than putting
+    /// a number on screen that nobody can vouch for.
+    private static func readCredits(_ root: [String: Any]) -> ProviderCredits? {
+        guard let cache = root[usageCacheKey] as? [String: Any],
+            let fetchedAtMs = cache[usageFetchedAtKey] as? Double,
+            let body = cache[usageBodyKey] as? [String: Any],
+            let spend = body[spendKey] as? [String: Any],
+            let used = money(spend["used"]),
+            let cap = money(spend["limit"]),
+            used.currency == cap.currency,
+            used.exponent == cap.exponent
+        else { return nil }
+        return ProviderCredits(
+            isEnabled: spend["enabled"] as? Bool ?? true,
+            usedMinor: used.minor,
+            capMinor: cap.minor,
+            currency: used.currency,
+            exponent: used.exponent,
+            observedAt: Date(timeIntervalSince1970: fetchedAtMs / 1000)
+        )
+    }
+
+    /// One money object of the payload. The currency has to look like an
+    /// ISO 4217 code before it is carried any further: it reaches a formatter,
+    /// and a formatter handed arbitrary text out of a file is how a display
+    /// string becomes an injection.
+    private static func money(_ raw: Any?) -> (minor: Int, currency: String, exponent: Int)? {
+        guard let object = raw as? [String: Any],
+            let minor = object["amount_minor"] as? Int, minor >= 0,
+            let exponent = object["exponent"] as? Int, (0...4).contains(exponent),
+            let currency = object["currency"] as? String,
+            currency.count == 3,
+            currency.allSatisfy({ $0.isASCII && $0.isUppercase })
+        else { return nil }
+        return (minor, currency, exponent)
     }
 
     private static func stripping(_ prefix: String, from raw: String?) -> String? {

@@ -1,9 +1,9 @@
 import Foundation
 
-/// Claude Code's out-of-band facts. Neither is anything the tail parsed: the
-/// windows come from the usage endpoint the limits probe polls, and the plan
-/// from the CLI's own config file — which is why the plan is readable whether
-/// or not the user turned the probe on.
+/// Claude Code's out-of-band facts. None is anything the tail parsed: the
+/// windows come from the usage endpoint the limits probe polls, and the plan,
+/// the account and the credits from the CLI's own config file — which is why
+/// all three are readable whether or not the user turned the probe on.
 private struct ClaudeCodeSignals: SourceSignals {
     let limitsProbe: ClaudeLimitsProbe?
     let profile: ClaudeProfileSource
@@ -12,6 +12,7 @@ private struct ClaudeCodeSignals: SourceSignals {
     func currentPlan() -> String? { profile.currentPlan() }
     func currentPlanTier() -> String? { profile.currentPlanTier() }
     func currentAccount() -> ProviderAccount? { profile.currentAccount() }
+    func currentCredits() -> ProviderCredits? { profile.currentCredits() }
     func currentLimitsState() -> ProviderLimitsState {
         limitsProbe?.currentLimitsState() ?? .quiet
     }

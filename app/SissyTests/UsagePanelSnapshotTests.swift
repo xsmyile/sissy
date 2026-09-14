@@ -28,7 +28,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
         _ cost: String,
         windows: [UsageWindow] = [],
         plan: String? = nil,
-        planTier: String? = nil
+        planTier: String? = nil,
+        credits: ProviderCredits? = nil
     ) -> ProviderSlice {
         ProviderSlice(
             id: id,
@@ -36,7 +37,23 @@ final class UsagePanelSnapshotTests: XCTestCase {
             cost: Decimal(string: cost)!,
             windows: windows,
             plan: plan,
-            planTier: planTier
+            planTier: planTier,
+            credits: credits
+        )
+    }
+
+    private func credits(
+        used: Int,
+        cap: Int,
+        isEnabled: Bool = true
+    ) -> ProviderCredits {
+        ProviderCredits(
+            isEnabled: isEnabled,
+            usedMinor: used,
+            capMinor: cap,
+            currency: "EUR",
+            exponent: 2,
+            observedAt: Date(timeIntervalSince1970: 1_789_303_000)
         )
     }
 
@@ -238,6 +255,66 @@ final class UsagePanelSnapshotTests: XCTestCase {
         )
         XCTAssertEqual(snapshot.tokens, "233M")
         XCTAssertEqual(snapshot.cost, "$149")
+    }
+
+    // MARK: Credits
+
+    /// The money halves are asserted on their wording rather than their digits:
+    /// a currency formatter answers in the machine's locale, and a test that
+    /// pinned "€58.95" would pass in one region and fail in the next.
+    func testCreditsRowCarriesThePercentAndBothAmounts() throws {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice("claude-code", 100, "1.00", credits: credits(used: 5895, cap: 10_000))
+            ])
+        )
+        let row = try XCTUnwrap(snapshot.providers.first?.credits)
+        XCTAssertEqual(row.percent, 59)
+        XCTAssertEqual(row.fraction, 0.5895, accuracy: 0.0001)
+        XCTAssertFalse(row.capReached)
+        XCTAssertTrue(row.amount.contains(" of "), "the cap is missing from the headline")
+    }
+
+    /// A spend with no ceiling still answers what was spent, but nothing that
+    /// would imply a ceiling: no percentage, no bar, no amount left.
+    func testUncappedCreditsNameNoPercentAndNoCap() throws {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("claude-code", 100, "1.00", credits: credits(used: 5895, cap: 0))])
+        )
+        let row = try XCTUnwrap(snapshot.providers.first?.credits)
+        XCTAssertNil(row.percent)
+        XCTAssertEqual(row.fraction, 0)
+        XCTAssertFalse(row.amount.contains(" of "))
+        XCTAssertFalse(row.caption.contains("left"))
+    }
+
+    func testCreditsAtTheCapSaySoInsteadOfNamingWhatIsLeft() throws {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice("claude-code", 100, "1.00", credits: credits(used: 10_000, cap: 10_000))
+            ])
+        )
+        let row = try XCTUnwrap(snapshot.providers.first?.credits)
+        XCTAssertTrue(row.capReached)
+        XCTAssertTrue(row.caption.hasPrefix("Cap reached"))
+    }
+
+    /// Which is every account that has never turned credits on, and a section
+    /// that renders the same sentence forever is a row nobody reads.
+    func testNoCreditsRowWhenNothingWasSpentAgainstNoCap() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("claude-code", 100, "1.00", credits: credits(used: 0, cap: 0))])
+        )
+        XCTAssertNil(snapshot.providers.first?.credits)
+    }
+
+    func testNoCreditsRowWhenTheVendorReportsTheFacilityOff() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice("claude-code", 100, "1.00", credits: credits(used: 5895, cap: 10_000, isEnabled: false))
+            ])
+        )
+        XCTAssertNil(snapshot.providers.first?.credits)
     }
 
     // MARK: Provider rows

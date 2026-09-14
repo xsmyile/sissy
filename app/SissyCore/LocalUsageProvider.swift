@@ -42,6 +42,7 @@ protocol SourceSignals: Sendable {
     func currentPlanTier() -> String?
     func currentAccount() -> ProviderAccount?
     func currentLimitsState() -> ProviderLimitsState
+    func currentCredits() -> ProviderCredits?
 }
 
 extension SourceSignals {
@@ -50,6 +51,7 @@ extension SourceSignals {
     func currentPlanTier() -> String? { nil }
     func currentAccount() -> ProviderAccount? { nil }
     func currentLimitsState() -> ProviderLimitsState { .quiet }
+    func currentCredits() -> ProviderCredits? { nil }
 }
 
 /// The facts `LocalUsageProvider` copies out of its adapter at init, so it can
@@ -312,6 +314,8 @@ actor LocalUsageProvider: UsageProvider {
     nonisolated func currentAccount() -> ProviderAccount? { signals.currentAccount() }
 
     nonisolated func currentLimitsState() -> ProviderLimitsState { signals.currentLimitsState() }
+
+    nonisolated func currentCredits() -> ProviderCredits? { signals.currentCredits() }
 
     /// Hands the adapter the chance to re-read its own out-of-band files. The
     /// engine re-emits afterwards, so nothing is published from here.

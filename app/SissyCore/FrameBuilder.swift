@@ -131,6 +131,57 @@ struct ProviderAccount: Sendable, Equatable {
     }
 }
 
+/// Money a vendor has billed against a spend cap the user set, in the
+/// account's own currency.
+///
+/// Kept in minor units with the exponent the vendor stated rather than
+/// converted on the way in: the currency is the account's, not the machine's,
+/// and a division done here would be a rounding nobody asked for. It is
+/// deliberately not comparable with `ProviderSlice.cost`, which is Sissy's own
+/// estimate of what the metered tokens were worth — one is what was charged,
+/// the other what was counted, and the panel keeps them apart.
+struct ProviderCredits: Sendable, Equatable {
+    /// False when the vendor reports the facility switched off, which renders
+    /// as a sentence rather than an empty gauge.
+    let isEnabled: Bool
+    let usedMinor: Int
+    /// The cap, in the same units. Zero when the account has none set, which
+    /// is a spend with no ceiling rather than a ceiling of nothing.
+    let capMinor: Int
+    /// ISO 4217 code as the vendor gave it (`EUR`), so the app formats in the
+    /// account's currency instead of assuming the machine's.
+    let currency: String
+    /// Where the minor units put the decimal point. Read rather than assumed
+    /// to be 2: not every currency has hundredths.
+    let exponent: Int
+    /// When the vendor last answered, as the vendor stamped it — not when the
+    /// file was read. A reading is shown with this beside it, because a cached
+    /// one is the ordinary case and a number with no age is a claim of being
+    /// current.
+    let observedAt: Date
+
+    var hasCap: Bool { capMinor > 0 }
+    var capReached: Bool { hasCap && usedMinor >= capMinor }
+    /// Zero without a cap: a bar drawn against no ceiling would be inventing
+    /// one.
+    var fraction: Double {
+        guard hasCap else { return 0 }
+        return min(1, Double(usedMinor) / Double(capMinor))
+    }
+
+    /// The amount as money, for a formatter that takes a `Decimal`.
+    func amount(_ minor: Int) -> Decimal {
+        var scaled = Decimal(minor)
+        var result = Decimal()
+        NSDecimalMultiplyByPowerOf10(&result, &scaled, Int16(-exponent), .plain)
+        return result
+    }
+
+    var used: Decimal { amount(usedMinor) }
+    var cap: Decimal { amount(capMinor) }
+    var remaining: Decimal { amount(max(0, capMinor - usedMinor)) }
+}
+
 struct ProviderSlice: Sendable, Equatable, Identifiable {
     let id: String
     let tokens: Int
@@ -146,6 +197,10 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     /// Limit tier the plan is metered at (`max_5x`), for the one vendor that
     /// publishes one. Only ever set alongside `plan`.
     let planTier: String?
+    /// What the vendor has billed against a spend cap, for the providers that
+    /// publish one. Nil for every other, and for an account that has never
+    /// enabled the facility.
+    let credits: ProviderCredits?
     /// How this provider's day splits across projects. Empty for a provider
     /// whose format names no working directory, which reads the same as a
     /// provider that has spent nothing.
@@ -163,6 +218,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         windows: [UsageWindow] = [],
         plan: String? = nil,
         planTier: String? = nil,
+        credits: ProviderCredits? = nil,
         projects: [ProjectTotals] = [],
         account: ProviderAccount? = nil,
         limitsState: ProviderLimitsState = .quiet
@@ -173,6 +229,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         self.windows = windows
         self.plan = plan
         self.planTier = plan == nil ? nil : planTier
+        self.credits = credits
         self.projects = projects
         self.account = account
         self.limitsState = limitsState

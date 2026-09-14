@@ -76,6 +76,12 @@ protocol UsageProvider: AnyObject, Sendable {
     /// the emitting provider still holds its actor.
     nonisolated func currentAccount() -> ProviderAccount?
 
+    /// What the vendor has billed against the user's spend cap, for a provider
+    /// that publishes one. Nil for every other.
+    ///
+    /// Nonisolated for the reason the windows are.
+    nonisolated func currentCredits() -> ProviderCredits?
+
     /// Why this provider's windows are missing, when they are. `.quiet` for a
     /// provider that publishes no limits and for one whose limits are fine.
     ///
@@ -117,5 +123,6 @@ extension UsageProvider {
     nonisolated func currentPlanTier() -> String? { nil }
     nonisolated func currentAccount() -> ProviderAccount? { nil }
     nonisolated func currentLimitsState() -> ProviderLimitsState { .quiet }
+    nonisolated func currentCredits() -> ProviderCredits? { nil }
     nonisolated func currentProjects() -> [ProjectTotals] { [] }
 }

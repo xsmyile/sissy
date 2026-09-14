@@ -11,6 +11,19 @@ struct ScanEntry: Encodable {
     /// closed before its first `token_count` event.
     let plan: String?
     let planTier: String?
+    /// What the vendor has billed against the user's spend cap, when its own
+    /// files say. Present so the reading can be checked without launching the
+    /// app — it is the one number here that comes from neither the logs nor
+    /// the pricing tables.
+    let credits: ScanCredits?
+}
+
+/// The credits block of a `--scan` entry, in the account's own currency.
+struct ScanCredits: Encodable {
+    let used: String
+    let cap: String
+    let currency: String
+    let observedAt: Date
 }
 
 let args = CommandLine.arguments
@@ -149,7 +162,14 @@ if args.contains("--scan") {
                 cost: NSDecimalNumber(decimal: today.totalCost).stringValue,
                 filesWatched: p.filesWatched(),
                 plan: p.currentPlan(),
-                planTier: p.currentPlanTier()
+                planTier: p.currentPlanTier(),
+                credits: p.currentCredits().map {
+                    ScanCredits(
+                        used: NSDecimalNumber(decimal: $0.used).stringValue,
+                        cap: NSDecimalNumber(decimal: $0.cap).stringValue,
+                        currency: $0.currency,
+                        observedAt: $0.observedAt)
+                }
             )
             await p.stop()
         }

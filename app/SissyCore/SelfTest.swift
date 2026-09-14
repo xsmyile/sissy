@@ -1043,6 +1043,75 @@ func runClaudeLimitsParseTests() {
         .unreadable
     )
 
+    // Measured shape of `cachedUsageUtilization` in `~/.claude.json`, which is
+    // the usage endpoint's own answer cached by the CLI. Read from disk, so it
+    // costs no keychain prompt and no network — the whole reason the credits
+    // are sourced here rather than from the probe.
+    let creditsBlob = Data(
+        #"""
+        {"cachedUsageUtilization":{"fetchedAtMs":1789303000000,"utilization":
+        {"spend":{"used":{"amount_minor":5895,"currency":"EUR","exponent":2},
+        "limit":{"amount_minor":10000,"currency":"EUR","exponent":2},
+        "enabled":true}}}}
+        """#.replacingOccurrences(of: "\n", with: "").utf8
+    )
+    let billed = ClaudeProfileSource.readCredits(creditsBlob)
+    expect("credits used", billed?.usedMinor, 5895)
+    expect("credits cap", billed?.capMinor, 10000)
+    expect("credits currency is the account's", billed?.currency, "EUR")
+    expect("credits amount scales by the stated exponent", billed?.used, Decimal(string: "58.95")!)
+    expect("credits remaining", billed?.remaining, Decimal(string: "41.05")!)
+    expect("credits cap not reached", billed?.capReached, false)
+    expect(
+        "credits carry the vendor's own timestamp, not the file's",
+        billed?.observedAt,
+        Date(timeIntervalSince1970: 1_789_303_000)
+    )
+
+    // A used amount in one currency against a cap in another is two readings,
+    // not one, and there is no honest way to draw it as a single bar.
+    let mixedCurrency = Data(
+        #"{"cachedUsageUtilization":{"fetchedAtMs":1,"utilization":{"spend":{"used":{"amount_minor":1,"currency":"EUR","exponent":2},"limit":{"amount_minor":2,"currency":"USD","exponent":2}}}}}"#
+            .utf8
+    )
+    expect(
+        "credits with two currencies are refused",
+        ClaudeProfileSource.readCredits(mixedCurrency) == nil,
+        true
+    )
+
+    // The code reaches a currency formatter. Anything that is not an ISO 4217
+    // code stops at the boundary rather than inside it.
+    let badCurrency = Data(
+        #"{"cachedUsageUtilization":{"fetchedAtMs":1,"utilization":{"spend":{"used":{"amount_minor":1,"currency":"€","exponent":2},"limit":{"amount_minor":2,"currency":"€","exponent":2}}}}}"#
+            .utf8
+    )
+    expect(
+        "credits with a non-ISO currency are refused",
+        ClaudeProfileSource.readCredits(badCurrency) == nil,
+        true
+    )
+
+    expect(
+        "a config naming no credits answers none",
+        ClaudeProfileSource.readCredits(Data(#"{"oauthAccount":{}}"#.utf8)) == nil,
+        true
+    )
+
+    // A spend with no ceiling draws no bar: a fraction of nothing would be
+    // inventing the cap the account does not have.
+    let uncapped = ProviderCredits(
+        isEnabled: true, usedMinor: 500, capMinor: 0, currency: "EUR", exponent: 2,
+        observedAt: Date(timeIntervalSince1970: 0))
+    expect("an uncapped spend has no fraction", uncapped.fraction, 0)
+    expect("an uncapped spend has not reached a cap", uncapped.capReached, false)
+
+    let spent = ProviderCredits(
+        isEnabled: true, usedMinor: 10_500, capMinor: 10_000, currency: "EUR", exponent: 2,
+        observedAt: Date(timeIntervalSince1970: 0))
+    expect("a spend past the cap reads as reached", spent.capReached, true)
+    expect("a spend past the cap does not overfill the bar", spent.fraction, 1)
+
     // Measured shape of `~/.codex/auth.json`: the plan is a claim inside the
     // id_token, under a namespace key spelled as a URL. The fixture's payload
     // is `{"https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}`, and

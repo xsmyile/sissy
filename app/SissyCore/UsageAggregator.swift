@@ -143,6 +143,7 @@ actor UsageAggregator {
                 windows: p.currentWindows(),
                 plan: p.currentPlan(),
                 planTier: p.currentPlanTier(),
+                credits: p.currentCredits(),
                 projects: p.currentProjects(),
                 account: p.currentAccount(),
                 limitsState: p.currentLimitsState()

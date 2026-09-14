@@ -25,6 +25,11 @@ struct PanelProviderPage: View {
             Divider()
             limits
 
+            if let credits = row.credits {
+                Divider()
+                self.credits(credits)
+            }
+
             Divider()
             today
 
@@ -116,6 +121,49 @@ struct PanelProviderPage: View {
                         .opacity(index == 0 ? 1 : PanelMetrics.secondaryWindowOpacity)
                 }
             }
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: Credits
+
+    /// What the vendor has charged against the cap the user set, which is the
+    /// figure people open the browser for.
+    ///
+    /// It sits under the limits because that is where it belongs: credits are
+    /// what covers the work once a plan's window runs out, so the row above
+    /// reading 100% is the reason this one is moving at all.
+    ///
+    /// The colour is reserved for a reached cap. That is the same axis the
+    /// limits are on — headroom running out — and not a judgement on how much
+    /// was spent, which is a line Sissy does not draw.
+    private func credits(_ credits: UsagePanelSnapshot.CreditsRow) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                SectionLabel(text: "Credits")
+                Spacer(minLength: 0)
+                Text(credits.amount)
+                    .font(.system(size: 12))
+                    .monospacedDigit()
+                    .foregroundStyle(credits.capReached ? Color.red : .primary)
+            }
+
+            HStack(spacing: 8) {
+                ShareBar(share: credits.fraction, tint: credits.capReached ? .red : tint)
+
+                if let percent = credits.percent {
+                    Text("\(percent)%")
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .frame(width: 32, alignment: .trailing)
+                }
+            }
+
+            Text(credits.caption)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)

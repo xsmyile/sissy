@@ -467,4 +467,56 @@ enum UsageFormat {
     static let projectsUnattributedReason =
         "Counted in the total, but its working directory names no repository — "
         + "a CLI's own scratch directory, or a checkout deleted since."
+    /// The credits headline: what has been charged, against the cap when one
+    /// is set.
+    ///
+    /// Both halves go through the account's own currency rather than the
+    /// machine's, because the cap is a figure the user typed on the vendor's
+    /// site and a euro rendered as a dollar is a different number.
+    static func creditsAmount(_ credits: ProviderCredits) -> String {
+        let used = money(credits.used, currency: credits.currency)
+        guard credits.hasCap else { return used }
+        return "\(used) of \(money(credits.cap, currency: credits.currency))"
+    }
+
+    /// The line under the credits bar: what is left, and when the vendor last
+    /// answered.
+    ///
+    /// The age is not decoration. The figure is read out of the cache the CLI
+    /// keeps, so it is only ever as current as that CLI's last fetch, and a
+    /// spend shown without one is a claim of being live that this source
+    /// cannot make.
+    static func creditsCaption(
+        _ credits: ProviderCredits,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        var parts: [String] = []
+        if credits.capReached {
+            parts.append("Cap reached")
+        } else if credits.hasCap {
+            parts.append("\(money(credits.remaining, currency: credits.currency)) left")
+        }
+        parts.append(observedLabel(credits.observedAt, now: now, calendar: calendar))
+        return parts.joined(separator: " · ")
+    }
+
+    /// When a cached reading was taken. A clock time for today, the weekday
+    /// and the time once it is not — the same cut `resetLabel` makes, but
+    /// keeping the clock, because this column is the width of a caption and
+    /// "how old" is the whole point of it.
+    static func observedLabel(
+        _ observedAt: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        if calendar.isDate(observedAt, inSameDayAs: now) {
+            return observedAt.formatted(.dateTime.hour().minute())
+        }
+        return observedAt.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+    }
+
+    private static func money(_ amount: Decimal, currency: String) -> String {
+        amount.formatted(.currency(code: currency).precision(.fractionLength(2)))
+    }
 }
