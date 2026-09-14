@@ -43,6 +43,13 @@ case $dir in
 esac
 [ -d "$dir" ] || exit 0
 
+# git answers with the physical path, so the comparison below has to be made in
+# the same terms: on macOS /tmp and /var are symlinks, and a session that names
+# its directory through one would otherwise fail the ancestor test and record
+# nothing at all.
+dir=$(cd "$dir" 2>/dev/null && pwd -P) || exit 0
+[ -n "$dir" ] || exit 0
+
 # `env -i` is what drops an inherited GIT_DIR or GIT_WORK_TREE, which otherwise
 # beat `-C` and answer for a repository the session was never in. HOME stays so
 # the user's own git config — `safe.directory` above all — still applies.

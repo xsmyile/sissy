@@ -16,8 +16,13 @@ final class SessionHookScriptTests: XCTestCase {
         script = try XCTUnwrap(
             Bundle.main.url(forResource: "session-start", withExtension: "sh"),
             "the hook script has to ship inside the app bundle")
-        root = FileManager.default.temporaryDirectory
+        let base = FileManager.default.temporaryDirectory
             .appendingPathComponent("sissy-hook-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        // Physical, the way `pwd -P` and git both answer: the temporary
+        // directory sits under /var, which is a symlink, and Foundation's own
+        // standardisation does not reliably resolve it.
+        root = URL(fileURLWithPath: Self.physicalPath(of: base))
         hooks = root.appendingPathComponent("state/hooks")
         inbox = ProjectLedger.inboxURL(in: root.appendingPathComponent("state"))
         try FileManager.default.createDirectory(at: hooks, withIntermediateDirectories: true)
@@ -33,7 +38,7 @@ final class SessionHookScriptTests: XCTestCase {
     func testARepositoryAnswersItself() throws {
         let repository = try makeRepository("sissy")
 
-        run(in: repository.path)
+        try run(in: repository.path)
 
         XCTAssertEqual(recorded(), [ProjectCheckout(directory: repository.path, project: repository.path)])
     }
@@ -44,7 +49,7 @@ final class SessionHookScriptTests: XCTestCase {
         let repository = try makeRepository("sissy")
         let worktree = try makeWorktree("grampus", of: repository)
 
-        run(in: worktree.path)
+        try run(in: worktree.path)
 
         XCTAssertEqual(recorded(), [ProjectCheckout(directory: worktree.path, project: repository.path)])
     }
@@ -58,7 +63,7 @@ final class SessionHookScriptTests: XCTestCase {
         let nested = worktree.appendingPathComponent("app/SissyCore")
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
 
-        run(in: nested.path)
+        try run(in: nested.path)
 
         XCTAssertEqual(recorded(), [ProjectCheckout(directory: worktree.path, project: repository.path)])
     }
@@ -67,7 +72,7 @@ final class SessionHookScriptTests: XCTestCase {
     func testThePairSurvivesTheWorktreeItNames() throws {
         let repository = try makeRepository("sissy")
         let worktree = try makeWorktree("grampus", of: repository)
-        run(in: worktree.path)
+        try run(in: worktree.path)
 
         try FileManager.default.removeItem(at: worktree)
 
@@ -81,7 +86,7 @@ final class SessionHookScriptTests: XCTestCase {
         let plain = root.appendingPathComponent("elsewhere")
         try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)
 
-        run(in: plain.path)
+        try run(in: plain.path)
 
         XCTAssertEqual(recorded(), [])
     }
@@ -93,7 +98,7 @@ final class SessionHookScriptTests: XCTestCase {
         let repository = try makeRepository("hostile")
         git(["config", "core.worktree", "/Users/somebody/Clients/Confidential"], in: repository)
 
-        run(in: repository.path)
+        try run(in: repository.path)
 
         XCTAssertEqual(recorded(), [])
     }
@@ -104,7 +109,7 @@ final class SessionHookScriptTests: XCTestCase {
         let repository = try makeRepository("sissy")
         let other = try makeRepository("elsewhere")
 
-        run(
+        try run(
             in: repository.path,
             environment: [
                 "GIT_DIR": other.appendingPathComponent(".git").path,
@@ -120,7 +125,7 @@ final class SessionHookScriptTests: XCTestCase {
         let repository = try makeRepository("sissy")
         try FileManager.default.removeItem(at: inbox)
 
-        XCTAssertEqual(run(in: repository.path).status, 0)
+        XCTAssertEqual(try run(in: repository.path).status, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: inbox.path))
     }
 
@@ -129,9 +134,9 @@ final class SessionHookScriptTests: XCTestCase {
     func testTheScriptIsSilentAndAlwaysSucceeds() throws {
         let repository = try makeRepository("sissy")
 
-        let quiet = run(in: repository.path)
-        let noRepository = run(in: "/")
-        let missing = run(in: root.appendingPathComponent("never").path)
+        let quiet = try run(in: repository.path)
+        let noRepository = try run(in: "/")
+        let missing = try run(in: root.appendingPathComponent("never").path)
 
         for outcome in [quiet, noRepository, missing] {
             XCTAssertEqual(outcome.status, 0)
@@ -145,7 +150,7 @@ final class SessionHookScriptTests: XCTestCase {
     func testAnUndecodableWorkingDirectoryIsNotGuessedAt() throws {
         let repository = try makeRepository("sissy")
 
-        run(payload: #"{"cwd":"/Users/davide\/dev/sissy"}"#, from: repository.path)
+        try run(payload: #"{"cwd":"/Users/davide\/dev/sissy"}"#, from: repository.path)
 
         XCTAssertEqual(recorded(), [ProjectCheckout(directory: repository.path, project: repository.path)])
     }
@@ -164,20 +169,29 @@ final class SessionHookScriptTests: XCTestCase {
     @discardableResult
     private func run(
         in directory: String, environment: [String: String] = [:]
-    ) -> (status: Int32, output: String) {
-        run(
+    ) throws -> (status: Int32, output: String) {
+        try run(
             payload: #"{"session_id":"s","cwd":"\#(directory)","hook_event_name":"SessionStart"}"#,
             from: directory, environment: environment)
     }
 
+    /// The hook is launched from a directory that exists, because that is what
+    /// a CLI does — a working directory that has gone is something the payload
+    /// says, not somewhere a process can be started. Launch failures are
+    /// thrown rather than swallowed: a `Process` that never ran leaves the
+    /// pipe's write end open in this process, and reading it to EOF then waits
+    /// forever.
     @discardableResult
     private func run(
         payload: String, from directory: String, environment: [String: String] = [:]
-    ) -> (status: Int32, output: String) {
+    ) throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [hooks.appendingPathComponent("session-start.sh").path]
-        process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        process.currentDirectoryURL = URL(
+            fileURLWithPath: FileManager.default.fileExists(atPath: directory)
+                ? directory
+                : root.path)
         process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in
             new
         }
@@ -186,12 +200,22 @@ final class SessionHookScriptTests: XCTestCase {
         process.standardOutput = output
         process.standardError = Pipe()
         process.standardInput = input
-        try? process.run()
+        try process.run()
         input.fileHandleForWriting.write(Data(payload.utf8))
         try? input.fileHandleForWriting.close()
         let captured = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         return (process.terminationStatus, String(decoding: captured, as: UTF8.self))
+    }
+
+    /// Foundation's own standardisation is not used anywhere in here: it strips
+    /// a `/private` prefix only when the path still exists, so a worktree that
+    /// has just been deleted would normalise differently from the same path a
+    /// moment earlier. `root` is physical already, so nothing needs to.
+    private static func physicalPath(of url: URL) -> String {
+        guard let resolved = realpath(url.path, nil) else { return url.path }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     private func makeRepository(_ name: String) throws -> URL {
@@ -203,13 +227,13 @@ final class SessionHookScriptTests: XCTestCase {
                 "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "--quiet",
                 "--allow-empty", "-m", "init",
             ], in: repository)
-        return repository.standardizedFileURL
+        return repository
     }
 
     private func makeWorktree(_ name: String, of repository: URL) throws -> URL {
         let worktree = root.appendingPathComponent(name)
         git(["worktree", "add", "--quiet", "--detach", worktree.path], in: repository)
-        return worktree.standardizedFileURL
+        return worktree
     }
 
     private func git(_ arguments: [String], in directory: URL) {
