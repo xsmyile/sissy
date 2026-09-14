@@ -38,6 +38,20 @@ final class CodexAdapter: SourceAdapter {
     /// fresher window.
     private var latestWindowsAt: Date?
 
+    /// Digest of the identity claims `auth.json` last named, persisted so a
+    /// relaunch can still tell "the same account" from "a different one". It
+    /// is a digest rather than the claims because nothing but the plan token
+    /// may leave that file.
+    private var accountFingerprint: String?
+    /// Whether `auth.json` has ever been read successfully. Separates an
+    /// install that never had one — a log-only Codex — from an account that
+    /// has just been signed out, which is a reading and clears the row.
+    private var hasReadAuth = false
+    /// When the signed-in identity last changed. Windows stamped before it
+    /// belong to the account that left, and a cold scan re-reading old
+    /// rollouts must not publish them under the new one.
+    private var identityBoundaryAt: Date?
+
     /// Per-file "last seen model id" so a `token_count` event resolves to the
     /// `turn_context.payload.model` that immediately preceded it in the same
     /// rollout. Codex bumps the model mid-session if the user reassigns the
@@ -101,7 +115,7 @@ final class CodexAdapter: SourceAdapter {
     }
 
     /// Takes the account from Codex's auth file, and the plan too when
-    /// neither the snapshot nor a rollout has named one yet.
+    /// nothing has named one yet.
     ///
     /// Without this a resumed reader shows the Codex row with no plan: the
     /// offsets are at EOF, `plan_type` rides events that were already
@@ -109,26 +123,70 @@ final class CodexAdapter: SourceAdapter {
     /// answers immediately, and the first rollout event that lands overwrites
     /// it — the CLI restamps the claim per turn, this file only on a token
     /// refresh.
-    ///
-    /// The account is stored unconditionally because this file is its only
-    /// source: no rollout line carries an address, and nothing persists one.
-    /// It is also why it cannot make this return true, which means "the next
-    /// snapshot has something new to carry".
-    func prepareToStart() -> Bool { readAuthFile() }
+    func prepareToStart() -> Bool { readAuthFile(userInitiated: false) }
 
     /// The same read, on demand. Codex's *limits* cannot be refreshed at all —
     /// they ride the CLI's own `token_count` events and a reader at EOF has
     /// nothing left to re-read — so this is the whole of what a refresh on
     /// this provider can honestly do, and the surface has to say so.
-    func refreshOutOfBandState() -> Bool { readAuthFile() }
+    ///
+    /// A user asking also lets the file's plan claim win over the one the last
+    /// turn published: that is the gesture someone makes after switching plan,
+    /// and the alternative is a badge that stays wrong until the next turn.
+    func refreshOutOfBandState() -> Bool { readAuthFile(userInitiated: true) }
 
-    private func readAuthFile() -> Bool {
+    /// Reads `auth.json` and republishes the identity it names.
+    ///
+    /// Four outcomes, and only two of them are answers. A file that will not
+    /// parse leaves everything as it was — a half-written file is not a
+    /// logout. A file that is simply absent is a logout only once one has been
+    /// read before; on a machine that never had one it is a Codex used through
+    /// an API key, which has no account to show. A signed-out or key-mode file
+    /// clears the row, and a *demonstrably different* account clears the
+    /// windows with it, because a percentage metered against somebody else's
+    /// plan is worse than no gauge at all.
+    ///
+    /// Returns whether the next snapshot has something new to carry.
+    private func readAuthFile(userInitiated: Bool) -> Bool {
+        let before = published.load()
+        let previousFingerprint = accountFingerprint
         let url = CodexAuthSource.defaultURL(sessionsDir: codexDir)
-        guard let identity = CodexAuthSource.load(at: url) else { return false }
-        published.update { $0.account = identity.account }
-        guard published.load().plan == nil, let plan = identity.plan else { return false }
-        published.update { $0.plan = plan }
-        return true
+        switch CodexAuthSource.read(at: url) {
+        case .unreadable:
+            return false
+        case .missing where !hasReadAuth && accountFingerprint == nil:
+            // A log-only install may never have had a local auth file.
+            return false
+        case .missing, .signedOut:
+            published.store(ProviderSignals())
+            latestWindowsAt = nil
+            accountFingerprint = nil
+            identityBoundaryAt = Date()
+        case .found(let identity):
+            // A token that named none of the claims says nothing about whose
+            // it is, which is not the same as saying it is somebody else's.
+            // Only two identities that are both known and different are a
+            // change; an unknown one leaves the last known reading standing,
+            // for the reason the project ledger keeps a checkout it can no
+            // longer walk to — remembering a reading is not inventing one.
+            let changedAccount =
+                identity.fingerprint != nil && accountFingerprint != nil
+                && accountFingerprint != identity.fingerprint
+            if changedAccount {
+                published.store(ProviderSignals())
+                latestWindowsAt = nil
+                identityBoundaryAt = Date()
+            }
+            published.update {
+                $0.account = identity.account
+                if userInitiated || changedAccount || $0.plan == nil { $0.plan = identity.plan }
+            }
+            if let fingerprint = identity.fingerprint { accountFingerprint = fingerprint }
+        }
+        hasReadAuth = true
+        let after = published.load()
+        return before.plan != after.plan || before.windows != after.windows
+            || previousFingerprint != accountFingerprint
     }
 
     /// Bytes for `"token_count"`. Same prefilter idea as the assistant marker
@@ -233,6 +291,7 @@ final class CodexAdapter: SourceAdapter {
 
     private func captureWindows(_ raw: Any?, observedAt: Date) {
         guard let dict = raw as? [String: Any] else { return }
+        if let boundary = identityBoundaryAt, observedAt < boundary { return }
         if let seen = latestWindowsAt, seen >= observedAt { return }
         // Ahead of the window parse and outside its `isEmpty` bail: a rollout
         // whose buckets did not parse still named the plan, and the plan is
@@ -372,6 +431,7 @@ final class CodexAdapter: SourceAdapter {
             fileModels[fileURL] = entry.model
             fileProjects[fileURL] = entry.project.flatMap { projects.project(for: $0) }
         }
+        accountFingerprint = resume.accountFingerprint
         published.update { $0.plan = resume.plan }
         guard !resume.rateLimitWindows.isEmpty else { return true }
         published.update {
@@ -403,7 +463,8 @@ final class CodexAdapter: SourceAdapter {
             // one that still has seconds left.
             rateLimitWindows: published.load().windows,
             rateLimitWindowsAt: latestWindowsAt,
-            plan: published.load().plan
+            plan: published.load().plan,
+            accountFingerprint: accountFingerprint
         )
     }
 }

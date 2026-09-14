@@ -116,6 +116,13 @@ struct UsageStateSnapshot: Codable, Equatable {
         /// optional block — a snapshot from before this field simply resumes
         /// without one.
         var plan: String?
+        /// Digest of the claims naming the account these windows and this plan
+        /// were metered against. Carried so a relaunch can tell the same
+        /// account from a different one — without it, signing into another
+        /// seat left the previous one's gauges on the row until its buckets
+        /// outlived their own resets. Nil for a snapshot from before the
+        /// field, and for a token that named none of the claims.
+        var accountFingerprint: String?
     }
 
     struct FileModel: Codable, Equatable {
