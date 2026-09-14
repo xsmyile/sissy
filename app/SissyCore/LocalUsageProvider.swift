@@ -108,7 +108,10 @@ protocol SourceAdapter: AnyObject {
     /// changed something the next snapshot should carry.
     func prepareToStart() -> Bool
 
-    /// Ran at the top of every poll, for out-of-band state that goes stale.
+    /// Ran at the top of every wake — the FSEvents batch a turn raises as well
+    /// as the safety-net poll — for out-of-band state that goes stale. The
+    /// adapter decides what that costs: this runs at whatever rate the CLI
+    /// writes, so anything expensive behind it needs its own floor.
     func willPoll()
 
     /// Re-reads the out-of-band state on demand, for the one surface that
@@ -412,6 +415,13 @@ actor LocalUsageProvider: UsageProvider {
         // One carrying `rootChanged` would otherwise build a fresh stream that
         // nothing is left to stop.
         guard lifecycle == .running else { return }
+        // FSEvents is the primary wake and the poll only the safety net, so
+        // re-reading the out-of-band files on the poll alone left every frame a
+        // turn produced carrying fresh tokens beside a plan and a credits
+        // figure from up to two polls back: the adapter's own floor is the poll
+        // interval, which made it skip alternate polls. Driven from here the
+        // floor sets that cadence rather than aliasing against it.
+        adapter.willPoll()
         if rootChanged {
             fsWatcher?.stop()
             fsWatcher = nil
