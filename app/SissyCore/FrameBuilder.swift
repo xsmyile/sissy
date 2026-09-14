@@ -19,7 +19,12 @@ struct UsageWindow: Sendable, Equatable, Codable {
 
     let minutes: Int
     let usedPercent: Double
-    let resetsAt: Date
+    /// When the window rolls over. Nil for a window the vendor reports as
+    /// inactive: measured, a session bucket at 0% arrives with a null reset
+    /// until the first turn of the period. That is a window with nothing left
+    /// to count down to, not a window that does not exist, and dropping it
+    /// took the whole session row off the panel until someone used it.
+    let resetsAt: Date?
     /// What the window meters, when it is not the whole plan — a model name
     /// as the vendor spells it for display. Nil is the plan-wide window.
     ///
@@ -37,9 +42,9 @@ struct UsageWindow: Sendable, Equatable, Codable {
     /// render. It validates rather than substitutes — an overage above 100%
     /// is real and the panel renders it — so a rejected bucket drops its one
     /// gauge, exactly as a bucket missing half its fields already does.
-    init?(minutes: Int, usedPercent: Double, resetsAt: Date, scope: String? = nil) {
+    init?(minutes: Int, usedPercent: Double, resetsAt: Date?, scope: String? = nil) {
         guard usedPercent.isFinite, (0...Self.maxUsedPercent).contains(usedPercent),
-            resetsAt.timeIntervalSince1970.isFinite
+            resetsAt.map(\.timeIntervalSince1970.isFinite) ?? true
         else { return nil }
         self.minutes = minutes
         self.usedPercent = usedPercent

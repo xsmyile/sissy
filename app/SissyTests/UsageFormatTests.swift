@@ -153,12 +153,21 @@ final class UsageFormatTests: XCTestCase {
         )
     }
 
-    func testWindowLabelNamesTheSessionWindowInHours() {
-        XCTAssertEqual(UsageFormat.windowLabel(minutes: 300), "5h")
+    /// The row leads with the label now, so the two periods both vendors
+    /// meter get the word they are known by rather than their length.
+    func testWindowLabelNamesTheSessionWindow() {
+        XCTAssertEqual(UsageFormat.windowLabel(minutes: 300), "Session")
     }
 
-    func testWindowLabelNamesTheWeeklyWindowInDays() {
-        XCTAssertEqual(UsageFormat.windowLabel(minutes: 10080), "7d")
+    func testWindowLabelNamesTheWeeklyWindow() {
+        XCTAssertEqual(UsageFormat.windowLabel(minutes: 10080), "Weekly")
+    }
+
+    /// A window that meters one model says which, so two weekly windows do
+    /// not read as one.
+    func testWindowLabelCarriesTheScope() {
+        XCTAssertEqual(
+            UsageFormat.windowLabel(minutes: 10080, scope: "Fable"), "Weekly · Fable")
     }
 
     func testWindowLabelFallsBackToMinutesForAnUnevenWindow() {

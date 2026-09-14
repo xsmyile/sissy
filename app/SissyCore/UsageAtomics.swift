@@ -64,7 +64,10 @@ struct ProviderSignals: Sendable, Equatable {
     /// first would take the emphasis from the session one that binds sooner.
     func live(now: Date = Date()) -> Self {
         var copy = self
-        copy.windows = windows.filter { $0.resetsAt > now }.sorted { $0.minutes < $1.minutes }
+        copy.windows =
+            windows
+            .filter { $0.resetsAt.map { $0 > now } ?? true }
+            .sorted { ($0.minutes, $0.scope ?? "") < ($1.minutes, $1.scope ?? "") }
         return copy
     }
 }

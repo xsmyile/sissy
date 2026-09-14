@@ -38,13 +38,24 @@ final class ClaudeUsagePayloadTests: XCTestCase {
         XCTAssertEqual(Set(windows.map(\.minutes)), [10_080])
         XCTAssertEqual(
             Set(windows.map { UsageFormat.windowLabel(minutes: $0.minutes, scope: $0.scope) }),
-            ["7d", "7d Fable"])
+            ["Weekly", "Weekly · Fable"])
     }
 
-    /// An inactive bucket arrives with a null reset and cannot be drawn.
-    func testABucketWithNoResetIsDropped() {
+    /// A bucket nobody has started arrives with a null reset. That is a
+    /// window at zero, not a window that does not exist — dropping it took
+    /// the session row off the panel entirely until someone used it.
+    func testABucketWithNoResetIsStillAWindow() {
         let windows = ClaudeUsagePayload.windows([
             "limits": [["kind": "session", "percent": 0, "resets_at": NSNull()]]
+        ])
+        XCTAssertEqual(windows.map(\.minutes), [300])
+        XCTAssertNil(windows.first?.resetsAt)
+    }
+
+    /// A bucket with no percentage has nothing to draw and is dropped.
+    func testABucketWithNoPercentageIsDropped() {
+        let windows = ClaudeUsagePayload.windows([
+            "limits": [["kind": "session", "resets_at": reset]]
         ])
         XCTAssertTrue(windows.isEmpty)
     }
