@@ -5,7 +5,6 @@ import XCTest
 final class UsagePanelSnapshotTests: XCTestCase {
     private func frame(
         providers: [ProviderSlice],
-        prev: Int? = nil,
         tokens: String = "26K",
         cost: String = "0.09",
         burn: String = "1.5K",
@@ -17,8 +16,6 @@ final class UsagePanelSnapshotTests: XCTestCase {
             cost: cost,
             burn: burn,
             providers: providers,
-            prevTokens: prev,
-            prevCost: prev.map { Decimal($0) },
             keepAwake: .off,
             history: history,
             projects: projects
@@ -241,58 +238,6 @@ final class UsagePanelSnapshotTests: XCTestCase {
         )
         XCTAssertEqual(snapshot.tokens, "233M")
         XCTAssertEqual(snapshot.cost, "$149")
-    }
-
-    // MARK: Day-over-day delta
-
-    func testDeltaIsUpWhenTodayExceedsYesterday() throws {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 130, "1.00")], prev: 100)
-        )
-        let delta = try XCTUnwrap(snapshot.delta)
-        XCTAssertEqual(delta.direction, .up)
-        XCTAssertEqual(delta.percent, 30)
-    }
-
-    func testDeltaIsDownWithAPositivePercentage() throws {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 40, "1.00")], prev: 100)
-        )
-        let delta = try XCTUnwrap(snapshot.delta)
-        XCTAssertEqual(delta.direction, .down)
-        XCTAssertEqual(delta.percent, 60)
-    }
-
-    /// A sub-half-percent move rounds to 0, and an arrow next to "0%" reads
-    /// as a rendering bug — so it collapses to `.flat` instead.
-    func testSubPercentMoveReadsAsFlat() throws {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 10_002, "1.00")], prev: 10_000)
-        )
-        let delta = try XCTUnwrap(snapshot.delta)
-        XCTAssertEqual(delta.direction, .flat)
-        XCTAssertEqual(delta.percent, 0)
-    }
-
-    func testNoDeltaWhenTheFrameCarriesNoYesterday() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 100, "1.00")])
-        )
-        XCTAssertNil(snapshot.delta)
-    }
-
-    func testNoDeltaWhenYesterdayWasZero() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 100, "1.00")], prev: 0)
-        )
-        XCTAssertNil(snapshot.delta)
-    }
-
-    func testNoDeltaBeforeTodayHasAnyTokens() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [], prev: 100)
-        )
-        XCTAssertNil(snapshot.delta)
     }
 
     // MARK: Provider rows

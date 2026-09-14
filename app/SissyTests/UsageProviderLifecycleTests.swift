@@ -57,9 +57,9 @@ final class UsageProviderLifecycleTests: XCTestCase {
         let provider = makeProvider()
 
         await provider.stop()
-        await provider.start { _, _ in }
+        await provider.start { _ in }
 
-        let (today, _) = await provider.current()
+        let today = await provider.current()
         XCTAssertEqual(today.totalTokens, 0, "a stopped provider scanned the tree")
         let warm = await provider.isWarm()
         XCTAssertFalse(warm, "a boot that never ran reported a complete cold scan")
@@ -73,14 +73,14 @@ final class UsageProviderLifecycleTests: XCTestCase {
         try writeTurn("a.jsonl", requestId: "r1")
         let provider = makeProvider()
 
-        let booting = Task { await provider.start { _, _ in } }
+        let booting = Task { await provider.start { _ in } }
         await provider.stop()
         await booting.value
 
         try writeTurn("b.jsonl", requestId: "r2")
-        await provider.start { _, _ in }
+        await provider.start { _ in }
 
-        let (today, _) = await provider.current()
+        let today = await provider.current()
         XCTAssertLessThanOrEqual(
             today.totalTokens,
             Self.tokensPerTurn,
@@ -99,7 +99,7 @@ final class UsageProviderLifecycleTests: XCTestCase {
             pollInterval: .seconds(60),
             persistenceURL: snapshot
         )
-        await provider.start { _, _ in }
+        await provider.start { _ in }
         await provider.stop()
         let firstWrite = try XCTUnwrap(
             FileManager.default.attributesOfItem(atPath: snapshot.path)[.modificationDate] as? Date,

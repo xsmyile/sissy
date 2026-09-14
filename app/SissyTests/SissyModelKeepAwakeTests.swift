@@ -13,8 +13,6 @@ final class SissyModelKeepAwakeTests: XCTestCase {
             cost: "0.09",
             burn: "1.5K",
             providers: [],
-            prevTokens: nil,
-            prevCost: nil,
             keepAwake: keepAwake,
             history: nil
         )

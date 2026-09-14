@@ -14,8 +14,6 @@ final class SissyModelLiveFrameTests: XCTestCase {
             cost: "0.09",
             burn: "1.5K",
             providers: [],
-            prevTokens: nil,
-            prevCost: nil,
             keepAwake: .off,
             history: nil
         )

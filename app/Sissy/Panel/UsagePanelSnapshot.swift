@@ -2,17 +2,15 @@ import Foundation
 
 /// Everything numeric the usage panel renders, derived from one frame. Pure
 /// by construction: no AppKit, no clock, no model access, so the panel's
-/// arithmetic — shares, day-over-day delta — is testable without a running
-/// engine.
+/// arithmetic — shares, rollups — is testable without a running engine.
 ///
 /// Totals come from the frame's raw `providers` slices rather than its
-/// pre-formatted scalars, so the big number, the rows and the delta all
-/// agree to the penny.
+/// pre-formatted scalars, so the big number and the rows agree to the
+/// penny.
 struct UsagePanelSnapshot: Equatable {
     let tokens: String
     let cost: String
     let burn: String
-    let delta: TokenDelta?
     let providers: [ProviderRow]
     /// Today's spend by project, the busiest first, the tail folded into one
     /// row and whatever named no repository in a last row of its own. Empty
@@ -24,21 +22,6 @@ struct UsagePanelSnapshot: Equatable {
     /// The one gauge the Overview leads on, absent when no provider reports a
     /// window at all.
     let headroom: HeadroomRow?
-
-    /// Day-over-day change in tokens. Absent when the frame carries no
-    /// yesterday yet, or when yesterday was zero and a percentage would be
-    /// undefined. Note the comparison is today-so-far against yesterday's
-    /// full day — daily totals are the only granularity the engine keeps.
-    struct TokenDelta: Equatable {
-        let percent: Int
-        let direction: DeltaDirection
-    }
-
-    enum DeltaDirection: Equatable {
-        case up
-        case down
-        case flat
-    }
 
     /// What the archive adds up to over its window. `label` says which days
     /// that is: a window the archive does not reach back across is named by
@@ -189,7 +172,6 @@ struct UsagePanelSnapshot: Equatable {
             tokens: frame.providers.isEmpty ? frame.tokens : UsageFormat.tokens(totalTokens),
             cost: frame.providers.isEmpty ? "$\(frame.cost)" : UsageFormat.cost(totalCost),
             burn: frame.burn,
-            delta: makeDelta(today: totalTokens, prevTokens: frame.prevTokens),
             providers: rows,
             projects: makeProjects(
                 frame.projects, totalTokens: totalTokens, totalCost: totalCost),
@@ -239,16 +221,6 @@ struct UsagePanelSnapshot: Equatable {
             tokens: UsageFormat.tokens(rollup.tokens),
             cost: UsageFormat.cost(rollup.cost)
         )
-    }
-
-    private static func makeDelta(today: Int, prevTokens: Int?) -> TokenDelta? {
-        guard let prevTokens, prevTokens > 0, today > 0 else { return nil }
-        let ratio = Double(today - prevTokens) / Double(prevTokens)
-        let percent = Int((abs(ratio) * 100).rounded())
-        if percent == 0 {
-            return TokenDelta(percent: 0, direction: .flat)
-        }
-        return TokenDelta(percent: percent, direction: today > prevTokens ? .up : .down)
     }
 
     private static func makeRows(

@@ -223,7 +223,7 @@ final class UsageProjectSplitTests: XCTestCase {
             historyRoot: nil,
             ledger: ledger()
         )
-        await provider.start { _, _ in }
+        await provider.start { _ in }
         let split = provider.currentProjects()
         await provider.stop()
 
@@ -245,7 +245,7 @@ final class UsageProjectSplitTests: XCTestCase {
             historyRoot: stateDir,
             ledger: ledger()
         )
-        await provider.start { _, _ in }
+        await provider.start { _ in }
         await provider.stop()
     }
 
@@ -258,7 +258,7 @@ final class UsageProjectSplitTests: XCTestCase {
             historyRoot: stateDir,
             ledger: ledger()
         )
-        await provider.start { _, _ in }
+        await provider.start { _ in }
         await provider.stop()
     }
 

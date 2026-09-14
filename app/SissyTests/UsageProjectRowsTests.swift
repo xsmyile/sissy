@@ -194,8 +194,6 @@ final class UsageProjectRowsTests: XCTestCase {
                     projects: projects
                 )
             ],
-            prevTokens: nil,
-            prevCost: nil,
             keepAwake: .off,
             history: nil,
             projects: projects

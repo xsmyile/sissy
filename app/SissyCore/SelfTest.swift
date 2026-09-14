@@ -54,22 +54,11 @@ func runSelfTest() {
 
     let frame = FrameBuilder.build(
         today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
-        prev: nil,
         hoursElapsed: 5
     )
     expect("frame tokens", frame.tokens, "2.5M")
     expect("frame cost", frame.cost, "42.5")
     expect("frame burn", frame.burn, "500K")
-    expect("frame prev tokens absent", frame.prevTokens, nil)
-    expect("frame prev cost absent", frame.prevCost, nil)
-
-    let framePrev = FrameBuilder.build(
-        today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
-        prev: DayTotals(totalTokens: 2_000_000, totalCost: Decimal(string: "31.00")!),
-        hoursElapsed: 5
-    )
-    expect("frame prev tokens", framePrev.prevTokens, 2_000_000)
-    expect("frame prev cost", framePrev.prevCost, Decimal(string: "31.00")!)
 
     // ProviderSlice path: build() passes the array through verbatim and
     // sortProviders enforces the canonical order (claude-code, codex,
@@ -92,7 +81,6 @@ func runSelfTest() {
     expect("activeSlices keeps used CLI", active.first?.id, "claude-code")
     let frameWithProviders = FrameBuilder.build(
         today: DayTotals(totalTokens: 301, totalCost: Decimal(string: "3.50")!),
-        prev: nil,
         hoursElapsed: 1,
         providers: sorted
     )
@@ -102,7 +90,6 @@ func runSelfTest() {
     expect("frame providers head cost", frameWithProviders.providers.first?.cost, Decimal(string: "2.00")!)
     let frameNoProviders = FrameBuilder.build(
         today: DayTotals(totalTokens: 0, totalCost: 0),
-        prev: nil,
         hoursElapsed: 1
     )
     expect("frame providers empty default", frameNoProviders.providers.isEmpty, true)
@@ -315,7 +302,6 @@ private func runFrameBuildTests() {
     let heldSince = Date(timeIntervalSince1970: 1_770_000_000)
     let frame = FrameBuilder.build(
         today: DayTotals(totalTokens: 33_121_400, totalCost: Decimal(string: "23.99")!),
-        prev: nil,
         hoursElapsed: 1,
         providers: [
             ProviderSlice(id: "claude-code", tokens: 33_121_400, cost: Decimal(string: "23.99")!),
@@ -333,19 +319,11 @@ private func runFrameBuildTests() {
     expect("frame keep-awake active", frame.keepAwake.active, true)
     expect("frame keep-awake since", frame.keepAwake.since, heldSince)
     expect("frame keep-awake covers screen", frame.keepAwake.coversScreen, true)
-    // Both nil together or neither: a half-present pair would render a
-    // day-over-day delta measured against a zero nobody observed.
-    expect("frame prev tokens absent", frame.prevTokens == nil, true)
-    expect("frame prev cost absent", frame.prevCost == nil, true)
-
-    let withPrev = FrameBuilder.build(
+    let defaults = FrameBuilder.build(
         today: DayTotals(totalTokens: 10, totalCost: 1),
-        prev: DayTotals(totalTokens: 4, totalCost: Decimal(string: "0.5")!),
         hoursElapsed: 1
     )
-    expect("frame prev tokens", withPrev.prevTokens, 4)
-    expect("frame prev cost", withPrev.prevCost, Decimal(string: "0.5")!)
-    expect("frame keep-awake defaults off", withPrev.keepAwake, .off)
+    expect("frame keep-awake defaults off", defaults.keepAwake, .off)
 }
 
 private func runServerConfigTests() {
@@ -607,8 +585,8 @@ private func runStreamingIngestTests() {
             pollInterval: .seconds(60),
             persistenceURL: nil
         )
-        await reader.start { _, _ in }
-        let (today, _) = await reader.current()
+        await reader.start { _ in }
+        let today = await reader.current()
         box.value = (today.totalTokens, today.totalCost)
         await reader.stop()
         sem.signal()
@@ -858,8 +836,8 @@ private func runCodexParserTests() {
             pollInterval: .seconds(60),
             persistenceURL: nil
         )
-        await reader.start { _, _ in }
-        let (today, _) = await reader.current()
+        await reader.start { _ in }
+        let today = await reader.current()
         box.value = (today.totalTokens, today.totalCost)
         await reader.stop()
         sem.signal()
@@ -895,8 +873,8 @@ private func runCodexParserTests() {
             pollInterval: .seconds(60),
             persistenceURL: nil
         )
-        await reader.start { _, _ in }
-        let (today, _) = await reader.current()
+        await reader.start { _ in }
+        let today = await reader.current()
         replay.value = today.totalTokens
         await reader.stop()
         sem2.signal()
@@ -923,15 +901,15 @@ func runAggregatorEmitTest() {
                     .compactMap { $0 })
         }
 
-        func start(onChange: @Sendable @escaping (DayTotals, DayTotals?) async -> Void) async {
+        func start(onChange: @Sendable @escaping (DayTotals) async -> Void) async {
             // Deliberately awaited while this actor is held, which is what
             // every real reader does at the end of its cold scan.
-            await onChange(DayTotals(totalTokens: 10, totalCost: 1), nil)
+            await onChange(DayTotals(totalTokens: 10, totalCost: 1))
         }
 
         func stop() async {}
-        func current() async -> (today: DayTotals, prev: DayTotals?) {
-            (DayTotals(totalTokens: 10, totalCost: 1), nil)
+        func current() async -> DayTotals {
+            DayTotals(totalTokens: 10, totalCost: 1)
         }
         nonisolated func filesWatched() -> Int { 1 }
         func isWarm() async -> Bool { true }
@@ -943,7 +921,7 @@ func runAggregatorEmitTest() {
     let received = TestBox<[ProviderSlice]>([])
     Task {
         let aggregator = UsageAggregator(providers: [EmittingProvider()])
-        await aggregator.start { _, _, slices in
+        await aggregator.start { _, slices in
             received.value = slices
             sem.signal()
         }
@@ -1407,7 +1385,7 @@ func runCodexAuthFallbackTest() {
         let reader = LocalUsageProvider.codex(
             codexDir: sessionsDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: nil)
-        await reader.start { _, _ in }
+        await reader.start { _ in }
         box.value = reader.currentPlan()
         await reader.stop()
         sem.signal()
@@ -1468,7 +1446,7 @@ func runCodexRateLimitTest() {
             pollInterval: .seconds(60),
             persistenceURL: nil
         )
-        await reader.start { _, _ in }
+        await reader.start { _ in }
         box.value = await reader.currentWindows()
         planBox.value = await reader.currentPlan()
         await reader.stop()
@@ -1519,7 +1497,7 @@ func runCodexLegacySnapshotTest() {
         let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
-        await r.start { _, _ in }
+        await r.start { _ in }
         await r.stop()
         sem1.signal()
     }
@@ -1554,8 +1532,8 @@ func runCodexLegacySnapshotTest() {
         let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
-        await r.start { _, _ in }
-        let (today, _) = await r.current()
+        await r.start { _ in }
+        let today = await r.current()
         observed.value = today.totalCost
         await r.stop()
         sem2.signal()
@@ -1602,7 +1580,7 @@ func runCodexWindowPersistenceTest() {
         let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
-        await r.start { _, _ in }
+        await r.start { _ in }
         await r.stop()
         sem1.signal()
     }
@@ -1617,7 +1595,7 @@ func runCodexWindowPersistenceTest() {
         let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
-        await r.start { _, _ in }
+        await r.start { _ in }
         box.value = r.currentWindows()
         planBox.value = r.currentPlan()
         await r.stop()
@@ -1672,7 +1650,7 @@ func runCodexModelBackfillTest() {
         let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
-        await r.start { _, _ in }
+        await r.start { _ in }
         await r.stop()
         sem1.signal()
     }
@@ -1700,8 +1678,8 @@ func runCodexModelBackfillTest() {
         let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
             persistenceURL: snapshot)
-        await r.start { _, _ in }
-        let (today, _) = await r.current()
+        await r.start { _ in }
+        let today = await r.current()
         observed.value = today.totalCost
         await r.stop()
         sem2.signal()

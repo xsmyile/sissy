@@ -16,8 +16,6 @@ final class PanelPagesTests: XCTestCase {
             cost: "0.09",
             burn: "1.5K",
             providers: providers,
-            prevTokens: nil,
-            prevCost: nil,
             keepAwake: .off,
             history: nil,
             projects: FrameBuilder.combinedProjects(providers)

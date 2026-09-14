@@ -232,8 +232,8 @@ actor UsageEngine {
         guard lifecycle == .running else { return }
         let me = self
         bootTask = Task.detached { [aggregator] in
-            await aggregator.start { today, prev, slices in
-                await me.rebuildAndEmit(today: today, prev: prev, slices: slices)
+            await aggregator.start { today, slices in
+                await me.rebuildAndEmit(today: today, slices: slices)
             }
         }
     }
@@ -520,12 +520,11 @@ actor UsageEngine {
     private func reemit() async {
         guard hasReading else { return }
         let reading = await aggregator.currentReading()
-        await rebuildAndEmit(today: reading.today, prev: reading.prev, slices: reading.slices)
+        await rebuildAndEmit(today: reading.today, slices: reading.slices)
     }
 
     private func rebuildAndEmit(
         today: DayTotals,
-        prev: DayTotals?,
         slices: [ProviderSlice]
     ) async {
         hasReading = true
@@ -535,14 +534,13 @@ actor UsageEngine {
         let startOfDay = Calendar.current.startOfDay(for: now)
         let hoursElapsed = max(now.timeIntervalSince(startOfDay) / 3600, 1.0 / 60.0)
         // Slices arrive captured against the same `perProvider` snapshot the
-        // aggregator used to compute `today`/`prev`, whether they came from an
-        // emit or from `currentReading()`. Rebuilding them here would race
+        // aggregator used to compute `today`, whether they came from an emit
+        // or from `currentReading()`. Rebuilding them here would race
         // actor reentrancy and could ship a frame whose scalars and breakdown
         // disagree.
         pruneHistoryIfDue(now: now)
         let frame = FrameBuilder.build(
             today: today,
-            prev: prev,
             hoursElapsed: hoursElapsed,
             providers: slices,
             keepAwake: KeepAwakeState(

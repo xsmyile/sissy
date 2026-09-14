@@ -119,11 +119,6 @@ renders them as two properties of one glyph, tint for the mode and fill for the
 effect, so "switched on and holding nothing" is readable at a glance rather than
 silent.
 
-`prevTokens` / `prevCost` carry yesterday's raw combined totals so the panel can
-render a day-over-day delta without a second data path. Both are nil together
-until every active provider has produced a `prev` snapshot, so the app renders no
-delta rather than a false 0%.
-
 ## Engine modules (`app/SissyCore/`)
 
 Compiled into both targets. `main.swift` and `SelfTest.swift` are the tool's own
@@ -175,9 +170,10 @@ entries are deduplicated by `requestId` because Claude Code logs each assistant
 turn 2-3 times as the message streams; Codex turns are deduplicated implicitly
 because `last_token_usage` arrives once per turn.
 
-Each provider retains a 2-day window on disk (today + yesterday). Sissy only ever
-surfaces today + yesterday — the latter feeds the panel's day-over-day delta — so
-the retention window is sized to match. Cold scans skip every file with
+Each provider retains a 2-day window on disk (today + yesterday). The frame
+surfaces today alone; yesterday is retained because the minutes after midnight
+are full of lines stamped for the day before, and a bucket that had already been
+dropped would bill them to today and hand the archive a day it never metered. Cold scans skip every file with
 `mtime < now-48h`, which on real-world trees (~500 MB across hundreds of
 projects) parses ~10-20% of the bytes and finishes in low seconds. Bumping this
 requires every consumer of `dailyTotals` to actually use the extra history; today

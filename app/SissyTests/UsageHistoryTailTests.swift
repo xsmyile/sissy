@@ -77,7 +77,7 @@ final class UsageHistoryTailTests: XCTestCase {
             persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
             historyRoot: archiving ? stateDir : nil
         )
-        await provider.start { _, _ in }
+        await provider.start { _ in }
         await provider.stop()
     }
 
@@ -168,7 +168,7 @@ final class UsageHistoryTailTests: XCTestCase {
             historyRoot: stateDir
         )
         let emits = EmitCounter()
-        await provider.start { _, _ in emits.record() }
+        await provider.start { _ in emits.record() }
         XCTAssertNotNil(
             UsageHistoryStore.load(
                 provider: ProviderID.claudeCode, day: yesterdayKey, in: stateDir),

@@ -1,13 +1,10 @@
 import Foundation
 
-/// One provider's totals as emitted by `--scan`. Optional previous-day fields
-/// are omitted from the JSON when the provider has no prior-day data.
+/// One provider's totals as emitted by `--scan`.
 struct ScanEntry: Encodable {
     let tokens: Int
     let cost: String
     let filesWatched: Int
-    let prevTokens: Int?
-    let prevCost: String?
     /// Plan the provider named for this account, so the value the panel badges
     /// can be read without launching the app. Absent for a provider that
     /// names none — and for Codex also when the scan's one-second window
@@ -144,15 +141,13 @@ if args.contains("--scan") {
         }
         var out: [String: ScanEntry] = [:]
         for p in providers {
-            await p.start { _, _ in }
+            await p.start { _ in }
             try? await Task.sleep(for: .seconds(1))
-            let (today, prev) = await p.current()
+            let today = await p.current()
             out[p.id] = ScanEntry(
                 tokens: today.totalTokens,
                 cost: NSDecimalNumber(decimal: today.totalCost).stringValue,
                 filesWatched: p.filesWatched(),
-                prevTokens: prev?.totalTokens,
-                prevCost: prev.map { NSDecimalNumber(decimal: $0.totalCost).stringValue },
                 plan: p.currentPlan(),
                 planTier: p.currentPlanTier()
             )

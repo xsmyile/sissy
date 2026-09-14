@@ -187,11 +187,6 @@ struct FrameData: Sendable, Equatable {
     /// spend today. Stable order: claude-code, codex, then alphabetical. Empty
     /// when no provider has tokens today (none active yet, or all idle today).
     let providers: [ProviderSlice]
-    /// Yesterday's raw totals, carried so the menubar can render a
-    /// day-over-day delta. Both nil until every active provider has produced
-    /// a `prev` snapshot, so the app shows no delta instead of a false 0%.
-    let prevTokens: Int?
-    let prevCost: Decimal?
     /// The keep-awake mode and whether it is holding right now. Not optional,
     /// including when off: the app renders the control from this, and "off"
     /// and "nothing reported" must not collapse into the same value.
@@ -213,8 +208,6 @@ struct FrameData: Sendable, Equatable {
         cost: String,
         burn: String,
         providers: [ProviderSlice],
-        prevTokens: Int?,
-        prevCost: Decimal?,
         keepAwake: KeepAwakeState,
         history: UsageHistoryRollup?,
         projects: [ProjectTotals] = []
@@ -223,8 +216,6 @@ struct FrameData: Sendable, Equatable {
         self.cost = cost
         self.burn = burn
         self.providers = providers
-        self.prevTokens = prevTokens
-        self.prevCost = prevCost
         self.keepAwake = keepAwake
         self.history = history
         self.projects = projects
@@ -268,7 +259,6 @@ enum FrameBuilder {
 
     static func build(
         today: DayTotals,
-        prev: DayTotals?,
         hoursElapsed: Double,
         providers: [ProviderSlice] = [],
         keepAwake: KeepAwakeState = .off,
@@ -281,8 +271,6 @@ enum FrameBuilder {
             cost: fmtCost(today.totalCost),
             burn: burn,
             providers: providers,
-            prevTokens: prev?.totalTokens,
-            prevCost: prev?.totalCost,
             keepAwake: keepAwake,
             history: history,
             projects: combinedProjects(providers)

@@ -62,9 +62,6 @@ struct PanelOverview: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 Spacer(minLength: 0)
-                if let delta = snapshot.delta {
-                    DeltaChip(delta: delta)
-                }
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)
@@ -270,42 +267,5 @@ struct StackedShareBar: View {
         }
         .frame(height: PanelMetrics.barHeight)
         .animation(.default, value: rows.map(\.share))
-    }
-}
-
-/// Today against yesterday. Yesterday is a full day and today is a day so far,
-/// which is the only granularity the engine keeps — the chip says "vs
-/// yesterday" rather than claiming a like-for-like.
-struct DeltaChip: View {
-    let delta: UsagePanelSnapshot.TokenDelta
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: symbol)
-                .font(.system(size: 9, weight: .bold))
-            Text("\(delta.percent)%")
-                .font(.system(size: 11, weight: .medium))
-                .monospacedDigit()
-            Text("vs yesterday")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-        }
-        .foregroundStyle(tint)
-    }
-
-    private var symbol: String {
-        switch delta.direction {
-        case .up: return "arrow.up.right"
-        case .down: return "arrow.down.right"
-        case .flat: return "equal"
-        }
-    }
-
-    private var tint: Color {
-        switch delta.direction {
-        case .up: return .green
-        case .down: return .red
-        case .flat: return .secondary
-        }
     }
 }

@@ -135,7 +135,7 @@ final class ClaudeStreamedTurnTests: XCTestCase {
             persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
             historyRoot: stateDir
         )
-        await provider.start { _, _ in }
+        await provider.start { _ in }
         await provider.stop()
     }
 

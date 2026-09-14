@@ -214,7 +214,7 @@ actor LocalUsageProvider: UsageProvider {
     /// can read it without an actor hop.
     private let publishedProjects = AtomicProjects()
     private var pollTask: Task<Void, Never>?
-    private var onChange: (@Sendable (DayTotals, DayTotals?) async -> Void)?
+    private var onChange: (@Sendable (DayTotals) async -> Void)?
     nonisolated private let watchedCounter = AtomicIntCounter()
     /// FSEvents-backed primary wake source. When non-nil, kernel-level
     /// notifications drive `ingestEventPaths` directly and the `pollTask`
@@ -232,15 +232,10 @@ actor LocalUsageProvider: UsageProvider {
     /// the provider has produced a real frame.
     private var lastEmittedDayKey: Date?
     /// False until the initial backfill scan has finished parsing every
-    /// in-window JSONL. While false, `current()` suppresses `prev` (passes
-    /// nil) so consumers can't make ratio decisions on a partially populated
-    /// "yesterday" total. Without this guard the panel would flash a wild
-    /// day-over-day delta mid-scan: yesterday's daily total is rebuilt
-    /// incrementally as the tail walks the JSONL file containing it, so for
-    /// a few hundred ms `today` is compared against a not-yet-finalised
-    /// `prev`. The flag flips once after `start()` runs its blocking cold
-    /// pass; FSEvents-driven incremental ingest from then on operates on a
-    /// fully consistent `prev`.
+    /// in-window JSONL. What `isWarm()` answers, and so what the panel and
+    /// the Providers tab read to tell a reader that has found nothing yet
+    /// from one that has finished and found nothing. The flag flips once
+    /// after `start()` runs its blocking cold pass.
     private var coldScanComplete = false
     /// A provider runs once. `stopped` is terminal for the same reason
     /// `UsageEngine.lifecycle` is: the app builds a fresh engine, and with it
@@ -328,7 +323,7 @@ actor LocalUsageProvider: UsageProvider {
         adapter.applyPriceCatalog(catalog)
     }
 
-    func start(onChange: @escaping @Sendable (DayTotals, DayTotals?) async -> Void) async {
+    func start(onChange: @escaping @Sendable (DayTotals) async -> Void) async {
         guard lifecycle == .idle else { return }
         lifecycle = .running
         self.onChange = onChange
@@ -353,30 +348,18 @@ actor LocalUsageProvider: UsageProvider {
         // of idle between turns — and the panel sits on its empty-day
         // placeholder despite valid totals being in memory.
         if loaded {
-            let (today, prev) = current()
             lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
-            await onChange(today, prev)
+            await onChange(current())
         }
         await poll()
         // The scan above ends either because it finished or because it was cut
         // short, and only the first may be taken for a complete pass. A
         // cancelled boot task bails `poll()` out of its file loop; a `stop()`
         // can land in any of the suspensions it is made of. Resuming past this
-        // guard used to expose a half-built `prev` and arm a stream and a loop
-        // the teardown had no handle left to cancel.
+        // guard used to arm a stream and a loop the teardown had no handle
+        // left to cancel.
         guard lifecycle == .running, !Task.isCancelled else { return }
-        // Cold backfill done: from here on `prev` is consistent with the
-        // full in-window JSONL state, safe to expose. Order matters — set
-        // this before the emit below so that frame is the one that
-        // introduces `prev` to the UI.
         coldScanComplete = true
-        // Every backfill emit ran with `prev` still suppressed, and `poll()`
-        // re-emits only when JSONL actually changed. Without this emit an
-        // idle CLI leaves the last frame built from a nil `prev`, so the
-        // panel shows no delta until the next turn writes a line.
-        let (warmToday, warmPrev) = current()
-        lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
-        await onChange(warmToday, warmPrev)
         // Read back once more before arming anything: `pollTask` is
         // unstructured and inherits nothing, so a boot cancelled during the
         // emit above would otherwise leave a 60 s loop behind it.
@@ -480,16 +463,16 @@ actor LocalUsageProvider: UsageProvider {
         }
         let todayKey = Calendar.current.startOfDay(for: Date())
         if dirty, let cb = onChange {
-            let (today, prev) = current()
+            let today = current()
             lastEmittedDayKey = todayKey
-            await cb(today, prev)
+            await cb(today)
         } else if let cb = onChange,
             let lastKey = lastEmittedDayKey,
             lastKey != todayKey
         {
-            let (today, prev) = current()
+            let today = current()
             lastEmittedDayKey = todayKey
-            await cb(today, prev)
+            await cb(today)
         }
         trim()
         adapter.projects.ledger.saveIfDirty()
@@ -497,24 +480,15 @@ actor LocalUsageProvider: UsageProvider {
         saveHistoryIfDirty()
     }
 
-    /// What today and yesterday add up to right now.
+    /// What today adds up to right now.
     ///
     /// Every emit goes through here, which is why this is also where the
     /// project split is republished: recomputing it per emit costs a walk over
     /// today's rows, where doing it per event would cost a lock per line.
-    func current() -> (today: DayTotals, prev: DayTotals?) {
-        let cal = Calendar.current
-        let todayKey = cal.startOfDay(for: Date())
-        let prevKey = cal.date(byAdding: .day, value: -1, to: todayKey)!
+    func current() -> DayTotals {
+        let todayKey = Calendar.current.startOfDay(for: Date())
         publishedProjects.store(projectTotals(on: todayKey))
-        // Suppress `prev` until the cold backfill scan finishes — see
-        // `coldScanComplete` for the rationale (avoid a spurious delta
-        // mid-scan when yesterday's total is half-rebuilt).
-        let prev = coldScanComplete ? dailyTotals[prevKey] : nil
-        return (
-            dailyTotals[todayKey] ?? DayTotals(totalTokens: 0, totalCost: 0),
-            prev
-        )
+        return dailyTotals[todayKey] ?? DayTotals(totalTokens: 0, totalCost: 0)
     }
 
     nonisolated func filesWatched() -> Int { watchedCounter.load() }
@@ -594,32 +568,29 @@ actor LocalUsageProvider: UsageProvider {
                 Date().timeIntervalSince(lastEmitAt) > emitThrottle,
                 let cb = onChange
             {
-                let (today, prev) = current()
                 lastEmittedDayKey = todayKey
-                await cb(today, prev)
+                await cb(current())
                 lastEmitAt = Date()
                 dirtySinceEmit = false
             }
         }
         trim()
         if dirtySinceEmit, let cb = onChange {
-            let (today, prev) = current()
             lastEmittedDayKey = todayKey
-            await cb(today, prev)
+            await cb(current())
         } else if let cb = onChange,
             let lastKey = lastEmittedDayKey,
             lastKey != todayKey
         {
             // Calendar day rolled since the last emit and nothing wrote a
             // new JSONL line. Force a synthetic emit so the menubar
-            // resets to a fresh "today=0, prev=yesterday" frame instead
-            // of holding the stale frame until the next turn. Covers
-            // both the trivial case (Mac stays awake across midnight) and
-            // the wake-after-sleep case (system slept across one or more
-            // midnights, first poll after wake observes the day shift).
-            let (today, prev) = current()
+            // resets to a fresh "today=0" frame instead of holding the
+            // stale frame until the next turn. Covers both the trivial case
+            // (Mac stays awake across midnight) and the wake-after-sleep
+            // case (system slept across one or more midnights, first poll
+            // after wake observes the day shift).
             lastEmittedDayKey = todayKey
-            await cb(today, prev)
+            await cb(current())
         }
         // Throttled persistence: only writes if state changed since the
         // last save AND `saveThrottle` seconds have elapsed. SIGKILL/power

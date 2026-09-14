@@ -2,9 +2,9 @@ import Foundation
 
 /// Pluggable source of per-day token + cost totals. Each implementation tails
 /// one CLI's session log (Claude Code JSONL today, Codex JSONL next), parses
-/// usage events, and pushes a `(today, prev)` pair through `onChange` whenever
-/// state changes. The aggregator fans these into a single combined frame so
-/// the frame stays unaware of multi-provider.
+/// usage events, and pushes today's totals through `onChange` whenever state
+/// changes. The aggregator fans these into a single combined frame so the
+/// frame stays unaware of multi-provider.
 ///
 /// Conforming types are typically actors; protocol leaves isolation up to the
 /// implementation but every stateful method is `async` so callers don't need
@@ -19,7 +19,7 @@ protocol UsageProvider: AnyObject, Sendable {
     /// Boot the provider. Does any persisted-state load, initial cold scan,
     /// and starts the FSEvents watcher + safety-net poll. The supplied
     /// callback fires on every observed state change.
-    func start(onChange: @Sendable @escaping (DayTotals, DayTotals?) async -> Void) async
+    func start(onChange: @Sendable @escaping (DayTotals) async -> Void) async
 
     /// Tear down. Flushes any pending persistence, cancels timers, releases
     /// the FSEvents stream. Idempotent.
@@ -30,11 +30,8 @@ protocol UsageProvider: AnyObject, Sendable {
     /// counted, and the archive takes it back on the next flush.
     func forgetArchivedDays() async
 
-    /// Latest `(today, prev)` totals as observed by this provider. `prev` is
-    /// suppressed (nil) until the cold scan has finished — see
-    /// `LocalUsageProvider.coldScanComplete` for the trend-flicker
-    /// rationale.
-    func current() async -> (today: DayTotals, prev: DayTotals?)
+    /// Latest totals for today as observed by this provider.
+    func current() async -> DayTotals
 
     /// Number of session files currently being watched. Drives the panel's
     /// and the menubar "No JSONL detected" pill. Nonisolated so the HTTP

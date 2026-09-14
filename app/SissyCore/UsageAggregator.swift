@@ -1,26 +1,18 @@
 import Foundation
 
-/// The three values a frame is built from, kept together because they only
+/// The two values a frame is built from, kept together because they only
 /// describe a reading while they describe the same one.
 struct UsageReading: Sendable {
     let today: DayTotals
-    let prev: DayTotals?
     let slices: [ProviderSlice]
 }
 
-/// Fans N `UsageProvider` streams into a single combined `(today, prev)`
+/// Fans N `UsageProvider` streams into a single combined today's-total
 /// frame. The frame's own scalars stay unaware of multi-provider: the engine
 /// sums per-day totals before emitting and carries the split alongside them.
-///
-/// `prev` is emitted as non-nil only when every active provider has produced
-/// a non-nil `prev`. If any provider is still warming (e.g. a fresh Codex
-/// reader on the first poll after install) the aggregated `prev` is nil, so
-/// the app shows no day-over-day delta rather than one measured against a
-/// half-populated yesterday.
 actor UsageAggregator {
     private struct Snapshot {
         var today: DayTotals
-        var prev: DayTotals?
     }
 
     /// Nonisolated so the HTTP path can read it (and `filesWatched()`) without
@@ -28,7 +20,7 @@ actor UsageAggregator {
     /// mutated; each provider's own counter is itself nonisolated.
     nonisolated private let providers: [any UsageProvider]
     private var perProvider: [String: Snapshot] = [:]
-    private var onChange: (@Sendable (DayTotals, DayTotals?, [ProviderSlice]) async -> Void)?
+    private var onChange: (@Sendable (DayTotals, [ProviderSlice]) async -> Void)?
 
     init(providers: [any UsageProvider]) {
         self.providers = providers
@@ -36,12 +28,11 @@ actor UsageAggregator {
 
     /// Boots every provider in parallel. Each provider's `onChange` routes
     /// through `handleProviderEmit` which updates the per-provider snapshot
-    /// and re-emits the aggregated `(today, prev, slices)` to the outer
-    /// callback. `slices` is captured against the **same** `perProvider`
-    /// snapshot as `today`/`prev` so a concurrent emit racing through actor
-    /// reentrancy can't desync the aggregate scalars from the per-provider
-    /// breakdown.
-    func start(onChange: @escaping @Sendable (DayTotals, DayTotals?, [ProviderSlice]) async -> Void) async {
+    /// and re-emits the aggregated `(today, slices)` to the outer callback.
+    /// `slices` is captured against the **same** `perProvider` snapshot as
+    /// `today` so a concurrent emit racing through actor reentrancy can't
+    /// desync the aggregate scalars from the per-provider breakdown.
+    func start(onChange: @escaping @Sendable (DayTotals, [ProviderSlice]) async -> Void) async {
         self.onChange = onChange
         // Strong-self capture is intentional: provider callbacks must fire
         // for the engine's full lifetime, and the aggregator outlives both
@@ -55,8 +46,8 @@ actor UsageAggregator {
                 let pid = p.id
                 let provider = p
                 group.addTask {
-                    await provider.start { today, prev in
-                        await me.handleProviderEmit(id: pid, today: today, prev: prev)
+                    await provider.start { today in
+                        await me.handleProviderEmit(id: pid, today: today)
                     }
                 }
             }
@@ -88,8 +79,7 @@ actor UsageAggregator {
     /// hop, with no suspension between them, so a caller cannot pair totals
     /// from one moment with a breakdown from another.
     func currentReading() -> UsageReading {
-        let (today, prev) = aggregate()
-        return UsageReading(today: today, prev: prev, slices: currentProviderSlices())
+        UsageReading(today: aggregate(), slices: currentProviderSlices())
     }
 
     /// Per-provider scan progress, keyed by provider id. Only the providers
@@ -113,9 +103,9 @@ actor UsageAggregator {
         return progress
     }
 
-    private func handleProviderEmit(id: String, today: DayTotals, prev: DayTotals?) async {
-        perProvider[id] = Snapshot(today: today, prev: prev)
-        let (combinedToday, combinedPrev) = aggregate()
+    private func handleProviderEmit(id: String, today: DayTotals) async {
+        perProvider[id] = Snapshot(today: today)
+        let combinedToday = aggregate()
         // Build slices from the same `perProvider` map that just produced
         // `combinedToday` — both before the upcoming `await`. A concurrent
         // emit can re-enter the actor at the suspension below, but it
@@ -123,7 +113,7 @@ actor UsageAggregator {
         // captured, so the outgoing frame stays internally consistent.
         let slices = currentProviderSlices()
         if let cb = onChange {
-            await cb(combinedToday, combinedPrev, slices)
+            await cb(combinedToday, slices)
         }
     }
 
@@ -161,27 +151,13 @@ actor UsageAggregator {
         return FrameBuilder.activeSlices(raw)
     }
 
-    private func aggregate() -> (today: DayTotals, prev: DayTotals?) {
+    private func aggregate() -> DayTotals {
         var todayTok = 0
         var todayCost: Decimal = 0
         for s in perProvider.values {
             todayTok += s.today.totalTokens
             todayCost += s.today.totalCost
         }
-        let today = DayTotals(totalTokens: todayTok, totalCost: todayCost)
-
-        var prevTok = 0
-        var prevCost: Decimal = 0
-        var allHavePrev = !providers.isEmpty
-        for p in providers {
-            guard let snap = perProvider[p.id], let pv = snap.prev else {
-                allHavePrev = false
-                break
-            }
-            prevTok += pv.totalTokens
-            prevCost += pv.totalCost
-        }
-        let prev: DayTotals? = allHavePrev ? DayTotals(totalTokens: prevTok, totalCost: prevCost) : nil
-        return (today, prev)
+        return DayTotals(totalTokens: todayTok, totalCost: todayCost)
     }
 }
