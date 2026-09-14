@@ -42,6 +42,13 @@ final class UsageEngineHost {
     /// rewritten — the name of the CLI whose file was left alone, so Settings
     /// can say which one rather than claiming the switch took effect.
     private(set) var agentHooksRefused: [String] = []
+    /// Which registration attempt is current. Two quick toggles start two
+    /// independent pieces of work, and installing is the slower of the two — it
+    /// copies the script, spawns `sh -n` and takes a backup — so without this
+    /// an enable that started first can land after the disable that replaced it
+    /// and leave the caption describing a state that is no longer on disk.
+    private var agentHooksGeneration = 0
+    private var agentHooksTask: Task<Void, Never>?
     /// The keep-awake mode `server.json` holds, for the window before the
     /// first frame carries one.
     ///
@@ -125,6 +132,8 @@ final class UsageEngineHost {
     /// a boot still in flight — `engine.stop()` is, by clearing the flag
     /// `start()` re-reads after each of its suspensions.
     func stop() async {
+        await agentHooksTask?.value
+        agentHooksTask = nil
         readinessTask?.cancel()
         readinessTask = nil
         bootTask?.cancel()
@@ -223,8 +232,12 @@ final class UsageEngineHost {
         }
         let stateDirectory = ServerConfig.defaultURL.deletingLastPathComponent()
         let targets = AgentHookInstaller.targets(home: home)
+        agentHooksGeneration += 1
+        let generation = agentHooksGeneration
         let host = self
-        Task.detached(priority: .utility) {
+        let previous = agentHooksTask
+        agentHooksTask = Task.detached(priority: .utility) {
+            await previous?.value
             let installer = AgentHookInstaller(stateDirectory: stateDirectory, targets: targets)
             let report =
                 enabled ? installer.install(bundledScript: script) : installer.remove()
@@ -233,7 +246,10 @@ final class UsageEngineHost {
                 .filter { _, outcome in outcome != .written && outcome != .unchanged }
                 .keys.map(\.name)
                 .sorted()
-            await MainActor.run { host.agentHooksRefused = enabled ? refused : [] }
+            await MainActor.run {
+                guard host.agentHooksGeneration == generation else { return }
+                host.agentHooksRefused = enabled ? refused : []
+            }
         }
     }
 

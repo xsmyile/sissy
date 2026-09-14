@@ -31,6 +31,16 @@ import Foundation
 /// worktree list for it, so the sibling worktrees are answered for before they
 /// are deleted rather than looked up after.
 ///
+/// Paths are standardised lexically, never through `standardizedFileURL`,
+/// which strips a leading `/private` **only while the directory still exists**:
+/// measured, `/private/tmp/x` answers `/tmp/x` while `x` is there and
+/// `/private/tmp/x` once it is deleted. A checkout under `/tmp` or `$TMPDIR`
+/// would therefore be keyed one way while it was alive and another once it was
+/// gone, which is the one transition the ledger exists to survive — and it is
+/// the same normalisation the session hook uses, so a directory has one key
+/// whichever of the two read it. Both CLIs report a physical working directory
+/// (`getcwd`), so there is nothing left for symlink resolution to add.
+///
 /// Results are cached per working directory: a real day names a hundred or so
 /// distinct ones across thousands of lines, and the walk costs a `stat` per
 /// level.
@@ -99,7 +109,7 @@ final class ProjectResolver {
     }
 
     private func resolve(_ workingDirectory: String) -> String? {
-        let start = URL(fileURLWithPath: workingDirectory).standardizedFileURL
+        let start = URL(fileURLWithPath: workingDirectory).standardized
         var directory = start
         while true {
             let entry = directory.appendingPathComponent(Self.gitEntryName)
@@ -120,7 +130,7 @@ final class ProjectResolver {
                 ledger.harvestWorktrees(of: project)
                 return project
             }
-            let parent = directory.deletingLastPathComponent().standardizedFileURL
+            let parent = directory.deletingLastPathComponent().standardized
             if parent.path == directory.path { break }
             directory = parent
         }
@@ -140,12 +150,12 @@ final class ProjectResolver {
                 .trimmingCharacters(in: .whitespaces)
             guard let marker = target.range(of: Self.worktreeMarker) else { return nil }
             let root = String(target[target.startIndex..<marker.lowerBound])
-            if root.hasPrefix("/") { return URL(fileURLWithPath: root).standardizedFileURL.path }
+            if root.hasPrefix("/") { return URL(fileURLWithPath: root).standardized.path }
             return
                 pointer
                 .deletingLastPathComponent()
                 .appendingPathComponent(root)
-                .standardizedFileURL
+                .standardized
                 .path
         }
         return nil
