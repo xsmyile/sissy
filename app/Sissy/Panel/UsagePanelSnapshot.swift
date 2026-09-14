@@ -180,7 +180,9 @@ struct UsagePanelSnapshot: Equatable {
         let label: String
         let percent: Int
         let fraction: Double
-        let resetsAt: Date
+        /// Nil for a window the vendor has not started, which is a bar at
+        /// zero with nothing to count down to.
+        let resetsAt: Date?
         /// Nil in the window's first minutes, where the projection is noise.
         let pace: Pace?
     }
@@ -441,10 +443,12 @@ struct UsagePanelSnapshot: Equatable {
 
     /// The pace for one window, or nil when the window is too young to project
     /// from — or already past the reset it names, which describes a period
-    /// that no longer exists.
+    /// that no longer exists. A window the vendor has not started names no
+    /// reset at all, and there is no elapsed time to project from either.
     private static func makePace(_ window: UsageWindow, now: Date) -> Pace? {
+        guard let resetsAt = window.resetsAt else { return nil }
         let duration = Double(window.minutes) * 60
-        let remaining = window.resetsAt.timeIntervalSince(now)
+        let remaining = resetsAt.timeIntervalSince(now)
         guard duration > 0, remaining > 0 else { return nil }
         let elapsed = min(max(duration - remaining, 0), duration)
         let progress = elapsed / duration

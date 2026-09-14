@@ -98,8 +98,11 @@ struct PanelOverview: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Text(
-                    "\(row.providerName) · \(row.window.label) · "
-                        + UsageFormat.resetLabel(row.window.resetsAt)
+                    [
+                        row.providerName, row.window.label,
+                        row.window.resetsAt.map { UsageFormat.resetLabel($0) },
+                    ]
+                    .compactMap { $0 }.joined(separator: " · ")
                 )
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)

@@ -75,7 +75,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
                 slice("codex", 1000, "1.00", windows: [try window(300, 25), try window(10080, 8)])
             ])
         )
-        XCTAssertEqual(snapshot.providers.first?.windows.map(\.label), ["5h", "7d"])
+        XCTAssertEqual(snapshot.providers.first?.windows.map(\.label), ["Session", "Weekly"])
     }
 
     func testWindowPercentRoundsWhileTheBarStaysClamped() throws {

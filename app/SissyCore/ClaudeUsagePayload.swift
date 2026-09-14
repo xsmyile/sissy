@@ -37,9 +37,10 @@ enum ClaudeUsagePayload {
     /// Every window the payload names, from `limits` where the vendor sends
     /// it and from the flat keys where it does not.
     ///
-    /// Buckets that report no `utilization`, or no reset, are dropped either
-    /// way: a window without both halves cannot be drawn, and an inactive
-    /// bucket arrives with a null reset.
+    /// A bucket with no `utilization` is dropped — there is nothing to draw.
+    /// A bucket with no reset is not: the vendor sends a null reset for a
+    /// period nobody has started yet, and that is a window at zero rather
+    /// than a window that does not exist.
     static func windows(_ body: [String: Any]) -> [UsageWindow] {
         let listed = (body[limitsKey] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
         guard listed.isEmpty else { return listed.compactMap(window(fromLimit:)) }
@@ -59,9 +60,9 @@ enum ClaudeUsagePayload {
     private static func window(fromLimit raw: [String: Any]) -> UsageWindow? {
         guard let kind = raw["kind"] as? String,
             let minutes = limitKinds[kind],
-            let resetsAt = parseReset(raw["resets_at"]),
             let percent = raw["percent"] as? Double ?? (raw["percent"] as? Int).map(Double.init)
         else { return nil }
+        let resetsAt = parseReset(raw["resets_at"])
         let model = (raw["scope"] as? [String: Any])?["model"] as? [String: Any]
         return UsageWindow(
             minutes: minutes,

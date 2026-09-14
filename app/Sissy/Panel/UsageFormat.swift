@@ -175,16 +175,47 @@ enum UsageFormat {
     /// Compact name for a rate-limit window, derived from its length so a
     /// vendor that ships a bucket Sissy has never seen still gets a label.
     static func windowLabel(minutes: Int, scope: String? = nil) -> String {
-        let period =
-            if minutes % minutesPerDay == 0 {
-                "\(minutes / minutesPerDay)d"
-            } else if minutes
-                % minutesPerHour == 0
-            {
-                "\(minutes / minutesPerHour)h"
-            } else { "\(minutes)m" }
-        guard let scope, !scope.isEmpty else { return period }
-        return "\(period) \(scope)"
+        guard let scope, !scope.isEmpty else { return period(minutes) }
+        return "\(period(minutes)) · \(scope)"
+    }
+
+    /// The two periods both vendors meter get the word they are known by;
+    /// anything else is named by its length. A name rather than a duration
+    /// because the row now leads with it: "5h" as a heading reads as a
+    /// measurement, where "Session" says what is being measured.
+    private static func period(_ minutes: Int) -> String {
+        switch minutes {
+        case minutesPerSession: return "Session"
+        case minutesPerWeek: return "Weekly"
+        default:
+            if minutes % minutesPerDay == 0 { return "\(minutes / minutesPerDay)d" }
+            if minutes % minutesPerHour == 0 { return "\(minutes / minutesPerHour)h" }
+            return "\(minutes)m"
+        }
+    }
+
+    private static let minutesPerSession = 300
+    private static let minutesPerWeek = 10_080
+
+    /// The line under a limit bar: the pace where there is one, and when the
+    /// window rolls over, joined.
+    ///
+    /// Nil for a window the vendor has not started, which has neither — the
+    /// bar at zero is the whole statement, and a caption saying so twice is
+    /// noise on the one row that has nothing to report.
+    static func windowCaption(
+        _ window: UsagePanelSnapshot.WindowRow,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String? {
+        var parts: [String] = []
+        if let pace = window.pace {
+            parts.append(paceCaption(deltaPercent: pace.deltaPercent, runsOutAt: pace.runsOutAt))
+        }
+        if let resetsAt = window.resetsAt {
+            parts.append("resets " + resetLabel(resetsAt, now: now, calendar: calendar))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// When a window rolls over. A clock time while that is unambiguous, the

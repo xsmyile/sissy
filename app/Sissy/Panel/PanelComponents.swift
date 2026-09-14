@@ -149,28 +149,28 @@ struct WindowRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
-                ShareBar(share: window.fraction, tint: tint, pace: window.pace)
+                Text(window.label)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 8)
 
                 Text("\(window.percent)%")
                     .font(.system(size: 11))
                     .monospacedDigit()
-                    .frame(width: 32, alignment: .trailing)
-
-                Text("\(window.label) · \(UsageFormat.resetLabel(window.resetsAt))")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: 74, alignment: .trailing)
+                    .layoutPriority(1)
             }
 
-            if let pace = window.pace {
-                Text(
-                    UsageFormat.paceCaption(
-                        deltaPercent: pace.deltaPercent, runsOutAt: pace.runsOutAt)
-                )
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            ShareBar(share: window.fraction, tint: tint, pace: window.pace)
+
+            if let caption = UsageFormat.windowCaption(window) {
+                Text(caption)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
     }
