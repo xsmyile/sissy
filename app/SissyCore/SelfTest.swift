@@ -30,35 +30,33 @@ func runSelfTest() {
     )
     print("=== FrameBuilder ===")
 
-    expect("fmtTokens(0)", FrameBuilder.fmtTokens(0), "0")
-    expect("fmtTokens(999)", FrameBuilder.fmtTokens(999), "999")
-    expect("fmtTokens(1000)", FrameBuilder.fmtTokens(1_000), "1.0K")
-    expect("fmtTokens(9999)", FrameBuilder.fmtTokens(9_999), "10.0K")
-    expect("fmtTokens(10000)", FrameBuilder.fmtTokens(10_000), "10K")
-    expect("fmtTokens(1_234_567)", FrameBuilder.fmtTokens(1_234_567), "1.2M")
-    expect("fmtTokens(12_000_000)", FrameBuilder.fmtTokens(12_000_000), "12M")
-
-    expect("fmtBurn(0,1)", FrameBuilder.fmtBurn(tokens: 0, hoursElapsed: 1), "...")
-    expect("fmtBurn(neg,1)", FrameBuilder.fmtBurn(tokens: -5, hoursElapsed: 1), "...")
-    expect("fmtBurn(60k,1h)", FrameBuilder.fmtBurn(tokens: 60_000, hoursElapsed: 1), "60K")
+    expect("burnRate with no tokens", FrameBuilder.burnRate(tokens: 0, hoursElapsed: 1), nil)
+    expect("burnRate with negative tokens", FrameBuilder.burnRate(tokens: -5, hoursElapsed: 1), nil)
+    expect("burnRate over an hour", FrameBuilder.burnRate(tokens: 60_000, hoursElapsed: 1), 60_000)
     // 0.5h elapsed => double rate
-    expect("fmtBurn(60k,0.5h)", FrameBuilder.fmtBurn(tokens: 60_000, hoursElapsed: 0.5), "120K")
+    expect(
+        "burnRate over half an hour",
+        FrameBuilder.burnRate(tokens: 60_000, hoursElapsed: 0.5), 120_000)
+    // A day's first minute would otherwise divide by a few seconds and report
+    // a rate in the millions; the floor is one minute's worth of elapsed time.
+    expect(
+        "burnRate floors the elapsed time at a minute",
+        FrameBuilder.burnRate(tokens: 600, hoursElapsed: 0.001), 36_000)
+    expect("burnRate with no time", FrameBuilder.burnRate(tokens: 10, hoursElapsed: 0), nil)
+    expect(
+        "burnRate with a non-finite clock",
+        FrameBuilder.burnRate(tokens: 10, hoursElapsed: .infinity), nil)
 
-    expect("fmtCost(0)", FrameBuilder.fmtCost(0), "0.00")
-    expect("fmtCost(1.234)", FrameBuilder.fmtCost(Decimal(string: "1.234")!), "1.23")
-    expect("fmtCost(9.99)", FrameBuilder.fmtCost(Decimal(string: "9.99")!), "9.99")
-    expect("fmtCost(10)", FrameBuilder.fmtCost(10), "10.0")
-    expect("fmtCost(99.9)", FrameBuilder.fmtCost(Decimal(string: "99.9")!), "99.9")
-    expect("fmtCost(100)", FrameBuilder.fmtCost(100), "100")
-    expect("fmtCost(199.7)", FrameBuilder.fmtCost(Decimal(string: "199.7")!), "199")
-
+    // The frame carries the day's raw totals: rounding for a surface is the
+    // surface's, so the panel and the menu are not held to a width that went
+    // with the 128×64 display these used to be shaped for.
     let frame = FrameBuilder.build(
         today: DayTotals(totalTokens: 2_500_000, totalCost: Decimal(string: "42.5")!),
         hoursElapsed: 5
     )
-    expect("frame tokens", frame.tokens, "2.5M")
-    expect("frame cost", frame.cost, "42.5")
-    expect("frame burn", frame.burn, "500K")
+    expect("frame tokens", frame.tokens, 2_500_000)
+    expect("frame cost", frame.cost, Decimal(string: "42.5")!)
+    expect("frame burn", frame.burn, 500_000)
 
     // ProviderSlice path: build() passes the array through verbatim and
     // sortProviders enforces the canonical order (claude-code, codex,

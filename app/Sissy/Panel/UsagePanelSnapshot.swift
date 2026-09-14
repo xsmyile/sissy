@@ -4,13 +4,13 @@ import Foundation
 /// by construction: no AppKit, no clock, no model access, so the panel's
 /// arithmetic — shares, rollups — is testable without a running engine.
 ///
-/// Totals come from the frame's raw `providers` slices rather than its
-/// pre-formatted scalars, so the big number and the rows agree to the
-/// penny.
+/// Every number is worded here rather than in a view, so the headline and the
+/// rows under it round the same way and a test can hold both.
 struct UsagePanelSnapshot: Equatable {
     let tokens: String
     let cost: String
-    let burn: String
+    /// Tokens per hour so far today, nil on a day nothing has been spent on.
+    let burn: String?
     let providers: [ProviderRow]
     /// How many of those rows have spent anything today. The rows themselves
     /// are every provider Sissy is metering — a row is also where a plan, an
@@ -204,9 +204,9 @@ struct UsagePanelSnapshot: Equatable {
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
         let rows = makeRows(frame.providers, totalTokens: totalTokens, now: now)
         return Self(
-            tokens: frame.providers.isEmpty ? frame.tokens : UsageFormat.tokens(totalTokens),
-            cost: frame.providers.isEmpty ? "$\(frame.cost)" : UsageFormat.cost(totalCost),
-            burn: frame.burn,
+            tokens: UsageFormat.tokens(frame.tokens),
+            cost: UsageFormat.cost(frame.cost),
+            burn: frame.burn.map(UsageFormat.burn),
             providers: rows,
             usedToday: frame.providers.count { $0.tokens > 0 },
             projects: makeProjects(

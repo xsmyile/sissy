@@ -9,9 +9,9 @@ import XCTest
 final class SissyModelKeepAwakeTests: XCTestCase {
     private func frame(_ keepAwake: KeepAwakeState) -> FrameData {
         FrameData(
-            tokens: "26K",
-            cost: "0.09",
-            burn: "1.5K",
+            tokens: 26_000,
+            cost: Decimal(string: "0.09")!,
+            burn: 1500,
             providers: [],
             keepAwake: keepAwake,
             history: nil
