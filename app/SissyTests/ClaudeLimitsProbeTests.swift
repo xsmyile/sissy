@@ -210,7 +210,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         let order = Order()
         let started = expectation(description: "the request began")
         let probe = ClaudeLimitsProbe { _, _ in
-            .found(ClaudeCredentials(accessToken: "t", expiresAt: .distantFuture))
+            .found(ClaudeCredentials(accessToken: "t", expiresAt: .distantFuture, origin: .cli))
         } fetch: { _ in
             started.fulfill()
             await gate.wait()

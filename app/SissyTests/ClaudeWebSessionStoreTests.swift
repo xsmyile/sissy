@@ -1,0 +1,126 @@
+import XCTest
+
+@testable import Sissy
+
+/// What Sissy will accept as a claude.ai session, and what holding one in an
+/// item Sissy owns actually does.
+final class ClaudeWebSessionStoreTests: XCTestCase {
+    private let session = "sk-ant-sid01-" + String(repeating: "a", count: 100)
+    /// A per-run account, so a test can write to the real keychain without
+    /// ever addressing the item the user's own import lives in.
+    private lazy var account = "test-\(UUID().uuidString)"
+
+    override func tearDown() {
+        try? ClaudeWebSessionStore.delete(account: account)
+        super.tearDown()
+    }
+
+    // MARK: - What a session looks like
+
+    func testTakesASessionCopiedWithItsCookieName() {
+        XCTAssertEqual(
+            ClaudeWebSessionStore.normalize("sessionKey=\(session)"), session)
+    }
+
+    /// A whole `Cookie` header pasted in keeps only the cookie it names.
+    func testTakesASessionOutOfAWholeCookieHeader() {
+        XCTAssertEqual(
+            ClaudeWebSessionStore.normalize("sessionKey=\(session); lastActiveOrg=abc"), session)
+    }
+
+    func testTakesASessionSurroundedByWhitespace() {
+        XCTAssertEqual(ClaudeWebSessionStore.normalize("  \(session)\n"), session)
+    }
+
+    func testRecognisesASession() {
+        XCTAssertTrue(ClaudeWebSessionStore.looksLikeSession(session))
+    }
+
+    /// The shape check exists to name the obvious mis-paste before it is sent
+    /// anywhere. An API key is the one that would otherwise look plausible.
+    func testDoesNotMistakeAnAPIKeyForASession() {
+        XCTAssertFalse(ClaudeWebSessionStore.looksLikeSession("sk-ant-api03-abcdef"))
+    }
+
+    func testDoesNotAcceptTheBarePrefix() {
+        XCTAssertFalse(ClaudeWebSessionStore.looksLikeSession("sk-ant-sid"))
+    }
+
+    // MARK: - The item
+
+    func testASavedSessionReadsBack() throws {
+        try ClaudeWebSessionStore.save(session, account: account)
+        guard
+            case .found(let credentials) = ClaudeWebSessionStore.load(
+                account: account, allowingInteraction: false)
+        else {
+            return XCTFail("a session Sissy just wrote did not read back")
+        }
+        XCTAssertEqual(credentials.accessToken, session)
+        XCTAssertEqual(credentials.origin, .web)
+    }
+
+    /// A session carries no expiry: the cookie store names one, but the copy
+    /// Sissy holds is a string and the endpoint's 401 is what knows the
+    /// session has ended.
+    func testASessionIsValidUntilTheEndpointSaysOtherwise() throws {
+        try ClaudeWebSessionStore.save(session, account: account)
+        guard
+            case .found(let credentials) = ClaudeWebSessionStore.load(
+                account: account, allowingInteraction: false)
+        else {
+            return XCTFail("a session Sissy just wrote did not read back")
+        }
+        XCTAssertNil(credentials.expiresAt)
+        XCTAssertTrue(credentials.isValid(at: .distantFuture))
+    }
+
+    /// Importing again replaces: a rotated session must not leave the old one
+    /// behind for a poll to find.
+    func testASecondImportReplacesTheFirst() throws {
+        let rotated = "sk-ant-sid01-" + String(repeating: "b", count: 100)
+        try ClaudeWebSessionStore.save(session, account: account)
+        try ClaudeWebSessionStore.save(rotated, account: account)
+        guard
+            case .found(let credentials) = ClaudeWebSessionStore.load(
+                account: account, allowingInteraction: false)
+        else {
+            return XCTFail("a session Sissy just wrote did not read back")
+        }
+        XCTAssertEqual(credentials.accessToken, rotated)
+    }
+
+    /// Presence is asked without decrypting, so Settings can say "a session is
+    /// set" on a build whose grant has lapsed.
+    func testPresenceIsAnsweredWithoutReadingTheSecret() throws {
+        XCTAssertFalse(ClaudeWebSessionStore.isPresent(account: account))
+        try ClaudeWebSessionStore.save(session, account: account)
+        XCTAssertTrue(ClaudeWebSessionStore.isPresent(account: account))
+    }
+
+    func testForgettingASessionLeavesNothingBehind() throws {
+        try ClaudeWebSessionStore.save(session, account: account)
+        try ClaudeWebSessionStore.delete(account: account)
+        XCTAssertFalse(ClaudeWebSessionStore.isPresent(account: account))
+        guard
+            case .absent = ClaudeWebSessionStore.load(
+                account: account, allowingInteraction: false)
+        else {
+            return XCTFail("a forgotten session still reads as something")
+        }
+    }
+
+    /// Forgetting something that is already gone is what the caller asked for,
+    /// not a failure.
+    func testForgettingTwiceIsNotAnError() throws {
+        try ClaudeWebSessionStore.save(session, account: account)
+        try ClaudeWebSessionStore.delete(account: account)
+        XCTAssertNoThrow(try ClaudeWebSessionStore.delete(account: account))
+    }
+
+    func testAnEmptySessionIsRefused() {
+        XCTAssertThrowsError(try ClaudeWebSessionStore.save("   ", account: account)) { error in
+            XCTAssertEqual(error as? ClaudeWebSessionStoreError, .empty)
+        }
+    }
+}
