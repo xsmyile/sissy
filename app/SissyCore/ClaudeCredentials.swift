@@ -11,35 +11,20 @@ import Security
 /// token is simply skipped until the CLI renews it.
 struct ClaudeCredentials: Sendable, Equatable {
     let accessToken: String
-    /// When the token dies, for the source that says so.
+    /// When the credential dies, for the source that says so.
     ///
-    /// Nil for a web session: the cookie names an expiry in the store it was
-    /// imported from, but the copy Sissy holds is a string and the endpoint's
-    /// own 401 is the only thing that knows the session has ended. Treating an
-    /// absent expiry as "not expired" keeps that 401 the single place a dead
-    /// credential is handled, rather than a clock here and a status code
-    /// there.
+    /// Nil for a claude.ai session: the cookie names an expiry in the store it
+    /// was imported from, but the copy Sissy holds is a string and the
+    /// endpoint's own 401 is the only thing that knows the session has ended.
+    /// Treating an absent expiry as "not expired" keeps that 401 the single
+    /// place a dead credential is handled, rather than a clock here and a
+    /// status code there.
     let expiresAt: Date?
-    let origin: ClaudeTokenOrigin
 
     func isValid(at moment: Date = Date()) -> Bool {
         guard let expiresAt else { return true }
         return expiresAt > moment
     }
-}
-
-/// Which keychain item a credential came out of.
-///
-/// It travels with the credential because it is what decides how a rejection
-/// is worded. A 401 on the CLI's token is nobody's problem — the CLI renews on
-/// its own schedule and the next poll succeeds. A 401 on the session imported
-/// from Claude.app is the user's to fix, and saying so is the only way they
-/// find out it ended.
-enum ClaudeTokenOrigin: Sendable, Equatable {
-    /// Claude Code's own item, read with permission and never written.
-    case cli
-    /// The claude.ai session imported from Claude.app, in an item Sissy owns.
-    case web
 }
 
 /// Outcome of a keychain lookup. Absence and refusal are different states:
@@ -297,8 +282,7 @@ enum ClaudeCredentialsStore {
         let seconds = rawExpiry > secondsUpperBound ? rawExpiry / 1000 : rawExpiry
         return ClaudeCredentials(
             accessToken: token,
-            expiresAt: Date(timeIntervalSince1970: seconds),
-            origin: .cli
+            expiresAt: Date(timeIntervalSince1970: seconds)
         )
     }
 }

@@ -24,7 +24,7 @@ final class ClaudeWebSourceTests: XCTestCase {
     }
 
     private static func found(_ token: String) -> ClaudeCredentialsLookup {
-        .found(ClaudeCredentials(accessToken: token, expiresAt: nil, origin: .web))
+        .found(ClaudeCredentials(accessToken: token, expiresAt: nil))
     }
 
     // MARK: - Which organization
