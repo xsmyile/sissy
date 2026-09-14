@@ -100,6 +100,11 @@ struct PanelProviderPage: View {
     /// leaving the block empty: an API-key user has no subscription window,
     /// and a Codex that has not taken a turn since launch has not sent one
     /// yet — neither is a fault, and both look identical to a blank space.
+    ///
+    /// The gauges carry their own age under them. Neither provider's windows
+    /// are fetched when this page opens — Codex's ride the CLI's own turns and
+    /// Claude's a five-minute poll — so the only other date on screen is the
+    /// frame's, and that one moves when the *other* provider spends anything.
     private var limits: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionLabel(text: "Limits")
@@ -119,6 +124,13 @@ struct PanelProviderPage: View {
                 ForEach(Array(row.windows.enumerated()), id: \.element.id) { index, window in
                     WindowRowView(window: window, tint: tint)
                         .opacity(index == 0 ? 1 : PanelMetrics.secondaryWindowOpacity)
+                }
+
+                if let caption = row.windowsCaption {
+                    Text(caption)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
         }

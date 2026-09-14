@@ -30,30 +30,6 @@ struct SourceLine {
     let retainCutoff: Date
 }
 
-/// What a source can answer without entering the provider's actor.
-///
-/// The aggregator reads these while the emitting provider still holds its
-/// actor, so they cannot be `await`ed — see `AtomicWindows` for what that
-/// deadlock looks like. A source that publishes none of them takes the
-/// defaults.
-protocol SourceSignals: Sendable {
-    func currentWindows() -> [UsageWindow]
-    func currentPlan() -> String?
-    func currentPlanTier() -> String?
-    func currentAccount() -> ProviderAccount?
-    func currentLimitsState() -> ProviderLimitsState
-    func currentCredits() -> ProviderCredits?
-}
-
-extension SourceSignals {
-    func currentWindows() -> [UsageWindow] { [] }
-    func currentPlan() -> String? { nil }
-    func currentPlanTier() -> String? { nil }
-    func currentAccount() -> ProviderAccount? { nil }
-    func currentLimitsState() -> ProviderLimitsState { .quiet }
-    func currentCredits() -> ProviderCredits? { nil }
-}
-
 /// The facts `LocalUsageProvider` copies out of its adapter at init, so it can
 /// answer them from outside its own actor.
 struct SourceDescriptor: Sendable {
@@ -67,6 +43,8 @@ struct SourceDescriptor: Sendable {
     /// FSEvents queue label, one per source so a stack trace names the tail
     /// it came from.
     let watcherLabel: String
+    /// Everything the adapter answers for that is not a token count, readable
+    /// without entering the provider's actor.
     let signals: SourceSignals
 }
 
@@ -214,10 +192,11 @@ actor LocalUsageProvider: UsageProvider {
     private var seenEventKeys: [String: SeenEvent] = [:]
     /// Today's project split, republished on every emit so the aggregator
     /// can read it without an actor hop.
-    private let publishedProjects = AtomicProjects()
+    private let publishedProjects = LockedValue<[ProjectTotals]>([])
+    private var lastPublishedSignals: ProviderSignals?
     private var pollTask: Task<Void, Never>?
     private var onChange: (@Sendable (DayTotals) async -> Void)?
-    nonisolated private let watchedCounter = AtomicIntCounter()
+    nonisolated private let watchedCounter = LockedValue(0)
     /// FSEvents-backed primary wake source. When non-nil, kernel-level
     /// notifications drive `ingestEventPaths` directly and the `pollTask`
     /// timer only runs as a low-frequency safety net (missed events,
@@ -305,17 +284,7 @@ actor LocalUsageProvider: UsageProvider {
         self.historyRoot = historyRoot
     }
 
-    nonisolated func currentWindows() -> [UsageWindow] { signals.currentWindows() }
-
-    nonisolated func currentPlan() -> String? { signals.currentPlan() }
-
-    nonisolated func currentPlanTier() -> String? { signals.currentPlanTier() }
-
-    nonisolated func currentAccount() -> ProviderAccount? { signals.currentAccount() }
-
-    nonisolated func currentLimitsState() -> ProviderLimitsState { signals.currentLimitsState() }
-
-    nonisolated func currentCredits() -> ProviderCredits? { signals.currentCredits() }
+    nonisolated func currentSignals() -> ProviderSignals { signals.currentSignals().live() }
 
     /// Hands the adapter the chance to re-read its own out-of-band files. The
     /// engine re-emits afterwards, so nothing is published from here.
@@ -351,10 +320,7 @@ actor LocalUsageProvider: UsageProvider {
         // this emit the first frame waits for the next JSONL append — minutes
         // of idle between turns — and the panel sits on its empty-day
         // placeholder despite valid totals being in memory.
-        if loaded {
-            lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
-            await onChange(current())
-        }
+        if loaded { await emitReading() }
         await poll()
         // The scan above ends either because it finished or because it was cut
         // short, and only the first may be taken for a complete pass. A
@@ -466,22 +432,45 @@ actor LocalUsageProvider: UsageProvider {
             watchedCounter.store(max(watchedCounter.load(), fileOffsets.count))
         }
         let todayKey = Calendar.current.startOfDay(for: Date())
-        if dirty, let cb = onChange {
-            let today = current()
-            lastEmittedDayKey = todayKey
-            await cb(today)
-        } else if let cb = onChange,
-            let lastKey = lastEmittedDayKey,
-            lastKey != todayKey
-        {
-            let today = current()
-            lastEmittedDayKey = todayKey
-            await cb(today)
+        if dirty || signalsChanged {
+            await emitReading()
+        } else if let lastKey = lastEmittedDayKey, lastKey != todayKey {
+            await emitReading()
         }
         trim()
         adapter.projects.ledger.saveIfDirty()
         saveSnapshotIfDirty()
         saveHistoryIfDirty()
+    }
+
+    /// Whether anything this provider answers for besides its totals has moved
+    /// since the last emit — an authorization that lapsed, a plan the CLI
+    /// rewrote, an account switched. None of those move a token count, and
+    /// before this the panel kept showing the old one until the next turn
+    /// landed, which on the day a keychain grant expires may be never.
+    ///
+    /// False until something has actually been published. A provider that read
+    /// nothing has no reading to contradict, and emitting a frame for it would
+    /// take the panel off the one sentence a user with no session logs at all
+    /// can act on.
+    private var signalsChanged: Bool {
+        guard let lastPublishedSignals else { return false }
+        return currentSignals() != lastPublishedSignals
+    }
+
+    /// Publishes today's totals, recording the day and the reading that went
+    /// out with them.
+    ///
+    /// Every emit goes through here so the record cannot drift from what was
+    /// sent: `lastPublishedSignals` is what lets the next pass tell a provider
+    /// whose plan, account or authorization changed from one that merely read
+    /// the same numbers again, and a branch that emitted without updating it
+    /// would emit on every poll forever after.
+    private func emitReading() async {
+        guard let onChange else { return }
+        lastEmittedDayKey = Calendar.current.startOfDay(for: Date())
+        lastPublishedSignals = currentSignals()
+        await onChange(current())
     }
 
     /// What today adds up to right now.
@@ -568,24 +557,16 @@ actor LocalUsageProvider: UsageProvider {
             }
             // Stream partial totals out during backfill, so the panel counts
             // up while the scan runs instead of sitting blank until it ends.
-            if dirtySinceEmit,
-                Date().timeIntervalSince(lastEmitAt) > emitThrottle,
-                let cb = onChange
-            {
-                lastEmittedDayKey = todayKey
-                await cb(current())
+            if dirtySinceEmit, Date().timeIntervalSince(lastEmitAt) > emitThrottle {
+                await emitReading()
                 lastEmitAt = Date()
                 dirtySinceEmit = false
             }
         }
         trim()
-        if dirtySinceEmit, let cb = onChange {
-            lastEmittedDayKey = todayKey
-            await cb(current())
-        } else if let cb = onChange,
-            let lastKey = lastEmittedDayKey,
-            lastKey != todayKey
-        {
+        if dirtySinceEmit || signalsChanged {
+            await emitReading()
+        } else if let lastKey = lastEmittedDayKey, lastKey != todayKey {
             // Calendar day rolled since the last emit and nothing wrote a
             // new JSONL line. Force a synthetic emit so the menubar
             // resets to a fresh "today=0" frame instead of holding the
@@ -593,8 +574,7 @@ actor LocalUsageProvider: UsageProvider {
             // (Mac stays awake across midnight) and the wake-after-sleep
             // case (system slept across one or more midnights, first poll
             // after wake observes the day shift).
-            lastEmittedDayKey = todayKey
-            await cb(current())
+            await emitReading()
         }
         // Throttled persistence: only writes if state changed since the
         // last save AND `saveThrottle` seconds have elapsed. SIGKILL/power

@@ -11,15 +11,13 @@ struct UsageReading: Sendable {
 /// frame. The frame's own scalars stay unaware of multi-provider: the engine
 /// sums per-day totals before emitting and carries the split alongside them.
 actor UsageAggregator {
-    private struct Snapshot {
-        var today: DayTotals
-    }
-
-    /// Nonisolated so the HTTP path can read it (and `filesWatched()`) without
-    /// hopping into the actor. Provider list is set once in init and never
-    /// mutated; each provider's own counter is itself nonisolated.
-    nonisolated private let providers: [any UsageProvider]
-    private var perProvider: [String: Snapshot] = [:]
+    /// Set once in init and never mutated; each provider answers for its own
+    /// state without an actor hop.
+    private let providers: [any UsageProvider]
+    /// The last reading each provider produced. A provider with no entry has
+    /// not read yet, which is not the same as a provider that read zero — the
+    /// first has no row, the second has one saying zero.
+    private var perProvider: [String: DayTotals] = [:]
     private var onChange: (@Sendable (DayTotals, [ProviderSlice]) async -> Void)?
 
     init(providers: [any UsageProvider]) {
@@ -104,7 +102,7 @@ actor UsageAggregator {
     }
 
     private func handleProviderEmit(id: String, today: DayTotals) async {
-        perProvider[id] = Snapshot(today: today)
+        perProvider[id] = today
         let combinedToday = aggregate()
         // Build slices from the same `perProvider` map that just produced
         // `combinedToday` — both before the upcoming `await`. A concurrent
@@ -138,26 +136,21 @@ actor UsageAggregator {
             guard let s = perProvider[p.id] else { return nil }
             return ProviderSlice(
                 id: p.id,
-                tokens: s.today.totalTokens,
-                cost: s.today.totalCost,
-                windows: p.currentWindows(),
-                plan: p.currentPlan(),
-                planTier: p.currentPlanTier(),
-                credits: p.currentCredits(),
-                projects: p.currentProjects(),
-                account: p.currentAccount(),
-                limitsState: p.currentLimitsState()
+                tokens: s.totalTokens,
+                cost: s.totalCost,
+                signals: p.currentSignals(),
+                projects: p.currentProjects()
             )
         }
-        return FrameBuilder.activeSlices(raw)
+        return FrameBuilder.sortProviders(raw)
     }
 
     private func aggregate() -> DayTotals {
         var todayTok = 0
         var todayCost: Decimal = 0
         for s in perProvider.values {
-            todayTok += s.today.totalTokens
-            todayCost += s.today.totalCost
+            todayTok += s.totalTokens
+            todayCost += s.totalCost
         }
         return DayTotals(totalTokens: todayTok, totalCost: todayCost)
     }

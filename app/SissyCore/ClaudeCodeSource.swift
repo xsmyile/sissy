@@ -8,13 +8,14 @@ private struct ClaudeCodeSignals: SourceSignals {
     let limitsProbe: ClaudeLimitsProbe?
     let profile: ClaudeProfileSource
 
-    func currentWindows() -> [UsageWindow] { limitsProbe?.currentWindows() ?? [] }
-    func currentPlan() -> String? { profile.currentPlan() }
-    func currentPlanTier() -> String? { profile.currentPlanTier() }
-    func currentAccount() -> ProviderAccount? { profile.currentAccount() }
-    func currentCredits() -> ProviderCredits? { profile.currentCredits() }
-    func currentLimitsState() -> ProviderLimitsState {
-        limitsProbe?.currentLimitsState() ?? .quiet
+    func currentSignals() -> ProviderSignals {
+        var reading = profile.currentSignals()
+        if let limits = limitsProbe?.currentSignals() {
+            reading.windows = limits.windows
+            reading.limitsState = limits.limitsState
+            reading.limitsObservedAt = limits.limitsObservedAt
+        }
+        return reading
     }
 }
 

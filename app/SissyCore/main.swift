@@ -157,13 +157,14 @@ if args.contains("--scan") {
             await p.start { _ in }
             try? await Task.sleep(for: .seconds(1))
             let today = await p.current()
+            let signals = p.currentSignals()
             out[p.id] = ScanEntry(
                 tokens: today.totalTokens,
                 cost: NSDecimalNumber(decimal: today.totalCost).stringValue,
                 filesWatched: p.filesWatched(),
-                plan: p.currentPlan(),
-                planTier: p.currentPlanTier(),
-                credits: p.currentCredits().map {
+                plan: signals.plan,
+                planTier: signals.planTier,
+                credits: signals.credits.map {
                     ScanCredits(
                         used: NSDecimalNumber(decimal: $0.used).stringValue,
                         cap: NSDecimalNumber(decimal: $0.cap).stringValue,

@@ -12,6 +12,11 @@ struct UsagePanelSnapshot: Equatable {
     let cost: String
     let burn: String
     let providers: [ProviderRow]
+    /// How many of those rows have spent anything today. The rows themselves
+    /// are every provider Sissy is metering — a row is also where a plan, an
+    /// account and the rate-limit gauges ride, none of which stop existing
+    /// because the day's total is zero.
+    let usedToday: Int
     /// Today's spend by project, the busiest first, the tail folded into one
     /// row and whatever named no repository in a last row of its own. Empty
     /// when nothing today names a project, and the panel then draws no section
@@ -68,6 +73,10 @@ struct UsagePanelSnapshot: Equatable {
         /// Shortest window first. Empty when the provider reports none, which
         /// its page answers with a sentence rather than a blank block.
         let windows: [WindowRow]
+        /// When those windows were taken, worded. Nil when there are none, and
+        /// when the provider published them without saying — a gauge with an
+        /// invented age would be worse than one with none.
+        let windowsCaption: String?
         /// What to say and offer when the limits are missing for a reason the
         /// user can act on. Nil the rest of the time, which is most of it.
         let notice: LimitsNotice?
@@ -199,6 +208,7 @@ struct UsagePanelSnapshot: Equatable {
             cost: frame.providers.isEmpty ? "$\(frame.cost)" : UsageFormat.cost(totalCost),
             burn: frame.burn,
             providers: rows,
+            usedToday: frame.providers.count { $0.tokens > 0 },
             projects: makeProjects(
                 frame.projects, totalTokens: totalTokens, totalCost: totalCost),
             history: makeHistory(frame.history, now: now),
@@ -266,6 +276,11 @@ struct UsagePanelSnapshot: Equatable {
                 cost: UsageFormat.cost(slice.cost),
                 share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0,
                 windows: slice.windows.map { makeWindow($0, now: now) },
+                windowsCaption: slice.windows.isEmpty
+                    ? nil
+                    : slice.limitsObservedAt.map {
+                        UsageFormat.windowsCaption(observedAt: $0, now: now)
+                    },
                 notice: UsageFormat.limitsNotice(slice.limitsState)
                     .map { LimitsNotice(message: $0.message, action: $0.action) },
                 account: makeAccount(slice.account, now: now),
