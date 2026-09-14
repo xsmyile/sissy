@@ -1208,7 +1208,7 @@ func runClaudeLimitsParseTests() {
     expect("measured weekly utilization", live.last?.usedPercent, 25.0)
     expect(
         "measured reset survives its offset and microseconds",
-        live.first.map { Int($0.resetsAt.timeIntervalSince1970) },
+        live.first?.resetsAt.map { Int($0.timeIntervalSince1970) },
         1_789_042_800
     )
 
