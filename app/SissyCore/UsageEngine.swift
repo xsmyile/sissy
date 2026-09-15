@@ -209,17 +209,19 @@ actor UsageEngine {
                         ledger: projectLedger
                     ))
             default:
-                // The shared keychain probe and the imported claude.ai session
-                // answer for whichever account the CLI and Claude.app are
-                // signed into, which is one account and not necessarily this
-                // one. Only the account that predates accounts may use them;
-                // every other reads the OAuth credential out of its own config
-                // home, where no other account's reading can reach it.
-                let ownProbe = account.key.account.map { _ in
-                    ClaudeLimitsProbe(credentials: { _, _ in
+                // An account's limits come from its own config home, whichever
+                // account it is. The shared keychain item and the imported
+                // claude.ai session answer for whoever the CLI and Claude.app
+                // are signed into — one account, and not necessarily this one —
+                // which is exactly how a row came to pair one account's name
+                // with another's windows. They are the fallback for the account
+                // that has no home of its own to read, never the first answer.
+                let ownProbe =
+                    ClaudeFileCredentials.isPresent(at: account.claudeCredentialsURL)
+                    ? ClaudeLimitsProbe(credentials: { _, _ in
                         ClaudeFileCredentials.load(at: account.claudeCredentialsURL)
                     })
-                }
+                    : account.key.account.map { _ in ClaudeLimitsProbe() }
                 if let ownProbe { limitsSources[account.id] = ownProbe }
                 providers.append(
                     LocalUsageProvider.claudeCode(
@@ -417,8 +419,14 @@ actor UsageEngine {
     /// asked for by a control that never promised to.
     func refreshProvider(id: String) async {
         guard lifecycle == .running else { return }
-        if id == ProviderID.claudeCode, config.claudeLimits {
-            let me = self
+        let me = self
+        // An account with a credential of its own is refreshed through it,
+        // whichever account it is. Nothing here may reach for the shared
+        // sources on its behalf: they answer for a different account, and this
+        // button is pressed on one row.
+        if let own = perAccountLimits[id] {
+            await own.refresh { await me.reemit() }
+        } else if id == ProviderID.claudeCode, config.claudeLimits {
             if hasClaudeWebSession {
                 // A session claude.ai has closed cannot be refreshed into
                 // working again, and re-reading the same dead string is the
@@ -640,17 +648,24 @@ actor UsageEngine {
     /// this way", and forgetting is what takes it back.
     private func startClaudeLimits(userInitiated: Bool) async {
         let me = self
-        // The session is imported rather than asked for. A user who switched
-        // limits on has already granted the permission this needs, and making
-        // them find a second button in Settings to get the live reading is the
-        // switch failing to do what it says.
-        if !hasClaudeWebSession {
-            _ = await adoptClaudeWebSession(allowingInteraction: userInitiated)
-        }
-        if hasClaudeWebSession {
-            await claudeWebSource.start(userInitiated: userInitiated) { await me.reemit() }
-        } else {
-            await claudeLimitsProbe.start(userInitiated: userInitiated) { await me.reemit() }
+        // An account reading its own credential needs neither of the shared
+        // sources, and must not be given one: the imported session is
+        // Claude.app's account and the keychain item is the CLI's, so starting
+        // either here is how a second account's windows land under the first
+        // account's name.
+        if !defaultClaudeAccountReadsItsOwnHome {
+            // The session is imported rather than asked for. A user who
+            // switched limits on has already granted the permission this needs,
+            // and making them find a second button in Settings to get the live
+            // reading is the switch failing to do what it says.
+            if !hasClaudeWebSession {
+                _ = await adoptClaudeWebSession(allowingInteraction: userInitiated)
+            }
+            if hasClaudeWebSession {
+                await claudeWebSource.start(userInitiated: userInitiated) { await me.reemit() }
+            } else {
+                await claudeLimitsProbe.start(userInitiated: userInitiated) { await me.reemit() }
+            }
         }
         // Every other account reads a file, so `userInitiated` means nothing
         // to it: there is no dialog to be allowed to raise and no grant to go
@@ -667,6 +682,17 @@ actor UsageEngine {
         await claudeLimitsProbe.stop()
         await claudeWebSource.stop()
         for probe in perAccountLimits.values { await probe.stop() }
+    }
+
+    /// Whether the account that predates accounts has a credential of its own.
+    ///
+    /// When it has, nothing on this Mac needs the keychain item or the imported
+    /// cookie to read Claude's limits, and neither is started — which also
+    /// means no keychain dialog and no session to go stale. When it has not —
+    /// a CLI that keeps its token only in the keychain, or one never signed in
+    /// — the two shared sources are still the only answer there is.
+    private var defaultClaudeAccountReadsItsOwnHome: Bool {
+        perAccountLimits[ProviderKey(vendor: ProviderID.claudeCode).id] != nil
     }
 
     /// Where one account's offsets are kept.

@@ -31,7 +31,21 @@ actor ClaudeLimitsProbe: SourceSignals {
     private let credentialsSource: @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup
     /// The network half, injectable for the same reason: a test of the refresh
     /// contract must not reach Anthropic to observe it.
-    private let fetchSource: @Sendable (String) async throws -> [UsageWindow]
+    private let fetchSource: @Sendable (String) async throws -> Reading
+
+    /// One answer from the usage endpoint: the windows it drew and what it has
+    /// billed against the spend cap.
+    ///
+    /// The credits ride along rather than being read from the CLI's cached
+    /// copy, because that copy only advances when someone types `/usage` and
+    /// it is not invalidated when the CLI signs into a different account —
+    /// measured 2026-09-15, a config file naming one account still carried the
+    /// previous one's spend, in the previous one's currency. A live window
+    /// beside a cached figure from another account is two readings on one row.
+    struct Reading: Sendable, Equatable {
+        let windows: [UsageWindow]
+        let credits: ProviderCredits?
+    }
     /// Whether the next credential read may put a dialog on screen.
     ///
     /// Set only by a `start` the user asked for, and spent on the first read
@@ -68,7 +82,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         credentials: @escaping @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup = {
             await ClaudeCredentialsStore.loadOffPool(timeout: $0, allowingInteraction: $1)
         },
-        fetch: @escaping @Sendable (String) async throws -> [UsageWindow] = {
+        fetch: @escaping @Sendable (String) async throws -> Reading = {
             try await ClaudeLimitsProbe.fetch(token: $0)
         }
     ) {
@@ -138,6 +152,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         cached = nil
         published.update {
             $0.windows = []
+            $0.credits = nil
             $0.limitsObservedAt = nil
             if clearingState { $0.limitsState = .quiet }
         }
@@ -293,10 +308,11 @@ actor ClaudeLimitsProbe: SourceSignals {
         case .wait(let delay): return delay
         }
         do {
-            let windows = try await fetchSource(credentials.accessToken)
+            let reading = try await fetchSource(credentials.accessToken)
             guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
             published.update {
-                $0.windows = windows
+                $0.windows = reading.windows
+                $0.credits = reading.credits
                 $0.limitsState = .quiet
                 $0.limitsObservedAt = Date()
             }
@@ -327,10 +343,11 @@ actor ClaudeLimitsProbe: SourceSignals {
         published.update {
             $0.limitsState = state
             $0.windows = []
+            $0.credits = nil
         }
     }
 
-    private static func fetch(token: String) async throws -> [UsageWindow] {
+    private static func fetch(token: String) async throws -> Reading {
         var request = URLRequest(url: usageURL, timeoutInterval: requestTimeout)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -343,14 +360,18 @@ actor ClaudeLimitsProbe: SourceSignals {
         guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ClaudeLimitsError.malformedPayload
         }
-        return parse(payload)
+        return parse(payload, observedAt: Date())
     }
 
-    /// The two windows the panel draws, off the body every Claude usage
-    /// source answers with. The parse itself lives in `ClaudeUsagePayload`,
-    /// which claude.ai and the CLI's own cache read through too.
-    static func parse(_ payload: [String: Any]) -> [UsageWindow] {
-        ClaudeUsagePayload.windows(payload)
+    /// The windows the panel draws and the spend beside them, off the body
+    /// every Claude usage source answers with. The parse itself lives in
+    /// `ClaudeUsagePayload`, which claude.ai and the CLI's own cache read
+    /// through too.
+    static func parse(_ payload: [String: Any], observedAt: Date = Date()) -> Reading {
+        Reading(
+            windows: ClaudeUsagePayload.windows(payload),
+            credits: ClaudeUsagePayload.credits(payload, observedAt: observedAt)
+        )
     }
 }
 

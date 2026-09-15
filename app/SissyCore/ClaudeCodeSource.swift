@@ -5,13 +5,18 @@ import Foundation
 /// plan, the account and the credits from the CLI's own config file — which is
 /// why the last three are readable whether or not the user turned limits on.
 ///
-/// An imported claude.ai session outranks the OAuth probe, and takes the
-/// credits with it. Not a chain of fallbacks: exactly one source is running,
-/// decided by whether a session was imported, and the one that is running
-/// answers for everything it can. The credits move with it because the
-/// config file's copy is the endpoint's reply as of the last time the CLI
-/// asked, which is only when the user typed `/usage` — pairing a live window
-/// with an hour-old spend would be two moments on one row.
+/// Whichever limits source is running answers for everything it can, credits
+/// included — and answers for them even when its answer is "none". Not a
+/// chain of fallbacks: exactly one source is running and the config file's
+/// copy is not a second opinion to fill in behind it. That copy is the
+/// endpoint's reply as of the last time the CLI asked, which is only when the
+/// user typed `/usage`, so pairing a live window with it would be two moments
+/// on one row — and, measured 2026-09-15, two *accounts* on one row: a config
+/// file naming a freshly created account still carried the previous account's
+/// spend, in the previous account's currency, because signing in elsewhere
+/// does not invalidate the cache. It is the answer when nothing live is
+/// running, which is every user who never switched limits on, and never an
+/// amendment to one that is.
 struct ClaudeCodeSignals: SourceSignals {
     let limitsProbe: ClaudeLimitsProbe?
     let webSource: ClaudeWebSource?
@@ -55,7 +60,7 @@ struct ClaudeCodeSignals: SourceSignals {
         reading.windows = live.windows
         reading.limitsState = live.limitsState
         reading.limitsObservedAt = live.limitsObservedAt
-        if let credits = live.credits { reading.credits = credits }
+        reading.credits = live.credits
         return reading
     }
 }
