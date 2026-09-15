@@ -35,7 +35,18 @@ final class SissyModel {
         self.engine.attach(model: self)
     }
 
+    /// Brings the app up: the login item's state, the one-shot retirement of
+    /// the legacy agent, then metering.
+    ///
+    /// The login item is read here rather than left to Settings because
+    /// `LoginItemController` starts at `.notRegistered` and Settings' own
+    /// refresh lands a frame after the switch is already on screen — long
+    /// enough for a registered login item to draw as off and then animate on.
+    /// The query costs 1–7 ms against launchd, measured, at a point where
+    /// nothing is drawn yet. Settings keeps refreshing on appearance: only the
+    /// system knows that the user has since undone it from Login Items.
     func start() {
+        loginItem.refresh()
         retireLegacyAgentIfNeeded()
         engine.start()
     }
