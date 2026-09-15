@@ -118,6 +118,28 @@ struct UsagePanelSnapshot: Equatable {
         /// say — no cap set and nothing spent, which is every account that
         /// has never turned credits on.
         let credits: CreditsRow?
+        /// What the vendor's own status page last said. Nil while the readings
+        /// are switched off and for a provider with no feed to poll, which is
+        /// what leaves the row off the page rather than putting an empty one
+        /// on it.
+        let status: StatusRow?
+    }
+
+    /// A vendor's own status, as the provider page prints it.
+    ///
+    /// The indicator travels raw beside the worded label because it is the one
+    /// field a surface reads rather than shows: it picks the dot's colour, and
+    /// it decides whether the Overview colours that provider's name at all.
+    struct StatusRow: Equatable {
+        let indicator: ProviderStatusIndicator
+        /// The vendor's own sentence, or Sissy's own when there is no reading.
+        let label: String
+        /// When Sissy read it, left for the view to word on its own clock: the
+        /// monitor emits nothing while a vendor keeps saying the same thing,
+        /// so an age frozen into this value would stop moving under an open
+        /// panel. Nil for a feed that has never answered — an age there would
+        /// date a fetch that produced no reading as though it were one.
+        let checkedAt: Date?
     }
 
     /// The credits block of a provider's page: what has been charged against
@@ -247,7 +269,8 @@ struct UsagePanelSnapshot: Equatable {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
         let rows = makeRows(
-            frame.providers, claudeAccounts: claudeAccounts, totalTokens: totalTokens, now: now)
+            frame.providers, claudeAccounts: claudeAccounts, status: frame.providerStatus,
+            totalTokens: totalTokens, now: now)
         return Self(
             tokens: UsageFormat.tokens(frame.tokens),
             cost: UsageFormat.cost(frame.cost),
@@ -287,6 +310,7 @@ struct UsagePanelSnapshot: Equatable {
     private static func makeRows(
         _ slices: [ProviderSlice],
         claudeAccounts: ClaudeAccountRegistry.Snapshot,
+        status: [String: ProviderStatusReading],
         totalTokens: Int,
         now: Date
     ) -> [ProviderRow] {
@@ -316,9 +340,22 @@ struct UsagePanelSnapshot: Equatable {
                 account: makeAccount(slice.account, now: now),
                 projects: makeProjects(
                     slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
-                credits: makeCredits(slice.credits, now: now)
+                credits: makeCredits(slice.credits, now: now),
+                status: makeStatus(status[slice.id])
             )
         }
+    }
+
+    /// A reading that exists becomes a row; one that does not becomes no row.
+    /// The map is empty for every provider while the readings are switched
+    /// off, which is what takes the section off the page rather than leaving
+    /// an unexplained blank where it was.
+    private static func makeStatus(_ reading: ProviderStatusReading?) -> StatusRow? {
+        guard let reading else { return nil }
+        return StatusRow(
+            indicator: reading.indicator,
+            label: UsageFormat.statusLabel(reading.description),
+            checkedAt: reading.indicator == .unknown ? nil : reading.checkedAt)
     }
 
     /// The accounts the switcher offers, or none when there is nothing to

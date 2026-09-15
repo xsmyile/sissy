@@ -124,11 +124,42 @@ struct ProvidersSettingsView: View {
                     }
                 }
             }
+            Section {
+                statusChecks
+            }
         }
         .formStyle(.grouped)
         // The readiness poll stops once the scan is warm, so a window opened
         // afterwards would render whatever the last tick left behind.
         .task { model.engine.refreshProviders() }
+    }
+
+    /// Whether Sissy reads each vendor's own status page.
+    ///
+    /// It names the pages rather than describing them, for the reason the
+    /// Files row names files: this is a request that leaves the Mac, and what
+    /// it reaches is the part worth knowing before it is left on. What it
+    /// carries is nothing — no account, no credential, no identity — which is
+    /// why it can be on without being asked for.
+    private var statusChecks: some View {
+        LabeledContent {
+            Toggle("Provider status", isOn: statusChecksBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        } label: {
+            Text("Provider status")
+            Text(
+                "Reads status.claude.com and status.openai.com so the panel can say "
+                    + "whether it is you or them. No account, no sign-in."
+            )
+        }
+    }
+
+    private var statusChecksBinding: Binding<Bool> {
+        Binding(
+            get: { model.engine.statusChecks },
+            set: { model.engine.setStatusChecks($0) }
+        )
     }
 
     /// What is read when the CLI keeps its own credential: no keychain

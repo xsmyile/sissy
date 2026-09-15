@@ -299,6 +299,14 @@ struct FrameData: Sendable, Equatable {
     /// counts against the checkout it was cut from — and a line naming no
     /// directory is not given a row at all rather than inventing one.
     let projects: [ProjectTotals]
+    /// What each vendor's own status page last said, keyed by provider.
+    ///
+    /// Beside the slices rather than on one, because a status is the vendor's
+    /// and not the log tail's: it is the same answer for every account of that
+    /// vendor, it costs no reading of theirs, and it exists for a provider
+    /// whose cold scan has not finished. Empty for a provider with no feed to
+    /// poll, and for every provider while the switch is off.
+    let providerStatus: [String: ProviderStatusReading]
 
     /// Defaulted so a frame can be built without naming the split: a caller
     /// that has none is saying there is none, and every test and future field
@@ -310,7 +318,8 @@ struct FrameData: Sendable, Equatable {
         providers: [ProviderSlice],
         keepAwake: KeepAwakeState,
         history: UsageHistoryRollup?,
-        projects: [ProjectTotals] = []
+        projects: [ProjectTotals] = [],
+        providerStatus: [String: ProviderStatusReading] = [:]
     ) {
         self.tokens = tokens
         self.cost = cost
@@ -319,6 +328,7 @@ struct FrameData: Sendable, Equatable {
         self.keepAwake = keepAwake
         self.history = history
         self.projects = projects
+        self.providerStatus = providerStatus
     }
 }
 
@@ -333,7 +343,8 @@ enum FrameBuilder {
         hoursElapsed: Double,
         providers: [ProviderSlice] = [],
         keepAwake: KeepAwakeState = .off,
-        history: UsageHistoryRollup? = nil
+        history: UsageHistoryRollup? = nil,
+        providerStatus: [String: ProviderStatusReading] = [:]
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
         return FrameData(
@@ -343,7 +354,8 @@ enum FrameBuilder {
             providers: providers,
             keepAwake: keepAwake,
             history: history,
-            projects: combinedProjects(providers)
+            projects: combinedProjects(providers),
+            providerStatus: providerStatus
         )
     }
 
