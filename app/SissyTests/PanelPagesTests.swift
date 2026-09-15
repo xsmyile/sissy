@@ -29,7 +29,8 @@ final class PanelPagesTests: XCTestCase {
         plan: String? = nil,
         account: ProviderAccount? = nil,
         projects: [ProjectTotals] = [],
-        limitsState: ProviderLimitsState = .quiet
+        limitsState: ProviderLimitsState = .quiet,
+        limitsObservedAt: Date? = nil
     ) -> ProviderSlice {
         ProviderSlice(
             id: id,
@@ -39,51 +40,140 @@ final class PanelPagesTests: XCTestCase {
             plan: plan,
             projects: projects,
             account: account,
-            limitsState: limitsState
+            limitsState: limitsState,
+            limitsObservedAt: limitsObservedAt
         )
     }
 
-    private func window(_ minutes: Int, _ usedPercent: Double) throws -> UsageWindow {
+    /// The instant every window fixture is placed against, so a pace the panel
+    /// derives is a property of the fixture and not of the day the suite runs
+    /// on. The reset that used to be hard-coded here fell into the past, which
+    /// left both headroom tests silently exercising the no-projection branch.
+    private static let now = Date(timeIntervalSince1970: 1_789_000_000)
+
+    /// A window `elapsed` of the way through its own period. The default sits
+    /// exactly on the reset, which is a window with nothing left to project
+    /// from — the shape the percentage fallback is for.
+    private func window(
+        _ minutes: Int, _ usedPercent: Double, elapsed: Double = 1
+    ) throws -> UsageWindow {
         try XCTUnwrap(
             UsageWindow(
                 minutes: minutes,
                 usedPercent: usedPercent,
-                resetsAt: Date(timeIntervalSince1970: 1_789_006_037)
+                resetsAt: Self.now.addingTimeInterval(Double(minutes) * 60 * (1 - elapsed))
             ))
+    }
+
+    private func windows(
+        _ windows: [UsageWindow], observedAt: Date? = nil
+    ) -> [UsagePanelSnapshot.WindowRow] {
+        UsagePanelSnapshot.make(
+            frame: frame([
+                slice("claude-code", windows: windows, limitsObservedAt: observedAt)
+            ]),
+            now: Self.now
+        ).providers[0].windows
     }
 
     // MARK: Headroom
 
-    /// The window a provider leads on is the one it is closest to running out
-    /// of, not the shortest it reports: a session bucket nobody has started
-    /// sits at 0% with no reset and says nothing while the weekly one behind
-    /// it is nearly spent.
-    func testTheBindingWindowIsTheOneWithTheLeastLeft() throws {
-        let windows = UsagePanelSnapshot.make(
-            frame: frame([
-                slice("claude-code", windows: [try window(300, 20), try window(10080, 95)])
-            ])
-        ).providers[0].windows
+    /// The window a provider leads on is the one its own rate empties first,
+    /// not the fullest it reports. A session at 40% four and a half hours into
+    /// five lasts until its reset whatever the bar says; a weekly at 35% two
+    /// days in does not, and it is the one the user actually meets.
+    func testTheBindingWindowIsTheOneTheRateEmptiesFirst() throws {
+        let rows = windows([
+            try window(300, 40, elapsed: 0.9),
+            try window(10080, 35, elapsed: 0.2),
+        ])
 
-        XCTAssertEqual(UsagePanelSnapshot.binding(windows)?.percent, 95)
+        XCTAssertNil(rows.first { $0.minutes == 300 }?.pace?.runsOutAt)
+        XCTAssertNotNil(rows.first { $0.minutes == 10080 }?.pace?.runsOutAt)
+        XCTAssertEqual(UsagePanelSnapshot.binding(rows)?.minutes, 10080)
+    }
+
+    /// Two windows both heading for their cap are ranked by which arrives
+    /// first, not by which bar is fuller: the weekly here is the more spent
+    /// and the session is the one the user meets this afternoon.
+    func testAmongWindowsHeadingForTheirCapTheSoonestLeads() throws {
+        let rows = windows([
+            try window(300, 60, elapsed: 0.5),
+            try window(10080, 80, elapsed: 0.7),
+        ])
+
+        let session = try XCTUnwrap(rows.first { $0.minutes == 300 }?.pace?.runsOutAt)
+        let weekly = try XCTUnwrap(rows.first { $0.minutes == 10080 }?.pace?.runsOutAt)
+        XCTAssertLessThan(session, weekly)
+        XCTAssertEqual(UsagePanelSnapshot.binding(rows)?.minutes, 300)
+    }
+
+    /// Two windows that run out at the same instant are not equally urgent
+    /// either — the shorter period is the one met sooner, and it leads.
+    ///
+    /// Built row by row rather than from a window fixture: two run-outs land
+    /// on the same instant only for one exact pair of rates, and a test that
+    /// has to solve for it asserts a date equality that floating point owes it
+    /// no answer on.
+    func testTwoWindowsRunningOutTogetherGoToTheShorterPeriod() {
+        let runsOut = Self.now.addingTimeInterval(3600)
+        let rows = [(10080, 90), (300, 40)].map { minutes, percent in
+            UsagePanelSnapshot.WindowRow(
+                id: "\(minutes)-",
+                minutes: minutes,
+                label: "",
+                percent: percent,
+                fraction: Double(percent) / 100,
+                resetsAt: Self.now.addingTimeInterval(7200),
+                pace: UsagePanelSnapshot.Pace(
+                    expectedFraction: 0.5, deltaPercent: 0, runsOutAt: runsOut))
+        }
+
+        XCTAssertEqual(UsagePanelSnapshot.binding(rows)?.minutes, 300)
+    }
+
+    /// A window that survives its own reset does not bind at all, however full
+    /// it is — and when no window projects a run-out, the most spent leads.
+    func testWithNoProjectionTheMostSpentWindowLeads() throws {
+        let rows = windows([try window(300, 20), try window(10080, 95)])
+
+        XCTAssertTrue(rows.allSatisfy { $0.pace == nil })
+        XCTAssertEqual(UsagePanelSnapshot.binding(rows)?.percent, 95)
     }
 
     /// Two windows equally spent are not equally urgent — the shorter one
     /// binds first, and it is the one the user meets sooner.
     func testATieGoesToTheShorterWindow() throws {
-        let windows = UsagePanelSnapshot.make(
-            frame: frame([
-                slice("claude-code", windows: [try window(10080, 50), try window(300, 50)])
-            ])
-        ).providers[0].windows
+        let rows = windows([try window(10080, 50), try window(300, 50)])
 
-        XCTAssertEqual(UsagePanelSnapshot.binding(windows)?.id, "300-")
+        XCTAssertTrue(rows.allSatisfy { $0.pace == nil })
+        XCTAssertEqual(UsagePanelSnapshot.binding(rows)?.id, "300-")
     }
 
     func testAProviderReportingNoWindowHasNoneThatBinds() {
-        let windows = UsagePanelSnapshot.make(frame: frame([slice("codex")])).providers[0].windows
+        let rows = UsagePanelSnapshot.make(frame: frame([slice("codex")])).providers[0].windows
 
-        XCTAssertNil(UsagePanelSnapshot.binding(windows))
+        XCTAssertNil(UsagePanelSnapshot.binding(rows))
+    }
+
+    /// The pace is measured from when the vendor's percentage was taken, not
+    /// from the clock. Codex publishes its windows only on the CLI's own
+    /// turns, so an idle Mac holds a reading for hours — against the clock the
+    /// mark walks right while the bar stands still and the row grows a reserve
+    /// nothing measured.
+    func testPaceIsMeasuredFromTheReadingRatherThanTheClock() throws {
+        let sixHours: TimeInterval = 6 * 60 * 60
+        let rows = windows(
+            [try window(10080, 35, elapsed: 0.2)],
+            observedAt: Self.now.addingTimeInterval(-sixHours))
+
+        XCTAssertEqual(rows[0].pace?.deltaPercent, 19)
+    }
+
+    func testPaceFallsBackToTheClockWhenTheVendorNamedNoReadingTime() throws {
+        let rows = windows([try window(10080, 35, elapsed: 0.2)])
+
+        XCTAssertEqual(rows[0].pace?.deltaPercent, 15)
     }
 
     // MARK: The open page

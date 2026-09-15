@@ -247,7 +247,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         self.tokens = tokens
         self.cost = cost
         var ordered = signals
-        ordered.windows.sort { $0.minutes < $1.minutes }
+        ordered.windows.sort { ($0.minutes, $0.scope ?? "") < ($1.minutes, $1.scope ?? "") }
         if ordered.plan == nil { ordered.planTier = nil }
         self.signals = ordered
         self.projects = projects

@@ -148,6 +148,14 @@ struct PanelProviderPage: View {
 
     // MARK: Limits
 
+    /// The window this provider is closest to running out of, which is the one
+    /// the block leads on. `UsagePanelSnapshot.binding` is where the rule
+    /// lives, so the page and the Overview's legend cannot lead on different
+    /// windows of the same provider.
+    private var binding: UsagePanelSnapshot.WindowRow? {
+        UsagePanelSnapshot.binding(row.windows)
+    }
+
     /// Every window this provider reports, shortest first, with the reason
     /// they are missing when they are.
     ///
@@ -160,17 +168,6 @@ struct PanelProviderPage: View {
     /// are fetched when this page opens — Codex's ride the CLI's own turns and
     /// Claude's a five-minute poll — so the only other date on screen is the
     /// frame's, and that one moves when the *other* provider spends anything.
-    /// The window this provider is closest to running out of, which is the one
-    /// the block leads on.
-    ///
-    /// Emphasis followed position before — the list is sorted shortest first,
-    /// and the shortest was taken to be the one that binds. A session bucket
-    /// nobody has started breaks that: it sorts first at 0% with no reset and
-    /// takes the emphasis off a weekly window sitting at 100%.
-    private var binding: UsagePanelSnapshot.WindowRow? {
-        UsagePanelSnapshot.binding(row.windows)
-    }
-
     private var limits: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionLabel(text: "Limits")
@@ -188,9 +185,8 @@ struct PanelProviderPage: View {
                 }
             } else {
                 ForEach(row.windows) { window in
-                    WindowRowView(window: window, tint: tint)
-                        .opacity(
-                            window.id == binding?.id ? 1 : PanelMetrics.secondaryWindowOpacity)
+                    WindowRowView(
+                        window: window, tint: tint, isBinding: window.id == binding?.id)
                 }
 
                 if let caption = row.windowsCaption {

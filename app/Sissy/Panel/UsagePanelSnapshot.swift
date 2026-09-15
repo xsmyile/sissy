@@ -40,12 +40,34 @@ struct UsagePanelSnapshot: Equatable {
     /// The window a provider is closest to running out of, or nil when it
     /// reports none.
     ///
-    /// The most spent, ties to the shorter period. Not the shortest outright:
-    /// a session bucket nobody has started sits at 0% with no reset, and
-    /// leading on it says nothing while the weekly one behind it is full.
+    /// The rate decides it, not the reading: a window the pace empties before
+    /// its own reset binds, soonest first, and one that survives its reset
+    /// does not bind at all however full it is. The percentage is the
+    /// fallback, for the windows that carry no projection — too young to
+    /// extrapolate from, or never started — and there the most spent leads.
+    /// A tie in either group goes to the shorter period, which is the one met
+    /// sooner.
+    ///
+    /// Emphasis and caption were on two different axes before, which is what
+    /// made the block unreadable: the row was chosen on its percentage while
+    /// its own caption spoke in pace, so a session at 40% that lasts until
+    /// reset outranked a weekly at 35% running out in two days — the window
+    /// the user actually meets, drawn quiet under one that never binds.
     static func binding(_ windows: [WindowRow]) -> WindowRow? {
-        windows.max {
-            $0.percent == $1.percent ? $0.minutes > $1.minutes : $0.percent < $1.percent
+        windows.min(by: bindsSooner)
+    }
+
+    private static func bindsSooner(_ lhs: WindowRow, _ rhs: WindowRow) -> Bool {
+        switch (lhs.pace?.runsOutAt, rhs.pace?.runsOutAt) {
+        case (let left?, let right?):
+            return left == right ? lhs.minutes < rhs.minutes : left < right
+        case (.some, .none):
+            return true
+        case (.none, .some):
+            return false
+        case (.none, .none):
+            return lhs.percent == rhs.percent
+                ? lhs.minutes < rhs.minutes : lhs.percent > rhs.percent
         }
     }
 
@@ -281,7 +303,9 @@ struct UsagePanelSnapshot: Equatable {
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
                 share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0,
-                windows: slice.windows.map { makeWindow($0, now: now) },
+                windows: slice.windows.map {
+                    makeWindow($0, observedAt: slice.limitsObservedAt ?? now)
+                },
                 windowsCaption: slice.windows.isEmpty
                     ? nil
                     : slice.limitsObservedAt.map {
@@ -428,7 +452,7 @@ struct UsagePanelSnapshot: Equatable {
     private static let foldedProjectRowID = "sissy.projects.rest"
     private static let unattributedRowID = "sissy.projects.unattributed"
 
-    private static func makeWindow(_ window: UsageWindow, now: Date) -> WindowRow {
+    private static func makeWindow(_ window: UsageWindow, observedAt: Date) -> WindowRow {
         WindowRow(
             id: "\(window.minutes)-\(window.scope ?? "")",
             minutes: window.minutes,
@@ -436,7 +460,7 @@ struct UsagePanelSnapshot: Equatable {
             percent: Int(window.usedPercent.rounded()),
             fraction: min(max(window.usedPercent / 100, 0), 1),
             resetsAt: window.resetsAt,
-            pace: makePace(window, now: now)
+            pace: makePace(window, observedAt: observedAt)
         )
     }
 
@@ -456,10 +480,18 @@ struct UsagePanelSnapshot: Equatable {
     /// from — or already past the reset it names, which describes a period
     /// that no longer exists. A window the vendor has not started names no
     /// reset at all, and there is no elapsed time to project from either.
-    private static func makePace(_ window: UsageWindow, now: Date) -> Pace? {
+    ///
+    /// Measured from when the reading was taken rather than from the clock,
+    /// because the percentage is the vendor's and was true then. Against the
+    /// clock the mark slides right while the bar stands still, so a reading
+    /// Sissy cannot refresh grows a reserve it never measured: Codex's windows
+    /// arrive only on the CLI's own turns, and a Mac left idle overnight gained
+    /// a point of phantom headroom every fourteen minutes of a week it had no
+    /// news of.
+    private static func makePace(_ window: UsageWindow, observedAt: Date) -> Pace? {
         guard let resetsAt = window.resetsAt else { return nil }
         let duration = Double(window.minutes) * 60
-        let remaining = resetsAt.timeIntervalSince(now)
+        let remaining = resetsAt.timeIntervalSince(observedAt)
         guard duration > 0, remaining > 0 else { return nil }
         let elapsed = min(max(duration - remaining, 0), duration)
         let progress = elapsed / duration
@@ -469,7 +501,8 @@ struct UsagePanelSnapshot: Equatable {
         return Pace(
             expectedFraction: progress,
             deltaPercent: Int((window.usedPercent - expected).rounded()),
-            runsOutAt: runOut(window, elapsed: elapsed, remaining: remaining, now: now)
+            runsOutAt: runOut(
+                window, elapsed: elapsed, remaining: remaining, observedAt: observedAt)
         )
     }
 
@@ -480,17 +513,22 @@ struct UsagePanelSnapshot: Equatable {
     /// answer as a rate slow enough to last: both are a window that survives
     /// its own reset, and the caption says so rather than naming a date past
     /// the one the row already prints.
+    ///
+    /// The date is anchored to the reading for the reason the rest of the pace
+    /// is, and the countdown under the bar then shortens on its own as the
+    /// projection ages — a run-out projected an hour ago for half an hour out
+    /// reads as spent rather than as still half an hour away.
     private static func runOut(
         _ window: UsageWindow,
         elapsed: TimeInterval,
         remaining: TimeInterval,
-        now: Date
+        observedAt: Date
     ) -> Date? {
         let headroom = fullWindowPercent - window.usedPercent
-        guard headroom > 0 else { return now }
+        guard headroom > 0 else { return observedAt }
         let rate = window.usedPercent / elapsed
         guard rate > 0 else { return nil }
         let untilEmpty = headroom / rate
-        return untilEmpty >= remaining ? nil : now.addingTimeInterval(untilEmpty)
+        return untilEmpty >= remaining ? nil : observedAt.addingTimeInterval(untilEmpty)
     }
 }

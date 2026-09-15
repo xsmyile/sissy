@@ -59,9 +59,11 @@ struct ProviderSignals: Sendable, Equatable {
     /// the period they measure.
     ///
     /// A window past its reset describes a period that no longer exists. The
-    /// order is here rather than at each producer because the panel dims
-    /// every row after the first: a weekly bucket a vendor happened to list
-    /// first would take the emphasis from the session one that binds sooner.
+    /// order is here rather than at each producer because the panel draws the
+    /// list in the order it is handed: two vendors listing the same two
+    /// periods the other way round would stack their blocks differently for
+    /// no reason a reader could see. Which row the block *leads* on is not
+    /// positional — `UsagePanelSnapshot.binding` decides it from the pace.
     func live(now: Date = Date()) -> Self {
         var copy = self
         copy.windows =
