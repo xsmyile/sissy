@@ -167,19 +167,36 @@ final class UsageEngineHost {
     /// failed. Published because a switch that silently does nothing leaves
     /// the user typing `claude` and meeting the account they just left.
     private(set) var accountSwitchFailure: String?
+    /// Every Claude Code account Sissy has archived, and which one is signed
+    /// in. Refreshed from the engine rather than held here, so the app keeps
+    /// no second copy of something the keychain decides.
+    private(set) var claudeAccounts = ClaudeAccountRegistry.Snapshot()
 
-    /// Makes an account the one Claude Code starts as.
+    /// Makes an archived account the one Claude Code starts as.
     ///
-    /// The one write Sissy makes that outlives it, and it runs only from the
-    /// panel's picker. macOS may ask for permission to read the account's
-    /// credential and to replace the active one; both are this gesture's own.
-    func activateClaudeAccount(_ id: String) {
+    /// Sissy holds its own copy of every account it has seen signed in, so
+    /// this overwrites the CLI's slots without putting any credential beyond
+    /// recovery — which is the whole difference from the version that lost
+    /// one.
+    func activateClaudeAccount(uuid: String) {
         guard let engine else { return }
         accountSwitchFailure = nil
         Task { [weak self] in
-            if case .failure(let why) = await engine.activateClaudeAccount(id: id) {
+            let outcome = await engine.activateClaudeAccount(uuid: uuid)
+            if case .failure(let why) = outcome {
                 self?.accountSwitchFailure = ClaudeAccountSwitchCopy.failure(why)
             }
+            self?.claudeAccounts = engine.claudeAccountSnapshot
+        }
+    }
+
+    /// Forgets one archived account, for the user who wants a stored secret
+    /// gone.
+    func forgetClaudeAccount(uuid: String) {
+        guard let engine else { return }
+        Task { [weak self] in
+            await engine.forgetClaudeAccount(uuid: uuid)
+            self?.claudeAccounts = engine.claudeAccountSnapshot
         }
     }
 

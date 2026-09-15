@@ -646,12 +646,12 @@ enum UsageFormat {
 /// not one sentence: an account that has never signed in needs a login, and a
 /// keychain that said no needs the user to allow it.
 enum ClaudeAccountSwitchCopy {
-    static func failure(_ why: ClaudeAccountActivation.Failure) -> String {
+    static func failure(_ why: ClaudeAccountRegistry.Failure) -> String {
         switch why {
-        case .noCredential:
-            return "That account has no saved sign-in on this Mac, so Claude Code cannot start as it"
+        case .notArchived:
+            return "Sissy has no saved sign-in for that account yet. Sign into it once with claude /login"
         case .keychain:
-            return "macOS did not let Sissy change the signed-in account. Try again and allow it"
+            return "The keychain would not accept the change, so the signed-in account is unchanged"
         }
     }
 }

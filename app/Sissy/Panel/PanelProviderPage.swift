@@ -17,10 +17,6 @@ struct PanelProviderPage: View {
     /// Switches the vendor to another of its accounts. Never called for a
     /// vendor with one account, whose row carries no choices.
     let onSelectAccount: (String) -> Void
-    /// Why the last switch did not happen, when one did not. Shown under the
-    /// identity, because a switch that quietly failed leaves the user typing
-    /// `claude` and meeting the account they thought they had left.
-    let switchFailure: String?
     let refresh: () -> Void
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
@@ -79,23 +75,15 @@ struct PanelProviderPage: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, PanelMetrics.gutter)
             .padding(.vertical, 10)
-            if let switchFailure {
-                Text(switchFailure)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, PanelMetrics.gutter)
-                    .padding(.bottom, 10)
-            }
         }
     }
 
-    /// Switches which of this vendor's accounts the page is about.
+    /// Picks which of this vendor's accounts the page is about.
     ///
     /// It sits on the identity line because that line *is* the account — the
-    /// address, the organisation and the plan all belong to it, and a control
-    /// that changes them belongs where they are rather than in Settings. The
-    /// switch costs nothing: every account is metered all the time, so this
-    /// only changes which reading is drawn.
+    /// address, the organisation and the plan all belong to it. It changes
+    /// nothing outside the panel: every account is metered all the time, so
+    /// this only decides which reading is drawn.
     ///
     /// A `Menu` inside the popover is safe — a transient `NSPopover` is not
     /// dismissed by one, verified on macOS 27.
@@ -126,10 +114,10 @@ struct PanelProviderPage: View {
     }
 
     /// Said once here rather than at the call site: the picker is the only
-    /// place the word "account" means a choice, and a tooltip that explains
-    /// what switching does not do is what stops it reading as a login.
+    /// place the word "account" means a choice, and the tooltip is what stops
+    /// it reading as a login.
     static let accountPickerHelp =
-        "Start Claude Code as another account. Both keep being counted either way."
+        "Show another account's usage. Both keep being counted either way."
 
     /// The organisation and the plan on one line, either of which can be the
     /// only one there: a personal account names no organisation, and an

@@ -33,6 +33,10 @@ actor UsageEngine {
     /// `~/.claude/projects` after everything else had shut down and only
     /// drained when every provider finished its scan organically.
     private var bootTask: Task<Void, Never>?
+    /// Watches which Claude Code account is signed in and archives every one
+    /// it sees, which is what makes switching back to one possible at all.
+    private let claudeAccounts: ClaudeAccountRegistry
+    private var claudeAccountsTask: Task<Void, Never>?
     /// Handle on the pricing-catalog refresh loop so `stop()` can cancel an
     /// in-flight fetch instead of leaving it to finish against a torn-down
     /// engine.
@@ -172,7 +176,7 @@ actor UsageEngine {
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
-        let claudeAccounts = config.resolvedAccounts(vendor: ProviderID.claudeCode)
+        let claudeHomes = config.resolvedAccounts(vendor: ProviderID.claudeCode)
         let codexAccounts = config.resolvedAccounts(vendor: ProviderID.codex)
         // Claude Code has no detection step: it is the v0.1.0 baseline and an
         // unset toggle leaves it on. Codex is tailed whenever its rollout dir
@@ -181,7 +185,7 @@ actor UsageEngine {
         // off means Sissy stops reading it, however many accounts of it exist.
         let claudeActivation: ProviderActivation = (config.providers.claudeCode ?? true) ? .on : .off
         self.resolvedProviders =
-            claudeAccounts.map {
+            claudeHomes.map {
                 ResolvedProvider(
                     id: $0.id, activation: claudeActivation, dataDir: $0.dataDir, account: $0)
             }
@@ -198,6 +202,8 @@ actor UsageEngine {
             }
         self.claudeLimitsProbe = limitsProbe
         self.claudeWebSource = webSource
+        self.claudeAccounts = ClaudeAccountRegistry(
+            store: ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: stateDir)))
         var limitsSources: [String: ClaudeLimitsProbe] = [:]
         var providers: [any UsageProvider] = []
         for resolved in self.resolvedProviders where resolved.activation.isMetering {
@@ -297,12 +303,44 @@ actor UsageEngine {
         await applyKeepAwake()
         guard lifecycle == .running else { return }
         let me = self
+        startClaudeAccountWatch()
         bootTask = Task.detached { [aggregator] in
             await aggregator.start { today, slices in
                 await me.rebuildAndEmit(today: today, slices: slices)
             }
         }
     }
+
+    /// Seeds the account archive from the config homes on this Mac, then keeps
+    /// it level with whichever account is signed in.
+    ///
+    /// The poll is what catches a `/login` or a switch made outside Sissy, and
+    /// it is cheap: an unchanged credential costs one `security` call and no
+    /// request. Only a token Sissy has not filed buys a round trip to identify
+    /// it, which is roughly once per token rotation.
+    private func startClaudeAccountWatch() {
+        let registry = claudeAccounts
+        let homes =
+            resolvedProviders
+            .filter { $0.account.key.vendor == ProviderID.claudeCode }
+            .map(\.account.home)
+        claudeAccountsTask = Task.detached {
+            await registry.seed(homes: homes)
+            while !Task.isCancelled {
+                await registry.captureActive()
+                do {
+                    try await Task.sleep(for: Self.claudeAccountPollInterval)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    /// How often the active credential is re-read. Long on purpose: a token
+    /// rotation is tens of minutes apart, and the only thing a shorter poll
+    /// would buy is noticing a switch sooner than the next frame.
+    private static let claudeAccountPollInterval: Duration = .seconds(120)
 
     /// Tears everything down. Idempotent, and safe to land while `start()` is
     /// still suspended — that is what `lifecycle` is re-read for. Terminal: an
@@ -313,6 +351,7 @@ actor UsageEngine {
         // cancellation and bails out of its file enumeration loops before
         // anything else is torn down.
         bootTask?.cancel()
+        claudeAccountsTask?.cancel()
         priceCatalogTask?.cancel()
         keepAwakeDeadlineTask?.cancel()
         keepAwakeDeadlineTask = nil
@@ -327,6 +366,7 @@ actor UsageEngine {
         await stopClaudeLimits()
         await aggregator.stop()
         bootTask = nil
+        claudeAccountsTask = nil
         priceCatalogTask = nil
     }
 
@@ -418,25 +458,36 @@ actor UsageEngine {
         await reemit()
     }
 
-    /// Makes one account the one Claude Code starts as.
+    /// Makes an account the one Claude Code starts as.
     ///
-    /// The only write Sissy makes outside its own directory that is not a
-    /// file it can take back: the next `claude` in any terminal starts as this
-    /// account. It runs from the panel's own picker and from nothing else.
-    func activateClaudeAccount(id: String) async -> Result<Void, ClaudeAccountActivation.Failure> {
-        guard let account = resolvedProviders.first(where: { $0.id == id })?.account else {
-            return .failure(.noCredential)
+    /// Safe to write the CLI's slots here precisely because they are not where
+    /// the account lives: `ClaudeAccountRegistry` holds Sissy's own copy of
+    /// every account it has seen, so whatever this overwrites is still
+    /// recoverable in a click. It runs from the panel's own control and from
+    /// nothing else.
+    func activateClaudeAccount(uuid: String) async -> Result<Void, ClaudeAccountRegistry.Failure> {
+        let outcome = await claudeAccounts.activate(uuid: uuid)
+        if case .failure(let why) = outcome {
+            sissyLog("sissy: could not switch Claude Code to \(uuid): \(why)")
         }
-        do {
-            try ClaudeAccountActivation.activate(home: account.home)
-        } catch let failure as ClaudeAccountActivation.Failure {
-            sissyLog("sissy: could not switch Claude Code to \(id): \(failure)")
-            return .failure(failure)
-        } catch {
-            return .failure(.keychain(errSecInternalError))
-        }
-        sissyLog("sissy: Claude Code now starts as \(id)")
-        return .success(())
+        await reemit()
+        return outcome
+    }
+
+    /// Every Claude Code account Sissy has archived, and which is signed in.
+    ///
+    /// Nonisolated because the panel draws the switcher from it while the
+    /// registry is busy identifying a credential, and a control that only
+    /// appears once a network call has returned is a control nobody finds.
+    nonisolated var claudeAccountSnapshot: ClaudeAccountRegistry.Snapshot {
+        claudeAccounts.currentSnapshot()
+    }
+
+    /// Forgets one archived account, which is the only way a stored secret
+    /// leaves this Mac by Sissy's hand.
+    func forgetClaudeAccount(uuid: String) async {
+        await claudeAccounts.forget(uuid: uuid)
+        await reemit()
     }
 
     /// Whether a claude.ai session is filed. Asked without decrypting one, so
