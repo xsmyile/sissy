@@ -134,24 +134,20 @@ struct ProvidersSettingsView: View {
 
     /// What is read when the CLI keeps its own credential: no keychain
     /// dialog, no cookie, and no grant that a re-signed build invalidates.
-    @ViewBuilder
     private var ownCredentialRow: some View {
         LabeledContent {
             Text(ClaudeWebSessionCopy.ownCredentialState).foregroundStyle(.secondary)
         } label: {
             Text(ClaudeWebSessionCopy.ownCredentialLabel)
+            Text(ClaudeWebSessionCopy.ownCredentialCaption)
         }
-        Text(ClaudeWebSessionCopy.ownCredentialCaption)
-            .font(.callout)
-            .foregroundStyle(.secondary)
     }
 
     /// The vendor's line, and under it where Sissy is reading and what it has
     /// found there.
-    @ViewBuilder
     private func row(_ readiness: ProviderReadiness) -> some View {
         let snapshot = ProviderRowSnapshot.make(readiness)
-        LabeledContent {
+        return LabeledContent {
             Text(snapshot.state).foregroundStyle(.secondary)
         } label: {
             Label {
@@ -159,29 +155,24 @@ struct ProvidersSettingsView: View {
             } icon: {
                 ProviderMark(id: readiness.id, size: Self.markSize, textSize: NSFont.systemFontSize)
             }
+            Text(snapshot.detail)
         }
-        Text(snapshot.detail)
-            .font(.callout)
-            .foregroundStyle(.secondary)
     }
 
     /// Shown only when the CLI keeps no credential Sissy can read, which is a
     /// CLI nobody has signed into. Otherwise there is nothing to import: the
     /// limits already come from the account that is signed in.
-    @ViewBuilder
     private var claudeWebSession: some View {
         LabeledContent {
-            HStack(spacing: 8) {
-                if model.engine.claudeWebSession {
-                    Button(ClaudeWebSessionCopy.forgetTitle) {
-                        model.engine.forgetClaudeWebSession()
-                    }
-                } else {
-                    Button(ClaudeWebSessionCopy.importTitle) {
-                        model.engine.importClaudeWebSession()
-                    }
-                    .disabled(model.engine.importingClaudeWebSession)
+            if model.engine.claudeWebSession {
+                Button(ClaudeWebSessionCopy.forgetTitle) {
+                    model.engine.forgetClaudeWebSession()
                 }
+            } else {
+                Button(ClaudeWebSessionCopy.importTitle) {
+                    model.engine.importClaudeWebSession()
+                }
+                .disabled(model.engine.importingClaudeWebSession)
             }
         } label: {
             HStack(spacing: 4) {
@@ -191,15 +182,11 @@ struct ProvidersSettingsView: View {
                         : ClaudeWebSessionCopy.importTitle)
                 webSessionDetailButton
             }
-        }
-        if let why = model.engine.claudeWebImportFailure {
-            Text(ClaudeWebSessionCopy.failure(why))
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        } else if !model.engine.claudeWebSession {
-            Text(ClaudeWebSessionCopy.caption)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            if let why = model.engine.claudeWebImportFailure {
+                Text(ClaudeWebSessionCopy.failure(why))
+            } else if !model.engine.claudeWebSession {
+                Text(ClaudeWebSessionCopy.caption)
+            }
         }
     }
 
