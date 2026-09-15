@@ -6,7 +6,6 @@ enum PanelMetrics {
     static let width: CGFloat = 340
     static let gutter: CGFloat = 14
     static let barHeight: CGFloat = 5
-    static let secondaryWindowOpacity: Double = 0.55
     /// The one number a headline block is about — the day's cost, and the
     /// headroom left on the window that binds first.
     ///
@@ -142,24 +141,38 @@ private struct BarCanvas: View, Animatable {
 
 /// The bar, its reading, and — once the window is old enough to project from
 /// — the line that says whether that reading is ahead or behind.
+///
+/// `isBinding` lifts the one window the block leads on rather than sinking the
+/// others: the label and the number go up a step, and nothing on any row goes
+/// down one. Dimming the rest to 55% is what this replaced, and measured in
+/// dark mode it put their label and caption at 0.30 alpha against the 0.25 macOS
+/// draws disabled text at — so every window but one read as a control switched
+/// off. The bar and its pace mark keep full strength on every row for the same
+/// reason: the mark is the reading, and a reading nobody can see is worse than
+/// no emphasis at all.
 struct WindowRowView: View {
     let window: UsagePanelSnapshot.WindowRow
     let tint: Color
+    let isBinding: Bool
+
+    private var emphasis: Color { isBinding ? .primary : .secondary }
+    private var weight: Font.Weight { isBinding ? .medium : .regular }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
                 Text(window.label)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11, weight: weight))
+                    .foregroundStyle(emphasis)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
                 Spacer(minLength: 8)
 
                 Text("\(window.percent)%")
-                    .font(.system(size: 11))
+                    .font(.system(size: 11, weight: weight))
                     .monospacedDigit()
+                    .foregroundStyle(emphasis)
                     .layoutPriority(1)
             }
 

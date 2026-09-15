@@ -117,6 +117,30 @@ struct PanelOverview: View {
     /// one point on this row worth a colour.
     private static let bindingWarningPercent = 90
 
+    /// Whether the window this provider leads on is a reason to stop working.
+    ///
+    /// The percentage alone stopped answering that when `binding` moved onto
+    /// the pace: the window that binds is now the one the current rate empties
+    /// before its own reset, and that can be a bar at 10% nine minutes into a
+    /// session — imminent, and nowhere near the threshold. A projected run-out
+    /// *is* the warning, so it carries the colour; the threshold stays for the
+    /// windows that project nothing, where a nearly full bar is all there is
+    /// to go on.
+    private static func isUnderPressure(_ window: UsagePanelSnapshot.WindowRow) -> Bool {
+        window.pace?.runsOutAt != nil || window.percent >= bindingWarningPercent
+    }
+
+    /// The legend prints one number for a whole provider and never names the
+    /// window it came from. That was legible while the number was the highest
+    /// of them; now that the pace picks the window, a low percentage in orange
+    /// is unreadable without the sentence behind it, so the tooltip carries
+    /// the page's own caption and the two surfaces answer alike.
+    private static func bindingHelp(_ window: UsagePanelSnapshot.WindowRow) -> String {
+        let head = "\(window.label) · \(window.percent)% used"
+        guard let caption = UsageFormat.windowCaption(window) else { return head }
+        return head + "\n" + caption
+    }
+
     private func legendRow(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
         HStack(spacing: 6) {
             ProviderMark(id: row.id)
@@ -138,9 +162,9 @@ struct PanelOverview: View {
                 Text("\(binding.percent)%")
                     .font(.system(size: 12))
                     .monospacedDigit()
-                    .foregroundStyle(binding.percent >= Self.bindingWarningPercent ? .orange : .secondary)
+                    .foregroundStyle(Self.isUnderPressure(binding) ? .orange : .secondary)
                     .fixedSize()
-                    .help("\(binding.label) · \(binding.percent)% used")
+                    .help(Self.bindingHelp(binding))
             }
             Text("\(row.tokens) · \(row.cost)")
                 .font(.system(size: 12))
