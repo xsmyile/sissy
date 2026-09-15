@@ -20,6 +20,22 @@ enum ProviderPalette {
         }
     }
 
+    /// The colour a vendor's own status reads in.
+    ///
+    /// The system's own greens, oranges and reds rather than literals, so they
+    /// follow the appearance and whatever the user has set for colour — a
+    /// hand-picked triplet is a traffic light that only works in one of them.
+    /// `unknown` is grey and never red: Sissy having no reading is not the
+    /// vendor being down.
+    static func statusTint(_ indicator: ProviderStatusIndicator) -> Color {
+        switch indicator {
+        case .operational: return .green
+        case .maintenance, .minor: return .orange
+        case .major, .critical: return .red
+        case .unknown: return .secondary
+        }
+    }
+
     /// The vendor's own mark, for the providers Sissy ships one for.
     ///
     /// Template assets, so every surface tints them with `tint(for:)` and one

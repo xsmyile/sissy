@@ -86,7 +86,7 @@ struct PanelOverview: View {
                     legendRow(row)
                 }
                 .buttonStyle(.plain)
-                .help("Open \(row.name)")
+                .help(Self.legendHelp(row))
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)
@@ -141,12 +141,46 @@ struct PanelOverview: View {
         return head + "\n" + caption
     }
 
+    /// A vendor that is not operational says so in its own name, which is the
+    /// only thing on this row that can carry it for free.
+    ///
+    /// Measured at the real fonts: the row is 312 pt wide and "Claude · Team
+    /// Premium · 100% · $1,234.56" already fills 306.4 of them, so a mark, a
+    /// dot or a glyph added here would push the plan badge — which yields
+    /// first by design — off a row that has nothing left to give. Colour costs
+    /// nothing, and the wording is a hover and a click away, which is where
+    /// this row already keeps the limits notice's.
+    ///
+    /// Only a degraded vendor colours. `unknown` does not: that is Sissy
+    /// having no reading, which is not news about the vendor, and the page
+    /// says so in words.
+    private static func nameTint(_ status: UsagePanelSnapshot.StatusRow?) -> Color {
+        guard let status, status.indicator.isDegraded else { return .primary }
+        return ProviderPalette.statusTint(status.indicator)
+    }
+
+    /// What the row hovers: the vendor's own sentence when there is one worth
+    /// reading, and what the click does otherwise.
+    ///
+    /// Deliberately without the age the page carries. The Overview keeps no
+    /// clock of its own, so an age worded here would be as old as the last
+    /// frame rather than as old as the reading.
+    private static func legendHelp(_ row: UsagePanelSnapshot.ProviderRow) -> String {
+        guard let status = row.status, status.indicator.isDegraded else {
+            return "Open \(row.name)"
+        }
+        return UsageFormat.statusSummary(
+            provider: row.id, label: status.label, checkedAt: nil)
+    }
+
     private func legendRow(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
         HStack(spacing: 6) {
             ProviderMark(id: row.id)
             Text(row.name)
                 .font(.system(size: 12, weight: .medium))
                 .lineLimit(1)
+                .foregroundStyle(Self.nameTint(row.status))
+                .accessibilityLabel(Self.legendHelp(row))
             if let plan = row.plan {
                 PlanBadge(plan: plan, tier: row.planTier)
                     .layoutPriority(-1)

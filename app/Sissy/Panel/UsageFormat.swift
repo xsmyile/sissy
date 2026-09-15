@@ -458,6 +458,40 @@ enum UsageFormat {
         "Read " + observedLabel(observedAt, now: now, calendar: calendar)
     }
 
+    /// What a provider's status row says.
+    ///
+    /// The vendor's own sentence wherever there is one, so a wording it
+    /// changes needs no release. Sissy only words the one case the vendor
+    /// cannot: a feed that has never answered, which is a gap in Sissy's
+    /// reading and deliberately not an outage.
+    static func statusLabel(_ description: String?) -> String {
+        let trimmed = description?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return "Status unavailable" }
+        return trimmed
+    }
+
+    /// How long ago Sissy read that page — never how long ago the vendor
+    /// touched it.
+    ///
+    /// Measured 2026-09-15: OpenAI's own `updated_at` read `2026-07-09`,
+    /// because it moves on incidents rather than on polls. It is also what
+    /// makes a failed poll honest, since a fetch that fails publishes nothing
+    /// and this age is then the only thing on the row that moves.
+    static func statusAge(checkedAt: Date, now: Date = Date()) -> String {
+        "checked " + age(now.timeIntervalSince(checkedAt))
+    }
+
+    /// The whole status row as one sentence, for the tooltip and for
+    /// VoiceOver — which is what keeps the colour on the Overview's provider
+    /// name from being the only carrier of it.
+    static func statusSummary(
+        provider: String, label: String, checkedAt: Date?, now: Date = Date()
+    ) -> String {
+        let head = "\(providerName(provider)) · \(label)"
+        guard let checkedAt else { return head }
+        return head + " · " + statusAge(checkedAt: checkedAt, now: now)
+    }
+
     /// What pressing refresh on a provider actually does, said before it is
     /// pressed.
     ///

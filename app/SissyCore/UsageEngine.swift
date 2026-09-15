@@ -59,6 +59,11 @@ actor UsageEngine {
     /// that publishes its reading is assembled once, at launch, and an import
     /// that arrives later must not need a new provider to be seen.
     private let claudeWebSource: ClaudeWebSource
+    /// Reads each metering vendor's public status page. Constructed for the
+    /// providers that are metering and inert until `start` — a vendor Sissy
+    /// was told to leave alone makes no request, which is the same rule its
+    /// reader is built under.
+    private let statusMonitor: ProviderStatusMonitor
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
@@ -203,6 +208,8 @@ actor UsageEngine {
             ),
         ]
         self.claudeHome = claudeHome
+        self.statusMonitor = ProviderStatusMonitor(
+            providers: self.resolvedProviders.filter { $0.activation.isMetering }.map(\.id))
         self.claudeWebSource = webSource
         self.claudeAccounts =
             claudeAccounts
@@ -292,6 +299,9 @@ actor UsageEngine {
         if meteringClaudeCode {
             await startClaudeLimits(userInitiated: false)
         }
+        if config.statusChecks {
+            await startStatusChecks()
+        }
         await applyKeepAwake()
         guard lifecycle == .running else { return }
         let me = self
@@ -350,6 +360,7 @@ actor UsageEngine {
         // the wanted state false.
         await applyKeepAwake()
         await stopClaudeLimits()
+        await statusMonitor.stop()
         await aggregator.stop()
         bootTask = nil
         claudeAccountsTask = nil
@@ -494,6 +505,9 @@ actor UsageEngine {
                     await claudeWebSource.refresh { await me.reemit() }
                 }
             }
+        }
+        if config.statusChecks {
+            await statusMonitor.refresh(provider: id) { await me.reemit() }
         }
         await aggregator.refreshSignals(for: id)
         await reemit()
@@ -673,6 +687,7 @@ actor UsageEngine {
         else { return }
         lastObservedActivityAt = latest
         lastAgentActivityAt = Date()
+        statusMonitor.noteActivity()
     }
 
     /// Takes or releases the automatic hold when the agents change the answer.
@@ -744,6 +759,35 @@ actor UsageEngine {
         await claudeOwnLimits?.stop()
     }
 
+    /// Starts the status poll. Every change it publishes rebuilds the frame,
+    /// for the reason a lapsed authorization does: a vendor going down is news
+    /// that arrives on a day where no token event follows it.
+    private func startStatusChecks() async {
+        let me = self
+        await statusMonitor.start { await me.reemit() }
+    }
+
+    /// Switches the status readings on or off at runtime, and persists it.
+    ///
+    /// Stopping drops the readings with the loop, so the rows go when the
+    /// switch does rather than sitting there dated to the last poll — which is
+    /// the same reason the limits probe clears its windows.
+    func setStatusChecks(enabled: Bool) async {
+        guard config.statusChecks != enabled else { return }
+        config.statusChecks = enabled
+        do {
+            try ServerConfig.save(config, to: configURL)
+        } catch {
+            sissyLog("sissy: failed to persist statusChecks to \(configURL.path): \(error)")
+        }
+        if enabled {
+            await startStatusChecks()
+        } else {
+            await statusMonitor.stop()
+        }
+        await reemit()
+    }
+
     /// Where one provider's offsets are kept.
     ///
     /// Claude Code keeps the unqualified `usage-state.json` every install has
@@ -799,7 +843,8 @@ actor UsageEngine {
                 active: keepAwakeActive,
                 since: keepAwakeSince,
                 coversScreen: keepAwakeCoversScreen),
-            history: currentHistory(now: now)
+            history: currentHistory(now: now),
+            providerStatus: statusMonitor.currentStatus()
         )
         await onFrame?(frame)
     }

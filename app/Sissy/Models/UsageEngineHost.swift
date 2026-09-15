@@ -37,6 +37,11 @@ final class UsageEngineHost {
     /// that file, and a second copy in the app could disagree with the one the
     /// assertions are actually taken from.
     private(set) var keepScreenAwake: Bool = true
+    /// Whether Sissy reads each vendor's own status page. Read from
+    /// `server.json` for the reason the rest of these are: the engine owns the
+    /// file and owns the poll, and a copy kept in the app could say the
+    /// readings are on while nothing is fetching them.
+    private(set) var statusChecks: Bool = true
     private(set) var agentHooks: Bool = false
     /// Set when the switch is on but a configuration file could not be
     /// rewritten — the name of the CLI whose file was left alone, so Settings
@@ -111,6 +116,7 @@ final class UsageEngineHost {
         self.engine = engine
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
+        statusChecks = config.statusChecks
         keepAwakeMode = config.keepAwake
         agentHooks = config.agentHooks
         // Re-affirmed at every launch rather than written once: the CLIs
@@ -382,6 +388,12 @@ final class UsageEngineHost {
         guard let engine, enabled != keepScreenAwake else { return }
         keepScreenAwake = enabled
         Task { await engine.setKeepScreenAwake(enabled: enabled) }
+    }
+
+    func setStatusChecks(_ enabled: Bool) {
+        guard let engine, enabled != statusChecks else { return }
+        statusChecks = enabled
+        Task { await engine.setStatusChecks(enabled: enabled) }
     }
 
     private func deliver(_ frame: FrameData) {

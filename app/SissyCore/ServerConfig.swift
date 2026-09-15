@@ -23,6 +23,17 @@ struct ServerConfig: Sendable, Codable {
     /// pricing to the tables compiled into the binary and make Sissy fully
     /// offline; `pricingOverride` still applies either way.
     var remotePricing: Bool?
+    /// Whether Sissy reads each metering vendor's public status page, so a CLI
+    /// that has started failing can be told apart from a vendor that has.
+    ///
+    /// On, like `remotePricing` and for the same reason: it is a reading the
+    /// user opened the app for, it carries no account, no credential and no
+    /// identity, and the request is one a browser tab would make anyway. Off
+    /// is for the Mac that is to make no request Sissy was not asked for.
+    /// Non-optional, so a `server.json` written before this key existed falls
+    /// through the partial-config path below and lands on the default, which
+    /// is what `keepScreenAwake` already does.
+    var statusChecks: Bool
     var providers: ProviderToggles
     /// How many days of the day-by-model archive Sissy keeps. `nil` means the
     /// default; `0` stops it recording and reporting, and leaves what is
@@ -70,6 +81,7 @@ struct ServerConfig: Sendable, Codable {
         pollIntervalSeconds: 60.0,
         pricingOverride: nil,
         remotePricing: nil,
+        statusChecks: true,
         providers: .defaults,
         historyRetentionDays: nil,
         keepAwake: .off,
@@ -112,6 +124,7 @@ struct ServerConfig: Sendable, Codable {
         // setting in here.
         merged.keepAwake = (obj["keepAwake"] as? String).flatMap(KeepAwakeMode.init(rawValue:)) ?? .off
         if let v = obj["keepScreenAwake"] as? Bool { merged.keepScreenAwake = v }
+        if let v = obj["statusChecks"] as? Bool { merged.statusChecks = v }
         if let v = obj["agentHooks"] as? Bool { merged.agentHooks = v }
         if let v = obj["agentHooksRemovalPending"] as? Bool { merged.agentHooksRemovalPending = v }
         if let prov = obj["providers"] as? [String: Any] {
