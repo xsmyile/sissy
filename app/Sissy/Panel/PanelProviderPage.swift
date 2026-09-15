@@ -41,7 +41,7 @@ struct PanelProviderPage: View {
     private var strip: UsagePanelSnapshot.DayStrip? {
         UsagePanelSnapshot.dayStrip(
             series: series, todayTokens: todayTokens, todayCost: todayCost,
-            days: UsageEngine.historyWindowDays)
+            days: UsagePanelSnapshot.dayStripDays)
     }
 
     var body: some View {

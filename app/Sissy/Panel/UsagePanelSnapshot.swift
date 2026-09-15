@@ -82,14 +82,23 @@ struct UsagePanelSnapshot: Equatable {
     /// disk would print a bar that disagrees with the `Today` row on the same
     /// page for as long as the throttle holds.
     ///
-    /// Nil until the archive reaches past today, which is `HistoryRow`'s rule
-    /// for the same reason: a strip whose only bar is today is the figure
+    /// Nil until the archive reaches past today, for the reason the archive
+    /// row carried before it: a strip whose only bar is today is the figure
     /// above it drawn as a rectangle.
     ///
     /// The window is applied here as well as by the reader, so the total under
     /// the label is the bars above it summed. A day older than the window has
     /// no bar to appear in, and counting it would put money on the label that
     /// nothing on screen accounts for.
+    /// How many bars the strip draws, and how many days its reader asks for.
+    ///
+    /// It lived on `UsageEngine` while the engine rolled a fixed week up for
+    /// the Overview's archive row. That row is gone and the headline's windows
+    /// are the user's choice now, so the only thing this still decides is how
+    /// wide a strip of bars reads — which is the panel's call, and its two
+    /// callers are both on this side of the engine.
+    static let dayStripDays = 7
+
     static func dayStrip(
         series: [UsageHistoryDaySummary],
         todayTokens: Int,

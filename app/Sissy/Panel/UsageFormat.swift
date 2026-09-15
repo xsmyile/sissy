@@ -299,13 +299,49 @@ enum UsageFormat {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> String? {
-        guard let earliest = rollup.earliestDay else { return nil }
-        guard let days = rollup.period.days else { return since(earliest) }
+        shortfall(
+            days: rollup.period.days, earliestDay: rollup.earliestDay,
+            now: now, calendar: calendar
+        ).map(since)
+    }
+
+    /// Names the window a reading covers: its width while the archive reaches
+    /// back across all of it, and the first day it holds once it does not.
+    ///
+    /// A label where `periodCoverage` is an admission. A surface that names the
+    /// period elsewhere — the headline, whose control says `7 days` — wants
+    /// nothing said when the archive covers it; one that names it nowhere else,
+    /// like a strip of day bars, needs the width either way.
+    static func historyWindowLabel(
+        days: Int,
+        earliestDay: Date?,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        guard
+            let day = shortfall(
+                days: days, earliestDay: earliestDay, now: now, calendar: calendar)
+        else { return "Last \(days) days" }
+        return "Since \(day.formatted(.dateTime.day().month(.abbreviated)))"
+    }
+
+    /// The first day the archive holds inside a window, when it falls short of
+    /// that window, and nil when it reaches back across the whole of it.
+    ///
+    /// The one piece of arithmetic under both labels, so a window can never be
+    /// called short by one of them and whole by the other. `days` of nil is an
+    /// unbounded window, which has no width to fall short of and therefore
+    /// always names its first day.
+    private static func shortfall(
+        days: Int?, earliestDay: Date?, now: Date, calendar: Calendar
+    ) -> Date? {
+        guard let earliestDay else { return nil }
+        guard let days else { return earliestDay }
         let today = calendar.startOfDay(for: now)
         guard let start = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today),
-            calendar.startOfDay(for: earliest) > start
+            calendar.startOfDay(for: earliestDay) > start
         else { return nil }
-        return since(earliest)
+        return earliestDay
     }
 
     /// Lowercase because it lands mid-line, after the tokens it qualifies.
