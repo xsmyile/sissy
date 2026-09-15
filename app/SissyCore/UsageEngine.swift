@@ -880,7 +880,7 @@ actor UsageEngine {
         let stale = now.timeIntervalSince(historyRollupAt) >= Self.historyRollupTTL
         if historyRollups.isEmpty || stale {
             historyRollups = UsageHistoryStore.rollups(
-                for: UsagePeriod.archived, in: stateDir, now: now)
+                for: Set(UsagePeriod.archived), in: stateDir, now: now)
             historyRollupAt = now
         }
         return (historyRollups[.all]?.tokens ?? 0) > 0 ? historyRollups : [:]

@@ -385,14 +385,25 @@ enum UsageHistoryStore {
     /// is a reading rather than an absence: a week nothing was spent in is
     /// true, and it is the caller that knows whether there is an archive at
     /// all.
+    ///
+    /// A `Set` rather than an array, because every day is added into each
+    /// window that admits it: the same period twice would silently double its
+    /// money, and a type that cannot hold it twice is cheaper than a guard
+    /// that checks. Order is not lost with it — the result is keyed, and the
+    /// order the panel offers the windows in is `UsagePeriod.archived`'s.
     static func rollups(
-        for periods: [UsagePeriod], in parent: URL, now: Date = Date()
+        for periods: Set<UsagePeriod>, in parent: URL, now: Date = Date()
     ) -> [UsagePeriod: UsageHistoryRollup] {
+        guard !periods.isEmpty else { return [:] }
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
+        // A nil cutoff means unbounded, so a failed subtraction must not
+        // produce one: it would turn a bounded window into the whole archive
+        // under the bounded window's name.
         let cutoffs = periods.map { period -> (UsagePeriod, Date?) in
             guard let days = period.days else { return (period, nil) }
-            return (period, cal.date(byAdding: .day, value: -(max(days, 1) - 1), to: today))
+            let start = cal.date(byAdding: .day, value: -(max(days, 1) - 1), to: today)
+            return (period, start ?? today)
         }
         var tokens: [UsagePeriod: Int] = [:]
         var cost: [UsagePeriod: Decimal] = [:]
