@@ -9,15 +9,32 @@ import SwiftUI
 /// the hosted view own the whole surface including the chevron region. The
 /// status item stays an `NSStatusItem` so the panel has a button to anchor to.
 ///
-/// `.transient` needs no help here. Measured on macOS 26: showing the popover
-/// from a status-item click makes the app active and the popover window key,
-/// and AppKit then closes it on the next interaction outside it and drops
-/// activation on the way out. Taking key costs the app in front no menu bar —
-/// `_NSPopoverWindow` is an `NSPanel` carrying `.nonactivatingPanel`, which is
-/// what the system's own menu bar extras use. This class carried a global
-/// mouse-event monitor for a while, on the reading that an accessory app never
-/// activates and so never sees the click that dismisses a transient popover;
-/// the monitor duplicated what AppKit was already doing.
+/// **`.transient` dismissal is conditional on activation, so it cannot be the
+/// only way out.** A status-item click usually makes the app active and the
+/// popover window key, and AppKit then closes the popover on the next
+/// interaction outside it — that much was measured on macOS 26 and is why this
+/// class went a while with nothing else. It is not guaranteed: the app is an
+/// accessory that asks for no activation of its own, and a showing that does
+/// not take it leaves the panel on screen through every click that follows.
+/// Measured on macOS 27 against this build, driving the status item and then
+/// Control Center with synthetic clicks — which open the panel without the app
+/// ever reaching the front — the panel survived the outside click **6 times out
+/// of 6**, and survived the one after it. What the user sees is a panel that
+/// has visibly lost key, over an app it will not get out of the way of.
+///
+/// `outsideClickMonitor` is what makes dismissal unconditional. A *global*
+/// monitor sees only events delivered to other processes, which is exactly the
+/// set AppKit may miss: it never fires for a click inside the panel, on the
+/// status item, or on one of the panel's own `Menu`s, so it cannot dismiss a
+/// gesture that belongs to the panel. Mouse events need no authorization —
+/// only a keyboard monitor would, and that would cost the first-run prompt
+/// this app is built not to have.
+///
+/// Activating on open would also fix it and is what most menubar apps do, but
+/// taking key here costs the app in front no menu bar (`_NSPopoverWindow` is an
+/// `NSPanel` carrying `.nonactivatingPanel`, which is what the system's own
+/// menu bar extras use) where activating would, and `AppDelegate` goes out of
+/// its way to hand activation back. A read-only panel is no reason to start.
 ///
 /// **The host lives only while the panel is on screen.** A closed popover keeps
 /// its window, and a `contentViewController` left attached to it keeps a live
@@ -40,6 +57,7 @@ import SwiftUI
 final class UsagePanelController: NSObject {
     private let popover = NSPopover()
     private let model: SissyModel
+    private var outsideClickMonitor: Any?
 
     init(model: SissyModel) {
         self.model = model
@@ -63,11 +81,34 @@ final class UsagePanelController: NSObject {
         popover.contentViewController = host
         host.view.layoutSubtreeIfNeeded()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        startWatchingForOutsideClicks()
     }
 
     func close() {
         guard popover.isShown else { return }
         popover.performClose(nil)
+    }
+
+    /// Idempotent because a showing that replaces one still closing inherits
+    /// the monitor rather than adding a second: both describe the same panel,
+    /// and the one that is already installed is watching for the same click.
+    ///
+    /// The handler asserts its isolation rather than hopping onto the actor:
+    /// the monitor is registered from the main run loop and fires on it, so
+    /// the dismissal lands on the click's own turn instead of the one after.
+    private func startWatchingForOutsideClicks() {
+        guard outsideClickMonitor == nil else { return }
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.close() }
+        }
+    }
+
+    private func stopWatchingForOutsideClicks() {
+        guard let outsideClickMonitor else { return }
+        NSEvent.removeMonitor(outsideClickMonitor)
+        self.outsideClickMonitor = nil
     }
 
     /// Whether a SwiftUI host is attached to the popover right now.
@@ -81,7 +122,7 @@ final class UsagePanelController: NSObject {
 /// `NSPopoverDelegate` is `@MainActor` on macOS 26's Swift 6 AppKit, so its
 /// methods can be implemented as MainActor-isolated directly.
 extension UsagePanelController: NSPopoverDelegate {
-    /// Drops the host the finished showing was built for.
+    /// Drops the host and the monitor the finished showing was built for.
     ///
     /// The guard rests on when `isShown` moves, which `NSPopover.h` pins to
     /// the *call*: a popover is shown "until the popover is closed in response
@@ -94,6 +135,7 @@ extension UsagePanelController: NSPopoverDelegate {
     /// drop.
     func popoverDidClose(_ notification: Notification) {
         guard !popover.isShown else { return }
+        stopWatchingForOutsideClicks()
         popover.contentViewController = nil
     }
 }
