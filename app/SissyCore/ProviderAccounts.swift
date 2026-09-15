@@ -164,3 +164,65 @@ enum AccountDefaults {
         dataDir.deletingLastPathComponent()
     }
 }
+
+extension ServerConfig {
+    /// This config with one more account of `vendor`.
+    ///
+    /// A vendor with no entry in the list is not a vendor with no account: it
+    /// is one whose single account is implied by `claudeDataDir` /
+    /// `codexDataDir`. So the first addition writes that implied account down
+    /// before appending the new one — otherwise adding a second account would
+    /// silently replace the first, taking its snapshot and its archive out of
+    /// the reading with it.
+    func addingAccount(vendor: String, home: URL, label: String?) -> ServerConfig {
+        var updated = self
+        var list = accounts ?? []
+        if !list.contains(where: { $0.vendor == vendor }) {
+            let implied = resolvedAccounts(vendor: vendor)
+            list += implied.map {
+                AccountConfig(
+                    id: $0.key.account ?? "", vendor: vendor, label: $0.label,
+                    home: $0.home.path)
+            }
+        }
+        let taken = Set(list.filter { $0.vendor == vendor }.map(\.id))
+        list.append(
+            AccountConfig(
+                id: Self.accountID(label: label, home: home, taken: taken),
+                vendor: vendor,
+                label: label,
+                home: home.path
+            ))
+        updated.accounts = list
+        return updated
+    }
+
+    /// This config without that account.
+    ///
+    /// Its snapshot and its recorded days are deliberately left on disk: the
+    /// days it counted happened, and the archive is the one thing Sissy keeps
+    /// — removing an account is saying "stop reading this", not "forget what
+    /// was read". Settings' delete button is where the data goes.
+    func removingAccount(id: String, vendor: String) -> ServerConfig {
+        var updated = self
+        updated.accounts = (accounts ?? []).filter { !($0.vendor == vendor && $0.id == id) }
+        return updated
+    }
+
+    /// A key for a new account: readable, stable, and unique within its
+    /// vendor, because it names that account's snapshot file and its directory
+    /// in the archive.
+    private static func accountID(label: String?, home: URL, taken: Set<String>) -> String {
+        let named = label.flatMap { $0.isEmpty ? nil : $0 }
+        let source = named ?? home.lastPathComponent
+        let slug = source.lowercased().map { character -> Character in
+            character.isLetter || character.isNumber ? character : "-"
+        }
+        var candidate = String(String(slug).split(separator: "-").joined(separator: "-").prefix(32))
+        if candidate.isEmpty { candidate = "account" }
+        guard taken.contains(candidate) else { return candidate }
+        var suffix = 2
+        while taken.contains("\(candidate)-\(suffix)") { suffix += 1 }
+        return "\(candidate)-\(suffix)"
+    }
+}

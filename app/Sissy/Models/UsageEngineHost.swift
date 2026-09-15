@@ -28,6 +28,11 @@ final class UsageEngineHost {
     /// it used to keep could disagree with the file the probe actually booted
     /// from.
     private(set) var claudeLimits: Bool = false
+    /// The accounts `server.json` names, so Settings can list and edit them.
+    /// Read from the same file the engine booted from, for the reason
+    /// `claudeLimits` is: a second copy in the app could disagree with the one
+    /// the readers were actually built from.
+    private(set) var accounts: [AccountConfig] = []
     /// Days the archive is kept for, as `server.json` resolves it. Read from
     /// the same place and for the same reason as `claudeLimits`: Settings
     /// says what the engine is actually doing, not what the app assumed.
@@ -110,6 +115,7 @@ final class UsageEngineHost {
         let engine = UsageEngine(config: config)
         self.engine = engine
         claudeLimits = config.claudeLimits
+        accounts = config.accounts ?? []
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
         keepAwakeMode = config.keepAwake
@@ -155,6 +161,38 @@ final class UsageEngineHost {
         guard let engine else { return }
         let host = self
         Task { host.apply(await engine.providerReadiness()) }
+    }
+
+    /// Starts metering a second account of a vendor.
+    ///
+    /// Which readers exist is decided once, when the engine is built — the
+    /// resolution is what the whole run hangs off and there is nothing left to
+    /// re-derive it from afterwards. So an account is added by writing it down
+    /// and building a new engine, which costs a restart of the tails and not a
+    /// cold scan: every reader resumes from the offsets it already persisted.
+    func addAccount(vendor: String, home: URL, label: String?) {
+        rebuild { $0.addingAccount(vendor: vendor, home: home, label: label) }
+    }
+
+    /// Stops metering one. Its snapshot and its recorded days stay on disk:
+    /// the days it counted happened, and deleting the archive is a different
+    /// button that says so.
+    func removeAccount(id: String, vendor: String) {
+        rebuild { $0.removingAccount(id: id, vendor: vendor) }
+    }
+
+    private func rebuild(_ change: @escaping @Sendable (ServerConfig) -> ServerConfig) {
+        let updated = change((try? ServerConfig.load()) ?? .defaults)
+        do {
+            try ServerConfig.save(updated)
+        } catch {
+            sissyLog("sissy: failed to persist accounts: \(error)")
+            return
+        }
+        Task { [weak self] in
+            await self?.stop()
+            self?.start()
+        }
     }
 
     func setClaudeLimits(_ enabled: Bool) {

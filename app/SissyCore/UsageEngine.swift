@@ -317,6 +317,7 @@ actor UsageEngine {
         return resolvedProviders.map {
             ProviderReadiness(
                 id: $0.id,
+                label: $0.account.label,
                 activation: $0.activation,
                 dataDir: $0.dataDir,
                 scan: progress[$0.id]

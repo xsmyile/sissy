@@ -238,12 +238,16 @@ struct UsagePanelSnapshot: Equatable {
         totalTokens: Int,
         now: Date
     ) -> [ProviderRow] {
-        slices.map { slice in
+        let sharedVendors = Self.vendorsAnsweringTwice(slices)
+        return slices.map { slice in
             let plan = UsageFormat.plan(
                 slice.plan, tier: slice.planTier, seat: slice.account?.seat)
+            let vendor = ProviderKey.vendor(of: slice.id)
             return ProviderRow(
                 id: slice.id,
-                name: UsageFormat.providerName(slice.id),
+                name: sharedVendors.contains(vendor)
+                    ? UsageFormat.providerName(slice.id, distinguishedBy: slice.account)
+                    : UsageFormat.providerName(slice.id),
                 plan: plan?.label,
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
@@ -263,6 +267,18 @@ struct UsagePanelSnapshot: Equatable {
                 credits: makeCredits(slice.credits, now: now)
             )
         }
+    }
+
+    /// Which vendors have more than one account on screen, and so need their
+    /// rows told apart by account rather than by vendor.
+    private static func vendorsAnsweringTwice(_ slices: [ProviderSlice]) -> Set<String> {
+        var seen: Set<String> = []
+        var twice: Set<String> = []
+        for vendor in slices.map({ ProviderKey.vendor(of: $0.id) })
+        where !seen.insert(vendor).inserted {
+            twice.insert(vendor)
+        }
+        return twice
     }
 
     /// The credits row, or nil when there is nothing a reader would act on.

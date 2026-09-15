@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// What one provider's row says. A pure function of the readiness so the
@@ -8,9 +9,11 @@ struct ProviderRowSnapshot: Equatable {
     let state: String
     let detail: String
 
-    static func make(_ readiness: ProviderReadiness) -> Self {
+    static func make(_ readiness: ProviderReadiness, sharesVendor: Bool = false) -> Self {
         Self(
-            name: UsageFormat.providerName(readiness.id),
+            name: sharesVendor
+                ? UsageFormat.providerName(readiness.id, named: readiness.label)
+                : UsageFormat.providerName(readiness.id),
             state: state(for: readiness.activation),
             detail: detail(for: readiness)
         )
@@ -121,6 +124,29 @@ enum ClaudeWebSessionCopy {
     }
 }
 
+/// What the accounts section says.
+enum AccountsCopy {
+    static let header = "Accounts"
+    static let addClaude = "Add a Claude account…"
+    static let addCodex = "Add a Codex account…"
+    static let removeTitle = "Stop metering"
+    static let removeLabel = "This account"
+    static let choosePrompt = "Use as account"
+
+    static let caption =
+        "An account is the directory its CLI keeps everything in — the session logs, "
+        + "the plan, the credential the limits are read with. Point Sissy at a second "
+        + "one and it meters that account on its own row, with its own limits. "
+        + "The CLI has to be told to use it too: run Claude Code with "
+        + "CLAUDE_CONFIG_DIR set to that directory, or Codex with CODEX_HOME."
+
+    static func chooseMessage(vendor: String) -> String {
+        vendor == ProviderID.codex
+            ? "Choose the CODEX_HOME directory of the account to meter."
+            : "Choose the CLAUDE_CONFIG_DIR directory of the account to meter."
+    }
+}
+
 /// Where each provider's numbers come from, and what it is doing about them.
 struct ProvidersSettingsView: View {
     let model: SissyModel
@@ -137,12 +163,21 @@ struct ProvidersSettingsView: View {
             ForEach(model.engine.providers, id: \.id) { readiness in
                 Section {
                     row(readiness)
-                    if ProviderKey.vendor(of: readiness.id) == ProviderID.claudeCode {
+                    // Under the vendor's first account only: the switch is the
+                    // CLI's, not an account's, and the imported session belongs
+                    // to whichever account Claude.app holds. Repeating them
+                    // under a second account would offer two controls for one
+                    // setting and imply the session could be that account's.
+                    if isFirstOfVendor(readiness), vendor(of: readiness) == ProviderID.claudeCode {
                         claudeLimits
                         if model.engine.claudeLimits { claudeWebSession }
                     }
+                    if let account = ProviderKey(id: readiness.id).account {
+                        removeButton(account: account, vendor: vendor(of: readiness))
+                    }
                 }
             }
+            accountsSection
         }
         .formStyle(.grouped)
         // The readiness poll stops once the scan is warm, so a window opened
@@ -150,9 +185,72 @@ struct ProvidersSettingsView: View {
         .task { model.engine.refreshProviders() }
     }
 
+    private func vendor(of readiness: ProviderReadiness) -> String {
+        ProviderKey.vendor(of: readiness.id)
+    }
+
+    /// Whether this is the first row of its vendor, which is where the
+    /// vendor-wide controls belong.
+    private func isFirstOfVendor(_ readiness: ProviderReadiness) -> Bool {
+        model.engine.providers.first { vendor(of: $0) == vendor(of: readiness) }?.id == readiness.id
+    }
+
+    /// Adding an account, and the one thing a user has to do outside Sissy for
+    /// it to mean anything.
+    ///
+    /// Both CLIs keep an account's whole state — its logs, its credential, its
+    /// profile — under one directory, and that directory is what Sissy is
+    /// being pointed at. A home nothing has ever run against is an empty row,
+    /// so the caption says which variable puts a session there rather than
+    /// leaving someone to find out from an account that never fills in.
+    @ViewBuilder
+    private var accountsSection: some View {
+        Section {
+            Button(AccountsCopy.addClaude) { addAccount(vendor: ProviderID.claudeCode) }
+            Button(AccountsCopy.addCodex) { addAccount(vendor: ProviderID.codex) }
+            Text(AccountsCopy.caption)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text(AccountsCopy.header)
+        }
+    }
+
+    @ViewBuilder
+    private func removeButton(account: String, vendor: String) -> some View {
+        LabeledContent {
+            Button(AccountsCopy.removeTitle, role: .destructive) {
+                model.engine.removeAccount(id: account, vendor: vendor)
+            }
+        } label: {
+            Text(AccountsCopy.removeLabel)
+        }
+    }
+
+    /// Picks the account's config home and starts metering it.
+    ///
+    /// A directory chooser rather than a text field because the value is a
+    /// path that has to exist, and because the panel is also how a user
+    /// discovers that an account *is* a directory.
+    private func addAccount(vendor: String) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = AccountsCopy.choosePrompt
+        panel.message = AccountsCopy.chooseMessage(vendor: vendor)
+        guard panel.runModal() == .OK, let home = panel.url else { return }
+        model.engine.addAccount(vendor: vendor, home: home, label: home.lastPathComponent)
+    }
+
     @ViewBuilder
     private func row(_ readiness: ProviderReadiness) -> some View {
-        let snapshot = ProviderRowSnapshot.make(readiness)
+        let snapshot = ProviderRowSnapshot.make(
+            readiness,
+            sharesVendor: model.engine.providers.filter { vendor(of: $0) == vendor(of: readiness) }
+                .count > 1
+        )
         LabeledContent {
             Text(snapshot.state).foregroundStyle(.secondary)
         } label: {

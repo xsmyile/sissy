@@ -501,6 +501,45 @@ enum UsageFormat {
         }
     }
 
+    /// What a row is called when the same vendor answers for more than one
+    /// account.
+    ///
+    /// The vendor's name alone stops identifying a row the moment a second
+    /// account of it appears, and two rows both reading "Claude" is the
+    /// failure this whole feature exists to remove — one of them is a work
+    /// seat and the user cannot tell which. The qualifier is the account's own
+    /// organisation, which is the name the vendor itself puts on it and the
+    /// one the user recognises; an account that names none falls back to the
+    /// local part of its address, and one that names neither to the key it was
+    /// added under, because a row has to be callable something.
+    ///
+    /// Deliberately not applied when a vendor has one account: the overwhelming
+    /// majority of installs have exactly that, and "Claude · Personal" on a Mac
+    /// with one Claude account is noise dressed as information.
+    static func providerName(_ id: String, distinguishedBy account: ProviderAccount?) -> String {
+        let name = providerName(id)
+        guard let qualifier = accountQualifier(id, account: account) else { return name }
+        return "\(name) · \(qualifier)"
+    }
+
+    /// The same row name for a surface that holds the user's own label rather
+    /// than the vendor's answer for the account — Settings, which lists
+    /// accounts before any of them has produced a reading.
+    static func providerName(_ id: String, named label: String?) -> String {
+        let name = providerName(id)
+        let qualifier = label.flatMap { $0.isEmpty ? nil : $0 } ?? ProviderKey(id: id).account
+        guard let qualifier else { return name }
+        return "\(name) · \(qualifier)"
+    }
+
+    private static func accountQualifier(_ id: String, account: ProviderAccount?) -> String? {
+        if let organization = account?.organization, !organization.isEmpty { return organization }
+        if let email = account?.email, let local = email.split(separator: "@").first {
+            return String(local)
+        }
+        return ProviderKey(id: id).account
+    }
+
     /// What a project is called: the last component of its path, which is the
     /// repository's own name. Two unrelated repositories sharing a basename
     /// render the same label and are told apart by the tooltip — the accepted
