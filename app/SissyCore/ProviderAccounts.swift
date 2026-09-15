@@ -98,16 +98,21 @@ struct ResolvedAccount: Sendable, Equatable {
 
     /// Claude Code's config file for this account.
     ///
-    /// The odd case is the default home, and it is the CLI's own: with
-    /// `CLAUDE_CONFIG_DIR` unset the config home is `~/.claude` but
-    /// `.claude.json` sits beside it at `$HOME/.claude.json`, while a home the
-    /// variable names holds its own copy. Measured against 2.1.272, which
-    /// creates `<home>/.claude.json` on first run under a home it was given.
+    /// Three places in one order, the same one `CodexBar` resolves in
+    /// (`ClaudeConfigPaths.accountConfigURL`): the home's own `.config.json`
+    /// where the CLI has migrated to it, then `<home>/.claude.json` for a home
+    /// `CLAUDE_CONFIG_DIR` names, and `$HOME/.claude.json` for the default
+    /// home — where the CLI keeps the profile *beside* the config directory
+    /// rather than inside it. Measured against 2.1.272, which creates
+    /// `<home>/.claude.json` on first run under a home it was given.
     var claudeProfileURL: URL {
-        home == AccountDefaults.claudeHome
-            ? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(
-                AccountDefaults.claudeProfileName)
-            : home.appendingPathComponent(AccountDefaults.claudeProfileName)
+        let profile = home.appendingPathComponent(AccountDefaults.claudeProfileName)
+        if FileManager.default.fileExists(atPath: profile.path) { return profile }
+        guard home == AccountDefaults.claudeHome else {
+            return home.appendingPathComponent(AccountDefaults.claudeLegacyProfileName)
+        }
+        return URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(AccountDefaults.claudeLegacyProfileName)
     }
 
     /// Claude Code's own OAuth credential for this account, which is the only
@@ -128,7 +133,12 @@ struct ResolvedAccount: Sendable, Equatable {
 enum AccountDefaults {
     static let claudeConfigDirEnvVar = "CLAUDE_CONFIG_DIR"
     static let codexHomeEnvVar = "CODEX_HOME"
-    static let claudeProfileName = ".claude.json"
+    /// Newer layout: a config home the CLI has migrated keeps its profile
+    /// here, and it wins where both exist. Same order `CodexBar` resolves in
+    /// (`ClaudeConfigPaths.accountConfigURL`), so the two tools cannot read
+    /// one machine differently.
+    static let claudeProfileName = ".config.json"
+    static let claudeLegacyProfileName = ".claude.json"
     static let claudeCredentialsName = ".credentials.json"
     static let codexAuthName = "auth.json"
     static let claudeLogsSubdirectory = "projects"

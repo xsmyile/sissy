@@ -14,6 +14,9 @@ struct PanelProviderPage: View {
     /// one provider has such a switch; it decides which sentence an empty
     /// limits block gets.
     let limitsEnabled: Bool
+    /// Switches the vendor to another of its accounts. Never called for a
+    /// vendor with one account, whose row carries no choices.
+    let onSelectAccount: (String) -> Void
     let refresh: () -> Void
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
@@ -54,22 +57,68 @@ struct PanelProviderPage: View {
     /// a label on the app.
     @ViewBuilder
     private var identity: some View {
-        if row.account != nil || row.plan != nil {
-            VStack(alignment: .leading, spacing: 2) {
-                if let email = row.account?.email {
-                    Text(email)
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
+        if row.account != nil || row.plan != nil || !row.accounts.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let email = row.account?.email {
+                        Text(email)
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                    organisation
                 }
-                organisation
+                .frame(maxWidth: .infinity, alignment: .leading)
+                accountPicker
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, PanelMetrics.gutter)
             .padding(.vertical, 10)
         }
     }
+
+    /// Switches which of this vendor's accounts the page is about.
+    ///
+    /// It sits on the identity line because that line *is* the account — the
+    /// address, the organisation and the plan all belong to it, and a control
+    /// that changes them belongs where they are rather than in Settings. The
+    /// switch costs nothing: every account is metered all the time, so this
+    /// only changes which reading is drawn.
+    ///
+    /// A `Menu` inside the popover is safe — a transient `NSPopover` is not
+    /// dismissed by one, verified on macOS 27.
+    @ViewBuilder
+    private var accountPicker: some View {
+        if !row.accounts.isEmpty {
+            Menu {
+                ForEach(row.accounts) { choice in
+                    Button {
+                        onSelectAccount(choice.id)
+                    } label: {
+                        if choice.isSelected {
+                            Label(choice.label, systemImage: "checkmark")
+                        } else {
+                            Text(choice.label)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "person.2")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.visible)
+            .fixedSize()
+            .help(Self.accountPickerHelp)
+        }
+    }
+
+    /// Said once here rather than at the call site: the picker is the only
+    /// place the word "account" means a choice, and a tooltip that explains
+    /// what switching does not do is what stops it reading as a login.
+    static let accountPickerHelp =
+        "Show another account of this provider. Both keep counting either way."
 
     /// The organisation and the plan on one line, either of which can be the
     /// only one there: a personal account names no organisation, and an

@@ -66,9 +66,20 @@ struct UsagePanelView: View {
         return providers.first { $0.id == id }
     }
 
+    /// Switches the open page's vendor to another of its accounts, and moves
+    /// the page with it: the page is addressed by provider id, so leaving it
+    /// pointed at the account that was just switched away from would drop the
+    /// user back to the overview on every switch.
+    private func selectAccount(_ id: String) {
+        model.selectAccount(vendor: ProviderKey.vendor(of: id), id: id)
+        page = .provider(id)
+    }
+
     var body: some View {
         let live = model.liveFrame
-        let snapshot = live.map { UsagePanelSnapshot.make(frame: $0.frame) }
+        let snapshot = live.map {
+            UsagePanelSnapshot.make(frame: $0.frame, selected: model.preferences.selectedAccounts)
+        }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
         return VStack(alignment: .leading, spacing: 0) {
             if let open {
@@ -80,7 +91,9 @@ struct UsagePanelView: View {
             if let snapshot {
                 if let open {
                     PanelProviderPage(
-                        row: open, limitsEnabled: model.engine.claudeLimits
+                        row: open,
+                        limitsEnabled: model.engine.claudeLimits,
+                        onSelectAccount: { selectAccount($0) }
                     ) { model.refreshProvider(open.id) }
                 } else {
                     PanelOverview(

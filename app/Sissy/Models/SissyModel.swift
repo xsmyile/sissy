@@ -243,6 +243,18 @@ final class SissyModel {
         lastFrameAt = Date()
     }
 
+    /// Switches which account of a vendor the panel draws.
+    ///
+    /// Nothing is read again: every account is metered whether or not it is on
+    /// screen, so this only changes which slice the row is built from. That is
+    /// what makes the switch instant, and it is also why it is a preference —
+    /// the choice is about looking, not about metering.
+    func selectAccount(vendor: String, id: String) {
+        guard preferences.selectedAccounts[vendor] != id else { return }
+        preferences.selectedAccounts[vendor] = id
+        savePreferences()
+    }
+
     func setSissyMotion(_ enabled: Bool) {
         guard enabled != preferences.sissyMotion else { return }
         preferences.sissyMotion = enabled

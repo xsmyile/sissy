@@ -222,12 +222,22 @@ actor UsageEngine {
                 // which is exactly how a row came to pair one account's name
                 // with another's windows. They are the fallback for the account
                 // that has no home of its own to read, never the first answer.
-                let ownProbe =
-                    ClaudeFileCredentials.isPresent(at: account.claudeCredentialsURL)
-                    ? ClaudeLimitsProbe(credentials: { _, _ in
-                        ClaudeFileCredentials.load(at: account.claudeCredentialsURL)
-                    })
-                    : account.key.account.map { _ in ClaudeLimitsProbe() }
+                let ownProbe: ClaudeLimitsProbe? =
+                    if ClaudeFileCredentials.isPresent(at: account.claudeCredentialsURL) {
+                        ClaudeLimitsProbe(credentials: { _, _ in
+                            ClaudeFileCredentials.load(at: account.claudeCredentialsURL)
+                        })
+                    } else if account.key.account != nil {
+                        // Its credential is somewhere this build cannot
+                        // address, and the shared keychain item is the *other*
+                        // account's. Saying so is the only honest answer: a
+                        // probe reading the shared item here would put the
+                        // default account's windows under this account's name,
+                        // which is the bug this whole feature removes.
+                        ClaudeLimitsProbe(credentials: { _, _ in .unreachable })
+                    } else {
+                        nil
+                    }
                 if let ownProbe { limitsSources[account.id] = ownProbe }
                 providers.append(
                     LocalUsageProvider.claudeCode(

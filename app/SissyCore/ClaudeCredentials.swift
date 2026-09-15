@@ -43,6 +43,14 @@ enum ClaudeCredentialsLookup: Sendable {
     /// front of someone who did not just ask for one. A caller that *is* a
     /// user action reads again with interaction allowed.
     case interactionRequired
+    /// The account keeps a credential somewhere this build cannot address.
+    ///
+    /// A second Claude Code config home files its token under a keychain
+    /// service whose name carries a hash of that home, and writes no
+    /// `.credentials.json` beside it. Reading the shared item instead would
+    /// answer for a different account, so the only correct answer is that
+    /// there is no reading — not that nobody is signed in.
+    case unreachable
     case unreadable(OSStatus)
     /// The lookup outlived its budget. `SecItemCopyMatching` blocks while
     /// macOS decides whether to authorize, and that decision can wait on a

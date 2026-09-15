@@ -396,6 +396,8 @@ enum UsageFormat {
             return ("Claude Code is not signed in on this Mac", nil)
         case .sessionExpired:
             return ("The claude.ai session has ended", "Import again")
+        case .credentialUnreachable:
+            return ("Sissy cannot read this account's sign-in, so its limits stay hidden", nil)
         }
     }
 
@@ -520,6 +522,19 @@ enum UsageFormat {
         let name = providerName(id)
         guard let qualifier = accountQualifier(id, account: account) else { return name }
         return "\(name) · \(qualifier)"
+    }
+
+    /// What one account is called in the picker.
+    ///
+    /// The address is what a user recognises an account by — it is what they
+    /// typed to sign in — with the organisation behind it for an account whose
+    /// address the vendor does not report, and the key it was added under when
+    /// neither has been read yet. An account whose files nothing has written
+    /// still has to be pickable, which is why this never answers empty.
+    static func accountLabel(_ id: String, account: ProviderAccount?) -> String {
+        if let email = account?.email, !email.isEmpty { return email }
+        if let organization = account?.organization, !organization.isEmpty { return organization }
+        return ProviderKey(id: id).account ?? providerName(id)
     }
 
     /// The same row name for a surface that holds the user's own label rather

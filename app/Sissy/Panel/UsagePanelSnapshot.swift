@@ -49,9 +49,20 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
+    /// One account a vendor's row can be switched to.
+    struct AccountChoice: Equatable, Identifiable {
+        let id: String
+        let label: String
+        let isSelected: Bool
+    }
+
     struct ProviderRow: Equatable, Identifiable {
         let id: String
         let name: String
+        /// The other accounts of this vendor, for the picker on the identity
+        /// line. Empty when the vendor has one account, which is most of them
+        /// — a picker over a single choice is a control that does nothing.
+        let accounts: [AccountChoice]
         /// Subscription plan, already worded. Nil leaves the row's header at
         /// the name alone — an API-key user has no plan to name, and a Codex
         /// that has not taken a turn yet has not said which it is on.
@@ -202,10 +213,19 @@ struct UsagePanelSnapshot: Equatable {
         var isOverPace: Bool { deltaPercent > 0 }
     }
 
-    static func make(frame: FrameData, now: Date = Date()) -> Self {
+    /// `selected` names which account of each vendor to draw, keyed by vendor.
+    /// A vendor it does not name, or names an account the frame no longer
+    /// carries, falls back to that vendor's first account — a row must not
+    /// vanish because a preference outlived the account it points at.
+    static func make(
+        frame: FrameData,
+        selected: [String: String] = [:],
+        now: Date = Date()
+    ) -> Self {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
-        let rows = makeRows(frame.providers, totalTokens: totalTokens, now: now)
+        let rows = makeRows(
+            frame.providers, selected: selected, totalTokens: totalTokens, now: now)
         return Self(
             tokens: UsageFormat.tokens(frame.tokens),
             cost: UsageFormat.cost(frame.cost),
@@ -233,21 +253,37 @@ struct UsagePanelSnapshot: Equatable {
         )
     }
 
+    /// One row per vendor, drawing the account that vendor is switched to.
+    ///
+    /// A row per *account* was the first shape and it was wrong: two rows both
+    /// headed "Claude" made the panel taller and left the user reading
+    /// directory names to tell them apart, when the thing that identifies an
+    /// account — its address, its organisation, its plan — is already on the
+    /// row. So the vendor keeps one row and the account is chosen on the line
+    /// that names it. Every account is still metered; this is only which one
+    /// is drawn.
     private static func makeRows(
         _ slices: [ProviderSlice],
+        selected: [String: String],
         totalTokens: Int,
         now: Date
     ) -> [ProviderRow] {
-        let sharedVendors = Self.vendorsAnsweringTwice(slices)
-        return slices.map { slice in
+        return Self.byVendor(slices).map { group in
+            let slice =
+                group.first { $0.id == selected[ProviderKey.vendor(of: $0.id)] } ?? group[0]
             let plan = UsageFormat.plan(
                 slice.plan, tier: slice.planTier, seat: slice.account?.seat)
-            let vendor = ProviderKey.vendor(of: slice.id)
             return ProviderRow(
                 id: slice.id,
-                name: sharedVendors.contains(vendor)
-                    ? UsageFormat.providerName(slice.id, distinguishedBy: slice.account)
-                    : UsageFormat.providerName(slice.id),
+                name: UsageFormat.providerName(slice.id),
+                accounts: group.count > 1
+                    ? group.map {
+                        AccountChoice(
+                            id: $0.id,
+                            label: UsageFormat.accountLabel($0.id, account: $0.account),
+                            isSelected: $0.id == slice.id)
+                    }
+                    : [],
                 plan: plan?.label,
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
@@ -269,16 +305,18 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
-    /// Which vendors have more than one account on screen, and so need their
-    /// rows told apart by account rather than by vendor.
-    private static func vendorsAnsweringTwice(_ slices: [ProviderSlice]) -> Set<String> {
-        var seen: Set<String> = []
-        var twice: Set<String> = []
-        for vendor in slices.map({ ProviderKey.vendor(of: $0.id) })
-        where !seen.insert(vendor).inserted {
-            twice.insert(vendor)
+    /// The slices grouped by vendor, each group and the groups themselves in
+    /// the order the frame listed them — which is the engine's canonical
+    /// order, so a row does not move between frames.
+    private static func byVendor(_ slices: [ProviderSlice]) -> [[ProviderSlice]] {
+        var order: [String] = []
+        var groups: [String: [ProviderSlice]] = [:]
+        for slice in slices {
+            let vendor = ProviderKey.vendor(of: slice.id)
+            if groups[vendor] == nil { order.append(vendor) }
+            groups[vendor, default: []].append(slice)
         }
-        return twice
+        return order.compactMap { groups[$0] }
     }
 
     /// The credits row, or nil when there is nothing a reader would act on.

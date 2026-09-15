@@ -131,21 +131,24 @@ enum ClaudeWebSessionCopy {
     }
 }
 
-/// What the accounts section says.
+/// What the account controls inside a provider's section say.
 enum AccountsCopy {
-    static let header = "Accounts"
-    static let addClaude = "Add a Claude account…"
-    static let addCodex = "Add a Codex account…"
+    static let addTitle = "Add account…"
+    static let addLabel = "Another account"
     static let removeTitle = "Stop metering"
     static let removeLabel = "This account"
     static let choosePrompt = "Use as account"
 
-    static let caption =
-        "An account is the directory its CLI keeps everything in — the session logs, "
-        + "the plan, the credential the limits are read with. Point Sissy at a second "
-        + "one and it meters that account on its own row, with its own limits. "
-        + "The CLI has to be told to use it too: run Claude Code with "
-        + "CLAUDE_CONFIG_DIR set to that directory, or Codex with CODEX_HOME."
+    /// Names the variable rather than the concept: an account added here fills
+    /// in only once its CLI is actually pointed at that directory, and someone
+    /// who is not told that watches an empty row and concludes Sissy is broken.
+    static func caption(vendor: String) -> String {
+        let variable = vendor == ProviderID.codex ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"
+        return "An account is the directory its CLI keeps everything in — the session "
+            + "logs, the plan, the credential the limits are read with. Point Sissy at "
+            + "another one and you can switch to it from the panel. Run the CLI with "
+            + "\(variable) set to that directory, or the row stays empty."
+    }
 
     static func chooseMessage(vendor: String) -> String {
         vendor == ProviderID.codex
@@ -192,9 +195,12 @@ struct ProvidersSettingsView: View {
                     if let account = ProviderKey(id: readiness.id).account {
                         removeButton(account: account, vendor: vendor(of: readiness))
                     }
+                    // Under the vendor's last account, so adding one reads as
+                    // part of that provider rather than as a separate feature
+                    // that happens to mention it.
+                    if isLastOfVendor(readiness) { addButton(vendor: vendor(of: readiness)) }
                 }
             }
-            accountsSection
         }
         .formStyle(.grouped)
         // The readiness poll stops once the scan is warm, so a window opened
@@ -235,17 +241,22 @@ struct ProvidersSettingsView: View {
             .foregroundStyle(.secondary)
     }
 
+    /// Whether this is the last row of its vendor, which is where adding
+    /// another account belongs.
+    private func isLastOfVendor(_ readiness: ProviderReadiness) -> Bool {
+        model.engine.providers.last { vendor(of: $0) == vendor(of: readiness) }?.id == readiness.id
+    }
+
     @ViewBuilder
-    private var accountsSection: some View {
-        Section {
-            Button(AccountsCopy.addClaude) { addAccount(vendor: ProviderID.claudeCode) }
-            Button(AccountsCopy.addCodex) { addAccount(vendor: ProviderID.codex) }
-            Text(AccountsCopy.caption)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        } header: {
-            Text(AccountsCopy.header)
+    private func addButton(vendor: String) -> some View {
+        LabeledContent {
+            Button(AccountsCopy.addTitle) { addAccount(vendor: vendor) }
+        } label: {
+            Text(AccountsCopy.addLabel)
         }
+        Text(AccountsCopy.caption(vendor: vendor))
+            .font(.callout)
+            .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
