@@ -2,10 +2,13 @@ import SwiftUI
 
 /// What the vendor says about itself, on the page about that vendor.
 ///
-/// It sits directly under the identity and above the limits because of the
-/// question it answers: when an agent starts failing, the first thing worth
-/// knowing is whether it is you or them, and that question comes before "how
-/// much is left". On every other day it is one quiet line.
+/// It sits at the foot of the page because of what opening it does: the tree
+/// is the one block here whose height a click changes, and anywhere above the
+/// limits it pushes them, the day and the projects down the page every time it
+/// is opened. The move costs the alarm nothing — a degraded vendor already
+/// colours its own name on the Overview and carries the sentence in that row's
+/// tooltip, so "is it me or them" is answered before this page is open. On
+/// every other day it is one quiet line.
 ///
 /// The age is on its own clock rather than in the snapshot. The monitor
 /// publishes nothing while a vendor keeps answering the same thing — that is
@@ -241,11 +244,11 @@ enum StatusTreeGeometry {
     /// Past this the tree scrolls inside itself rather than growing the page.
     ///
     /// The panel gained a scroll view of its own, so this is no longer what
-    /// keeps the popover on the screen. It survives for the reason that always
-    /// sat underneath that one: OpenAI publishes 34 services, and a tree
-    /// allowed to run to its full length puts everything below it — the
-    /// limits, the day, the projects — past the bottom of a panel the user
-    /// then has to scroll through to reach what they opened it for.
+    /// keeps the popover on the screen, and the block sits last on the page so
+    /// there is nothing below it left to push. What survives is the page
+    /// itself: OpenAI publishes 34 services, so a tree allowed to run to its
+    /// full length is one click away from several times the height of
+    /// everything above it put together.
     static let maxHeight: CGFloat = 200
 
     static func height(rows: Int) -> CGFloat {
