@@ -130,7 +130,7 @@ struct UsagePanelSnapshot: Equatable {
     /// The indicator travels raw beside the worded label because it is the one
     /// field a surface reads rather than shows: it picks the dot's colour, and
     /// it decides whether the Overview colours that provider's name at all.
-    struct StatusRow: Equatable {
+    struct StatusRow: Equatable, Sendable {
         let indicator: ProviderStatusIndicator
         /// The vendor's own sentence, or Sissy's own when there is no reading.
         let label: String
@@ -140,6 +140,28 @@ struct UsagePanelSnapshot: Equatable {
         /// panel. Nil for a feed that has never answered — an age there would
         /// date a fetch that produced no reading as though it were one.
         let checkedAt: Date?
+        /// The vendor's own services, in the vendor's own order and nesting.
+        /// Empty leaves the row closed and without a disclosure, which is what
+        /// a feed whose component list could not be read looks like.
+        let components: [ComponentRow]
+        /// The page these rows are a copy of, for the one question the copy
+        /// deliberately cannot answer: what actually happened, and when.
+        let page: URL?
+    }
+
+    /// One service on a vendor's status page, or a group of them.
+    struct ComponentRow: Equatable, Identifiable, Sendable {
+        let id: String
+        let name: String
+        /// Kept raw beside the worded status because it picks the dot's
+        /// colour, which is the one thing about this row that is read rather
+        /// than shown.
+        let indicator: ProviderStatusIndicator
+        /// The vendor's own status, worded.
+        let status: String
+        let children: [ComponentRow]
+
+        var isGroup: Bool { !children.isEmpty }
     }
 
     /// The credits block of a provider's page: what has been charged against
@@ -341,7 +363,7 @@ struct UsagePanelSnapshot: Equatable {
                 projects: makeProjects(
                     slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
                 credits: makeCredits(slice.credits, now: now),
-                status: makeStatus(status[slice.id])
+                status: makeStatus(status[slice.id], provider: slice.id)
             )
         }
     }
@@ -350,12 +372,25 @@ struct UsagePanelSnapshot: Equatable {
     /// The map is empty for every provider while the readings are switched
     /// off, which is what takes the section off the page rather than leaving
     /// an unexplained blank where it was.
-    private static func makeStatus(_ reading: ProviderStatusReading?) -> StatusRow? {
+    private static func makeStatus(_ reading: ProviderStatusReading?, provider: String)
+        -> StatusRow?
+    {
         guard let reading else { return nil }
         return StatusRow(
             indicator: reading.indicator,
             label: UsageFormat.statusLabel(reading.description),
-            checkedAt: reading.indicator == .unknown ? nil : reading.checkedAt)
+            checkedAt: reading.indicator == .unknown ? nil : reading.checkedAt,
+            components: reading.components.map(makeComponent),
+            page: ProviderStatusFeed.root(for: provider))
+    }
+
+    private static func makeComponent(_ component: ProviderStatusComponent) -> ComponentRow {
+        ComponentRow(
+            id: component.id,
+            name: component.name,
+            indicator: component.indicator,
+            status: UsageFormat.componentStatus(component.status),
+            children: component.children.map(makeComponent))
     }
 
     /// The accounts the switcher offers, or none when there is nothing to

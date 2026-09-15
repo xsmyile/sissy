@@ -481,6 +481,32 @@ enum UsageFormat {
         "checked " + age(now.timeIntervalSince(checkedAt))
     }
 
+    /// One component's own status, worded.
+    ///
+    /// The vendor's tokens where they are known, and a humanised form of
+    /// whatever else arrives — `partial_outage` reads "Partial outage" either
+    /// way, so a vocabulary a vendor extends still prints as itself rather
+    /// than as a blank or as the raw token. That is the same division `plan`
+    /// is on: the token travels, the app words it, and no release is needed
+    /// for a new one.
+    static func componentStatus(_ raw: String) -> String {
+        switch raw {
+        case "operational": return "Operational"
+        case "degraded_performance": return "Degraded"
+        case "partial_outage": return "Partial outage"
+        case "major_outage": return "Major outage"
+        case "full_outage": return "Full outage"
+        case "under_maintenance": return "Maintenance"
+        default: return humanised(raw)
+        }
+    }
+
+    private static func humanised(_ raw: String) -> String {
+        let words = raw.split(separator: "_").joined(separator: " ")
+        guard let first = words.first else { return raw }
+        return first.uppercased() + words.dropFirst()
+    }
+
     /// The whole status row as one sentence, for the tooltip and for
     /// VoiceOver — which is what keeps the colour on the Overview's provider
     /// name from being the only carrier of it.

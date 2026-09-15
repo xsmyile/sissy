@@ -243,6 +243,169 @@ final class ProviderStatusTests: XCTestCase {
         XCTAssertEqual(UsageFormat.statusLabel("   "), "Status unavailable")
         XCTAssertEqual(UsageFormat.statusLabel(nil), "Status unavailable")
     }
+
+    // MARK: The tree
+
+    /// Claude's own shape, recorded 2026-09-15: six services, none of them
+    /// grouped and none of them hidden, with the page's sentence in the same
+    /// document — which is what keeps this vendor at one request per poll.
+    private static let claudeSummary = """
+        {"page":{"id":"tymt9n04zgry","name":"Claude"},
+         "components":[
+          {"id":"c1","name":"claude.ai","status":"operational","position":1,
+           "group":false,"group_id":null,"only_show_if_degraded":false},
+          {"id":"c2","name":"Claude API (api.anthropic.com)","status":"degraded_performance",
+           "position":3,"group":false,"group_id":null,"only_show_if_degraded":false},
+          {"id":"c3","name":"Claude Code","status":"operational","position":2,
+           "group":false,"group_id":null,"only_show_if_degraded":false},
+          {"id":"c4","name":"Claude for Government","status":"operational","position":4,
+           "group":false,"group_id":null,"only_show_if_degraded":true}],
+         "status":{"indicator":"minor","description":"Partially Degraded Service"}}
+        """
+
+    /// OpenAI's own shape, recorded the same day: the services arrive grouped,
+    /// the statuses arrive separately in `affected_components`, and anything
+    /// absent from that list is operational.
+    private static let openAIComponents = """
+        {"summary":{"affected_components":[{"component_id":"k2","status":"partial_outage"}],
+         "structure":{"items":[
+          {"group":{"id":"g1","name":"Codex","hidden":false,"components":[
+            {"component_id":"k1","name":"Codex Web","hidden":false},
+            {"component_id":"k2","name":"CLI","hidden":false},
+            {"component_id":"k3","name":"Hidden thing","hidden":true}]}},
+          {"group":{"id":"g2","name":"Secret","hidden":true,"components":[
+            {"component_id":"k4","name":"Nope","hidden":false}]}},
+          {"component":{"component_id":"k5","name":"FedRAMP","hidden":false}}]}}}
+        """
+
+    func testTheFlatFeedAnswersTheSentenceAndTheServicesAtOnce() throws {
+        let reading = try StatuspageFeed.parseSummary(
+            Data(Self.claudeSummary.utf8), checkedAt: Self.fetchedAt)
+        XCTAssertEqual(reading.indicator, .minor)
+        XCTAssertEqual(reading.description, "Partially Degraded Service")
+        XCTAssertEqual(
+            reading.components.map(\.name),
+            ["claude.ai", "Claude Code", "Claude API (api.anthropic.com)"])
+        XCTAssertTrue(reading.components.allSatisfy { !$0.isGroup })
+    }
+
+    /// The vendor's own order, which is `position` and not the order the array
+    /// happened to arrive in.
+    func testTheFlatFeedKeepsTheVendorsOrder() throws {
+        let reading = try StatuspageFeed.parseSummary(
+            Data(Self.claudeSummary.utf8), checkedAt: Self.fetchedAt)
+        XCTAssertEqual(reading.components.first?.name, "claude.ai")
+        XCTAssertEqual(reading.components.last?.name, "Claude API (api.anthropic.com)")
+    }
+
+    /// A row the page hides while it is healthy is hidden here too: the tree
+    /// is a copy of that page, and a row it does not draw is one the user
+    /// would not find by opening it either.
+    func testARowThePageHidesWhileHealthyIsHiddenHere() throws {
+        let reading = try StatuspageFeed.parseSummary(
+            Data(Self.claudeSummary.utf8), checkedAt: Self.fetchedAt)
+        XCTAssertFalse(reading.components.contains { $0.name == "Claude for Government" })
+    }
+
+    func testTheGroupedFeedNestsAndDropsWhatThePageHides() throws {
+        let components = try IncidentIOFeed.parse(Data(Self.openAIComponents.utf8))
+        XCTAssertEqual(components.map(\.name), ["Codex", "FedRAMP"])
+        let codex = try XCTUnwrap(components.first)
+        XCTAssertTrue(codex.isGroup)
+        XCTAssertEqual(codex.children.map(\.name), ["Codex Web", "CLI"])
+    }
+
+    /// Anything absent from `affected_components` is operational, and a group
+    /// reports the worst of what it holds — otherwise a collapsed group would
+    /// hide the outage that is the reason to open it.
+    func testAGroupReportsTheWorstOfItsChildren() throws {
+        let components = try IncidentIOFeed.parse(Data(Self.openAIComponents.utf8))
+        let codex = try XCTUnwrap(components.first)
+        XCTAssertEqual(codex.indicator, .major)
+        XCTAssertEqual(codex.children.first?.indicator, .operational)
+        XCTAssertEqual(codex.children.last?.indicator, .major)
+        XCTAssertEqual(components.last?.indicator, .operational)
+    }
+
+    func testTheComponentVocabularyIsWordedAndSurvivesANewToken() {
+        XCTAssertEqual(UsageFormat.componentStatus("operational"), "Operational")
+        XCTAssertEqual(UsageFormat.componentStatus("degraded_performance"), "Degraded")
+        XCTAssertEqual(UsageFormat.componentStatus("major_outage"), "Major outage")
+        XCTAssertEqual(UsageFormat.componentStatus("some_new_state"), "Some new state")
+    }
+
+    /// A component list that failed to load leaves the last one standing: it
+    /// is the best-effort half of the reading, and blanking the tree because a
+    /// second request timed out would take the detail away mid-incident.
+    func testATreeThatFailedToReloadKeepsTheLastOne() async {
+        let withTree = ProviderStatusReading(
+            indicator: .minor, description: "Partially Degraded Service",
+            checkedAt: Self.fetchedAt,
+            components: [
+                ProviderStatusComponent(
+                    id: "c1", name: "Claude Code", indicator: .operational, status: "operational")
+            ])
+        let feed = Feed(.success(withTree))
+        let monitor = makeMonitor(feed)
+        _ = await monitor.refreshOnce {}
+        feed.answer(
+            .success(
+                ProviderStatusReading(
+                    indicator: .operational, description: "All Systems Operational",
+                    checkedAt: Self.fetchedAt.addingTimeInterval(300))))
+        _ = await monitor.refreshOnce {}
+        let current = monitor.currentStatus()[ProviderID.claudeCode]
+        XCTAssertEqual(current?.indicator, .operational)
+        XCTAssertEqual(current?.components.map(\.name), ["Claude Code"])
+    }
+
+    func testTheRowCarriesTheTreeAndThePageItCopies() throws {
+        let reading = ProviderStatusReading(
+            indicator: .minor, description: "Partially Degraded Service",
+            checkedAt: Self.fetchedAt,
+            components: [
+                .group(
+                    id: "g1", name: "Codex",
+                    children: [
+                        ProviderStatusComponent(
+                            id: "k2", name: "CLI", indicator: .major, status: "partial_outage")
+                    ])
+            ])
+        let status = try XCTUnwrap(row([ProviderID.claudeCode: reading])?.status)
+        XCTAssertEqual(status.components.first?.name, "Codex")
+        XCTAssertEqual(status.components.first?.children.first?.status, "Partial outage")
+        XCTAssertEqual(status.page?.host(), "status.claude.com")
+    }
+
+    // MARK: The bound
+
+    /// The panel has no scroll view of its own and sizes to its content, so
+    /// the tree is what has to stop growing. Measured 2026-09-15: OpenAI
+    /// publishes 34 services in 5 groups, so one open group is already taller
+    /// than the rest of the page.
+    func testTheTreeStopsGrowingThePanel() {
+        XCTAssertLessThanOrEqual(StatusTreeGeometry.height(rows: 34), StatusTreeGeometry.maxHeight)
+        XCTAssertFalse(StatusTreeGeometry.scrolls(rows: 5))
+        XCTAssertTrue(StatusTreeGeometry.scrolls(rows: 20))
+        XCTAssertEqual(StatusTreeGeometry.height(rows: 0), 0)
+    }
+
+    func testOnlyOpenGroupsCountTowardsTheHeight() {
+        let tree = [
+            UsagePanelSnapshot.ComponentRow(
+                id: "g1", name: "APIs", indicator: .operational, status: "Operational",
+                children: [
+                    UsagePanelSnapshot.ComponentRow(
+                        id: "k1", name: "Responses", indicator: .operational,
+                        status: "Operational", children: [])
+                ]),
+            UsagePanelSnapshot.ComponentRow(
+                id: "g2", name: "ChatGPT", indicator: .operational, status: "Operational",
+                children: []),
+        ]
+        XCTAssertEqual(StatusTreeGeometry.visibleRows(tree, expanded: []), 2)
+        XCTAssertEqual(StatusTreeGeometry.visibleRows(tree, expanded: ["g1"]), 3)
+    }
 }
 
 /// Counts callbacks from whichever isolation they arrive on.
