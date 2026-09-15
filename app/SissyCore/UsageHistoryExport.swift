@@ -28,7 +28,10 @@ enum UsageHistoryExport {
         "cost",
     ]
 
-    /// Basename of the file holding every provider's rows.
+    /// Basename of the file holding every provider's rows, and the one
+    /// provider id that cannot name its own file — a provider called `all`
+    /// would write into this one. Nothing enforces that, because provider ids
+    /// are Sissy's own (`claude-code`, `codex`) rather than a vendor's.
     static let combinedName = "all"
 
     /// The rows of one day, flattened and ordered so two exports of an
@@ -99,11 +102,13 @@ enum UsageHistoryExport {
 
     /// Writes one file per provider plus the combined one into `directory`.
     ///
-    /// Throws rather than reporting partial success: the caller's gesture was
-    /// "give me the archive", and a directory holding one CSV of three is a
-    /// worse answer than an error naming what stopped it. Each file is written
-    /// atomically, so a failure part-way leaves no half-written CSV behind for
-    /// somebody to open and believe.
+    /// Each file is written atomically, so nothing here leaves a half-written
+    /// CSV for somebody to open and believe. The *set* is not atomic: a
+    /// failure on the third file keeps the two already written, and the throw
+    /// is what tells the caller the directory holds less than the archive.
+    /// Staging the lot through a temporary directory would buy all-or-nothing
+    /// at the cost of writing every byte twice, and the caller already has to
+    /// name the error either way.
     static func write(_ days: [UsageHistoryDay], to directory: URL) throws {
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true)

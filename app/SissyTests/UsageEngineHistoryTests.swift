@@ -95,6 +95,60 @@ final class UsageEngineHistoryTests: XCTestCase {
         return try XCTUnwrap(frames.all.last)
     }
 
+    private func archive(dayOffset: Int, project: String?, tokens: Int) throws {
+        let cal = Calendar.current
+        let date = try XCTUnwrap(
+            cal.date(byAdding: .day, value: dayOffset, to: cal.startOfDay(for: Date())))
+        try UsageHistoryStore.save(
+            UsageHistoryDay(
+                day: UsageReaderShared.dayFormatter.string(from: date),
+                provider: ProviderID.claudeCode,
+                updatedAt: Date(),
+                totals: [
+                    UsageHistoryRow(model: "claude-sonnet-4-6", project: project):
+                        UsageHistoryTotals(
+                            inputTokens: tokens,
+                            outputTokens: 0,
+                            cacheReadTokens: 0,
+                            cacheCreationTokens: 0,
+                            cost: Decimal(string: "1.25") ?? 0
+                        )
+                ]
+            ),
+            in: tempDir
+        )
+    }
+
+    /// The export takes no window where the frame's rollup takes seven days:
+    /// what bounds it is retention, and a second bound would mean an export
+    /// carrying less than the archive Settings names.
+    func testTheExportReachesADayOlderThanTheFramesWindow() throws {
+        let old = -(UsageEngine.historyWindowDays + 30)
+        try archive(dayOffset: old, project: nil, tokens: 11)
+        try archive(dayOffset: 0, project: nil, tokens: 22)
+        let engine = makeEngine()
+
+        let days = engine.exportableHistory()
+
+        XCTAssertEqual(days.flatMap { $0.models }.map(\.inputTokens).sorted(), [11, 22])
+    }
+
+    /// The archive's own rule, end to end: a persisted path is read through the
+    /// resolver before it leaves, so a row an older build wrote for a directory
+    /// that is no longer a repository stops claiming one — and keeps its money,
+    /// which is the half a migration on disk would have thrown away.
+    func testAPathThatIsNoLongerARepositoryLosesItsNameAndKeepsItsMoney() throws {
+        let gone = tempDir.appendingPathComponent("deleted-worktree").path
+        try archive(dayOffset: 0, project: gone, tokens: 33)
+        let engine = makeEngine()
+
+        let rows = engine.exportableHistory().flatMap { $0.models }
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertNil(rows.first?.project, "the export named a repository nothing verified")
+        XCTAssertEqual(rows.first?.inputTokens, 33, "re-reading the day moved its money")
+    }
+
     func testTheFrameCarriesWhatTheArchiveHoldsForTheWeek() async throws {
         try writeClaudeTurn()
         try archiveYesterday()
