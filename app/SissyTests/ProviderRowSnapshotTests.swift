@@ -75,12 +75,13 @@ final class ProviderRowSnapshotTests: XCTestCase {
         XCTAssertEqual(row.state, "On, detected")
     }
 
-    /// There is no switch on this page yet, so the row has to say where the
-    /// one that turned it off actually lives.
-    func testAProviderSwitchedOffNamesWhereItWasSwitchedOff() {
+    /// The switch beside the row is what says it is off, so the line under it
+    /// says what that costs instead — and names the path, because "off" and
+    /// "pointed somewhere you did not mean" are answered by the same row.
+    func testAProviderSwitchedOffSaysWhatIsNotBeingRead() {
         let row = ProviderRowSnapshot.make(readiness(activation: .off))
 
         XCTAssertEqual(row.state, "Off")
-        XCTAssertEqual(row.detail, "Switched off in server.json")
+        XCTAssertEqual(row.detail, "/tmp/sissy-tests/projects is not being read")
     }
 }

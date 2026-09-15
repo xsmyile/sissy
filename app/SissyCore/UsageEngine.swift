@@ -809,6 +809,46 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// Records that a provider is to be metered, or not, and persists it.
+    ///
+    /// Only the record. Applying it is the caller's, because the provider list
+    /// is built in `init` and this lifecycle is terminal — an engine that has
+    /// stopped stays stopped — so a list that has changed is a new engine
+    /// rather than a mutated one. That is the cheaper half of the trade: a
+    /// locked, mutable list would have to answer for a provider stopped
+    /// mid-emit, where a rebuild costs only what a relaunch costs, which is
+    /// nothing the persisted offsets do not already cover.
+    ///
+    /// Answers whether the file now says so. An id this build does not meter
+    /// is refused rather than written: `ProviderToggles` would drop it, and a
+    /// switch that writes nothing and reports success is the kind of lie the
+    /// Providers tab exists to prevent.
+    func setProvider(id: String, enabled: Bool) -> Bool {
+        guard resolvedProviders.contains(where: { $0.id == id }) else {
+            sissyLog("sissy: refused a toggle for an unknown provider — \(id)")
+            return false
+        }
+        guard config.providers[id] != enabled else { return true }
+        config.providers[id] = enabled
+        // Read back rather than trusted: `ProviderToggles` carries a field per
+        // provider and drops an id it has none for, so a provider added to the
+        // list above and not to the toggles would be persisted nowhere while
+        // this reported success. The invariant lives in another file and no
+        // compiler tie holds it, so it is checked where it can still be
+        // refused.
+        guard config.providers[id] == enabled else {
+            sissyLog("sissy: the \(id) toggle has no field in server.json to land in")
+            return false
+        }
+        do {
+            try ServerConfig.save(config, to: configURL)
+        } catch {
+            sissyLog("sissy: failed to persist the \(id) toggle to \(configURL.path): \(error)")
+            return false
+        }
+        return true
+    }
+
     /// Where one provider's offsets are kept.
     ///
     /// Claude Code keeps the unqualified `usage-state.json` every install has
