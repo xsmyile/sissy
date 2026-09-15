@@ -15,7 +15,7 @@ final class SissyModelLiveFrameTests: XCTestCase {
             burn: 1500,
             providers: [],
             keepAwake: .off,
-            history: nil
+            history: [:]
         )
     }
 

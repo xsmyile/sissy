@@ -195,7 +195,7 @@ final class UsageProjectRowsTests: XCTestCase {
                 )
             ],
             keepAwake: .off,
-            history: nil,
+            history: [:],
             projects: projects
         )
     }

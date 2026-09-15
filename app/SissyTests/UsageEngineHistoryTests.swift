@@ -120,11 +120,12 @@ final class UsageEngineHistoryTests: XCTestCase {
         )
     }
 
-    /// The export takes no window where the frame's rollup takes seven days:
-    /// what bounds it is retention, and a second bound would mean an export
-    /// carrying less than the archive Settings names.
+    /// The export takes no window where the frame's rollups take four: what
+    /// bounds it is retention, and a second bound would mean an export carrying
+    /// less than the archive Settings names.
     func testTheExportReachesADayOlderThanTheFramesWindow() throws {
-        let old = -(UsageEngine.historyWindowDays + 30)
+        let widest = try XCTUnwrap(UsagePeriod.thirtyDays.days)
+        let old = -(widest + 7)
         try archive(dayOffset: old, project: nil, tokens: 11)
         try archive(dayOffset: 0, project: nil, tokens: 22)
         let engine = makeEngine()
@@ -150,7 +151,10 @@ final class UsageEngineHistoryTests: XCTestCase {
         XCTAssertEqual(rows.first?.inputTokens, 33, "re-reading the day moved its money")
     }
 
-    func testTheFrameCarriesWhatTheArchiveHoldsForTheWeek() async throws {
+    /// Every window at once rather than the selected one: the panel's choice is
+    /// the app's, and a frame carrying only the period it was last told would
+    /// make changing it cost a round trip and a frame's wait.
+    func testTheFrameCarriesEveryWindowTheArchiveAnswersFor() async throws {
         try writeClaudeTurn()
         try archiveYesterday()
         let engine = makeEngine()
@@ -158,8 +162,28 @@ final class UsageEngineHistoryTests: XCTestCase {
 
         let frame = try await firstFrame(from: engine)
 
-        XCTAssertEqual(frame.history?.tokens, Self.archivedTokens)
-        XCTAssertEqual(frame.history?.days, UsageEngine.historyWindowDays)
+        XCTAssertEqual(
+            Set(frame.history.keys), Set(UsagePeriod.archived),
+            "the frame offered a set of windows the archive does not answer for")
+        for period in UsagePeriod.archived {
+            XCTAssertEqual(
+                frame.history[period]?.tokens, Self.archivedTokens,
+                "\(period) did not carry yesterday")
+        }
+    }
+
+    /// Today is never a key: the archive's copy of it is written behind the
+    /// tail's flush, so the headline stays on the live totals the frame already
+    /// carries rather than going slower the moment today is selected.
+    func testTheFrameNeverRollsTodayUpFromTheArchive() async throws {
+        try writeClaudeTurn()
+        try archiveYesterday()
+        let engine = makeEngine()
+        addTeardownBlock { await engine.stop() }
+
+        let frame = try await firstFrame(from: engine)
+
+        XCTAssertNil(frame.history[.today])
     }
 
     /// The engine hands its tails the directory beside the config that named
@@ -197,7 +221,7 @@ final class UsageEngineHistoryTests: XCTestCase {
         await engine.deleteHistory()
 
         await fulfillment(of: [replayed], timeout: 5)
-        XCTAssertNotEqual(frames.all.last?.history?.earliestDay, try yesterday())
+        XCTAssertNotEqual(frames.all.last?.history[.all]?.earliestDay, try yesterday())
         XCTAssertNil(
             UsageHistoryStore.load(
                 provider: ProviderID.claudeCode,
@@ -220,7 +244,7 @@ final class UsageEngineHistoryTests: XCTestCase {
         let frame = try await firstFrame(from: engine)
         await engine.stop()
 
-        XCTAssertNil(frame.history)
+        XCTAssertTrue(frame.history.isEmpty)
         XCTAssertNil(
             UsageHistoryStore.load(
                 provider: ProviderID.claudeCode,

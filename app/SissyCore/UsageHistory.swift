@@ -237,11 +237,49 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     }
 }
 
+/// A window the panel can put its headline over.
+///
+/// A ladder rather than a set of alternatives: now, a week, a month,
+/// everything kept, each step about four times the last. A calendar month is
+/// deliberately absent — it and `thirtyDays` are the same question with two
+/// answers a few percent apart, and it degenerates besides, showing two days
+/// on the 2nd where a rolling window is always full. The calendar anchor is
+/// the invoice question, which needs a last month and a quarter with it and
+/// belongs to the report rather than to a popup in a 340 pt panel.
+///
+/// `today` is a case here so the panel's selection is one value, but it is
+/// never rolled up from the archive: the archive's copy of today is written
+/// behind the tail's flush, and a headline that went slower the moment it was
+/// selected would be a worse reading than the one it replaced. The engine
+/// fills it from the live day totals and asks the store only for the rest.
+enum UsagePeriod: String, Codable, CaseIterable, Sendable {
+    case today
+    case sevenDays = "7d"
+    case thirtyDays = "30d"
+    case all
+
+    /// Width of the window in days, nil for the whole archive — which is
+    /// bounded by `historyRetentionDays` rather than by anything here, so
+    /// `all` means everything kept and not everything spent.
+    var days: Int? {
+        switch self {
+        case .today: 1
+        case .sevenDays: 7
+        case .thirtyDays: 30
+        case .all: nil
+        }
+    }
+
+    /// Every period the archive answers for, which is every one but `today`.
+    static let archived: [Self] = [.sevenDays, .thirtyDays, .all]
+}
+
 /// What a window of the archive adds up to.
 struct UsageHistoryRollup: Sendable, Equatable {
-    /// Width of the window that was asked for, in days, so a reader can say
-    /// "last 7 days" without re-deriving it.
-    let days: Int
+    /// The window this is the total of, so a reader can name it without
+    /// re-deriving it. The period rather than a day count: `all` has no width
+    /// to carry.
+    let period: UsagePeriod
     /// Earliest day the archive actually holds inside that window, which is
     /// what stops a two-day-old install from presenting itself as a week.
     let earliestDay: Date?
@@ -333,29 +371,57 @@ enum UsageHistoryStore {
         return .day(decoded)
     }
 
-    /// What the archive holds for the `days` most recent local days, ending
-    /// today. Every provider directory present is counted, including one
-    /// whose provider is switched off now — the days it recorded happened.
-    static func rollup(days: Int, in parent: URL, now: Date = Date()) -> UsageHistoryRollup {
+    /// What the archive holds for each of `periods`, ending today. Every
+    /// provider directory present is counted, including one whose provider is
+    /// switched off now — the days it recorded happened.
+    ///
+    /// One pass rather than a walk per window: the windows nest, so every day
+    /// file would otherwise be opened and decoded once for each period that
+    /// contains it, and the widest of them already reads the whole archive.
+    /// A day is decoded once and added into every window whose cutoff admits
+    /// it.
+    ///
+    /// A period holding no days comes back at zero with no earliest day, which
+    /// is a reading rather than an absence: a week nothing was spent in is
+    /// true, and it is the caller that knows whether there is an archive at
+    /// all.
+    static func rollups(
+        for periods: [UsagePeriod], in parent: URL, now: Date = Date()
+    ) -> [UsagePeriod: UsageHistoryRollup] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
-        let cutoff = cal.date(byAdding: .day, value: -(max(days, 1) - 1), to: today) ?? today
-        var tokens = 0
-        var cost: Decimal = 0
-        var earliest: Date?
+        let cutoffs = periods.map { period -> (UsagePeriod, Date?) in
+            guard let days = period.days else { return (period, nil) }
+            return (period, cal.date(byAdding: .day, value: -(max(days, 1) - 1), to: today))
+        }
+        var tokens: [UsagePeriod: Int] = [:]
+        var cost: [UsagePeriod: Decimal] = [:]
+        var earliest: [UsagePeriod: Date] = [:]
         for provider in providers(in: parent) {
             for (dayKey, url) in dayFiles(provider: provider, in: parent) {
-                guard dayKey >= cutoff, dayKey <= today, let decoded = decode(at: url) else {
-                    continue
-                }
+                guard dayKey <= today, let decoded = decode(at: url) else { continue }
+                var dayTokens = 0
+                var dayCost: Decimal = 0
                 for entry in decoded.models {
-                    tokens += entry.totalTokens
-                    cost += Decimal(string: entry.cost) ?? 0
+                    dayTokens += entry.totalTokens
+                    dayCost += Decimal(string: entry.cost) ?? 0
                 }
-                earliest = earliest.map { min($0, dayKey) } ?? dayKey
+                for (period, cutoff) in cutoffs where cutoff.map({ dayKey >= $0 }) ?? true {
+                    tokens[period, default: 0] += dayTokens
+                    cost[period, default: 0] += dayCost
+                    earliest[period] = earliest[period].map { min($0, dayKey) } ?? dayKey
+                }
             }
         }
-        return UsageHistoryRollup(days: days, earliestDay: earliest, tokens: tokens, cost: cost)
+        var out: [UsagePeriod: UsageHistoryRollup] = [:]
+        for period in periods {
+            out[period] = UsageHistoryRollup(
+                period: period,
+                earliestDay: earliest[period],
+                tokens: tokens[period] ?? 0,
+                cost: cost[period] ?? 0)
+        }
+        return out
     }
 
     /// One provider's archived days inside the `days` most recent local days,

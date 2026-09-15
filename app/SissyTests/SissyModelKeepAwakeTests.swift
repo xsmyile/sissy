@@ -14,7 +14,7 @@ final class SissyModelKeepAwakeTests: XCTestCase {
             burn: 1500,
             providers: [],
             keepAwake: keepAwake,
-            history: nil
+            history: [:]
         )
     }
 

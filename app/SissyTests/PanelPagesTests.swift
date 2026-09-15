@@ -16,7 +16,7 @@ final class PanelPagesTests: XCTestCase {
             burn: 1500,
             providers: providers,
             keepAwake: .off,
-            history: nil,
+            history: [:],
             projects: FrameBuilder.combinedProjects(providers)
         )
     }

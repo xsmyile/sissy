@@ -291,9 +291,15 @@ struct FrameData: Sendable, Equatable {
     /// including when off: the app renders the control from this, and "off"
     /// and "nothing reported" must not collapse into the same value.
     let keepAwake: KeepAwakeState
-    /// What the archive holds for the last week, or nil when there is no
-    /// archive to read — switched off, or on and still empty.
-    let history: UsageHistoryRollup?
+    /// What the archive holds for each period the panel offers over it, empty
+    /// when there is no archive to read — switched off, or on and still empty.
+    ///
+    /// Every period at once rather than the selected one: the choice is the
+    /// app's and changing it must not cost a round trip to the engine and a
+    /// frame's wait. `today` is never a key here — it is what `tokens` and
+    /// `cost` above already are, read live rather than from an archive written
+    /// behind the tail's flush.
+    let history: [UsagePeriod: UsageHistoryRollup]
     /// Today's spend by project, summed across every provider and ordered by
     /// cost. One repository is one row wherever the work ran — a worktree
     /// counts against the checkout it was cut from — and a line naming no
@@ -317,7 +323,7 @@ struct FrameData: Sendable, Equatable {
         burn: Double?,
         providers: [ProviderSlice],
         keepAwake: KeepAwakeState,
-        history: UsageHistoryRollup?,
+        history: [UsagePeriod: UsageHistoryRollup] = [:],
         projects: [ProjectTotals] = [],
         providerStatus: [String: ProviderStatusReading] = [:]
     ) {
@@ -343,7 +349,7 @@ enum FrameBuilder {
         hoursElapsed: Double,
         providers: [ProviderSlice] = [],
         keepAwake: KeepAwakeState = .off,
-        history: UsageHistoryRollup? = nil,
+        history: [UsagePeriod: UsageHistoryRollup] = [:],
         providerStatus: [String: ProviderStatusReading] = [:]
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)

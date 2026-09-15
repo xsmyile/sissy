@@ -17,11 +17,11 @@ actor UsageEngine {
     /// Where the archive lives, which is beside the config that named the
     /// trees it was read from — the rule the snapshots already follow.
     private let stateDir: URL
-    /// Last archive rollup and when it was taken. The day files are written by
-    /// the providers on their own throttle, so the frame re-reads them rather
+    /// Last archive rollups and when they were taken. The day files are written
+    /// by the providers on their own throttle, so the frame re-reads them rather
     /// than being told; the cache is what keeps a burst of frames from turning
     /// into a burst of directory walks.
-    private var historyRollup: UsageHistoryRollup?
+    private var historyRollups: [UsagePeriod: UsageHistoryRollup] = [:]
     private var historyRollupAt: Date = .distantPast
     /// The one checkout memory every provider shares, kept because the export
     /// re-reads the archive's project paths through a resolver built on it.
@@ -100,12 +100,9 @@ actor UsageEngine {
     /// something to cancel rather than leaving a sleeper against a torn-down
     /// engine.
     private var keepAwakeDeadlineTask: Task<Void, Never>?
-    /// Days the panel's archive line covers. A week is what makes "more than
-    /// today" legible in a row that has to fit beside the per-provider rows.
-    static let historyWindowDays = 7
-    /// How long a rollup is reused before the day files are read again. Long
-    /// enough that frames do not walk the archive, short enough that the line
-    /// is never visibly behind the day it includes.
+    /// How long the rollups are reused before the day files are read again.
+    /// Long enough that frames do not walk the archive, short enough that a
+    /// window is never visibly behind the day it includes.
     private static let historyRollupTTL: TimeInterval = 2
 
     /// An engine runs once. `stopped` is terminal on purpose: the app builds a
@@ -866,22 +863,27 @@ actor UsageEngine {
         await onFrame?(frame)
     }
 
-    /// What the archive holds for the last week, cached for a beat.
+    /// What the archive holds for every period the panel offers, cached for a
+    /// beat.
     ///
-    /// Nil when the archive is switched off, and when it is on but empty —
-    /// a line saying a week came to nothing is a line about a feature rather
-    /// than about usage, so the panel drops it until there is something in it.
-    private func currentHistory(now: Date) -> UsageHistoryRollup? {
-        guard config.resolvedHistoryRetentionDays > 0 else { return nil }
-        let rollup: UsageHistoryRollup
-        if let historyRollup, now.timeIntervalSince(historyRollupAt) < Self.historyRollupTTL {
-            rollup = historyRollup
-        } else {
-            rollup = UsageHistoryStore.rollup(days: Self.historyWindowDays, in: stateDir, now: now)
-            historyRollup = rollup
+    /// Empty when the archive is switched off, and when it is on but empty — a
+    /// control offering four windows that all come to nothing offers a feature
+    /// rather than a reading, so the panel keeps the headline on today until
+    /// there is something behind it. The widest window decides that for all of
+    /// them: it contains the others, so nothing in it is nothing anywhere.
+    ///
+    /// The cache is kept even when the answer is withheld, so an empty archive
+    /// costs one directory walk every `historyRollupTTL` rather than one per
+    /// frame.
+    private func currentHistory(now: Date) -> [UsagePeriod: UsageHistoryRollup] {
+        guard config.resolvedHistoryRetentionDays > 0 else { return [:] }
+        let stale = now.timeIntervalSince(historyRollupAt) >= Self.historyRollupTTL
+        if historyRollups.isEmpty || stale {
+            historyRollups = UsageHistoryStore.rollups(
+                for: UsagePeriod.archived, in: stateDir, now: now)
             historyRollupAt = now
         }
-        return rollup.tokens > 0 ? rollup : nil
+        return (historyRollups[.all]?.tokens ?? 0) > 0 ? historyRollups : [:]
     }
 
     /// Prunes the archive to what `historyRetentionDays` allows, once for each
@@ -974,7 +976,7 @@ actor UsageEngine {
         } catch {
             sissyLog("sissy: failed to delete usage history at \(stateDir.path): \(error)")
         }
-        historyRollup = nil
+        historyRollups = [:]
         historyRollupAt = .distantPast
         await reemit()
     }
