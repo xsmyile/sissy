@@ -35,9 +35,9 @@ final class CodexReplayedTurnsTests: XCTestCase {
         try write(
             "one.jsonl",
             events: [
-                (delta: 1000, cumulative: 1000, at: "2026-09-14T10:00:00.000Z"),
-                (delta: 500, cumulative: 1500, at: "2026-09-14T10:01:00.000Z"),
-                (delta: 500, cumulative: 1500, at: "2026-09-14T10:03:30.000Z"),
+                (delta: 1000, cumulative: 1000, at: Self.at(0)),
+                (delta: 500, cumulative: 1500, at: Self.at(60)),
+                (delta: 500, cumulative: 1500, at: Self.at(210)),
             ])
 
         let today = await meter()
@@ -53,8 +53,8 @@ final class CodexReplayedTurnsTests: XCTestCase {
         try write(
             "one.jsonl",
             events: [
-                (delta: 500, cumulative: 500, at: "2026-09-14T10:00:00.000Z"),
-                (delta: 500, cumulative: 1000, at: "2026-09-14T10:01:00.000Z"),
+                (delta: 500, cumulative: 500, at: Self.at(0)),
+                (delta: 500, cumulative: 1000, at: Self.at(60)),
             ])
 
         let today = await meter()
@@ -68,12 +68,12 @@ final class CodexReplayedTurnsTests: XCTestCase {
     func testAForkedSessionDoesNotBillTheHistoryItCopied() async throws {
         try write(
             "fork.jsonl",
-            startedAt: "2026-09-14T10:30:00.000Z",
+            startedAt: Self.at(1800),
             parent: ["forked_from_id": "parent-xyz"],
             events: [
-                (delta: 1000, cumulative: 1000, at: "2026-09-14T10:30:00.001Z"),
-                (delta: 2000, cumulative: 3000, at: "2026-09-14T10:30:00.001Z"),
-                (delta: 700, cumulative: 3700, at: "2026-09-14T10:30:44.000Z"),
+                (delta: 1000, cumulative: 1000, at: Self.at(1800.001)),
+                (delta: 2000, cumulative: 3000, at: Self.at(1800.001)),
+                (delta: 700, cumulative: 3700, at: Self.at(1844)),
             ])
 
         let today = await meter()
@@ -86,11 +86,11 @@ final class CodexReplayedTurnsTests: XCTestCase {
     func testASpawnedSubagentDoesNotBillItsParentsHistoryEither() async throws {
         try write(
             "subagent.jsonl",
-            startedAt: "2026-09-14T10:30:00.000Z",
+            startedAt: Self.at(1800),
             parent: ["source": ["subagent": ["thread_spawn": ["parent_thread_id": "parent-xyz"]]]],
             events: [
-                (delta: 1000, cumulative: 1000, at: "2026-09-14T10:30:00.002Z"),
-                (delta: 900, cumulative: 1900, at: "2026-09-14T10:31:10.000Z"),
+                (delta: 1000, cumulative: 1000, at: Self.at(1800.002)),
+                (delta: 900, cumulative: 1900, at: Self.at(1870)),
             ])
 
         let today = await meter()
@@ -104,10 +104,10 @@ final class CodexReplayedTurnsTests: XCTestCase {
     func testASessionThatNamesNoParentKeepsItsOpeningTurns() async throws {
         try write(
             "own.jsonl",
-            startedAt: "2026-09-14T10:30:00.000Z",
+            startedAt: Self.at(1800),
             events: [
-                (delta: 1000, cumulative: 1000, at: "2026-09-14T10:30:00.001Z"),
-                (delta: 2000, cumulative: 3000, at: "2026-09-14T10:30:00.001Z"),
+                (delta: 1000, cumulative: 1000, at: Self.at(1800.001)),
+                (delta: 2000, cumulative: 3000, at: Self.at(1800.001)),
             ])
 
         let today = await meter()
@@ -123,14 +123,14 @@ final class CodexReplayedTurnsTests: XCTestCase {
         try write(
             "one.jsonl",
             events: [
-                (delta: 1000, cumulative: 1000, at: "2026-09-14T10:00:00.000Z"),
-                (delta: 500, cumulative: 1500, at: "2026-09-14T10:01:00.000Z"),
+                (delta: 1000, cumulative: 1000, at: Self.at(0)),
+                (delta: 500, cumulative: 1500, at: Self.at(60)),
             ])
         let first = await meter()
         XCTAssertEqual(first.totalTokens, 1500)
 
         try append(
-            "one.jsonl", events: [(delta: 500, cumulative: 1500, at: "2026-09-14T10:03:30.000Z")])
+            "one.jsonl", events: [(delta: 500, cumulative: 1500, at: Self.at(210))])
         let second = await meter()
 
         XCTAssertEqual(second.totalTokens, 1500, "the repeat was billed by the reader that resumed")
@@ -156,9 +156,24 @@ final class CodexReplayedTurnsTests: XCTestCase {
 
     private typealias Event = (delta: Int, cumulative: Int, at: String)
 
+    /// A fixture stamp, on the day the reader will actually ask about.
+    ///
+    /// `current()` answers for today, so a rollout stamped with the date these
+    /// tests were written passes on that date and on no other — which is what
+    /// happened the morning after. The offset is seconds from 10:00 local, so
+    /// every interval the rules turn on — the one-second replay window, the two
+    /// events a millisecond apart — is preserved exactly.
+    private static func at(_ offset: TimeInterval) -> String {
+        let base = Calendar.current.startOfDay(for: Date()).addingTimeInterval(10 * 3600)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: base.addingTimeInterval(offset))
+    }
+
     private func write(
         _ name: String,
-        startedAt: String = "2026-09-14T09:59:00.000Z",
+        startedAt: String = CodexReplayedTurnsTests.at(-60),
         parent: [String: Any] = [:],
         events: [Event]
     ) throws {
