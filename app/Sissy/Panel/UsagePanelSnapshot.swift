@@ -72,6 +72,15 @@ struct UsagePanelSnapshot: Equatable {
         let total: String
     }
 
+    /// How many bars the strip draws, and how many days its reader asks for.
+    ///
+    /// It lived on `UsageEngine` while the engine rolled a fixed week up for
+    /// the Overview's archive row. That row is gone and the headline's windows
+    /// are the user's choice now, so the only thing this still decides is how
+    /// wide a strip of bars reads — which is the panel's call, and its two
+    /// callers are both on this side of the engine.
+    static let dayStripDays = 7
+
     /// The strip for one provider: the archive for every day before today, and
     /// today from the frame.
     ///
@@ -90,15 +99,6 @@ struct UsagePanelSnapshot: Equatable {
     /// the label is the bars above it summed. A day older than the window has
     /// no bar to appear in, and counting it would put money on the label that
     /// nothing on screen accounts for.
-    /// How many bars the strip draws, and how many days its reader asks for.
-    ///
-    /// It lived on `UsageEngine` while the engine rolled a fixed week up for
-    /// the Overview's archive row. That row is gone and the headline's windows
-    /// are the user's choice now, so the only thing this still decides is how
-    /// wide a strip of bars reads — which is the panel's call, and its two
-    /// callers are both on this side of the engine.
-    static let dayStripDays = 7
-
     static func dayStrip(
         series: [UsageHistoryDaySummary],
         todayTokens: Int,
