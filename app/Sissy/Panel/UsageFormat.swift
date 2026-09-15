@@ -639,3 +639,19 @@ enum UsageFormat {
         amount.formatted(.currency(code: currency).precision(.fractionLength(2)))
     }
 }
+
+/// What a failed account switch says.
+///
+/// Each case is a different thing for the user to do, which is why they are
+/// not one sentence: an account that has never signed in needs a login, and a
+/// keychain that said no needs the user to allow it.
+enum ClaudeAccountSwitchCopy {
+    static func failure(_ why: ClaudeAccountActivation.Failure) -> String {
+        switch why {
+        case .noCredential:
+            return "That account has no saved sign-in on this Mac, so Claude Code cannot start as it"
+        case .keychain:
+            return "macOS did not let Sissy change the signed-in account. Try again and allow it"
+        }
+    }
+}

@@ -71,8 +71,15 @@ struct UsagePanelView: View {
     /// pointed at the account that was just switched away from would drop the
     /// user back to the overview on every switch.
     private func selectAccount(_ id: String) {
-        model.selectAccount(vendor: ProviderKey.vendor(of: id), id: id)
+        let vendor = ProviderKey.vendor(of: id)
+        model.selectAccount(vendor: vendor, id: id)
         page = .provider(id)
+        // Picking an account is picking the account, not a view of it: the
+        // next `claude` in a terminal starts as the one just chosen. Only
+        // Claude Code can be switched from here — Codex keeps its credential
+        // in a file the CLI reads directly, which is a different move.
+        guard vendor == ProviderID.claudeCode else { return }
+        model.engine.activateClaudeAccount(id)
     }
 
     var body: some View {
@@ -93,8 +100,10 @@ struct UsagePanelView: View {
                     PanelProviderPage(
                         row: open,
                         limitsEnabled: model.engine.claudeLimits,
-                        onSelectAccount: { selectAccount($0) }
-                    ) { model.refreshProvider(open.id) }
+                        onSelectAccount: { selectAccount($0) },
+                        switchFailure: model.engine.accountSwitchFailure,
+                        refresh: { model.refreshProvider(open.id) }
+                    )
                 } else {
                     PanelOverview(
                         snapshot: snapshot,

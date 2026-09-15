@@ -17,6 +17,10 @@ struct PanelProviderPage: View {
     /// Switches the vendor to another of its accounts. Never called for a
     /// vendor with one account, whose row carries no choices.
     let onSelectAccount: (String) -> Void
+    /// Why the last switch did not happen, when one did not. Shown under the
+    /// identity, because a switch that quietly failed leaves the user typing
+    /// `claude` and meeting the account they thought they had left.
+    let switchFailure: String?
     let refresh: () -> Void
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
@@ -75,6 +79,13 @@ struct PanelProviderPage: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, PanelMetrics.gutter)
             .padding(.vertical, 10)
+            if let switchFailure {
+                Text(switchFailure)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, PanelMetrics.gutter)
+                    .padding(.bottom, 10)
+            }
         }
     }
 
@@ -118,7 +129,7 @@ struct PanelProviderPage: View {
     /// place the word "account" means a choice, and a tooltip that explains
     /// what switching does not do is what stops it reading as a login.
     static let accountPickerHelp =
-        "Show another account of this provider. Both keep counting either way."
+        "Start Claude Code as another account. Both keep being counted either way."
 
     /// The organisation and the plan on one line, either of which can be the
     /// only one there: a personal account names no organisation, and an

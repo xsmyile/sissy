@@ -418,6 +418,27 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// Makes one account the one Claude Code starts as.
+    ///
+    /// The only write Sissy makes outside its own directory that is not a
+    /// file it can take back: the next `claude` in any terminal starts as this
+    /// account. It runs from the panel's own picker and from nothing else.
+    func activateClaudeAccount(id: String) async -> Result<Void, ClaudeAccountActivation.Failure> {
+        guard let account = resolvedProviders.first(where: { $0.id == id })?.account else {
+            return .failure(.noCredential)
+        }
+        do {
+            try ClaudeAccountActivation.activate(home: account.home)
+        } catch let failure as ClaudeAccountActivation.Failure {
+            sissyLog("sissy: could not switch Claude Code to \(id): \(failure)")
+            return .failure(failure)
+        } catch {
+            return .failure(.keychain(errSecInternalError))
+        }
+        sissyLog("sissy: Claude Code now starts as \(id)")
+        return .success(())
+    }
+
     /// Whether a claude.ai session is filed. Asked without decrypting one, so
     /// Settings can say so on a build whose grant has lapsed.
     nonisolated var hasClaudeWebSession: Bool { ClaudeWebSessionStore.isPresent() }

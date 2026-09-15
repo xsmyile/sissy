@@ -163,6 +163,26 @@ final class UsageEngineHost {
         Task { host.apply(await engine.providerReadiness()) }
     }
 
+    /// Why the last account switch did not happen, or nil when none has
+    /// failed. Published because a switch that silently does nothing leaves
+    /// the user typing `claude` and meeting the account they just left.
+    private(set) var accountSwitchFailure: String?
+
+    /// Makes an account the one Claude Code starts as.
+    ///
+    /// The one write Sissy makes that outlives it, and it runs only from the
+    /// panel's picker. macOS may ask for permission to read the account's
+    /// credential and to replace the active one; both are this gesture's own.
+    func activateClaudeAccount(_ id: String) {
+        guard let engine else { return }
+        accountSwitchFailure = nil
+        Task { [weak self] in
+            if case .failure(let why) = await engine.activateClaudeAccount(id: id) {
+                self?.accountSwitchFailure = ClaudeAccountSwitchCopy.failure(why)
+            }
+        }
+    }
+
     func setClaudeLimits(_ enabled: Bool) {
         guard let engine, enabled != claudeLimits else { return }
         claudeLimits = enabled
