@@ -159,6 +159,11 @@ enum AccountDefaults {
         return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex")
     }
 
+    /// The home a vendor uses when nobody has said otherwise.
+    static func home(vendor: String) -> URL {
+        vendor == ProviderID.codex ? codexHome : claudeHome
+    }
+
     /// Log tree of a home, per vendor.
     static func dataDir(vendor: String, home: URL) -> URL {
         switch vendor {
@@ -176,63 +181,158 @@ enum AccountDefaults {
 }
 
 extension ServerConfig {
-    /// This config with one more account of `vendor`.
+    /// Every account Sissy meters for one vendor, resolved to the paths each
+    /// is read from.
     ///
-    /// A vendor with no entry in the list is not a vendor with no account: it
-    /// is one whose single account is implied by `claudeDataDir` /
-    /// `codexDataDir`. So the first addition writes that implied account down
-    /// before appending the new one — otherwise adding a second account would
-    /// silently replace the first, taking its snapshot and its archive out of
-    /// the reading with it.
-    func addingAccount(vendor: String, home: URL, label: String?) -> ServerConfig {
-        var updated = self
-        var list = accounts ?? []
-        if !list.contains(where: { $0.vendor == vendor }) {
-            let implied = resolvedAccounts(vendor: vendor)
-            list += implied.map {
-                AccountConfig(
-                    id: $0.key.account ?? "", vendor: vendor, label: $0.label,
-                    home: $0.home.path)
+    /// Found, not configured. A second account is a second config home and a
+    /// home is something `AccountDiscovery` can look for, so there is nothing
+    /// to add and nothing to keep in step — which is the whole point: the
+    /// common case is one home, and it must not carry a control it never
+    /// needs. Two things still outrank the scan, in order: an `accounts` list
+    /// someone wrote into `server.json` by hand, and a `claudeDataDir` /
+    /// `codexDataDir` pointed somewhere other than the default, because a user
+    /// who named a tree meant that tree.
+    func resolvedAccounts(vendor: String) -> [ResolvedAccount] {
+        let configured = (accounts ?? []).filter { $0.vendor == vendor }
+        if !configured.isEmpty {
+            return configured.map { account in
+                let home = Self.expandTilde(account.home)
+                return ResolvedAccount(
+                    key: ProviderKey(vendor: vendor, account: account.id),
+                    label: account.label,
+                    home: home,
+                    dataDir: AccountDefaults.dataDir(vendor: vendor, home: home)
+                )
             }
         }
-        let taken = Set(list.filter { $0.vendor == vendor }.map(\.id))
-        list.append(
-            AccountConfig(
-                id: Self.accountID(label: label, home: home, taken: taken),
-                vendor: vendor,
-                label: label,
-                home: home.path
-            ))
-        updated.accounts = list
-        return updated
-    }
-
-    /// This config without that account.
-    ///
-    /// Its snapshot and its recorded days are deliberately left on disk: the
-    /// days it counted happened, and the archive is the one thing Sissy keeps
-    /// — removing an account is saying "stop reading this", not "forget what
-    /// was read". Settings' delete button is where the data goes.
-    func removingAccount(id: String, vendor: String) -> ServerConfig {
-        var updated = self
-        updated.accounts = (accounts ?? []).filter { !($0.vendor == vendor && $0.id == id) }
-        return updated
-    }
-
-    /// A key for a new account: readable, stable, and unique within its
-    /// vendor, because it names that account's snapshot file and its directory
-    /// in the archive.
-    private static func accountID(label: String?, home: URL, taken: Set<String>) -> String {
-        let named = label.flatMap { $0.isEmpty ? nil : $0 }
-        let source = named ?? home.lastPathComponent
-        let slug = source.lowercased().map { character -> Character in
-            character.isLetter || character.isNumber ? character : "-"
+        let legacy = legacyAccount(vendor: vendor)
+        guard legacy.home == AccountDefaults.home(vendor: vendor) else { return [legacy] }
+        let homes = AccountDiscovery.homes(vendor: vendor)
+        guard !homes.isEmpty else { return [legacy] }
+        return homes.map { home in
+            let isDefault = home == AccountDefaults.home(vendor: vendor)
+            return ResolvedAccount(
+                key: ProviderKey(
+                    vendor: vendor,
+                    account: isDefault ? nil : AccountDiscovery.key(vendor: vendor, home: home)),
+                label: nil,
+                home: home,
+                dataDir: AccountDefaults.dataDir(vendor: vendor, home: home)
+            )
         }
-        var candidate = String(String(slug).split(separator: "-").joined(separator: "-").prefix(32))
-        if candidate.isEmpty { candidate = "account" }
-        guard taken.contains(candidate) else { return candidate }
-        var suffix = 2
-        while taken.contains("\(candidate)-\(suffix)") { suffix += 1 }
-        return "\(candidate)-\(suffix)"
+    }
+
+    /// The account every install had before there was more than one.
+    ///
+    /// Its key carries no account, which is what keeps `usage-state.json` and
+    /// the archive directory it has been writing since 0.1.0 exactly where
+    /// they are. The home comes from the configured log tree rather than from
+    /// the environment, because a user who pointed `claudeDataDir` somewhere
+    /// else meant it.
+    private func legacyAccount(vendor: String) -> ResolvedAccount {
+        let dataDir = vendor == ProviderID.codex ? resolvedCodexDataDir : resolvedClaudeDataDir
+        return ResolvedAccount(
+            key: ProviderKey(vendor: vendor),
+            label: nil,
+            home: AccountDefaults.home(ofDataDir: dataDir),
+            dataDir: dataDir
+        )
+    }
+}
+
+/// The accounts on this Mac, found rather than configured.
+///
+/// Both CLIs keep an account's whole state under one directory, so a second
+/// account is a second directory — and a directory is something Sissy can
+/// look for. Asking the user to point at one was the wrong shape twice over:
+/// it put a folder picker in front of a question about accounts, and it made
+/// the overwhelmingly common case — one account, one directory — carry a
+/// control it never needs.
+///
+/// The scan is the home directory's own entries, one level, no recursion. A
+/// candidate counts only when it holds something a CLI wrote: a profile
+/// naming an account, or a log tree. That is what keeps a stray backup
+/// directory from becoming a row nobody can explain.
+enum AccountDiscovery {
+    /// Prefix of the directories each vendor keeps its homes under. Claude
+    /// Code's default is `~/.claude` and a second home is conventionally
+    /// `~/.claude-<name>`; Codex's is `~/.codex`.
+    private static func prefix(vendor: String) -> String {
+        vendor == ProviderID.codex ? ".codex" : ".claude"
+    }
+
+    /// Every config home of `vendor` on this Mac, the default one first and
+    /// the rest in the order the filesystem lists them — which is stable, so a
+    /// row does not move between launches.
+    static func homes(vendor: String, in parent: URL? = nil) -> [URL] {
+        let root = parent ?? URL(fileURLWithPath: NSHomeDirectory())
+        let defaultHome = defaultHome(vendor: vendor, in: root)
+        let entries =
+            (try? FileManager.default.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        let found =
+            entries
+            .filter { $0.lastPathComponent.hasPrefix(prefix(vendor: vendor)) }
+            .filter { $0 != defaultHome }
+            .filter { holdsAnAccount(vendor: vendor, home: $0) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        guard holdsAnAccount(vendor: vendor, home: defaultHome) else { return found }
+        return [defaultHome] + found
+    }
+
+    /// The home the vendor uses when nobody has said otherwise, relative to
+    /// the directory being scanned.
+    ///
+    /// Parent-relative rather than absolute so the scan answers for the tree
+    /// it was given and nothing else — an absolute default leaks the real
+    /// `~/.claude` into every scan of anywhere else, which is what a test of
+    /// this caught before a user could.
+    private static func defaultHome(vendor: String, in root: URL) -> URL {
+        guard root.standardizedFileURL.path == NSHomeDirectory() else {
+            return root.appendingPathComponent(prefix(vendor: vendor))
+        }
+        return AccountDefaults.home(vendor: vendor)
+    }
+
+    /// Whether a directory is a config home a CLI has actually used.
+    ///
+    /// A log tree or a profile naming an account, either one. Both tests are
+    /// needed: a home signed in this morning has no logs yet, and a home whose
+    /// profile a build cannot parse still has the days it recorded.
+    static func holdsAnAccount(vendor: String, home: URL) -> Bool {
+        let manager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard manager.fileExists(atPath: home.path, isDirectory: &isDirectory),
+            isDirectory.boolValue
+        else { return false }
+        if manager.fileExists(atPath: AccountDefaults.dataDir(vendor: vendor, home: home).path) {
+            return true
+        }
+        return namesAnAccount(vendor: vendor, home: home)
+    }
+
+    private static func namesAnAccount(vendor: String, home: URL) -> Bool {
+        let account = ResolvedAccount(
+            key: ProviderKey(vendor: vendor), label: nil, home: home,
+            dataDir: AccountDefaults.dataDir(vendor: vendor, home: home))
+        guard vendor != ProviderID.codex else {
+            return FileManager.default.fileExists(atPath: account.codexAuthURL.path)
+        }
+        guard let data = try? Data(contentsOf: account.claudeProfileURL) else { return false }
+        return ClaudeProfileSource.read(data) == .absent ? false : true
+    }
+
+    /// A key for a home, derived from its directory name so it is stable
+    /// across launches without anything being written down: the key names the
+    /// snapshot file and the archive directory, and a key that moved would
+    /// strand both.
+    static func key(vendor: String, home: URL) -> String? {
+        let name = home.lastPathComponent
+        let marker = prefix(vendor: vendor) + "-"
+        let stripped =
+            name.hasPrefix(marker) ? String(name.dropFirst(marker.count)) : name
+        let slug = String(
+            stripped.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }.prefix(32))
+        return slug.isEmpty ? nil : slug
     }
 }

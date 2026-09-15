@@ -30,12 +30,26 @@ final class ProviderAccountsTests: XCTestCase {
         XCTAssertNil(key.account)
     }
 
-    func testAConfigWithNoAccountsMetersTheOneItAlwaysHad() {
+    /// However many homes the scan finds, the one that predates accounts
+    /// leads and keeps the bare id — which is what keeps its snapshot and its
+    /// archive directory where they have been since 0.1.0.
+    func testTheDefaultHomeLeadsAndKeepsTheBareID() {
         let accounts = config(nil).resolvedAccounts(vendor: ProviderID.claudeCode)
 
-        XCTAssertEqual(accounts.count, 1)
         XCTAssertEqual(accounts.first?.id, ProviderID.claudeCode)
         XCTAssertEqual(accounts.first?.dataDir.lastPathComponent, "projects")
+    }
+
+    /// A user who pointed `claudeDataDir` at a tree of their own meant that
+    /// tree, and the scan must not add rows beside it.
+    func testANamedLogTreeIsTheOnlyAccount() {
+        var named = ServerConfig.defaults
+        named.claudeDataDir = "/tmp/sissy-tests/elsewhere/projects"
+
+        let accounts = named.resolvedAccounts(vendor: ProviderID.claudeCode)
+
+        XCTAssertEqual(accounts.count, 1)
+        XCTAssertEqual(accounts.first?.dataDir.path, "/tmp/sissy-tests/elsewhere/projects")
     }
 
     func testEachConfiguredAccountResolvesToItsOwnTree() {
@@ -59,41 +73,58 @@ final class ProviderAccountsTests: XCTestCase {
         XCTAssertEqual(resolved.first?.id, ProviderID.codex)
     }
 
-    /// The failure this guards is silent and expensive: appending the second
-    /// account without writing the first one down would drop the account that
-    /// owns `usage-state.json` and the whole archive.
-    func testAddingTheSecondAccountWritesDownTheFirst() {
-        let updated = config(nil).addingAccount(
-            vendor: ProviderID.claudeCode, home: URL(fileURLWithPath: "/tmp/b"), label: "Work")
+    /// Found, not configured: a second account is a second config home, and a
+    /// home is something the scan can see without anyone adding it.
+    func testASecondHomeIsFoundByItsContents() throws {
+        let parent = try makeHome(".claude-work", contents: "projects")
 
-        let claude = updated.resolvedAccounts(vendor: ProviderID.claudeCode)
-        XCTAssertEqual(claude.count, 2)
-        XCTAssertEqual(claude.first?.id, ProviderID.claudeCode)
-        XCTAssertEqual(claude.last?.id, "claude-code:work")
+        let homes = AccountDiscovery.homes(vendor: ProviderID.claudeCode, in: parent)
+
+        XCTAssertEqual(homes.map(\.lastPathComponent), [".claude-work"])
+        XCTAssertEqual(
+            AccountDiscovery.key(vendor: ProviderID.claudeCode, home: homes[0]), "work")
     }
 
-    func testTwoAccountsNamedTheSameGetDifferentKeys() {
-        let once = config(nil).addingAccount(
-            vendor: ProviderID.claudeCode, home: URL(fileURLWithPath: "/tmp/b"), label: "Work")
-        let twice = once.addingAccount(
-            vendor: ProviderID.claudeCode, home: URL(fileURLWithPath: "/tmp/c"), label: "Work")
+    /// A directory that merely starts with the prefix is not an account. The
+    /// scan runs unattended, so a backup nobody remembers must not become a
+    /// row that cannot be explained.
+    func testADirectoryHoldingNothingACLIWroteIsNotAnAccount() throws {
+        let parent = try makeHome(".claude-backup", contents: nil)
 
-        let ids = twice.resolvedAccounts(vendor: ProviderID.claudeCode).map(\.id)
-        XCTAssertEqual(ids, [ProviderID.claudeCode, "claude-code:work", "claude-code:work-2"])
+        XCTAssertTrue(AccountDiscovery.homes(vendor: ProviderID.claudeCode, in: parent).isEmpty)
     }
 
-    func testRemovingAnAccountLeavesTheOthers() {
-        let updated = config(nil)
-            .addingAccount(
-                vendor: ProviderID.claudeCode,
-                home: URL(fileURLWithPath: "/tmp/b"),
-                label: "Work"
-            )
-            .removingAccount(id: "work", vendor: ProviderID.claudeCode)
+    /// A home signed into this morning has no logs yet, and it is exactly the
+    /// one the user is looking for.
+    func testAHomeWithAProfileAndNoLogsIsStillAnAccount() throws {
+        let parent = try makeHome(".claude-work", contents: nil)
+        let profile = parent.appendingPathComponent(".claude-work/.claude.json")
+        try #"{"oauthAccount":{"organizationType":"claude_max"}}"#
+            .write(to: profile, atomically: true, encoding: .utf8)
 
         XCTAssertEqual(
-            updated.resolvedAccounts(vendor: ProviderID.claudeCode).map(\.id),
-            [ProviderID.claudeCode])
+            AccountDiscovery.homes(vendor: ProviderID.claudeCode, in: parent)
+                .map(\.lastPathComponent),
+            [".claude-work"])
+    }
+
+    func testCodexHomesAreFoundByTheirOwnMarkers() throws {
+        let parent = try makeHome(".codex-work", contents: "sessions")
+
+        XCTAssertEqual(
+            AccountDiscovery.homes(vendor: ProviderID.codex, in: parent).map(\.lastPathComponent),
+            [".codex-work"])
+        XCTAssertTrue(AccountDiscovery.homes(vendor: ProviderID.claudeCode, in: parent).isEmpty)
+    }
+
+    private func makeHome(_ name: String, contents: String?) throws -> URL {
+        let parent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sissy-homes-\(UUID().uuidString)")
+        let home = parent.appendingPathComponent(name)
+        let leaf = contents.map { home.appendingPathComponent($0) } ?? home
+        try FileManager.default.createDirectory(at: leaf, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: parent) }
+        return parent
     }
 
     /// The CLI's own quirk: with `CLAUDE_CONFIG_DIR` unset the profile sits

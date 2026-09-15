@@ -222,7 +222,7 @@ struct ServerConfig: Sendable, Codable {
         return Self.expandTilde(codexDataDir)
     }
 
-    private static func expandTilde(_ path: String) -> URL {
+    static func expandTilde(_ path: String) -> URL {
         if path.hasPrefix("~/") {
             return URL(fileURLWithPath: NSHomeDirectory())
                 .appendingPathComponent(String(path.dropFirst(2)))
@@ -232,47 +232,5 @@ struct ServerConfig: Sendable, Codable {
 
     var remotePricingEnabled: Bool {
         remotePricing ?? true
-    }
-}
-
-extension ServerConfig {
-    /// Every account Sissy meters, per vendor, resolved to the paths each one
-    /// is read from.
-    ///
-    /// The list on disk is authoritative when it names an account for a
-    /// vendor. When it does not — an install that predates accounts, or one
-    /// that holds a second Codex account and no second Claude one — that
-    /// vendor falls back to the single account it has always had, resolved
-    /// from `claudeDataDir` / `codexDataDir`. So growing the key for one
-    /// vendor never silently drops the other.
-    func resolvedAccounts(vendor: String) -> [ResolvedAccount] {
-        let configured = (accounts ?? []).filter { $0.vendor == vendor }
-        guard !configured.isEmpty else { return [legacyAccount(vendor: vendor)] }
-        return configured.map { account in
-            let home = Self.expandTilde(account.home)
-            return ResolvedAccount(
-                key: ProviderKey(vendor: vendor, account: account.id),
-                label: account.label,
-                home: home,
-                dataDir: AccountDefaults.dataDir(vendor: vendor, home: home)
-            )
-        }
-    }
-
-    /// The account every install had before this key existed.
-    ///
-    /// Its key carries no account, which is what keeps `usage-state.json` and
-    /// the archive directory it has been writing since 0.1.0 exactly where
-    /// they are. The home is derived from the configured log tree rather than
-    /// from the environment, because a user who pointed `claudeDataDir`
-    /// somewhere else meant it.
-    private func legacyAccount(vendor: String) -> ResolvedAccount {
-        let dataDir = vendor == ProviderID.codex ? resolvedCodexDataDir : resolvedClaudeDataDir
-        return ResolvedAccount(
-            key: ProviderKey(vendor: vendor),
-            label: nil,
-            home: AccountDefaults.home(ofDataDir: dataDir),
-            dataDir: dataDir
-        )
     }
 }

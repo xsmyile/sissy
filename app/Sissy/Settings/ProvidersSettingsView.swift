@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// What one provider's row says. A pure function of the readiness so the
@@ -9,11 +8,9 @@ struct ProviderRowSnapshot: Equatable {
     let state: String
     let detail: String
 
-    static func make(_ readiness: ProviderReadiness, sharesVendor: Bool = false) -> Self {
+    static func make(_ readiness: ProviderReadiness) -> Self {
         Self(
-            name: sharesVendor
-                ? UsageFormat.providerName(readiness.id, named: readiness.label)
-                : UsageFormat.providerName(readiness.id),
+            name: UsageFormat.providerName(readiness.id),
             state: state(for: readiness.activation),
             detail: detail(for: readiness)
         )
@@ -131,32 +128,6 @@ enum ClaudeWebSessionCopy {
     }
 }
 
-/// What the account controls inside a provider's section say.
-enum AccountsCopy {
-    static let addTitle = "Add account…"
-    static let addLabel = "Another account"
-    static let removeTitle = "Stop metering"
-    static let removeLabel = "This account"
-    static let choosePrompt = "Use as account"
-
-    /// Names the variable rather than the concept: an account added here fills
-    /// in only once its CLI is actually pointed at that directory, and someone
-    /// who is not told that watches an empty row and concludes Sissy is broken.
-    static func caption(vendor: String) -> String {
-        let variable = vendor == ProviderID.codex ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"
-        return "An account is the directory its CLI keeps everything in — the session "
-            + "logs, the plan, the credential the limits are read with. Point Sissy at "
-            + "another one and you can switch to it from the panel. Run the CLI with "
-            + "\(variable) set to that directory, or the row stays empty."
-    }
-
-    static func chooseMessage(vendor: String) -> String {
-        vendor == ProviderID.codex
-            ? "Choose the CODEX_HOME directory of the account to meter."
-            : "Choose the CLAUDE_CONFIG_DIR directory of the account to meter."
-    }
-}
-
 /// Where each provider's numbers come from, and what it is doing about them.
 struct ProvidersSettingsView: View {
     let model: SissyModel
@@ -170,20 +141,11 @@ struct ProvidersSettingsView: View {
 
     var body: some View {
         Form {
-            ForEach(model.engine.providers, id: \.id) { readiness in
+            ForEach(vendors, id: \.first!.id) { accounts in
                 Section {
-                    row(readiness)
-                    // Under the vendor's first account only: the switch is the
-                    // CLI's, not an account's, and the imported session belongs
-                    // to whichever account Claude.app holds. Repeating them
-                    // under a second account would offer two controls for one
-                    // setting and imply the session could be that account's.
-                    if isFirstOfVendor(readiness), vendor(of: readiness) == ProviderID.claudeCode {
+                    row(accounts[0], accounts: accounts)
+                    if vendor(of: accounts[0]) == ProviderID.claudeCode {
                         claudeLimits
-                        // The imported session is only offered when something
-                        // would read it. With the CLI's own credential in
-                        // place nothing does, and a control over a source that
-                        // is not running is a setting that lies.
                         if model.engine.claudeLimits {
                             if model.engine.claudeUsesOwnCredential {
                                 ownCredentialRow
@@ -192,13 +154,6 @@ struct ProvidersSettingsView: View {
                             }
                         }
                     }
-                    if let account = ProviderKey(id: readiness.id).account {
-                        removeButton(account: account, vendor: vendor(of: readiness))
-                    }
-                    // Under the vendor's last account, so adding one reads as
-                    // part of that provider rather than as a separate feature
-                    // that happens to mention it.
-                    if isLastOfVendor(readiness) { addButton(vendor: vendor(of: readiness)) }
                 }
             }
         }
@@ -208,14 +163,33 @@ struct ProvidersSettingsView: View {
         .task { model.engine.refreshProviders() }
     }
 
+    /// The directory an account lives in, named the way the user sees it on
+    /// disk. It is what tells two accounts of one vendor apart here, where
+    /// neither address nor organisation has been read yet.
+    private static func homeName(of readiness: ProviderReadiness) -> String {
+        readiness.dataDir.deletingLastPathComponent().lastPathComponent
+    }
+
     private func vendor(of readiness: ProviderReadiness) -> String {
         ProviderKey.vendor(of: readiness.id)
     }
 
-    /// Whether this is the first row of its vendor, which is where the
-    /// vendor-wide controls belong.
-    private func isFirstOfVendor(_ readiness: ProviderReadiness) -> Bool {
-        model.engine.providers.first { vendor(of: $0) == vendor(of: readiness) }?.id == readiness.id
+    /// One group per vendor, in the engine's own order.
+    ///
+    /// A section per *account* was the first shape and it read as two
+    /// providers: "Claude" twice, with the limits switch under one of them and
+    /// not the other. A vendor is one CLI however many accounts it holds, and
+    /// its switch is the CLI's — so the section is the vendor's and the
+    /// accounts are lines inside it.
+    private var vendors: [[ProviderReadiness]] {
+        var order: [String] = []
+        var groups: [String: [ProviderReadiness]] = [:]
+        for readiness in model.engine.providers {
+            let key = vendor(of: readiness)
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(readiness)
+        }
+        return order.compactMap { groups[$0] }
     }
 
     /// Adding an account, and the one thing a user has to do outside Sissy for
@@ -241,59 +215,27 @@ struct ProvidersSettingsView: View {
             .foregroundStyle(.secondary)
     }
 
-    /// Whether this is the last row of its vendor, which is where adding
-    /// another account belongs.
-    private func isLastOfVendor(_ readiness: ProviderReadiness) -> Bool {
-        model.engine.providers.last { vendor(of: $0) == vendor(of: readiness) }?.id == readiness.id
-    }
-
+    /// The vendor's own line, and one line under it per account it is
+    /// metering — which is where the path and the file count belong, because
+    /// those are an account's and not a CLI's.
     @ViewBuilder
-    private func addButton(vendor: String) -> some View {
-        LabeledContent {
-            Button(AccountsCopy.addTitle) { addAccount(vendor: vendor) }
-        } label: {
-            Text(AccountsCopy.addLabel)
-        }
-        Text(AccountsCopy.caption(vendor: vendor))
-            .font(.callout)
-            .foregroundStyle(.secondary)
-    }
-
-    @ViewBuilder
-    private func removeButton(account: String, vendor: String) -> some View {
-        LabeledContent {
-            Button(AccountsCopy.removeTitle, role: .destructive) {
-                model.engine.removeAccount(id: account, vendor: vendor)
+    private func row(_ readiness: ProviderReadiness, accounts: [ProviderReadiness]) -> some View {
+        vendorRow(readiness)
+        ForEach(accounts, id: \.id) { account in
+            LabeledContent {
+                Text(ProviderRowSnapshot.make(account).detail)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            } label: {
+                Text(Self.homeName(of: account))
+                    .textSelection(.enabled)
             }
-        } label: {
-            Text(AccountsCopy.removeLabel)
         }
     }
 
-    /// Picks the account's config home and starts metering it.
-    ///
-    /// A directory chooser rather than a text field because the value is a
-    /// path that has to exist, and because the panel is also how a user
-    /// discovers that an account *is* a directory.
-    private func addAccount(vendor: String) {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.prompt = AccountsCopy.choosePrompt
-        panel.message = AccountsCopy.chooseMessage(vendor: vendor)
-        guard panel.runModal() == .OK, let home = panel.url else { return }
-        model.engine.addAccount(vendor: vendor, home: home, label: home.lastPathComponent)
-    }
-
     @ViewBuilder
-    private func row(_ readiness: ProviderReadiness) -> some View {
-        let snapshot = ProviderRowSnapshot.make(
-            readiness,
-            sharesVendor: model.engine.providers.filter { vendor(of: $0) == vendor(of: readiness) }
-                .count > 1
-        )
+    private func vendorRow(_ readiness: ProviderReadiness) -> some View {
+        let snapshot = ProviderRowSnapshot.make(readiness)
         LabeledContent {
             Text(snapshot.state).foregroundStyle(.secondary)
         } label: {
@@ -303,10 +245,6 @@ struct ProvidersSettingsView: View {
                 ProviderMark(id: readiness.id, size: Self.markSize, textSize: NSFont.systemFontSize)
             }
         }
-        Text(snapshot.detail)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
     }
 
     @ViewBuilder
