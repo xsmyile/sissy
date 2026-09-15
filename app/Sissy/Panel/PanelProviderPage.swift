@@ -48,11 +48,6 @@ struct PanelProviderPage: View {
         VStack(alignment: .leading, spacing: 0) {
             identity
 
-            if let status = row.status {
-                Divider()
-                PanelProviderStatus(provider: row.id, row: status)
-            }
-
             Divider()
             limits
 
@@ -74,6 +69,11 @@ struct PanelProviderPage: View {
             if !row.projects.isEmpty {
                 Divider()
                 projects
+            }
+
+            if let status = row.status {
+                Divider()
+                PanelProviderStatus(provider: row.id, row: status)
             }
         }
         .task(id: row.id) {
