@@ -305,7 +305,14 @@ actor UsageEngine {
         await applyKeepAwake()
         guard lifecycle == .running else { return }
         let me = self
-        startClaudeAccountWatch()
+        // Not for a Claude Code that is switched off, for the reason the
+        // limits poll above is not: a module that is off must not exist as far
+        // as the system is concerned, and this one spends a `security` call
+        // every two minutes reading the credential of a CLI the user has told
+        // Sissy to leave alone.
+        if meteringClaudeCode {
+            startClaudeAccountWatch()
+        }
         bootTask = Task.detached { [aggregator] in
             await aggregator.start { today, slices in
                 await me.rebuildAndEmit(today: today, slices: slices)
