@@ -116,6 +116,14 @@ struct PanelProviderStatus: View {
     /// group left open is already taller than the rest of the page. Every row
     /// is drawn at one fixed height, which is what lets the bound be arithmetic
     /// over a count rather than a measurement of a laid-out view.
+    ///
+    /// It carries no scroll indicator, which leaves the clipped row as the one
+    /// thing that says there is more below: the bound falls 8 pt into a ninth
+    /// row rather than on a row boundary, and `ProviderStatusTests` is what
+    /// holds it there. An overlay scroller would otherwise draw over the
+    /// status words on the right for as long as it is up. `.never` rather
+    /// than `.hidden` — measured on macOS 27, `.hidden` leaves the scroller
+    /// installed on the backing `NSScrollView` where `.never` removes it.
     private var tree: some View {
         let rows = StatusTreeGeometry.visibleRows(row.components, expanded: expanded)
         return ScrollView(.vertical) {
@@ -132,6 +140,7 @@ struct PanelProviderStatus: View {
         }
         .frame(height: StatusTreeGeometry.height(rows: rows))
         .scrollDisabled(!StatusTreeGeometry.scrolls(rows: rows))
+        .scrollIndicators(.never)
     }
 
     private func group(_ component: UsagePanelSnapshot.ComponentRow) -> some View {
