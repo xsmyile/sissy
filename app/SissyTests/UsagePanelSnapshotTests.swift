@@ -9,7 +9,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
     private func frame(
         providers: [ProviderSlice],
         burn: Double? = 1500,
-        history: UsageHistoryRollup? = nil,
+        history: [UsagePeriod: UsageHistoryRollup] = [:],
         projects: [ProjectTotals] = []
     ) -> FrameData {
         FrameData(
@@ -362,39 +362,97 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.providers.map(\.name), ["Claude", "Codex"])
     }
 
-    // MARK: Archive line
+    // MARK: The headline's window
 
-    func testTheArchiveLineCarriesTheWindowItCovers() {
-        let now = Date()
-        let earliest = Calendar.current.date(
-            byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: now))
+    /// The whole point of the control: the number under it is the archive's for
+    /// the window selected, not the day's.
+    func testTheHeadlineIsTheSelectedWindowsOwnTotal() {
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(
-                providers: [slice("codex", 10, "1.00")],
-                history: UsageHistoryRollup(
-                    days: 7, earliestDay: earliest, tokens: 2_500_000,
-                    cost: Decimal(string: "41.5")!)
-            ),
-            now: now
+            frame: frame(providers: [slice("codex", 10, "1.00")], history: archive()),
+            period: .sevenDays,
+            now: Self.now
         )
-        XCTAssertEqual(snapshot.history?.label, "Last 7 days")
-        XCTAssertEqual(snapshot.history?.tokens, "2.5M")
-        XCTAssertEqual(snapshot.history?.cost, "$41.50")
+
+        XCTAssertEqual(snapshot.period, .sevenDays)
+        XCTAssertEqual(snapshot.tokens, "2.5M")
+        XCTAssertEqual(snapshot.cost, "$41.50")
     }
 
-    /// The headline is already today. A second line saying the same thing, a
-    /// few seconds behind it, reads as a disagreement.
-    func testTheArchiveLineIsAbsentWhileItOnlyReachesBackToToday() {
-        let now = Date()
+    /// Today is never rolled up from the archive: it is the live totals the
+    /// frame already carries, which is what stops the number the panel is opened
+    /// for from going slower than it was before the control existed.
+    func testTodayIsTheLiveTotalAndNotTheArchivesCopyOfIt() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 10, "1.00")], history: archive()),
+            period: .today,
+            now: Self.now
+        )
+
+        XCTAssertEqual(snapshot.tokens, "10")
+        XCTAssertEqual(snapshot.cost, "$1.00")
+    }
+
+    /// An average over thirty days is not a pace, so the slot it would take goes
+    /// to how far back the archive actually reaches.
+    func testThePaceIsOnTodayAloneAndCoverageTakesItsPlace() {
+        let short = archive(earliestOffset: -2)
+        let today = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 10, "1.00")], history: short),
+            period: .today, now: Self.now)
+        let week = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 10, "1.00")], history: short),
+            period: .sevenDays, now: Self.now)
+
+        XCTAssertNotNil(today.burn)
+        XCTAssertNil(today.coverage)
+        XCTAssertNil(week.burn)
+        XCTAssertNotNil(week.coverage)
+    }
+
+    /// No archive, no control — and the headline stays on today rather than
+    /// rendering a window nothing answers for.
+    func testWithNoArchiveThereIsOnlyTodayAndNoControl() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 10, "1.00")]),
+            period: .thirtyDays,
+            now: Self.now
+        )
+
+        XCTAssertEqual(snapshot.periods, [.today])
+        XCTAssertEqual(snapshot.period, .today)
+        XCTAssertEqual(snapshot.cost, "$1.00")
+    }
+
+    /// A preference outliving the archive it was set against falls back rather
+    /// than rendering a blank, the same way a page pointed at a gone account does.
+    func testAPeriodTheFrameCannotAnswerFallsBackToToday() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(
                 providers: [slice("codex", 10, "1.00")],
-                history: UsageHistoryRollup(
-                    days: 7, earliestDay: Calendar.current.startOfDay(for: now),
-                    tokens: 10, cost: 1)
-            ),
-            now: now
+                history: [.sevenDays: rollup(.sevenDays, earliestOffset: -6)]),
+            period: .all,
+            now: Self.now
         )
-        XCTAssertNil(snapshot.history)
+
+        XCTAssertEqual(snapshot.period, .today)
+    }
+
+    private static let now = Date()
+
+    private func archive(earliestOffset: Int = -6) -> [UsagePeriod: UsageHistoryRollup] {
+        Dictionary(
+            uniqueKeysWithValues: UsagePeriod.archived.map {
+                ($0, rollup($0, earliestOffset: earliestOffset))
+            })
+    }
+
+    private func rollup(_ period: UsagePeriod, earliestOffset: Int) -> UsageHistoryRollup {
+        UsageHistoryRollup(
+            period: period,
+            earliestDay: Calendar.current.date(
+                byAdding: .day, value: earliestOffset,
+                to: Calendar.current.startOfDay(for: Self.now)),
+            tokens: 2_500_000,
+            cost: Decimal(string: "41.5")!)
     }
 }

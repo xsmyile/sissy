@@ -28,6 +28,7 @@ struct PanelOverview: View {
     /// and that is exactly the provider the recap is about.
     let meteringProviders: Int
     let openProvider: (String) -> Void
+    let selectPeriod: (UsagePeriod) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -42,23 +43,28 @@ struct PanelOverview: View {
                 Divider()
                 projects
             }
-
-            if let history = snapshot.history {
-                Divider()
-                historyRow(history)
-            }
         }
     }
 
     // MARK: Headline
 
-    /// Cost first, because it is the number the day is judged by and the one
-    /// a user can compare against a bill. Tokens and burn keep their place on
-    /// the same line one step quieter: they say how the cost was reached,
-    /// which is a follow-up question rather than the headline.
+    /// Cost first, because it is the number the panel is judged by and the one
+    /// a user can compare against a bill, with the window it is over beside it
+    /// and how it was reached under it.
+    ///
+    /// Tokens and burn sat inline beside the cost for as long as the number was
+    /// always today's. Two things changed with the period. Inline, the cost and
+    /// its meta take about two thirds of the 340 pt and leave the control a
+    /// cramped remainder — and the meta *grows* with the window, since a period
+    /// the archive falls short of has to say so, which is exactly when the
+    /// control matters most. They also never sat well: `firstTextBaseline`
+    /// between an 18 pt bold rounded number and an 11 pt caption puts the
+    /// caption high against the number it qualifies. Stacked, the meta is as
+    /// subordinate as it ever was, which was the point of the old arrangement
+    /// rather than the line it happened to be on.
     private var headline: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(snapshot.cost)
                     .font(
                         .system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded)
@@ -69,8 +75,9 @@ struct PanelOverview: View {
                     .font(.system(size: PanelMetrics.headlineMeta))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
-                Spacer(minLength: 0)
             }
+            Spacer(minLength: 8)
+            periodPicker
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.top, 9)
@@ -78,10 +85,42 @@ struct PanelOverview: View {
         .animation(.default, value: snapshot.cost)
     }
 
+    /// Tokens always, the pace only on today, and how far back the archive
+    /// reaches only when it falls short of the window named beside it.
     private var subline: String {
-        let tokens = "\(snapshot.tokens) tokens"
-        guard let burn = snapshot.burn else { return tokens }
-        return "\(tokens) · \(burn)/h"
+        var parts = ["\(snapshot.tokens) tokens"]
+        if let burn = snapshot.burn { parts.append("\(burn)/h") }
+        if let coverage = snapshot.coverage { parts.append(coverage) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// A popup rather than a segmented control: four boxes at full width,
+    /// permanently on screen, is a lot of the panel's scarcest room for a choice
+    /// most people make once. The cost is that a closed menu does not advertise
+    /// the windows behind it — a period with a disclosure chevron says there is
+    /// a choice without saying which, and that is the accepted trade.
+    ///
+    /// Absent entirely while there is no archive behind the other windows, which
+    /// is both a fresh install and the archive switched off. A control whose
+    /// every option answers the number already on screen is a control about a
+    /// feature.
+    @ViewBuilder
+    private var periodPicker: some View {
+        if snapshot.periods.count > 1 {
+            Picker("Period", selection: periodBinding) {
+                ForEach(snapshot.periods, id: \.self) { period in
+                    Text(UsageFormat.periodLabel(period)).tag(period)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+            .help("What the numbers above are over")
+        }
+    }
+
+    private var periodBinding: Binding<UsagePeriod> {
+        Binding(get: { snapshot.period }, set: { selectPeriod($0) })
     }
 
     // MARK: Providers
@@ -280,8 +319,14 @@ struct PanelOverview: View {
 
     // MARK: Projects
 
-    /// Where the day's money went. The reason the app exists, so it sits
-    /// above the archive line and below nothing but the day's own numbers.
+    /// Where the day's money went. The reason the app exists, so it sits below
+    /// nothing but the day's own numbers.
+    ///
+    /// Today's, under a headline that may be over a month. The archive carries
+    /// the project on its rows, but only from the day the dimension landed: the
+    /// days before it name no repository at all, and a window reaching back
+    /// across them would put an unattributed row above real ones. It follows the
+    /// period when that share has aged out, which is #81's ground.
     private var projects: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(text: "By project")
@@ -291,24 +336,5 @@ struct PanelOverview: View {
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
-    }
-
-    // MARK: History
-
-    /// One line, under the day's own numbers, for what came before it. It is
-    /// deliberately the quietest thing in the panel: the archive answers a
-    /// question asked at the end of a month, not one asked while working.
-    private func historyRow(_ row: UsagePanelSnapshot.HistoryRow) -> some View {
-        HStack(spacing: 6) {
-            Text(row.label)
-                .font(.system(size: 12))
-            Spacer(minLength: 0)
-            Text("\(row.tokens) · \(row.cost)")
-                .font(.system(size: 12))
-                .monospacedDigit()
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 10)
     }
 }

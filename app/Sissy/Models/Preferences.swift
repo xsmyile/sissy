@@ -14,14 +14,23 @@ struct Preferences: Codable, Equatable {
     /// for that — only a note that the migration happened, so a user who
     /// later removes Sissy from Login Items does not get it put back.
     var retiredServerAgent: Bool = false
-    /// Which account of each vendor the panel is currently showing, keyed by
+    /// Which window the panel's headline is over.
+    ///
+    /// A preference rather than view state: `UsagePanelView.page` is dropped
+    /// when the popover closes because it is navigation, where this is a choice
+    /// about what the user wants to read and has to survive the close. It lives
+    /// here rather than in `server.json` because it changes what is rendered
+    /// and nothing about what is metered.
+    var usagePeriod: UsagePeriod = .today
 
     init(
         sissyMotion: Bool = true,
         retiredServerAgent: Bool = false,
+        usagePeriod: UsagePeriod = .today,
     ) {
         self.sissyMotion = sissyMotion
         self.retiredServerAgent = retiredServerAgent
+        self.usagePeriod = usagePeriod
     }
 
     /// Backwards-compatible decoder so a `preferences.json` written by an
@@ -31,6 +40,7 @@ struct Preferences: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         sissyMotion = Self.decodeSissyMotion(from: decoder)
         retiredServerAgent = (try? c.decode(Bool.self, forKey: .retiredServerAgent)) ?? false
+        usagePeriod = (try? c.decode(UsagePeriod.self, forKey: .usagePeriod)) ?? .today
     }
 
     /// `sissyMotion` was persisted as `mascotMotion` up to and including

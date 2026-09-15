@@ -282,22 +282,46 @@ enum UsageFormat {
         return "\(minutes)m"
     }
 
-    /// Names the window the archive line covers. The asked-for width while
-    /// the archive reaches back across all of it, and the first day it holds
-    /// once it does not — a total labelled "Last 7 days" on an install three
-    /// days old is a number nobody can read correctly.
-    static func historyWindowLabel(
-        days: Int,
-        earliestDay: Date?,
+    /// How far back the archive reaches, said only when it falls short of the
+    /// window on screen.
+    ///
+    /// The control beside the number already names the period, so repeating
+    /// "Last 7 days" under it adds nothing. What the control cannot say is that
+    /// the archive holds four of those seven days — and a total labelled by a
+    /// width it does not have is a daily average a reader computes wrong and
+    /// cannot tell they did.
+    ///
+    /// `all` always names its first day: that day is the whole of what
+    /// "everything kept" means, and without it the widest window is the one
+    /// reading on the panel that never says what it covers.
+    static func periodCoverage(
+        _ rollup: UsageHistoryRollup,
         now: Date = Date(),
         calendar: Calendar = .current
-    ) -> String {
+    ) -> String? {
+        guard let earliest = rollup.earliestDay else { return nil }
+        guard let days = rollup.period.days else { return since(earliest) }
         let today = calendar.startOfDay(for: now)
-        let start = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today)
-        guard let earliestDay, let start,
-            calendar.startOfDay(for: earliestDay) > start
-        else { return "Last \(days) days" }
-        return "Since \(earliestDay.formatted(.dateTime.day().month(.abbreviated)))"
+        guard let start = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today),
+            calendar.startOfDay(for: earliest) > start
+        else { return nil }
+        return since(earliest)
+    }
+
+    /// Lowercase because it lands mid-line, after the tokens it qualifies.
+    private static func since(_ day: Date) -> String {
+        "since \(day.formatted(.dateTime.day().month(.abbreviated)))"
+    }
+
+    /// The control's own label for a window, which is the only place the period
+    /// is named now that the line under the number admits coverage instead.
+    static func periodLabel(_ period: UsagePeriod) -> String {
+        switch period {
+        case .today: "Today"
+        case .sevenDays: "7 days"
+        case .thirtyDays: "30 days"
+        case .all: "All"
+        }
     }
 
     /// Names the window a strip of day bars covers, and says how much of it
