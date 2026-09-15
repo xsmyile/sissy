@@ -4,9 +4,22 @@ import SwiftUI
 /// and where the money went.
 ///
 /// It answers one question per block and hands the second question — what a
-/// single account is doing — to a page of its own. The per-provider gauges
-/// that used to stack here were eight lines for a split that is two numbers,
-/// and they pushed the projects, which are what the app is for, below the fold.
+/// single account is doing — to a page of its own.
+///
+/// The provider block answers whether there is room to keep working, and that
+/// is the only thing it answers. It used to carry the day's spend split as
+/// well — a stacked bar and a figure per row — and the two axes did not belong
+/// on one line: a percentage of a rate-limit window sat in a legend for a bar
+/// about money, naming neither the window it measured nor what it had to do
+/// with the segment beside it. Pressure is the one reading on this panel that
+/// is only actionable *now*; what the day cost is a question asked at the end
+/// of it, and the headline, the archive and the export all answer that one.
+/// So the row keeps the gauge and hands the money back to them.
+///
+/// One gauge per provider, never the stack: every window a provider reports,
+/// laid out here, was eight lines for two numbers and pushed the projects —
+/// which are what the app is for — below the fold. The row shows the window
+/// that binds and the page shows the rest.
 struct PanelOverview: View {
     let snapshot: UsagePanelSnapshot
     /// How many CLIs Sissy has a reader for, which is the denominator of the
@@ -73,17 +86,17 @@ struct PanelOverview: View {
 
     // MARK: Providers
 
-    /// The day's split, as one bar and a legend. A row opens that provider's
-    /// page, which is where its gauges, its account and its own projects live.
+    /// One row per provider, each carrying the window it is closest to running
+    /// out of. A row opens that provider's page, which is where its other
+    /// windows, its plan, its account, its day and its own projects live.
     private var providers: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(text: providersLabel)
-            StackedShareBar(rows: snapshot.providers)
             ForEach(snapshot.providers) { row in
                 Button {
                     openProvider(row.id)
                 } label: {
-                    legendRow(row)
+                    providerRow(row)
                 }
                 .buttonStyle(.plain)
                 .help(Self.legendHelp(row))
@@ -104,37 +117,27 @@ struct PanelOverview: View {
         return "By provider · " + recap
     }
 
-    /// A legend row carries the *fact* that something needs attention even
-    /// though the sentence and the button for it live on the page behind it.
-    ///
-    /// Without this the split would undo what putting the notice on screen
-    /// was for: the grant lapses every time Claude Code refreshes its token,
-    /// and a user who never opens that page would be back to gauges that
-    /// silently went blank. The mark is the affordance; the row is already a
-    /// click away from the wording and the fix.
     /// Where a window stops being background and starts being the reason to
     /// stop working. Not a threshold the vendor publishes — a reading, and the
     /// one point on this row worth a colour.
+    ///
+    /// The colour stays on the reading and not on the projection. Colouring a
+    /// row whose rate empties it before the reset was tried and is wrong:
+    /// rendered against a real day it lit *both* providers, one of them at
+    /// 36% with four hours in hand, because spending above pace at all
+    /// projects a run-out eventually and that is the ordinary state of
+    /// working. What the pace has to say is already on the row — the bar's own
+    /// mark goes red the moment the fill passes it — and it says it without
+    /// spending the row's one colour.
     private static let bindingWarningPercent = 90
 
-    /// Whether the window this provider leads on is a reason to stop working.
+    /// The row's tooltip for its gauge: the window named, how full it is, and
+    /// the pace sentence the page prints under the same bar.
     ///
-    /// The percentage alone stopped answering that when `binding` moved onto
-    /// the pace: the window that binds is now the one the current rate empties
-    /// before its own reset, and that can be a bar at 10% nine minutes into a
-    /// session — imminent, and nowhere near the threshold. A projected run-out
-    /// *is* the warning, so it carries the colour; the threshold stays for the
-    /// windows that project nothing, where a nearly full bar is all there is
-    /// to go on.
-    private static func isUnderPressure(_ window: UsagePanelSnapshot.WindowRow) -> Bool {
-        window.pace?.runsOutAt != nil || window.percent >= bindingWarningPercent
-    }
-
-    /// The legend prints one number for a whole provider and never names the
-    /// window it came from. That was legible while the number was the highest
-    /// of them; now that the pace picks the window, a low percentage in orange
-    /// is unreadable without the sentence behind it, so the tooltip carries
-    /// the page's own caption and the two surfaces answer alike.
+    /// The row already names the window beside the bar, so this is not what
+    /// makes the number legible — it is what saves the click when the answer
+    /// is "how long has this got", which is the page's caption verbatim rather
+    /// than a second wording of it.
     private static func bindingHelp(_ window: UsagePanelSnapshot.WindowRow) -> String {
         let head = "\(window.label) · \(window.percent)% used"
         guard let caption = UsageFormat.windowCaption(window) else { return head }
@@ -144,12 +147,10 @@ struct PanelOverview: View {
     /// A vendor that is not operational says so in its own name, which is the
     /// only thing on this row that can carry it for free.
     ///
-    /// Measured at the real fonts: the row is 312 pt wide and "Claude · Team
-    /// Premium · 100% · $1,234.56" already fills 306.4 of them, so a mark, a
-    /// dot or a glyph added here would push the plan badge — which yields
-    /// first by design — off a row that has nothing left to give. Colour costs
-    /// nothing, and the wording is a hover and a click away, which is where
-    /// this row already keeps the limits notice's.
+    /// Colour rather than a mark, a dot or a glyph: the name is already on the
+    /// row and is already its subject, so nothing has to be made room for and
+    /// nothing else has to yield for it. The wording is a hover and a click
+    /// away, which is where this row already keeps the limits notice's.
     ///
     /// Only a degraded vendor colours. `unknown` does not: that is Sissy
     /// having no reading, which is not news about the vendor, and the page
@@ -173,42 +174,108 @@ struct PanelOverview: View {
             provider: row.id, label: status.label, checkedAt: nil)
     }
 
-    private func legendRow(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
+    /// Room enough for a gauge to be read as one once the label beside it has
+    /// taken what it needs.
+    private static let gaugeMinWidth: CGFloat = 56
+    private static let percentWidth: CGFloat = 32
+
+    /// Floors for the two columns in front of the gauge, so every track starts
+    /// at the same x and the bars underneath each other are the same length.
+    ///
+    /// Without them a name one glyph wider shortens its own track, and two
+    /// rows drawn one under the other stop being comparable — 36% of a short
+    /// bar is not the width of 36% of a long one, which is the whole reason
+    /// they are stacked.
+    ///
+    /// Floors rather than fixed widths: a provider whose name outgrows the
+    /// column pushes its own row out instead of truncating, which is a ragged
+    /// edge on one row rather than a name nobody can read.
+    private static let nameColumnWidth: CGFloat = 62
+    private static let windowColumnWidth: CGFloat = 50
+
+    /// The row carries the *fact* that something needs attention even though
+    /// the sentence and the button for it live on the page behind it.
+    ///
+    /// Without this the split would undo what putting the notice on screen was
+    /// for: the grant lapses every time Claude Code refreshes its token, and a
+    /// user who never opens that page would be back to gauges that silently
+    /// went blank. The mark is the affordance; the row is already a click away
+    /// from the wording and the fix.
+    ///
+    /// The plan badge is not here. It is identity rather than a reading — it
+    /// says what the account pays for, not what it has left, and it is the
+    /// same word tomorrow. The page leads with it.
+    private func providerRow(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
         HStack(spacing: 6) {
             ProviderMark(id: row.id)
             Text(row.name)
                 .font(.system(size: 12, weight: .medium))
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(1)
                 .foregroundStyle(Self.nameTint(row.status))
                 .accessibilityLabel(Self.legendHelp(row))
-            if let plan = row.plan {
-                PlanBadge(plan: plan, tier: row.planTier)
-                    .layoutPriority(-1)
-            }
+                .frame(minWidth: Self.nameColumnWidth, alignment: .leading)
             if let notice = row.notice {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
                     .help(notice.message)
             }
-            Spacer(minLength: 0)
-            if let binding = UsagePanelSnapshot.binding(row.windows) {
-                Text("\(binding.percent)%")
-                    .font(.system(size: 12))
-                    .monospacedDigit()
-                    .foregroundStyle(Self.isUnderPressure(binding) ? .orange : .secondary)
-                    .fixedSize()
-                    .help(Self.bindingHelp(binding))
-            }
-            Text("\(row.tokens) · \(row.cost)")
-                .font(.system(size: 12))
-                .monospacedDigit()
-                .fixedSize()
+            gauge(row)
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
         .contentShape(.rect)
+    }
+
+    /// The window that binds, or the reason there is not one yet.
+    ///
+    /// Named by its period alone, never by the window's full label. A scope is
+    /// a vendor display string of no bounded length — "Weekly · Claude Sonnet
+    /// 4.5" — and this column has about fifty points: rendered, the label ran
+    /// under its own bar, and truncated it read "Weekly · Clau…", which names
+    /// no model and still pushed the track out of line with the row above. A
+    /// period is a whole word at any width and the same width every time.
+    /// Which window of that period it is lives in the tooltip and on the page,
+    /// where there is room to say it.
+    ///
+    /// A provider with no reading gets a dash rather than a bar at zero: an
+    /// empty gauge is a measurement, and "Codex has not taken a turn since
+    /// launch" is the absence of one. The sentence for it is the same one the
+    /// page prints, on the hover.
+    @ViewBuilder
+    private func gauge(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
+        if let binding = UsagePanelSnapshot.binding(row.windows) {
+            Text(UsageFormat.windowLabel(minutes: binding.minutes))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(minWidth: Self.windowColumnWidth, alignment: .leading)
+            ShareBar(
+                share: binding.fraction,
+                tint: ProviderPalette.tint(for: row.id),
+                pace: binding.pace
+            )
+            .frame(minWidth: Self.gaugeMinWidth)
+            Text("\(binding.percent)%")
+                .font(.system(size: 12))
+                .monospacedDigit()
+                .foregroundStyle(
+                    binding.percent >= Self.bindingWarningPercent ? .orange : .secondary
+                )
+                .frame(width: Self.percentWidth, alignment: .trailing)
+                .help(Self.bindingHelp(binding))
+        } else {
+            Spacer(minLength: 8)
+            Text("—")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+                .frame(width: Self.percentWidth, alignment: .trailing)
+                .help(UsageFormat.noWindowsCaption(row.id))
+        }
     }
 
     // MARK: Projects
@@ -243,32 +310,5 @@ struct PanelOverview: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 10)
-    }
-}
-
-/// The day split across providers in one bar, which is the whole of what the
-/// per-provider share bars used to say between them — and says it in one line
-/// instead of one each, where the widths are actually comparable.
-struct StackedShareBar: View {
-    let rows: [UsagePanelSnapshot.ProviderRow]
-
-    private static let gap: CGFloat = 2
-
-    var body: some View {
-        GeometryReader { geometry in
-            let gaps = CGFloat(max(rows.count - 1, 0)) * Self.gap
-            let usable = max(geometry.size.width - gaps, 0)
-            HStack(spacing: Self.gap) {
-                ForEach(rows) { row in
-                    Capsule()
-                        .fill(ProviderPalette.tint(for: row.id).gradient)
-                        .frame(width: max(usable * row.share, row.share > 0 ? 3 : 0))
-                }
-                Spacer(minLength: 0)
-            }
-            .background(Capsule().fill(.quaternary))
-        }
-        .frame(height: PanelMetrics.barHeight)
-        .animation(.default, value: rows.map(\.share))
     }
 }

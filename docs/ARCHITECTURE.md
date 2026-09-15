@@ -245,8 +245,8 @@ tab through `SissyModel.settingsTab`.
 
 **The panel is two surfaces behind one popover.** `Panel/PanelOverview.swift`
 answers what today costs and whether there is room to keep working — the day's
-cost, one headroom gauge, the split by provider as a single stacked bar, the
-projects, the archive line. `Panel/PanelProviderPage.swift` answers what one
+cost, one row per provider carrying the window that binds, the projects, the
+archive line. `Panel/PanelProviderPage.swift` answers what one
 account is doing: its windows, who it is signed in as, its own day and its own
 projects, and the refresh, which is a different action on each provider.
 `UsagePanelView` is the shell around them — a contextual header and a `switch`
