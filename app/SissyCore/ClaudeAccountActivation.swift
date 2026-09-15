@@ -64,15 +64,13 @@ enum ClaudeAccountActivation {
     /// from a click that asked for exactly this, which is the rule every other
     /// keychain path in Sissy exists to honour from the other side.
     ///
-    /// The scoped item is written as well as the unscoped one, so a terminal
-    /// pinned to that home with `CLAUDE_CONFIG_DIR` and one started bare agree
-    /// about who is signed in.
+    /// Only the unscoped item is written. The account's own scoped item is
+    /// where the credential was just read from, so writing it back would
+    /// rewrite a secret to the value it already holds — and a terminal pinned
+    /// to that home with `CLAUDE_CONFIG_DIR` was already reading it.
     static func activate(home: URL) throws {
         let credentials = try read(service: service(for: home))
         try write(credentials, service: activeService)
-        let scoped = service(for: home)
-        guard scoped != activeService else { return }
-        try write(credentials, service: scoped)
     }
 
     /// Whether a credential is filed for this home, asked without reading it.
