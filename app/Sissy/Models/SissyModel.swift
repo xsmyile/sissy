@@ -256,6 +256,15 @@ final class SissyModel {
         savePreferences()
     }
 
+    /// Which window the panel's headline is over. Persisted rather than held
+    /// for the life of the popover: the panel's page selection is dropped on
+    /// close because it is navigation, where this is a reading the user chose.
+    func setUsagePeriod(_ period: UsagePeriod) {
+        guard period != preferences.usagePeriod else { return }
+        preferences.usagePeriod = period
+        savePreferences()
+    }
+
     /// Registers or removes the app's own login item. Failures are the
     /// user's to see rather than the caller's to handle: the switch has no
     /// second way to get the app opened at login.

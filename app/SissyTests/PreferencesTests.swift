@@ -66,10 +66,26 @@ final class PreferencesTests: XCTestCase {
             .appendingPathComponent("sissy-prefs-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let prefs = Preferences(sissyMotion: false, retiredServerAgent: true)
+        let prefs = Preferences(
+            sissyMotion: false, retiredServerAgent: true, usagePeriod: .thirtyDays)
 
         prefs.save(to: dir)
 
         XCTAssertEqual(Preferences.load(from: dir), prefs)
+    }
+
+    /// A file written before the period existed, and one naming a window this
+    /// build does not know, both land on today rather than refusing to load —
+    /// the decoder's whole contract.
+    func testAFileWithNoPeriodOrAnUnknownOneReadsAsToday() throws {
+        for json in ["{\"sissyMotion\":false}", "{\"usagePeriod\":\"fortnight\"}"] {
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("sissy-prefs-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
+            try Data(json.utf8).write(to: dir.appendingPathComponent(Preferences.fileName))
+
+            XCTAssertEqual(Preferences.load(from: dir).usagePeriod, .today, json)
+        }
     }
 }

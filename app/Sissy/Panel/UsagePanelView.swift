@@ -116,7 +116,9 @@ struct UsagePanelView: View {
         let live = model.liveFrame
         let snapshot = live.map {
             UsagePanelSnapshot.make(
-                frame: $0.frame, claudeAccounts: model.engine.claudeAccounts)
+                frame: $0.frame,
+                period: model.preferences.usagePeriod,
+                claudeAccounts: model.engine.claudeAccounts)
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
         return VStack(alignment: .leading, spacing: 0) {
@@ -155,8 +157,10 @@ struct UsagePanelView: View {
                                 snapshot: snapshot,
                                 meteringProviders: model.engine.providers.count {
                                     $0.activation.isMetering
-                                }
-                            ) { page = .provider($0) }
+                                },
+                                openProvider: { page = .provider($0) },
+                                selectPeriod: { model.setUsagePeriod($0) }
+                            )
                         }
                     } else {
                         placeholder

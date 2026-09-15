@@ -7,10 +7,25 @@ import Foundation
 /// Every number is worded here rather than in a view, so the headline and the
 /// rows under it round the same way and a test can hold both.
 struct UsagePanelSnapshot: Equatable {
+    /// The window `tokens` and `cost` are over. Resolved rather than requested:
+    /// a preference naming a period this archive cannot answer falls back to
+    /// today instead of rendering a blank.
+    let period: UsagePeriod
+    /// The windows the control may offer, `[.today]` alone when there is no
+    /// archive behind the others and the control therefore does not appear.
+    let periods: [UsagePeriod]
     let tokens: String
     let cost: String
-    /// Tokens per hour so far today, nil on a day nothing has been spent on.
+    /// Tokens per hour so far today, nil on a day nothing has been spent on and
+    /// on every window wider than one: an average over thirty days is not a
+    /// pace, and the slot it would take is the one that says how far back the
+    /// archive actually reaches.
     let burn: String?
+    /// How far back the archive reaches when it falls short of the window on
+    /// screen, nil when it covers it — the control already names the period, so
+    /// this speaks only to admit that the number under it is of fewer days than
+    /// its name claims.
+    let coverage: String?
     let providers: [ProviderRow]
     /// How many of those rows have spent anything today. The rows themselves
     /// are every provider Sissy is metering — a row is also where a plan, an
@@ -22,18 +37,6 @@ struct UsagePanelSnapshot: Equatable {
     /// when nothing today names a project, and the panel then draws no section
     /// rather than a heading over nothing.
     let projects: [ProjectRow]
-    /// The archive line, absent when there is no archive to show.
-    let history: HistoryRow?
-
-    /// What the archive adds up to over its window. `label` says which days
-    /// that is: a window the archive does not reach back across is named by
-    /// the day it starts on instead, so a three-day-old install does not
-    /// present three days as a week.
-    struct HistoryRow: Equatable {
-        let label: String
-        let tokens: String
-        let cost: String
-    }
 
     /// One day of a provider's recent spend, as a bar on its page.
     ///
@@ -384,6 +387,7 @@ struct UsagePanelSnapshot: Equatable {
     /// vanish because a preference outlived the account it points at.
     static func make(
         frame: FrameData,
+        period: UsagePeriod = .today,
         claudeAccounts: ClaudeAccountRegistry.Snapshot = .init(),
         now: Date = Date()
     ) -> Self {
@@ -392,31 +396,38 @@ struct UsagePanelSnapshot: Equatable {
         let rows = makeRows(
             frame.providers, claudeAccounts: claudeAccounts, status: frame.providerStatus,
             totalTokens: totalTokens, now: now)
+        let periods = availablePeriods(frame.history)
+        let resolved = periods.contains(period) ? period : .today
+        let rollup = frame.history[resolved]
         return Self(
-            tokens: UsageFormat.tokens(frame.tokens),
-            cost: UsageFormat.cost(frame.cost),
-            burn: frame.burn.map(UsageFormat.burn),
+            period: resolved,
+            periods: periods,
+            tokens: UsageFormat.tokens(rollup?.tokens ?? frame.tokens),
+            cost: UsageFormat.cost(rollup?.cost ?? frame.cost),
+            burn: resolved == .today ? frame.burn.map(UsageFormat.burn) : nil,
+            coverage: rollup.flatMap { UsageFormat.periodCoverage($0, now: now) },
             providers: rows,
             usedToday: frame.providers.count { $0.tokens > 0 },
             projects: makeProjects(
-                frame.projects, totalTokens: totalTokens, totalCost: totalCost),
-            history: makeHistory(frame.history, now: now)
+                frame.projects, totalTokens: totalTokens, totalCost: totalCost)
         )
     }
 
-    /// Nothing until the archive reaches past today: a window whose only day
-    /// is the one the headline already prints is a second opinion on the same
-    /// number, and the two are read seconds apart.
-    private static func makeHistory(_ rollup: UsageHistoryRollup?, now: Date) -> HistoryRow? {
-        guard let rollup, rollup.tokens > 0, let earliest = rollup.earliestDay,
-            earliest < Calendar.current.startOfDay(for: now)
-        else { return nil }
-        return HistoryRow(
-            label: UsageFormat.historyWindowLabel(
-                days: rollup.days, earliestDay: rollup.earliestDay, now: now),
-            tokens: UsageFormat.tokens(rollup.tokens),
-            cost: UsageFormat.cost(rollup.cost)
-        )
+    /// Which windows the headline may be put over: today, which needs no
+    /// archive, and each of the rest the frame actually carries a total for.
+    ///
+    /// Read off the keys rather than from whether the frame sent anything at
+    /// all. The engine sends all of them or none, so the difference is invisible
+    /// in production — but taking a window the frame cannot answer as available
+    /// falls it back to today's number while the control still reads `All`,
+    /// which is a wrong label on a right number and the worst of the outcomes
+    /// here. Today alone is both the archive switched off and a fresh install,
+    /// and then there is no control at all: four windows that all answer the
+    /// number already on screen are a feature rather than a reading.
+    private static func availablePeriods(_ history: [UsagePeriod: UsageHistoryRollup])
+        -> [UsagePeriod]
+    {
+        [.today] + UsagePeriod.archived.filter { history[$0] != nil }
     }
 
     /// One row per vendor.

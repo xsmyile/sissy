@@ -365,28 +365,59 @@ final class UsageFormatTests: XCTestCase {
 
     // MARK: Archive window
 
-    func testAWindowTheArchiveReachesBackAcrossIsNamedByItsWidth() throws {
+    /// The control beside the number already names the period, so a window the
+    /// archive covers has nothing left to admit.
+    func testAWindowTheArchiveReachesBackAcrossSaysNothing() throws {
         let clock = try fixedClock()
         let earliest = try XCTUnwrap(
             clock.calendar.date(byAdding: .day, value: -6, to: clock.now))
-        XCTAssertEqual(
-            UsageFormat.historyWindowLabel(
-                days: 7, earliestDay: earliest, now: clock.now, calendar: clock.calendar),
-            "Last 7 days"
-        )
+        XCTAssertNil(
+            UsageFormat.periodCoverage(
+                rollup(.sevenDays, earliest: earliest),
+                now: clock.now, calendar: clock.calendar))
     }
 
-    /// Three days of data under a "Last 7 days" label is a daily average a
-    /// reader computes wrong and cannot tell they did.
-    func testAWindowTheArchiveFallsShortOfIsNamedByItsFirstDay() throws {
+    /// Three days of data under a "7 days" label is a daily average a reader
+    /// computes wrong and cannot tell they did.
+    func testAWindowTheArchiveFallsShortOfNamesItsFirstDay() throws {
         let clock = try fixedClock()
         let earliest = try XCTUnwrap(
             clock.calendar.date(byAdding: .day, value: -2, to: clock.now))
         XCTAssertEqual(
-            UsageFormat.historyWindowLabel(
-                days: 7, earliestDay: earliest, now: clock.now, calendar: clock.calendar),
-            "Since \(earliest.formatted(.dateTime.day().month(.abbreviated)))"
+            UsageFormat.periodCoverage(
+                rollup(.sevenDays, earliest: earliest),
+                now: clock.now, calendar: clock.calendar),
+            "since \(earliest.formatted(.dateTime.day().month(.abbreviated)))"
         )
+    }
+
+    /// `all` has no width to fall short of, so it always names its first day —
+    /// without which the widest window is the one reading on the panel that
+    /// never says what it covers.
+    func testTheWidestWindowAlwaysNamesItsFirstDay() throws {
+        let clock = try fixedClock()
+        let earliest = try XCTUnwrap(
+            clock.calendar.date(byAdding: .day, value: -400, to: clock.now))
+        XCTAssertEqual(
+            UsageFormat.periodCoverage(
+                rollup(.all, earliest: earliest),
+                now: clock.now, calendar: clock.calendar),
+            "since \(earliest.formatted(.dateTime.day().month(.abbreviated)))"
+        )
+    }
+
+    /// A window holding none of the archive's days has no first day to name,
+    /// and the zero under it is a reading rather than a short one.
+    func testAWindowHoldingNoDaysAdmitsNothing() throws {
+        let clock = try fixedClock()
+        XCTAssertNil(
+            UsageFormat.periodCoverage(
+                rollup(.sevenDays, earliest: nil),
+                now: clock.now, calendar: clock.calendar))
+    }
+
+    private func rollup(_ period: UsagePeriod, earliest: Date?) -> UsageHistoryRollup {
+        UsageHistoryRollup(period: period, earliestDay: earliest, tokens: 1, cost: 1)
     }
 
     /// A fixed instant in a fixed zone: "same calendar day" is a question the
