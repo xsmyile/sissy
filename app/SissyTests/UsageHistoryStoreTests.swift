@@ -404,7 +404,7 @@ final class UsageHistoryStoreTests: XCTestCase {
         try write(provider: "codex", day: day(-8), models: ["a": totals(input: 10, cost: "10")])
         try write(provider: "codex", day: day(-40), models: ["a": totals(input: 100, cost: "100")])
 
-        let rollups = UsageHistoryStore.rollups(for: UsagePeriod.archived, in: root)
+        let rollups = UsageHistoryStore.rollups(for: Set(UsagePeriod.archived), in: root)
 
         XCTAssertEqual(rollups[.sevenDays]?.tokens, 1)
         XCTAssertEqual(rollups[.thirtyDays]?.tokens, 11)
@@ -418,7 +418,7 @@ final class UsageHistoryStoreTests: XCTestCase {
         try write(provider: "codex", day: day(-1), models: ["a": totals(input: 7, cost: "2")])
         try write(provider: "claude-code", day: day(-9), models: ["b": totals(input: 9, cost: "3")])
 
-        let together = UsageHistoryStore.rollups(for: UsagePeriod.archived, in: root)
+        let together = UsageHistoryStore.rollups(for: Set(UsagePeriod.archived), in: root)
 
         for period in UsagePeriod.archived {
             let alone = UsageHistoryStore.rollups(for: [period], in: root)[period]
@@ -447,11 +447,20 @@ final class UsageHistoryStoreTests: XCTestCase {
     func testAWindowWithNoDaysInItComesBackAtZeroWithNoFirstDay() throws {
         try write(provider: "codex", day: day(-40), models: ["a": totals(input: 5, cost: "1")])
 
-        let rollups = UsageHistoryStore.rollups(for: UsagePeriod.archived, in: root)
+        let rollups = UsageHistoryStore.rollups(for: Set(UsagePeriod.archived), in: root)
 
         XCTAssertEqual(rollups[.sevenDays]?.tokens, 0)
         XCTAssertNil(rollups[.sevenDays]?.earliestDay)
         XCTAssertEqual(rollups[.all]?.tokens, 5)
+    }
+
+    /// Asking for nothing walks nothing: the archive is a directory tree, and
+    /// an empty request that still enumerated and decoded it would be paid for
+    /// on every frame that wanted no window.
+    func testAskingForNoWindowReadsNothing() throws {
+        try write(provider: "codex", day: day(0), models: ["a": totals(input: 5, cost: "1")])
+
+        XCTAssertTrue(UsageHistoryStore.rollups(for: [], in: root).isEmpty)
     }
 
     private func week(in root: URL) throws -> UsageHistoryRollup {
