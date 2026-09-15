@@ -104,11 +104,22 @@ struct GeneralSettingsView: View {
         let days = model.engine.historyRetentionDays
         guard days > 0 else {
             return "Switched off in server.json, so Sissy records nothing beyond the day it "
-                + "is counting. Delete removes what an earlier run left."
+                + "is counting. Export and Delete still reach what an earlier run left."
         }
         return "A day-by-model record kept in history/ for \(days) days, so the panel can show "
-            + "more than today. Nothing in it leaves this Mac."
+            + "more than today. Sissy sends none of it anywhere, and Export is the only way "
+            + "any of it leaves this Mac."
     }
+
+    /// What the export carries, said before it is pressed rather than
+    /// discovered in the file. The rows name repository paths, and a folder
+    /// name is often a client's name — the panel renders the last component
+    /// for exactly that reason, and a file leaving the machine cannot.
+    private static let exportCaption =
+        "One CSV per provider plus a combined one, at the archive's own grain: a row per day, "
+        + "model and project, with the tokens and the cost as recorded rather than as the panel "
+        + "rounds them. A month or a quarter is a pivot table away. The rows carry the full path "
+        + "of every repository the work was in, so choose where the folder goes accordingly."
 
     var body: some View {
         Form {
@@ -205,10 +216,17 @@ struct GeneralSettingsView: View {
                     .textSelection(.enabled)
 
                 LabeledContent("Usage history") {
-                    Button("Delete") { confirmingDelete = true }
-                        .buttonStyle(.link)
+                    HStack(spacing: 14) {
+                        Button("Export CSV") { model.exportUsageHistory() }
+                            .buttonStyle(.link)
+                        Button("Delete") { confirmingDelete = true }
+                            .buttonStyle(.link)
+                    }
                 }
                 Text(historyCaption)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(Self.exportCaption)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

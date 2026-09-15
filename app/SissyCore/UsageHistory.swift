@@ -367,6 +367,29 @@ enum UsageHistoryStore {
         }
     }
 
+    /// Every day the archive holds, across every provider directory present,
+    /// oldest first and ordered within a day by provider.
+    ///
+    /// Unbounded on purpose where `rollup` takes a window: retention has
+    /// already bounded what is on disk, and a second bound here would mean an
+    /// export that silently carried less than the archive the caption names.
+    /// A day this build cannot decode is skipped rather than guessed at, the
+    /// same answer `load` gives.
+    static func allDays(in parent: URL) -> [UsageHistoryDay] {
+        var out: [UsageHistoryDay] = []
+        for provider in providers(in: parent).sorted() {
+            for (_, url) in dayFiles(provider: provider, in: parent) {
+                guard let decoded = decode(at: url) else { continue }
+                out.append(decoded)
+            }
+        }
+        return out.sorted { lhs, rhs in
+            let left: [String] = [lhs.day, lhs.provider]
+            let right: [String] = [rhs.day, rhs.provider]
+            return left.lexicographicallyPrecedes(right)
+        }
+    }
+
     /// Removes the whole archive. Reachable only from the explicit button in
     /// Settings, which is the one place a user asks for it.
     static func removeAll(in parent: URL) throws {

@@ -264,6 +264,49 @@ final class SissyModel {
         engine.deleteUsageHistory()
     }
 
+    /// Asks where the archive should go and writes it there as CSV.
+    ///
+    /// A folder rather than a file, because the export is one CSV per provider
+    /// plus a combined one — the split Numbers turns back into a sheet each on
+    /// import, which is why this is not a workbook and not a dependency.
+    ///
+    /// App-modal rather than a sheet on Settings: the button is only reachable
+    /// with that window already open and the app already active, and a sheet
+    /// would need the window handed down through the view to attach to.
+    func exportUsageHistory() {
+        let panel = NSSavePanel()
+        panel.title = "Export usage history"
+        panel.prompt = "Export"
+        panel.nameFieldLabel = "Folder:"
+        panel.nameFieldStringValue =
+            "Sissy usage \(UsageReaderShared.dayFormatter.string(from: Date()))"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let directory = panel.url else { return }
+        Task { await writeUsageHistory(to: directory) }
+    }
+
+    private func writeUsageHistory(to directory: URL) async {
+        do {
+            let days = try await engine.exportUsageHistory(to: directory)
+            guard days > 0 else {
+                await showError(
+                    title: "There is no usage history to export",
+                    message: "Sissy records a day once it has counted something in it. "
+                        + "Nothing was written."
+                )
+                return
+            }
+            NSWorkspace.shared.activateFileViewerSelecting([directory])
+        } catch {
+            await showError(
+                title: "Export failed",
+                message: "Sissy could not write to "
+                    + "\((directory.path as NSString).abbreviatingWithTildeInPath). "
+                    + error.localizedDescription
+            )
+        }
+    }
+
     func openLogs() {
         let url = SissyPaths.logsDir
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

@@ -23,6 +23,10 @@ actor UsageEngine {
     /// into a burst of directory walks.
     private var historyRollup: UsageHistoryRollup?
     private var historyRollupAt: Date = .distantPast
+    /// The one checkout memory every provider shares, kept because the export
+    /// re-reads the archive's project paths through a resolver built on it.
+    /// A second ledger over the same file would be a second writer to it.
+    private let projectLedger: ProjectLedger
     /// Day the archive was last pruned for. Retention is measured in days, so
     /// the answer changes only when the day does — and a Mac that stays up for
     /// a month has to keep the promise the setting makes without waiting for a
@@ -175,6 +179,7 @@ actor UsageEngine {
         // reading of the disk rather than token math, so no schema bump that
         // invalidates a tail's snapshot may take it with it.
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
+        self.projectLedger = projectLedger
         let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
         let claudeHome = config.providerHome(vendor: ProviderID.claudeCode)
@@ -833,6 +838,27 @@ actor UsageEngine {
         lastHistoryPruneDay = today
         UsageHistoryStore.prune(
             keeping: config.resolvedHistoryRetentionDays, in: stateDir, now: now)
+    }
+
+    /// The whole archive, every path re-read through the resolver, for the one
+    /// gesture that carries it off this Mac.
+    ///
+    /// Reattributed rather than handed over as written, which is the archive's
+    /// own rule: a day file keeps the directory it saw, and what that path
+    /// *means* is today's answer. Without this, a row an older build wrote for
+    /// a CLI's scratch directory would go on claiming a project in somebody's
+    /// spreadsheet, and a deleted worktree would leave its money on a path
+    /// that no longer exists instead of on the repository it was cut from.
+    ///
+    /// A resolver per export rather than a long-lived one: it pins an answer
+    /// for its own lifetime, and an export is exactly the moment to ask the
+    /// disk again. The ledger behind it is the shared one, so what any
+    /// provider has seen alive is what answers here.
+    func exportableHistory() -> [UsageHistoryDay] {
+        let resolver = ProjectResolver(ledger: projectLedger)
+        return UsageHistoryStore.allDays(in: stateDir).map { day in
+            day.reattributed { resolver.project(for: $0) }
+        }
     }
 
     /// Deletes the archive, on the one explicit ask there is for it.
