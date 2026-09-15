@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Metrics every panel surface shares, so a page cannot drift a point away
@@ -26,6 +27,35 @@ enum PanelMetrics {
     /// takes the smaller of the two sizes the panel uses.
     static let markSize: CGFloat = 14
     static let rowText: CGFloat = 12
+
+    /// What the popover leaves itself between its content and the screen edge:
+    /// the shadow, the corner radius, and enough that a page ending exactly on
+    /// the boundary does not read as cut off.
+    private static let screenMargin: CGFloat = 16
+    /// The ceiling to assume when the screen cannot be named — a panel with no
+    /// window yet, or a status item on a display AppKit has not reported.
+    /// Deliberately the smallest Mac worth designing for rather than a
+    /// generous guess: a page that scrolls when it did not have to is a
+    /// nuisance, where one that runs off the bottom is unreachable.
+    private static let fallbackMaxHeight: CGFloat = 640
+
+    /// How tall the panel may be on the screen it is opening on.
+    ///
+    /// `visibleFrame` already excludes the menu bar and the Dock, which is the
+    /// whole answer: the popover hangs off the status item and grows down, so
+    /// what it has is what the menu bar leaves. Read per opening rather than
+    /// cached — the menu bar moves with the display arrangement, and a ceiling
+    /// measured on a 5K would follow the panel back onto the laptop screen.
+    ///
+    /// This replaces a per-section ceiling. Bounding one block meant a page
+    /// gave up rows it had room for: measured on the author's own displays,
+    /// `visibleFrame` is about 957 pt on the built-in 14" and 1415 pt on the
+    /// external 5K, against a tallest-page reading of 690.5 pt — so the
+    /// section was hiding projects to fit a screen nobody in front of it had.
+    static func maxHeight(on screen: NSScreen?) -> CGFloat {
+        guard let screen else { return fallbackMaxHeight }
+        return max(screen.visibleFrame.height - screenMargin, 0)
+    }
 }
 
 /// The panel's one bar, in both the jobs it does: a share of the day, and a

@@ -249,6 +249,18 @@ struct UsageHistoryRollup: Sendable, Equatable {
     let cost: Decimal
 }
 
+/// What one archived day came to for one provider, which is the grain a
+/// per-day reading is drawn from.
+///
+/// Carries no model or project split: the split is what the export and the
+/// report are for, and a value that held it would be re-read on every frame
+/// the panel is open for the sake of a number nobody is looking at.
+struct UsageHistoryDaySummary: Equatable, Sendable {
+    let day: Date
+    let tokens: Int
+    let cost: Decimal
+}
+
 /// File-level wrapper over the archive: one directory per provider, one file
 /// per day. Pure I/O, no reader knowledge — the tail composes it the way it
 /// composes `UsageStatePersistence`.
@@ -344,6 +356,38 @@ enum UsageHistoryStore {
             }
         }
         return UsageHistoryRollup(days: days, earliestDay: earliest, tokens: tokens, cost: cost)
+    }
+
+    /// One provider's archived days inside the `days` most recent local days,
+    /// oldest first and **strictly before today**.
+    ///
+    /// Only days the archive actually holds are in the result. A day Sissy was
+    /// not running for has no file and gets no element, which is what keeps a
+    /// caller from drawing it as a day that cost nothing — an absent reading
+    /// and a reading of zero are different answers, and a bar chart is the one
+    /// surface where confusing them is a claim about someone's week.
+    ///
+    /// Today is excluded because the archive is not where today is read from:
+    /// the day file is written on the tail's own throttle while the frame is
+    /// emitted as events land, so a caller pairs this with the slice it is
+    /// already drawing rather than with a figure that lags it.
+    static func series(
+        provider: String, days: Int, in parent: URL, now: Date = Date()
+    ) -> [UsageHistoryDaySummary] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: now)
+        let cutoff = cal.date(byAdding: .day, value: -(max(days, 1) - 1), to: today) ?? today
+        return dayFiles(provider: provider, in: parent)
+            .filter { $0.0 >= cutoff && $0.0 < today }
+            .compactMap { day, url in
+                guard let decoded = decode(at: url) else { return nil }
+                return UsageHistoryDaySummary(
+                    day: day,
+                    tokens: decoded.models.reduce(0) { $0 + $1.totalTokens },
+                    cost: decoded.models.reduce(Decimal(0)) { $0 + (Decimal(string: $1.cost) ?? 0) }
+                )
+            }
+            .sorted { $0.day < $1.day }
     }
 
     /// Drops the files for days that have fallen out of retention, across

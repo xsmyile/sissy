@@ -931,6 +931,30 @@ actor UsageEngine {
         }
     }
 
+    /// One provider's archived days, for the surface that draws them.
+    ///
+    /// The decision is the actor's and the file walk is not: the retention a
+    /// switched-off archive is gated on lives in `config`, while decoding a
+    /// file per day belongs anywhere but here. Awaiting a detached task is
+    /// what separates them — the actor suspends rather than blocks, so frames
+    /// keep being emitted while a slow volume answers.
+    ///
+    /// This runs when a page opens, never on the frame path. `currentHistory`
+    /// is windowed and TTL-cached precisely because it is on that path, and
+    /// widening it to feed a chart would put a decode per archived day behind
+    /// every emit.
+    ///
+    /// Retention at `0` is the archive switched off. Pruning leaves whatever
+    /// was already written where it is, so the gate is what stops a panel
+    /// drawing days from an archive the user has turned off.
+    func historySeries(provider: String, days: Int) async -> [UsageHistoryDaySummary] {
+        guard config.resolvedHistoryRetentionDays > 0 else { return [] }
+        let directory = stateDir
+        return await Task.detached {
+            UsageHistoryStore.series(provider: provider, days: days, in: directory)
+        }.value
+    }
+
     /// Deletes the archive, on the one explicit ask there is for it.
     ///
     /// The providers keep counting: what they hold in memory is today, and

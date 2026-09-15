@@ -307,6 +307,23 @@ final class UsageEngineHost {
         return days.count
     }
 
+    /// What the archive holds for one provider over the panel's own window,
+    /// oldest first and never including today.
+    ///
+    /// Today is the frame's to answer. The archive is written on the tail's
+    /// throttle while the frame is emitted as events land, so a page taking
+    /// both from here would print a figure that disagrees with the "Today"
+    /// row above it for as long as the throttle holds.
+    ///
+    /// An engine that is not running answers no days rather than nothing,
+    /// because a page that opens before the first frame has no provider on it
+    /// to draw them against anyway.
+    func usageHistorySeries(provider: String) async -> [UsageHistoryDaySummary] {
+        guard let engine else { return [] }
+        return await engine.historySeries(
+            provider: provider, days: UsageEngine.historyWindowDays)
+    }
+
     /// Deletes the archive. The engine re-emits once it is gone, which is
     /// what takes the panel's archive line away with it.
     func deleteUsageHistory() {

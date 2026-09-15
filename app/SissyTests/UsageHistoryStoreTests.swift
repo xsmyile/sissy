@@ -278,6 +278,35 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertEqual(rollup.tokens, 10, "a day outside the window was rolled up")
     }
 
+    /// The series is one provider's, oldest first, and it stops short of
+    /// today: the day file is written on the tail's throttle while the frame
+    /// is emitted as events land, so the surface drawing it pairs this with
+    /// the slice it already has rather than with a figure that lags.
+    func testTheSeriesIsOneProvidersOwnDaysBeforeToday() throws {
+        try write(provider: "claude-code", day: day(0), models: ["a": totals(input: 99, cost: "9")])
+        try write(provider: "claude-code", day: day(-1), models: ["a": totals(input: 10, cost: "1")])
+        try write(provider: "claude-code", day: day(-3), models: ["a": totals(input: 20, cost: "2")])
+        try write(provider: "codex", day: day(-1), models: ["b": totals(input: 50, cost: "5")])
+
+        let series = UsageHistoryStore.series(provider: "claude-code", days: 7, in: root)
+
+        XCTAssertEqual(series.map(\.tokens), [20, 10], "today or another provider leaked in")
+        XCTAssertEqual(series.map(\.cost), [Decimal(2), Decimal(1)])
+    }
+
+    /// A day outside the window is not the reader's to draw, and a day Sissy
+    /// was not running for has no element at all — the gap is what tells a
+    /// bar chart it is not looking at a day that cost nothing.
+    func testTheSeriesSkipsTheWindowsEdgeAndTheDaysWithNoFile() throws {
+        try write(provider: "codex", day: day(-1), models: ["a": totals(input: 10, cost: "1")])
+        try write(provider: "codex", day: day(-7), models: ["a": totals(input: 99, cost: "9")])
+
+        let series = UsageHistoryStore.series(provider: "codex", days: 7, in: root)
+
+        XCTAssertEqual(series.count, 1, "a day outside the window was returned")
+        XCTAssertEqual(series.first?.tokens, 10)
+    }
+
     /// What stops a two-day-old install from presenting itself as a week.
     func testTheWindowReportsTheEarliestDayItActuallyHolds() throws {
         try write(provider: "codex", day: day(-2), models: ["a": totals(input: 10, cost: "1")])

@@ -379,10 +379,10 @@ final class ProviderStatusTests: XCTestCase {
 
     // MARK: The bound
 
-    /// The panel has no scroll view of its own and sizes to its content, so
-    /// the tree is what has to stop growing. Measured 2026-09-15: OpenAI
-    /// publishes 34 services in 5 groups, so one open group is already taller
-    /// than the rest of the page.
+    /// The tree stops growing so that what sits below it stays reachable
+    /// without scrolling the page. Measured 2026-09-15: OpenAI publishes 34
+    /// services in 5 groups, so one open group is already taller than the rest
+    /// of the page.
     func testTheTreeStopsGrowingThePanel() {
         XCTAssertLessThanOrEqual(StatusTreeGeometry.height(rows: 34), StatusTreeGeometry.maxHeight)
         XCTAssertFalse(StatusTreeGeometry.scrolls(rows: 5))

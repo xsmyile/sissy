@@ -375,4 +375,131 @@ final class PanelPagesTests: XCTestCase {
 
         XCTAssertEqual(snapshot.providers.first?.projects.count, 0)
     }
+
+    // MARK: The day strip
+
+    private static let stripDays = 7
+
+    private func day(_ back: Int, cost: Decimal, now: Date) -> UsageHistoryDaySummary {
+        let day = Calendar.current.date(
+            byAdding: .day, value: -back, to: Calendar.current.startOfDay(for: now))!
+        return UsageHistoryDaySummary(day: day, tokens: 1_000, cost: cost)
+    }
+
+    private func strip(
+        _ series: [UsageHistoryDaySummary], todayCost: Decimal, now: Date
+    ) -> UsagePanelSnapshot.DayStrip? {
+        UsagePanelSnapshot.dayStrip(
+            series: series, todayTokens: 500, todayCost: todayCost,
+            days: Self.stripDays, now: now)
+    }
+
+    /// The archive is written on the tail's throttle and the frame is emitted
+    /// as events land, so today has to come off the frame or the bar disagrees
+    /// with the `Today` row above it.
+    func testTodaysBarComesFromTheFrameAndNotTheArchive() throws {
+        let now = Date()
+        let stale = UsageHistoryDaySummary(
+            day: Calendar.current.startOfDay(for: now), tokens: 1, cost: Decimal(1))
+
+        let strip = try XCTUnwrap(
+            strip([day(1, cost: 10, now: now), stale], todayCost: Decimal(40), now: now))
+        let today = try XCTUnwrap(strip.rows.last)
+
+        XCTAssertTrue(today.isToday)
+        XCTAssertEqual(today.cost, Decimal(40))
+        XCTAssertEqual(today.fraction, 1, accuracy: 0.001)
+        XCTAssertEqual(strip.total, UsageFormat.cost(Decimal(50)))
+    }
+
+    /// A day the archive holds nothing for is a day Sissy was not running.
+    /// Drawn as a bar of zero it would be a claim that nothing was spent.
+    func testADayWithNoFileIsNotADayThatCostNothing() throws {
+        let now = Date()
+        let strip = try XCTUnwrap(
+            strip([day(1, cost: 10, now: now)], todayCost: Decimal(5), now: now))
+
+        XCTAssertEqual(strip.rows.count, Self.stripDays)
+        XCTAssertNil(strip.rows.first?.cost)
+        XCTAssertEqual(strip.rows.count { $0.cost != nil }, 2)
+    }
+
+    /// A reading always draws, however small, so the shortest bar in the strip
+    /// is never mistaken for the mark that means nobody measured.
+    func testADayThatCostNothingStillDraws() {
+        XCTAssertEqual(DayBarGeometry.barHeight(fraction: 0), DayBarGeometry.minBarHeight)
+        XCTAssertGreaterThan(DayBarGeometry.barHeight(fraction: 1), DayBarGeometry.minBarHeight)
+    }
+
+    /// A window the archive does not fill is named by what it actually holds,
+    /// the way the Overview's own archive line already is.
+    func testAWindowTheArchiveDoesNotFillSaysSo() throws {
+        let now = Date()
+        let partial = try XCTUnwrap(
+            strip([day(1, cost: 10, now: now)], todayCost: Decimal(5), now: now))
+        XCTAssertTrue(partial.label.hasSuffix("2 of 7 days"), partial.label)
+
+        let whole = try XCTUnwrap(
+            strip(
+                (1..<Self.stripDays).map { day($0, cost: 10, now: now) },
+                todayCost: Decimal(5), now: now))
+        XCTAssertEqual(whole.label, "Last 7 days")
+    }
+
+    /// A strip whose only bar is today is the figure above it drawn as a
+    /// rectangle, which is the rule the archive line already keeps.
+    func testAnArchiveThatDoesNotReachPastTodayDrawsNothing() {
+        XCTAssertNil(strip([], todayCost: Decimal(5), now: Date()))
+    }
+
+    /// The total under the label is the bars above it summed. A day older than
+    /// the window has no bar to appear in, so counting it would put money on
+    /// the label that nothing on screen accounts for.
+    func testADayOlderThanTheWindowIsNotInTheTotal() throws {
+        let now = Date()
+        let strip = try XCTUnwrap(
+            strip(
+                [day(Self.stripDays, cost: 999, now: now), day(1, cost: 10, now: now)],
+                todayCost: Decimal(5), now: now))
+
+        XCTAssertEqual(strip.rows.count, Self.stripDays)
+        XCTAssertEqual(strip.total, UsageFormat.cost(Decimal(15)))
+        XCTAssertEqual(strip.rows.count { $0.cost != nil }, 2)
+    }
+
+    /// Every bar carries the day and the figures the header swaps in while the
+    /// pointer is on it, so the same facts reach VoiceOver without one.
+    func testEveryBarNamesItsDayAndWhatItCost() throws {
+        let now = Date()
+        let strip = try XCTUnwrap(
+            strip([day(1, cost: 10, now: now)], todayCost: Decimal(5), now: now))
+
+        let yesterday = try XCTUnwrap(strip.rows.dropLast().last { $0.cost != nil })
+        XCTAssertFalse(yesterday.title.isEmpty)
+        XCTAssertEqual(yesterday.figures, "1.0K · \(UsageFormat.cost(Decimal(10)))")
+
+        let absent = try XCTUnwrap(strip.rows.first)
+        XCTAssertNil(absent.cost)
+        XCTAssertEqual(absent.figures, "Sissy was not running")
+    }
+
+    // MARK: The panel's ceiling
+
+    /// The popover hangs off the status item and grows down, so what it has is
+    /// what the menu bar and the Dock leave — which is what `visibleFrame`
+    /// already answers.
+    func testThePanelTakesItsCeilingFromTheScreenItOpensOn() throws {
+        let screen = try XCTUnwrap(NSScreen.main)
+        let ceiling = PanelMetrics.maxHeight(on: screen)
+
+        XCTAssertLessThan(ceiling, screen.visibleFrame.height)
+        XCTAssertGreaterThan(ceiling, screen.visibleFrame.height - 40)
+    }
+
+    /// A status item AppKit has not placed on a screen yet still gets a
+    /// ceiling, and it is the small one: a page that scrolls when it need not
+    /// is a nuisance, where one that runs off the bottom is unreachable.
+    func testAPanelWithNoScreenStillHasACeiling() {
+        XCTAssertGreaterThan(PanelMetrics.maxHeight(on: nil), 0)
+    }
 }
