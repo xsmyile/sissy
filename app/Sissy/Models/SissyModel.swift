@@ -297,6 +297,8 @@ final class SissyModel {
                 return
             }
             NSWorkspace.shared.activateFileViewerSelecting([directory])
+        } catch let failure as UsageEngineHost.ExportFailure {
+            await showError(title: "Export failed", message: failure.localizedDescription)
         } catch {
             await showError(
                 title: "Export failed",

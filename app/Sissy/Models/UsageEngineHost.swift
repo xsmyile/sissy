@@ -267,18 +267,36 @@ final class UsageEngineHost {
         Task { await engine.setKeepAwake(mode: mode.rawValue) }
     }
 
+    /// Why an export wrote nothing, when it wrote nothing.
+    ///
+    /// Two silences the caller must not report as one: an archive with no days
+    /// in it is an answer, and an engine that is not running is the absence of
+    /// one. Both would be `0` on their own, and the second told as the first
+    /// sends somebody looking for usage they have.
+    enum ExportFailure: LocalizedError {
+        case engineNotRunning
+
+        var errorDescription: String? {
+            switch self {
+            case .engineNotRunning:
+                return "Sissy is not metering yet, so it has nothing to read the archive with. "
+                    + "Try again once the menu bar icon has counted something."
+            }
+        }
+    }
+
     /// Writes the archive out as CSV under `directory`, and answers with how
-    /// many day files went into it — zero when there is nothing recorded,
+    /// many day files went into it — zero only for an archive that holds none,
     /// which the caller says rather than leaving three header-only files
     /// somebody has to open to find out.
     ///
     /// The read is the engine's because the project paths are re-resolved
-    /// against the ledger it owns; the write is neither's, and runs detached
-    /// so a user's slow volume stalls the export rather than the metering or
-    /// the main thread.
+    /// against the ledger it owns, though it runs off the engine's actor; the
+    /// write is neither's, and runs detached so a user's slow volume stalls the
+    /// export rather than the metering or the main thread.
     func exportUsageHistory(to directory: URL) async throws -> Int {
-        guard let engine else { return 0 }
-        let days = await engine.exportableHistory()
+        guard let engine else { throw ExportFailure.engineNotRunning }
+        let days = engine.exportableHistory()
         guard !days.isEmpty else { return 0 }
         try await Task.detached { try UsageHistoryExport.write(days, to: directory) }.value
         return days.count

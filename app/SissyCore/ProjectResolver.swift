@@ -55,8 +55,11 @@ import Foundation
 /// about checkouts is the ledger's, and shared, because two memories answer
 /// the same deleted path differently as soon as one of them has seen it alive.
 ///
-/// Only ever touched from inside a provider's actor, which is what lets it
-/// hold plain mutable caches — the same arrangement `SourceAdapter` has.
+/// An instance is only ever touched from inside one actor — a provider's for
+/// the tail's, the engine's for the one an export builds and drops — which is
+/// what lets it hold plain mutable caches, the same arrangement `SourceAdapter`
+/// has. What is shared between those actors is the ledger, which carries its
+/// own lock; a resolver is never handed from one to another.
 final class ProjectResolver {
     /// What a worktree's `.git` file points at, and the only shape that says
     /// where the main checkout is.

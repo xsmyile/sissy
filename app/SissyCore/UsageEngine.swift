@@ -854,7 +854,15 @@ actor UsageEngine {
     /// for its own lifetime, and an export is exactly the moment to ask the
     /// disk again. The ledger behind it is the shared one, so what any
     /// provider has seen alive is what answers here.
-    func exportableHistory() -> [UsageHistoryDay] {
+    ///
+    /// Nonisolated, and that is the point rather than an optimisation. This
+    /// walks every day file in the archive and stats git for every distinct
+    /// path in it, unwindowed and uncached — the opposite of `currentHistory`,
+    /// which is windowed and TTL-cached because it runs on the frame path. On
+    /// the actor, one click would queue every frame behind it and stop the
+    /// metering for as long as the walk took. It touches only `let`s: the
+    /// directory, and a ledger that carries its own lock.
+    nonisolated func exportableHistory() -> [UsageHistoryDay] {
         let resolver = ProjectResolver(ledger: projectLedger)
         return UsageHistoryStore.allDays(in: stateDir).map { day in
             day.reattributed { resolver.project(for: $0) }
