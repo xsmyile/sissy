@@ -23,7 +23,8 @@ xcodebuild -project Sissy.xcodeproj -scheme sissy-cli -configuration Debug build
 ../scripts/dev-build-app.sh                                            # signed local app for login-item testing
 
 # Self-test (pure formatters + pricing tables)
-"$(xcodebuild -scheme sissy-cli -showBuildSettings | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)/sissy-cli" --self-test
+xcodebuild -project Sissy.xcodeproj -scheme sissy-cli -configuration Debug build \
+  && "$(xcodebuild -scheme sissy-cli -showBuildSettings | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)/sissy-cli" --self-test
 
 # Scan-once mode (compare against `npx ccusage@latest claude --json` or
 # `npx ccusage@latest codex --json` — never a bare `ccusage`, which may be the Homebrew build)
@@ -31,7 +32,7 @@ xcodebuild -project Sissy.xcodeproj -scheme sissy-cli -configuration Debug build
 "$(xcodebuild -scheme sissy-cli -showBuildSettings | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)/sissy-cli" --scan --scan-provider codex
 ```
 
-`sissy-cli` is a CI tool, not a product: nothing ships it to a user, and with no flag it prints the list above and exits 2.
+`sissy-cli` is a CI tool, not a product: nothing ships it to a user, and with no flag it prints the list above and exits 2. **Build the scheme before any of the three invocations above** — `-showBuildSettings` resolves `BUILT_PRODUCTS_DIR` without building, so on its own it runs whatever the last *successful* build left there. A `--self-test` that answers `ALL PASS` from a binary the current source no longer compiles into is the failure mode, and a `--scan` compared against `ccusage` on a stale binary is the same trap with numbers instead of a verdict.
 
 The login item and the one-shot retirement of the legacy agent both go through `SMAppService`, which must be tested from a normally signed app bundle. `CODE_SIGNING_ALLOWED=NO` is fine for CI compilation/tests, but launching that product locally makes macOS reject `Contents/Library/LaunchAgents/com.radonforge.sissy.server.plist`.
 
