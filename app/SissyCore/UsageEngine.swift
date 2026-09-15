@@ -874,9 +874,14 @@ actor UsageEngine {
     ///
     /// The cache is kept even when the answer is withheld, so an empty archive
     /// costs one directory walk every `historyRollupTTL` rather than one per
-    /// frame.
+    /// frame. Switching the archive off drops it instead: the setting can come
+    /// back inside the TTL, and serving what was read before it went off would
+    /// answer for days the user asked to stop recording.
     private func currentHistory(now: Date) -> [UsagePeriod: UsageHistoryRollup] {
-        guard config.resolvedHistoryRetentionDays > 0 else { return [:] }
+        guard config.resolvedHistoryRetentionDays > 0 else {
+            historyRollups = [:]
+            return [:]
+        }
         let stale = now.timeIntervalSince(historyRollupAt) >= Self.historyRollupTTL
         if historyRollups.isEmpty || stale {
             historyRollups = UsageHistoryStore.rollups(

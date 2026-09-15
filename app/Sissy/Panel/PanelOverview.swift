@@ -322,14 +322,19 @@ struct PanelOverview: View {
     /// Where the day's money went. The reason the app exists, so it sits below
     /// nothing but the day's own numbers.
     ///
-    /// Today's, under a headline that may be over a month. The archive carries
-    /// the project on its rows, but only from the day the dimension landed: the
-    /// days before it name no repository at all, and a window reaching back
-    /// across them would put an unattributed row above real ones. It follows the
-    /// period when that share has aged out, which is #81's ground.
+    /// Today's, under a headline that may be over a month — so the label says
+    /// `today` rather than leaving the reader to pair it with the window above.
+    /// The block that names its own day is the one that does not follow the
+    /// control; the provider rows above it say the same word for the same
+    /// reason.
+    ///
+    /// The archive carries the project on its rows, but only from the day the
+    /// dimension landed: the days before it name no repository at all, and a
+    /// window reaching back across them would put an unattributed row above
+    /// real ones.
     private var projects: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionLabel(text: "By project")
+            SectionLabel(text: "By project · today")
             ForEach(snapshot.projects) { row in
                 ProjectRowView(row: row)
             }
