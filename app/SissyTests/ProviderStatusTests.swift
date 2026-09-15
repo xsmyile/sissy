@@ -390,6 +390,17 @@ final class ProviderStatusTests: XCTestCase {
         XCTAssertEqual(StatusTreeGeometry.height(rows: 0), 0)
     }
 
+    /// The tree draws no scroll indicator, so the row the bound cuts through
+    /// is the only thing left that says there is more below. A ceiling that
+    /// landed on a row boundary — or in the gap between two — would end the
+    /// tree on a whole row and read as the whole tree.
+    func testTheBoundCutsThroughARowRatherThanBetweenTwo() {
+        let pitch = StatusTreeGeometry.rowHeight + StatusTreeGeometry.rowSpacing
+        let intoTheRow = StatusTreeGeometry.maxHeight.truncatingRemainder(dividingBy: pitch)
+        XCTAssertGreaterThan(intoTheRow, 0)
+        XCTAssertLessThan(intoTheRow, StatusTreeGeometry.rowHeight)
+    }
+
     func testOnlyOpenGroupsCountTowardsTheHeight() {
         let tree = [
             UsagePanelSnapshot.ComponentRow(
