@@ -106,6 +106,13 @@ enum ClaudeWebSessionCopy {
 
     static let detailButtonLabel = "What importing does"
 
+    static let ownCredentialLabel = "Limits source"
+    static let ownCredentialState = "This account's own sign-in"
+    static let ownCredentialCaption =
+        "Claude Code keeps its OAuth token in each account's own directory, so Sissy reads "
+        + "the limits of the account the row is about. Nothing is read from the keychain "
+        + "and no claude.ai session is needed."
+
     /// One sentence per way the import can come up empty, each naming what to
     /// do rather than what failed.
     static func failure(_ why: ClaudeWebCookieImport.Failure) -> String {
@@ -170,7 +177,17 @@ struct ProvidersSettingsView: View {
                     // setting and imply the session could be that account's.
                     if isFirstOfVendor(readiness), vendor(of: readiness) == ProviderID.claudeCode {
                         claudeLimits
-                        if model.engine.claudeLimits { claudeWebSession }
+                        // The imported session is only offered when something
+                        // would read it. With the CLI's own credential in
+                        // place nothing does, and a control over a source that
+                        // is not running is a setting that lies.
+                        if model.engine.claudeLimits {
+                            if model.engine.claudeUsesOwnCredential {
+                                ownCredentialRow
+                            } else {
+                                claudeWebSession
+                            }
+                        }
                     }
                     if let account = ProviderKey(id: readiness.id).account {
                         removeButton(account: account, vendor: vendor(of: readiness))
@@ -203,6 +220,21 @@ struct ProvidersSettingsView: View {
     /// being pointed at. A home nothing has ever run against is an empty row,
     /// so the caption says which variable puts a session there rather than
     /// leaving someone to find out from an account that never fills in.
+    /// What is read when the CLI keeps its own credential: no keychain, no
+    /// cookie, no grant to go stale, and an answer that belongs to this
+    /// account rather than to whoever else is signed in on this Mac.
+    @ViewBuilder
+    private var ownCredentialRow: some View {
+        LabeledContent {
+            Text(ClaudeWebSessionCopy.ownCredentialState).foregroundStyle(.secondary)
+        } label: {
+            Text(ClaudeWebSessionCopy.ownCredentialLabel)
+        }
+        Text(ClaudeWebSessionCopy.ownCredentialCaption)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
     @ViewBuilder
     private var accountsSection: some View {
         Section {

@@ -132,6 +132,12 @@ actor UsageEngine {
     /// accounts keeps using the shared keychain probe and the imported
     /// claude.ai session, which is where its reading has always come from.
     private let perAccountLimits: [String: ClaudeLimitsProbe]
+    /// Whether the account that predates accounts reads a credential of its
+    /// own, which is what decides that neither shared source is started.
+    /// Nonisolated because Settings words a row from it, and a row that says
+    /// Sissy is reading claude.ai while it is reading a file is the kind of
+    /// lie this app's settings are not allowed to tell.
+    nonisolated let claudeUsesOwnCredential: Bool
 
     private struct ResolvedProvider {
         let id: String
@@ -238,6 +244,8 @@ actor UsageEngine {
                     ))
             }
         }
+        self.claudeUsesOwnCredential =
+            limitsSources[ProviderKey(vendor: ProviderID.claudeCode).id] != nil
         self.perAccountLimits = limitsSources
         self.aggregator = UsageAggregator(providers: providers)
         let resolution =
@@ -691,9 +699,7 @@ actor UsageEngine {
     /// means no keychain dialog and no session to go stale. When it has not —
     /// a CLI that keeps its token only in the keychain, or one never signed in
     /// — the two shared sources are still the only answer there is.
-    private var defaultClaudeAccountReadsItsOwnHome: Bool {
-        perAccountLimits[ProviderKey(vendor: ProviderID.claudeCode).id] != nil
-    }
+    private var defaultClaudeAccountReadsItsOwnHome: Bool { claudeUsesOwnCredential }
 
     /// Where one account's offsets are kept.
     ///

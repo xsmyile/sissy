@@ -33,6 +33,11 @@ final class UsageEngineHost {
     /// `claudeLimits` is: a second copy in the app could disagree with the one
     /// the readers were actually built from.
     private(set) var accounts: [AccountConfig] = []
+    /// Whether Claude's limits come from the CLI's own credential file rather
+    /// than from the keychain item or an imported claude.ai session. When they
+    /// do, neither of those is read at all, and Settings has to say so instead
+    /// of offering a control over a source nothing is using.
+    private(set) var claudeUsesOwnCredential: Bool = false
     /// Days the archive is kept for, as `server.json` resolves it. Read from
     /// the same place and for the same reason as `claudeLimits`: Settings
     /// says what the engine is actually doing, not what the app assumed.
@@ -116,6 +121,7 @@ final class UsageEngineHost {
         self.engine = engine
         claudeLimits = config.claudeLimits
         accounts = config.accounts ?? []
+        claudeUsesOwnCredential = engine.claudeUsesOwnCredential
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
         keepAwakeMode = config.keepAwake
