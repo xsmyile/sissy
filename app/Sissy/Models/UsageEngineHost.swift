@@ -321,7 +321,7 @@ final class UsageEngineHost {
     func usageHistorySeries(provider: String) async -> [UsageHistoryDaySummary] {
         guard let engine else { return [] }
         return await engine.historySeries(
-            provider: provider, days: UsageEngine.historyWindowDays)
+            provider: provider, days: UsagePanelSnapshot.dayStripDays)
     }
 
     /// Deletes the archive. The engine re-emits once it is gone, which is
