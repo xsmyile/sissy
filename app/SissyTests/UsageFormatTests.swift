@@ -416,6 +416,63 @@ final class UsageFormatTests: XCTestCase {
                 now: clock.now, calendar: clock.calendar))
     }
 
+    /// The strip names its window whatever the archive holds, because nothing
+    /// else on that surface says which days the bars are. Restored with the
+    /// function: this branch deleted both while the headline was the only
+    /// caller, and the day strip on `master` still needs the width said.
+    func testAWindowTheArchiveReachesBackAcrossIsNamedByItsWidth() throws {
+        let clock = try fixedClock()
+        let earliest = try XCTUnwrap(
+            clock.calendar.date(byAdding: .day, value: -6, to: clock.now))
+        XCTAssertEqual(
+            UsageFormat.historyWindowLabel(
+                days: 7, earliestDay: earliest, now: clock.now, calendar: clock.calendar),
+            "Last 7 days"
+        )
+    }
+
+    /// Three days of data under a "Last 7 days" label is a daily average a
+    /// reader computes wrong and cannot tell they did.
+    func testAWindowTheArchiveFallsShortOfIsNamedByItsFirstDay() throws {
+        let clock = try fixedClock()
+        let earliest = try XCTUnwrap(
+            clock.calendar.date(byAdding: .day, value: -2, to: clock.now))
+        XCTAssertEqual(
+            UsageFormat.historyWindowLabel(
+                days: 7, earliestDay: earliest, now: clock.now, calendar: clock.calendar),
+            "Since \(earliest.formatted(.dateTime.day().month(.abbreviated)))"
+        )
+    }
+
+    /// An archive that holds nothing has no first day to name, so the window
+    /// keeps its own width rather than printing a label with a hole in it.
+    func testAWindowWithNoArchiveBehindItKeepsItsWidth() throws {
+        let clock = try fixedClock()
+        XCTAssertEqual(
+            UsageFormat.historyWindowLabel(
+                days: 7, earliestDay: nil, now: clock.now, calendar: clock.calendar),
+            "Last 7 days"
+        )
+    }
+
+    /// The two labels sit on one piece of arithmetic, so a window one of them
+    /// calls short must never be whole to the other.
+    func testBothLabelsAgreeOnWhetherAWindowIsShort() throws {
+        let clock = try fixedClock()
+        for offset in [-1, -6, -7, -30] {
+            let earliest = try XCTUnwrap(
+                clock.calendar.date(byAdding: .day, value: offset, to: clock.now))
+            let named = UsageFormat.historyWindowLabel(
+                days: 7, earliestDay: earliest, now: clock.now, calendar: clock.calendar)
+            let admitted = UsageFormat.periodCoverage(
+                rollup(.sevenDays, earliest: earliest),
+                now: clock.now, calendar: clock.calendar)
+            XCTAssertEqual(
+                named.hasPrefix("Since"), admitted != nil,
+                "the labels disagreed about a window starting \(offset) days back")
+        }
+    }
+
     private func rollup(_ period: UsagePeriod, earliest: Date?) -> UsageHistoryRollup {
         UsageHistoryRollup(period: period, earliestDay: earliest, tokens: 1, cost: 1)
     }
