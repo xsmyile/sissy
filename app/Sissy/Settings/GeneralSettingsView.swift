@@ -6,13 +6,12 @@ import SwiftUI
 enum AgentHookCopy {
     static let title = "Name projects even when Sissy is off"
 
-    static let caption =
-        "Asks Claude Code and Codex to tell Sissy which repository a session is working in, "
-        + "at the moment it starts. Without it, work in a worktree deleted while Sissy was "
-        + "not running counts towards no project at all."
+    static let caption = "Asks Claude Code and Codex to name the repository a session starts in."
 
     static let detail =
-        "Sissy adds one line to ~/.claude/settings.json and ~/.codex/hooks.json. That line runs "
+        "Without this, work in a worktree deleted while Sissy was not running counts towards "
+        + "no project at all.\n\n"
+        + "Sissy adds one line to ~/.claude/settings.json and ~/.codex/hooks.json. That line runs "
         + "a small script from Sissy's own folder whenever a session starts: it asks git which "
         + "repository the directory belongs to and writes the answer down. It reads nothing else "
         + "and sends nothing anywhere.\n\n"
@@ -45,11 +44,20 @@ enum AgentHookCopy {
 }
 
 /// Settings that change what the menu bar and the panel show.
+///
+/// Every row is a `LabeledContent` whose label carries the title and its own
+/// description, which is what keeps the tab inside the height budget: the
+/// caption sits beside the control it explains rather than under it as a
+/// full-width paragraph, and the platform words it as secondary rather than one
+/// point below the label. Measured on the shape this replaced — a `Section` per
+/// control, each with a full-width `callout` paragraph — the same eight controls
+/// came to 779 pt of content against 471 pt.
 struct GeneralSettingsView: View {
     let model: SissyModel
 
     @State private var confirmingDelete = false
     @State private var showingHookDetail = false
+    @State private var showingExportDetail = false
 
     /// Wide enough that the detail reads as a paragraph rather than a column.
     private static let detailPopoverWidth: CGFloat = 280
@@ -58,14 +66,14 @@ struct GeneralSettingsView: View {
     /// read rather than written out: a caption that says ten minutes while the
     /// shipped policy waits fifteen, or that calls a mode by a name the picker
     /// above it no longer uses, is worse than no caption. These are also the
-    /// only numbers in the app that say when a hold ends.
+    /// only numbers in the app that say when a hold ends, and the only place it
+    /// says what a closed lid does to one.
     private var keepAwakeCaption: String {
         let idle = UsageFormat.countdown(KeepAwakePolicy.default.idleWindow)
         let ceiling = UsageFormat.countdown(KeepAwakePolicy.default.manualCeiling)
-        return "\(UsageFormat.keepAwakeTitle(.auto)) holds the Mac only while a turn has "
-            + "landed in the last \(idle), and lets go after. "
-            + "\(UsageFormat.keepAwakeTitle(.on)) holds it until you switch it off, "
-            + "\(ceiling) at the outside. Closing the lid sleeps the Mac under either."
+        return "\(UsageFormat.keepAwakeTitle(.auto)) lets go \(idle) after the last turn; "
+            + "\(UsageFormat.keepAwakeTitle(.on)) stops at \(ceiling). "
+            + "Closing the lid sleeps the Mac either way."
     }
 
     private var agentHooksCaption: String {
@@ -74,7 +82,7 @@ struct GeneralSettingsView: View {
         return AgentHookCopy.refusedCaption(refused, enabled: model.engine.agentHooks)
     }
 
-    /// A button rather than a tooltip, for the reason the limits switch has
+    /// A button rather than a tooltip, for the reason the claude.ai import has
     /// one: this is the only thing Sissy writes outside its own folder, and
     /// what it writes has to be readable before the switch is flipped.
     private var agentHooksDetailButton: some View {
@@ -103,89 +111,51 @@ struct GeneralSettingsView: View {
     private var historyCaption: String {
         let days = model.engine.historyRetentionDays
         guard days > 0 else {
-            return "Switched off in server.json, so Sissy records nothing beyond the day it "
-                + "is counting. Export and Delete still reach what an earlier run left."
+            return "Switched off in server.json, so nothing is recorded beyond the day Sissy is "
+                + "counting. Export and Delete still reach what an earlier run left."
         }
-        return "A day-by-model record kept in history/ for \(days) days, so the panel can show "
-            + "more than today. Sissy sends none of it anywhere, and Export is the only way "
-            + "any of it leaves this Mac."
+        return "A day-by-model record kept in history/ for \(days) days. Sissy sends none of it "
+            + "anywhere, and Export is the only way any of it leaves this Mac."
     }
 
     /// What the export carries, said before it is pressed rather than
     /// discovered in the file. The rows name repository paths, and a folder
     /// name is often a client's name — the panel renders the last component
-    /// for exactly that reason, and a file leaving the machine cannot.
-    private static let exportCaption =
+    /// for exactly that reason, and a file leaving the machine cannot. It
+    /// hangs off the ⓘ for the reason the hook detail does: the row's own
+    /// caption has to fit beside its buttons.
+    private static let exportDetail =
         "One CSV per provider plus a combined one, at the archive's own grain: a row per day, "
         + "model and project, with the tokens and the cost as recorded rather than as the panel "
         + "rounds them. A month or a quarter is a pivot table away. The rows carry the full path "
         + "of every repository the work was in, so choose where the folder goes accordingly."
 
+    private static let exportDetailButtonLabel = "What the export carries"
+
+    /// The ⓘ beside Usage history, for the reason the hook switch has one:
+    /// what a button sends off the Mac has to be readable before it is pressed.
+    private var exportDetailButton: some View {
+        Button {
+            showingExportDetail = true
+        } label: {
+            Image(systemName: "info.circle")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(Self.exportDetailButtonLabel)
+        .popover(isPresented: $showingExportDetail, arrowEdge: .bottom) {
+            Text(Self.exportDetail)
+                .font(.callout)
+                .frame(width: Self.detailPopoverWidth)
+                .padding()
+        }
+    }
+
     var body: some View {
         Form {
             Section {
-                LabeledContent("Start at login") {
-                    if model.loginItem.requiresApproval {
-                        Button("Approve in Login Items") { model.loginItem.openLoginItemsSettings() }
-                    } else {
-                        Toggle("Start at login", isOn: launchAtLoginBinding)
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                    }
-                }
-                Text(
-                    "Sissy counts while it is running, so leaving this on is what keeps the "
-                        + "day complete after a restart."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Picker("Keep awake", selection: keepAwakeModeBinding) {
-                    ForEach(KeepAwakeMode.allCases, id: \.self) { mode in
-                        Text(UsageFormat.keepAwakeTitle(mode)).tag(mode)
-                    }
-                }
-                Text(keepAwakeCaption)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                Toggle("Keep the screen on too", isOn: keepScreenAwakeBinding)
-                Text(
-                    "Applies whenever the Mac is being held. Off lets the display sleep and the Mac "
-                        + "lock itself on its usual schedule, with the Mac still held awake "
-                        + "underneath for the agents."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Toggle("Animate Sissy", isOn: sissyMotionBinding)
-                Text(
-                    "A blink when new usage lands, in the menu bar and in the panel, "
-                        + "and the eye shutting while there is nothing to show. Nothing in between. "
-                        + "Follows the system's Reduce Motion setting."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
-
-            Section {
-                LabeledContent {
-                    Toggle(AgentHookCopy.title, isOn: agentHooksBinding)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(AgentHookCopy.title)
-                        agentHooksDetailButton
-                    }
-                }
-                Text(agentHooksCaption)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                startAtLogin
+                animateSissy
+                agentHooks
                 // Only ever reached by a configuration Sissy could not
                 // rewrite. The launch path retries on its own; this is for
                 // someone who has just fixed whatever stopped it and does not
@@ -197,38 +167,13 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                LabeledContent("Files") {
-                    HStack(spacing: 14) {
-                        Button("Open logs") { model.openLogs() }
-                            .buttonStyle(.link)
-                        Button("Show in Finder") { revealConfig() }
-                            .buttonStyle(.link)
-                    }
-                }
-                Text(verbatim: (SissyPaths.appSupportDir.path as NSString).abbreviatingWithTildeInPath)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                keepAwake
+                keepScreenAwake
+            }
 
-                Text("Session hooks: ~/.claude/settings.json and ~/.codex/hooks.json")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-
-                LabeledContent("Usage history") {
-                    HStack(spacing: 14) {
-                        Button("Export CSV") { model.exportUsageHistory() }
-                            .buttonStyle(.link)
-                        Button("Delete") { confirmingDelete = true }
-                            .buttonStyle(.link)
-                    }
-                }
-                Text(historyCaption)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Text(Self.exportCaption)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+            Section {
+                files
+                usageHistory
             }
         }
         .confirmationDialog(
@@ -248,6 +193,110 @@ struct GeneralSettingsView: View {
         // reads it whenever the window appears rather than trusting what it
         // last set: the user can undo it from System Settings.
         .task { model.loginItem.refresh() }
+    }
+
+    private var startAtLogin: some View {
+        LabeledContent {
+            if model.loginItem.requiresApproval {
+                Button("Approve in Login Items") { model.loginItem.openLoginItemsSettings() }
+            } else {
+                Toggle("Start at login", isOn: launchAtLoginBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+        } label: {
+            Text("Start at login")
+            Text("Sissy counts only while it is running, so this is what keeps a day complete.")
+        }
+    }
+
+    private var animateSissy: some View {
+        LabeledContent {
+            Toggle("Animate Sissy", isOn: sissyMotionBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        } label: {
+            Text("Animate Sissy")
+            Text(
+                "A blink when usage lands, the eye shut while nothing is. "
+                    + "Follows Reduce Motion."
+            )
+        }
+    }
+
+    private var agentHooks: some View {
+        LabeledContent {
+            Toggle(AgentHookCopy.title, isOn: agentHooksBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        } label: {
+            HStack(spacing: 4) {
+                Text(AgentHookCopy.title)
+                agentHooksDetailButton
+            }
+            Text(agentHooksCaption)
+        }
+    }
+
+    private var keepAwake: some View {
+        LabeledContent {
+            Picker("Keep awake", selection: keepAwakeModeBinding) {
+                ForEach(KeepAwakeMode.allCases, id: \.self) { mode in
+                    Text(UsageFormat.keepAwakeTitle(mode)).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        } label: {
+            Text("Keep awake")
+            Text(keepAwakeCaption)
+        }
+    }
+
+    private var keepScreenAwake: some View {
+        LabeledContent {
+            Toggle("Keep the screen on too", isOn: keepScreenAwakeBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        } label: {
+            Text("Keep the screen on too")
+            Text("Off lets the display sleep while the Mac stays awake underneath for the agents.")
+        }
+    }
+
+    /// Names both files Sissy writes outside its own folder, which is what the
+    /// hook switch promises can be found.
+    private var files: some View {
+        LabeledContent {
+            HStack(spacing: 14) {
+                Button("Open logs") { model.openLogs() }
+                    .buttonStyle(.link)
+                Button("Show in Finder") { revealConfig() }
+                    .buttonStyle(.link)
+            }
+        } label: {
+            Text("Files")
+            Text(verbatim: (SissyPaths.appSupportDir.path as NSString).abbreviatingWithTildeInPath)
+            Text("Session hooks: ~/.claude/settings.json and ~/.codex/hooks.json")
+        }
+        .textSelection(.enabled)
+    }
+
+    private var usageHistory: some View {
+        LabeledContent {
+            HStack(spacing: 14) {
+                Button("Export CSV") { model.exportUsageHistory() }
+                    .buttonStyle(.link)
+                Button("Delete") { confirmingDelete = true }
+                    .buttonStyle(.link)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("Usage history")
+                exportDetailButton
+            }
+            Text(historyCaption)
+        }
     }
 
     private var launchAtLoginBinding: Binding<Bool> {

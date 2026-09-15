@@ -37,6 +37,17 @@ struct SettingsRootView: View {
     @Bindable var model: SissyModel
 
     private static let width: CGFloat = 560
+    /// The budget a tab is designed to fit in, and the height past which one
+    /// scrolls instead of growing the window. A tab that needs more than this
+    /// is a tab that should have split.
+    ///
+    /// It is a ceiling on the content, which the window adds its own title bar
+    /// and tab strip to. Without one the window followed the content off the
+    /// bottom of the screen — and it cannot be resized or scrolled back, so
+    /// what went past the edge was unreachable: measured at 850 pt for General
+    /// against the 841 pt a 14" Mac set to a larger text size has room for, and
+    /// the 775 pt of a 1280×800 display.
+    private static let maxContentHeight: CGFloat = 600
     /// A `TabView` in a `Settings` scene otherwise names the window after the
     /// selected tab, which reads as three different windows in the Window menu
     /// and in Mission Control.
@@ -44,7 +55,10 @@ struct SettingsRootView: View {
 
     /// `fixedSize` is what makes the window follow the selected tab: without a
     /// definite ideal height the settings window keeps whatever height the
-    /// tallest tab established, and About then floats in the leftover space.
+    /// tallest tab established, and a shorter tab then floats centred in the
+    /// leftover space. The ceiling therefore goes on each tab's own content,
+    /// inside the `fixedSize` — put outside it, it makes the whole `TabView`
+    /// flexible again and brings that floating back.
     var body: some View {
         TabView(selection: $model.settingsTab) {
             tab(.general) { GeneralSettingsView(model: model) }
@@ -57,7 +71,8 @@ struct SettingsRootView: View {
         // a scroll view underneath it is scrolled off the top — so General,
         // whose `Form` is one, and About, which has none and can never report
         // "at the top", disagreed about whether to draw a band under the tabs.
-        // Neither tab ever scrolls: the window is sized to its content.
+        // A tab at the ceiling does scroll, and gives up that band to keep the
+        // three tabs drawing the same chrome.
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
     }
 
@@ -66,7 +81,9 @@ struct SettingsRootView: View {
         @ViewBuilder content: () -> Content
     ) -> some TabContent<SettingsTab> {
         Tab(tab.title, systemImage: tab.symbol, value: tab) {
-            content().navigationTitle(Self.windowTitle)
+            content()
+                .frame(maxHeight: Self.maxContentHeight)
+                .navigationTitle(Self.windowTitle)
         }
     }
 }
