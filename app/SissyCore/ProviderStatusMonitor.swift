@@ -35,10 +35,10 @@ actor ProviderStatusMonitor {
     /// to how often this polls. Nonisolated because it is written from the
     /// frame path, which cannot afford to await this actor.
     nonisolated private let lastActivity = LockedValue<Date?>(nil)
-    private let feeds: [String: URL]
+    private let feeds: [String: ProviderStatusFeed]
     /// The network half, injectable for the reason `ClaudeLimitsProbe`'s is: a
     /// test of the poll contract must not reach a vendor to observe it.
-    private let fetchSource: @Sendable (URL) async throws -> ProviderStatusReading
+    private let fetchSource: @Sendable (ProviderStatusFeed) async throws -> ProviderStatusReading
     private var pollTask: Task<Void, Never>?
     /// Bumped by every stop, so a request in flight when the monitor was torn
     /// down cannot publish over the run that replaced it.
@@ -46,15 +46,36 @@ actor ProviderStatusMonitor {
 
     init(
         providers: [String],
-        fetch: @escaping @Sendable (URL) async throws -> ProviderStatusReading = {
-            try await StatuspageFeed.fetch(root: $0)
+        fetch: @escaping @Sendable (ProviderStatusFeed) async throws -> ProviderStatusReading = {
+            try await ProviderStatusMonitor.read($0)
         }
     ) {
         feeds = Dictionary(
             uniqueKeysWithValues: providers.compactMap { id in
-                ProviderStatusFeed.root(for: id).map { (id, $0) }
+                ProviderStatusFeed.feed(for: id).map { (id, $0) }
             })
         fetchSource = fetch
+    }
+
+    /// One provider's whole reading, by the shape its vendor publishes.
+    ///
+    /// A page that answers both halves in one document costs one request; the
+    /// one that splits them costs two, and the second is best-effort — a
+    /// component list that failed leaves the sentence standing, and `publish`
+    /// keeps whichever tree was last read rather than blanking it.
+    static func read(_ feed: ProviderStatusFeed, checkedAt: Date = Date()) async throws
+        -> ProviderStatusReading
+    {
+        switch feed.components {
+        case .statuspage:
+            return try await StatuspageFeed.summary(root: feed.root, checkedAt: checkedAt)
+        case .incidentIO:
+            let reading = try await StatuspageFeed.fetch(root: feed.root, checkedAt: checkedAt)
+            guard let components = try? await IncidentIOFeed.components(root: feed.root) else {
+                return reading
+            }
+            return reading.with(components: components)
+        }
     }
 
     nonisolated func currentStatus() -> [String: ProviderStatusReading] { published.load() }
@@ -130,11 +151,15 @@ actor ProviderStatusMonitor {
         if published.load() != before { await onRefresh() }
     }
 
-    /// A reading replaces whatever was there. A failure replaces nothing: the
-    /// previous state keeps its own age, and a provider that has never
-    /// answered gets the one `unknown` row it will keep until a fetch works —
-    /// republishing that on every failed round would move an age that dates a
-    /// reading nobody ever took.
+    /// A reading replaces whatever was there, except for a tree it could not
+    /// read: the component list is the best-effort half, so one that failed
+    /// keeps the last one rather than collapsing the row's detail because a
+    /// second request timed out.
+    ///
+    /// A failure replaces nothing at all: the previous state keeps its own
+    /// age, and a provider that has never answered gets the one `unknown` row
+    /// it will keep until a fetch works — republishing that on every failed
+    /// round would move an age that dates a reading nobody ever took.
     private func publish(_ reading: ProviderStatusReading?, for id: String) {
         guard let reading else {
             published.update { map in
@@ -143,7 +168,12 @@ actor ProviderStatusMonitor {
             }
             return
         }
-        published.update { $0[id] = reading }
+        published.update { map in
+            let previous = map[id]?.components ?? []
+            map[id] =
+                reading.components.isEmpty && !previous.isEmpty
+                ? reading.with(components: previous) : reading
+        }
     }
 
     private func nextDelay() -> Duration {
