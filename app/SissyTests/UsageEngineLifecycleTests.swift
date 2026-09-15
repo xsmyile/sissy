@@ -23,7 +23,8 @@ final class UsageEngineLifecycleTests: XCTestCase {
     /// Points every path at the temp tree and pins pricing to the embedded
     /// seed, so a test neither reads the real log trees nor reaches the network.
     private func makeEngine(
-        limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe { _, _ in .absent }
+        limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe { _, _ in .absent },
+        statusMonitor: ProviderStatusMonitor? = nil
     ) -> UsageEngine {
         var config = ServerConfig.defaults
         config.claudeDataDir = tempDir.appendingPathComponent("claude").path
@@ -33,9 +34,32 @@ final class UsageEngineLifecycleTests: XCTestCase {
             config: config,
             configURL: tempDir.appendingPathComponent("server.json"),
             limitsProbe: limitsProbe,
-            claudeAccounts: .inert()
+            claudeAccounts: .inert(),
+            statusMonitor: statusMonitor
+                ?? ProviderStatusMonitor(providers: []) { _ in
+                    throw ProviderStatusError.malformedPayload
+                }
         )
     }
+
+    /// A monitor whose every fetch fulfils the expectation handed to it.
+    ///
+    /// Inverted at the call sites, because what these tests assert is that
+    /// something does *not* happen — and a poll loop starts its work in a
+    /// detached task, so reading a counter straight after the teardown proves
+    /// only that the task had not been scheduled yet.
+    private func signallingMonitor(_ fetched: XCTestExpectation) -> ProviderStatusMonitor {
+        ProviderStatusMonitor(providers: [ProviderID.claudeCode]) { _ in
+            fetched.fulfill()
+            return ProviderStatusReading(
+                indicator: .operational, description: "All Systems Operational",
+                checkedAt: Date())
+        }
+    }
+
+    /// Long enough for a poll task that was started to reach its first fetch,
+    /// which is immediate: the loop opens with no delay at all.
+    private static let orphanPollWindow: TimeInterval = 1
 
     /// A teardown has to leave no poll behind, and the limits poll is the one
     /// that reaches the network on a timer.
@@ -86,6 +110,29 @@ final class UsageEngineLifecycleTests: XCTestCase {
         await booting.value
 
         XCTAssertEqual(reads.load(), 0, "start() resumed into a torn-down engine")
+    }
+
+    /// The status poll is the second thing that reaches the network on a timer,
+    /// and it is reached across two suspensions a teardown can land in: the
+    /// boot's own, and a Settings toggle flipped while the app is quitting.
+    /// Neither may leave a loop behind, because nothing holds a handle to one
+    /// that is.
+    ///
+    /// Only the toggle is pinned here. The boot's window is an actor hop —
+    /// `ClaudeLimitsProbe.start` spawns its request and returns rather than
+    /// awaiting the credential — so a test of that path passes whether the
+    /// guard is there or not, and a test that cannot fail is worse than none.
+    /// The guard covers both; this holds the half that can be held.
+    func testTheStatusToggleDoesNotRestartAStoppedEngine() async {
+        let fetched = XCTestExpectation(description: "status fetch after teardown")
+        fetched.isInverted = true
+        let engine = makeEngine(statusMonitor: signallingMonitor(fetched))
+        await engine.stop()
+
+        await engine.setStatusChecks(enabled: false)
+        await engine.setStatusChecks(enabled: true)
+
+        await fulfillment(of: [fetched], timeout: Self.orphanPollWindow)
     }
 
     /// A provider that was never built still has to be listed, because "off"

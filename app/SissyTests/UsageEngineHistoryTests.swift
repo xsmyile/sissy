@@ -34,6 +34,7 @@ final class UsageEngineHistoryTests: XCTestCase {
         config.claudeDataDir = claudeDir.path
         config.codexDataDir = codexDir.path
         config.remotePricing = false
+        config.statusChecks = false
         config.providers = ProviderToggles(claudeCode: true, codex: false)
         config.historyRetentionDays = retentionDays
         return UsageEngine(
