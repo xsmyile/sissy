@@ -185,11 +185,17 @@ final class UsageEngineHost {
     }
 
     /// Forgets one archived account, for the user who wants a stored secret
-    /// gone.
+    /// gone. A keychain that refused is said out loud rather than reported as
+    /// a deletion that did not happen.
     func forgetClaudeAccount(uuid: String) {
         guard let engine else { return }
+        accountSwitchFailure = nil
         Task { [weak self] in
-            await engine.forgetClaudeAccount(uuid: uuid)
+            do {
+                try await engine.forgetClaudeAccount(uuid: uuid)
+            } catch {
+                self?.accountSwitchFailure = ClaudeAccountSwitchCopy.forgetFailure
+            }
             self?.claudeAccounts = engine.claudeAccountSnapshot
         }
     }

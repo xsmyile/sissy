@@ -52,7 +52,7 @@ struct ClaudeCodeSignals: SourceSignals {
         probe: ProviderSignals?
     ) -> ProviderSignals {
         var reading = profile
-        let readings = [web, probe].compactMap { $0 }
+        let readings = [probe, web].compactMap { $0 }
         guard
             let live = readings.first(where: { $0.limitsObservedAt != nil })
                 ?? readings.first(where: { $0.limitsState != .quiet })

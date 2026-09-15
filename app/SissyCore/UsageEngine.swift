@@ -46,10 +46,10 @@ actor UsageEngine {
     /// rebuild, and the change lands on the first real frame instead.
     private var hasReading = false
 
-    /// Polls Claude Code's subscription windows. Constructed unconditionally
-    /// so the toggle can start it later without rebuilding the provider list;
-    /// it does nothing until `start` is called.
-    private let claudeLimitsProbe: ClaudeLimitsProbe
+    /// The config home Claude Code is metered from, kept because the account
+    /// registry and the credential both address that home rather than the
+    /// default one.
+    private let claudeHome: ProviderHome
     /// The claude.ai reader. Built whether or not a session is imported —
     /// nothing runs until `startClaudeLimits` finds one — because the adapter
     /// that publishes its reading is assembled once, at launch, and an import
@@ -130,15 +130,17 @@ actor UsageEngine {
     /// resolution is what decides which readers exist and there is nothing
     /// left to re-derive it from afterwards.
     private let resolvedProviders: [ResolvedProvider]
-    /// The limits reader built on Claude Code's own credential, or nil when
-    /// nobody is signed into the CLI and the imported claude.ai session is all
-    /// that is left.
+    /// The limits reader built on Claude Code's own credential.
     private let claudeOwnLimits: ClaudeLimitsProbe?
-    /// Whether Claude's limits come from the CLI's own credential. Nonisolated
-    /// because Settings words a row from it, and a row that says Sissy is
-    /// reading claude.ai while it is reading the CLI's token is the kind of lie
-    /// this app's settings are not allowed to tell.
-    nonisolated let claudeUsesOwnCredential: Bool
+    /// Whether the CLI keeps a credential Sissy can read.
+    ///
+    /// Answered off the construction path — finding out costs a `security`
+    /// call when there is no credential file — and published rather than
+    /// returned, because Settings words a row from it and a row that says
+    /// Sissy is reading claude.ai while it is reading the CLI's token is the
+    /// kind of lie this app's settings are not allowed to tell.
+    nonisolated private let claudeOwnCredential = LockedValue(false)
+    nonisolated var claudeUsesOwnCredential: Bool { claudeOwnCredential.load() }
 
     private struct ResolvedProvider {
         let id: String
@@ -153,7 +155,7 @@ actor UsageEngine {
     init(
         config: ServerConfig,
         configURL: URL = ServerConfig.defaultURL,
-        limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe(),
+        limitsProbe: ClaudeLimitsProbe? = nil,
         webSource: ClaudeWebSource = ClaudeWebSource(),
         claudeAccounts: ClaudeAccountRegistry? = nil,
         keepAwakePolicy: KeepAwakePolicy = .default
@@ -195,12 +197,13 @@ actor UsageEngine {
                 home: codexHome
             ),
         ]
-        self.claudeLimitsProbe = limitsProbe
+        self.claudeHome = claudeHome
         self.claudeWebSource = webSource
         self.claudeAccounts =
             claudeAccounts
             ?? ClaudeAccountRegistry(
-                store: ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: stateDir)))
+                store: ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: stateDir)),
+                slot: .live(home: claudeHome))
         var ownLimits: ClaudeLimitsProbe?
         var providers: [any UsageProvider] = []
         for resolved in self.resolvedProviders where resolved.activation.isMetering {
@@ -220,15 +223,18 @@ actor UsageEngine {
             default:
                 // The CLI's own credential answers the usage endpoint with no
                 // dialog and no grant to lapse, from the file where there is
-                // one and from the login keychain where there is not. The
-                // imported claude.ai session is the fallback for a Mac that
-                // has neither, which is a CLI nobody has signed into.
-                let probe: ClaudeLimitsProbe? =
-                    ClaudeCodeCredentials.isPresent(home: home)
-                    ? ClaudeLimitsProbe(credentials: { _, _ in
+                // one and from the login keychain where there is not. Built
+                // unconditionally: asking which of the two holds it would
+                // spawn `security` on whatever thread is constructing the
+                // engine, and the probe's own first read answers the same
+                // question off it. The imported claude.ai session stays beside
+                // it as the fallback for a Mac that has neither, which is a
+                // CLI nobody has signed into.
+                let probe =
+                    limitsProbe
+                    ?? ClaudeLimitsProbe(credentials: { _, _ in
                         ClaudeCodeCredentials.load(home: home)
                     })
-                    : nil
                 ownLimits = probe
                 providers.append(
                     LocalUsageProvider.claudeCode(
@@ -238,14 +244,13 @@ actor UsageEngine {
                         persistenceURL: Self.persistenceURL(for: home, in: stateDir),
                         historyRoot: historyRoot,
                         pricingOverride: config.pricingOverride,
-                        limitsProbe: probe ?? limitsProbe,
-                        webSource: probe == nil ? webSource : nil,
+                        limitsProbe: probe,
+                        webSource: webSource,
                         profile: ClaudeProfileSource(url: home.claudeProfileURL),
                         ledger: projectLedger
                     ))
             }
         }
-        self.claudeUsesOwnCredential = ownLimits != nil
         self.claudeOwnLimits = ownLimits
         self.aggregator = UsageAggregator(providers: providers)
         let resolution =
@@ -293,8 +298,7 @@ actor UsageEngine {
         }
     }
 
-    /// Seeds the account archive from the config homes on this Mac, then keeps
-    /// it level with whichever account is signed in.
+    /// Keeps the account archive level with whichever account is signed in.
     ///
     /// The poll is what catches a `/login` or a switch made outside Sissy, and
     /// it is cheap: an unchanged credential costs one `security` call and no
@@ -302,12 +306,7 @@ actor UsageEngine {
     /// it, which is roughly once per token rotation.
     private func startClaudeAccountWatch() {
         let registry = claudeAccounts
-        let homes =
-            resolvedProviders
-            .filter { $0.id == ProviderID.claudeCode }
-            .map(\.home.home)
         claudeAccountsTask = Task.detached {
-            await registry.seed(homes: homes)
             while !Task.isCancelled {
                 await registry.captureActive()
                 do {
@@ -445,9 +444,10 @@ actor UsageEngine {
     }
 
     /// Forgets one archived account, which is the only way a stored secret
-    /// leaves this Mac by Sissy's hand.
-    func forgetClaudeAccount(uuid: String) async {
-        await claudeAccounts.forget(uuid: uuid)
+    /// leaves this Mac by Sissy's hand. Throws when the keychain refused, so
+    /// nothing tells the user a secret is gone while it is still filed.
+    func forgetClaudeAccount(uuid: String) async throws {
+        try await claudeAccounts.forget(uuid: uuid)
         await reemit()
     }
 
@@ -471,23 +471,23 @@ actor UsageEngine {
     func refreshProvider(id: String) async {
         guard lifecycle == .running else { return }
         let me = self
-        // The CLI's own credential is the first answer where there is one:
-        // it costs no dialog and it is the account that is actually signed in.
-        if id == ProviderID.claudeCode, let own = claudeOwnLimits {
-            await own.refresh { await me.reemit() }
-        } else if id == ProviderID.claudeCode {
+        if id == ProviderID.claudeCode {
+            // Both sources, because both may be reading and the row shows
+            // whichever answered: refreshing only one leaves the button doing
+            // nothing on the Mac where the other is the live one.
+            if let own = claudeOwnLimits {
+                await own.refresh { await me.reemit() }
+            }
+            // A session claude.ai has closed cannot be refreshed into working
+            // again, and re-reading the same dead string is the button failing
+            // at its only job. The notice beside it says "Import again", so
+            // that is what this does.
             if hasClaudeWebSession {
-                // A session claude.ai has closed cannot be refreshed into
-                // working again, and re-reading the same dead string is the
-                // button failing at its only job. The notice beside it says
-                // "Import again", so that is what this does.
                 if claudeWebSource.currentSignals().limitsState == .sessionExpired {
                     _ = await importClaudeWebSession()
                 } else {
                     await claudeWebSource.refresh { await me.reemit() }
                 }
-            } else {
-                await claudeLimitsProbe.refresh { await me.reemit() }
             }
         }
         await aggregator.refreshSignals(for: id)
@@ -702,45 +702,42 @@ actor UsageEngine {
         // Claude.app's account and the keychain item is the CLI's, so starting
         // either here is how a second account's windows land under the first
         // account's name.
-        if !defaultClaudeAccountReadsItsOwnHome {
-            // The session is imported rather than asked for. A user who
-            // switched limits on has already granted the permission this needs,
-            // and making them find a second button in Settings to get the live
-            // reading is the switch failing to do what it says.
-            if !hasClaudeWebSession {
-                _ = await adoptClaudeWebSession(allowingInteraction: userInitiated)
-            }
-            if hasClaudeWebSession {
-                await claudeWebSource.start(userInitiated: userInitiated) { await me.reemit() }
-            } else {
-                await claudeLimitsProbe.start(userInitiated: userInitiated) { await me.reemit() }
-            }
-        }
         // The CLI's own credential raises no dialog and has no grant to go
         // stale, so `userInitiated` means nothing to it: it polls from the
-        // moment there is something to read.
+        // moment there is something to read. Whether it found one is its own
+        // first reading rather than a second lookup — asking separately would
+        // spawn `security` for an answer the probe is about to publish.
         if let own = claudeOwnLimits {
-            await own.start(userInitiated: false) { await me.reemit() }
+            await own.start(userInitiated: false) {
+                await me.noteOwnCredential(own.currentSignals().limitsState)
+                await me.reemit()
+            }
         }
+        // The imported claude.ai session runs beside it rather than instead of
+        // it: `ClaudeCodeSignals.merge` prefers the CLI's own reading and falls
+        // back to this one, which is the only answer left on a Mac nobody has
+        // signed the CLI into. It is imported rather than asked for, so a user
+        // who already granted that permission needs no second button.
+        if !hasClaudeWebSession {
+            _ = await adoptClaudeWebSession(allowingInteraction: userInitiated)
+        }
+        guard hasClaudeWebSession else { return }
+        await claudeWebSource.start(userInitiated: userInitiated) { await me.reemit() }
+    }
+
+    /// Records whether the CLI turned out to keep a credential Sissy can read,
+    /// which is what Settings words its limits-source row from.
+    private func noteOwnCredential(_ state: ProviderLimitsState) {
+        claudeOwnCredential.update { $0 = state != .signedOut }
     }
 
     /// Stops both readers. Which one was running is not worth remembering:
     /// stopping one that never started is a no-op, and asking would be a
     /// second place for the answer to be wrong.
     private func stopClaudeLimits() async {
-        await claudeLimitsProbe.stop()
         await claudeWebSource.stop()
         await claudeOwnLimits?.stop()
     }
-
-    /// Whether the account that predates accounts has a credential of its own.
-    ///
-    /// When it has, nothing on this Mac needs the keychain item or the imported
-    /// cookie to read Claude's limits, and neither is started — which also
-    /// means no keychain dialog and no session to go stale. When it has not —
-    /// a CLI that keeps its token only in the keychain, or one never signed in
-    /// — the two shared sources are still the only answer there is.
-    private var defaultClaudeAccountReadsItsOwnHome: Bool { claudeUsesOwnCredential }
 
     /// Where one provider's offsets are kept.
     ///

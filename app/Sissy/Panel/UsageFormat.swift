@@ -522,17 +522,18 @@ enum UsageFormat {
         return "\(name) · \(qualifier)"
     }
 
-    /// What one account is called in the picker.
+    /// What one account is called in the switcher.
     ///
     /// The address is what a user recognises an account by — it is what they
     /// typed to sign in — with the organisation behind it for an account whose
-    /// address the vendor does not report, and the key it was added under when
-    /// neither has been read yet. An account whose files nothing has written
-    /// still has to be pickable, which is why this never answers empty.
+    /// address the vendor does not report. An account the vendor named neither
+    /// for falls back to its own id rather than to the CLI's name, because two
+    /// such accounts would otherwise render the same word and the menu would
+    /// offer a choice nobody could make.
     static func accountLabel(_ identity: ClaudeAccountIdentity) -> String {
         if let email = identity.email, !email.isEmpty { return email }
         if let organization = identity.organization, !organization.isEmpty { return organization }
-        return providerName(ProviderID.claudeCode)
+        return identity.uuid
     }
 
     private static func accountQualifier(_ id: String, account: ProviderAccount?) -> String? {
@@ -634,6 +635,9 @@ enum UsageFormat {
 /// not one sentence: an account that has never signed in needs a login, and a
 /// keychain that said no needs the user to allow it.
 enum ClaudeAccountSwitchCopy {
+    static let forgetFailure =
+        "The keychain would not let Sissy delete that saved sign-in, so it is still there"
+
     static func failure(_ why: ClaudeAccountRegistry.Failure) -> String {
         switch why {
         case .notArchived:

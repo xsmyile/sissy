@@ -46,27 +46,39 @@ actor ClaudeAccountRegistry {
         /// credential or identify it over the network.
         static let inert = ActiveSlot(read: { nil }, write: { _ in })
 
-        static let live = ActiveSlot(
-            read: {
-                try? ClaudeKeychainCLI.read(
-                    service: ClaudeKeychainCLI.claudeService,
-                    account: ClaudeKeychainCLI.claudeLoginName())
-            },
-            write: { data in
-                try ClaudeKeychainCLI.write(
-                    data,
-                    service: ClaudeKeychainCLI.claudeService,
-                    account: ClaudeKeychainCLI.claudeLoginName())
-                let mirror = AccountDefaults.claudeHome.appendingPathComponent(
-                    AccountDefaults.claudeCredentialsName)
-                guard FileManager.default.fileExists(atPath: mirror.path) else { return }
-                try? data.write(to: mirror, options: [.atomic, .completeFileProtection])
-            })
+        /// The slot of the config home Sissy actually meters.
+        ///
+        /// Taken from the resolved home rather than assumed to be the default
+        /// one: a `claudeDataDir` pointed elsewhere is metered from that home,
+        /// and its credential is filed under that home's own service name. A
+        /// slot hardcoded to the unscoped item would watch an account nobody
+        /// is metering and write a switch into a home nobody is reading.
+        ///
+        /// The mirror beside the keychain item is written only when the CLI
+        /// already keeps one, so this can never create a plaintext credential
+        /// where the CLI had none — and an atomic write onto an existing file
+        /// keeps its `0600`. A mirror that cannot be written fails the whole
+        /// switch: leaving it naming the previous account while the keychain
+        /// names the new one is the ambiguity this type exists to avoid.
+        static func live(home: ProviderHome) -> ActiveSlot {
+            let service = ClaudeKeychainCLI.claudeService(for: home.home)
+            let mirror = home.claudeCredentialsURL
+            return ActiveSlot(
+                read: {
+                    try? ClaudeKeychainCLI.read(
+                        service: service, account: ClaudeKeychainCLI.claudeLoginName())
+                },
+                write: { data in
+                    try ClaudeKeychainCLI.write(
+                        data, service: service, account: ClaudeKeychainCLI.claudeLoginName())
+                    guard FileManager.default.fileExists(atPath: mirror.path) else { return }
+                    try data.write(to: mirror, options: .atomic)
+                })
+        }
     }
 
     private let store: ClaudeAccountStore
     private let slot: ActiveSlot
-    private let loginName: String
     /// Resolves a token to its owner. Injected so a test can exercise the
     /// capture without reaching Anthropic — the network is the only part of
     /// this that cannot be stood in for by the keychain.
@@ -91,38 +103,19 @@ actor ClaudeAccountRegistry {
 
     init(
         store: ClaudeAccountStore,
-        slot: ActiveSlot = .live,
-        loginName: String = ClaudeKeychainCLI.claudeLoginName(),
+        slot: ActiveSlot,
         identify: @escaping @Sendable (String) async throws -> ClaudeAccountIdentity = {
             try await ClaudeAccountProfile.resolve(token: $0)
         }
     ) {
         self.store = store
         self.slot = slot
-        self.loginName = loginName
         self.identify = identify
         let index = store.loadIndex()
         published.update { $0 = Snapshot(accounts: index.accounts, activeUUID: index.activeUUID) }
     }
 
     nonisolated func currentSnapshot() -> Snapshot { published.load() }
-
-    /// Archives the credentials of accounts that already have a config home of
-    /// their own, so a machine set up before Sissy knew about accounts does not
-    /// have to sign into each one again to make it switchable.
-    ///
-    /// Only the homes that hold something: a directory with no keychain item
-    /// is a home whose CLI never signed in there.
-    func seed(homes: [URL]) async {
-        for home in homes {
-            let service = ClaudeKeychainCLI.claudeService(for: home)
-            guard
-                let credential = try? ClaudeKeychainCLI.read(
-                    service: service, account: loginName)
-            else { continue }
-            await file(credential: credential, markActive: false)
-        }
-    }
 
     /// Reads the active credential and archives it when it is one Sissy has
     /// not seen. Cheap when nothing has changed, which is the ordinary case.
@@ -159,10 +152,13 @@ actor ClaudeAccountRegistry {
 
     /// Forgets one archived account, for the user who wants a stored secret
     /// gone. The CLI's own copy is untouched: it is the CLI's.
-    func forget(uuid: String) {
-        try? store.forget(uuid: uuid)
-        let index = store.loadIndex()
-        published.update { $0 = Snapshot(accounts: index.accounts, activeUUID: index.activeUUID) }
+    ///
+    /// Throws rather than reporting success on a keychain that refused: a
+    /// caller told the secret is gone when it is still filed would say so to
+    /// the user, which is the one thing a delete must never get wrong.
+    func forget(uuid: String) throws {
+        defer { publishIndex() }
+        try store.forget(uuid: uuid)
     }
 
     /// Identifies a credential and archives it. A token the vendor will not

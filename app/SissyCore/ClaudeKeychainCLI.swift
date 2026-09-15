@@ -136,13 +136,18 @@ enum ClaudeKeychainCLI {
         return user
     }
 
+    /// One `security` invocation, bounded.
+    ///
+    /// Standard error goes to the null device rather than a pipe: nothing here
+    /// reads it, and a pipe nobody drains blocks the child once the kernel
+    /// buffer fills.
     private static func run(_ arguments: [String]) throws -> (status: Int32, output: Data) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: toolPath)
         process.arguments = arguments
         let stdout = Pipe()
         process.standardOutput = stdout
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         try process.run()
         let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)

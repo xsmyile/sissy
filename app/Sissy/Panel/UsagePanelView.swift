@@ -97,6 +97,7 @@ struct UsagePanelView: View {
                     PanelProviderPage(
                         row: open,
                         onSelectAccount: { selectAccount($0) },
+                        switchFailure: model.engine.accountSwitchFailure,
                         refresh: { model.refreshProvider(open.id) }
                     )
                 } else {
