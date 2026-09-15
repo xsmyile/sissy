@@ -252,7 +252,7 @@ final class UsageHistoryStoreTests: XCTestCase {
         try write(provider: "codex", day: day(0), models: models)
         try write(provider: "codex", day: day(0), models: models)
 
-        let rollup = UsageHistoryStore.rollup(days: 7, in: root)
+        let rollup = try week(in: root)
 
         XCTAssertEqual(rollup.tokens, 500)
         XCTAssertEqual(rollup.cost, Decimal(string: "0.10"))
@@ -263,7 +263,7 @@ final class UsageHistoryStoreTests: XCTestCase {
         try write(provider: "claude-code", day: day(-3), models: ["a": totals(input: 20, cost: "2")])
         try write(provider: "codex", day: day(-3), models: ["b": totals(input: 30, cost: "3")])
 
-        let rollup = UsageHistoryStore.rollup(days: 7, in: root)
+        let rollup = try week(in: root)
 
         XCTAssertEqual(rollup.tokens, 60)
         XCTAssertEqual(rollup.cost, Decimal(6))
@@ -273,7 +273,7 @@ final class UsageHistoryStoreTests: XCTestCase {
         try write(provider: "claude-code", day: day(0), models: ["a": totals(input: 10, cost: "1")])
         try write(provider: "claude-code", day: day(-7), models: ["a": totals(input: 99, cost: "9")])
 
-        let rollup = UsageHistoryStore.rollup(days: 7, in: root)
+        let rollup = try week(in: root)
 
         XCTAssertEqual(rollup.tokens, 10, "a day outside the window was rolled up")
     }
@@ -312,7 +312,7 @@ final class UsageHistoryStoreTests: XCTestCase {
         try write(provider: "codex", day: day(-2), models: ["a": totals(input: 10, cost: "1")])
         try write(provider: "codex", day: day(0), models: ["a": totals(input: 10, cost: "1")])
 
-        let rollup = UsageHistoryStore.rollup(days: 7, in: root)
+        let rollup = try week(in: root)
 
         let expected = Calendar.current.date(
             byAdding: .day, value: -2, to: Calendar.current.startOfDay(for: Date()))
@@ -372,7 +372,7 @@ final class UsageHistoryStoreTests: XCTestCase {
 
         try UsageHistoryStore.removeAll(in: root)
 
-        XCTAssertEqual(UsageHistoryStore.rollup(days: 7, in: root).tokens, 0)
+        XCTAssertEqual(try week(in: root).tokens, 0)
         XCTAssertFalse(
             FileManager.default.fileExists(
                 atPath: UsageHistoryStore.directory(in: root).path))
@@ -392,5 +392,69 @@ final class UsageHistoryStoreTests: XCTestCase {
 
         XCTAssertNil(UsageHistoryStore.load(provider: "codex", day: day(0), in: root))
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    // MARK: Periods
+
+    /// The windows nest, so the only thing the single pass can get wrong is
+    /// adding a day into a window that does not hold it. Three days apart
+    /// enough to fall on different sides of every cutoff.
+    func testEachWindowHoldsExactlyTheDaysInsideIt() throws {
+        try write(provider: "codex", day: day(0), models: ["a": totals(input: 1, cost: "1")])
+        try write(provider: "codex", day: day(-8), models: ["a": totals(input: 10, cost: "10")])
+        try write(provider: "codex", day: day(-40), models: ["a": totals(input: 100, cost: "100")])
+
+        let rollups = UsageHistoryStore.rollups(for: UsagePeriod.archived, in: root)
+
+        XCTAssertEqual(rollups[.sevenDays]?.tokens, 1)
+        XCTAssertEqual(rollups[.thirtyDays]?.tokens, 11)
+        XCTAssertEqual(rollups[.all]?.tokens, 111)
+        XCTAssertEqual(rollups[.all]?.cost, Decimal(111))
+    }
+
+    /// The pass is an optimisation over a walk per window, so it has to answer
+    /// what a walk per window would have.
+    func testOnePassAgreesWithAWindowRolledUpOnItsOwn() throws {
+        try write(provider: "codex", day: day(-1), models: ["a": totals(input: 7, cost: "2")])
+        try write(provider: "claude-code", day: day(-9), models: ["b": totals(input: 9, cost: "3")])
+
+        let together = UsageHistoryStore.rollups(for: UsagePeriod.archived, in: root)
+
+        for period in UsagePeriod.archived {
+            let alone = UsageHistoryStore.rollups(for: [period], in: root)[period]
+            XCTAssertEqual(together[period], alone, "\(period) disagreed with its own walk")
+        }
+    }
+
+    /// `all` is everything kept, so it takes no cutoff — and the day it names
+    /// is the whole of what the word means.
+    func testTheWidestWindowTakesEveryDayAndNamesItsFirst() throws {
+        try write(provider: "codex", day: day(-300), models: ["a": totals(input: 5, cost: "1")])
+        try write(provider: "codex", day: day(0), models: ["a": totals(input: 5, cost: "1")])
+
+        let rollup = try XCTUnwrap(UsageHistoryStore.rollups(for: [.all], in: root)[.all])
+
+        XCTAssertEqual(rollup.tokens, 10)
+        XCTAssertEqual(
+            rollup.earliestDay,
+            Calendar.current.date(
+                byAdding: .day, value: -300, to: Calendar.current.startOfDay(for: Date())))
+    }
+
+    /// A window holding none of the archive's days is a reading of zero, not an
+    /// absence: a week nothing was spent in is true, and it has no first day to
+    /// name because it holds none.
+    func testAWindowWithNoDaysInItComesBackAtZeroWithNoFirstDay() throws {
+        try write(provider: "codex", day: day(-40), models: ["a": totals(input: 5, cost: "1")])
+
+        let rollups = UsageHistoryStore.rollups(for: UsagePeriod.archived, in: root)
+
+        XCTAssertEqual(rollups[.sevenDays]?.tokens, 0)
+        XCTAssertNil(rollups[.sevenDays]?.earliestDay)
+        XCTAssertEqual(rollups[.all]?.tokens, 5)
+    }
+
+    private func week(in root: URL) throws -> UsageHistoryRollup {
+        try XCTUnwrap(UsageHistoryStore.rollups(for: [.sevenDays], in: root)[.sevenDays])
     }
 }

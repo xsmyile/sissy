@@ -195,7 +195,7 @@ final class ProviderStatusTests: XCTestCase {
             burn: nil,
             providers: [ProviderSlice(id: ProviderID.claudeCode, tokens: 10, cost: 1)],
             keepAwake: .off,
-            history: nil,
+            history: [:],
             providerStatus: status)
         return UsagePanelSnapshot.make(frame: frame).providers.first
     }
