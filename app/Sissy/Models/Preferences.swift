@@ -14,6 +14,7 @@ struct Preferences: Codable, Equatable {
     /// for that — only a note that the migration happened, so a user who
     /// later removes Sissy from Login Items does not get it put back.
     var retiredServerAgent: Bool = false
+    /// Which account of each vendor the panel is currently showing, keyed by
 
     init(
         sissyMotion: Bool = true,

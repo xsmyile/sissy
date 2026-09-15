@@ -215,7 +215,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
             started.fulfill()
             await gate.wait()
             await order.requestFinished()
-            return []
+            return ClaudeLimitsProbe.Reading(windows: [], credits: nil)
         }
         let finished = expectation(description: "the refresh returned")
         Task {

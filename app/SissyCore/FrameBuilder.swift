@@ -106,6 +106,17 @@ enum ProviderLimitsState: Sendable, Equatable {
     /// to import again, and only saying which of the two happened tells them
     /// which button to press.
     case sessionExpired
+    /// The account is signed in and Sissy cannot reach its credential.
+    ///
+    /// Measured 2026-09-15: a second Claude Code config home keeps its token
+    /// in a keychain item whose service name carries a hash of that home
+    /// (`Claude Code-credentials-<hash>`), written at the moment that home
+    /// first signed in, and it writes no `.credentials.json` beside it. So
+    /// there is a credential and Sissy has no way to address it. Emphatically
+    /// not `signedOut`, which would send the user to log in an account that is
+    /// already logged in, and not `needsAuthorization`, which promises a
+    /// dialog that would grant the wrong account's token.
+    case credentialUnreachable
 }
 
 /// Who a provider is signed in as.

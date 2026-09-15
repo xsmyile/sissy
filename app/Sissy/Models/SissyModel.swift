@@ -154,10 +154,6 @@ final class SissyModel {
 
     // MARK: Menu actions
 
-    func setClaudeLimits(_ enabled: Bool) {
-        engine.setClaudeLimits(enabled)
-    }
-
     func refreshProvider(_ id: String) {
         engine.refreshProvider(id)
     }

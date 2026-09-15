@@ -10,10 +10,13 @@ import SwiftUI
 /// at costs nothing.
 struct PanelProviderPage: View {
     let row: UsagePanelSnapshot.ProviderRow
-    /// Whether the module behind this provider's limits is switched on. Only
-    /// one provider has such a switch; it decides which sentence an empty
-    /// limits block gets.
-    let limitsEnabled: Bool
+    /// Switches the vendor to another of its accounts. Never called for a
+    /// vendor with one account, whose row carries no choices.
+    let onSelectAccount: (String) -> Void
+    /// Why the last switch did not happen, when one did not. Shown under the
+    /// identity, because a switch that quietly failed leaves the user typing
+    /// `claude` and meeting the account they thought they had left.
+    let switchFailure: String?
     let refresh: () -> Void
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
@@ -54,22 +57,74 @@ struct PanelProviderPage: View {
     /// a label on the app.
     @ViewBuilder
     private var identity: some View {
-        if row.account != nil || row.plan != nil {
-            VStack(alignment: .leading, spacing: 2) {
-                if let email = row.account?.email {
-                    Text(email)
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
+        if row.account != nil || row.plan != nil || !row.accounts.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let email = row.account?.email {
+                        Text(email)
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                    organisation
                 }
-                organisation
+                .frame(maxWidth: .infinity, alignment: .leading)
+                accountPicker
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, PanelMetrics.gutter)
             .padding(.vertical, 10)
+            if let switchFailure {
+                Text(switchFailure)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, PanelMetrics.gutter)
+                    .padding(.bottom, 10)
+            }
         }
     }
+
+    /// Switches which of this vendor's accounts is signed in.
+    ///
+    /// It sits on the identity line because that line *is* the account — the
+    /// address, the organisation and the plan all belong to it, and a control
+    /// that changes them belongs where they are rather than in Settings.
+    ///
+    /// A `Menu` inside the popover is safe — a transient `NSPopover` is not
+    /// dismissed by one, verified on macOS 27.
+    @ViewBuilder
+    private var accountPicker: some View {
+        if !row.accounts.isEmpty {
+            Menu {
+                ForEach(row.accounts) { choice in
+                    Button {
+                        onSelectAccount(choice.id)
+                    } label: {
+                        if choice.isSelected {
+                            Label(choice.label, systemImage: "checkmark")
+                        } else {
+                            Text(choice.label)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "person.2")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.visible)
+            .fixedSize()
+            .help(Self.accountPickerHelp)
+        }
+    }
+
+    /// Said once here rather than at the call site: this control rewrites the
+    /// credential the CLI starts with, and a tooltip that described it as a
+    /// view would be selling a credential change as a filter.
+    static let accountPickerHelp =
+        "Sign Claude Code in as this account. The next `claude` you run starts as it, "
+        + "and Sissy keeps the one you are leaving so you can switch back."
 
     /// The organisation and the plan on one line, either of which can be the
     /// only one there: a personal account names no organisation, and an
@@ -126,7 +181,7 @@ struct PanelProviderPage: View {
 
             if row.windows.isEmpty {
                 if row.notice == nil {
-                    Text(UsageFormat.noWindowsCaption(row.id, limitsEnabled: limitsEnabled))
+                    Text(UsageFormat.noWindowsCaption(row.id))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

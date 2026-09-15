@@ -127,17 +127,22 @@ if args.contains("--scan") {
         // rather than only what is still on disk at the moment it runs.
         let projectLedger = ProjectLedger(
             url: ProjectLedger.defaultURL(in: configURL.deletingLastPathComponent()))
-        if scanFilter == "all" || scanFilter == "claude-code" {
+        if scanFilter == "all" || scanFilter == ProviderID.claudeCode {
+            let home = config.providerHome(vendor: ProviderID.claudeCode)
             providers.append(
                 LocalUsageProvider.claudeCode(
-                    claudeDir: config.resolvedClaudeDataDir,
+                    claudeDir: home.dataDir,
+                    id: home.id,
                     pricingOverride: config.pricingOverride,
+                    profile: ClaudeProfileSource(url: home.claudeProfileURL),
                     ledger: projectLedger))
         }
-        if scanFilter == "all" || scanFilter == "codex" {
+        if scanFilter == "all" || scanFilter == ProviderID.codex {
+            let home = config.providerHome(vendor: ProviderID.codex)
             providers.append(
                 LocalUsageProvider.codex(
-                    codexDir: config.resolvedCodexDataDir,
+                    codexDir: home.dataDir,
+                    id: home.id,
                     pricingOverride: config.pricingOverride,
                     ledger: projectLedger))
         }

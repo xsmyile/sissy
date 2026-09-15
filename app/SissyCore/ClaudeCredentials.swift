@@ -43,6 +43,14 @@ enum ClaudeCredentialsLookup: Sendable {
     /// front of someone who did not just ask for one. A caller that *is* a
     /// user action reads again with interaction allowed.
     case interactionRequired
+    /// The account keeps a credential somewhere this build cannot address.
+    ///
+    /// A second Claude Code config home files its token under a keychain
+    /// service whose name carries a hash of that home, and writes no
+    /// `.credentials.json` beside it. Reading the shared item instead would
+    /// answer for a different account, so the only correct answer is that
+    /// there is no reading — not that nobody is signed in.
+    case unreachable
     case unreadable(OSStatus)
     /// The lookup outlived its budget. `SecItemCopyMatching` blocks while
     /// macOS decides whether to authorize, and that decision can wait on a
@@ -60,7 +68,11 @@ enum ClaudeCredentialsStore {
     /// Epoch values above this many seconds cannot be a plausible date, so
     /// they are milliseconds. Claude Code writes `expiresAt` in ms; the guard
     /// keeps the parse correct if that ever changes.
-    private static let secondsUpperBound: Double = 4_102_444_800
+    ///
+    /// Shared with `ClaudeFileCredentials`, which parses the same field out of
+    /// the copy the CLI keeps in its config home: two readers of one vendor's
+    /// number must not disagree about its unit.
+    static let secondsUpperBound: Double = 4_102_444_800
 
     /// `SecItemCopyMatching` blocks for as long as macOS takes to authorize,
     /// which is unbounded: it can sit behind a dialog nobody answers. The call

@@ -20,7 +20,6 @@ final class DiagnosticsReportTests: XCTestCase {
                 systemVersion: "Version 27.0",
                 filesWatched: 3,
                 isWarm: true,
-                claudeLimits: true,
                 claudeWebSession: true,
                 providers: [
                     ProviderSlice(
@@ -47,7 +46,6 @@ final class DiagnosticsReportTests: XCTestCase {
         providers: [ProviderSlice] = [],
         filesWatched: Int = 98,
         isWarm: Bool = true,
-        claudeLimits: Bool = true,
         claudeWebSession: Bool = false,
         systemVersion: String = "Version 26.0 (Build 25A354)",
         ccusage: [CcusageProbe.Install] = []
@@ -58,20 +56,18 @@ final class DiagnosticsReportTests: XCTestCase {
             systemVersion: systemVersion,
             filesWatched: filesWatched,
             isWarm: isWarm,
-            claudeLimits: claudeLimits,
             claudeWebSession: claudeWebSession,
             providers: providers,
             ccusage: ccusage
         )
     }
 
-    func testReportStatesVersionOSReadersAndLimits() {
+    func testReportStatesVersionOSAndReaders() {
         let lines = DiagnosticsReport.text(snapshot()).split(separator: "\n").map(String.init)
 
         XCTAssertEqual(lines[0], "Sissy 0.1.9 (42)")
         XCTAssertEqual(lines[1], "macOS 26.0 (Build 25A354)")
         XCTAssertEqual(lines[2], "Readers: warm, 98 file(s) watched")
-        XCTAssertEqual(lines[3], "Claude limits: on")
     }
 
     func testUnprefixedSystemVersionIsLeftAlone() {
@@ -85,11 +81,10 @@ final class DiagnosticsReportTests: XCTestCase {
     /// warmth beside it.
     func testAColdScanIsNotReportedAsAnEmptyTree() {
         let text = DiagnosticsReport.text(
-            snapshot(filesWatched: 0, isWarm: false, claudeLimits: false)
+            snapshot(filesWatched: 0, isWarm: false)
         )
 
         XCTAssertTrue(text.contains("Readers: still scanning, 0 file(s) watched"))
-        XCTAssertTrue(text.contains("Claude limits: off"))
     }
 
     func testProvidersReportExactTokensAndTheirWindows() {

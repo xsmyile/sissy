@@ -24,12 +24,6 @@ struct ServerConfig: Sendable, Codable {
     /// offline; `pricingOverride` still applies either way.
     var remotePricing: Bool?
     var providers: ProviderToggles
-    /// Whether Sissy reads Claude Code's OAuth token from the login
-    /// keychain to show that CLI's 5-hour and weekly subscription windows.
-    /// Off unless the user asks for it in Settings: turning it on is what
-    /// makes the one-time macOS keychain prompt expected rather than something
-    /// a first launch springs on someone who never asked for limits.
-    var claudeLimits: Bool
     /// How many days of the day-by-model archive Sissy keeps. `nil` means the
     /// default; `0` stops it recording and reporting, and leaves what is
     /// already there for the Settings button, which is the one place a user
@@ -77,7 +71,6 @@ struct ServerConfig: Sendable, Codable {
         pricingOverride: nil,
         remotePricing: nil,
         providers: .defaults,
-        claudeLimits: false,
         historyRetentionDays: nil,
         keepAwake: .off,
         keepScreenAwake: true,
@@ -113,7 +106,6 @@ struct ServerConfig: Sendable, Codable {
         if let v = obj["codexDataDir"] as? String { merged.codexDataDir = v }
         if let v = obj["pollIntervalSeconds"] as? Double { merged.pollIntervalSeconds = v }
         if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
-        if let v = obj["claudeLimits"] as? Bool { merged.claudeLimits = v }
         if let v = obj["historyRetentionDays"] as? Int { merged.historyRetentionDays = v }
         // An unknown mode reads as off rather than failing the whole file: a
         // value written by a newer build must not cost the user every other
@@ -196,7 +188,7 @@ struct ServerConfig: Sendable, Codable {
         return Self.expandTilde(codexDataDir)
     }
 
-    private static func expandTilde(_ path: String) -> URL {
+    static func expandTilde(_ path: String) -> URL {
         if path.hasPrefix("~/") {
             return URL(fileURLWithPath: NSHomeDirectory())
                 .appendingPathComponent(String(path.dropFirst(2)))

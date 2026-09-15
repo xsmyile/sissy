@@ -49,9 +49,20 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
+    /// One account a vendor's row can be switched to.
+    struct AccountChoice: Equatable, Identifiable {
+        let id: String
+        let label: String
+        let isSelected: Bool
+    }
+
     struct ProviderRow: Equatable, Identifiable {
         let id: String
         let name: String
+        /// The other accounts of this vendor, for the picker on the identity
+        /// line. Empty when the vendor has one account, which is most of them
+        /// — a picker over a single choice is a control that does nothing.
+        let accounts: [AccountChoice]
         /// Subscription plan, already worded. Nil leaves the row's header at
         /// the name alone — an API-key user has no plan to name, and a Codex
         /// that has not taken a turn yet has not said which it is on.
@@ -202,10 +213,19 @@ struct UsagePanelSnapshot: Equatable {
         var isOverPace: Bool { deltaPercent > 0 }
     }
 
-    static func make(frame: FrameData, now: Date = Date()) -> Self {
+    /// `selected` names which account of each vendor to draw, keyed by vendor.
+    /// A vendor it does not name, or names an account the frame no longer
+    /// carries, falls back to that vendor's first account — a row must not
+    /// vanish because a preference outlived the account it points at.
+    static func make(
+        frame: FrameData,
+        claudeAccounts: ClaudeAccountRegistry.Snapshot = .init(),
+        now: Date = Date()
+    ) -> Self {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
-        let rows = makeRows(frame.providers, totalTokens: totalTokens, now: now)
+        let rows = makeRows(
+            frame.providers, claudeAccounts: claudeAccounts, totalTokens: totalTokens, now: now)
         return Self(
             tokens: UsageFormat.tokens(frame.tokens),
             cost: UsageFormat.cost(frame.cost),
@@ -233,8 +253,18 @@ struct UsagePanelSnapshot: Equatable {
         )
     }
 
+    /// One row per vendor.
+    ///
+    /// A vendor is one CLI and one reading: Sissy meters the config home the
+    /// CLI writes to, and a log line carries no account id, so the spend is the
+    /// CLI's rather than an account's. What the account decides is the identity
+    /// on the row and the limits under it, both of which come from the
+    /// credential that is signed in — and `accounts` is the list of the others
+    /// Sissy could switch to, which is a property of the keychain rather than
+    /// of the frame.
     private static func makeRows(
         _ slices: [ProviderSlice],
+        claudeAccounts: ClaudeAccountRegistry.Snapshot,
         totalTokens: Int,
         now: Date
     ) -> [ProviderRow] {
@@ -244,6 +274,8 @@ struct UsagePanelSnapshot: Equatable {
             return ProviderRow(
                 id: slice.id,
                 name: UsageFormat.providerName(slice.id),
+                accounts: slice.id == ProviderID.claudeCode
+                    ? switchableAccounts(claudeAccounts) : [],
                 plan: plan?.label,
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
@@ -262,6 +294,21 @@ struct UsagePanelSnapshot: Equatable {
                     slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
                 credits: makeCredits(slice.credits, now: now)
             )
+        }
+    }
+
+    /// The accounts the switcher offers, or none when there is nothing to
+    /// switch between. One archived account is the ordinary case and a menu
+    /// with a single entry is a control that does nothing.
+    private static func switchableAccounts(
+        _ snapshot: ClaudeAccountRegistry.Snapshot
+    ) -> [AccountChoice] {
+        guard snapshot.accounts.count > 1 else { return [] }
+        return snapshot.accounts.map {
+            AccountChoice(
+                id: $0.uuid,
+                label: UsageFormat.accountLabel($0),
+                isSelected: $0.uuid == snapshot.activeUUID)
         }
     }
 

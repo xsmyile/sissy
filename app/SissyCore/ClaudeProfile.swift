@@ -6,11 +6,9 @@ import Foundation
 ///
 /// Nothing else on the Claude side answers for it. The usage endpoint the
 /// limits probe polls carries utilization buckets and no plan field
-/// (measured), and the copy in the login keychain sits behind the
-/// authorization prompt the `claudeLimits` toggle exists to gate — reaching
-/// for it would put a keychain dialog in front of someone who only switched
-/// limits on. `.claude.json` is therefore the one source that also
-/// answers for a user who never enabled limits.
+/// (measured), and the credential itself names a subscription type but not the
+/// organisation the seat belongs to. `.claude.json` is therefore the one
+/// source for the badge, and it costs neither a request nor a keychain read.
 ///
 /// A class rather than an actor because `UsageProvider.currentSignals()` is
 /// nonisolated: the aggregator reads it while the emitting provider still

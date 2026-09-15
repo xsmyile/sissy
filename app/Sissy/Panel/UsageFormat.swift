@@ -396,6 +396,8 @@ enum UsageFormat {
             return ("Claude Code is not signed in on this Mac", nil)
         case .sessionExpired:
             return ("The claude.ai session has ended", "Import again")
+        case .credentialUnreachable:
+            return ("Sissy cannot read this account's sign-in, so its limits stay hidden", nil)
         }
     }
 
@@ -429,10 +431,8 @@ enum UsageFormat {
     /// already flipped it to go and flip it — a reading that has not landed
     /// yet and a module that was never switched on look identical from here,
     /// and only the app knows which it is.
-    static func noWindowsCaption(_ id: String, limitsEnabled: Bool) -> String {
+    static func noWindowsCaption(_ id: String) -> String {
         switch id {
-        case ProviderID.claudeCode where !limitsEnabled:
-            return "Switch on Claude Code limits in Settings to see this account's windows."
         case ProviderID.claudeCode:
             return "Waiting for the first reading of this account's windows."
         case ProviderID.codex:
@@ -499,6 +499,49 @@ enum UsageFormat {
         case ProviderID.codex: return "Codex"
         default: return id
         }
+    }
+
+    /// What a row is called when the same vendor answers for more than one
+    /// account.
+    ///
+    /// The vendor's name alone stops identifying a row the moment a second
+    /// account of it appears, and two rows both reading "Claude" is the
+    /// failure this whole feature exists to remove — one of them is a work
+    /// seat and the user cannot tell which. The qualifier is the account's own
+    /// organisation, which is the name the vendor itself puts on it and the
+    /// one the user recognises; an account that names none falls back to the
+    /// local part of its address, and one that names neither to the key it was
+    /// added under, because a row has to be callable something.
+    ///
+    /// Deliberately not applied when a vendor has one account: the overwhelming
+    /// majority of installs have exactly that, and "Claude · Personal" on a Mac
+    /// with one Claude account is noise dressed as information.
+    static func providerName(_ id: String, distinguishedBy account: ProviderAccount?) -> String {
+        let name = providerName(id)
+        guard let qualifier = accountQualifier(id, account: account) else { return name }
+        return "\(name) · \(qualifier)"
+    }
+
+    /// What one account is called in the switcher.
+    ///
+    /// The address is what a user recognises an account by — it is what they
+    /// typed to sign in — with the organisation behind it for an account whose
+    /// address the vendor does not report. An account the vendor named neither
+    /// for falls back to its own id rather than to the CLI's name, because two
+    /// such accounts would otherwise render the same word and the menu would
+    /// offer a choice nobody could make.
+    static func accountLabel(_ identity: ClaudeAccountIdentity) -> String {
+        if let email = identity.email, !email.isEmpty { return email }
+        if let organization = identity.organization, !organization.isEmpty { return organization }
+        return identity.uuid
+    }
+
+    private static func accountQualifier(_ id: String, account: ProviderAccount?) -> String? {
+        if let organization = account?.organization, !organization.isEmpty { return organization }
+        if let email = account?.email, let local = email.split(separator: "@").first {
+            return String(local)
+        }
+        return nil
     }
 
     /// What a project is called: the last component of its path, which is the
@@ -583,5 +626,24 @@ enum UsageFormat {
 
     private static func money(_ amount: Decimal, currency: String) -> String {
         amount.formatted(.currency(code: currency).precision(.fractionLength(2)))
+    }
+}
+
+/// What a failed account switch says.
+///
+/// Each case is a different thing for the user to do, which is why they are
+/// not one sentence: an account that has never signed in needs a login, and a
+/// keychain that said no needs the user to allow it.
+enum ClaudeAccountSwitchCopy {
+    static let forgetFailure =
+        "The keychain would not let Sissy delete that saved sign-in, so it is still there"
+
+    static func failure(_ why: ClaudeAccountRegistry.Failure) -> String {
+        switch why {
+        case .notArchived:
+            return "Sissy has no saved sign-in for that account yet. Sign into it once with claude /login"
+        case .keychain:
+            return "The keychain would not accept the change, so the signed-in account is unchanged"
+        }
     }
 }

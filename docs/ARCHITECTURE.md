@@ -74,9 +74,9 @@ Each is identified by its `minutes` rather than by its position —
 vendors do not agree on an order, and Codex's own `primary` bucket is not always
 the session one. `usedPercent` is a percentage of the window's allowance; a
 bucket whose reset has passed is dropped before the frame is built. Empty for a
-provider that publishes no limits — an API-key user, a CLI that has not surfaced
-a window yet, or Claude Code with `claudeLimits` off — which is what puts the
-panel row back on its share-of-today bar.
+provider that publishes no limits — an API-key user, or a CLI that has not
+surfaced a window yet — which is what puts the panel row back on its
+share-of-today bar.
 
 `providers[].plan` is the account's subscription plan as the vendor's own
 lowercase token — `max`, `team`, `plus` — never a display label: the app words it
@@ -89,27 +89,36 @@ tier names the plan it decorates — a Max account reads "Max 5x", while a Team
 seat metered at the same tier keeps "Team" and puts the tier in the row's
 tooltip, because "Team 5x" is a plan nobody sells.
 
-Claude Code's windows come from one of two readers, and exactly one runs. The
-default is `ClaudeLimitsProbe`, which reads the CLI's own OAuth token out of the
-login keychain and polls the endpoint Claude Code's `/usage` reads; its
-*credits* come instead from `ClaudeProfileSource`, off the reply the CLI caches
-in `.claude.json` with no prompt and no network. Importing a claude.ai session
-switches both over to `ClaudeWebSource`, which polls claude.ai itself and
-answers for the windows and the credits together — see
-`ClaudeWebCookieImport.swift` below for where the session comes from and why the
-cached reply is not an alternative to it. Either way it costs a macOS keychain
-authorization, so it stays off until the user asks for it in Settings — and
-**only that asking may raise the dialog**. Every other read is silent:
-`ClaudeCredentialsStore.load(allowingInteraction:)` builds a query carrying an
-`LAContext` with `interactionNotAllowed` *and* `kSecUseAuthenticationUIFail`,
-resolved by name at runtime because the SDK deprecates the constant while still
-honouring it and nothing replaces it for the legacy keychain Claude Code writes
-into, where the context alone can still raise Allow/Deny. Such a read answers
-`.interactionRequired`, which is **not** `.denied`: nobody was asked, so the
-probe keeps polling and the limits simply stay hidden until the grant comes back
-or the user flips the switch. The grant lapses often — it is bound to Sissy's
-signature, so every re-signed build is a new one — and before this the lapse
-reached the user as a stack of dialogs at login.
+Claude Code's windows come from the credential the CLI is signed in with,
+read from `<home>/.credentials.json` where there is one and from the login
+keychain where there is not. **Neither costs a permission**, which is why there
+is no switch in front of them: a keychain item's ACL names *applications*, and
+Claude Code files its own item by shelling out to `security`, so
+`/usr/bin/security` is the application on that list and Sissy is not. Reading
+through that tool is silent; an in-process `SecItemCopyMatching` raises the
+legacy Allow/Deny panel and earns a grant that dies at the next token refresh,
+which is what the whole `allowingInteraction` apparatus used to exist for.
+`ClaudeKeychainCLI` is that reader, and it grants Sissy nothing the user's own
+shell does not already have.
+
+An imported claude.ai session (`ClaudeWebSource`) runs beside it rather than
+instead of it, and is the only reading left on a Mac nobody has signed the CLI
+into. `ClaudeCodeSignals.merge` prefers whichever source has an actual reading,
+asking the CLI's own credential first. Credits come from whichever source is
+live; `ClaudeProfileSource` answers for them off the reply the CLI caches in
+`.claude.json` when neither is, with no prompt and no network — and that cache
+only advances when someone types `/usage`, so it is a fallback and never an
+amendment to a live reading.
+
+`ClaudeAccountRegistry` is the account half. It watches the credential the CLI
+is signed in with, asks `api.anthropic.com/api/oauth/profile` whose it is
+whenever it sees one it has not archived — a switch, a `/login`, or the CLI
+rotating a token — and files a copy under that account's uuid in a keychain item
+Sissy owns, with an index beside it holding identities and never a token. That
+archive is what makes switching safe: the CLI's own slots are scratch, rewritten
+with whichever account is active, so a switch that wrote them without an archive
+destroyed the account it switched away from. Nothing here is attributed per
+account — a log line carries no account id, so the spend is the CLI's.
 
 `keepAwake` carries `{mode, active, since}` and is never optional, including when
 off: the panel draws its control from this, and "off" and "nothing reported" must
@@ -158,9 +167,14 @@ compiled into the app too.
 | `CodexSource.swift`             | `CodexAdapter`: `token_count` events out of `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`), `last_token_usage` as per-turn delta, model from `turn_context.payload.model` (fallback `gpt-5-codex`); owns the resume block. Two of those events are not turns: one whose `total_token_usage` has not moved is the previous turn re-emitted, and a session whose `session_meta` names a parent opens with that parent's whole history stamped at its own start — both are dropped, and both keep their bookkeeping in the snapshot because a relaunch can land between a turn and its repeat |
 | `UsageReaderShared.swift`       | Tuning constants the tail and its adapters share (`ingestChunkSize`, `pollEmitThrottle`, mtime slack), the token-count bound, and `parseTimestamp` — the one timestamp parser every source and the probe use |
 | `UsageAtomics.swift`            | `LockedValue`, the one lock box a provider is read through from outside its actor; `ProviderSignals`, everything a source answers for besides its token totals, published as one value so a reader cannot pair fields from two moments; and `SourceSignals`, the nonisolated protocol the aggregator reads it through |
-| `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429; off unless `claudeLimits` is set |
-| `ClaudeCredentials.swift`       | Read-only lookup of Claude Code's keychain OAuth token — never writes it, never refreshes it. `allowingInteraction` is the caller declaring itself a user action, and it is the only thing that lets macOS put a dialog on screen; a silent read answers `.interactionRequired` rather than `.denied`. One lookup runs at a time and every caller waits on that one under its own budget, so an unanswered authorization dialog parks neither the probe nor a second dispatch thread, and the answer reaches whoever is still waiting when it finally comes |
-| `ClaudeProfile.swift`           | Reads the plan, the tier, the account and the vendor's own cached credits reply out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain and no network, so it answers with `claudeLimits` off. A cached reading carries the vendor's own `fetchedAt`, which the panel prints beside it |
+| `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for the 5-hour and weekly windows; 5-min refresh, 30-min backoff on 429. Its credential source is injected, so the same probe serves the file, the keychain and a test |
+| `ClaudeKeychainCLI.swift`       | The login keychain through `/usr/bin/security`, which is the application Claude Code's own items trust — so no Allow/Deny panel and no grant that a re-signed build invalidates. Also the CLI's service-name rule: `Claude Code-credentials-<sha256(NFC(configDir))[:8]>`, unsuffixed for the default home |
+| `ClaudeAccountStore.swift`      | Every Claude account Sissy has seen signed in: the credential in a keychain item Sissy owns, keyed by the account's uuid, and an index beside it holding identities and never a token. `ClaudeAccountProfile` is what turns a token into an identity |
+| `ClaudeAccountRegistry.swift`   | Watches the credential the CLI is signed in with, archives every new one, and switches between them. The archive is what makes a switch safe: the CLI's slots are scratch and it rewrites them with whichever account is active |
+| `ProviderAccounts.swift`        | `ProviderHome` — the one config home per vendor Sissy meters, and every path resolved from it, so a credential and a log tree can never be read out of two different places |
+| `ClaudeCredentials.swift`       | `ClaudeCredentials` and the outcome of looking one up, plus the `SecItem` query `ClaudeWebSessionStore` reads Sissy's own item with. Never writes a credential and never refreshes one: Anthropic's refresh tokens rotate on use, so spending one would sign the user out of their own terminal |
+| `ClaudeFileCredentials.swift`   | The credential beside the CLI's config (`<home>/.credentials.json`), and `ClaudeCodeCredentials`, which reads that file and falls back to the login keychain — the two places the signed-in token lives, in one order |
+| `ClaudeProfile.swift`           | Reads the plan, the tier, the account and the vendor's own cached credits reply out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain and no network. A cached reading carries the vendor's own `fetchedAt`, which the panel prints beside it |
 | `ClaudeUsagePayload.swift`      | The one parser for the usage body Anthropic answers with, wherever it was read — the OAuth endpoint, claude.ai, or the CLI's cached copy of one. Measured to be the same object in all three, so there is no second reading of `spend` to drift |
 | `ClaudeWebCookieImport.swift`   | Reads the `sessionKey` out of Claude.app's Chromium cookie store: `Claude Safe Storage` from the keychain, PBKDF2-SHA1 + AES-128-CBC, `v10` prefix and the 32-byte domain-binding hash stripped. Only ever from the button — Claude.app is the source rather than a browser because that is where a live session is, and its key has not been rewritten since 2024 |
 | `ClaudeWebSessionStore.swift`   | The imported session, in a keychain item Sissy owns and nothing else rewrites. Presence is asked without decrypting, so Settings answers on a build whose grant lapsed. Keyed by account, so more than one is a stored row rather than a rewrite |
@@ -173,7 +187,7 @@ compiled into the app too.
 | `OpenAIPricing.swift`           | OpenAI cost math, same override → catalog → seed precedence |
 | `PriceCatalog.swift`            | Fetches, validates and caches LiteLLM rates at runtime; renders the seed for `--dump-seed` |
 | `PricingSeed.swift`             | **Generated** LiteLLM snapshot embedded at build time — offline / first-run floor |
-| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `claudeLimits`, `historyRetentionDays`, `keepAwake`, `keepScreenAwake`, `agentHooks` and `agentHooksRemovalPending` — the last written before either CLI's configuration is touched, so a removal the user asked for is retried at the next launch instead of being forgotten under a switch that is already off. The engine owns the file, and saves it through a staging file so it is owner-only before it answers to its own name |
+| `ServerConfig.swift`            | Codable, loaded from `~/Library/Application Support/Sissy/server.json`; carries `providers` toggles, `codexDataDir`, `remotePricing`, `historyRetentionDays`, `keepAwake`, `keepScreenAwake`, `agentHooks` and `agentHooksRemovalPending` — the last written before either CLI's configuration is touched, so a removal the user asked for is retried at the next launch instead of being forgotten under a switch that is already off. The engine owns the file, and saves it through a staging file so it is owner-only before it answers to its own name |
 | `UsageStatePersistence.swift`   | Per-provider snapshot URL builder (`forProvider("codex")`); Claude Code stays on the legacy `usage-state.json` for upgrade smoothness. The snapshots sit beside the `server.json` that named the trees they were read from, so a config pointed elsewhere — `--config`, a test — takes its reading with it. Carries two optional blocks, `historyResume` (the archive's per-model split) and `codexResume`, plus `projectCheckouts`, which is read on load and never written again — an install that predates `ProjectLedger` hands its memory over that way |
 | `UsageHistory.swift`            | The archive: one directory per provider under `history/`, one whole-file JSON per local day, a row per model per project. Versioned apart from the snapshot so a schema bump cannot delete it, rewritten whole so a re-derived day replaces rather than doubles, pruned to `historyRetentionDays` across every provider directory — the engine's call, since a provider that is off has no tail to make it |
 | `AgentHookInstaller.swift`      | Registers Sissy's `SessionStart` entry with `~/.claude/settings.json` and `~/.codex/hooks.json`, and takes it back out. Off unless the user asks. The path in the command is quoted for `sh` and the result passes `sh -n` before it is written; the home it is built from is `getpwuid`'s, not `NSHomeDirectory()`'s, which follows `CFFIXED_USER_HOME`. A file that will not parse is left untouched, a symlinked target keeps its link, the file's own mode is preserved, and the write is abandoned if the file moved between the read and the rename |
@@ -240,9 +254,9 @@ the same gauge repeated on that provider's page are one object down to the pace.
 
 `Models/Preferences.swift` holds only what the app itself remembers
 (`sissyMotion`, `retiredServerAgent`) in `preferences.json`. Everything about
-metering lives in `server.json`, which the engine owns — the app reads
-`claudeLimits` back from the engine rather than keeping a copy, because the copy
-it used to keep could disagree with the file the probe actually booted from.
+metering lives in `server.json`, which the engine owns — the app reads every
+such setting back from the engine rather than keeping a copy, because the copy
+it used to keep could disagree with the file the readers actually booted from.
 
 **Three readiness states, not one blank panel.** `HeaderSnapshot.make` is a pure
 function of `(hasFrame, isWarm, filesWatched)`, which is what the tests target.
@@ -351,12 +365,12 @@ a cold scan instead of only a cancelled boot task doing so.
   requests. Regenerate the seed when cutting a release:
   `sissy-cli --dump-seed > app/SissyCore/PricingSeed.swift`. The `pricing-oracle` CI
   job asserts exact agreement with `ccusage`, which prices from the same LiteLLM data.
-- **Permissions**: first run asks for nothing. A permission is requested when the
-  user switches on the module that needs it — the `claudeLimits` toggle is the worked
-  example, and the keychain prompt happens when the switch is flipped, not at boot.
-  That is enforced rather than intended: every read the app makes on its own is
-  built so macOS cannot prompt for it, and a grant that has lapsed leaves the
-  limits hidden instead of raising a dialog nobody asked for.
+- **Permissions**: first run asks for nothing, and nothing Sissy does on its own
+  asks later either. Claude's limits used to sit behind a switch because reading
+  the credential in-process raised a keychain dialog; reading it through
+  `/usr/bin/security` does not, so the switch is gone rather than defaulted off.
+  The one gesture that can still raise a dialog is the claude.ai import, which is
+  a button and says what it does before it is pressed.
 - **No third-party code ships.** The last dependency was SwiftNIO, which the
   WebSocket server needed. `CREDITS.md` credits the projects Sissy *reads*
   (`ccusage`, LiteLLM), which is courtesy rather than obligation; `AboutTests` fails

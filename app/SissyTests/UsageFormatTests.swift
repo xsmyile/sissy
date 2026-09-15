@@ -261,24 +261,17 @@ final class UsageFormatTests: XCTestCase {
 
     // MARK: An empty limits block
 
-    /// A reading that has not landed and a module nobody switched on look
-    /// identical from the frame, and only one of them is something to do
-    /// about — telling a user to flip a switch they already flipped sends
-    /// them to a screen that disagrees with the sentence.
-    func testAnEmptyLimitsBlockSendsYouToTheSwitchOnlyWhenItIsOff() {
-        XCTAssertTrue(
-            UsageFormat.noWindowsCaption(ProviderID.claudeCode, limitsEnabled: false)
-                .contains("Settings"))
-        XCTAssertFalse(
-            UsageFormat.noWindowsCaption(ProviderID.claudeCode, limitsEnabled: true)
-                .contains("Settings"))
+    /// Nothing to switch on any more, so an empty block is a reading that has
+    /// not landed — and must not send anyone to a screen looking for a control
+    /// that is not there.
+    func testAnEmptyLimitsBlockNoLongerSendsYouToSettings() {
+        let caption = UsageFormat.noWindowsCaption(ProviderID.claudeCode)
+        XCTAssertFalse(caption.contains("Settings"))
+        XCTAssertTrue(caption.contains("Waiting"))
     }
 
-    /// Codex has no such switch, so its sentence does not move.
     func testCodexSaysItsLimitsArriveOnItsOwnTurns() {
-        let off = UsageFormat.noWindowsCaption(ProviderID.codex, limitsEnabled: false)
-        XCTAssertEqual(off, UsageFormat.noWindowsCaption(ProviderID.codex, limitsEnabled: true))
-        XCTAssertTrue(off.contains("own turns"))
+        XCTAssertTrue(UsageFormat.noWindowsCaption(ProviderID.codex).contains("own turns"))
     }
 
     // MARK: Refresh

@@ -52,33 +52,6 @@ struct ProviderRowSnapshot: Equatable {
     }
 }
 
-/// What the Claude Code limits switch says about itself.
-///
-/// Split because the two halves are not equally urgent. `caption` carries the
-/// only two facts that change what someone does — what the switch shows, and
-/// that macOS will ask — and stays on screen, because a permission prompt this
-/// app did not warn about is the thing Sissy's first-run promise exists to
-/// avoid. `detail` is the reassurance and the after-an-update expectation:
-/// worth keeping, not worth four permanent lines.
-enum ClaudeLimitsCopy {
-    static let title = "Show Claude Code limits"
-
-    static let caption =
-        "Shows Claude Code's 5-hour and weekly windows next to Codex's. "
-        + "macOS will ask for your permission."
-
-    static let detail =
-        "Sissy reads the token Claude Code already keeps in your keychain — only ever "
-        + "reads it, never writes or refreshes it. That permission is tied to Sissy's own "
-        + "binary, so it lapses after an update. Sissy never asks again on its own: the "
-        + "limits go quiet instead, and switching this off and back on is what asks for "
-        + "them."
-
-    /// What the button reads as to a screen reader, where the glyph says
-    /// nothing — the one reader who cannot see an `info.circle` and guess.
-    static let detailButtonLabel = "What Sissy reads"
-}
-
 /// The claude.ai session, and what importing it changes.
 ///
 /// It says what the thing is before the button is pressed, because it is a
@@ -103,6 +76,13 @@ enum ClaudeWebSessionCopy {
 
     static let detailButtonLabel = "What importing does"
 
+    static let ownCredentialLabel = "Limits source"
+    static let ownCredentialState = "This account's own sign-in"
+    static let ownCredentialCaption =
+        "Claude Code keeps its OAuth token in each account's own directory, so Sissy reads "
+        + "the limits of the account the row is about. Nothing is read from the keychain "
+        + "and no claude.ai session is needed."
+
     /// One sentence per way the import can come up empty, each naming what to
     /// do rather than what failed.
     static func failure(_ why: ClaudeWebCookieImport.Failure) -> String {
@@ -125,7 +105,6 @@ enum ClaudeWebSessionCopy {
 struct ProvidersSettingsView: View {
     let model: SissyModel
 
-    @State private var showingLimitsDetail = false
     @State private var showingWebSessionDetail = false
 
     private static let markSize: CGFloat = 18
@@ -138,8 +117,11 @@ struct ProvidersSettingsView: View {
                 Section {
                     row(readiness)
                     if readiness.id == ProviderID.claudeCode {
-                        claudeLimits
-                        if model.engine.claudeLimits { claudeWebSession }
+                        if model.engine.claudeUsesOwnCredential {
+                            ownCredentialRow
+                        } else {
+                            claudeWebSession
+                        }
                     }
                 }
             }
@@ -150,6 +132,22 @@ struct ProvidersSettingsView: View {
         .task { model.engine.refreshProviders() }
     }
 
+    /// What is read when the CLI keeps its own credential: no keychain
+    /// dialog, no cookie, and no grant that a re-signed build invalidates.
+    @ViewBuilder
+    private var ownCredentialRow: some View {
+        LabeledContent {
+            Text(ClaudeWebSessionCopy.ownCredentialState).foregroundStyle(.secondary)
+        } label: {
+            Text(ClaudeWebSessionCopy.ownCredentialLabel)
+        }
+        Text(ClaudeWebSessionCopy.ownCredentialCaption)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
+    /// The vendor's line, and under it where Sissy is reading and what it has
+    /// found there.
     @ViewBuilder
     private func row(_ readiness: ProviderReadiness) -> some View {
         let snapshot = ProviderRowSnapshot.make(readiness)
@@ -165,55 +163,11 @@ struct ProvidersSettingsView: View {
         Text(snapshot.detail)
             .font(.callout)
             .foregroundStyle(.secondary)
-            .textSelection(.enabled)
     }
 
-    @ViewBuilder
-    private var claudeLimits: some View {
-        LabeledContent {
-            Toggle(ClaudeLimitsCopy.title, isOn: claudeLimitsBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
-            HStack(spacing: 4) {
-                Text(ClaudeLimitsCopy.title)
-                detailButton
-            }
-        }
-        Text(ClaudeLimitsCopy.caption)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-    }
-
-    /// A button rather than a `help` tooltip: a tooltip is reachable only by
-    /// hovering a pointer over it, and this is the one control on the page
-    /// whose consequences someone may want to read before flipping it.
-    private var detailButton: some View {
-        Button {
-            showingLimitsDetail = true
-        } label: {
-            Image(systemName: "info.circle")
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(ClaudeLimitsCopy.detailButtonLabel)
-        .popover(isPresented: $showingLimitsDetail, arrowEdge: .bottom) {
-            Text(ClaudeLimitsCopy.detail)
-                .font(.callout)
-                .frame(width: Self.detailPopoverWidth)
-                .padding()
-        }
-    }
-
-    private var claudeLimitsBinding: Binding<Bool> {
-        Binding(
-            get: { model.engine.claudeLimits },
-            set: { model.setClaudeLimits($0) }
-        )
-    }
-
-    /// Shown only under a switch that is already on: importing a session for
-    /// limits nobody asked to see would be a permission with nothing behind
-    /// it.
+    /// Shown only when the CLI keeps no credential Sissy can read, which is a
+    /// CLI nobody has signed into. Otherwise there is nothing to import: the
+    /// limits already come from the account that is signed in.
     @ViewBuilder
     private var claudeWebSession: some View {
         LabeledContent {

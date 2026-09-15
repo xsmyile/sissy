@@ -41,6 +41,42 @@ final class ClaudeSignalsMergeTests: XCTestCase {
         XCTAssertEqual(merged.windows.map(\.usedPercent), [80])
     }
 
+    /// The live reader owns the credits, including when it has none.
+    ///
+    /// The cached copy in `.claude.json` survives signing into a different
+    /// account — measured 2026-09-15, a config naming a day-old account still
+    /// carried the previous one's spend, in the previous one's currency. So a
+    /// live reading that reports no spend has to take that figure off the row
+    /// rather than let it fill in behind.
+    func testALiveReaderWithNoCreditsTakesTheCachedOnesOffTheRow() {
+        var profile = signals()
+        profile.credits = cached
+
+        let merged = ClaudeCodeSignals.merge(
+            profile: profile,
+            web: signals(),
+            probe: signals(windows: [window(12)], observedAt: Date()))
+
+        XCTAssertNil(merged.credits)
+    }
+
+    /// The same cached figure is the answer when nothing live is running,
+    /// which is every user who never switched limits on.
+    func testTheCachedCreditsStandWhenNoReaderIsRunning() {
+        var profile = signals()
+        profile.credits = cached
+
+        let merged = ClaudeCodeSignals.merge(profile: profile, web: signals(), probe: signals())
+
+        XCTAssertEqual(merged.credits, cached)
+    }
+
+    private var cached: ProviderCredits {
+        ProviderCredits(
+            isEnabled: true, usedMinor: 35934, capMinor: 37500, currency: "EUR",
+            exponent: 2, observedAt: Date(timeIntervalSince1970: 0))
+    }
+
     /// A reader that has produced nothing yet but has something to say about
     /// why still reaches the row: the notice is the only way back.
     func testAReaderWithNoReadingStillExplainsItself() {

@@ -104,12 +104,17 @@ final class CodexAdapter: SourceAdapter {
     /// what ccusage falls back to for the same reason.
     static let defaultModel = "gpt-5-codex"
 
-    init(codexDir: URL, pricingOverride: [String: ModelPricing]?, ledger: ProjectLedger) {
+    init(
+        codexDir: URL,
+        id: String = ProviderID.codex,
+        pricingOverride: [String: ModelPricing]?,
+        ledger: ProjectLedger
+    ) {
         self.projects = ProjectResolver(ledger: ledger)
         self.codexDir = codexDir
         self.pricingOverride = pricingOverride.map(PricingTable.init)
         self.descriptor = SourceDescriptor(
-            id: "codex",
+            id: id,
             root: codexDir,
             watcherLabel: "sissy.codex.fswatch",
             signals: published
@@ -586,6 +591,7 @@ extension LocalUsageProvider {
     /// Codex's tail.
     static func codex(
         codexDir: URL = CodexAdapter.defaultDir(),
+        id: String = ProviderID.codex,
         retainDays: Int = 2,
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
@@ -595,7 +601,7 @@ extension LocalUsageProvider {
     ) -> LocalUsageProvider {
         LocalUsageProvider(
             adapter: CodexAdapter(
-                codexDir: codexDir, pricingOverride: pricingOverride, ledger: ledger),
+                codexDir: codexDir, id: id, pricingOverride: pricingOverride, ledger: ledger),
             retainDays: retainDays,
             pollInterval: pollInterval,
             persistenceURL: persistenceURL,

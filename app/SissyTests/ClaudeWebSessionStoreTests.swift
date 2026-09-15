@@ -136,7 +136,7 @@ final class ClaudeWebSessionSecrecyTests: XCTestCase {
         let report = DiagnosticsReport.text(
             DiagnosticsReport.Snapshot(
                 version: "0.1.9", build: "1", systemVersion: "Version 27.0",
-                filesWatched: 1, isWarm: true, claudeLimits: true, claudeWebSession: true,
+                filesWatched: 1, isWarm: true, claudeWebSession: true,
                 providers: [], ccusage: []))
         XCTAssertTrue(report.contains("claude.ai session"))
         XCTAssertFalse(report.contains(Self.session))

@@ -203,6 +203,13 @@ actor ClaudeWebSource: SourceSignals {
             publishFailure(.signedOut)
             report("the claude.ai session could not be read (status \(status))")
             return .wait(Self.refreshInterval)
+        case .unreachable:
+            // Not reachable from this source: the session store is Sissy's own
+            // item, addressed by a name this type owns. Kept exhaustive rather
+            // than defaulted so a case added later has to be answered here.
+            publishFailure(.credentialUnreachable)
+            report("the imported claude.ai session is not readable from here")
+            return .wait(Self.refreshInterval)
         case .timedOut:
             report("reading the claude.ai session outlived its budget; retrying")
             return .wait(Self.refreshInterval)
