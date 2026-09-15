@@ -109,7 +109,6 @@ final class UsageEngineHost {
         let config = (try? ServerConfig.load()) ?? .defaults
         let engine = UsageEngine(config: config)
         self.engine = engine
-        claudeUsesOwnCredential = engine.claudeUsesOwnCredential
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
         keepAwakeMode = config.keepAwake
@@ -352,7 +351,22 @@ final class UsageEngineHost {
 
     private func deliver(_ frame: FrameData) {
         if frame.keepAwake.mode != keepAwakeMode { keepAwakeMode = frame.keepAwake.mode }
+        syncClaudeCredentialSource()
         model?.applyFrame(frame)
+    }
+
+    /// Re-reads which credential Claude's limits came from.
+    ///
+    /// The engine answers this off its construction path — finding out costs a
+    /// `security` call — so a value read when the engine is built is always
+    /// the placeholder it was initialised with, and Settings wording a row
+    /// from that placeholder says Sissy is reading claude.ai while it is
+    /// reading the CLI's own token. Called from both paths that publish: the
+    /// frame that the probe's first reading re-emits, and the readiness the
+    /// Providers tab asks for when it opens.
+    private func syncClaudeCredentialSource() {
+        guard let engine, engine.claudeUsesOwnCredential != claudeUsesOwnCredential else { return }
+        claudeUsesOwnCredential = engine.claudeUsesOwnCredential
     }
 
     /// Folds the per-provider list into the two scalars the panel header
@@ -361,6 +375,7 @@ final class UsageEngineHost {
     /// and must not pin the header in its cold-start placeholder.
     private func apply(_ readiness: [ProviderReadiness]) {
         providers = readiness
+        syncClaudeCredentialSource()
         let scans = readiness.compactMap(\.scan)
         filesWatched = scans.reduce(0) { $0 + $1.filesWatched }
         isWarm = scans.allSatisfy(\.isWarm)
