@@ -355,25 +355,11 @@ final class UsagePanelSnapshotTests: XCTestCase {
 
     // MARK: Provider rows
 
-    func testRowSharesAreProportionalToTokens() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("claude-code", 750, "7.50"), slice("codex", 250, "2.50")])
-        )
-        XCTAssertEqual(snapshot.providers.map(\.share), [0.75, 0.25])
-    }
-
     func testRowsKeepTheWireOrderAndCarryDisplayNames() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("claude-code", 1, "1.00"), slice("codex", 1, "1.00")])
         )
         XCTAssertEqual(snapshot.providers.map(\.name), ["Claude", "Codex"])
-    }
-
-    func testRowShareIsZeroWhenNothingWasSpent() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(providers: [slice("codex", 0, "0")])
-        )
-        XCTAssertEqual(snapshot.providers.first?.share, 0)
     }
 
     // MARK: Archive line

@@ -24,8 +24,6 @@ struct UsagePanelSnapshot: Equatable {
     let projects: [ProjectRow]
     /// The archive line, absent when there is no archive to show.
     let history: HistoryRow?
-    /// The one gauge the Overview leads on, absent when no provider reports a
-    /// window at all.
 
     /// What the archive adds up to over its window. `label` says which days
     /// that is: a window the archive does not reach back across is named by
@@ -95,7 +93,6 @@ struct UsagePanelSnapshot: Equatable {
         let planTier: String?
         let tokens: String
         let cost: String
-        let share: Double
         /// Shortest window first. Empty when the provider reports none, which
         /// its page answers with a sentence rather than a blank block.
         let windows: [WindowRow]
@@ -348,7 +345,6 @@ struct UsagePanelSnapshot: Equatable {
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
-                share: totalTokens > 0 ? Double(slice.tokens) / Double(totalTokens) : 0,
                 windows: slice.windows.map {
                     makeWindow($0, observedAt: slice.limitsObservedAt ?? now)
                 },
