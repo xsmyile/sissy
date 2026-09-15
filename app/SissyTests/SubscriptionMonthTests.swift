@@ -145,6 +145,35 @@ final class SubscriptionMonthTests: XCTestCase {
         }
     }
 
+    /// Whichever separator the user reached for means the same thing. Measured
+    /// on a Mac whose region makes the comma the decimal separator, which is
+    /// where the naive parse this replaced went wrong.
+    func testEitherDecimalSeparatorMeansTheSameAmount() {
+        XCTAssertEqual(ServerConfig.parsePlanPrice("200.50"), Decimal(string: "200.50"))
+        XCTAssertEqual(ServerConfig.parsePlanPrice("200,50"), Decimal(string: "200.50"))
+        XCTAssertEqual(ServerConfig.parsePlanPrice(" 200 "), 200)
+        XCTAssertEqual(ServerConfig.parsePlanPrice("0.75"), Decimal(string: "0.75"))
+    }
+
+    /// The failure that made this parser necessary. `Decimal(string:)` takes
+    /// the prefix it understands and answers with it, so a four-figure plan
+    /// reads as one dollar — and a $1 plan is covered by the first turn of
+    /// every month, which is the panel announcing something nobody measured.
+    func testAThousandsSeparatorIsRefusedRatherThanReadAsOne() {
+        XCTAssertEqual(Decimal(string: "1,234.56"), 1, "the trap this test exists for moved")
+
+        XCTAssertNil(ServerConfig.parsePlanPrice("1,234.56"))
+        XCTAssertNil(ServerConfig.parsePlanPrice("1.234,56"))
+    }
+
+    /// Anything that is not digits and at most one separator is refused whole
+    /// rather than partly read.
+    func testAValueThatIsNotAPriceIsRefusedWhole() {
+        for raw in ["$200", "2e3", "20 0", "200.505", "abc", "", "   ", "-5", "0", "0.00", ".5"] {
+            XCTAssertNil(ServerConfig.parsePlanPrice(raw), "\(raw.debugDescription) read as a price")
+        }
+    }
+
     /// The frame carries the month on the provider's own slice rather than
     /// beside it, so a row can never pair one provider's month with another's
     /// totals.

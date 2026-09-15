@@ -161,14 +161,35 @@ struct ProvidersSettingsView: View {
                 .multilineTextAlignment(.trailing)
             }
         }
-        Text(
+        Text(planPriceCaption(readiness.id))
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
+    /// The caption says what was understood rather than only what to type.
+    ///
+    /// A value the parser refuses would otherwise fail in silence: the field
+    /// keeps the text, `server.json` keeps the text, and the panel simply
+    /// never grows the comparison — leaving somebody to conclude the feature
+    /// is broken. Reading the amount back is also the only way to be sure
+    /// which separator was taken as the decimal one.
+    private func planPriceCaption(_ id: String) -> String {
+        let base =
             "US dollars a month, which is the currency Sissy prices tokens in — a plan billed "
-                + "in another one has to be converted, because a rate Sissy invented would be "
-                + "wrong by the time you read it. Leave it empty and the panel shows the month's "
-                + "usage without anything to compare it to."
-        )
-        .font(.callout)
-        .foregroundStyle(.secondary)
+            + "in another one has to be converted, because a rate Sissy invented would be wrong "
+            + "by the time you read it."
+        let typed = model.engine.planPrices[id] ?? ""
+        guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return base + " Leave it empty and the panel shows the month's usage with nothing "
+                + "to compare it to."
+        }
+        guard let parsed = ServerConfig.parsePlanPrice(typed) else {
+            return "Not a price Sissy can read, so the panel shows the month's usage on its own. "
+                + "Digits and at most one decimal separator — 200, 200.50 or 200,50. "
+                + "A thousands separator is refused because 1,234 means two different amounts "
+                + "to two readers."
+        }
+        return base + " Read as \(UsageFormat.cost(parsed)) a month."
     }
 
     private func planPriceBinding(_ id: String) -> Binding<String> {

@@ -191,16 +191,60 @@ struct ServerConfig: Sendable, Codable {
         return min(max(historyRetentionDays, 0), UsageHistoryStore.maxRetentionDays)
     }
 
-    /// What this provider's plan costs a month, or nil when the user has not
-    /// said. A value that will not parse, or one that is not a positive
-    /// amount, answers nil rather than zero: "no plan price" is a question
-    /// unanswered, and "$0.00 plan" is an answer nobody gave.
-    func planPrice(forProvider id: String) -> Decimal? {
-        guard let raw = planPrices?[id]?.trimmingCharacters(in: .whitespaces),
-            let parsed = Decimal(string: raw),
+    /// A plan price as the user typed it, or nil when what they typed is not
+    /// one.
+    ///
+    /// Deliberately not `Decimal(string:)` on its own, which is where this
+    /// started and where it was wrong. Measured on a Mac whose region makes
+    /// the decimal separator a comma: `Decimal(string:)` parses the prefix it
+    /// understands and returns *that* rather than failing, so `200,50` reads
+    /// as **200** and `1,234.56` reads as **1**. The second is the one that
+    /// matters — a four-figure plan silently becoming a one-dollar plan means
+    /// the panel announces the subscription paid for itself on the first day
+    /// of every month, and nothing on screen says why.
+    ///
+    /// So the shape is checked before the parse and anything ambiguous is
+    /// refused rather than guessed at: digits, at most one separator — period
+    /// or comma, whichever the user reached for — and at most two decimals.
+    /// A grouping separator is refused for the same reason, because `1,234`
+    /// means one thousand to one reader and one to another, and a price
+    /// nobody can be sure of is worse than a price nobody entered.
+    static func parsePlanPrice(_ raw: String) -> Decimal? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.count <= maxPlanPriceCharacters else { return nil }
+        var digits = 0
+        var decimals: Int?
+        for character in trimmed {
+            if character.isASCII, character.isNumber {
+                if decimals != nil { decimals? += 1 } else { digits += 1 }
+                continue
+            }
+            guard character == ".", decimals == nil else {
+                guard character == ",", decimals == nil else { return nil }
+                decimals = 0
+                continue
+            }
+            decimals = 0
+        }
+        guard digits > 0, (decimals ?? 0) <= maxPlanPriceDecimals else { return nil }
+        let normalized = trimmed.replacingOccurrences(of: ",", with: ".")
+        guard let parsed = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
             parsed > 0
         else { return nil }
         return parsed
+    }
+
+    /// Long enough for a price nobody sells above and short enough that a
+    /// pasted paragraph is refused before it is walked.
+    private static let maxPlanPriceCharacters = 16
+    private static let maxPlanPriceDecimals = 2
+
+    /// What this provider's plan costs a month, or nil when the user has not
+    /// said — and nil too for a value that is not a price, because "$0.00
+    /// plan" is an answer nobody gave.
+    func planPrice(forProvider id: String) -> Decimal? {
+        guard let raw = planPrices?[id] else { return nil }
+        return Self.parsePlanPrice(raw)
     }
 
     var resolvedClaudeDataDir: URL {
