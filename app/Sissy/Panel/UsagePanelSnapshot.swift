@@ -35,6 +35,108 @@ struct UsagePanelSnapshot: Equatable {
         let cost: String
     }
 
+    /// One day of a provider's recent spend, as a bar on its page.
+    ///
+    /// `cost` is optional and that is the whole point of the type: a day the
+    /// archive holds nothing for is a day Sissy was not running, which is the
+    /// absence of a reading rather than a reading of zero. Drawn as a zero-height
+    /// bar it would be a claim that nothing was spent, made out of Sissy's own
+    /// downtime.
+    struct DayRow: Equatable, Identifiable {
+        let id: String
+        /// The weekday, or `Today` for the day the frame is answering for.
+        let label: String
+        let isToday: Bool
+        let cost: Decimal?
+        /// Of the tallest bar in the strip, so the shape is readable without
+        /// an axis. Zero for a day with no reading and for a day that spent
+        /// nothing.
+        let fraction: Double
+        /// The day named, which the header takes while the pointer is on this
+        /// bar.
+        let title: String
+        /// What the day cost, or why there is nothing to name. The strip has
+        /// no axis, so this is where a value is read.
+        let figures: String
+    }
+
+    /// A provider's recent days, with the window they cover named.
+    struct DayStrip: Equatable {
+        let rows: [DayRow]
+        /// `Last 7 days`, or the day the archive starts on plus how much of
+        /// the window it actually covers.
+        let label: String
+        let total: String
+    }
+
+    /// The strip for one provider: the archive for every day before today, and
+    /// today from the frame.
+    ///
+    /// **Today never comes from the archive.** Both are the same tail reading
+    /// the same events — `LocalUsageProvider.ingest` feeds the day buckets and
+    /// the day file from one `UsageEvent` — but the file is written on a
+    /// throttle while the frame is emitted as events land. Taking today from
+    /// disk would print a bar that disagrees with the `Today` row on the same
+    /// page for as long as the throttle holds.
+    ///
+    /// Nil until the archive reaches past today, which is `HistoryRow`'s rule
+    /// for the same reason: a strip whose only bar is today is the figure
+    /// above it drawn as a rectangle.
+    ///
+    /// The window is applied here as well as by the reader, so the total under
+    /// the label is the bars above it summed. A day older than the window has
+    /// no bar to appear in, and counting it would put money on the label that
+    /// nothing on screen accounts for.
+    static func dayStrip(
+        series: [UsageHistoryDaySummary],
+        todayTokens: Int,
+        todayCost: Decimal,
+        days: Int,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> DayStrip? {
+        let today = calendar.startOfDay(for: now)
+        let start = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today) ?? today
+        let past = series.filter {
+            let day = calendar.startOfDay(for: $0.day)
+            return day >= start && day < today
+        }
+        guard days > 0, !past.isEmpty else { return nil }
+        let archived = Dictionary(
+            past.map { (calendar.startOfDay(for: $0.day), $0) },
+            uniquingKeysWith: { _, last in last })
+        let peak = max(past.map(\.cost).max() ?? 0, todayCost)
+
+        let rows: [DayRow] = (0..<days).reversed().compactMap { back in
+            guard let day = calendar.date(byAdding: .day, value: -back, to: today) else { return nil }
+            let isToday = back == 0
+            let tokens = isToday ? todayTokens : archived[day]?.tokens
+            let cost: Decimal? = isToday ? todayCost : archived[day]?.cost
+            return DayRow(
+                id: UsageReaderShared.dayFormatter.string(from: day),
+                label: isToday ? "Today" : day.formatted(.dateTime.weekday(.abbreviated)),
+                isToday: isToday,
+                cost: cost,
+                fraction: Self.share(cost, of: peak),
+                title: UsageFormat.dayTitle(day),
+                figures: UsageFormat.dayFigures(tokens: tokens, cost: cost))
+        }
+        let covered = rows.count { $0.cost != nil }
+        return DayStrip(
+            rows: rows,
+            label: UsageFormat.dayStripLabel(
+                days: days, covered: covered,
+                earliestDay: past.map(\.day).min(), now: now, calendar: calendar),
+            total: UsageFormat.cost(past.reduce(todayCost) { $0 + $1.cost }))
+    }
+
+    private static func share(_ value: Decimal?, of peak: Decimal) -> Double {
+        guard let value, peak > 0, value > 0 else { return 0 }
+        return min(
+            NSDecimalNumber(decimal: value).doubleValue
+                / NSDecimalNumber(decimal: peak).doubleValue, 1)
+    }
+
     /// The window a provider is closest to running out of, or nil when it
     /// reports none.
     ///

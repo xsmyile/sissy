@@ -229,9 +229,14 @@ private struct Chevron: View {
 enum StatusTreeGeometry {
     static let rowHeight: CGFloat = 18
     static let rowSpacing: CGFloat = 6
-    /// Past this the tree scrolls inside itself rather than growing the panel.
-    /// The panel has no scroll view of its own and sizes to its content, so
-    /// without a ceiling one open group takes the popover off the screen.
+    /// Past this the tree scrolls inside itself rather than growing the page.
+    ///
+    /// The panel gained a scroll view of its own, so this is no longer what
+    /// keeps the popover on the screen. It survives for the reason that always
+    /// sat underneath that one: OpenAI publishes 34 services, and a tree
+    /// allowed to run to its full length puts everything below it — the
+    /// limits, the day, the projects — past the bottom of a panel the user
+    /// then has to scroll through to reach what they opened it for.
     static let maxHeight: CGFloat = 200
 
     static func height(rows: Int) -> CGFloat {

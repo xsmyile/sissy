@@ -29,6 +29,13 @@ import SwiftUI
 /// closed: 15% of a core on the main thread, 79% of it inside
 /// `CA::Transaction::flush`. Building the host on open and dropping it on close
 /// is what makes a closed panel free.
+///
+/// **It is laid out before it is shown.** The panel measures its own page to
+/// decide where the screen's ceiling falls, and a measurement taken during
+/// layout is not available to the pass that triggered it: measured on
+/// macOS 26, the first `sizeThatFits` answers with the header alone and the
+/// real height only on the pass after. The popover reads `preferredContentSize`
+/// as it is shown, so without this it opens as a 45 pt stub and jumps.
 @MainActor
 final class UsagePanelController: NSObject {
     private let popover = NSPopover()
@@ -48,9 +55,13 @@ final class UsagePanelController: NSObject {
             close()
             return
         }
-        let host = NSHostingController(rootView: UsagePanelView(model: model))
+        let host = NSHostingController(
+            rootView: UsagePanelView(
+                model: model,
+                maxHeight: PanelMetrics.maxHeight(on: button.window?.screen)))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
+        host.view.layoutSubtreeIfNeeded()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 

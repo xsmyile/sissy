@@ -18,8 +18,31 @@ struct PanelProviderPage: View {
     /// `claude` and meeting the account they thought they had left.
     let switchFailure: String?
     let refresh: () -> Void
+    /// This provider's archived days, read once when the page opens. A closure
+    /// rather than a value because the read walks the archive and the page is
+    /// rebuilt on every frame the engine emits — a value would have to be
+    /// carried down through a view that has no use for it, and a read on the
+    /// frame path is the one thing this must not become.
+    let loadHistory: (String) async -> [UsageHistoryDaySummary]
+    /// Today's raw figures off the frame, for the one bar the archive must not
+    /// answer for. The rest of the page reads today already worded; the strip
+    /// needs the `Decimal` to scale a bar against the days beside it.
+    let todayTokens: Int
+    let todayCost: Decimal
+
+    /// The archived days, read once when the page opens. The strip itself is
+    /// derived in `body` rather than stored, because today's bar comes from
+    /// the frame and a stored strip would freeze it at the moment the page was
+    /// opened while the `Today` row below it kept moving.
+    @State private var series: [UsageHistoryDaySummary] = []
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
+
+    private var strip: UsagePanelSnapshot.DayStrip? {
+        UsagePanelSnapshot.dayStrip(
+            series: series, todayTokens: todayTokens, todayCost: todayCost,
+            days: UsageEngine.historyWindowDays)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -38,6 +61,13 @@ struct PanelProviderPage: View {
                 self.credits(credits)
             }
 
+            if let strip {
+                Divider()
+                PanelDayBars(strip: strip, tint: tint)
+                    .padding(.horizontal, PanelMetrics.gutter)
+                    .padding(.vertical, 12)
+            }
+
             Divider()
             today
 
@@ -45,6 +75,9 @@ struct PanelProviderPage: View {
                 Divider()
                 projects
             }
+        }
+        .task(id: row.id) {
+            series = await loadHistory(row.id)
         }
     }
 
@@ -268,6 +301,10 @@ struct PanelProviderPage: View {
     /// This provider's own day by project, which the slice already carries —
     /// the Overview's list is the two summed, and a page that repeated it
     /// would answer a question nobody asked here.
+    ///
+    /// Every row at full height. The page's own ceiling is the panel's, taken
+    /// from the screen it opens on, so a section does not have to buy room
+    /// from the user by hiding what they worked on.
     private var projects: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(text: "By project")

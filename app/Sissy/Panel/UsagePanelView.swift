@@ -13,8 +13,25 @@ import SwiftUI
 ///
 /// Every number it prints comes from `UsagePanelSnapshot`, so the panel and the
 /// pull-down menu cannot disagree.
+///
+/// **The header stays, the page scrolls, and only at the screen's edge.** The
+/// popover has no title bar and no way back once its content runs past the
+/// bottom of the screen, so the page below the divider sits in a scroll view
+/// bounded by what the screen leaves. A page that fits is untouched — the
+/// scroll view is set to the page's own measured height and scrolling is
+/// disabled — so the popover is the size it has always been on every Mac big
+/// enough for it, which is every Mac the author owns.
+///
+/// Scrolling the header away instead would take the back chevron and the
+/// controls with it, which is the one row that has to be reachable from
+/// anywhere on the page.
 struct UsagePanelView: View {
     let model: SissyModel
+    /// How tall the panel may be on the screen it is opening on, which the
+    /// controller resolves per showing. The panel sizes to its content under
+    /// this and scrolls at it — a ceiling rather than a height, so a short
+    /// page is exactly as tall as it was before there was one.
+    let maxHeight: CGFloat
 
     /// Which surface is on screen. Local to the view rather than on the model:
     /// the panel is dropped when it closes, and a page selection that outlived
@@ -28,6 +45,23 @@ struct UsagePanelView: View {
     /// because the target is the whole panel — a focus ring around all of it
     /// would say nothing.
     @FocusState private var panelFocused: Bool
+
+    /// The header block and the page, measured rather than derived.
+    ///
+    /// A `ScrollView` is greedy: given a flexible proposal it takes all of it,
+    /// so a page 300 pt tall under a 957 pt ceiling reported 957 and the
+    /// popover opened at the height of the screen. Measured on macOS 26 —
+    /// `.frame(maxHeight:)` on the panel, `.fixedSize` on the scroll view and
+    /// both together all produce that. What works is giving the scroll view an
+    /// explicit height: the page is measured inside it and the scroll view is
+    /// set to the smaller of that and what the header leaves. The ceiling
+    /// therefore cannot be applied to the panel as a whole, because the
+    /// greedy child is what it would be clamping.
+    @State private var headerHeight: CGFloat = 0
+    @State private var pageHeight: CGFloat = 0
+
+    /// What the page has once the header has taken its share.
+    private var availableForPage: CGFloat { max(maxHeight - headerHeight, 0) }
 
     enum Page: Equatable {
         case overview
@@ -86,31 +120,57 @@ struct UsagePanelView: View {
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
         return VStack(alignment: .leading, spacing: 0) {
-            if let open {
-                providerHeader(open, live: live)
-            } else {
-                header(live)
-            }
-            Divider()
-            if let snapshot {
+            VStack(alignment: .leading, spacing: 0) {
                 if let open {
-                    PanelProviderPage(
-                        row: open,
-                        onSelectAccount: { selectAccount($0) },
-                        switchFailure: model.engine.accountSwitchFailure,
-                        refresh: { model.refreshProvider(open.id) }
-                    )
+                    providerHeader(open, live: live)
                 } else {
-                    PanelOverview(
-                        snapshot: snapshot,
-                        meteringProviders: model.engine.providers.count {
-                            $0.activation.isMetering
-                        }
-                    ) { page = .provider($0) }
+                    header(live)
                 }
-            } else {
-                placeholder
+                Divider()
             }
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.height
+            } action: {
+                headerHeight = $0
+            }
+
+            ScrollView(.vertical) {
+                Group {
+                    if let snapshot {
+                        if let open {
+                            let slice = live?.frame.providers.first { $0.id == open.id }
+                            PanelProviderPage(
+                                row: open,
+                                onSelectAccount: { selectAccount($0) },
+                                switchFailure: model.engine.accountSwitchFailure,
+                                refresh: { model.refreshProvider(open.id) },
+                                loadHistory: {
+                                    await model.engine.usageHistorySeries(provider: $0)
+                                },
+                                todayTokens: slice?.tokens ?? 0,
+                                todayCost: slice?.cost ?? 0
+                            )
+                        } else {
+                            PanelOverview(
+                                snapshot: snapshot,
+                                meteringProviders: model.engine.providers.count {
+                                    $0.activation.isMetering
+                                }
+                            ) { page = .provider($0) }
+                        }
+                    } else {
+                        placeholder
+                    }
+                }
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.height
+                } action: {
+                    pageHeight = $0
+                }
+            }
+            .frame(height: min(pageHeight, availableForPage))
+            .scrollDisabled(pageHeight <= availableForPage)
+            .scrollBounceBehavior(.basedOnSize)
         }
         .frame(width: PanelMetrics.width)
         .focusable()

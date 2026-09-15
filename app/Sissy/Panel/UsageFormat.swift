@@ -300,6 +300,44 @@ enum UsageFormat {
         return "Since \(earliestDay.formatted(.dateTime.day().month(.abbreviated)))"
     }
 
+    /// Names the window a strip of day bars covers, and says how much of it
+    /// the archive actually answers for.
+    ///
+    /// The coverage half is not decoration. The strip has a bar's worth of
+    /// space per day and no axis, so a day Sissy was not running for is a
+    /// small mark that a reader can take for a quiet day. Counting the days
+    /// that carry a reading is what makes the difference legible without
+    /// putting a legend under a seven-bar chart.
+    static func dayStripLabel(
+        days: Int,
+        covered: Int,
+        earliestDay: Date?,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        let window = historyWindowLabel(
+            days: days, earliestDay: earliestDay, now: now, calendar: calendar)
+        guard covered < days else { return window }
+        return "\(window) · \(covered) of \(days) days"
+    }
+
+    /// A day bar's own name, which the strip's header takes while the pointer
+    /// is on that bar.
+    static func dayTitle(_ day: Date) -> String {
+        day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
+
+    /// A day bar's own figures, since the strip carries no axis to read one
+    /// off.
+    ///
+    /// A day with no reading says what happened rather than naming a figure:
+    /// the archive holds nothing for a day Sissy was not running, and "—"
+    /// there would read as a day that cost nothing.
+    static func dayFigures(tokens: Int?, cost: Decimal?) -> String {
+        guard let tokens, let cost else { return "Sissy was not running" }
+        return "\(self.tokens(tokens)) · \(self.cost(cost))"
+    }
+
     private static let secondsPerMinute = 60
     private static let minutesPerHour = 60
     private static let minutesPerDay = 1440
