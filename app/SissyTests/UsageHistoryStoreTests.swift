@@ -197,6 +197,36 @@ final class UsageHistoryStoreTests: XCTestCase {
         )
     }
 
+    /// The export reads this rather than `rollup`, so it takes no window: what
+    /// bounds it is retention, which has already bounded what is on disk. A
+    /// second bound here would mean an export quietly carrying less than the
+    /// archive the caption names.
+    func testEveryDayOnDiskComesBackOrderedByDayThenProvider() throws {
+        let models = ["opus": totals(input: 1, cost: "1")]
+        try write(provider: "codex", day: day(-40), models: models)
+        try write(provider: "claude-code", day: day(-40), models: models)
+        try write(provider: "claude-code", day: day(0), models: models)
+
+        let all = UsageHistoryStore.allDays(in: root)
+
+        XCTAssertEqual(
+            all.map { [$0.day, $0.provider] },
+            [[day(-40), "claude-code"], [day(-40), "codex"], [day(0), "claude-code"]]
+        )
+    }
+
+    /// A day this build cannot decode is skipped, the answer `load` already
+    /// gives — one unreadable file must not cost the user the whole export.
+    func testADayThisBuildCannotReadIsSkippedRatherThanFailingTheRead() throws {
+        try write(provider: "claude-code", day: day(0), models: ["opus": totals(input: 1, cost: "1")])
+        try Data("not json".utf8).write(
+            to: UsageHistoryStore.url(provider: "claude-code", day: day(-1), in: root))
+
+        let all = UsageHistoryStore.allDays(in: root)
+
+        XCTAssertEqual(all.map(\.day), [day(0)])
+    }
+
     func testADayComesBackWithTheRowsItWasWrittenWith() throws {
         try write(
             provider: "claude-code",

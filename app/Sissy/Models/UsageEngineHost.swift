@@ -267,6 +267,23 @@ final class UsageEngineHost {
         Task { await engine.setKeepAwake(mode: mode.rawValue) }
     }
 
+    /// Writes the archive out as CSV under `directory`, and answers with how
+    /// many day files went into it — zero when there is nothing recorded,
+    /// which the caller says rather than leaving three header-only files
+    /// somebody has to open to find out.
+    ///
+    /// The read is the engine's because the project paths are re-resolved
+    /// against the ledger it owns; the write is neither's, and runs detached
+    /// so a user's slow volume stalls the export rather than the metering or
+    /// the main thread.
+    func exportUsageHistory(to directory: URL) async throws -> Int {
+        guard let engine else { return 0 }
+        let days = await engine.exportableHistory()
+        guard !days.isEmpty else { return 0 }
+        try await Task.detached { try UsageHistoryExport.write(days, to: directory) }.value
+        return days.count
+    }
+
     /// Deletes the archive. The engine re-emits once it is gone, which is
     /// what takes the panel's archive line away with it.
     func deleteUsageHistory() {
