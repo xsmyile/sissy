@@ -315,6 +315,19 @@ enum UsageFormat {
 
     /// The control's own label for a window, which is the only place the period
     /// is named now that the line under the number admits coverage instead.
+    ///
+    /// The widest is `All`, meaning everything the archive kept — which
+    /// `historyRetentionDays` bounds, at 90 days by default.
+    ///
+    /// It was briefly "Everything kept", because measured against an archive
+    /// five days old the word promised a lifetime and delivered $2,100 where
+    /// the CLI's own logs held $4,615. That was copy compensating for a
+    /// defect: the archive started the day it shipped on the machine, and the
+    /// label was carrying the apology. #151 fixes the cause, and `All` is then
+    /// true of what Sissy holds. The number of days stays out of the label
+    /// either way — the retention is a ceiling rather than what is there, so
+    /// naming it would be a larger promise than `All` ever was, and the
+    /// coverage line under the number is what admits a short archive.
     static func periodLabel(_ period: UsagePeriod) -> String {
         switch period {
         case .today: "Today"
