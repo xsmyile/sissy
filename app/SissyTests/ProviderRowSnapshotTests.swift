@@ -8,14 +8,12 @@ import XCTest
 final class ProviderRowSnapshotTests: XCTestCase {
     private func readiness(
         id: String = ProviderID.claudeCode,
-        label: String? = nil,
         activation: ProviderActivation,
         dataDir: String = "/tmp/sissy-tests/projects",
         scan: ProviderReadiness.ScanProgress? = nil
     ) -> ProviderReadiness {
         ProviderReadiness(
             id: id,
-            label: label,
             activation: activation,
             dataDir: URL(fileURLWithPath: dataDir),
             scan: scan

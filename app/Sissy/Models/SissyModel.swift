@@ -154,10 +154,6 @@ final class SissyModel {
 
     // MARK: Menu actions
 
-    func setClaudeLimits(_ enabled: Bool) {
-        engine.setClaudeLimits(enabled)
-    }
-
     func refreshProvider(_ id: String) {
         engine.refreshProvider(id)
     }
@@ -241,18 +237,6 @@ final class SissyModel {
         if frame.keepAwake.mode != .off { preferredKeepAwakeMode = frame.keepAwake.mode }
         currentFrame = frame
         lastFrameAt = Date()
-    }
-
-    /// Switches which account of a vendor the panel draws.
-    ///
-    /// Nothing is read again: every account is metered whether or not it is on
-    /// screen, so this only changes which slice the row is built from. That is
-    /// what makes the switch instant, and it is also why it is a preference —
-    /// the choice is about looking, not about metering.
-    func selectAccount(vendor: String, id: String) {
-        guard preferences.selectedAccounts[vendor] != id else { return }
-        preferences.selectedAccounts[vendor] = id
-        savePreferences()
     }
 
     func setSissyMotion(_ enabled: Bool) {

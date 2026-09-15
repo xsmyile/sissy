@@ -219,13 +219,13 @@ struct UsagePanelSnapshot: Equatable {
     /// vanish because a preference outlived the account it points at.
     static func make(
         frame: FrameData,
-        selected: [String: String] = [:],
+        claudeAccounts: ClaudeAccountRegistry.Snapshot = .init(),
         now: Date = Date()
     ) -> Self {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
         let rows = makeRows(
-            frame.providers, selected: selected, totalTokens: totalTokens, now: now)
+            frame.providers, claudeAccounts: claudeAccounts, totalTokens: totalTokens, now: now)
         return Self(
             tokens: UsageFormat.tokens(frame.tokens),
             cost: UsageFormat.cost(frame.cost),
@@ -253,37 +253,29 @@ struct UsagePanelSnapshot: Equatable {
         )
     }
 
-    /// One row per vendor, drawing the account that vendor is switched to.
+    /// One row per vendor.
     ///
-    /// A row per *account* was the first shape and it was wrong: two rows both
-    /// headed "Claude" made the panel taller and left the user reading
-    /// directory names to tell them apart, when the thing that identifies an
-    /// account — its address, its organisation, its plan — is already on the
-    /// row. So the vendor keeps one row and the account is chosen on the line
-    /// that names it. Every account is still metered; this is only which one
-    /// is drawn.
+    /// A vendor is one CLI and one reading: Sissy meters the config home the
+    /// CLI writes to, and a log line carries no account id, so the spend is the
+    /// CLI's rather than an account's. What the account decides is the identity
+    /// on the row and the limits under it, both of which come from the
+    /// credential that is signed in — and `accounts` is the list of the others
+    /// Sissy could switch to, which is a property of the keychain rather than
+    /// of the frame.
     private static func makeRows(
         _ slices: [ProviderSlice],
-        selected: [String: String],
+        claudeAccounts: ClaudeAccountRegistry.Snapshot,
         totalTokens: Int,
         now: Date
     ) -> [ProviderRow] {
-        return Self.byVendor(slices).map { group in
-            let slice =
-                group.first { $0.id == selected[ProviderKey.vendor(of: $0.id)] } ?? group[0]
+        slices.map { slice in
             let plan = UsageFormat.plan(
                 slice.plan, tier: slice.planTier, seat: slice.account?.seat)
             return ProviderRow(
                 id: slice.id,
                 name: UsageFormat.providerName(slice.id),
-                accounts: group.count > 1
-                    ? group.map {
-                        AccountChoice(
-                            id: $0.id,
-                            label: UsageFormat.accountLabel($0.id, account: $0.account),
-                            isSelected: $0.id == slice.id)
-                    }
-                    : [],
+                accounts: slice.id == ProviderID.claudeCode
+                    ? switchableAccounts(claudeAccounts) : [],
                 plan: plan?.label,
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
@@ -305,18 +297,19 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
-    /// The slices grouped by vendor, each group and the groups themselves in
-    /// the order the frame listed them — which is the engine's canonical
-    /// order, so a row does not move between frames.
-    private static func byVendor(_ slices: [ProviderSlice]) -> [[ProviderSlice]] {
-        var order: [String] = []
-        var groups: [String: [ProviderSlice]] = [:]
-        for slice in slices {
-            let vendor = ProviderKey.vendor(of: slice.id)
-            if groups[vendor] == nil { order.append(vendor) }
-            groups[vendor, default: []].append(slice)
+    /// The accounts the switcher offers, or none when there is nothing to
+    /// switch between. One archived account is the ordinary case and a menu
+    /// with a single entry is a control that does nothing.
+    private static func switchableAccounts(
+        _ snapshot: ClaudeAccountRegistry.Snapshot
+    ) -> [AccountChoice] {
+        guard snapshot.accounts.count > 1 else { return [] }
+        return snapshot.accounts.map {
+            AccountChoice(
+                id: $0.uuid,
+                label: UsageFormat.accountLabel($0),
+                isSelected: $0.uuid == snapshot.activeUUID)
         }
-        return order.compactMap { groups[$0] }
     }
 
     /// The credits row, or nil when there is nothing a reader would act on.

@@ -23,22 +23,17 @@ final class UsageEngineHost {
     /// renders these; the two scalars above are the panel header's summary of
     /// the same list, so they cannot disagree with it.
     private(set) var providers: [ProviderReadiness] = []
-    /// Whether the Claude Code limit probe is on. Read from `server.json`,
-    /// which the engine owns: the app keeps no second copy, because the one
-    /// it used to keep could disagree with the file the probe actually booted
-    /// from.
-    private(set) var claudeLimits: Bool = false
     /// Whether Claude's limits come from the CLI's own credential file rather
     /// than from the keychain item or an imported claude.ai session. When they
     /// do, neither of those is read at all, and Settings has to say so instead
     /// of offering a control over a source nothing is using.
     private(set) var claudeUsesOwnCredential: Bool = false
     /// Days the archive is kept for, as `server.json` resolves it. Read from
-    /// the same place and for the same reason as `claudeLimits`: Settings
+    /// the same place and for the same reason as the rest: Settings
     /// says what the engine is actually doing, not what the app assumed.
     private(set) var historyRetentionDays: Int = UsageHistoryStore.defaultRetentionDays
     /// Whether the keep-awake hold is set to cover the screen. Read from
-    /// `server.json` for the same reason as `claudeLimits`: the engine owns
+    /// `server.json` for the same reason as the rest: the engine owns
     /// that file, and a second copy in the app could disagree with the one the
     /// assertions are actually taken from.
     private(set) var keepScreenAwake: Bool = true
@@ -114,7 +109,6 @@ final class UsageEngineHost {
         let config = (try? ServerConfig.load()) ?? .defaults
         let engine = UsageEngine(config: config)
         self.engine = engine
-        claudeLimits = config.claudeLimits
         claudeUsesOwnCredential = engine.claudeUsesOwnCredential
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
@@ -198,12 +192,6 @@ final class UsageEngineHost {
             await engine.forgetClaudeAccount(uuid: uuid)
             self?.claudeAccounts = engine.claudeAccountSnapshot
         }
-    }
-
-    func setClaudeLimits(_ enabled: Bool) {
-        guard let engine, enabled != claudeLimits else { return }
-        claudeLimits = enabled
-        Task { await engine.setClaudeLimits(enabled: enabled) }
     }
 
     /// Whether a claude.ai session is filed, so Settings can offer the right

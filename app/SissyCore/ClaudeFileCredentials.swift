@@ -59,3 +59,46 @@ enum ClaudeFileCredentials {
         return Date(timeIntervalSince1970: scaled)
     }
 }
+
+/// Claude Code's credential for the home Sissy reads, from wherever the CLI
+/// put it.
+///
+/// Two places, in one order. The file is what the CLI writes beside its config
+/// and is the cheapest read there is; the login keychain is where a macOS
+/// install keeps it when there is no file, reached through `/usr/bin/security`
+/// so it costs no dialog either. Both answer for whoever is signed in, which
+/// is the account the limits belong to — Sissy reports what the CLI spent, and
+/// who paid for it is `ClaudeAccountRegistry`'s question.
+enum ClaudeCodeCredentials {
+    static func load(home: ProviderHome) -> ClaudeCredentialsLookup {
+        let fromFile = ClaudeFileCredentials.load(at: home.claudeCredentialsURL)
+        if case .absent = fromFile { return fromKeychain(home: home.home) }
+        return fromFile
+    }
+
+    /// Whether a credential exists at all, asked without reading either one.
+    static func isPresent(home: ProviderHome) -> Bool {
+        if ClaudeFileCredentials.isPresent(at: home.claudeCredentialsURL) { return true }
+        return ClaudeKeychainCLI.contains(
+            service: ClaudeKeychainCLI.claudeService(for: home.home),
+            account: ClaudeKeychainCLI.claudeLoginName())
+    }
+
+    private static func fromKeychain(home: URL) -> ClaudeCredentialsLookup {
+        do {
+            let data = try ClaudeKeychainCLI.read(
+                service: ClaudeKeychainCLI.claudeService(for: home),
+                account: ClaudeKeychainCLI.claudeLoginName())
+            guard let parsed = ClaudeCredentialsStore.parse(data) else {
+                return .unreadable(OSStatus(errSecDecode))
+            }
+            return .found(parsed)
+        } catch ClaudeKeychainCLI.Failure.noItem {
+            return .absent
+        } catch ClaudeKeychainCLI.Failure.tool(let status) {
+            return .unreadable(OSStatus(status))
+        } catch {
+            return .unreadable(OSStatus(errSecIO))
+        }
+    }
+}

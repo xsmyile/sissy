@@ -19,7 +19,6 @@ struct DiagnosticsReport {
         /// it found nothing, and the two are the same zero without this.
         let filesWatched: Int
         let isWarm: Bool
-        let claudeLimits: Bool
         /// Whether the limits are being read off an imported claude.ai
         /// session rather than Claude Code's keychain token. The fact, never
         /// the session: which source answered is the first thing a gap needs,
@@ -37,8 +36,7 @@ struct DiagnosticsReport {
             "Sissy \(snapshot.version) (\(snapshot.build))",
             "macOS \(normalize(systemVersion: snapshot.systemVersion))",
             "Readers: \(snapshot.isWarm ? "warm" : "still scanning"), "
-                + "\(snapshot.filesWatched) file(s) watched",
-            "Claude limits: \(snapshot.claudeLimits ? "on" : "off")"
+                + "\(snapshot.filesWatched) file(s) watched"
                 + (snapshot.claudeWebSession ? " (claude.ai session)" : ""),
             "Providers: \(describe(snapshot.providers))",
             "ccusage: \(describe(snapshot.ccusage))",
@@ -58,7 +56,6 @@ struct DiagnosticsReport {
                 systemVersion: processInfo.operatingSystemVersionString,
                 filesWatched: model.engine.filesWatched,
                 isWarm: model.engine.isWarm,
-                claudeLimits: model.engine.claudeLimits,
                 claudeWebSession: model.engine.claudeWebSession,
                 providers: model.currentFrame?.providers ?? [],
                 ccusage: CcusageProbe.installs()

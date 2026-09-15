@@ -431,10 +431,8 @@ enum UsageFormat {
     /// already flipped it to go and flip it — a reading that has not landed
     /// yet and a module that was never switched on look identical from here,
     /// and only the app knows which it is.
-    static func noWindowsCaption(_ id: String, limitsEnabled: Bool) -> String {
-        switch ProviderKey.vendor(of: id) {
-        case ProviderID.claudeCode where !limitsEnabled:
-            return "Switch on Claude Code limits in Settings to see this account's windows."
+    static func noWindowsCaption(_ id: String) -> String {
+        switch id {
         case ProviderID.claudeCode:
             return "Waiting for the first reading of this account's windows."
         case ProviderID.codex:
@@ -469,7 +467,7 @@ enum UsageFormat {
     /// limits ride the CLI's own events, so no button can make them arrive —
     /// all a refresh can honestly touch is the account and the plan.
     static func refreshHelp(_ id: String) -> String {
-        switch ProviderKey.vendor(of: id) {
+        switch id {
         case ProviderID.claudeCode:
             return "Read the limits again · may ask for keychain access"
         case ProviderID.codex:
@@ -496,7 +494,7 @@ enum UsageFormat {
     /// Claude open in a browser and no CLI installed is exactly the case
     /// "Claude is not signed in" would misreport.
     static func providerName(_ id: String) -> String {
-        switch ProviderKey.vendor(of: id) {
+        switch id {
         case ProviderID.claudeCode: return "Claude"
         case ProviderID.codex: return "Codex"
         default: return id
@@ -531,20 +529,10 @@ enum UsageFormat {
     /// address the vendor does not report, and the key it was added under when
     /// neither has been read yet. An account whose files nothing has written
     /// still has to be pickable, which is why this never answers empty.
-    static func accountLabel(_ id: String, account: ProviderAccount?) -> String {
-        if let email = account?.email, !email.isEmpty { return email }
-        if let organization = account?.organization, !organization.isEmpty { return organization }
-        return ProviderKey(id: id).account ?? providerName(id)
-    }
-
-    /// The same row name for a surface that holds the user's own label rather
-    /// than the vendor's answer for the account — Settings, which lists
-    /// accounts before any of them has produced a reading.
-    static func providerName(_ id: String, named label: String?) -> String {
-        let name = providerName(id)
-        let qualifier = label.flatMap { $0.isEmpty ? nil : $0 } ?? ProviderKey(id: id).account
-        guard let qualifier else { return name }
-        return "\(name) · \(qualifier)"
+    static func accountLabel(_ identity: ClaudeAccountIdentity) -> String {
+        if let email = identity.email, !email.isEmpty { return email }
+        if let organization = identity.organization, !organization.isEmpty { return organization }
+        return providerName(ProviderID.claudeCode)
     }
 
     private static func accountQualifier(_ id: String, account: ProviderAccount?) -> String? {
@@ -552,7 +540,7 @@ enum UsageFormat {
         if let email = account?.email, let local = email.split(separator: "@").first {
             return String(local)
         }
-        return ProviderKey(id: id).account
+        return nil
     }
 
     /// What a project is called: the last component of its path, which is the

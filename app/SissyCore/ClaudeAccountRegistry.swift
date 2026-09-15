@@ -41,6 +41,11 @@ actor ClaudeAccountRegistry {
         var read: @Sendable () -> Data?
         var write: @Sendable (Data) throws -> Void
 
+        /// Reads and writes nothing. What a test gets unless it asks for the
+        /// real keychain, so a suite can never read the machine's own
+        /// credential or identify it over the network.
+        static let inert = ActiveSlot(read: { nil }, write: { _ in })
+
         static let live = ActiveSlot(
             read: {
                 try? ClaudeKeychainCLI.read(
@@ -71,6 +76,18 @@ actor ClaudeAccountRegistry {
     /// buys a request.
     private var lastSeenToken: String?
     nonisolated private let published = LockedValue(Snapshot())
+
+    /// A registry that knows nothing and learns nothing: no keychain, no
+    /// network, no index on disk. The default everywhere an engine is built
+    /// without one.
+    static func inert() -> ClaudeAccountRegistry {
+        var store = ClaudeAccountStore(indexURL: URL(fileURLWithPath: "/dev/null"))
+        store.secrets = ClaudeAccountStore.Secrets(
+            read: { _ in nil }, write: { _, _ in }, delete: { _ in })
+        return ClaudeAccountRegistry(store: store, slot: .inert) { _ in
+            throw ClaudeAccountProfile.Failure.malformedPayload
+        }
+    }
 
     init(
         store: ClaudeAccountStore,

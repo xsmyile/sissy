@@ -56,6 +56,7 @@ final class UsageEngineControlTests: XCTestCase {
             config: config,
             configURL: configURL,
             limitsProbe: ClaudeLimitsProbe { _, _ in .absent },
+            claudeAccounts: .inert(),
             keepAwakePolicy: keepAwakePolicy
         )
     }
@@ -119,45 +120,6 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertEqual(readiness.map(\.activation), [.off, .off])
         XCTAssertNil(readiness[0].scan, "a provider that is off has no reader")
         XCTAssertNil(readiness[1].scan)
-    }
-
-    // MARK: The limits switch
-
-    func testTurningTheLimitsSwitchOnPersistsItWhereARelaunchWillReadIt() async throws {
-        let engine = makeEngine()
-        await engine.start { _ in }
-        addTeardownBlock { await engine.stop() }
-
-        await engine.setClaudeLimits(enabled: true)
-
-        let inMemory = await engine.config.claudeLimits
-        XCTAssertTrue(inMemory)
-        XCTAssertTrue(try ServerConfig.load(from: configURL).claudeLimits)
-    }
-
-    func testTurningTheLimitsSwitchOffPersistsThatToo() async throws {
-        let engine = makeEngine()
-        await engine.start { _ in }
-        addTeardownBlock { await engine.stop() }
-        await engine.setClaudeLimits(enabled: true)
-
-        await engine.setClaudeLimits(enabled: false)
-
-        let inMemory = await engine.config.claudeLimits
-        XCTAssertFalse(inMemory)
-        XCTAssertFalse(try ServerConfig.load(from: configURL).claudeLimits)
-    }
-
-    /// The setter guards on the value actually changing, so a switch already
-    /// where it is asked to be writes nothing.
-    func testSettingTheLimitsSwitchToWhereItAlreadyIsTouchesNothing() async {
-        let engine = makeEngine()
-        await engine.start { _ in }
-        addTeardownBlock { await engine.stop() }
-
-        await engine.setClaudeLimits(enabled: false)
-
-        XCTAssertFalse(FileManager.default.fileExists(atPath: configURL.path))
     }
 
     // MARK: The keep-awake switch

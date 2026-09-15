@@ -10,10 +10,6 @@ import SwiftUI
 /// at costs nothing.
 struct PanelProviderPage: View {
     let row: UsagePanelSnapshot.ProviderRow
-    /// Whether the module behind this provider's limits is switched on. Only
-    /// one provider has such a switch; it decides which sentence an empty
-    /// limits block gets.
-    let limitsEnabled: Bool
     /// Switches the vendor to another of its accounts. Never called for a
     /// vendor with one account, whose row carries no choices.
     let onSelectAccount: (String) -> Void
@@ -174,7 +170,7 @@ struct PanelProviderPage: View {
 
             if row.windows.isEmpty {
                 if row.notice == nil {
-                    Text(UsageFormat.noWindowsCaption(row.id, limitsEnabled: limitsEnabled))
+                    Text(UsageFormat.noWindowsCaption(row.id))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

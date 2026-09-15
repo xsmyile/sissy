@@ -69,10 +69,6 @@ struct ProviderReadiness: Sendable, Equatable {
 
     /// Stable provider id, as the frame carries it. The app words it.
     let id: String
-    /// What the user called this account, when they named one. Nil for the
-    /// account that predates accounts and for one added without a name, where
-    /// the row falls back to the vendor and the key.
-    let label: String?
     let activation: ProviderActivation
     /// Where this provider's logs are read from, for the row that has to say
     /// where Sissy looked and found nothing.

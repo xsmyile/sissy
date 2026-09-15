@@ -22,34 +22,37 @@ final class UsageEngineLifecycleTests: XCTestCase {
 
     /// Points every path at the temp tree and pins pricing to the embedded
     /// seed, so a test neither reads the real log trees nor reaches the network.
-    private func makeEngine() -> UsageEngine {
+    private func makeEngine(
+        limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe { _, _ in .absent }
+    ) -> UsageEngine {
         var config = ServerConfig.defaults
         config.claudeDataDir = tempDir.appendingPathComponent("claude").path
         config.codexDataDir = tempDir.appendingPathComponent("codex").path
         config.remotePricing = false
         return UsageEngine(
             config: config,
-            configURL: tempDir.appendingPathComponent("server.json")
+            configURL: tempDir.appendingPathComponent("server.json"),
+            limitsProbe: limitsProbe,
+            claudeAccounts: .inert()
         )
     }
 
-    /// The stake is a keychain dialog: `setClaudeLimits` is what starts the
-    /// probe, and a control call arriving after teardown must not put a system
-    /// prompt in front of someone who has quit.
-    func testAStoppedEngineWillNotStartTheLimitsProbe() async {
-        let engine = makeEngine()
+    /// A teardown has to leave no poll behind, and the limits poll is the one
+    /// that reaches the network on a timer.
+    func testAStoppedEngineRunsNoLimitsPoll() async {
+        let reads = LockedValue(0)
+        let engine = makeEngine(
+            limitsProbe: ClaudeLimitsProbe { _, _ in
+                reads.update { $0 += 1 }
+                return .absent
+            })
         await engine.start { _ in }
         await engine.stop()
+        let afterStop = reads.load()
 
-        await engine.setClaudeLimits(enabled: true)
+        await engine.start { _ in }
 
-        let claudeLimits = await engine.config.claudeLimits
-        XCTAssertFalse(claudeLimits, "a stopped engine took a control call")
-        XCTAssertFalse(
-            FileManager.default.fileExists(
-                atPath: tempDir.appendingPathComponent("server.json").path),
-            "a stopped engine persisted a setting it did not apply"
-        )
+        XCTAssertEqual(reads.load(), afterStop, "a stopped engine restarted the limits poll")
     }
 
     /// Termination can reach this more than once, and the readiness poll can
@@ -71,15 +74,18 @@ final class UsageEngineLifecycleTests: XCTestCase {
     /// a boolean flag got wrong — a `stop()` arriving before `start()` left the
     /// flag false, and `start()` then booted as if nothing had happened.
     func testAStopWinsOverAConcurrentStart() async {
-        let engine = makeEngine()
+        let reads = LockedValue(0)
+        let engine = makeEngine(
+            limitsProbe: ClaudeLimitsProbe { _, _ in
+                reads.update { $0 += 1 }
+                return .absent
+            })
         let booting = Task { await engine.start { _ in } }
 
         await engine.stop()
         await booting.value
 
-        await engine.setClaudeLimits(enabled: true)
-        let claudeLimits = await engine.config.claudeLimits
-        XCTAssertFalse(claudeLimits, "start() resumed into a torn-down engine")
+        XCTAssertEqual(reads.load(), 0, "start() resumed into a torn-down engine")
     }
 
     /// A provider that was never built still has to be listed, because "off"

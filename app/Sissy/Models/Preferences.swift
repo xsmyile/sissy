@@ -15,23 +15,13 @@ struct Preferences: Codable, Equatable {
     /// later removes Sissy from Login Items does not get it put back.
     var retiredServerAgent: Bool = false
     /// Which account of each vendor the panel is currently showing, keyed by
-    /// vendor. Empty for the overwhelming majority of installs, which hold one
-    /// account per vendor and have nothing to choose between.
-    ///
-    /// A preference rather than engine state on purpose: every account is
-    /// metered all the time, so switching is a change of what is drawn and not
-    /// of what is read — which is what makes it instant and what stops a
-    /// glance at the other account costing a re-scan.
-    var selectedAccounts: [String: String] = [:]
 
     init(
         sissyMotion: Bool = true,
         retiredServerAgent: Bool = false,
-        selectedAccounts: [String: String] = [:],
     ) {
         self.sissyMotion = sissyMotion
         self.retiredServerAgent = retiredServerAgent
-        self.selectedAccounts = selectedAccounts
     }
 
     /// Backwards-compatible decoder so a `preferences.json` written by an
@@ -41,8 +31,6 @@ struct Preferences: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         sissyMotion = Self.decodeSissyMotion(from: decoder)
         retiredServerAgent = (try? c.decode(Bool.self, forKey: .retiredServerAgent)) ?? false
-        selectedAccounts =
-            (try? c.decode([String: String].self, forKey: .selectedAccounts)) ?? [:]
     }
 
     /// `sissyMotion` was persisted as `mascotMotion` up to and including

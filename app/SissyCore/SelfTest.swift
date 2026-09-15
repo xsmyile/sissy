@@ -353,13 +353,13 @@ private func runServerConfigTests() {
     // setting rather than desyncing a second copy.
     let saveURL = tempDir.appendingPathComponent("roundtrip.json")
     var cfg = ServerConfig.defaults
-    cfg.claudeLimits = true
+    cfg.agentHooks = true
     cfg.keepAwake = .on
     cfg.codexDataDir = "~/somewhere/else"
     do {
         try ServerConfig.save(cfg, to: saveURL)
         let reloaded = try ServerConfig.load(from: saveURL)
-        expect("save roundtrip claudeLimits", reloaded.claudeLimits, true)
+        expect("save roundtrip agentHooks", reloaded.agentHooks, true)
         expect("save roundtrip keepAwake", reloaded.keepAwake, .on)
         expect("save roundtrip codexDataDir", reloaded.codexDataDir, "~/somewhere/else")
     } catch {
@@ -369,11 +369,11 @@ private func runServerConfigTests() {
     // A mode written by a newer build must cost the user that one setting,
     // not the rest of the file with it.
     let futureModeURL = tempDir.appendingPathComponent("future-mode.json")
-    try? Data(#"{"claudeLimits":true,"keepAwake":"hypersleep"}"#.utf8).write(to: futureModeURL)
+    try? Data(#"{"agentHooks":true,"keepAwake":"hypersleep"}"#.utf8).write(to: futureModeURL)
     do {
         let loaded = try ServerConfig.load(from: futureModeURL)
         expect("unknown keepAwake mode reads as off", loaded.keepAwake, .off)
-        expect("unknown keepAwake mode keeps the rest", loaded.claudeLimits, true)
+        expect("unknown keepAwake mode keeps the rest", loaded.agentHooks, true)
     } catch {
         expect("future-mode config loads", false, true)
     }
@@ -383,12 +383,12 @@ private func runServerConfigTests() {
     // it must not drag the removed settings back in.
     let legacyURL = tempDir.appendingPathComponent("legacy.json")
     try? Data(
-        #"{"host":"127.0.0.1","port":5155,"authToken":"x","primaryMetric":"tokens","claudeLimits":true}"#
+        #"{"host":"127.0.0.1","port":5155,"authToken":"x","primaryMetric":"tokens","agentHooks":true}"#
             .utf8
     ).write(to: legacyURL)
     do {
         let loaded = try ServerConfig.load(from: legacyURL)
-        expect("legacy config keeps what this build still has", loaded.claudeLimits, true)
+        expect("legacy config keeps what this build still has", loaded.agentHooks, true)
         expect("legacy config defaults the rest", loaded.keepAwake, .off)
     } catch {
         expect("legacy config loads", false, true)
@@ -1338,16 +1338,16 @@ func runServerConfigSaveTests() {
     }
 
     var config = ServerConfig.defaults
-    config.claudeLimits = true
+    config.agentHooks = true
     expect(
         "a config saves where there is no file yet", (try? ServerConfig.save(config, to: url)) != nil, true)
     expect("and is owner-only", mode(), 0o600)
-    expect("and reads back", (try? ServerConfig.load(from: url))?.claudeLimits, true)
+    expect("and reads back", (try? ServerConfig.load(from: url))?.agentHooks, true)
 
-    config.claudeLimits = false
+    config.agentHooks = false
     expect("a config saves over one that is there", (try? ServerConfig.save(config, to: url)) != nil, true)
     expect("and is owner-only too", mode(), 0o600)
-    expect("and replaces it", (try? ServerConfig.load(from: url))?.claudeLimits, false)
+    expect("and replaces it", (try? ServerConfig.load(from: url))?.agentHooks, false)
     expect(
         "no staging file is left behind",
         (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.count ?? 0,

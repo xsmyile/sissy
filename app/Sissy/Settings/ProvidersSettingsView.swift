@@ -52,33 +52,6 @@ struct ProviderRowSnapshot: Equatable {
     }
 }
 
-/// What the Claude Code limits switch says about itself.
-///
-/// Split because the two halves are not equally urgent. `caption` carries the
-/// only two facts that change what someone does — what the switch shows, and
-/// that macOS will ask — and stays on screen, because a permission prompt this
-/// app did not warn about is the thing Sissy's first-run promise exists to
-/// avoid. `detail` is the reassurance and the after-an-update expectation:
-/// worth keeping, not worth four permanent lines.
-enum ClaudeLimitsCopy {
-    static let title = "Show Claude Code limits"
-
-    static let caption =
-        "Shows Claude Code's 5-hour and weekly windows next to Codex's. "
-        + "macOS will ask for your permission."
-
-    static let detail =
-        "Sissy reads the token Claude Code already keeps in your keychain — only ever "
-        + "reads it, never writes or refreshes it. That permission is tied to Sissy's own "
-        + "binary, so it lapses after an update. Sissy never asks again on its own: the "
-        + "limits go quiet instead, and switching this off and back on is what asks for "
-        + "them."
-
-    /// What the button reads as to a screen reader, where the glyph says
-    /// nothing — the one reader who cannot see an `info.circle` and guess.
-    static let detailButtonLabel = "What Sissy reads"
-}
-
 /// The claude.ai session, and what importing it changes.
 ///
 /// It says what the thing is before the button is pressed, because it is a
@@ -132,7 +105,6 @@ enum ClaudeWebSessionCopy {
 struct ProvidersSettingsView: View {
     let model: SissyModel
 
-    @State private var showingLimitsDetail = false
     @State private var showingWebSessionDetail = false
 
     private static let markSize: CGFloat = 18
@@ -141,17 +113,14 @@ struct ProvidersSettingsView: View {
 
     var body: some View {
         Form {
-            ForEach(vendors, id: \.first!.id) { accounts in
+            ForEach(model.engine.providers, id: \.id) { readiness in
                 Section {
-                    row(accounts[0], accounts: accounts)
-                    if vendor(of: accounts[0]) == ProviderID.claudeCode {
-                        claudeLimits
-                        if model.engine.claudeLimits {
-                            if model.engine.claudeUsesOwnCredential {
-                                ownCredentialRow
-                            } else {
-                                claudeWebSession
-                            }
+                    row(readiness)
+                    if readiness.id == ProviderID.claudeCode {
+                        if model.engine.claudeUsesOwnCredential {
+                            ownCredentialRow
+                        } else {
+                            claudeWebSession
                         }
                     }
                 }
@@ -163,46 +132,8 @@ struct ProvidersSettingsView: View {
         .task { model.engine.refreshProviders() }
     }
 
-    /// The directory an account lives in, named the way the user sees it on
-    /// disk. It is what tells two accounts of one vendor apart here, where
-    /// neither address nor organisation has been read yet.
-    private static func homeName(of readiness: ProviderReadiness) -> String {
-        readiness.dataDir.deletingLastPathComponent().lastPathComponent
-    }
-
-    private func vendor(of readiness: ProviderReadiness) -> String {
-        ProviderKey.vendor(of: readiness.id)
-    }
-
-    /// One group per vendor, in the engine's own order.
-    ///
-    /// A section per *account* was the first shape and it read as two
-    /// providers: "Claude" twice, with the limits switch under one of them and
-    /// not the other. A vendor is one CLI however many accounts it holds, and
-    /// its switch is the CLI's — so the section is the vendor's and the
-    /// accounts are lines inside it.
-    private var vendors: [[ProviderReadiness]] {
-        var order: [String] = []
-        var groups: [String: [ProviderReadiness]] = [:]
-        for readiness in model.engine.providers {
-            let key = vendor(of: readiness)
-            if groups[key] == nil { order.append(key) }
-            groups[key, default: []].append(readiness)
-        }
-        return order.compactMap { groups[$0] }
-    }
-
-    /// Adding an account, and the one thing a user has to do outside Sissy for
-    /// it to mean anything.
-    ///
-    /// Both CLIs keep an account's whole state — its logs, its credential, its
-    /// profile — under one directory, and that directory is what Sissy is
-    /// being pointed at. A home nothing has ever run against is an empty row,
-    /// so the caption says which variable puts a session there rather than
-    /// leaving someone to find out from an account that never fills in.
-    /// What is read when the CLI keeps its own credential: no keychain, no
-    /// cookie, no grant to go stale, and an answer that belongs to this
-    /// account rather than to whoever else is signed in on this Mac.
+    /// What is read when the CLI keeps its own credential: no keychain
+    /// dialog, no cookie, and no grant that a re-signed build invalidates.
     @ViewBuilder
     private var ownCredentialRow: some View {
         LabeledContent {
@@ -215,26 +146,10 @@ struct ProvidersSettingsView: View {
             .foregroundStyle(.secondary)
     }
 
-    /// The vendor's own line, and one line under it per account it is
-    /// metering — which is where the path and the file count belong, because
-    /// those are an account's and not a CLI's.
+    /// The vendor's line, and under it where Sissy is reading and what it has
+    /// found there.
     @ViewBuilder
-    private func row(_ readiness: ProviderReadiness, accounts: [ProviderReadiness]) -> some View {
-        vendorRow(readiness)
-        ForEach(accounts, id: \.id) { account in
-            LabeledContent {
-                Text(ProviderRowSnapshot.make(account).detail)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
-            } label: {
-                Text(Self.homeName(of: account))
-                    .textSelection(.enabled)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func vendorRow(_ readiness: ProviderReadiness) -> some View {
+    private func row(_ readiness: ProviderReadiness) -> some View {
         let snapshot = ProviderRowSnapshot.make(readiness)
         LabeledContent {
             Text(snapshot.state).foregroundStyle(.secondary)
@@ -245,54 +160,14 @@ struct ProvidersSettingsView: View {
                 ProviderMark(id: readiness.id, size: Self.markSize, textSize: NSFont.systemFontSize)
             }
         }
-    }
-
-    @ViewBuilder
-    private var claudeLimits: some View {
-        LabeledContent {
-            Toggle(ClaudeLimitsCopy.title, isOn: claudeLimitsBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
-            HStack(spacing: 4) {
-                Text(ClaudeLimitsCopy.title)
-                detailButton
-            }
-        }
-        Text(ClaudeLimitsCopy.caption)
+        Text(snapshot.detail)
             .font(.callout)
             .foregroundStyle(.secondary)
     }
 
-    /// A button rather than a `help` tooltip: a tooltip is reachable only by
-    /// hovering a pointer over it, and this is the one control on the page
-    /// whose consequences someone may want to read before flipping it.
-    private var detailButton: some View {
-        Button {
-            showingLimitsDetail = true
-        } label: {
-            Image(systemName: "info.circle")
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(ClaudeLimitsCopy.detailButtonLabel)
-        .popover(isPresented: $showingLimitsDetail, arrowEdge: .bottom) {
-            Text(ClaudeLimitsCopy.detail)
-                .font(.callout)
-                .frame(width: Self.detailPopoverWidth)
-                .padding()
-        }
-    }
-
-    private var claudeLimitsBinding: Binding<Bool> {
-        Binding(
-            get: { model.engine.claudeLimits },
-            set: { model.setClaudeLimits($0) }
-        )
-    }
-
-    /// Shown only under a switch that is already on: importing a session for
-    /// limits nobody asked to see would be a permission with nothing behind
-    /// it.
+    /// Shown only when the CLI keeps no credential Sissy can read, which is a
+    /// CLI nobody has signed into. Otherwise there is nothing to import: the
+    /// limits already come from the account that is signed in.
     @ViewBuilder
     private var claudeWebSession: some View {
         LabeledContent {

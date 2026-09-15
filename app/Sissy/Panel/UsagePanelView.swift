@@ -70,16 +70,19 @@ struct UsagePanelView: View {
     /// the page with it: the page is addressed by provider id, so leaving it
     /// pointed at the account that was just switched away from would drop the
     /// user back to the overview on every switch.
-    private func selectAccount(_ id: String) {
-        let vendor = ProviderKey.vendor(of: id)
-        model.selectAccount(vendor: vendor, id: id)
-        page = .provider(id)
+    /// Picking an account is picking the account: the next `claude` in a
+    /// terminal starts as it, and the identity and limits on the row follow.
+    /// Sissy holds its own copy of every account it has seen, so the one being
+    /// switched away from stays a click away.
+    private func selectAccount(_ uuid: String) {
+        model.engine.activateClaudeAccount(uuid: uuid)
     }
 
     var body: some View {
         let live = model.liveFrame
         let snapshot = live.map {
-            UsagePanelSnapshot.make(frame: $0.frame, selected: model.preferences.selectedAccounts)
+            UsagePanelSnapshot.make(
+                frame: $0.frame, claudeAccounts: model.engine.claudeAccounts)
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
         return VStack(alignment: .leading, spacing: 0) {
@@ -93,7 +96,6 @@ struct UsagePanelView: View {
                 if let open {
                     PanelProviderPage(
                         row: open,
-                        limitsEnabled: model.engine.claudeLimits,
                         onSelectAccount: { selectAccount($0) },
                         refresh: { model.refreshProvider(open.id) }
                     )

@@ -15,15 +15,6 @@ struct ProviderToggles: Sendable, Codable {
 struct ServerConfig: Sendable, Codable {
     var claudeDataDir: String
     var codexDataDir: String
-    /// The accounts Sissy meters, across every vendor.
-    ///
-    /// Nil for every install written before accounts existed, and that is the
-    /// migration: an absent list means the one account each vendor has always
-    /// had, resolved from `claudeDataDir` / `codexDataDir` below. Nothing is
-    /// rewritten on disk for it — a user who never holds a second account
-    /// never grows the key, and the one who does adds accounts beside a
-    /// default that keeps its own snapshot and its own archive.
-    var accounts: [AccountConfig]?
     var pollIntervalSeconds: Double
     var pricingOverride: [String: ModelPricing]?
     /// Whether Sissy fetches LiteLLM's rate table at runtime
@@ -33,12 +24,6 @@ struct ServerConfig: Sendable, Codable {
     /// offline; `pricingOverride` still applies either way.
     var remotePricing: Bool?
     var providers: ProviderToggles
-    /// Whether Sissy reads Claude Code's OAuth token from the login
-    /// keychain to show that CLI's 5-hour and weekly subscription windows.
-    /// Off unless the user asks for it in Settings: turning it on is what
-    /// makes the one-time macOS keychain prompt expected rather than something
-    /// a first launch springs on someone who never asked for limits.
-    var claudeLimits: Bool
     /// How many days of the day-by-model archive Sissy keeps. `nil` means the
     /// default; `0` stops it recording and reporting, and leaves what is
     /// already there for the Settings button, which is the one place a user
@@ -82,12 +67,10 @@ struct ServerConfig: Sendable, Codable {
     static let defaults = ServerConfig(
         claudeDataDir: "~/.claude/projects",
         codexDataDir: "~/.codex/sessions",
-        accounts: nil,
         pollIntervalSeconds: 60.0,
         pricingOverride: nil,
         remotePricing: nil,
         providers: .defaults,
-        claudeLimits: false,
         historyRetentionDays: nil,
         keepAwake: .off,
         keepScreenAwake: true,
@@ -121,10 +104,8 @@ struct ServerConfig: Sendable, Codable {
         var merged = defaults
         if let v = obj["claudeDataDir"] as? String { merged.claudeDataDir = v }
         if let v = obj["codexDataDir"] as? String { merged.codexDataDir = v }
-        merged.accounts = decodeAccounts(obj["accounts"])
         if let v = obj["pollIntervalSeconds"] as? Double { merged.pollIntervalSeconds = v }
         if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
-        if let v = obj["claudeLimits"] as? Bool { merged.claudeLimits = v }
         if let v = obj["historyRetentionDays"] as? Int { merged.historyRetentionDays = v }
         // An unknown mode reads as off rather than failing the whole file: a
         // value written by a newer build must not cost the user every other
@@ -146,21 +127,6 @@ struct ServerConfig: Sendable, Codable {
             merged.pricingOverride = decoded
         }
         return merged
-    }
-
-    /// The account list of a partially decodable config.
-    ///
-    /// A list this build cannot read answers nil rather than failing the file,
-    /// on the same grounds as every other key here: a value written by a newer
-    /// build must not cost the user every other setting beside it. Nil is also
-    /// what an install that predates accounts carries, so both land on the
-    /// single account each vendor has always had.
-    private static func decodeAccounts(_ raw: Any?) -> [AccountConfig]? {
-        guard let raw,
-            let nested = try? JSONSerialization.data(withJSONObject: raw),
-            let decoded = try? JSONDecoder().decode([AccountConfig].self, from: nested)
-        else { return nil }
-        return decoded
     }
 
     /// Atomic write to disk. Used by the engine's runtime config-change paths
