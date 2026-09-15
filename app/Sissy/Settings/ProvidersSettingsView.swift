@@ -80,8 +80,7 @@ enum ClaudeWebSessionCopy {
     static let ownCredentialState = "This account's own sign-in"
     static let ownCredentialCaption =
         "Claude Code keeps its OAuth token in each account's own directory, so Sissy reads "
-        + "the limits of the account the row is about. Nothing is read from the keychain "
-        + "and no claude.ai session is needed."
+        + "that account's own limits."
 
     /// One sentence per way the import can come up empty, each naming what to
     /// do rather than what failed.
