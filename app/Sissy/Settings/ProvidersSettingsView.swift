@@ -108,6 +108,10 @@ struct ProvidersSettingsView: View {
     @State private var showingWebSessionDetail = false
 
     private static let markSize: CGFloat = 18
+    /// Wide enough for a four-figure plan price and no wider — the field sits
+    /// at the trailing edge of a Form row, where a full-width one reads as a
+    /// text box for prose.
+    private static let planPriceFieldWidth: CGFloat = 72
     /// Wide enough that the detail reads as a paragraph rather than a column.
     private static let detailPopoverWidth: CGFloat = 280
 
@@ -116,6 +120,7 @@ struct ProvidersSettingsView: View {
             ForEach(model.engine.providers, id: \.id) { readiness in
                 Section {
                     row(readiness)
+                    planPrice(readiness)
                     if readiness.id == ProviderID.claudeCode {
                         if model.engine.claudeUsesOwnCredential {
                             ownCredentialRow
@@ -130,6 +135,47 @@ struct ProvidersSettingsView: View {
         // The readiness poll stops once the scan is warm, so a window opened
         // afterwards would render whatever the last tick left behind.
         .task { model.engine.refreshProviders() }
+    }
+
+    /// What this provider's subscription costs a month, typed by the user.
+    ///
+    /// Typed, and never shipped. Plan prices differ by country, by seat and
+    /// by promotion, so a table in the binary would be the same regression as
+    /// a rate table and a slower one to notice, because nobody cross-checks a
+    /// figure Sissy invented. Empty is the ordinary state and costs nothing:
+    /// the month still prints what the usage came to, it just does not say
+    /// what it was measured against.
+    @ViewBuilder
+    private func planPrice(_ readiness: ProviderReadiness) -> some View {
+        LabeledContent("Plan price") {
+            HStack(spacing: 4) {
+                Text(verbatim: "$")
+                    .foregroundStyle(.secondary)
+                TextField(
+                    "Plan price",
+                    text: planPriceBinding(readiness.id),
+                    prompt: Text(verbatim: "0.00")
+                )
+                .labelsHidden()
+                .frame(width: Self.planPriceFieldWidth)
+                .multilineTextAlignment(.trailing)
+            }
+        }
+        Text(
+            "US dollars a month, which is the currency Sissy prices tokens in — a plan billed "
+                + "in another one has to be converted, because a rate Sissy invented would be "
+                + "wrong by the time you read it. Leave it empty and the panel shows the month's "
+                + "usage without anything to compare it to."
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+
+    private func planPriceBinding(_ id: String) -> Binding<String> {
+        Binding(
+            get: { model.engine.planPrices[id] ?? "" },
+            set: { model.setPlanPrice($0, forProvider: id) }
+        )
     }
 
     /// What is read when the CLI keeps its own credential: no keychain

@@ -111,6 +111,7 @@ final class UsageEngineHost {
         self.engine = engine
         claudeUsesOwnCredential = engine.claudeUsesOwnCredential
         historyRetentionDays = config.resolvedHistoryRetentionDays
+        planPrices = config.planPrices ?? [:]
         keepScreenAwake = config.keepScreenAwake
         keepAwakeMode = config.keepAwake
         agentHooks = config.agentHooks
@@ -377,6 +378,23 @@ final class UsageEngineHost {
                 host.agentHooksRefused = refused
             }
         }
+    }
+
+    /// What each provider's plan costs a month, as `server.json` holds it —
+    /// the raw string the user typed, so the field renders back what they
+    /// entered rather than Sissy's reading of it.
+    private(set) var planPrices: [String: String] = [:]
+
+    func setPlanPrice(_ price: String, forProvider id: String) {
+        guard let engine else { return }
+        let trimmed = price.trimmingCharacters(in: .whitespaces)
+        guard trimmed != (planPrices[id] ?? "") else { return }
+        if trimmed.isEmpty {
+            planPrices.removeValue(forKey: id)
+        } else {
+            planPrices[id] = trimmed
+        }
+        Task { await engine.setPlanPrice(trimmed, forProvider: id) }
     }
 
     func setKeepScreenAwake(_ enabled: Bool) {

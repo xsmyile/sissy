@@ -300,6 +300,35 @@ enum UsageFormat {
         return "Since \(earliestDay.formatted(.dateTime.day().month(.abbreviated)))"
     }
 
+    /// `This month`, or `Since 9 Sep` when the archive does not reach the
+    /// first of it.
+    ///
+    /// The same distinction `historyWindowLabel` draws for the week, and for
+    /// the same reason sharpened: a fortnight of spend held up against a whole
+    /// month's plan price reads as a plan that did not pay for itself, when
+    /// what actually happened is that Sissy was not installed for the rest.
+    static func monthLabel(
+        earliestDay: Date,
+        monthStart: Date,
+        calendar: Calendar = .current
+    ) -> String {
+        guard calendar.startOfDay(for: earliestDay) > calendar.startOfDay(for: monthStart)
+        else { return "This month" }
+        return "Since \(earliestDay.formatted(.dateTime.day().month(.abbreviated)))"
+    }
+
+    /// `$312.40 of usage on a $200.00 plan`, or the spend alone until the user
+    /// says what the plan costs.
+    ///
+    /// "of usage" rather than "spent", because nothing was: a subscriber is
+    /// billed the plan whatever the meter says, and this is what the same
+    /// tokens would have cost on the API. Saying "spent" would name a charge
+    /// that never happened.
+    static func subscriptionMonth(cost: Decimal, planPrice: Decimal?) -> String {
+        guard let planPrice else { return "\(self.cost(cost)) of usage" }
+        return "\(self.cost(cost)) of usage on a \(self.cost(planPrice)) plan"
+    }
+
     private static let secondsPerMinute = 60
     private static let minutesPerHour = 60
     private static let minutesPerDay = 1440

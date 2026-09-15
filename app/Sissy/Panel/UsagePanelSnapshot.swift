@@ -96,6 +96,27 @@ struct UsagePanelSnapshot: Equatable {
         /// say — no cap set and nothing spent, which is every account that
         /// has never turned credits on.
         let credits: CreditsRow?
+        /// The month so far against the plan's price, worded. Nil when the
+        /// archive is off or holds no day of this month for this provider.
+        let month: MonthRow?
+    }
+
+    /// The month block of a provider's page.
+    ///
+    /// Kept apart from `credits` for the reason that row is kept apart from
+    /// the day's cost: credits are what a vendor charged, this is what the
+    /// same tokens would have cost on the API, and adding or comparing them
+    /// would be inventing a third number.
+    struct MonthRow: Equatable {
+        /// `This month`, or `Since 9 Sep` when the archive starts later.
+        let label: String
+        /// `$312.40 of usage on a $200.00 plan`.
+        let amount: String
+        /// True once the month's usage has covered what the plan cost — the
+        /// one thing on this row worth a colour, because it is the answer the
+        /// row exists for. Nil without a price, which is a comparison nobody
+        /// has enabled rather than one that came out false.
+        let returnedItsPrice: Bool?
     }
 
     /// The credits block of a provider's page: what has been charged against
@@ -292,7 +313,8 @@ struct UsagePanelSnapshot: Equatable {
                 account: makeAccount(slice.account, now: now),
                 projects: makeProjects(
                     slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
-                credits: makeCredits(slice.credits, now: now)
+                credits: makeCredits(slice.credits, now: now),
+                month: makeMonth(slice.month)
             )
         }
     }
@@ -319,6 +341,20 @@ struct UsagePanelSnapshot: Equatable {
     /// "how much of my own ceiling have I used", and neither of those has a
     /// ceiling or a spend to report. That is most accounts, and a permanent
     /// "Not enabled" under every provider page is a row that never changes.
+    /// Nil for a provider the archive holds no day of this month for, which
+    /// is every provider on the day Sissy is installed. A zero beside a plan
+    /// price is a verdict on the plan that nobody measured.
+    private static func makeMonth(_ month: SubscriptionMonth?) -> MonthRow? {
+        guard let month else { return nil }
+        return MonthRow(
+            label: UsageFormat.monthLabel(
+                earliestDay: month.earliestDay, monthStart: month.monthStart),
+            amount: UsageFormat.subscriptionMonth(
+                cost: month.cost, planPrice: month.planPrice),
+            returnedItsPrice: month.returnedItsPrice
+        )
+    }
+
     private static func makeCredits(_ credits: ProviderCredits?, now: Date) -> CreditsRow? {
         guard let credits, credits.isEnabled, credits.hasCap || credits.usedMinor > 0 else {
             return nil

@@ -23,6 +23,13 @@ actor UsageEngine {
     /// into a burst of directory walks.
     private var historyRollup: UsageHistoryRollup?
     private var historyRollupAt: Date = .distantPast
+    /// The month-to-date rollup per provider, its age, and the month it is
+    /// for. The month is part of the key rather than recomputed beside it:
+    /// a cached reading of October paired with a freshly derived November
+    /// start is a month that reads as one day old and nearly free.
+    private var monthRollup: [String: UsageHistoryRollup]?
+    private var monthRollupAt: Date = .distantPast
+    private var monthRollupStart: Date?
     /// The one checkout memory every provider shares, kept because the export
     /// re-reads the archive's project paths through a resolver built on it.
     /// A second ledger over the same file would be a second writer to it.
@@ -546,6 +553,33 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// Records what a provider's plan costs a month, or forgets it when the
+    /// user clears the field.
+    ///
+    /// The month cache is invalidated rather than patched: the price is half
+    /// of every `SubscriptionMonth` in it, and a cached reading carrying the
+    /// old price would leave the panel quoting a plan the user has just
+    /// changed for as long as the beat lasted.
+    func setPlanPrice(_ price: String?, forProvider id: String) async {
+        var prices = config.planPrices ?? [:]
+        let trimmed = price?.trimmingCharacters(in: .whitespaces)
+        if let trimmed, !trimmed.isEmpty {
+            prices[id] = trimmed
+        } else {
+            prices.removeValue(forKey: id)
+        }
+        let updated: [String: String]? = prices.isEmpty ? nil : prices
+        guard updated != config.planPrices else { return }
+        config.planPrices = updated
+        do {
+            try ServerConfig.save(config, to: configURL)
+        } catch {
+            sissyLog("sissy: failed to persist planPrices to \(configURL.path): \(error)")
+        }
+        monthRollupAt = .distantPast
+        await reemit()
+    }
+
     /// Whether the Mac should be held right now.
     ///
     /// `on` is the switch and `auto` is the evidence: a hold the agents earn
@@ -799,9 +833,48 @@ actor UsageEngine {
                 active: keepAwakeActive,
                 since: keepAwakeSince,
                 coversScreen: keepAwakeCoversScreen),
-            history: currentHistory(now: now)
+            history: currentHistory(now: now),
+            months: currentMonths(now: now)
         )
         await onFrame?(frame)
+    }
+
+    /// What each provider has spent this calendar month, paired with what the
+    /// user says its plan costs, cached on the same beat as the week.
+    ///
+    /// Empty when the archive is switched off, and a provider with no day
+    /// recorded this month gets no entry — an install that started today has
+    /// not measured a month, and a $0 month beside a $200 plan is a verdict
+    /// on the plan that nobody measured.
+    private func currentMonths(now: Date) -> [String: SubscriptionMonth] {
+        guard config.resolvedHistoryRetentionDays > 0 else { return [:] }
+        let cal = Calendar.current
+        guard
+            let start = cal.date(
+                from: cal.dateComponents([.year, .month], from: cal.startOfDay(for: now)))
+        else { return [:] }
+        let rollups: [String: UsageHistoryRollup]
+        if let monthRollup, monthRollupStart == start,
+            now.timeIntervalSince(monthRollupAt) < Self.historyRollupTTL
+        {
+            rollups = monthRollup
+        } else {
+            rollups = UsageHistoryStore.monthToDate(in: stateDir, now: now)
+            monthRollup = rollups
+            monthRollupAt = now
+            monthRollupStart = start
+        }
+        var out: [String: SubscriptionMonth] = [:]
+        for (provider, rollup) in rollups {
+            guard let earliest = rollup.earliestDay else { continue }
+            out[provider] = SubscriptionMonth(
+                cost: rollup.cost,
+                planPrice: config.planPrice(forProvider: provider),
+                earliestDay: earliest,
+                monthStart: start
+            )
+        }
+        return out
     }
 
     /// What the archive holds for the last week, cached for a beat.
@@ -890,6 +963,9 @@ actor UsageEngine {
         }
         historyRollup = nil
         historyRollupAt = .distantPast
+        monthRollup = nil
+        monthRollupAt = .distantPast
+        monthRollupStart = nil
         await reemit()
     }
 

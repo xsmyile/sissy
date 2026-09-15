@@ -30,6 +30,21 @@ struct ServerConfig: Sendable, Codable {
     /// asks for their own data to be deleted. Clamped on read, so a
     /// hand-edited absurdity cannot turn "keep some days" into "keep forever".
     var historyRetentionDays: Int?
+    /// What each provider's subscription costs a month, keyed by provider id,
+    /// as the user typed it.
+    ///
+    /// The user's, and only the user's. A shipped table would be the same
+    /// regression as a shipped rate table with a slower feedback loop: plan
+    /// prices differ by country, by seat and by promotion, and nobody
+    /// cross-checks a number Sissy invented. Money as text for the reason the
+    /// archive keeps it that way — `JSONEncoder` routes `Decimal` through
+    /// `Double` and drops the cents.
+    ///
+    /// Read as US dollars, because that is the currency everything it is
+    /// compared against is in: `PriceCatalog` prices in dollars and
+    /// `UsageFormat.cost` prints them. A user billed in another currency is
+    /// converting either way, and Sissy inventing a rate would be worse.
+    var planPrices: [String: String]?
     /// Whether Sissy holds a power assertion so the Mac does not idle to
     /// sleep. Persisted here rather than kept in memory because it is a
     /// setting, not a hold: a user who switched their Mac to never sleep
@@ -72,6 +87,7 @@ struct ServerConfig: Sendable, Codable {
         remotePricing: nil,
         providers: .defaults,
         historyRetentionDays: nil,
+        planPrices: nil,
         keepAwake: .off,
         keepScreenAwake: true,
         agentHooks: false,
@@ -107,6 +123,7 @@ struct ServerConfig: Sendable, Codable {
         if let v = obj["pollIntervalSeconds"] as? Double { merged.pollIntervalSeconds = v }
         if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
         if let v = obj["historyRetentionDays"] as? Int { merged.historyRetentionDays = v }
+        if let v = obj["planPrices"] as? [String: String] { merged.planPrices = v }
         // An unknown mode reads as off rather than failing the whole file: a
         // value written by a newer build must not cost the user every other
         // setting in here.
@@ -172,6 +189,18 @@ struct ServerConfig: Sendable, Codable {
     var resolvedHistoryRetentionDays: Int {
         guard let historyRetentionDays else { return UsageHistoryStore.defaultRetentionDays }
         return min(max(historyRetentionDays, 0), UsageHistoryStore.maxRetentionDays)
+    }
+
+    /// What this provider's plan costs a month, or nil when the user has not
+    /// said. A value that will not parse, or one that is not a positive
+    /// amount, answers nil rather than zero: "no plan price" is a question
+    /// unanswered, and "$0.00 plan" is an answer nobody gave.
+    func planPrice(forProvider id: String) -> Decimal? {
+        guard let raw = planPrices?[id]?.trimmingCharacters(in: .whitespaces),
+            let parsed = Decimal(string: raw),
+            parsed > 0
+        else { return nil }
+        return parsed
     }
 
     var resolvedClaudeDataDir: URL {

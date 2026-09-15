@@ -346,6 +346,47 @@ enum UsageHistoryStore {
         return UsageHistoryRollup(days: days, earliestDay: earliest, tokens: tokens, cost: cost)
     }
 
+    /// What each provider has spent so far this calendar month, keyed by the
+    /// id the archive filed its days under.
+    ///
+    /// The calendar month, not the plan's own billing period, because no
+    /// vendor publishes a renewal date anywhere Sissy can read — so the month
+    /// boundary is an approximation, and the only one available. A provider
+    /// with no day inside the month gets no entry rather than a zero: it has
+    /// spent nothing *that Sissy recorded*, which on a fresh install is not
+    /// the same claim.
+    ///
+    /// `earliestDay` is what stops the second of those from being read as the
+    /// first: a reading whose earliest day is the 9th cannot be compared to a
+    /// whole month's plan price without saying so.
+    static func monthToDate(in parent: URL, now: Date = Date()) -> [String: UsageHistoryRollup] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: now)
+        guard let start = cal.date(from: cal.dateComponents([.year, .month], from: today))
+        else { return [:] }
+        let width = (cal.dateComponents([.day], from: start, to: today).day ?? 0) + 1
+        var out: [String: UsageHistoryRollup] = [:]
+        for provider in providers(in: parent) {
+            var tokens = 0
+            var cost: Decimal = 0
+            var earliest: Date?
+            for (dayKey, url) in dayFiles(provider: provider, in: parent) {
+                guard dayKey >= start, dayKey <= today, let decoded = decode(at: url) else {
+                    continue
+                }
+                for entry in decoded.models {
+                    tokens += entry.totalTokens
+                    cost += Decimal(string: entry.cost) ?? 0
+                }
+                earliest = earliest.map { min($0, dayKey) } ?? dayKey
+            }
+            guard let earliest else { continue }
+            out[provider] = UsageHistoryRollup(
+                days: width, earliestDay: earliest, tokens: tokens, cost: cost)
+        }
+        return out
+    }
+
     /// Drops the files for days that have fallen out of retention, across
     /// every provider directory the archive holds — including one whose
     /// provider is switched off, since the days it recorded are still there

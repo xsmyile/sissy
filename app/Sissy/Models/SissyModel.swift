@@ -220,6 +220,10 @@ final class SissyModel {
         engine.setKeepScreenAwake(enabled)
     }
 
+    func setPlanPrice(_ price: String, forProvider id: String) {
+        engine.setPlanPrice(price, forProvider: id)
+    }
+
     func setKeepAwake(_ mode: KeepAwakeMode) {
         guard mode != keepAwake.mode else { return }
         if mode != .off { preferredKeepAwakeMode = mode }

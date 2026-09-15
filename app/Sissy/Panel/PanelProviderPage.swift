@@ -36,6 +36,11 @@ struct PanelProviderPage: View {
             Divider()
             today
 
+            if let month = row.month {
+                Divider()
+                self.month(month)
+            }
+
             if !row.projects.isEmpty {
                 Divider()
                 projects
@@ -257,6 +262,31 @@ struct PanelProviderPage: View {
             Text("\(row.tokens) · \(row.cost)")
                 .font(.system(size: 12))
                 .monospacedDigit()
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: Month
+
+    /// What the subscription returned so far, which is the one question a
+    /// plan makes unanswerable on its own: the bill is the same whatever the
+    /// meter says, so the only way to know is to add up what the same tokens
+    /// would have cost on the API.
+    ///
+    /// Under Today rather than above it, because it is the slower reading and
+    /// the panel is opened for the faster one. The tint is the only colour on
+    /// the page that is about money, and it is not a verdict on spending — it
+    /// says the plan has covered its price, which is the good direction.
+    private func month(_ month: UsagePanelSnapshot.MonthRow) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            SectionLabel(text: month.label)
+            Spacer(minLength: 0)
+            Text(month.amount)
+                .font(.system(size: 12))
+                .monospacedDigit()
+                .foregroundStyle(month.returnedItsPrice == true ? tint : .primary)
+                .multilineTextAlignment(.trailing)
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 10)

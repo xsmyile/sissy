@@ -222,6 +222,37 @@ struct ProviderCredits: Sendable, Equatable {
 /// One provider's share of the day, and everything else its own files answer
 /// for. The frame carries these raw so the header total and the per-provider
 /// rows come off a single payload rather than two counts that can disagree.
+/// What one provider has cost so far this calendar month, against what its
+/// subscription costs.
+///
+/// The question a subscriber cannot answer anywhere else: a plan hides the
+/// meter, so the only way to know whether it returned its price is to add up
+/// what the same tokens would have cost on the API. The spend is Sissy's, the
+/// price is the user's, and the two are kept apart here because only one of
+/// them is a reading.
+struct SubscriptionMonth: Sendable, Equatable {
+    /// API-equivalent cost of everything the archive holds for this provider
+    /// since the first of the month.
+    let cost: Decimal
+    /// What the user says the plan costs a month, or nil until they say. The
+    /// spend is worth printing on its own; the comparison is not without it.
+    let planPrice: Decimal?
+    /// Earliest day the archive actually holds inside the month. A month the
+    /// archive only covers half of reads low against a whole month's price,
+    /// so the surface has to be able to say which it is looking at.
+    let earliestDay: Date
+    /// First day of the month this reading is for, so a frame that survives
+    /// midnight on the 1st is recognisably about the month that ended.
+    let monthStart: Date
+
+    /// True once the month's spend has covered what the plan cost. Nil
+    /// without a price, which is a comparison nobody has enabled rather than
+    /// one that came out false.
+    var returnedItsPrice: Bool? {
+        planPrice.map { cost >= $0 }
+    }
+}
+
 struct ProviderSlice: Sendable, Equatable, Identifiable {
     let id: String
     let tokens: Int
@@ -233,6 +264,11 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     /// whose format names no working directory, which reads the same as a
     /// provider that has spent nothing.
     let projects: [ProjectTotals]
+    /// The month so far against the plan's price. Nil when the archive is
+    /// switched off, and when it holds no day of this month for this
+    /// provider — an install that started today has not measured a month and
+    /// must not present one.
+    let month: SubscriptionMonth?
 
     var windows: [UsageWindow] { signals.windows }
     var plan: String? { signals.plan }
@@ -242,7 +278,10 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     var limitsState: ProviderLimitsState { signals.limitsState }
     var limitsObservedAt: Date? { signals.limitsObservedAt }
 
-    init(id: String, tokens: Int, cost: Decimal, signals: ProviderSignals, projects: [ProjectTotals] = []) {
+    init(
+        id: String, tokens: Int, cost: Decimal, signals: ProviderSignals,
+        projects: [ProjectTotals] = [], month: SubscriptionMonth? = nil
+    ) {
         self.id = id
         self.tokens = tokens
         self.cost = cost
@@ -251,6 +290,15 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         if ordered.plan == nil { ordered.planTier = nil }
         self.signals = ordered
         self.projects = projects
+        self.month = month
+    }
+
+    /// The same slice with a month attached, which is how the archive's half
+    /// reaches a reading the aggregator has already captured. Rebuilding the
+    /// slice from the provider instead would race the actor's reentrancy and
+    /// could ship a frame whose scalars and breakdown disagree.
+    func with(month: SubscriptionMonth?) -> Self {
+        Self(id: id, tokens: tokens, cost: cost, signals: signals, projects: projects, month: month)
     }
 
     /// The field-by-field form, for the callers that name a slice's parts
@@ -260,14 +308,15 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         id: String, tokens: Int, cost: Decimal, windows: [UsageWindow] = [],
         plan: String? = nil, planTier: String? = nil, credits: ProviderCredits? = nil,
         projects: [ProjectTotals] = [], account: ProviderAccount? = nil,
-        limitsState: ProviderLimitsState = .quiet, limitsObservedAt: Date? = nil
+        limitsState: ProviderLimitsState = .quiet, limitsObservedAt: Date? = nil,
+        month: SubscriptionMonth? = nil
     ) {
         self.init(
             id: id, tokens: tokens, cost: cost,
             signals: ProviderSignals(
                 windows: windows, plan: plan, planTier: planTier, account: account,
                 credits: credits, limitsState: limitsState, limitsObservedAt: limitsObservedAt),
-            projects: projects)
+            projects: projects, month: month)
     }
 }
 
@@ -333,17 +382,19 @@ enum FrameBuilder {
         hoursElapsed: Double,
         providers: [ProviderSlice] = [],
         keepAwake: KeepAwakeState = .off,
-        history: UsageHistoryRollup? = nil
+        history: UsageHistoryRollup? = nil,
+        months: [String: SubscriptionMonth] = [:]
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
+        let withMonths = months.isEmpty ? providers : providers.map { $0.with(month: months[$0.id]) }
         return FrameData(
             tokens: today.totalTokens,
             cost: today.totalCost,
             burn: burn,
-            providers: providers,
+            providers: withMonths,
             keepAwake: keepAwake,
             history: history,
-            projects: combinedProjects(providers)
+            projects: combinedProjects(withMonths)
         )
     }
 
