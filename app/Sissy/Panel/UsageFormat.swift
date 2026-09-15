@@ -430,7 +430,7 @@ enum UsageFormat {
     /// yet and a module that was never switched on look identical from here,
     /// and only the app knows which it is.
     static func noWindowsCaption(_ id: String, limitsEnabled: Bool) -> String {
-        switch id {
+        switch ProviderKey.vendor(of: id) {
         case ProviderID.claudeCode where !limitsEnabled:
             return "Switch on Claude Code limits in Settings to see this account's windows."
         case ProviderID.claudeCode:
@@ -467,7 +467,7 @@ enum UsageFormat {
     /// limits ride the CLI's own events, so no button can make them arrive —
     /// all a refresh can honestly touch is the account and the plan.
     static func refreshHelp(_ id: String) -> String {
-        switch id {
+        switch ProviderKey.vendor(of: id) {
         case ProviderID.claudeCode:
             return "Read the limits again · may ask for keychain access"
         case ProviderID.codex:
@@ -494,7 +494,7 @@ enum UsageFormat {
     /// Claude open in a browser and no CLI installed is exactly the case
     /// "Claude is not signed in" would misreport.
     static func providerName(_ id: String) -> String {
-        switch id {
+        switch ProviderKey.vendor(of: id) {
         case ProviderID.claudeCode: return "Claude"
         case ProviderID.codex: return "Codex"
         default: return id

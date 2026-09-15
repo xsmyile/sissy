@@ -13,7 +13,7 @@ enum ProviderPalette {
     static let codex = Color.primary
 
     static func tint(for id: String) -> Color {
-        switch id {
+        switch ProviderKey.vendor(of: id) {
         case ProviderID.claudeCode: return claudeCode
         case ProviderID.codex: return codex
         default: return .secondary
@@ -27,7 +27,7 @@ enum ProviderPalette {
     /// for anything unrecognised, which is what keeps a provider a future
     /// release adds renderable without an asset of its own.
     static func mark(for id: String) -> Image? {
-        switch id {
+        switch ProviderKey.vendor(of: id) {
         case ProviderID.claudeCode: return Image("ProviderMarkClaude")
         case ProviderID.codex: return Image("ProviderMarkCodex")
         default: return nil

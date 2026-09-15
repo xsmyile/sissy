@@ -126,11 +126,20 @@ actor UsageEngine {
     /// resolution is what decides which readers exist and there is nothing
     /// left to re-derive it from afterwards.
     private let resolvedProviders: [ResolvedProvider]
+    /// The limits reader each additional account owns, keyed by provider id.
+    ///
+    /// Only the accounts that carry a key are in here: the one that predates
+    /// accounts keeps using the shared keychain probe and the imported
+    /// claude.ai session, which is where its reading has always come from.
+    private let perAccountLimits: [String: ClaudeLimitsProbe]
 
     private struct ResolvedProvider {
         let id: String
         let activation: ProviderActivation
         let dataDir: URL
+        /// The account this instance reads, so every path it needs comes from
+        /// one home and a row can never pair two accounts' readings.
+        let account: ResolvedAccount
     }
 
     init(
@@ -157,53 +166,77 @@ actor UsageEngine {
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
-        let claudeDir = config.resolvedClaudeDataDir
-        let codexDir = config.resolvedCodexDataDir
+        let claudeAccounts = config.resolvedAccounts(vendor: ProviderID.claudeCode)
+        let codexAccounts = config.resolvedAccounts(vendor: ProviderID.codex)
         // Claude Code has no detection step: it is the v0.1.0 baseline and an
         // unset toggle leaves it on. Codex is tailed whenever its rollout dir
         // exists — the cold scan is already 48h-bounded, so an idle reader is
-        // cheap.
+        // cheap. The toggle is the vendor's, not an account's: switching a CLI
+        // off means Sissy stops reading it, however many accounts of it exist.
         let claudeActivation: ProviderActivation = (config.providers.claudeCode ?? true) ? .on : .off
-        let codexActivation = ProviderActivation.resolve(
-            toggle: config.providers.codex,
-            autoDetected: FileManager.default.fileExists(atPath: codexDir.path)
-        )
-        self.resolvedProviders = [
-            ResolvedProvider(
-                id: ProviderID.claudeCode, activation: claudeActivation, dataDir: claudeDir),
-            ResolvedProvider(id: ProviderID.codex, activation: codexActivation, dataDir: codexDir),
-        ]
+        self.resolvedProviders =
+            claudeAccounts.map {
+                ResolvedProvider(
+                    id: $0.id, activation: claudeActivation, dataDir: $0.dataDir, account: $0)
+            }
+            + codexAccounts.map { account in
+                ResolvedProvider(
+                    id: account.id,
+                    activation: ProviderActivation.resolve(
+                        toggle: config.providers.codex,
+                        autoDetected: FileManager.default.fileExists(atPath: account.dataDir.path)
+                    ),
+                    dataDir: account.dataDir,
+                    account: account
+                )
+            }
         self.claudeLimitsProbe = limitsProbe
         self.claudeWebSource = webSource
+        var limitsSources: [String: ClaudeLimitsProbe] = [:]
         var providers: [any UsageProvider] = []
-        if claudeActivation.isMetering {
-            // Legacy persistence URL on purpose: existing installs already
-            // wrote `usage-state.json` (no provider suffix). Keeping it lets
-            // an upgrade skip the cold backfill instead of stranding
-            // historical offsets behind a renamed file.
-            providers.append(
-                LocalUsageProvider.claudeCode(
-                    claudeDir: claudeDir,
-                    pollInterval: pollInterval,
-                    persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
-                    historyRoot: historyRoot,
-                    pricingOverride: config.pricingOverride,
-                    limitsProbe: limitsProbe,
-                    webSource: webSource,
-                    ledger: projectLedger
-                ))
+        for resolved in self.resolvedProviders where resolved.activation.isMetering {
+            let account = resolved.account
+            switch account.key.vendor {
+            case ProviderID.codex:
+                providers.append(
+                    LocalUsageProvider.codex(
+                        codexDir: account.dataDir,
+                        id: account.id,
+                        pollInterval: pollInterval,
+                        persistenceURL: Self.persistenceURL(for: account, in: stateDir),
+                        historyRoot: historyRoot,
+                        pricingOverride: config.pricingOverride,
+                        ledger: projectLedger
+                    ))
+            default:
+                // The shared keychain probe and the imported claude.ai session
+                // answer for whichever account the CLI and Claude.app are
+                // signed into, which is one account and not necessarily this
+                // one. Only the account that predates accounts may use them;
+                // every other reads the OAuth credential out of its own config
+                // home, where no other account's reading can reach it.
+                let ownProbe = account.key.account.map { _ in
+                    ClaudeLimitsProbe(credentials: { _, _ in
+                        ClaudeFileCredentials.load(at: account.claudeCredentialsURL)
+                    })
+                }
+                if let ownProbe { limitsSources[account.id] = ownProbe }
+                providers.append(
+                    LocalUsageProvider.claudeCode(
+                        claudeDir: account.dataDir,
+                        id: account.id,
+                        pollInterval: pollInterval,
+                        persistenceURL: Self.persistenceURL(for: account, in: stateDir),
+                        historyRoot: historyRoot,
+                        pricingOverride: config.pricingOverride,
+                        limitsProbe: ownProbe ?? limitsProbe,
+                        webSource: ownProbe == nil ? webSource : nil,
+                        profile: ClaudeProfileSource(url: account.claudeProfileURL),
+                        ledger: projectLedger
+                    ))
+            }
         }
-        if codexActivation.isMetering {
-            providers.append(
-                LocalUsageProvider.codex(
-                    codexDir: codexDir,
-                    pollInterval: pollInterval,
-                    persistenceURL: UsageStatePersistence.forProvider("codex", in: stateDir),
-                    historyRoot: historyRoot,
-                    pricingOverride: config.pricingOverride,
-                    ledger: projectLedger
-                ))
-        }
+        self.perAccountLimits = limitsSources
         self.aggregator = UsageAggregator(providers: providers)
         let resolution =
             resolvedProviders
@@ -618,6 +651,12 @@ actor UsageEngine {
         } else {
             await claudeLimitsProbe.start(userInitiated: userInitiated) { await me.reemit() }
         }
+        // Every other account reads a file, so `userInitiated` means nothing
+        // to it: there is no dialog to be allowed to raise and no grant to go
+        // stale. It polls from the moment the switch is on.
+        for probe in perAccountLimits.values {
+            await probe.start(userInitiated: false) { await me.reemit() }
+        }
     }
 
     /// Stops both readers. Which one was running is not worth remembering:
@@ -626,6 +665,21 @@ actor UsageEngine {
     private func stopClaudeLimits() async {
         await claudeLimitsProbe.stop()
         await claudeWebSource.stop()
+        for probe in perAccountLimits.values { await probe.stop() }
+    }
+
+    /// Where one account's offsets are kept.
+    ///
+    /// The account that predates accounts keeps the unqualified
+    /// `usage-state.json` every install has been writing since 0.1.0: renaming
+    /// it would strand those offsets and buy a cold backfill for nothing.
+    /// Every other account takes its own file, so a schema change or a
+    /// corruption in one cannot cost another its history.
+    private static func persistenceURL(for account: ResolvedAccount, in stateDir: URL) -> URL {
+        guard account.key.account != nil || account.key.vendor != ProviderID.claudeCode else {
+            return UsageStatePersistence.defaultURL(in: stateDir)
+        }
+        return UsageStatePersistence.forProvider(account.id, in: stateDir)
     }
 
     /// Rebuild the frame from what the aggregator holds right now, so a

@@ -127,19 +127,30 @@ if args.contains("--scan") {
         // rather than only what is still on disk at the moment it runs.
         let projectLedger = ProjectLedger(
             url: ProjectLedger.defaultURL(in: configURL.deletingLastPathComponent()))
-        if scanFilter == "all" || scanFilter == "claude-code" {
-            providers.append(
-                LocalUsageProvider.claudeCode(
-                    claudeDir: config.resolvedClaudeDataDir,
-                    pricingOverride: config.pricingOverride,
-                    ledger: projectLedger))
+        // One reader per account, exactly as the app builds them: a scan that
+        // saw only the first account of a vendor would measure something
+        // nobody runs, and the profile it reads has to be that account's own
+        // or the entry pairs one account's plan with another's tokens.
+        if scanFilter == "all" || scanFilter == ProviderID.claudeCode {
+            for account in config.resolvedAccounts(vendor: ProviderID.claudeCode) {
+                providers.append(
+                    LocalUsageProvider.claudeCode(
+                        claudeDir: account.dataDir,
+                        id: account.id,
+                        pricingOverride: config.pricingOverride,
+                        profile: ClaudeProfileSource(url: account.claudeProfileURL),
+                        ledger: projectLedger))
+            }
         }
-        if scanFilter == "all" || scanFilter == "codex" {
-            providers.append(
-                LocalUsageProvider.codex(
-                    codexDir: config.resolvedCodexDataDir,
-                    pricingOverride: config.pricingOverride,
-                    ledger: projectLedger))
+        if scanFilter == "all" || scanFilter == ProviderID.codex {
+            for account in config.resolvedAccounts(vendor: ProviderID.codex) {
+                providers.append(
+                    LocalUsageProvider.codex(
+                        codexDir: account.dataDir,
+                        id: account.id,
+                        pricingOverride: config.pricingOverride,
+                        ledger: projectLedger))
+            }
         }
         // No fetch here — `--scan` stays offline and fast. The cached catalog
         // only exists once something has refreshed it; otherwise the embedded

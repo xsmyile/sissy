@@ -15,6 +15,15 @@ struct ProviderToggles: Sendable, Codable {
 struct ServerConfig: Sendable, Codable {
     var claudeDataDir: String
     var codexDataDir: String
+    /// The accounts Sissy meters, across every vendor.
+    ///
+    /// Nil for every install written before accounts existed, and that is the
+    /// migration: an absent list means the one account each vendor has always
+    /// had, resolved from `claudeDataDir` / `codexDataDir` below. Nothing is
+    /// rewritten on disk for it — a user who never holds a second account
+    /// never grows the key, and the one who does adds accounts beside a
+    /// default that keeps its own snapshot and its own archive.
+    var accounts: [AccountConfig]?
     var pollIntervalSeconds: Double
     var pricingOverride: [String: ModelPricing]?
     /// Whether Sissy fetches LiteLLM's rate table at runtime
@@ -73,6 +82,7 @@ struct ServerConfig: Sendable, Codable {
     static let defaults = ServerConfig(
         claudeDataDir: "~/.claude/projects",
         codexDataDir: "~/.codex/sessions",
+        accounts: nil,
         pollIntervalSeconds: 60.0,
         pricingOverride: nil,
         remotePricing: nil,
@@ -111,6 +121,7 @@ struct ServerConfig: Sendable, Codable {
         var merged = defaults
         if let v = obj["claudeDataDir"] as? String { merged.claudeDataDir = v }
         if let v = obj["codexDataDir"] as? String { merged.codexDataDir = v }
+        merged.accounts = decodeAccounts(obj["accounts"])
         if let v = obj["pollIntervalSeconds"] as? Double { merged.pollIntervalSeconds = v }
         if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
         if let v = obj["claudeLimits"] as? Bool { merged.claudeLimits = v }
@@ -135,6 +146,21 @@ struct ServerConfig: Sendable, Codable {
             merged.pricingOverride = decoded
         }
         return merged
+    }
+
+    /// The account list of a partially decodable config.
+    ///
+    /// A list this build cannot read answers nil rather than failing the file,
+    /// on the same grounds as every other key here: a value written by a newer
+    /// build must not cost the user every other setting beside it. Nil is also
+    /// what an install that predates accounts carries, so both land on the
+    /// single account each vendor has always had.
+    private static func decodeAccounts(_ raw: Any?) -> [AccountConfig]? {
+        guard let raw,
+            let nested = try? JSONSerialization.data(withJSONObject: raw),
+            let decoded = try? JSONDecoder().decode([AccountConfig].self, from: nested)
+        else { return nil }
+        return decoded
     }
 
     /// Atomic write to disk. Used by the engine's runtime config-change paths
@@ -206,5 +232,47 @@ struct ServerConfig: Sendable, Codable {
 
     var remotePricingEnabled: Bool {
         remotePricing ?? true
+    }
+}
+
+extension ServerConfig {
+    /// Every account Sissy meters, per vendor, resolved to the paths each one
+    /// is read from.
+    ///
+    /// The list on disk is authoritative when it names an account for a
+    /// vendor. When it does not — an install that predates accounts, or one
+    /// that holds a second Codex account and no second Claude one — that
+    /// vendor falls back to the single account it has always had, resolved
+    /// from `claudeDataDir` / `codexDataDir`. So growing the key for one
+    /// vendor never silently drops the other.
+    func resolvedAccounts(vendor: String) -> [ResolvedAccount] {
+        let configured = (accounts ?? []).filter { $0.vendor == vendor }
+        guard !configured.isEmpty else { return [legacyAccount(vendor: vendor)] }
+        return configured.map { account in
+            let home = Self.expandTilde(account.home)
+            return ResolvedAccount(
+                key: ProviderKey(vendor: vendor, account: account.id),
+                label: account.label,
+                home: home,
+                dataDir: AccountDefaults.dataDir(vendor: vendor, home: home)
+            )
+        }
+    }
+
+    /// The account every install had before this key existed.
+    ///
+    /// Its key carries no account, which is what keeps `usage-state.json` and
+    /// the archive directory it has been writing since 0.1.0 exactly where
+    /// they are. The home is derived from the configured log tree rather than
+    /// from the environment, because a user who pointed `claudeDataDir`
+    /// somewhere else meant it.
+    private func legacyAccount(vendor: String) -> ResolvedAccount {
+        let dataDir = vendor == ProviderID.codex ? resolvedCodexDataDir : resolvedClaudeDataDir
+        return ResolvedAccount(
+            key: ProviderKey(vendor: vendor),
+            label: nil,
+            home: AccountDefaults.home(ofDataDir: dataDir),
+            dataDir: dataDir
+        )
     }
 }

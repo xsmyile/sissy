@@ -87,6 +87,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
 
     init(
         claudeDir: URL,
+        id: String = ProviderID.claudeCode,
         pricingOverride: [String: ModelPricing]?,
         limitsProbe: ClaudeLimitsProbe?,
         webSource: ClaudeWebSource?,
@@ -97,7 +98,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
         self.profile = profile
         self.projects = ProjectResolver(ledger: ledger)
         self.descriptor = SourceDescriptor(
-            id: "claude-code",
+            id: id,
             root: claudeDir,
             watcherLabel: "sissy.usage.fswatch",
             signals: ClaudeCodeSignals(
@@ -336,6 +337,7 @@ extension LocalUsageProvider {
     static func claudeCode(
         claudeDir: URL = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".claude/projects"),
+        id: String = ProviderID.claudeCode,
         retainDays: Int = 2,
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
@@ -349,6 +351,7 @@ extension LocalUsageProvider {
         LocalUsageProvider(
             adapter: ClaudeCodeAdapter(
                 claudeDir: claudeDir,
+                id: id,
                 pricingOverride: pricingOverride,
                 limitsProbe: limitsProbe,
                 webSource: webSource,

@@ -137,7 +137,7 @@ struct ProvidersSettingsView: View {
             ForEach(model.engine.providers, id: \.id) { readiness in
                 Section {
                     row(readiness)
-                    if readiness.id == ProviderID.claudeCode {
+                    if ProviderKey.vendor(of: readiness.id) == ProviderID.claudeCode {
                         claudeLimits
                         if model.engine.claudeLimits { claudeWebSession }
                     }
