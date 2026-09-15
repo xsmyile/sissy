@@ -167,6 +167,7 @@ actor UsageEngine {
         limitsProbe: ClaudeLimitsProbe? = nil,
         webSource: ClaudeWebSource = ClaudeWebSource(),
         claudeAccounts: ClaudeAccountRegistry? = nil,
+        statusMonitor: ProviderStatusMonitor? = nil,
         keepAwakePolicy: KeepAwakePolicy = .default
     ) {
         self.config = config
@@ -208,8 +209,10 @@ actor UsageEngine {
             ),
         ]
         self.claudeHome = claudeHome
-        self.statusMonitor = ProviderStatusMonitor(
-            providers: self.resolvedProviders.filter { $0.activation.isMetering }.map(\.id))
+        self.statusMonitor =
+            statusMonitor
+            ?? ProviderStatusMonitor(
+                providers: self.resolvedProviders.filter { $0.activation.isMetering }.map(\.id))
         self.claudeWebSource = webSource
         self.claudeAccounts =
             claudeAccounts
@@ -762,9 +765,23 @@ actor UsageEngine {
     /// Starts the status poll. Every change it publishes rebuilds the frame,
     /// for the reason a lapsed authorization does: a vendor going down is news
     /// that arrives on a day where no token event follows it.
+    ///
+    /// The lifecycle is checked on both sides of the hop, and this is the one
+    /// place that can be, because it is the one place that creates the poll
+    /// loop: the two callers reach it across suspensions a `stop()` can land
+    /// in — `start()` from behind the keychain read, and `setStatusChecks`
+    /// from a toggle flipped while the app is quitting — and the monitor
+    /// itself only knows whether *it* is running. Without the second check a
+    /// `start` that queued behind that `stop()` on the monitor's executor
+    /// leaves a poll loop nothing holds a handle to.
     private func startStatusChecks() async {
+        guard lifecycle == .running else { return }
         let me = self
         await statusMonitor.start { await me.reemit() }
+        guard lifecycle == .running else {
+            await statusMonitor.stop()
+            return
+        }
     }
 
     /// Switches the status readings on or off at runtime, and persists it.

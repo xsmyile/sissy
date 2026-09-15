@@ -49,6 +49,7 @@ final class UsageEngineControlTests: XCTestCase {
         config.claudeDataDir = claudeDir.path
         config.codexDataDir = codexDir.path
         config.remotePricing = false
+        config.statusChecks = false
         config.pollIntervalSeconds = pollIntervalSeconds
         config.providers = ProviderToggles(claudeCode: claudeCode, codex: codex)
         config.keepAwake = keepAwake
