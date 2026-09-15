@@ -123,6 +123,61 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertNil(readiness[1].scan)
     }
 
+    // MARK: The provider switch
+
+    /// The switch writes an explicit value in both directions. Applying it is
+    /// the host's — this engine goes on metering what it was built with — so
+    /// what is asserted here is the record, which is what the next engine is
+    /// built from.
+    func testTheProviderSwitchReachesTheFileInBothDirections() async throws {
+        let engine = makeEngine()
+        await engine.start { _ in }
+        addTeardownBlock { await engine.stop() }
+
+        let switchedOn = await engine.setProvider(id: ProviderID.codex, enabled: true)
+        XCTAssertTrue(switchedOn)
+        XCTAssertEqual(try ServerConfig.load(from: configURL).providers.codex, true)
+
+        let switchedOff = await engine.setProvider(id: ProviderID.claudeCode, enabled: false)
+        XCTAssertTrue(switchedOff)
+        XCTAssertEqual(try ServerConfig.load(from: configURL).providers.claudeCode, false)
+    }
+
+    /// An explicit `true` is not the same record as an unset toggle that
+    /// happened to detect something, and writing it is the whole reason the
+    /// switch exists: the next launch must not re-decide what the user decided.
+    func testSwitchingOnADetectedProviderStillWritesTheChoiceDown() async throws {
+        try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+        let engine = makeEngine()
+        await engine.start { _ in }
+        addTeardownBlock { await engine.stop() }
+
+        XCTAssertNil(try ServerConfig.load(from: configURL).providers.codex)
+        let detected = await engine.providerReadiness()[1].activation
+        XCTAssertEqual(detected, .autoDetected)
+
+        let switchedOn = await engine.setProvider(id: ProviderID.codex, enabled: true)
+        XCTAssertTrue(switchedOn)
+
+        XCTAssertEqual(try ServerConfig.load(from: configURL).providers.codex, true)
+    }
+
+    /// `ProviderToggles` would drop a name it does not carry, so a switch
+    /// written under one would report success and change nothing. Refused at
+    /// the engine instead, which is the only place that knows what it meters.
+    func testAToggleForAProviderThisBuildDoesNotMeterIsRefused() async {
+        let engine = makeEngine()
+        await engine.start { _ in }
+        addTeardownBlock { await engine.stop() }
+
+        let written = await engine.setProvider(id: "grok", enabled: true)
+        XCTAssertFalse(written)
+
+        let toggles = await engine.config.providers
+        XCTAssertNil(toggles.claudeCode, "a refused toggle wrote itself onto another provider")
+        XCTAssertNil(toggles.codex)
+    }
+
     // MARK: The keep-awake switch
 
     func testTheKeepAwakeModeReachesTheFileAndTheAssertion() async throws {

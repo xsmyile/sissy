@@ -105,7 +105,11 @@ final class UsageEngineHost {
         self.model = model
     }
 
-    func start() {
+    /// `isLaunch` separates the app starting from a provider switch building a
+    /// new engine. Only a launch re-affirms the agent hooks: those are lines
+    /// in two other programs' configuration files, and a switch flipped in
+    /// Settings has no business rewriting them.
+    func start(isLaunch: Bool = true) {
         guard engine == nil else { return }
         // A `server.json` that will not parse is not a reason to meter
         // nothing: `load` overlays what it can read onto the defaults, and
@@ -122,7 +126,7 @@ final class UsageEngineHost {
         // Re-affirmed at every launch rather than written once: the CLIs
         // rewrite these files themselves, and a line that has gone has to come
         // back without the user noticing it was missing.
-        if config.agentHooks || config.agentHooksRemovalPending {
+        if isLaunch, config.agentHooks || config.agentHooksRemovalPending {
             applyAgentHooks(config.agentHooks)
         }
         let host = self
@@ -134,13 +138,51 @@ final class UsageEngineHost {
         pollReadiness()
     }
 
-    /// Stops metering and waits for it, so the readers get their final offset
-    /// flush before the process goes. Cancelling `bootTask` is not what stops
-    /// a boot still in flight — `engine.stop()` is, by clearing the flag
-    /// `start()` re-reads after each of its suspensions.
+    /// Stops metering for good and waits for it, so the readers get their
+    /// final offset flush before the process goes. Cancelling `bootTask` is
+    /// not what stops a boot still in flight — `engine.stop()` is, by clearing
+    /// the flag `start()` re-reads after each of its suspensions.
+    ///
+    /// Terminal, which is what a provider switch landing against a quit needs:
+    /// the rebuild reads this back and leaves the engine down rather than
+    /// building a new one behind an app that is going away.
     func stop() async {
+        isStopped = true
+        // Only a real stop waits for the hooks pass. It writes two other
+        // programs' configuration files and spawns `sh -n` to check what it is
+        // about to write, with no bound on either, so joining it is a debt a
+        // process that is going away can afford and a provider switch cannot:
+        // a rebuild waiting here would leave `switchingProvider` true and
+        // every toggle dead for the rest of the session. A rebuild is not
+        // going anywhere, so it lets the pass finish on its own.
         await agentHooksTask?.value
         agentHooksTask = nil
+        await tearDown()
+    }
+
+    /// Whether the app has asked for metering to end. Distinct from having no
+    /// engine, which is also what the middle of a rebuild looks like.
+    @ObservationIgnored private var isStopped = false
+    /// The teardown in flight, so a second caller waits for it rather than
+    /// finding `engine` already cleared and reporting a flush that has not
+    /// happened yet. `applicationShouldTerminate` is the caller that must not
+    /// be told Sissy is done while a switch's rebuild is still writing
+    /// offsets.
+    @ObservationIgnored private var teardownTask: Task<Void, Never>?
+
+    private func tearDown() async {
+        if let inFlight = teardownTask {
+            await inFlight.value
+            return
+        }
+        let host = self
+        let task = Task { await host.releaseEngine() }
+        teardownTask = task
+        await task.value
+        teardownTask = nil
+    }
+
+    private func releaseEngine() async {
         readinessTask?.cancel()
         readinessTask = nil
         bootTask?.cancel()
@@ -411,6 +453,78 @@ final class UsageEngineHost {
         guard let engine, enabled != statusChecks else { return }
         statusChecks = enabled
         Task { await engine.setStatusChecks(enabled: enabled) }
+    }
+
+    /// Whether anything is being metered at all.
+    ///
+    /// False for the window before the first readiness lands as well as for a
+    /// run with every provider switched off, which is why the header reads it
+    /// behind `isWarm` rather than in front of it: an empty list is warm, so
+    /// the two are told apart by the order they are asked in.
+    var isMetering: Bool { providers.contains { $0.activation.isMetering } }
+
+    /// Whether a provider switch is still being applied. The rebuild is
+    /// several awaits long, and a second flip landing inside it would stop an
+    /// engine the first one has already let go of.
+    private(set) var switchingProvider: Bool = false
+
+    /// Switches one provider's metering on or off, and applies it.
+    ///
+    /// The toggle is written as an explicit value in both directions, so a
+    /// provider Sissy had auto-detected stops being auto-detected the moment
+    /// someone touches its switch — which is the honest reading of the
+    /// gesture, and what keeps the row from claiming Sissy decided something
+    /// the user did.
+    func setProvider(_ id: String, enabled: Bool) {
+        guard let engine, !switchingProvider else { return }
+        guard providers.first(where: { $0.id == id })?.activation.isMetering != enabled else {
+            return
+        }
+        switchingProvider = true
+        // Shown thrown before the rebuild rather than after it. Tearing an
+        // engine down flushes every reader's offsets first, so the row would
+        // otherwise sit in its old position for the length of that flush,
+        // which reads as a switch refusing the click. The state written here
+        // is the one being persisted, not a guess: an explicit toggle resolves
+        // to `on` or `off` whatever is on disk.
+        providers = providers.map {
+            guard $0.id == id else { return $0 }
+            return ProviderReadiness(
+                id: $0.id,
+                activation: enabled ? .on : .off,
+                dataDir: $0.dataDir,
+                scan: nil
+            )
+        }
+        isWarm = false
+        filesWatched = 0
+        Task {
+            if await engine.setProvider(id: id, enabled: enabled) {
+                await rebuild()
+            }
+            switchingProvider = false
+            // The correction, for the path where the engine refused to write
+            // it: the row is already showing a switch that was never
+            // persisted, and only re-reading the engine puts it back.
+            refreshProviders()
+        }
+    }
+
+    /// Tears the engine down and builds a new one from the config on disk.
+    ///
+    /// The reading on screen goes with it rather than staying: it still counts
+    /// the provider that has just been switched off, and a panel that keeps
+    /// showing it reads as a switch that did nothing. What does not go is
+    /// anything on disk — every reader resumes from the offsets its own
+    /// snapshot holds, so nothing is re-scanned and no day is counted twice.
+    private func rebuild() async {
+        await tearDown()
+        // A quit that landed inside the teardown has already said metering is
+        // over. Building a new engine here would put one behind an app that
+        // has replied it is done.
+        guard !isStopped else { return }
+        model?.clearFrame()
+        start(isLaunch: false)
     }
 
     private func deliver(_ frame: FrameData) {

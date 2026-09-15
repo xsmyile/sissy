@@ -10,6 +10,32 @@ struct ProviderToggles: Sendable, Codable {
     var codex: Bool?
 
     static let defaults = ProviderToggles(claudeCode: nil, codex: nil)
+
+    /// One provider's toggle, by the id the frame and the readiness list
+    /// carry, so a surface that has a row can set that row without knowing
+    /// which stored property is behind it.
+    ///
+    /// Named fields rather than a map because there are two of them and a map
+    /// would have to answer for a key no build knows. An id this build does
+    /// not meter reads `nil` and writes nothing, which is why the engine
+    /// checks the id against its own list before calling: a toggle written
+    /// under a name nothing reads is a switch that silently does nothing.
+    subscript(id: String) -> Bool? {
+        get {
+            switch id {
+            case ProviderID.claudeCode: return claudeCode
+            case ProviderID.codex: return codex
+            default: return nil
+            }
+        }
+        set {
+            switch id {
+            case ProviderID.claudeCode: claudeCode = newValue
+            case ProviderID.codex: codex = newValue
+            default: break
+            }
+        }
+    }
 }
 
 struct ServerConfig: Sendable, Codable {

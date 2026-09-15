@@ -107,7 +107,8 @@ final class SissyModel {
         /// user threw and has nothing to do with them. The duration of the
         /// hold is not here; it belongs beside the reading's age, under this.
         static func make(
-            hasFrame: Bool, isWarm: Bool, filesWatched: Int, holdingForAgents: Bool = false
+            hasFrame: Bool, isWarm: Bool, filesWatched: Int, isMetering: Bool = true,
+            holdingForAgents: Bool = false
         ) -> Self {
             guard !hasFrame else {
                 return Self(
@@ -121,6 +122,17 @@ final class SissyModel {
                     isAsleep: true,
                     title: "Sissy is waking up",
                     subtitle: "Reading your session logs"
+                )
+            }
+            // Asked behind the warmth and in front of the count, because a run
+            // with nothing switched on is warm with nothing to watch — and
+            // "no session logs found" sends someone looking at a log tree for
+            // a provider Sissy was told not to read.
+            guard isMetering else {
+                return Self(
+                    isAsleep: true,
+                    title: "Sissy is sleeping",
+                    subtitle: "No provider switched on"
                 )
             }
             return Self(
@@ -158,6 +170,7 @@ final class SissyModel {
             hasFrame: currentFrame != nil,
             isWarm: engine.isWarm,
             filesWatched: engine.filesWatched,
+            isMetering: engine.isMetering,
             holdingForAgents: hold.mode == .auto && hold.active
         )
         return MenuSnapshot(header: header, statusIcon: StatusIconSnapshot(isAsleep: header.isAsleep))
@@ -248,6 +261,15 @@ final class SissyModel {
         if frame.keepAwake.mode != .off { preferredKeepAwakeMode = frame.keepAwake.mode }
         currentFrame = frame
         lastFrameAt = Date()
+    }
+
+    /// Drops the reading on screen, for a change that invalidates it rather
+    /// than updating it. Switching a provider off is the one: its tokens are
+    /// still in the last frame, and a panel that goes on showing them until
+    /// the next event lands reads as a switch that did nothing.
+    func clearFrame() {
+        currentFrame = nil
+        lastFrameAt = nil
     }
 
     func setSissyMotion(_ enabled: Bool) {

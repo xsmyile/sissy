@@ -57,6 +57,30 @@ final class SissyModelHeaderTests: XCTestCase {
         XCTAssertEqual(header.subtitle, "No session logs found")
     }
 
+    /// A run with every provider switched off is warm with nothing to watch,
+    /// so it reaches the same zero as a Mac with no logs on it. Told as the
+    /// second, it sends someone looking at a log tree for a CLI they told
+    /// Sissy not to read.
+    func testNothingSwitchedOnIsNotTheSameAsNothingFound() {
+        let header = SissyModel.HeaderSnapshot.make(
+            hasFrame: false, isWarm: true, filesWatched: 0, isMetering: false)
+
+        XCTAssertTrue(header.isAsleep)
+        XCTAssertEqual(header.title, "Sissy is sleeping")
+        XCTAssertEqual(header.subtitle, "No provider switched on")
+    }
+
+    /// The list is empty for the first moments of a launch as well, and an
+    /// empty list is warm — so the cold-start sentence has to win, or every
+    /// launch claims the user switched everything off.
+    func testAColdStartIsNotMistakenForNothingSwitchedOn() {
+        let header = SissyModel.HeaderSnapshot.make(
+            hasFrame: false, isWarm: false, filesWatched: 0, isMetering: false)
+
+        XCTAssertEqual(header.title, "Sissy is waking up")
+        XCTAssertEqual(header.subtitle, "Reading your session logs")
+    }
+
     /// The common case first thing in the morning, and the one that must not
     /// read as a fault.
     func testLogsButAnEmptyDaySaysSoWithoutBlamingAnything() {

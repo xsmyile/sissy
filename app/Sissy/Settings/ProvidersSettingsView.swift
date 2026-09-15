@@ -36,7 +36,7 @@ struct ProviderRowSnapshot: Equatable {
     private static func detail(for readiness: ProviderReadiness) -> String {
         let path = (readiness.dataDir.path as NSString).abbreviatingWithTildeInPath
         switch readiness.activation {
-        case .off: return "Switched off in server.json"
+        case .off: return "\(path) is not being read"
         case .autoNotFound: return "\(path) does not exist"
         case .on, .autoDetected: return scanned(readiness.scan, at: path)
         }
@@ -115,7 +115,12 @@ struct ProvidersSettingsView: View {
             ForEach(model.engine.providers, id: \.id) { readiness in
                 Section {
                     row(readiness)
-                    if readiness.id == ProviderID.claudeCode {
+                    // Only under a Claude Code that is being metered. Where
+                    // it is not there is no limits probe to hand a session to
+                    // and no slice for the windows to ride on, so the import
+                    // would raise Claude.app's dialog to change nothing —
+                    // which is the one thing a permission prompt may never do.
+                    if readiness.id == ProviderID.claudeCode, readiness.activation.isMetering {
                         if model.engine.claudeUsesOwnCredential {
                             ownCredentialRow
                         } else {
@@ -173,12 +178,22 @@ struct ProvidersSettingsView: View {
         }
     }
 
-    /// The vendor's line, and under it where Sissy is reading and what it has
-    /// found there.
+    /// The vendor's line, the switch that decides whether Sissy reads it, and
+    /// under both where it is reading and what it has found there.
+    ///
+    /// The switch carries the resolved state as its accessibility value rather
+    /// than printing it beside itself: "On" next to a control already showing
+    /// on is a label for the control, and the one thing the word adds over the
+    /// switch — that Sissy detected this provider rather than being told about
+    /// it — is worth a screen reader hearing and not worth a second column.
     private func row(_ readiness: ProviderReadiness) -> some View {
         let snapshot = ProviderRowSnapshot.make(readiness)
         return LabeledContent {
-            Text(snapshot.state).foregroundStyle(.secondary)
+            Toggle(snapshot.name, isOn: binding(readiness))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityValue(snapshot.state)
+                .disabled(model.engine.switchingProvider)
         } label: {
             Label {
                 Text(snapshot.name)
@@ -187,6 +202,16 @@ struct ProvidersSettingsView: View {
             }
             Text(snapshot.detail)
         }
+    }
+
+    /// Reads the resolution rather than the stored toggle, so a provider Sissy
+    /// auto-detected shows on — and writes an explicit value, which is what
+    /// stops the next launch from re-deciding what the user has just decided.
+    private func binding(_ readiness: ProviderReadiness) -> Binding<Bool> {
+        Binding(
+            get: { readiness.activation.isMetering },
+            set: { model.engine.setProvider(readiness.id, enabled: $0) }
+        )
     }
 
     /// Shown only when the CLI keeps no credential Sissy can read, which is a
