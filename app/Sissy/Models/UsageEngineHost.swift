@@ -380,11 +380,20 @@ final class UsageEngineHost {
         Task { await engine.deleteHistory() }
     }
 
-    /// Refused once teardown has begun, the published flag with it: nothing
-    /// will be written after that point, and a switch left showing the
-    /// position it was moved to claims a configuration that is not on disk.
+    /// Refused, the published flag with it, wherever the pass cannot run:
+    /// once teardown has begun, and across the window a provider switch leaves
+    /// with no engine — `releaseEngine` clears it before awaiting the stop it
+    /// is built on. Nothing is written in either, and a switch left showing
+    /// the position it was moved to claims a configuration that is not on
+    /// disk. On this control that claim is the serious one: it is the one
+    /// thing Sissy writes outside its own folder, so a dropped *off* says two
+    /// other programs have stopped running Sissy's line while they have not,
+    /// and the next launch re-affirms from the file and undoes the click.
+    ///
+    /// The engine is asked for here as well as in the pass, because every
+    /// other control on this object asks for it before it publishes anything.
     func setAgentHooks(_ enabled: Bool) {
-        guard !isStopped, enabled != agentHooks else { return }
+        guard engine != nil, !isStopped, enabled != agentHooks else { return }
         agentHooks = enabled
         applyAgentHooks(enabled)
     }
