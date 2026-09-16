@@ -402,6 +402,16 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertTrue(row.amount.contains(" of "), "the cap is missing from the headline")
     }
 
+    /// The headline is one string because the share is a share *of* the figure
+    /// beside it — and a vendor that names no ceiling, which is Codex on every
+    /// block measured, has only the figure.
+    func testTheCreditsHeadlineCarriesTheShareOnlyWhereThereIsACap() {
+        XCTAssertEqual(
+            UsageFormat.creditsReading(amount: "€374.80 of €375.00", percent: 100),
+            "€374.80 of €375.00 · 100%")
+        XCTAssertEqual(UsageFormat.creditsReading(amount: "0 credits", percent: nil), "0 credits")
+    }
+
     /// A spend with no ceiling still answers what was spent, but nothing that
     /// would imply a ceiling: no percentage, no bar, no amount left.
     func testUncappedCreditsNameNoPercentAndNoCap() throws {

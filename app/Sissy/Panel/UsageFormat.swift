@@ -825,6 +825,19 @@ enum UsageFormat {
         return "\(spent) of \(amount(cap, in: credits.unit))"
     }
 
+    /// The credits headline: the figure, and the share of the cap it is where
+    /// the vendor named a cap to take a share of.
+    ///
+    /// The two sit together because the second is a percentage *of* the first,
+    /// and because a vendor that answers a balance and no ceiling — which is
+    /// Codex on every block measured — has only the one figure to print. A
+    /// percentage that had to be suppressed separately would be a second place
+    /// to remember that.
+    static func creditsReading(amount: String, percent: Int?) -> String {
+        guard let percent else { return amount }
+        return "\(amount) · \(percent)%"
+    }
+
     /// The line under the credits bar: what is left, and when the vendor last
     /// answered.
     ///
