@@ -56,6 +56,36 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
         XCTAssertEqual(identity.organizationType, "claude_team")
     }
 
+    /// The seat belongs to the membership, not to the organisation, so it is
+    /// taken off the membership the subscription was chosen from. An account
+    /// holding two would otherwise wear the other one's seat under the
+    /// subscription's name.
+    func testTheSeatComesFromTheSubscriptionMembership() throws {
+        let identity = try ClaudeWebAccountProfile.parse([
+            "uuid": "c805523f",
+            "memberships": [
+                ["organization": individualOrganization, "seat_tier": "team_standard"],
+                ["organization": subscriptionOrganization, "seat_tier": "team_tier_1"],
+            ],
+        ])
+
+        XCTAssertEqual(identity.organization, "Master Soft Srl")
+        XCTAssertEqual(identity.seat, "team_tier_1")
+    }
+
+    /// An account on no chat plan names no organisation, so there is no
+    /// membership to take a seat off either.
+    func testAnAccountWithNoSubscriptionNamesNoSeat() throws {
+        let identity = try ClaudeWebAccountProfile.parse([
+            "uuid": "c805523f",
+            "memberships": [
+                ["organization": individualOrganization, "seat_tier": "team_standard"]
+            ],
+        ])
+
+        XCTAssertNil(identity.seat)
+    }
+
     /// The measured divergence, and the one field that is dropped rather than
     /// mapped: claude.ai reports this account `default_raven` where the OAuth
     /// profile reports `default_claude_max_5x`. Two taxonomies, so carrying

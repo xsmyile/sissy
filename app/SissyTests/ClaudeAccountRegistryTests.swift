@@ -53,6 +53,19 @@ final class ClaudeAccountProfileTests: XCTestCase {
         XCTAssertEqual(identity.rateLimitTier, "default_claude_max_5x")
     }
 
+    /// The seat sits on the organisation here, where claude.ai puts it on the
+    /// membership. Measured 2026-09-16: both answer `team_tier_1` for one
+    /// account, which is what lets a row badge "Team Premium" whichever source
+    /// named it.
+    func testParseTakesTheSeatOffTheOrganisation() throws {
+        let identity = try ClaudeAccountProfile.parse([
+            "account": ["uuid": "u-1"],
+            "organization": ["organization_type": "claude_team", "seat_tier": "team_tier_1"],
+        ])
+
+        XCTAssertEqual(identity.seat, "team_tier_1")
+    }
+
     /// A personal account names no organisation, and that is not a failure.
     func testParseSurvivesAnAccountWithNoOrganisation() throws {
         let identity = try ClaudeAccountProfile.parse(["account": ["uuid": "u-2"]])
