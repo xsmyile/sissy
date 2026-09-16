@@ -131,9 +131,9 @@ struct PanelOverview: View {
     private var providers: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(text: providersLabel)
-            ForEach(snapshot.providers) { row in
+            ForEach(snapshot.gaugeRows) { row in
                 Button {
-                    openProvider(row.id)
+                    openProvider(row.provider)
                 } label: {
                     providerRow(row)
                 }
@@ -205,12 +205,12 @@ struct PanelOverview: View {
     /// Deliberately without the age the page carries. The Overview keeps no
     /// clock of its own, so an age worded here would be as old as the last
     /// frame rather than as old as the reading.
-    private static func legendHelp(_ row: UsagePanelSnapshot.ProviderRow) -> String {
+    private static func legendHelp(_ row: UsagePanelSnapshot.GaugeRow) -> String {
         guard let status = row.status, status.indicator.isDegraded else {
             return "Open \(row.name)"
         }
         return UsageFormat.statusSummary(
-            provider: row.id, label: status.label, checkedAt: nil)
+            provider: row.provider, label: status.label, checkedAt: nil)
     }
 
     /// Room enough for a gauge to be read as one once the label beside it has
@@ -244,9 +244,9 @@ struct PanelOverview: View {
     /// The plan badge is not here. It is identity rather than a reading — it
     /// says what the account pays for, not what it has left, and it is the
     /// same word tomorrow. The page leads with it.
-    private func providerRow(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
+    private func providerRow(_ row: UsagePanelSnapshot.GaugeRow) -> some View {
         HStack(spacing: 6) {
-            ProviderMark(id: row.id)
+            ProviderMark(id: row.provider)
             Text(row.name)
                 .font(.system(size: 12, weight: .medium))
                 .lineLimit(1)
@@ -285,7 +285,7 @@ struct PanelOverview: View {
     /// launch" is the absence of one. The sentence for it is the same one the
     /// page prints, on the hover.
     @ViewBuilder
-    private func gauge(_ row: UsagePanelSnapshot.ProviderRow) -> some View {
+    private func gauge(_ row: UsagePanelSnapshot.GaugeRow) -> some View {
         if let binding = UsagePanelSnapshot.binding(row.windows) {
             Text(UsageFormat.windowLabel(minutes: binding.minutes))
                 .font(.system(size: 11))
@@ -295,7 +295,7 @@ struct PanelOverview: View {
                 .frame(minWidth: Self.windowColumnWidth, alignment: .leading)
             ShareBar(
                 share: binding.fraction,
-                tint: ProviderPalette.tint(for: row.id),
+                tint: ProviderPalette.tint(for: row.provider),
                 pace: binding.pace
             )
             .frame(minWidth: Self.gaugeMinWidth)

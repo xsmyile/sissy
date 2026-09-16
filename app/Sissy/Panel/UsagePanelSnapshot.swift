@@ -190,20 +190,75 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
-    /// One account a vendor's row can be switched to.
-    struct AccountChoice: Equatable, Identifiable {
+    /// One gauge on the Overview: a vendor, or a vendor's account once there
+    /// is more than one worth drawing.
+    ///
+    /// The Overview answers whether there is room to keep working, and with
+    /// two accounts that question has two answers — the whole point of linking
+    /// a second one is seeing 100% and 20% side by side rather than finding
+    /// out after switching. So the row is per readable account, and the name
+    /// is qualified only then: one account keeps the vendor's plain name and
+    /// no track gets shorter for a qualifier nobody needed.
+    ///
+    /// Carries no money, which is not an omission. A log line names no
+    /// account, so the day belongs to the config home and cannot be split; the
+    /// Overview's block has answered pressure and nothing else since 0.1.10.
+    struct GaugeRow: Equatable, Identifiable {
         let id: String
+        /// Which page this opens, which is the vendor's — an account is a
+        /// reading on that page rather than a page of its own.
+        let provider: String
+        let name: String
+        let windows: [WindowRow]
+        let notice: LimitsNotice?
+        let status: StatusRow?
+    }
+
+    /// One account of a vendor, as the panel knows it.
+    ///
+    /// Two things make an account appear here and they are not the same thing.
+    /// Sissy can **read** an account it holds a live source for — the CLI's
+    /// own credential for whoever is signed in, a linked claude.ai session for
+    /// anyone else — and it can **switch to** an account whose credential it
+    /// has archived. An account can be either, both, or the first without the
+    /// second.
+    ///
+    /// So an archived account with no session linked gets a row with no
+    /// gauges: Sissy knows who it is and can sign the CLI in as it, and cannot
+    /// say a thing about its limits until a session is linked. Leaving it out
+    /// would hide the account the user most wants to link.
+    struct AccountEntry: Equatable, Identifiable {
+        let id: String
+        /// What the picker calls it, and what qualifies the Overview's row
+        /// once there is more than one.
         let label: String
-        let isSelected: Bool
+        let email: String?
+        let organization: String?
+        let plan: String?
+        let planTier: String?
+        /// Shortest window first, and empty for an account Sissy cannot read.
+        let windows: [WindowRow]
+        let windowsCaption: String?
+        let credits: CreditsRow?
+        let notice: LimitsNotice?
+        /// Whether Sissy has a source for this account at all. False is an
+        /// invitation to link one rather than a failure to report.
+        let isReadable: Bool
+        /// Whether the CLI itself is signed in as this account — the one whose
+        /// future spend lands in the day beside it.
+        let isSignedIn: Bool
+        /// Whether Sissy holds a credential it could sign the CLI in with.
+        let isSwitchable: Bool
     }
 
     struct ProviderRow: Equatable, Identifiable {
         let id: String
         let name: String
-        /// The other accounts of this vendor, for the picker on the identity
-        /// line. Empty when the vendor has one account, which is most of them
-        /// — a picker over a single choice is a control that does nothing.
-        let accounts: [AccountChoice]
+        /// Every account of this vendor the panel knows. Empty when there is
+        /// one, which is most installs — a picker over a single choice is a
+        /// control that does nothing, and the fields below are that one
+        /// account's reading anyway.
+        let accounts: [AccountEntry]
         /// Subscription plan, already worded. Nil leaves the row's header at
         /// the name alone — an API-key user has no plan to name, and a Codex
         /// that has not taken a turn yet has not said which it is on.
@@ -516,7 +571,10 @@ struct UsagePanelSnapshot: Equatable {
                 id: slice.id,
                 name: UsageFormat.providerName(slice.id),
                 accounts: slice.id == ProviderID.claudeCode
-                    ? switchableAccounts(claudeAccounts) : [],
+                    ? accountEntries(
+                        readings: slice.signals.accounts, known: claudeAccounts,
+                        reading: limitsReading, now: now)
+                    : [],
                 plan: plan?.label,
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
@@ -567,18 +625,92 @@ struct UsagePanelSnapshot: Equatable {
             children: component.children.map(makeComponent))
     }
 
-    /// The accounts the switcher offers, or none when there is nothing to
-    /// switch between. One archived account is the ordinary case and a menu
-    /// with a single entry is a control that does nothing.
-    private static func switchableAccounts(
-        _ snapshot: ClaudeAccountRegistry.Snapshot
-    ) -> [AccountChoice] {
-        guard snapshot.accounts.count > 1 else { return [] }
-        return snapshot.accounts.map {
-            AccountChoice(
-                id: $0.uuid,
-                label: UsageFormat.accountLabel($0),
-                isSelected: $0.uuid == snapshot.activeUUID)
+    /// The Overview's gauges: one per vendor, or one per readable account of a
+    /// vendor that has more than one.
+    ///
+    /// An account Sissy cannot read is left out here while it still appears in
+    /// the picker. The picker is a list of accounts and this is a list of
+    /// readings, and a row with an empty track would report headroom nobody
+    /// measured.
+    var gaugeRows: [GaugeRow] {
+        providers.flatMap { row -> [GaugeRow] in
+            let readable = row.accounts.filter(\.isReadable)
+            guard readable.count > 1 else {
+                return [
+                    GaugeRow(
+                        id: row.id, provider: row.id, name: row.name, windows: row.windows,
+                        notice: row.notice, status: row.status)
+                ]
+            }
+            return readable.map { account in
+                GaugeRow(
+                    id: "\(row.id)#\(account.id)",
+                    provider: row.id,
+                    name: UsageFormat.accountQualifiedName(
+                        row.name, organization: account.organization, fallback: account.label),
+                    windows: account.windows,
+                    notice: account.notice,
+                    status: row.status)
+            }
+        }
+    }
+
+    /// Every account of this vendor, readable or merely switchable, in a
+    /// stable order with the signed-in one first.
+    ///
+    /// The two inputs answer different questions and neither subsumes the
+    /// other. `readings` is what Sissy has a live source for; `known` is what
+    /// it holds an archived credential for. An account in the second and not
+    /// the first is one the user has signed into on this Mac and not linked a
+    /// session for — it gets a row with no gauges, because hiding it would
+    /// hide the account they most need to link.
+    ///
+    /// Fewer than two accounts is no list at all: the row's own fields are
+    /// that account's reading, and a picker over one choice is a control that
+    /// does nothing.
+    static func accountEntries(
+        readings: [AccountSignals],
+        known: ClaudeAccountRegistry.Snapshot,
+        reading limitsReading: LimitsReading,
+        now: Date
+    ) -> [AccountEntry] {
+        let byID = Dictionary(readings.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let switchable = Set(known.accounts.map(\.uuid))
+        let ids = switchable.union(byID.keys)
+        guard ids.count > 1 else { return [] }
+
+        let entries = ids.map { id -> AccountEntry in
+            let reading = byID[id]
+            let identity = known.accounts.first { $0.uuid == id }
+            let plan = UsageFormat.plan(
+                reading?.plan ?? identity?.organizationType,
+                tier: reading?.planTier ?? identity?.rateLimitTier,
+                seat: reading?.account?.seat)
+            let observedAt = reading?.limitsObservedAt
+            return AccountEntry(
+                id: id,
+                label: identity.map(UsageFormat.accountLabel)
+                    ?? reading?.account?.email ?? id,
+                email: reading?.account?.email ?? identity?.email,
+                organization: reading?.account?.organization ?? identity?.organization,
+                plan: plan?.label,
+                planTier: plan?.tier,
+                windows: (reading?.windows ?? []).map {
+                    makeWindow(
+                        $0, observedAt: observedAt ?? now, reading: limitsReading, now: now)
+                },
+                windowsCaption: observedAt.map {
+                    UsageFormat.windowsCaption(observedAt: $0, now: now)
+                },
+                credits: makeCredits(reading?.credits, now: now),
+                notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet)
+                    .map { LimitsNotice(message: $0.message, action: $0.action) },
+                isReadable: reading != nil,
+                isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID),
+                isSwitchable: switchable.contains(id))
+        }
+        return entries.sorted { lhs, rhs in
+            (lhs.isSignedIn ? 0 : 1, lhs.label) < (rhs.isSignedIn ? 0 : 1, rhs.label)
         }
     }
 
