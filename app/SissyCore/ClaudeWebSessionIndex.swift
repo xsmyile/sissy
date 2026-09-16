@@ -26,6 +26,45 @@ struct ClaudeWebLink: Sendable, Codable, Equatable {
     let organization: String?
 }
 
+/// One account Sissy holds a claude.ai session for, as a surface lists it.
+///
+/// Built from the sessions rather than from the links, because the two are not
+/// the same list and the shorter one is the wrong one. A session is filed
+/// first and named second — `UsageEngine.store(session:as:)` catches a failed
+/// `remember` and keeps the session, on the reasoning that losing a login to a
+/// disk error is worse than deriving an organisation — so a session with no
+/// entry is a state the ordinary path can produce, and one whose reader is
+/// polling claude.ai either way. Listing the links would leave it running with
+/// no row and no way to stop it.
+///
+/// The identity is therefore optional and filled by whatever can fill it: the
+/// link, then the account archive, then nothing. The same fallback the panel's
+/// own rows take, so one account cannot be named two ways.
+struct ClaudeWebAccount: Sendable, Equatable, Identifiable {
+    let id: String
+    let identity: ClaudeAccountIdentity?
+
+    /// The join itself, so which accounts get a row is testable without a
+    /// keychain.
+    ///
+    /// Driven by `stored`, never by `links`: an entry naming a session that is
+    /// no longer filed is a row for an account Sissy reads nothing for, and a
+    /// session with no entry is the case this list exists to reach.
+    static func list(
+        stored: [String],
+        links: [String: ClaudeWebLink],
+        archived: [ClaudeAccountIdentity]
+    ) -> [ClaudeWebAccount] {
+        stored
+            .filter { $0 != ClaudeWebSessionStore.unkeyedAccount }
+            .map { uuid in
+                ClaudeWebAccount(
+                    id: uuid,
+                    identity: links[uuid]?.identity ?? archived.first { $0.uuid == uuid })
+            }
+    }
+}
+
 /// The links, in a file of Sissy's own beside the sessions they describe.
 ///
 /// Deliberately not `ClaudeAccountStore`'s index, though both list accounts.

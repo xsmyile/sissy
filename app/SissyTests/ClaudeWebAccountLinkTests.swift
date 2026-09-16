@@ -199,3 +199,79 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
         XCTAssertTrue(index.load().isEmpty)
     }
 }
+
+/// Which accounts Settings lists, and what each is called.
+///
+/// The list came out of the links, which are a naming written best-effort
+/// after the session — so a session whose entry never landed was polling
+/// claude.ai with no row in Settings and no way to stop it. Measured on the
+/// dev build 2026-09-16: one of two stored sessions was listed.
+final class ClaudeWebAccountListTests: XCTestCase {
+    private let linked = "dbab20e1"
+    private let unnamed = "c805523f"
+
+    private func identity(_ uuid: String, email: String) -> ClaudeAccountIdentity {
+        ClaudeAccountIdentity(
+            uuid: uuid, email: email, organization: nil, organizationType: nil,
+            rateLimitTier: nil)
+    }
+
+    func testASessionIsNamedByItsLink() {
+        let accounts = ClaudeWebAccount.list(
+            stored: [linked],
+            links: [
+                linked: ClaudeWebLink(
+                    identity: identity(linked, email: "davide@radonforge.com"),
+                    organization: "org-1")
+            ],
+            archived: [])
+
+        XCTAssertEqual(accounts.map(\.id), [linked])
+        XCTAssertEqual(accounts.first?.identity?.email, "davide@radonforge.com")
+    }
+
+    /// A session filed before anything could name it still gets a row, and the
+    /// account archive is what names it.
+    func testASessionWithNoLinkIsNamedByTheAccountArchive() {
+        let accounts = ClaudeWebAccount.list(
+            stored: [unnamed],
+            links: [:],
+            archived: [identity(unnamed, email: "davide.tacchini@mastersoft.it")])
+
+        XCTAssertEqual(accounts.map(\.id), [unnamed])
+        XCTAssertEqual(accounts.first?.identity?.email, "davide.tacchini@mastersoft.it")
+    }
+
+    /// Named by neither, it keeps its uuid rather than being dropped: a row
+    /// under a poor label is what makes that session removable at all.
+    func testASessionNothingCanNameKeepsItsRow() {
+        let accounts = ClaudeWebAccount.list(stored: [unnamed], links: [:], archived: [])
+
+        XCTAssertEqual(accounts.map(\.id), [unnamed])
+        XCTAssertNil(accounts.first?.identity)
+    }
+
+    /// The holding key is not an account. A row for it would offer to unlink a
+    /// session that is mid-adoption, under a label no user has seen.
+    func testTheHoldingKeyIsNoAccount() {
+        let accounts = ClaudeWebAccount.list(
+            stored: [ClaudeWebSessionStore.unkeyedAccount, linked], links: [:], archived: [])
+
+        XCTAssertEqual(accounts.map(\.id), [linked])
+    }
+
+    /// An entry whose session has gone is not a row: the list answers for what
+    /// Sissy is reading, and the links can outlive what they name.
+    func testALinkWithNoSessionIsNoRow() {
+        let accounts = ClaudeWebAccount.list(
+            stored: [],
+            links: [
+                linked: ClaudeWebLink(
+                    identity: identity(linked, email: "davide@radonforge.com"),
+                    organization: "org-1")
+            ],
+            archived: [])
+
+        XCTAssertTrue(accounts.isEmpty)
+    }
+}

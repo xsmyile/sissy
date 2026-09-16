@@ -282,7 +282,7 @@ final class UsageEngineHost {
     /// The accounts Settings lists, and the only surface one can be unlinked
     /// from. Stored rather than read through to the engine on each access:
     /// the engine holds it behind a lock, which no view is observing.
-    private(set) var linkedClaudeAccounts: [ClaudeWebLink] = []
+    private(set) var linkedClaudeAccounts: [ClaudeWebAccount] = []
     /// Why the last import found nothing, kept so Settings says which of the
     /// several ways it can come up empty happened. Cleared by the next
     /// attempt, and by a successful one.

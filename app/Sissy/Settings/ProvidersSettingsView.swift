@@ -80,6 +80,17 @@ enum ClaudeAccountLinkCopy {
 
     static func unlink(_ account: String) -> String { "Unlink \(account)" }
 
+    static func unlinkTitle(_ account: String) -> String {
+        "Forget the claude.ai session for \(account)?"
+    }
+
+    static let unlinkMessage =
+        "Sissy stops reading this account's limits and credits from claude.ai. The Claude "
+        + "Code sign-in it archived stays, so the account is still one you can switch to — "
+        + "and you can link the session again from this window."
+
+    static let unlinkConfirm = "Forget session"
+
     static let cancel = "Cancel"
     static let link = "Link"
     static let retry = "Try again"
@@ -118,8 +129,9 @@ enum ClaudeWebSessionCopy {
     static let ownCredentialLabel = "Limits source"
     static let ownCredentialState = "This account's own sign-in"
     static let ownCredentialCaption =
-        "Claude Code keeps its OAuth token in each account's own directory, so Sissy reads "
-        + "that account's own limits."
+        "Claude Code keeps its OAuth token in its own config directory, and it belongs to "
+        + "whichever account is signed in there, so that is the account Sissy reads limits "
+        + "for."
 
     /// One sentence per way the import can come up empty, each naming what to
     /// do rather than what failed.
@@ -144,6 +156,11 @@ struct ProvidersSettingsView: View {
     let model: SissyModel
 
     @State private var showingWebSessionDetail = false
+    /// The account a confirmation is open for. A session is a secret the user
+    /// cannot read back and did not have to type, so the one click that
+    /// deletes it is asked about first — this one was pressed by accident on
+    /// the account its owner was signed into.
+    @State private var unlinking: ClaudeWebAccount?
 
     private static let markSize: CGFloat = 18
     /// Wide enough that the detail reads as a paragraph rather than a column.
@@ -174,6 +191,18 @@ struct ProvidersSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .confirmationDialog(
+            unlinking.map { ClaudeAccountLinkCopy.unlinkTitle(Self.label(of: $0)) } ?? "",
+            isPresented: Binding(get: { unlinking != nil }, set: { if !$0 { unlinking = nil } }),
+            presenting: unlinking
+        ) { account in
+            Button(ClaudeAccountLinkCopy.unlinkConfirm, role: .destructive) {
+                model.engine.forgetClaudeWebSession(account: account.id)
+            }
+            Button(ClaudeAccountLinkCopy.cancel, role: .cancel) {}
+        } message: { _ in
+            Text(ClaudeAccountLinkCopy.unlinkMessage)
+        }
         // The readiness poll stops once the scan is warm, so a window opened
         // afterwards would render whatever the last tick left behind.
         .task { model.engine.refreshProviders() }
@@ -305,18 +334,23 @@ struct ProvidersSettingsView: View {
                 Text(ClaudeAccountLinkCopy.caption)
             }
         }
-        ForEach(sortedLinks, id: \.identity.uuid) { link in
-            linkedAccount(link)
+        ForEach(sortedAccounts) { account in
+            linkedAccount(account)
         }
     }
 
     /// Ordered by the name they are drawn under rather than by the uuid they
     /// are keyed by, which is the order the engine deliberately does not have:
     /// the words are this layer's.
-    private var sortedLinks: [ClaudeWebLink] {
-        model.engine.linkedClaudeAccounts.sorted {
-            UsageFormat.accountLabel($0.identity) < UsageFormat.accountLabel($1.identity)
-        }
+    private var sortedAccounts: [ClaudeWebAccount] {
+        model.engine.linkedClaudeAccounts.sorted { Self.label(of: $0) < Self.label(of: $1) }
+    }
+
+    /// An account with no identity is one whose session was filed before
+    /// anything could name it. Its uuid is a poor label and the only honest
+    /// one — and a row under it is what makes that session removable.
+    private static func label(of account: ClaudeWebAccount) -> String {
+        account.identity.map(UsageFormat.accountLabel) ?? account.id
     }
 
     /// One linked account, with the control that unlinks it.
@@ -327,20 +361,20 @@ struct ProvidersSettingsView: View {
     /// sign-in beside it is not something the user linked, and Sissy cannot
     /// make another — which the help text says before the click rather than
     /// after it.
-    private func linkedAccount(_ link: ClaudeWebLink) -> some View {
-        let label = UsageFormat.accountLabel(link.identity)
+    private func linkedAccount(_ account: ClaudeWebAccount) -> some View {
+        let label = Self.label(of: account)
         return LabeledContent {
-            Button {
-                model.engine.forgetClaudeWebSession(account: link.identity.uuid)
+            Button(role: .destructive) {
+                unlinking = account
             } label: {
-                Image(systemName: "trash")
+                Image(systemName: "trash").foregroundStyle(.red)
             }
             .buttonStyle(.borderless)
             .help(ClaudeAccountLinkCopy.unlinkHelp)
             .accessibilityLabel(ClaudeAccountLinkCopy.unlink(label))
         } label: {
             Text(label)
-            if let organization = link.identity.organization {
+            if let organization = account.identity?.organization {
                 Text(organization)
             }
         }
