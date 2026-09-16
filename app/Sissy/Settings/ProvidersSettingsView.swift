@@ -75,6 +75,7 @@ enum ClaudeAccountLinkCopy {
     }
 
     static let cancel = "Cancel"
+    static let link = "Link"
 
     static func failure(_ why: ClaudeWebAccountLink.Failure) -> String {
         switch why {
@@ -134,6 +135,10 @@ struct ProvidersSettingsView: View {
     let model: SissyModel
 
     @State private var showingWebSessionDetail = false
+    /// Which organisation the pending link is aimed at. Nil until someone
+    /// picks, which is what keeps `Link` from committing a default nobody
+    /// chose.
+    @State private var pickedOrganization: String?
 
     private static let markSize: CGFloat = 18
     /// Wide enough that the detail reads as a paragraph rather than a column.
@@ -307,20 +312,44 @@ struct ProvidersSettingsView: View {
     /// address. The session is not filed until this is answered, because a
     /// reader that picked for itself would be free to pick differently on the
     /// next poll.
+    ///
+    /// A radio group rather than a button per organisation: a row of buttons
+    /// reads as several actions where there is one, and it says nothing about
+    /// which is selected while you decide. Committing is its own button, so
+    /// the choice can be changed before it is spent — the link writes a
+    /// credential and re-linking costs another login.
     private func organizationChoice(_ choice: ClaudeWebLinkChoice) -> some View {
         LabeledContent {
             HStack(spacing: 8) {
-                ForEach(choice.organizations) { organization in
-                    Button(organization.name) {
-                        model.engine.chooseClaudeWebOrganization(organization.id)
-                    }
-                }
                 Button(ClaudeAccountLinkCopy.cancel) { model.engine.cancelClaudeWebLink() }
+                Button(ClaudeAccountLinkCopy.link) {
+                    guard let pickedOrganization else { return }
+                    model.engine.chooseClaudeWebOrganization(pickedOrganization)
+                }
+                .disabled(pickedOrganization == nil)
             }
         } label: {
             Text(ClaudeAccountLinkCopy.chooseLabel)
             Text(ClaudeAccountLinkCopy.chooseCaption(choice.identity.email))
+            Picker("", selection: organizationBinding(choice)) {
+                ForEach(UsageFormat.organizationChoices(choice.organizations), id: \.id) {
+                    organization in
+                    Text(organization.label).tag(organization.id)
+                }
+            }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
         }
+    }
+
+    /// Defaults to nothing picked, so the link is a choice someone made rather
+    /// than the first row happening to be selected — which is the whole reason
+    /// the question is asked instead of derived.
+    private func organizationBinding(_ choice: ClaudeWebLinkChoice) -> Binding<String> {
+        Binding(
+            get: { pickedOrganization ?? "" },
+            set: { pickedOrganization = $0 }
+        )
     }
 
     private var webSessionDetailButton: some View {

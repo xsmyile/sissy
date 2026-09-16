@@ -1,9 +1,18 @@
 import Foundation
 
 /// One organisation of an account, as claude.ai names it.
+///
+/// The name is frequently not one a human chose: measured 2026-09-16 on two
+/// accounts, claude.ai auto-generates `<name>'s Individual Org` and
+/// `<email>'s Organization` for the organisation that comes with a personal
+/// plan, and the two patterns differ. So the plan travels beside it — the same
+/// token `.claude.json` puts in `organizationType`, which `UsageFormat.plan`
+/// already words — and a surface asking someone to choose can say what each
+/// one *is* rather than repeat a machine-generated string at them.
 struct ClaudeWebOrganization: Sendable, Codable, Equatable, Identifiable {
     let id: String
     let name: String
+    let plan: String?
 }
 
 /// The question a link could not answer for itself, as a surface draws it.

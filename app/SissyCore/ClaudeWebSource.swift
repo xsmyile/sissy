@@ -417,11 +417,14 @@ actor ClaudeWebSource: SourceSignals {
         return subscriptionOrganizations(among: organizations).compactMap { organization in
             guard let uuid = organization["uuid"] as? String, !uuid.isEmpty else { return nil }
             return ClaudeWebOrganization(
-                id: uuid, name: organization[organizationNameKey] as? String ?? uuid)
+                id: uuid,
+                name: organization[organizationNameKey] as? String ?? uuid,
+                plan: organization[organizationPlanKey] as? String)
         }
     }
 
     private static let organizationNameKey = "name"
+    private static let organizationPlanKey = "analytics_subscription_plan"
 
     private static func get(_ path: String, session: String) async throws -> [String: Any] {
         let data = try await send(path, session: session)
