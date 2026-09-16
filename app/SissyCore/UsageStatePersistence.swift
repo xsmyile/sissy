@@ -294,10 +294,54 @@ enum UsageStatePersistence {
         try data.write(to: url, options: [.atomic])
     }
 
+    /// How many copies set aside for one snapshot are kept.
+    ///
+    /// A snapshot this build cannot read is moved aside rather than deleted,
+    /// so the failure can still be opened afterwards. Nothing removed the
+    /// older ones, and a schema bump quarantines on every install at once:
+    /// measured on one machine, seven were still there across three versions,
+    /// the oldest four months old. The newest is the one anybody would read,
+    /// and the rest are copies of a working set that has been rebuilt since.
+    static let quarantineKeep = 2
+
+    static func quarantinePrefix(for url: URL) -> String {
+        "\(url.lastPathComponent).corrupt-"
+    }
+
     private static func quarantine(_ url: URL, reason: String) {
         let ts = Int(Date().timeIntervalSince1970)
         let quarantined = url.deletingLastPathComponent()
-            .appendingPathComponent("\(url.lastPathComponent).corrupt-\(reason)-\(ts).json")
+            .appendingPathComponent("\(quarantinePrefix(for: url))\(reason)-\(ts).json")
         try? FileManager.default.moveItem(at: url, to: quarantined)
+        pruneQuarantined(of: url)
+    }
+
+    /// Drops all but the newest `quarantineKeep` copies set aside for one
+    /// snapshot.
+    ///
+    /// Candidates are named by the prefix this type writes, never by being in
+    /// the directory: it is the user's, and nothing here may delete what it
+    /// did not write.
+    private static func pruneQuarantined(of url: URL) {
+        let directory = url.deletingLastPathComponent()
+        let prefix = quarantinePrefix(for: url)
+        guard
+            let contents = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles])
+        else { return }
+        let mine =
+            contents
+            .filter { $0.lastPathComponent.hasPrefix(prefix) }
+            .sorted { modified($0) > modified($1) }
+        for stale in mine.dropFirst(quarantineKeep) {
+            try? FileManager.default.removeItem(at: stale)
+        }
+    }
+
+    private static func modified(_ url: URL) -> Date {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            .flatMap { $0 } ?? .distantPast
     }
 }
