@@ -280,4 +280,40 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         XCTAssertEqual(Array(reads.all.prefix(2)), [false, true])
         await probe.stop()
     }
+
+    /// The bug this caught: the probe held the credential until its own
+    /// expiry, so a `/login` to another account left the windows of the one
+    /// the user had just left standing under the name of the one they had
+    /// joined — measured at eight hours, the life of a Claude Code access
+    /// token, because a token that is merely the wrong account's still answers
+    /// 200.
+    ///
+    /// Asserted on the windows rather than on the read count: a probe that
+    /// re-reads and then publishes the first answer anyway is the same defect
+    /// with a different cause.
+    func testANewCredentialReplacesTheWindowsTheOldOneDrew() async {
+        let token = LockedValue("first")
+        let probe = ClaudeLimitsProbe(
+            credentials: { _, _ in
+                .found(ClaudeCredentials(accessToken: token.load(), expiresAt: .distantFuture))
+            },
+            fetch: { accessToken in
+                ClaudeLimitsProbe.Reading(
+                    windows: [
+                        UsageWindow(
+                            minutes: 300, usedPercent: 10, resetsAt: .distantFuture,
+                            scope: accessToken)!
+                    ],
+                    credits: nil)
+            })
+
+        _ = await probe.refreshOnce {}
+        XCTAssertEqual(probe.currentSignals().windows.map(\.scope), ["first"])
+
+        token.update { $0 = "second" }
+        _ = await probe.refreshOnce {}
+
+        XCTAssertEqual(probe.currentSignals().windows.map(\.scope), ["second"])
+        await probe.stop()
+    }
 }

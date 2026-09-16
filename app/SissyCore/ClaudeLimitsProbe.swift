@@ -65,15 +65,6 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// so once instead of every five minutes — and a *different* failure
     /// still gets through.
     private var lastReported: String?
-    /// Last credentials read from the keychain, held until they expire.
-    ///
-    /// The access token is good for hours while the poll runs every five
-    /// minutes, so re-reading it each time asks macOS to authorize ~96 times
-    /// a day for a value that changed three times. Every one of those reads
-    /// is a chance to meet a keychain whose grant has gone stale — an app
-    /// re-signed, or the item recreated by the CLI — and to put a dialog in
-    /// front of someone who did not just ask for one.
-    private var cached: ClaudeCredentials?
 
     /// `credentials` leads so a trailing closure still names the keychain: it
     /// is the half nearly every test answers for, and the half that decides
@@ -149,7 +140,6 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// not the same as one that cannot race.
     func stop(clearingState: Bool = true) {
         cancelRequests()
-        cached = nil
         published.update {
             $0.windows = []
             $0.credits = nil
@@ -172,18 +162,16 @@ actor ClaudeLimitsProbe: SourceSignals {
     ///
     /// The gesture behind a user asking for their limits back, and the only
     /// other thing besides flipping the switch that may put a keychain dialog
-    /// on screen. Three things stand between a running probe and a fresh read
-    /// and this clears all of them: the poll task, which makes `start` a
-    /// no-op while it lives; the cached token, which returns before the
-    /// keychain is touched at all; and the deduped log line, so the outcome
-    /// of the read the user just asked for is actually recorded.
+    /// on screen. Two things stand between a running probe and a fresh read
+    /// and this clears both: the poll task, which makes `start` a no-op while
+    /// it lives, and the deduped log line, so the outcome of the read the user
+    /// just asked for is actually recorded.
     ///
     /// Deliberately not `stop()` first: that drops the published windows, and
     /// a refresh that blanks the gauges it is trying to restore reads as a
     /// failure for as long as the request takes.
     func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
         cancelRequests()
-        cached = nil
         lastReported = nil
         let request = begin(userInitiated: true, onRefresh: onRefresh)
         await withTaskCancellationHandler {
@@ -229,12 +217,21 @@ actor ClaudeLimitsProbe: SourceSignals {
         case wait(Duration)
     }
 
-    /// The keychain half of a poll, and the whole of what decides whether
+    /// The credential half of a poll, and the whole of what decides whether
     /// macOS is asked anything.
     ///
-    /// A held token is spent without touching the keychain at all: it is good
-    /// for hours while the poll runs every five minutes, and every read is
-    /// another chance to meet a grant that has gone stale.
+    /// Every poll reads it again, and it deliberately holds nothing between
+    /// them. The token names the account, so a held one goes on answering for
+    /// whoever was signed in when it was read: a `/login` elsewhere leaves the
+    /// windows of the account the user just left under the name of the one
+    /// they just joined, for as long as the old token lives — measured
+    /// 2026-09-16, eight hours, because nothing short of the vendor refusing
+    /// it says it is the wrong one. What the hold used to buy is gone anyway.
+    /// It was written when this read was `SecItemCopyMatching`, which could
+    /// raise the legacy keychain panel and earn a grant that a token rotation
+    /// invalidated; the engine now injects `ClaudeCodeCredentials.load`, which
+    /// is a file read that falls back to `/usr/bin/security`, asks macOS for
+    /// nothing and costs about a millisecond once every five minutes.
     ///
     /// The read is a suspension a `stop()` or a second `refresh` can land in,
     /// which is what `stamp` guards. The generation is checked rather than
@@ -242,14 +239,12 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// task in that property while this continuation still belongs to the
     /// cancelled one.
     private func currentCredentials(generation stamp: Int) async -> Credentials {
-        if let held = cached, held.isValid() { return .ready(held) }
         let interactive = mayInteract
         mayInteract = false
         let outcome = await credentialsSource(Self.keychainTimeout, interactive)
         guard stamp == generation, !Task.isCancelled else { return .wait(Self.refreshInterval) }
         switch outcome {
         case .found(let found):
-            cached = found
             published.update { $0.limitsState = .quiet }
             if let expiresAt = found.expiresAt, expiresAt <= Date() {
                 report(
@@ -329,12 +324,6 @@ actor ClaudeLimitsProbe: SourceSignals {
                     "the Claude usage endpoint answered 429; backing off for "
                         + "\(Self.rateLimitedBackoff)")
                 return Self.rateLimitedBackoff
-            }
-            // The token was refused rather than the request: drop it so the
-            // next poll reads the keychain again instead of retrying a
-            // credential the CLI has already rotated.
-            if case ClaudeLimitsError.badStatus(let code) = error, code == 401 || code == 403 {
-                self.cached = nil
             }
             report("the Claude usage request failed: \(error.localizedDescription)")
             return Self.refreshInterval
