@@ -66,11 +66,21 @@ actor ClaudeWebSource: SourceSignals {
     /// The imported session, read under the caller's own interaction rule.
     ///
     /// Sessions are filed under the account they belong to, and this reads
-    /// whichever one is stored. That is exact while an install holds one, and
-    /// it is what a reader per account replaces — a source built for an
-    /// account takes that account's session rather than looking one up.
+    /// whichever one is stored. Exact while an install holds one, and what a
+    /// reader per account replaces — a source built for an account takes that
+    /// account's session rather than looking one up.
+    ///
+    /// The holding key wins when both are there, because that state means an
+    /// import has just landed and has not been identified yet: it is the newer
+    /// of the two, and preferring the keyed one would go on reading a session
+    /// the user has already replaced. Sorted otherwise, so two calls a moment
+    /// apart cannot answer for different accounts.
     static func storedSession(allowingInteraction: Bool) -> ClaudeCredentialsLookup {
-        guard let account = ClaudeWebSessionStore.storedAccounts().first else { return .absent }
+        let stored = ClaudeWebSessionStore.storedAccounts()
+        guard
+            let account = stored.first(where: { $0 == ClaudeWebSessionStore.unkeyedAccount })
+                ?? stored.first
+        else { return .absent }
         return ClaudeWebSessionStore.load(account: account, allowingInteraction: allowingInteraction)
     }
 

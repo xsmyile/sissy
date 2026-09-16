@@ -29,6 +29,9 @@ enum ClaudeAccountProfile {
 
     enum Failure: Error, Equatable {
         case badStatus(Int)
+        /// Named rather than folded into a status, because it is the one
+        /// failure that says "ask again later" in so many words.
+        case rateLimited
         case malformedPayload
     }
 
@@ -198,18 +201,23 @@ struct ClaudeAccountStore: Sendable {
 /// Fetching belongs beside the session, in `ClaudeWebSource`, which is what
 /// keeps the cookie leaving this module through paths that file owns.
 enum ClaudeWebAccountProfile {
-    /// The identity a session answers for, or a throw this layer cannot act
-    /// on. Both halves of the failure mean the same thing to a caller — the
-    /// session did not name an account — so the network error is mapped into
-    /// this type's own rather than propagated as claude.ai's.
+    /// The identity a session answers for.
+    ///
+    /// claude.ai's own status travels out rather than being flattened: a 401
+    /// is a session that has ended and will answer no better tomorrow, where a
+    /// timeout is a machine that was offline for a moment. A caller that
+    /// cannot tell them apart retries the first forever and says nothing about
+    /// why, which is what the log line off this is for.
     static func resolve(session: String) async throws -> ClaudeAccountIdentity {
-        let payload: [String: Any]
         do {
-            payload = try await ClaudeWebSource.account(session: session)
-        } catch {
-            throw ClaudeAccountProfile.Failure.malformedPayload
+            return try parse(await ClaudeWebSource.account(session: session))
+        } catch let failure as ClaudeLimitsError {
+            switch failure {
+            case .badStatus(let code): throw ClaudeAccountProfile.Failure.badStatus(code)
+            case .rateLimited: throw ClaudeAccountProfile.Failure.rateLimited
+            case .malformedPayload: throw ClaudeAccountProfile.Failure.malformedPayload
+            }
         }
-        return try parse(payload)
     }
 
     private static let idKey = "uuid"

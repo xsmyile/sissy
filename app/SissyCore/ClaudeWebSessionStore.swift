@@ -27,33 +27,25 @@ enum ClaudeWebSessionStore {
     /// Service the item is filed under. A literal rather than a provider id:
     /// renaming a provider must not orphan a credential the user imported.
     static let keychainService = "com.radonforge.sissy.claude-web"
-    /// Where a session sat before sessions were keyed by account.
+    /// Where a session waits until Sissy knows whose it is.
     ///
-    /// One install can hold several, filed under the Anthropic account uuid
-    /// each belongs to, which is the same key `ClaudeAccountStore` files a CLI
-    /// credential under — measured, both vendors' endpoints name an account
-    /// with one id. This is the un-keyed item an install imported before that
-    /// was true; `ClaudeWebSessionAdoption` re-files it and nothing writes it
-    /// again.
-    static let legacyAccount = "claude-web"
+    /// Sessions are filed under the Anthropic account uuid they belong to,
+    /// which is the same key `ClaudeAccountStore` files a CLI credential
+    /// under — measured, both vendors' endpoints name an account with one id.
+    /// A cookie is opaque, though, so only claude.ai can say which account a
+    /// freshly imported one is for, and that answer can be unavailable exactly
+    /// when the import happens.
+    ///
+    /// So this is the holding key, and it has two occupants: the item an
+    /// install imported before sessions were keyed at all, and an import whose
+    /// identifying request did not come back. `ClaudeWebSessionAdoption` keys
+    /// whatever it finds here, which is what makes one pass answer for both
+    /// rather than a migration answering for one of them.
+    static let unkeyedAccount = "claude-web"
 
     /// Prefix claude.ai's session cookie carries, kept so a paste can be
     /// recognised as a session before it is spent on a request.
     static let sessionPrefix = "sk-ant-sid"
-
-    /// Whether a session is filed, asked without decrypting one.
-    ///
-    /// The query returns attributes and deliberately not data: the keychain
-    /// authorizes a *read of the secret*, so asking whether the item exists
-    /// costs no ACL check and cannot raise a dialog. That is what lets
-    /// Settings say "a session is set" on a re-signed build, where actually
-    /// reading it would prompt.
-    static func isPresent(account: String) -> Bool {
-        var query = identity(account: account)
-        query[kSecReturnAttributes as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
-    }
 
     /// The session, under the same suppression a read of the CLI's item gets.
     ///
@@ -112,22 +104,32 @@ enum ClaudeWebSessionStore {
         }
     }
 
-    /// Every account a session is filed under, in no particular order.
+    /// Every account a session is filed under, sorted so two calls agree.
     ///
-    /// Attributes only and never the data, for the reason `isPresent` is: the
-    /// keychain authorizes a read of the *secret*, so asking which items exist
-    /// costs no ACL check and cannot raise a dialog. That is what lets the
-    /// engine decide how many readers to build before any of them has read
-    /// anything, and on a build whose grant has lapsed.
+    /// Attributes only and never the data: the keychain authorizes a read of
+    /// the *secret*, so asking which items exist costs no ACL check and cannot
+    /// raise a dialog. That is what lets the engine decide how many readers to
+    /// build before any of them has read anything, and on a build whose grant
+    /// has lapsed.
+    ///
+    /// An empty answer means no session is filed. A keychain that failed for
+    /// any other reason says so in the log rather than passing for one,
+    /// because the two are the same `[]` to every caller and only one of them
+    /// is the user's doing.
     static func storedAccounts() -> [String] {
         var query = baseQuery()
         query[kSecReturnAttributes as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitAll
         var items: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &items) == errSecSuccess,
-            let attributes = items as? [[String: Any]]
-        else { return [] }
-        return attributes.compactMap { $0[kSecAttrAccount as String] as? String }
+        let status = SecItemCopyMatching(query as CFDictionary, &items)
+        guard status == errSecSuccess else {
+            if status != errSecItemNotFound {
+                sissyLog("sissy: could not list the stored claude.ai sessions (OSStatus \(status))")
+            }
+            return []
+        }
+        guard let attributes = items as? [[String: Any]] else { return [] }
+        return attributes.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
     }
 
     private static func baseQuery() -> [String: Any] {
