@@ -36,9 +36,9 @@ open, the identity is not.
 The Claude, OpenAI, GitHub and GitLab marks in
 `Assets.xcassets/ProviderMark*.imageset/` and `ForgeMark*.imageset/` are not
 Sissy's to license either. They are their owners' trademarks, used nominatively
-to say which CLI a row is about and where a repository is pushed. The paths the
-marks are drawn from come from Simple Icons (CC0), and
-[CREDITS.md](CREDITS.md) has the detail; CC0 does not travel to the trademarks.
+to say which CLI a row is about and where a repository is pushed. The GitHub and
+GitLab paths are Simple Icons' (CC0), and [CREDITS.md](CREDITS.md) has the
+detail; CC0 does not travel to the trademarks.
 
 None of Anthropic, OpenAI, GitHub or GitLab is affiliated with Sissy, and none
 of them endorses it.

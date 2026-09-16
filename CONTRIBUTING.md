@@ -107,8 +107,9 @@ proposing a change. The short version:
   asks for nothing; a module that is off must not exist as far as the system is
   concerned.
 - Anything that outlives Sissy on the machine, or writes outside its own
-  folder. There are exactly two exceptions today and both are switchable and
-  reversible.
+  folder. There are exactly three exceptions today — the usage archive, the
+  session hooks and the archived Claude credentials — and every one of them is
+  reversible from Settings.
 - Anything that opens a port, a socket or a second process.
 - A hand-maintained price table. Rates come from LiteLLM at runtime with a
   generated seed as the floor; a new model must not need a release.
@@ -120,8 +121,8 @@ proposing a change. The short version:
 
 Open an issue with the output of **Settings ▸ About ▸ Copy diagnostics**. It
 carries the version, the OS, what the readers have found and which `ccusage`
-builds are on the machine, and no costs, paths or credentials. If your report is
-about a number, say what `ccusage --version` prints: a stale Homebrew install
-reports a different figure and will never upgrade off itself.
+builds are on the machine, and no costs, no project paths and no credentials.
+If your report is about a number, say what `ccusage --version` prints: a stale
+Homebrew install reports a different figure and will never upgrade off itself.
 
 Security problems do not go in an issue. See [SECURITY.md](SECURITY.md).
