@@ -253,11 +253,24 @@ enum UsageFormat {
     /// Nil for a window the vendor has not started, which has neither — the
     /// bar at zero is the whole statement, and a caption saying so twice is
     /// noise on the one row that has nothing to report.
+    ///
+    /// A window that has rolled over since the reading says so instead, and in
+    /// the past tense: everything else on that row describes the period that
+    /// ended, and "resets 14:30" for a time already gone reads as a countdown
+    /// still running. It is dated through `observedLabel` rather than
+    /// `resetLabel` because the question has turned from "when does this end"
+    /// into "how old is this", and a bare weekday for a date in the past
+    /// cannot say which week it belongs to.
     static func windowCaption(
         _ window: UsagePanelSnapshot.WindowRow,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> String? {
+        if window.hasRolledOver {
+            guard let resetsAt = window.resetsAt else { return nil }
+            let rolled = observedLabel(resetsAt, now: now, calendar: calendar)
+            return "rolled over \(rolled) · awaiting a reading"
+        }
         var parts: [String] = []
         if let pace = window.pace {
             parts.append(paceCaption(deltaPercent: pace.deltaPercent, runsOutAt: pace.runsOutAt))

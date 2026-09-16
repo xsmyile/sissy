@@ -158,7 +158,8 @@ final class PanelPagesTests: XCTestCase {
                 fraction: Double(percent) / 100,
                 resetsAt: Self.now.addingTimeInterval(7200),
                 pace: UsagePanelSnapshot.Pace(
-                    expectedFraction: 0.5, deltaPercent: 0, runsOutAt: runsOut))
+                    expectedFraction: 0.5, deltaPercent: 0, runsOutAt: runsOut),
+                hasRolledOver: false)
         }
 
         XCTAssertEqual(UsagePanelSnapshot.binding(rows)?.minutes, 300)

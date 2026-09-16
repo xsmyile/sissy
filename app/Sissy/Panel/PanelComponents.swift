@@ -187,6 +187,12 @@ struct WindowRowView: View {
 
     private var emphasis: Color { isBinding ? .primary : .secondary }
     private var weight: Font.Weight { isBinding ? .medium : .regular }
+    /// The dash a rolled-over window prints, styled like the Overview's own:
+    /// the absence of a reading is drawn a step quieter than a reading of any
+    /// value, which is what keeps it from being read as one.
+    private var readingStyle: AnyShapeStyle {
+        window.hasRolledOver ? AnyShapeStyle(.tertiary) : AnyShapeStyle(emphasis)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -199,14 +205,16 @@ struct WindowRowView: View {
 
                 Spacer(minLength: 8)
 
-                Text(window.reading)
+                Text(window.hasRolledOver ? "—" : window.reading)
                     .font(.system(size: 11, weight: weight))
                     .monospacedDigit()
-                    .foregroundStyle(emphasis)
+                    .foregroundStyle(readingStyle)
                     .layoutPriority(1)
             }
 
-            ShareBar(share: window.fraction, tint: tint, pace: window.pace)
+            if !window.hasRolledOver {
+                ShareBar(share: window.fraction, tint: tint, pace: window.pace)
+            }
 
             if let caption = UsageFormat.windowCaption(window) {
                 Text(caption)

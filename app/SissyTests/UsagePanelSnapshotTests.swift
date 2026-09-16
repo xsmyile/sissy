@@ -154,10 +154,77 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertEqual(row.pace?.runsOutAt, now)
     }
 
-    /// A window whose reset has passed describes a period that no longer
-    /// exists — the same rule the reader applies before publishing one.
+    /// A window whose reset has passed projects nothing: there is no elapsed
+    /// time left in a period that has ended, and a mark drawn over it would
+    /// place the reading inside a window it no longer measures.
     func testAWindowPastItsResetCarriesNoPace() throws {
+        let row = try rolledOverRow()
+
+        XCTAssertNil(row.pace)
+    }
+
+    /// The row survives the reset rather than vanishing with it. Codex answers
+    /// only on its own turns, so dropping it took the session row off the page
+    /// for as long as nobody used the CLI — with the weekly beside it still
+    /// drawn, and its caption implying the block was current.
+    func testAWindowPastItsResetKeepsItsRowAndSaysItRolledOver() throws {
+        let row = try rolledOverRow()
+
+        XCTAssertTrue(row.hasRolledOver)
+        XCTAssertEqual(row.label, "Session")
+    }
+
+    /// The reading is withheld, not zeroed: the vendor has not answered for
+    /// the new period, and a bar at zero would be Sissy answering for it.
+    func testARolledOverWindowIsCaptionedRatherThanMeasured() throws {
         let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let row = try rolledOverRow(now: now)
+
+        let caption = try XCTUnwrap(UsageFormat.windowCaption(row, now: now))
+        XCTAssertTrue(caption.hasPrefix("rolled over "), caption)
+        XCTAssertTrue(caption.hasSuffix("awaiting a reading"), caption)
+        XCTAssertFalse(caption.contains("resets"), caption)
+    }
+
+    /// A period that has ended is not the pressure anyone is under now, so it
+    /// cannot take the emphasis on the page or the Overview's one gauge.
+    func testARolledOverWindowNeverBinds() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let rolled = try XCTUnwrap(
+            UsageWindow(minutes: 300, usedPercent: 90, resetsAt: now.addingTimeInterval(-60)))
+        let live = try XCTUnwrap(
+            UsageWindow(minutes: 10_080, usedPercent: 12, resetsAt: now.addingTimeInterval(3600)))
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 1000, "1.00", windows: [rolled, live])]),
+            now: now
+        )
+        let windows = try XCTUnwrap(snapshot.providers.first?.windows)
+
+        XCTAssertEqual(UsagePanelSnapshot.binding(windows)?.minutes, 10_080)
+    }
+
+    /// Every window rolled over is no binding window at all, which is the dash
+    /// the Overview already draws for a provider that has answered nothing —
+    /// never the least stale of several dead readings.
+    func testAllWindowsRolledOverLeaveNoBinding() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let session = try XCTUnwrap(
+            UsageWindow(minutes: 300, usedPercent: 90, resetsAt: now.addingTimeInterval(-60)))
+        let weekly = try XCTUnwrap(
+            UsageWindow(minutes: 10_080, usedPercent: 12, resetsAt: now.addingTimeInterval(-3600)))
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 1000, "1.00", windows: [session, weekly])]),
+            now: now
+        )
+        let windows = try XCTUnwrap(snapshot.providers.first?.windows)
+
+        XCTAssertEqual(windows.count, 2)
+        XCTAssertNil(UsagePanelSnapshot.binding(windows))
+    }
+
+    private func rolledOverRow(
+        now: Date = Date(timeIntervalSince1970: 1_789_000_000)
+    ) throws -> UsagePanelSnapshot.WindowRow {
         let window = try XCTUnwrap(
             UsageWindow(
                 minutes: 300, usedPercent: 50, resetsAt: now.addingTimeInterval(-60)))
@@ -165,8 +232,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window])]),
             now: now
         )
-
-        XCTAssertNil(snapshot.providers.first?.windows.first?.pace)
+        return try XCTUnwrap(snapshot.providers.first?.windows.first)
     }
 
     private func paceRow(
