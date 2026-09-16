@@ -23,7 +23,7 @@ body:
       description: >
         Settings ▸ About ▸ **Copy diagnostics**, pasted here. It carries the
         version, the OS, what the readers have found and which `ccusage` builds
-        are installed, and no costs, paths or credentials.
+        are installed, and no costs, no project paths and no credentials.
       render: text
     validations:
       required: true
