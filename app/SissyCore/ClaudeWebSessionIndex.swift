@@ -58,10 +58,42 @@ struct ClaudeWebAccount: Sendable, Equatable, Identifiable {
         stored
             .filter { $0 != ClaudeWebSessionStore.unkeyedAccount }
             .map { uuid in
-                ClaudeWebAccount(
-                    id: uuid,
-                    identity: links[uuid]?.identity ?? archived.first { $0.uuid == uuid })
+                let archived = archived.first { $0.uuid == uuid }
+                guard let linked = links[uuid]?.identity else {
+                    return ClaudeWebAccount(id: uuid, identity: archived)
+                }
+                return ClaudeWebAccount(id: uuid, identity: linked.named(after: archived))
             }
+    }
+}
+
+extension ClaudeAccountIdentity {
+    /// This identity, with the owner's name borrowed from another copy of the
+    /// same account where this one does not carry it.
+    ///
+    /// A link is written once, when the account is linked, and never rewritten
+    /// — so a field that lands in a later build never reaches an account
+    /// already linked, and a user would have to unlink and sign in again to
+    /// see a name Sissy can already read. That is the mirror of the freeze
+    /// `ClaudeAccountRegistry` has on its own side, and it is worth undoing
+    /// only for a field both copies answer for the same way: the uuid names
+    /// one person, so whichever copy knows their name knows the same name.
+    ///
+    /// Deliberately the name and nothing else. Filling every nil from the
+    /// archive would restore `rateLimitTier`, which `ClaudeWebAccountProfile`
+    /// drops on purpose — claude.ai reports `default_raven` where the OAuth
+    /// profile reports `default_claude_max_5x`, two taxonomies — so a generic
+    /// merge would put back the one field a parser refuses.
+    func named(after other: ClaudeAccountIdentity?) -> ClaudeAccountIdentity {
+        guard name == nil, let borrowed = other?.name else { return self }
+        return ClaudeAccountIdentity(
+            uuid: uuid,
+            email: email,
+            name: borrowed,
+            organization: organization,
+            organizationType: organizationType,
+            rateLimitTier: rateLimitTier,
+            seat: seat)
     }
 }
 

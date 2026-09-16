@@ -210,9 +210,11 @@ final class ClaudeWebAccountListTests: XCTestCase {
     private let linked = "dbab20e1"
     private let unnamed = "c805523f"
 
-    private func identity(_ uuid: String, email: String) -> ClaudeAccountIdentity {
+    private func identity(_ uuid: String, email: String, name: String? = nil)
+        -> ClaudeAccountIdentity
+    {
         ClaudeAccountIdentity(
-            uuid: uuid, email: email, organization: nil, organizationType: nil,
+            uuid: uuid, email: email, name: name, organization: nil, organizationType: nil,
             rateLimitTier: nil)
     }
 
@@ -240,6 +242,67 @@ final class ClaudeWebAccountListTests: XCTestCase {
 
         XCTAssertEqual(accounts.map(\.id), [unnamed])
         XCTAssertEqual(accounts.first?.identity?.email, "davide.tacchini@mastersoft.it")
+    }
+
+    /// A link is written once and never rewritten, so an account linked before
+    /// the name could be read would never show one — the user would have to
+    /// unlink and sign in again for a field Sissy can already read off the
+    /// archive. Measured on the dev build 2026-09-16: both links on this Mac
+    /// predate the field.
+    func testALinkThatPredatesTheNameBorrowsItFromTheArchive() {
+        let accounts = ClaudeWebAccount.list(
+            stored: [linked],
+            links: [
+                linked: ClaudeWebLink(
+                    identity: identity(linked, email: "davide@radonforge.com"),
+                    organization: "org-1")
+            ],
+            archived: [identity(linked, email: "stale@example.com", name: "Davide")])
+
+        XCTAssertEqual(accounts.first?.identity?.name, "Davide")
+        XCTAssertEqual(accounts.first?.identity?.email, "davide@radonforge.com")
+    }
+
+    /// Only the name is borrowed. Filling every nil would restore the tier
+    /// claude.ai's parser drops on purpose, the two vendors reporting it in
+    /// different taxonomies.
+    func testTheLinkKeepsEveryFieldItAnswersForItself() {
+        let archived = ClaudeAccountIdentity(
+            uuid: linked, email: "stale@example.com", name: "Davide",
+            organization: "Stale Org", organizationType: "claude_max",
+            rateLimitTier: "default_claude_max_5x", seat: "team_standard")
+        let accounts = ClaudeWebAccount.list(
+            stored: [linked],
+            links: [
+                linked: ClaudeWebLink(
+                    identity: ClaudeAccountIdentity(
+                        uuid: linked, email: "davide@radonforge.com", organization: "Radon Forge",
+                        organizationType: "claude_team", rateLimitTier: nil, seat: "team_tier_1"),
+                    organization: "org-1")
+            ],
+            archived: [archived])
+
+        let identity = accounts.first?.identity
+        XCTAssertEqual(identity?.name, "Davide")
+        XCTAssertEqual(identity?.organization, "Radon Forge")
+        XCTAssertEqual(identity?.organizationType, "claude_team")
+        XCTAssertEqual(identity?.seat, "team_tier_1")
+        XCTAssertNil(identity?.rateLimitTier)
+    }
+
+    /// A link that names its own owner keeps that name: the archive is frozen
+    /// at the build that filed it, so it is the fallback and never an override.
+    func testALinkThatNamesItsOwnerIsNotOverriddenByTheArchive() {
+        let accounts = ClaudeWebAccount.list(
+            stored: [linked],
+            links: [
+                linked: ClaudeWebLink(
+                    identity: identity(linked, email: "davide@radonforge.com", name: "Davide"),
+                    organization: "org-1")
+            ],
+            archived: [identity(linked, email: "stale@example.com", name: "Old Name")])
+
+        XCTAssertEqual(accounts.first?.identity?.name, "Davide")
     }
 
     /// Named by neither, it keeps its uuid rather than being dropped: a row
