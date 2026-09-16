@@ -86,6 +86,19 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
         XCTAssertNil(identity.seat)
     }
 
+    /// The owner's name, off the same two keys the OAuth profile was measured
+    /// to carry. Unmeasured here, on purpose: claude.ai's reply cannot be read
+    /// without spending a live session, so the parser asks for what the vendor
+    /// is known to publish and an account it does not answer for keeps the
+    /// address it has always been named by.
+    func testTheOwnersNameIsReadWhereTheReplyCarriesOne() throws {
+        var carrying = payload()
+        carrying["full_name"] = "Davide Tacchini"
+
+        XCTAssertEqual(try ClaudeWebAccountProfile.parse(carrying).name, "Davide Tacchini")
+        XCTAssertNil(try ClaudeWebAccountProfile.parse(payload()).name)
+    }
+
     /// The measured divergence, and the one field that is dropped rather than
     /// mapped: claude.ai reports this account `default_raven` where the OAuth
     /// profile reports `default_claude_max_5x`. Two taxonomies, so carrying

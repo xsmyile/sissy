@@ -12,6 +12,18 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     /// else does.
     let uuid: String
     let email: String?
+    /// What the person calls themselves, where the vendor answers with one.
+    ///
+    /// The address is what an account is *keyed* by and the name is what it is
+    /// recognised by, and they are not interchangeable: two seats of one
+    /// company read as one word apart in a list of addresses, where the names
+    /// beside them are the whole answer. Nil is the ordinary case rather than a
+    /// fault — an account that has filled in neither field, and every source
+    /// that answers for an account without naming its owner — so every surface
+    /// that leads on it falls back to the address it always had.
+    ///
+    /// Optional on a type two JSON files hold, for the reason `seat` is.
+    let name: String?
     let organization: String?
     /// `claude_team`, `claude_max`… as the vendor spells it. Worded by
     /// `UsageFormat`, never here.
@@ -33,6 +45,7 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     init(
         uuid: String,
         email: String?,
+        name: String? = nil,
         organization: String?,
         organizationType: String?,
         rateLimitTier: String?,
@@ -40,6 +53,7 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     ) {
         self.uuid = uuid
         self.email = email
+        self.name = name
         self.organization = organization
         self.organizationType = organizationType
         self.rateLimitTier = rateLimitTier
@@ -80,6 +94,30 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     /// appear in 2.1.267, which is why the tier is treated as a decoration on
     /// the plan and never as the plan itself.
     static let tierPrefix = "default_claude_"
+
+    /// The owner's name off whichever block a source carries it on.
+    ///
+    /// Two keys because the vendor publishes two: measured 2026-09-16,
+    /// `api/oauth/profile` answers `account.full_name` *and*
+    /// `account.display_name`. The full name leads — it is what the account was
+    /// registered as, where the display name is what it chose to be shown as
+    /// and can be a handle.
+    ///
+    /// Shared by both parsers rather than written twice, which is also what
+    /// keeps a key claude.ai turns out to spell differently a one-line fix
+    /// instead of two. Through `sanitizedDisplayText` for the reason the
+    /// organisation is: the panel prints it unguarded, and the value came out
+    /// of a reply Sissy does not own.
+    static func name(in account: [String: Any]) -> String? {
+        for key in nameKeys {
+            if let name = UsageReaderShared.sanitizedDisplayText(account[key] as? String) {
+                return name
+            }
+        }
+        return nil
+    }
+
+    private static let nameKeys = ["full_name", "display_name"]
 
     /// Shared with `ClaudeProfileSource`, which reads the same two tokens out
     /// of `.claude.json`: the OAuth profile and the CLI's config spell them
@@ -136,6 +174,7 @@ enum ClaudeAccountProfile {
         return ClaudeAccountIdentity(
             uuid: uuid,
             email: account?["email"] as? String,
+            name: account.flatMap(ClaudeAccountIdentity.name(in:)),
             organization: organization?["name"] as? String,
             organizationType: organization?["organization_type"] as? String,
             rateLimitTier: organization?["rate_limit_tier"] as? String,
@@ -334,6 +373,7 @@ enum ClaudeWebAccountProfile {
         return ClaudeAccountIdentity(
             uuid: uuid,
             email: payload[emailKey] as? String,
+            name: ClaudeAccountIdentity.name(in: payload),
             organization: organization?[organizationNameKey] as? String,
             organizationType: organization?[planKey] as? String,
             rateLimitTier: nil,
