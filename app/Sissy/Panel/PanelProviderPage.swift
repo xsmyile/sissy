@@ -202,13 +202,26 @@ struct PanelProviderPage: View {
     /// and a Codex that has not taken a turn since launch has not sent one
     /// yet — neither is a fault, and both look identical to a blank space.
     ///
-    /// The gauges carry their own age under them. Neither provider's windows
-    /// are fetched when this page opens — Codex's ride the CLI's own turns and
-    /// Claude's a five-minute poll — so the only other date on screen is the
-    /// frame's, and that one moves when the *other* provider spends anything.
+    /// The age rides the block's own heading, beside the word it qualifies.
+    /// Neither provider's windows are fetched when this page opens — Codex's
+    /// ride the CLI's own turns and Claude's a five-minute poll — so the only
+    /// other date on screen is the frame's, and that one moves when the
+    /// *other* provider spends anything. It is the heading's because it is
+    /// true of every gauge under it: sitting below the last one it read as
+    /// that row's caption, which is where each window's own pace sentence
+    /// already is.
     private var limits: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionLabel(text: "Limits")
+            HStack(spacing: 6) {
+                SectionLabel(text: "Limits")
+                Spacer(minLength: 0)
+                if let caption = row.windowsCaption {
+                    Text(caption)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
 
             if let notice = row.notice {
                 LimitsNoticeView(notice: notice, act: refresh)
@@ -225,13 +238,6 @@ struct PanelProviderPage: View {
                 ForEach(row.windows) { window in
                     WindowRowView(
                         window: window, tint: tint, isBinding: window.id == binding?.id)
-                }
-
-                if let caption = row.windowsCaption {
-                    Text(caption)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
             }
         }
