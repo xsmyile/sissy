@@ -462,7 +462,10 @@ final class CodexAdapter: SourceAdapter {
     /// The vendor spells it as a string (`"0"`), so the text is checked for
     /// the shape of a non-negative decimal before it is parsed: `Decimal` reads
     /// as far as it understands and answers with what it got, which turns
-    /// `"12 credits"` into `12` rather than into nothing.
+    /// `"12 credits"` into `12` rather than into nothing. That check is the
+    /// only guard there is — it admits digits and one point and nothing else,
+    /// so a sign never reaches the parse and a second test for one would be
+    /// dead code posing as a safety net.
     private static func creditsMinor(_ raw: Any?) -> Int? {
         let text: String
         switch raw {
@@ -472,7 +475,7 @@ final class CodexAdapter: SourceAdapter {
         }
         guard !text.isEmpty, text.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ".") }),
             text.filter({ $0 == "." }).count <= 1,
-            var parsed = Decimal(string: text, locale: vendorLocale), parsed >= 0
+            var parsed = Decimal(string: text, locale: vendorLocale)
         else { return nil }
         var scaled = Decimal()
         NSDecimalMultiplyByPowerOf10(&scaled, &parsed, Int16(CreditsUnit.credits.exponent), .plain)
