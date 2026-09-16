@@ -229,8 +229,26 @@ final class SissyMenuBarAnimator {
     /// autoresizing mask keeps at zero however big its superview gets.
     private func draw(eye image: NSImage?) {
         guard let eyeOverlay, let button else { return }
-        eyeOverlay.frame = button.bounds
+        eyeOverlay.frame = eyeRect(on: button)
         eyeOverlay.image = image
+    }
+
+    /// The rect the button's own cell draws the silhouette into, which is the
+    /// only rect the eye may be drawn into as well.
+    ///
+    /// Given the button's whole bounds instead, the overlay centres the eye in
+    /// them itself — and `NSImageView` rounds that centring offset to a whole
+    /// point where `NSButtonCell` does not, so the two land apart whenever the
+    /// offset falls on a half. A 17 pt icon in the status button always does:
+    /// measured on macOS 26, the eye drew 0.95 device pixels high and 0.79
+    /// wide of the ink it covers, which is a third of the height of an eye
+    /// three device pixels tall, and it moved as the hold was switched — off,
+    /// the eye is ink inside the cell's own image. Handing over a rect the
+    /// size of the image leaves the overlay no centring left to round. The
+    /// panel never had this: SwiftUI stacks both layers on one frame.
+    private func eyeRect(on button: NSButton) -> NSRect {
+        guard let cell = button.cell as? NSButtonCell else { return button.bounds }
+        return cell.imageRect(forBounds: button.bounds)
     }
 
     /// Ends playback without deciding what the button shows: the callers

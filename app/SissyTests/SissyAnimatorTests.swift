@@ -126,6 +126,56 @@ final class SissyAnimatorTests: XCTestCase {
         XCTAssertIdentical(button.image, whole)
     }
 
+    /// Shaped like the status item's own button, which
+    /// `StatusItemController.configureButton` configures the same way: the
+    /// cell's image rect is what the eye is placed against, and it depends on
+    /// the button being image-only and unbordered.
+    private func statusShapedButton() -> NSButton {
+        let button = NSButton(frame: NSRect(x: 0, y: 0, width: 24, height: 22))
+        button.title = ""
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        return button
+    }
+
+    /// The eye goes where the cell draws the silhouette, never into the whole
+    /// button.
+    ///
+    /// Given the bounds, `NSImageView` centres the eye itself and rounds that
+    /// offset to a whole point where `NSButtonCell` does not — measured at
+    /// 0.95 device pixels of vertical drift on an eye three of them tall,
+    /// appearing and disappearing as the hold was switched. The two rects
+    /// differ at exactly the menu bar's own geometry, which is what the last
+    /// assertion pins: a 17 pt icon in a 24 x 22 pt button centres on a half
+    /// point in both axes.
+    func testTheEyeIsDrawnIntoTheRectTheCellDrawsTheSilhouetteInto() throws {
+        let button = statusShapedButton()
+        let animator = try makeAnimator(button)
+        let overlay = try eyeOverlay(on: button)
+        let cell = try XCTUnwrap(button.cell as? NSButtonCell)
+
+        XCTAssertEqual(overlay.frame, cell.imageRect(forBounds: button.bounds))
+        XCTAssertEqual(overlay.frame.size, NSSize(width: iconSize, height: iconSize))
+        XCTAssertNotEqual(overlay.frame, button.bounds)
+        withExtendedLifetime(animator) {}
+    }
+
+    /// The rect is asked for on every draw, so a button that is laid out after
+    /// the animator was built still gets the eye in the right place.
+    func testTheEyeFollowsTheButtonWhenItIsResized() throws {
+        let button = statusShapedButton()
+        let animator = try makeAnimator(button)
+        let overlay = try eyeOverlay(on: button)
+        let before = overlay.frame
+
+        button.setFrameSize(NSSize(width: 30, height: 26))
+        animator.stop()
+
+        let cell = try XCTUnwrap(button.cell as? NSButtonCell)
+        XCTAssertNotEqual(overlay.frame, before)
+        XCTAssertEqual(overlay.frame, cell.imageRect(forBounds: button.bounds))
+    }
+
     /// The overlay is the one view sitting on the status button, so a click
     /// that landed on it instead of the button would lose the panel.
     func testTheEyeOverlayNeverTakesAClick() throws {
