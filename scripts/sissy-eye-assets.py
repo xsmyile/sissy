@@ -62,7 +62,14 @@ def derive(source: Path, keep: str) -> str:
     opening = re.match(r"(<svg[^>]*>)", svg)
     if opening is None:
         raise DeriveError("no <svg> element")
-    groups = re.findall(r"<g[^>]*>", svg)
+    groups = re.findall(r"<g[^>]*[^/]>", svg)
+    if len(groups) != len(re.findall(r"<g[\s>]", svg)):
+        raise DeriveError("a <g> is self-closing; the transform chain cannot be rebuilt")
+    if len(groups) != svg.count("</g>"):
+        raise DeriveError(
+            f"{len(groups)} <g> opened against {svg.count('</g>')} closed; "
+            "the path is not wrapped in one chain"
+        )
     eyeless, eye = split_at_eye(paths[0])
     return (
         opening.group(1)

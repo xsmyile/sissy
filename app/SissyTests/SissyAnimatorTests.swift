@@ -130,10 +130,25 @@ final class SissyAnimatorTests: XCTestCase {
     /// that landed on it instead of the button would lose the panel.
     func testTheEyeOverlayNeverTakesAClick() throws {
         let button = NSButton(frame: NSRect(x: 0, y: 0, width: 24, height: 22))
-        _ = try makeAnimator(button)
+        let animator = try makeAnimator(button)
         let overlay = try eyeOverlay(on: button)
 
         XCTAssertNil(overlay.hitTest(NSPoint(x: overlay.bounds.midX, y: overlay.bounds.midY)))
+        withExtendedLifetime(animator) {}
+    }
+
+    /// The overlay is a subview of a button the animator only borrows, so an
+    /// animator that let go of it would leave a second one behind for its
+    /// replacement to draw over.
+    func testTheEyeOverlayLeavesWithItsAnimator() throws {
+        let button = NSButton()
+        try autoreleasepool {
+            let animator = try makeAnimator(button)
+            XCTAssertNotNil(try eyeOverlay(on: button))
+            withExtendedLifetime(animator) {}
+        }
+
+        XCTAssertTrue(button.subviews.compactMap { $0 as? SissyEyeOverlay }.isEmpty)
     }
 
     /// Both poses and all 24 frames need both halves of the split, and the one
@@ -165,11 +180,18 @@ final class SissyAnimatorTests: XCTestCase {
 
         XCTAssertTrue(animator.blink())
         await waitForFirstFrame(on: button, leaving: resting)
+        let bodyBeforeTheFlip = button.image
         animator.setArtwork(.lit)
+
+        // The body has to move to the eyeless set on the flip itself. Left to
+        // the gesture it would only move on the next frame index, and the
+        // shut-eye hold is one index held for four frames' worth of time.
+        XCTAssertNotIdentical(button.image, bodyBeforeTheFlip)
+        XCTAssertFalse(overlay.isHidden)
+
         let litAt = overlay.image
         await waitUntilIdle(animator)
 
-        XCTAssertFalse(overlay.isHidden)
         XCTAssertNotIdentical(overlay.image, litAt)
         XCTAssertNotIdentical(button.image, resting)
 
