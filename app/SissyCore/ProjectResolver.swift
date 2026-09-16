@@ -93,6 +93,8 @@ final class ProjectResolver {
     private static let gitSuffix = ".git"
     private static let webScheme = "https"
     private static let webSchemes: Set<String> = ["http", "https"]
+    private static let hostBracketOpen = "["
+    private static let hostBracketClose = "]"
 
     private let fileManager: FileManager
     let ledger: ProjectLedger
@@ -235,6 +237,13 @@ final class ProjectResolver {
     /// made where the host is the whole address: an `ssh` URL naming a port is
     /// pointing at a transport, and composing a page from it invents a link
     /// that answers nothing.
+    ///
+    /// A host in brackets is an IPv6 literal, in both shapes, and the colon
+    /// that separates it from the path is the one *after* the bracket — git
+    /// writes `git@[::1]:owner/repo` and the first colon in that string is
+    /// inside the address. Splitting on it names a group `db8::1]:owner`,
+    /// which is a wrong answer wearing a real shape rather than a missing
+    /// one.
     static func remote(ofRemoteURL remote: String) -> ProjectRemote? {
         let trimmed = remote.trimmingCharacters(in: .whitespaces)
         let scheme: String?
@@ -247,7 +256,7 @@ final class ProjectResolver {
             scheme = String(trimmed[trimmed.startIndex..<separator.lowerBound]).lowercased()
             authority = afterScheme[afterScheme.startIndex..<slash]
             path = String(afterScheme[afterScheme.index(after: slash)...])
-        } else if let colon = trimmed.firstIndex(of: ":") {
+        } else if let colon = trimmed[Self.pathColonSearchStart(of: trimmed)...].firstIndex(of: ":") {
             let head = trimmed[trimmed.startIndex..<colon]
             guard !head.isEmpty, !head.contains("/") else { return nil }
             scheme = nil
@@ -263,12 +272,11 @@ final class ProjectResolver {
             .filter { !$0.isEmpty }
         guard segments.count >= 2 else { return nil }
         let endpoint = authority.split(separator: "@").last.map(String.init) ?? ""
-        let hostAndPort = endpoint.split(separator: ":", omittingEmptySubsequences: false)
-        guard let host = hostAndPort.first.map(String.init), !host.isEmpty else { return nil }
-        let port = hostAndPort.count > 1 ? String(hostAndPort[1]) : nil
+        guard let (host, port) = hostAndPort(of: endpoint) else { return nil }
         let name = segments[segments.count - 1]
         let repository =
-            name.hasSuffix(Self.gitSuffix) ? String(name.dropLast(Self.gitSuffix.count)) : name
+            name.hasSuffix(Self.gitSuffix) && name != Self.gitSuffix
+            ? String(name.dropLast(Self.gitSuffix.count)) : name
         let trail = (segments.dropLast() + [repository]).joined(separator: "/")
         return ProjectRemote(
             host: host,
@@ -278,12 +286,50 @@ final class ProjectResolver {
         )
     }
 
-    private static func page(scheme: String?, host: String, port: String?, trail: String) -> URL? {
-        if let scheme, Self.webSchemes.contains(scheme) {
-            let endpoint = port.map { "\(host):\($0)" } ?? host
-            return URL(string: "\(scheme)://\(endpoint)/\(trail)")
+    /// Where an SCP-like remote's path may start, which is past a bracketed
+    /// IPv6 literal when there is one — every colon before the closing
+    /// bracket belongs to the address. The bracket is looked for anywhere
+    /// rather than at the front, because the user comes first:
+    /// `git@[2001:db8::1]:owner/repo`.
+    private static func pathColonSearchStart(of remote: String) -> String.Index {
+        guard let open = remote.firstIndex(of: Character(Self.hostBracketOpen)),
+            let close = remote[open...].firstIndex(of: Character(Self.hostBracketClose))
+        else { return remote.startIndex }
+        return remote.index(after: close)
+    }
+
+    /// An authority split into its host and its port, with a bracketed IPv6
+    /// literal kept whole and its brackets kept: they are the host's own
+    /// notation in a URL, and a page composed without them is not one.
+    private static func hostAndPort(of endpoint: String) -> (host: String, port: String?)? {
+        if endpoint.hasPrefix(Self.hostBracketOpen),
+            let close = endpoint.firstIndex(of: Character(Self.hostBracketClose))
+        {
+            let host = String(endpoint[endpoint.startIndex...close])
+            guard host.count > 2 else { return nil }
+            let rest = endpoint[endpoint.index(after: close)...]
+            guard rest.isEmpty || rest.hasPrefix(":") else { return nil }
+            let port = rest.isEmpty ? nil : String(rest.dropFirst())
+            return (host, port?.isEmpty == true ? nil : port)
         }
-        guard port == nil else { return nil }
-        return URL(string: "\(Self.webScheme)://\(host)/\(trail)")
+        let parts = endpoint.split(separator: ":", omittingEmptySubsequences: false)
+        guard let host = parts.first.map(String.init), !host.isEmpty else { return nil }
+        return (host, parts.count > 1 ? String(parts[1]) : nil)
+    }
+
+    /// The page, assembled through `URLComponents` so a segment carrying a
+    /// `#` or a `?` is escaped into the path rather than read as the fragment
+    /// or the query that would truncate it. The host keeps the brackets an
+    /// IPv6 literal came with — measured, `URLComponents` answers nil for one
+    /// without them.
+    private static func page(scheme: String?, host: String, port: String?, trail: String) -> URL? {
+        let web = scheme.map { Self.webSchemes.contains($0) } ?? false
+        guard web || port == nil else { return nil }
+        var components = URLComponents()
+        components.scheme = web ? scheme : Self.webScheme
+        components.host = host
+        components.port = port.flatMap(Int.init)
+        components.path = "/" + trail
+        return components.url
     }
 }
