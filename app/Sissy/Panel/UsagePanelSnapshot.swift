@@ -687,9 +687,10 @@ struct UsagePanelSnapshot: Equatable {
     /// keeps a row's name and its address from coming off two different
     /// accounts: `label` read it first and `email` did not, so one row named
     /// one account and printed the address of another. The seat is the
-    /// exception and stays on the reading — an archived identity holds none,
-    /// so identity-first there would take the badge off the account whose
-    /// config file does match.
+    /// exception and stays reading-first, because the reading is the only one
+    /// of the two that can carry the CLI's own — an account whose config file
+    /// does match names its seat there, and identity-first would replace a
+    /// current answer with an archived one.
     static func accountEntries(
         readings: [AccountSignals],
         known: ClaudeAccountRegistry.Snapshot,
@@ -707,7 +708,7 @@ struct UsagePanelSnapshot: Equatable {
             let plan = UsageFormat.plan(
                 reading?.plan ?? identity?.plan,
                 tier: reading?.planTier ?? identity?.planTier,
-                seat: reading?.account?.seat)
+                seat: reading?.account?.seat ?? identity?.seat)
             let observedAt = reading?.limitsObservedAt
             return AccountEntry(
                 id: id,

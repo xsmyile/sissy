@@ -17,14 +17,40 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     /// `UsageFormat`, never here.
     let organizationType: String?
     let rateLimitTier: String?
+    /// Which seat of a Team plan the account holds (`team_tier_1`), where the
+    /// vendor names one.
+    ///
+    /// Both sources answer for it and neither was read until now, so a Team
+    /// account reached through either was badged "Team" where the CLI badged
+    /// it "Team Premium" — measured 2026-09-16, `api/oauth/profile` carries
+    /// `organization.seat_tier` and claude.ai carries `seat_tier` on the
+    /// membership, both `team_tier_1` for the same account.
+    ///
+    /// Optional on a type two JSON files hold, so an index written before this
+    /// decodes with a nil rather than being quarantined.
+    let seat: String?
+
+    init(
+        uuid: String,
+        email: String?,
+        organization: String?,
+        organizationType: String?,
+        rateLimitTier: String?,
+        seat: String? = nil
+    ) {
+        self.uuid = uuid
+        self.email = email
+        self.organization = organization
+        self.organizationType = organizationType
+        self.rateLimitTier = rateLimitTier
+        self.seat = seat
+    }
 
     var id: String { uuid }
 
-    /// The account as a row carries it. The seat is nil because this type
-    /// holds none: claude.ai answers `seat_tier` and the OAuth profile does
-    /// not, so an identity archived from a credential cannot name one.
+    /// The account as a row carries it.
     var providerAccount: ProviderAccount? {
-        ProviderAccount(email: email, organization: organization)
+        ProviderAccount(email: email, organization: organization, seat: seat)
     }
 
     /// The plan and its tier in the vocabulary the frame carries: `team`
@@ -79,6 +105,11 @@ enum ClaudeAccountProfile {
         case malformedPayload
     }
 
+    /// The seat, on the organisation beside the plan and the tier. claude.ai
+    /// puts the same token on the membership instead, which is why the two
+    /// parsers read it from different places and record the same answer.
+    private static let seatKey = "seat_tier"
+
     static func resolve(token: String) async throws -> ClaudeAccountIdentity {
         var request = URLRequest(url: profileURL, timeoutInterval: requestTimeout)
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -107,7 +138,8 @@ enum ClaudeAccountProfile {
             email: account?["email"] as? String,
             organization: organization?["name"] as? String,
             organizationType: organization?["organization_type"] as? String,
-            rateLimitTier: organization?["rate_limit_tier"] as? String
+            rateLimitTier: organization?["rate_limit_tier"] as? String,
+            seat: UsageReaderShared.sanitizedPlanToken(organization?[seatKey] as? String)
         )
     }
 }
@@ -236,11 +268,12 @@ struct ClaudeAccountStore: Sendable {
 /// Max account reads "Max" here and "Max 5x" there — a missing decoration
 /// rather than a wrong reading.
 ///
-/// The seat is a sixth thing claude.ai answers for (`seat_tier`, measured to
-/// equal the CLI's) and this type carries no field for it, so a Team account
-/// resolved from a session is badged "Team" where the CLI badges it "Team
-/// Premium". That is the consumer's question rather than the parser's, and it
-/// is settled where the seat is actually read.
+/// The seat is the sixth and it maps too, from a different place: claude.ai
+/// puts `seat_tier` on the *membership* where the OAuth profile puts it on the
+/// organisation. Measured 2026-09-16, both answered `team_tier_1` for one
+/// account. So the membership is picked before the organisation is taken off
+/// it — reading the organisations alone cannot say which seat belongs to the
+/// one chosen, and an account holding two would badge the wrong plan's.
 ///
 /// Fetching belongs beside the session, in `ClaudeWebSource`, which is what
 /// keeps the cookie leaving this module through paths that file owns.
@@ -272,6 +305,8 @@ enum ClaudeWebAccountProfile {
     /// The plan, under the name claude.ai gives it. Measured to carry the
     /// identical token `.claude.json` puts in `organizationType`.
     private static let planKey = "analytics_subscription_plan"
+    /// On the membership here, on the organisation in the OAuth profile.
+    private static let seatKey = "seat_tier"
 
     /// Pure, so the shape of the reply is testable without claude.ai — and so
     /// a field they rename costs a nil rather than a throw, on the same rule
@@ -294,20 +329,30 @@ enum ClaudeWebAccountProfile {
         guard let uuid = payload[idKey] as? String, !uuid.isEmpty else {
             throw ClaudeAccountProfile.Failure.malformedPayload
         }
-        let organization = subscriptionOrganization(in: payload)
+        let membership = subscriptionMembership(in: payload)
+        let organization = membership?[organizationKey] as? [String: Any]
         return ClaudeAccountIdentity(
             uuid: uuid,
             email: payload[emailKey] as? String,
             organization: organization?[organizationNameKey] as? String,
             organizationType: organization?[planKey] as? String,
-            rateLimitTier: nil
+            rateLimitTier: nil,
+            seat: UsageReaderShared.sanitizedPlanToken(membership?[seatKey] as? String)
         )
     }
 
-    private static func subscriptionOrganization(in payload: [String: Any]) -> [String: Any]? {
+    /// The membership rather than the organisation off it, because the seat is
+    /// the membership's: an account holding two would otherwise take the
+    /// subscription's name and the other one's seat.
+    private static func subscriptionMembership(in payload: [String: Any]) -> [String: Any]? {
         let memberships = (payload[membershipsKey] as? [Any] ?? [])
             .compactMap { $0 as? [String: Any] }
-            .compactMap { $0[organizationKey] as? [String: Any] }
-        return ClaudeWebSource.subscriptionOrganization(among: memberships)
+        let organizations = memberships.compactMap { $0[organizationKey] as? [String: Any] }
+        guard let chosen = ClaudeWebSource.subscriptionOrganization(among: organizations),
+            let uuid = chosen[idKey] as? String
+        else { return nil }
+        return memberships.first {
+            ($0[organizationKey] as? [String: Any])?[idKey] as? String == uuid
+        }
     }
 }
