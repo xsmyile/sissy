@@ -213,25 +213,6 @@ struct PanelOverview: View {
             provider: row.provider, label: status.label, checkedAt: nil)
     }
 
-    /// Room enough for a gauge to be read as one once the label beside it has
-    /// taken what it needs.
-    private static let gaugeMinWidth: CGFloat = 56
-    private static let percentWidth: CGFloat = 32
-
-    /// Floors for the two columns in front of the gauge, so every track starts
-    /// at the same x and the bars underneath each other are the same length.
-    ///
-    /// Without them a name one glyph wider shortens its own track, and two
-    /// rows drawn one under the other stop being comparable — 36% of a short
-    /// bar is not the width of 36% of a long one, which is the whole reason
-    /// they are stacked.
-    ///
-    /// Floors rather than fixed widths: a provider whose name outgrows the
-    /// column pushes its own row out instead of truncating, which is a ragged
-    /// edge on one row rather than a name nobody can read.
-    private static let nameColumnWidth: CGFloat = 62
-    private static let windowColumnWidth: CGFloat = 50
-
     /// The row carries the *fact* that something needs attention even though
     /// the sentence and the button for it live on the page behind it.
     ///
@@ -244,77 +225,106 @@ struct PanelOverview: View {
     /// The plan badge is not here. It is identity rather than a reading — it
     /// says what the account pays for, not what it has left, and it is the
     /// same word tomorrow. The page leads with it.
+    ///
+    /// **Two lines, and the bar has one to itself.** Everything used to sit on
+    /// one, behind floors that were meant to start every track at the same x —
+    /// and at 340 pt fixed they could not. Measured 2026-09-16 on an account
+    /// with two organisations: `Claude · Master Soft Srl` wants 137.5 pt, its
+    /// column yielded 85, so the name truncated to `Claude · Mas…` *and* took
+    /// 23 pt off its own track, which then started at x=216 against Codex's
+    /// x=194 and ran 93 pt against its 115. Both halves of the rule the floors
+    /// existed for — same start, same length — broke on the same row, and the
+    /// percentage went with them: `100%` is 33.8 pt in a 32 pt column, so the
+    /// one reading that matters most wrapped to two lines.
+    ///
+    /// A bar on its own line answers all three without a constant: it starts
+    /// at the gutter and runs the full width on every row by construction, the
+    /// name has the panel rather than a column, and the reading sits on the
+    /// text line where three digits fit. It costs 8 pt a row.
     private func providerRow(_ row: UsagePanelSnapshot.GaugeRow) -> some View {
-        HStack(spacing: 6) {
-            ProviderMark(id: row.provider)
-            Text(row.name)
-                .font(.system(size: 12, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .layoutPriority(1)
-                .foregroundStyle(Self.nameTint(row.status))
-                .accessibilityLabel(Self.legendHelp(row))
-                .frame(minWidth: Self.nameColumnWidth, alignment: .leading)
-            if let notice = row.notice {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
-                    .help(notice.message)
+        let binding = UsagePanelSnapshot.binding(row.windows)
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                ProviderMark(id: row.provider)
+                Text(row.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(Self.nameTint(row.status))
+                    .accessibilityLabel(Self.legendHelp(row))
+                if let notice = row.notice {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                        .help(notice.message)
+                }
+                Spacer(minLength: 8)
+                gauge(row, binding: binding)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
-            gauge(row)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.tertiary)
+            if let binding {
+                ShareBar(
+                    share: binding.fraction,
+                    tint: ProviderPalette.tint(for: row.provider),
+                    pace: binding.pace
+                )
+            }
         }
         .contentShape(.rect)
     }
 
-    /// The window that binds, or the reason there is not one yet.
+    /// Which window the bar underneath is of, and how full it is.
     ///
     /// Named by its period alone, never by the window's full label. A scope is
     /// a vendor display string of no bounded length — "Weekly · Claude Sonnet
-    /// 4.5" — and this column has about fifty points: rendered, the label ran
-    /// under its own bar, and truncated it read "Weekly · Clau…", which names
-    /// no model and still pushed the track out of line with the row above. A
-    /// period is a whole word at any width and the same width every time.
-    /// Which window of that period it is lives in the tooltip and on the page,
-    /// where there is room to say it.
+    /// 4.5" — and this sits at the end of a line the name already has first
+    /// claim on. A period is a whole word at any width and the same width
+    /// every time. Which window of that period it is lives in the tooltip and
+    /// on the page, where there is room to say it.
     ///
-    /// A provider with no reading gets a dash rather than a bar at zero: an
-    /// empty gauge is a measurement, and "Codex has not taken a turn since
-    /// launch" is the absence of one. The sentence for it is the same one the
-    /// page prints, on the hover.
+    /// One `Text` rather than two, so the period and the figure cannot be
+    /// separated by a line break or a truncation: they are one reading, and
+    /// the run carries its own colour where the figure is the part worth one.
+    ///
+    /// A provider with no reading gets a dash and no bar at all: an empty
+    /// gauge is a measurement, and "Codex has not taken a turn since launch"
+    /// is the absence of one. The sentence for it is the same one the page
+    /// prints, on the hover.
     @ViewBuilder
-    private func gauge(_ row: UsagePanelSnapshot.GaugeRow) -> some View {
-        if let binding = UsagePanelSnapshot.binding(row.windows) {
-            Text(UsageFormat.windowLabel(minutes: binding.minutes))
+    private func gauge(
+        _ row: UsagePanelSnapshot.GaugeRow, binding: UsagePanelSnapshot.WindowRow?
+    ) -> some View {
+        if let binding {
+            Self.gaugeReading(binding)
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(minWidth: Self.windowColumnWidth, alignment: .leading)
-            ShareBar(
-                share: binding.fraction,
-                tint: ProviderPalette.tint(for: row.provider),
-                pace: binding.pace
-            )
-            .frame(minWidth: Self.gaugeMinWidth)
-            Text(binding.reading)
-                .font(.system(size: 12))
-                .monospacedDigit()
-                .foregroundStyle(
-                    binding.percent >= Self.bindingWarningPercent ? .orange : .secondary
-                )
-                .frame(width: Self.percentWidth, alignment: .trailing)
+                .layoutPriority(1)
                 .help(Self.bindingHelp(binding))
         } else {
-            Spacer(minLength: 8)
             Text("—")
-                .font(.system(size: 12))
+                .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
-                .frame(width: Self.percentWidth, alignment: .trailing)
                 .help(UsageFormat.noWindowsCaption(row.provider))
         }
+    }
+
+    /// The period and the figure as one `Text`, built by interpolation rather
+    /// than concatenation: `Text.+` is deprecated as of macOS 26 and
+    /// interpolating a styled `Text` is what replaced it.
+    private static func gaugeReading(_ window: UsagePanelSnapshot.WindowRow) -> Text {
+        let period = Text(UsageFormat.windowLabel(minutes: window.minutes) + " · ")
+            .foregroundStyle(.secondary)
+        let figure = Text(window.reading)
+            .monospacedDigit()
+            .foregroundStyle(readingTint(window))
+        return Text("\(period)\(figure)")
+    }
+
+    private static func readingTint(_ window: UsagePanelSnapshot.WindowRow) -> AnyShapeStyle {
+        window.percent >= bindingWarningPercent
+            ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)
     }
 
     // MARK: Projects
