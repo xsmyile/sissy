@@ -65,6 +65,118 @@ final class SissyAnimatorTests: XCTestCase {
         XCTAssertEqual(button.image?.isTemplate, true)
     }
 
+    private func eyeOverlay(on button: NSButton, line: UInt = #line) throws -> SissyEyeOverlay {
+        try XCTUnwrap(
+            button.subviews.compactMap { $0 as? SissyEyeOverlay }.first,
+            "the animator installed no eye overlay",
+            line: line
+        )
+    }
+
+    /// The silhouette stays the template image in both states: that is what
+    /// macOS applies the appearance, the menu highlight and full-strength ink
+    /// to, and compositing the eye into it costs the body two fifths of that
+    /// ink to the menu bar's vibrancy.
+    func testTheSilhouetteStaysATemplateImageWhicheverWayTheEyeIs() throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+
+        animator.setArtwork(.lit)
+        XCTAssertEqual(button.image?.isTemplate, true)
+
+        animator.setArtwork(.template)
+        XCTAssertEqual(button.image?.isTemplate, true)
+    }
+
+    func testNothingHeldLeavesTheEyeUnlit() throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+
+        XCTAssertEqual(animator.artwork, .template)
+        XCTAssertTrue(try eyeOverlay(on: button).isHidden)
+    }
+
+    func testAHoldLightsTheEyeOverTheSamePose() throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+
+        animator.setArtwork(.lit)
+
+        let overlay = try eyeOverlay(on: button)
+        XCTAssertEqual(animator.artwork, .lit)
+        XCTAssertFalse(overlay.isHidden)
+        XCTAssertEqual(overlay.image?.size, NSSize(width: iconSize, height: iconSize))
+        XCTAssertEqual(overlay.contentTintColor, SissyArtwork.holdTint)
+    }
+
+    /// The blue is laid over the body, so a body that kept its own eye ink
+    /// would show through the blue's antialiased edge as a fringe.
+    func testALitEyeSitsOnTheEyelessSilhouette() throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        let whole = button.image
+
+        animator.setArtwork(.lit)
+        let eyeless = button.image
+
+        XCTAssertNotIdentical(eyeless, whole)
+        XCTAssertEqual(eyeless?.size, NSSize(width: iconSize, height: iconSize))
+
+        animator.setArtwork(.template)
+        XCTAssertIdentical(button.image, whole)
+    }
+
+    /// The overlay is the one view sitting on the status button, so a click
+    /// that landed on it instead of the button would lose the panel.
+    func testTheEyeOverlayNeverTakesAClick() throws {
+        let button = NSButton(frame: NSRect(x: 0, y: 0, width: 24, height: 22))
+        _ = try makeAnimator(button)
+        let overlay = try eyeOverlay(on: button)
+
+        XCTAssertNil(overlay.hitTest(NSPoint(x: overlay.bounds.midX, y: overlay.bounds.midY)))
+    }
+
+    /// Both poses and all 24 frames need both halves of the split, and the one
+    /// thing that catches a catalogue regenerated without them is loading
+    /// every one of them.
+    func testTheSplitCoversBothPosesAndEveryFrame() throws {
+        for name in [SissyModel.sissyAssetName, SissyModel.sissySleepingAssetName]
+            + SissyMenuBarMotion.frameAssetNames
+        {
+            XCTAssertNotNil(
+                NSImage(named: SissyArtwork.eyeAssetName(for: name)),
+                "no eye for \(name); re-run scripts/sissy-eye-assets.py"
+            )
+            XCTAssertNotNil(
+                NSImage(named: SissyArtwork.eyelessAssetName(for: name)),
+                "no eyeless silhouette for \(name); re-run scripts/sissy-eye-assets.py"
+            )
+        }
+    }
+
+    /// A hold taken while she is blinking lights the rest of the gesture, and
+    /// the eye keeps step with the silhouette under it instead of sticking on
+    /// the frame it was lit at.
+    func testAHoldTakenDuringAGestureTracksTheRemainingFrames() async throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        let overlay = try eyeOverlay(on: button)
+        let resting = button.image
+
+        XCTAssertTrue(animator.blink())
+        await waitForFirstFrame(on: button, leaving: resting)
+        animator.setArtwork(.lit)
+        let litAt = overlay.image
+        await waitUntilIdle(animator)
+
+        XCTAssertFalse(overlay.isHidden)
+        XCTAssertNotIdentical(overlay.image, litAt)
+        XCTAssertNotIdentical(button.image, resting)
+
+        animator.setArtwork(.template)
+        XCTAssertIdentical(button.image, resting)
+    }
+
     func testStopRestoresTheExactRestingImage() async throws {
         let button = NSButton()
         let animator = try makeAnimator(button)

@@ -3,9 +3,10 @@ import AppKit
 /// Plays Sissy's eye on the status button: a blink when data lands, and
 /// the eye closing or opening as readings stop and start again.
 ///
-/// Once this exists it is the only writer of `button.image`: a refresh that
-/// reassigned the image mid-gesture would drop the remaining frames and leave
-/// whichever one happened to be showing.
+/// Once this exists it is the only writer of `button.image`, and the owner of
+/// the eye overlay drawn above it: a refresh that reassigned either
+/// mid-gesture would drop the remaining frames and leave whichever one
+/// happened to be showing.
 @MainActor
 final class SissyMenuBarAnimator {
     /// The pose the button rests in between gestures.
@@ -14,15 +15,14 @@ final class SissyMenuBarAnimator {
         case asleep
     }
 
-    enum AssetError: LocalizedError {
-        case missingImage(String)
-
-        var errorDescription: String? {
-            switch self {
-            case .missingImage(let name):
-                "Missing Sissy frame \(name). Regenerate the asset catalogue."
-            }
-        }
+    /// Which set of images the same pose is drawn from.
+    ///
+    /// Orthogonal to the pose on purpose: the eye is lit or not for a reason
+    /// that has nothing to do with whether it is open, and a manual hold with
+    /// nothing arriving is exactly the pair — shut and lit — worth showing.
+    enum Artwork {
+        case template
+        case lit
     }
 
     /// Read before and during playback, so an open menu blocks a new gesture
@@ -31,50 +31,79 @@ final class SissyMenuBarAnimator {
 
     private(set) var isPlaying = false
     private(set) var pose: Pose = .awake
+    private(set) var artwork: Artwork = .template
+
+    /// One image per pose and per frame of the blink.
+    ///
+    /// One copy of each, shared by all three motions: a copy per motion would
+    /// make the same artwork rasterize once per copy.
+    private struct Frames {
+        let awake: NSImage
+        let asleep: NSImage
+        let blink: [NSImage]
+
+        func resting(_ pose: Pose) -> NSImage { pose == .awake ? awake : asleep }
+    }
 
     private weak var button: NSButton?
-    private let awakeImage: NSImage
-    private let asleepImage: NSImage
-    /// One copy of each frame, shared by all three motions: a copy per motion
-    /// would make the same artwork rasterize once per copy.
-    private let frames: [NSImage]
+    private let silhouettes: Frames
+    /// The two halves of the split and the view the eye is drawn in, or nil
+    /// where the catalogue has no eye for a frame: Sissy is then exactly what
+    /// she was rather than losing the blink with the tint, which is the part
+    /// worth keeping of the two.
+    private let lit: LitFrames?
+    private let eyeOverlay: SissyEyeOverlay?
+
+    /// The body a lit eye sits on, beside the eye itself. They are one value
+    /// because a frame drawn from one and not the other is the fringe the
+    /// split exists to remove.
+    private struct LitFrames {
+        let eyeless: Frames
+        let eyes: Frames
+    }
     private var playbackTask: Task<Void, Never>?
     private var generation: UInt = 0
     private let reduceMotion: () -> Bool
 
-    private var restingImage: NSImage { pose == .awake ? awakeImage : asleepImage }
+    private var bodyFrames: Frames {
+        artwork == .lit ? (lit?.eyeless ?? silhouettes) : silhouettes
+    }
+
+    private var restingImage: NSImage { bodyFrames.resting(pose) }
 
     /// Loads every frame before touching the button, so a catalogue missing a
     /// frame leaves the caller's static icon exactly as it was.
     ///
-    /// `NSImage(named:)` hands back the catalogue's shared instance, which is
-    /// why each frame is copied before it is resized. The accessibility read
-    /// is injected so a test can drive playback on a machine that has Reduce
-    /// Motion switched on.
+    /// The accessibility read is injected so a test can drive playback on a
+    /// machine that has Reduce Motion switched on.
     init(
         button: NSButton,
         iconSize: CGFloat,
         reduceMotion: @escaping () -> Bool = SissyMenuBarAnimator.systemReduceMotion
     ) throws {
-        func load(_ name: String) throws -> NSImage {
-            guard let image = NSImage(named: name)?.copy() as? NSImage else {
-                throw AssetError.missingImage(name)
+        func build(_ make: (String, CGFloat) throws -> NSImage) throws -> Frames {
+            var blink: [NSImage] = []
+            blink.reserveCapacity(SissyMenuBarMotion.frameAssetNames.count)
+            for name in SissyMenuBarMotion.frameAssetNames {
+                blink.append(try make(name, iconSize))
             }
-            image.size = NSSize(width: iconSize, height: iconSize)
-            image.isTemplate = true
-            return image
+            return Frames(
+                awake: try make(SissyModel.sissyAssetName, iconSize),
+                asleep: try make(SissyModel.sissySleepingAssetName, iconSize),
+                blink: blink
+            )
         }
-        awakeImage = try load(SissyModel.sissyAssetName)
-        asleepImage = try load(SissyModel.sissySleepingAssetName)
-        frames = try SissyMenuBarMotion.frameAssetNames.map(load)
+        silhouettes = try build(SissyArtwork.silhouette)
+        lit = try? LitFrames(eyeless: build(SissyArtwork.eyeless), eyes: build(SissyArtwork.eye))
+        eyeOverlay = lit == nil ? nil : SissyEyeOverlay.installed(on: button)
         self.button = button
         self.reduceMotion = reduceMotion
-        button.image = awakeImage
+        drawResting()
     }
 
     isolated deinit {
         playbackTask?.cancel()
-        button?.image = restingImage
+        drawResting()
     }
 
     /// One blink. A request that arrives during playback is dropped, never
@@ -99,13 +128,24 @@ final class SissyMenuBarAnimator {
         cancelPlayback()
         pose = newPose
         if shouldAnimate, start(newPose == .asleep ? .eyeClose : .eyeOpen) { return }
-        button?.image = restingImage
+        drawResting()
+    }
+
+    /// Lights the eye, or puts it out, without disturbing a gesture: the
+    /// overlay tracks the silhouette frame by frame either way, so a hold
+    /// taken mid-blink lights the rest of it and the resting frame after.
+    func setArtwork(_ newArtwork: Artwork) {
+        guard newArtwork != artwork, let eyeOverlay else { return }
+        artwork = newArtwork
+        eyeOverlay.isHidden = newArtwork != .lit
+        guard !isPlaying else { return }
+        drawResting()
     }
 
     /// Cancels a running gesture and restores the resting frame immediately.
     func stop() {
         cancelPlayback()
-        button?.image = restingImage
+        drawResting()
     }
 
     static let systemReduceMotion: () -> Bool = {
@@ -135,7 +175,7 @@ final class SissyMenuBarAnimator {
 
                 guard let step = motion.step(at: started.duration(to: clock.now)) else { return }
                 if step.index != lastIndex {
-                    self?.button?.image = self?.frames[step.index]
+                    self?.draw(frame: step.index)
                     lastIndex = step.index
                 }
 
@@ -147,6 +187,28 @@ final class SissyMenuBarAnimator {
             }
         }
         return true
+    }
+
+    /// The one place both layers are written, so the eye can never be left on
+    /// a frame the silhouette under it has moved off.
+    private func drawResting() {
+        button?.image = restingImage
+        draw(eye: lit?.eyes.resting(pose))
+    }
+
+    private func draw(frame index: Int) {
+        button?.image = bodyFrames.blink[index]
+        draw(eye: lit?.eyes.blink[index])
+    }
+
+    /// The overlay is re-squared on the button every time it is drawn rather
+    /// than autoresized into place: the button has no bounds yet when the
+    /// animator is built, and a subview that starts at zero is one an
+    /// autoresizing mask keeps at zero however big its superview gets.
+    private func draw(eye image: NSImage?) {
+        guard let eyeOverlay, let button else { return }
+        eyeOverlay.frame = button.bounds
+        eyeOverlay.image = image
     }
 
     /// Ends playback without deciding what the button shows: the callers
@@ -163,6 +225,6 @@ final class SissyMenuBarAnimator {
         guard generation == token else { return }
         playbackTask = nil
         isPlaying = false
-        button?.image = restingImage
+        drawResting()
     }
 }
