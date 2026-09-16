@@ -44,7 +44,24 @@ struct PanelProviderPage: View {
     /// the write reaches Claude Code's own credential, and the one thing a
     /// user cannot work out for themselves — that an open session undoes it —
     /// has to be said before it happens rather than discovered afterwards.
-    @State private var pendingAccount: UsagePanelSnapshot.AccountChoice?
+    @State private var pendingAccount: UsagePanelSnapshot.AccountEntry?
+    /// Which account's reading the page is showing. Nil is the signed-in one,
+    /// which is what the row's own fields already carry.
+    ///
+    /// Picking here changes nothing outside Sissy. Signing the CLI in as an
+    /// account is a separate control that appears only while you are looking
+    /// at one it is not already on, which is what stops the reading you asked
+    /// for from also being a write to another program's credential.
+    @State private var viewedAccount: String?
+
+    /// The account the page is reading, or nil while there is one account and
+    /// the row's own fields are it.
+    private var viewed: UsagePanelSnapshot.AccountEntry? {
+        guard !row.accounts.isEmpty else { return nil }
+        return row.accounts.first { $0.id == viewedAccount }
+            ?? row.accounts.first { $0.isSignedIn }
+            ?? row.accounts.first
+    }
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
 
@@ -61,7 +78,7 @@ struct PanelProviderPage: View {
             Divider()
             limits
 
-            if let credits = row.credits {
+            if let credits = viewed?.credits ?? row.credits {
                 Divider()
                 self.credits(credits)
             }
@@ -98,10 +115,12 @@ struct PanelProviderPage: View {
     /// a label on the app.
     @ViewBuilder
     private var identity: some View {
-        if row.account != nil || row.plan != nil || !row.accounts.isEmpty {
+        if row.account != nil || row.plan != nil || !row.accounts.isEmpty
+            || viewed != nil
+        {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    if let email = row.account?.email {
+                    if let email = viewed?.email ?? row.account?.email {
                         Text(email)
                             .font(.system(size: 12, weight: .medium))
                             .lineLimit(1)
@@ -111,6 +130,7 @@ struct PanelProviderPage: View {
                     organisation
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                useInCLI
                 accountPicker
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -143,7 +163,7 @@ struct PanelProviderPage: View {
     /// another program's credential, so it is reached by aiming at it and
     /// never by a return key pressed at a panel.
     @ViewBuilder
-    private func switchConfirmation(_ choice: UsagePanelSnapshot.AccountChoice)
+    private func switchConfirmation(_ choice: UsagePanelSnapshot.AccountEntry)
         -> some View
     {
         VStack(alignment: .leading, spacing: 6) {
@@ -172,7 +192,7 @@ struct PanelProviderPage: View {
     }
 
     @ViewBuilder
-    private func switchProgress(_ choice: UsagePanelSnapshot.AccountChoice) -> some View {
+    private func switchProgress(_ choice: UsagePanelSnapshot.AccountEntry) -> some View {
         HStack(spacing: 6) {
             ProgressView()
                 .controlSize(.small)
@@ -217,6 +237,10 @@ struct PanelProviderPage: View {
     /// a menu renders to — the same shape the keep-awake modes already take,
     /// and the only one that marks which entry is current.
     ///
+    /// Picking is a change of view and nothing else. It used to be the switch
+    /// itself, which made a one-click menu item rewrite Claude Code's
+    /// credential; that is now `useInCLI`, which asks first.
+    ///
     /// A `Button` per account with a `Label(_:systemImage: "checkmark")` on the
     /// active one does not: a macOS menu item built from a SwiftUI `Button`
     /// drops the label's image, so every account rendered as plain text and
@@ -226,10 +250,8 @@ struct PanelProviderPage: View {
     /// rendering of an index that names an active account it no longer holds.
     private var accountBinding: Binding<String> {
         Binding(
-            get: { row.accounts.first(where: \.isSelected)?.id ?? "" },
-            set: { picked in
-                pendingAccount = row.accounts.first { $0.id == picked }
-            }
+            get: { viewed?.id ?? "" },
+            set: { picked in viewedAccount = picked }
         )
     }
 
@@ -239,6 +261,27 @@ struct PanelProviderPage: View {
     static let accountPickerHelp =
         "Choose which account Claude Code signs in as. Sissy asks before it changes anything."
 
+    /// Signs Claude Code in as the account being read.
+    ///
+    /// Present only while that is not the account it is already on, so it
+    /// cannot fire for the one in use and the accident it used to be is gone
+    /// by construction rather than by dialog. Absent for an account Sissy
+    /// holds no credential for — there is nothing to sign in with, and that
+    /// first `/login` is the user's.
+    @ViewBuilder
+    private var useInCLI: some View {
+        if let viewed, !viewed.isSignedIn, viewed.isSwitchable,
+            pendingAccount == nil, switchingAccount == nil
+        {
+            Button(ClaudeAccountSwitchCopy.useInCLI) { pendingAccount = viewed }
+                .controlSize(.small)
+                .help(Self.useInCLIHelp)
+        }
+    }
+
+    static let useInCLIHelp =
+        "Sign Claude Code in as this account. Sissy keeps the one you are leaving."
+
     /// The organisation and the plan on one line, either of which can be the
     /// only one there: a personal account names no organisation, and an
     /// API-key user is on no plan.
@@ -246,14 +289,19 @@ struct PanelProviderPage: View {
     private var organisation: some View {
         if row.account?.organization != nil || row.plan != nil {
             HStack(spacing: 6) {
-                if let organization = row.account?.organization {
+                if let organization = viewed?.organization ?? row.account?.organization {
                     Text(organization)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                if let plan = row.plan {
-                    PlanBadge(plan: plan, tier: row.planTier)
+                if let plan = viewed?.plan ?? row.plan {
+                    PlanBadge(plan: plan, tier: viewed?.planTier ?? row.planTier)
+                }
+                if let viewed, viewed.isSignedIn, row.accounts.count > 1 {
+                    Text(ClaudeAccountSwitchCopy.signedInBadge)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -266,8 +314,12 @@ struct PanelProviderPage: View {
     /// lives, so the page and the Overview's legend cannot lead on different
     /// windows of the same provider.
     private var binding: UsagePanelSnapshot.WindowRow? {
-        UsagePanelSnapshot.binding(row.windows)
+        UsagePanelSnapshot.binding(shownWindows)
     }
+
+    /// The windows of the account being read, which is the row's own while
+    /// there is one account.
+    private var shownWindows: [UsagePanelSnapshot.WindowRow] { viewed?.windows ?? row.windows }
 
     /// Every window this provider reports, shortest first, with the reason
     /// they are missing when they are.
@@ -290,7 +342,7 @@ struct PanelProviderPage: View {
             HStack(spacing: 6) {
                 SectionLabel(text: "Limits")
                 Spacer(minLength: 0)
-                if let caption = row.windowsCaption {
+                if let caption = viewed?.windowsCaption ?? row.windowsCaption {
                     Text(caption)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -298,19 +350,23 @@ struct PanelProviderPage: View {
                 }
             }
 
-            if let notice = row.notice {
+            if let notice = viewed?.notice ?? row.notice {
                 LimitsNoticeView(notice: notice, act: refresh)
             }
 
-            if row.windows.isEmpty {
-                if row.notice == nil {
-                    Text(UsageFormat.noWindowsCaption(row.id))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            if shownWindows.isEmpty {
+                if (viewed?.notice ?? row.notice) == nil {
+                    Text(
+                        viewed.map { $0.isReadable } == false
+                            ? UsageFormat.unlinkedAccountCaption
+                            : UsageFormat.noWindowsCaption(row.id)
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                ForEach(row.windows) { window in
+                ForEach(shownWindows) { window in
                     WindowRowView(
                         window: window, tint: tint, isBinding: window.id == binding?.id)
                 }
