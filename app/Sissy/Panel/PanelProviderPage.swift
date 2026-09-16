@@ -14,6 +14,9 @@ struct PanelProviderPage: View {
     /// confirmed it. Never called for a vendor with one account, whose row
     /// carries no choices, and never straight from the menu: picking proposes
     /// and the confirmation commits.
+    /// Which account the page was opened on, which is the Overview row that
+    /// was clicked. The picker overrides it and nothing else does.
+    let openOnAccount: String?
     let onSelectAccount: (String) -> Void
     /// Aims the Settings window at the tab that links an account, for the
     /// menu item that opens it.
@@ -70,7 +73,8 @@ struct PanelProviderPage: View {
     /// name and organisation.
     private var viewed: UsagePanelSnapshot.AccountEntry? {
         guard !row.accounts.isEmpty else { return nil }
-        return row.accounts.first { $0.id == viewedAccount }
+        let wanted = viewedAccount ?? openOnAccount
+        return row.accounts.first { $0.id == wanted }
             ?? row.accounts.first { $0.isSignedIn }
             ?? row.accounts.first
     }
