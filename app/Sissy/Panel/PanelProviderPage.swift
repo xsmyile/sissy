@@ -128,17 +128,12 @@ struct PanelProviderPage: View {
     private var accountPicker: some View {
         if !row.accounts.isEmpty {
             Menu {
-                ForEach(row.accounts) { choice in
-                    Button {
-                        onSelectAccount(choice.id)
-                    } label: {
-                        if choice.isSelected {
-                            Label(choice.label, systemImage: "checkmark")
-                        } else {
-                            Text(choice.label)
-                        }
+                Picker("Account", selection: accountBinding) {
+                    ForEach(row.accounts) { choice in
+                        Text(choice.label).tag(choice.id)
                     }
                 }
+                .pickerStyle(.inline)
             } label: {
                 Image(systemName: "person.2")
                     .font(.system(size: 11, weight: .medium))
@@ -148,6 +143,24 @@ struct PanelProviderPage: View {
             .fixedSize()
             .help(Self.accountPickerHelp)
         }
+    }
+
+    /// The account list as a radio group, which is what an inline `Picker` in
+    /// a menu renders to — the same shape the keep-awake modes already take,
+    /// and the only one that marks which entry is current.
+    ///
+    /// A `Button` per account with a `Label(_:systemImage: "checkmark")` on the
+    /// active one does not: a macOS menu item built from a SwiftUI `Button`
+    /// drops the label's image, so every account rendered as plain text and
+    /// the menu said nothing about which one the CLI was signed into.
+    ///
+    /// An id nothing matches leaves every entry unmarked, which is the honest
+    /// rendering of an index that names an active account it no longer holds.
+    private var accountBinding: Binding<String> {
+        Binding(
+            get: { row.accounts.first(where: \.isSelected)?.id ?? "" },
+            set: { onSelectAccount($0) }
+        )
     }
 
     /// Said once here rather than at the call site: this control rewrites the
