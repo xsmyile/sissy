@@ -433,18 +433,23 @@ final class CodexAdapter: SourceAdapter {
     /// on one machine, sends `individual_limit: null` on every one of them, so
     /// there is no ceiling to draw a bar against and the row is a line.
     ///
-    /// The three ways this reading goes missing are three different facts and
-    /// none of them is zero, which is why each answers nil rather than a
-    /// figure: the key is absent on a Codex older than 2026-05-18, `balance`
-    /// is null where the CLI has the key and not the number, and `unlimited`
-    /// describes a pool a balance says nothing about. `has_credits` is
-    /// deliberately not read as `isEnabled` — it reports whether a finite pool
-    /// exists, not whether the facility is switched off, and a confirmed zero
-    /// beside `has_credits: false` is the ordinary reading on an account that
-    /// has never bought any.
+    /// The two ways this reading goes missing are two different facts and
+    /// neither is zero, which is why each answers nil rather than a figure:
+    /// the key is absent on a Codex older than 2026-05-18, and `balance` is
+    /// null where the CLI has the key and not the number.
+    ///
+    /// Neither of the flags beside it is read, and both omissions are
+    /// deliberate. `has_credits` reports whether a finite pool exists rather
+    /// than whether the facility is switched off, so folding it into
+    /// `isEnabled` would hide the confirmed zero that is the ordinary reading
+    /// on an account that never bought any. `unlimited` says nothing about a
+    /// figure the vendor did send: it only means an *absent* balance is not
+    /// worth reporting as missing, which is already what happens, since a
+    /// balance that does not parse answers nil on its own. Suppressing a
+    /// figure on the strength of it was inventing an absence — the same rule
+    /// as "no reading is not a reading of zero", read the other way round.
     static func credits(_ raw: Any?, observedAt: Date) -> ProviderCredits? {
         guard let dict = raw as? [String: Any],
-            dict["unlimited"] as? Bool != true,
             let balanceMinor = creditsMinor(dict["balance"])
         else { return nil }
         return ProviderCredits(
