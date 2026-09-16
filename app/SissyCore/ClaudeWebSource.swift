@@ -64,8 +64,14 @@ actor ClaudeWebSource: SourceSignals {
     }
 
     /// The imported session, read under the caller's own interaction rule.
+    ///
+    /// Sessions are filed under the account they belong to, and this reads
+    /// whichever one is stored. That is exact while an install holds one, and
+    /// it is what a reader per account replaces — a source built for an
+    /// account takes that account's session rather than looking one up.
     static func storedSession(allowingInteraction: Bool) -> ClaudeCredentialsLookup {
-        ClaudeWebSessionStore.load(allowingInteraction: allowingInteraction)
+        guard let account = ClaudeWebSessionStore.storedAccounts().first else { return .absent }
+        return ClaudeWebSessionStore.load(account: account, allowingInteraction: allowingInteraction)
     }
 
     init(
@@ -316,6 +322,17 @@ actor ClaudeWebSource: SourceSignals {
         }
         return credits
     }
+
+    /// Who a session belongs to, as claude.ai answers it.
+    ///
+    /// Narrow on purpose: `get` stays private so the session leaves this file
+    /// only through paths it owns, and a caller that wants an identity asks
+    /// for an identity rather than for an arbitrary authenticated GET.
+    static func account(session: String) async throws -> [String: Any] {
+        try await get(accountPath, session: session)
+    }
+
+    private static let accountPath = "/api/account"
 
     /// The organization a subscription is metered against.
     ///

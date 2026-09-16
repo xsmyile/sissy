@@ -1,0 +1,95 @@
+import Foundation
+
+/// Re-files the session an install imported before sessions were keyed by
+/// account.
+///
+/// `ClaudeWebSessionStore` held one item under a fixed name, because there was
+/// one session and nothing to tell it apart from. Sessions are now filed under
+/// the Anthropic account uuid they belong to — the same key
+/// `ClaudeAccountStore` files a CLI credential under, measured 2026-09-16 to
+/// be one id across both vendors' endpoints — so the row a session draws and
+/// the account it belongs to are the same row.
+///
+/// The old item names no account, and nothing on this Mac can say which one it
+/// is: the session is opaque and only claude.ai knows whose it is. So the pass
+/// costs one request, and that is why it is a pass rather than a rename.
+enum ClaudeWebSessionAdoption {
+    /// What a pass did, for the log and for the tests. Not an error type: none
+    /// of these is something a caller acts on differently, and an install with
+    /// no legacy session is the ordinary case rather than a failure.
+    enum Outcome: Sendable, Equatable {
+        /// No legacy item. Every install after this ships, and every one the
+        /// pass has already run on.
+        case nothingToAdopt
+        case adopted(uuid: String)
+        /// claude.ai would not say whose the session is — offline, or a
+        /// session that has ended. The item is left exactly where it was and
+        /// the next launch tries again.
+        case unidentified
+        /// The keychain refused the move. Same treatment, for the same reason.
+        case keychainRefused(ClaudeWebSessionStoreError)
+    }
+
+    /// The keychain half, behind closures.
+    ///
+    /// Injected for the same reason `ClaudeAccountStore.Secrets` is: writing a
+    /// real session is the one piece of external I/O here, and what the pass
+    /// *decides* — especially that it never ends holding none — has to be
+    /// provable without the developer's own login keychain taking part.
+    struct Store: Sendable {
+        var read: @Sendable (String) -> String?
+        var write: @Sendable (String, String) throws -> Void
+        var delete: @Sendable (String) throws -> Void
+
+        static let keychain = Self(
+            read: { account in
+                guard
+                    case .found(let session) = ClaudeWebSessionStore.load(
+                        account: account, allowingInteraction: false)
+                else { return nil }
+                return session.accessToken
+            },
+            write: { account, session in
+                try ClaudeWebSessionStore.save(session, account: account)
+            },
+            delete: { account in try ClaudeWebSessionStore.delete(account: account) })
+    }
+
+    /// Runs the pass. Idempotent, and safe to interrupt: the session is
+    /// written under its new key before the old one is dropped, so the worst
+    /// an interruption leaves is two copies of one session — which the next
+    /// pass clears, because the legacy item is still there to be adopted.
+    ///
+    /// `identify` is the one part of this that leaves the machine.
+    static func run(
+        store: Store = .keychain,
+        identify: @Sendable (String) async throws -> ClaudeAccountIdentity =
+            ClaudeWebAccountProfile.resolve
+    ) async -> Outcome {
+        guard let session = store.read(ClaudeWebSessionStore.legacyAccount) else {
+            return .nothingToAdopt
+        }
+
+        let identity: ClaudeAccountIdentity
+        do {
+            identity = try await identify(session)
+        } catch {
+            sissyLog(
+                "sissy: claude.ai would not say which account the imported session belongs to; "
+                    + "leaving it where it is and trying again next launch")
+            return .unidentified
+        }
+
+        do {
+            try store.write(identity.uuid, session)
+            try store.delete(ClaudeWebSessionStore.legacyAccount)
+        } catch let failure as ClaudeWebSessionStoreError {
+            sissyLog("sissy: could not re-file the imported claude.ai session: \(failure)")
+            return .keychainRefused(failure)
+        } catch {
+            return .keychainRefused(.keychain(errSecIO))
+        }
+        sissyLog("sissy: adopted the imported claude.ai session under its own account")
+        return .adopted(uuid: identity.uuid)
+    }
+}

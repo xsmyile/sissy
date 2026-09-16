@@ -195,10 +195,23 @@ struct ClaudeAccountStore: Sendable {
 /// Premium". That is the consumer's question rather than the parser's, and it
 /// is settled where the seat is actually read.
 ///
-/// Only the parse lives here. Fetching it belongs beside the session, in
-/// `ClaudeWebSource`, which is what keeps the cookie leaving this module
-/// through paths that file owns.
+/// Fetching belongs beside the session, in `ClaudeWebSource`, which is what
+/// keeps the cookie leaving this module through paths that file owns.
 enum ClaudeWebAccountProfile {
+    /// The identity a session answers for, or a throw this layer cannot act
+    /// on. Both halves of the failure mean the same thing to a caller — the
+    /// session did not name an account — so the network error is mapped into
+    /// this type's own rather than propagated as claude.ai's.
+    static func resolve(session: String) async throws -> ClaudeAccountIdentity {
+        let payload: [String: Any]
+        do {
+            payload = try await ClaudeWebSource.account(session: session)
+        } catch {
+            throw ClaudeAccountProfile.Failure.malformedPayload
+        }
+        return try parse(payload)
+    }
+
     private static let idKey = "uuid"
     private static let emailKey = "email_address"
     private static let membershipsKey = "memberships"

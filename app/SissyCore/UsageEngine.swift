@@ -327,6 +327,7 @@ actor UsageEngine {
         // Sissy to leave alone.
         if meteringClaudeCode {
             startClaudeAccountWatch()
+            adoptLegacyClaudeWebSession()
         }
         bootTask = Task.detached { [aggregator] in
             await aggregator.start { today, slices in
@@ -474,6 +475,16 @@ actor UsageEngine {
         }
     }
 
+    /// Re-files a session imported before sessions were keyed by account.
+    ///
+    /// Detached because it costs a request to claude.ai and a launch must not
+    /// wait on one. It races nothing: the rekey writes the new item before
+    /// dropping the old, so a reader that runs mid-pass finds the same session
+    /// under whichever key it happens to see.
+    private func adoptLegacyClaudeWebSession() {
+        Task.detached { _ = await ClaudeWebSessionAdoption.run() }
+    }
+
     /// How often the active credential is re-read. Long on purpose: a token
     /// rotation is tens of minutes apart, and the only thing a shorter poll
     /// would buy is noticing a switch sooner than the next frame.
@@ -558,7 +569,8 @@ actor UsageEngine {
             return .failure(why)
         case .success(let session):
             do {
-                try ClaudeWebSessionStore.save(session)
+                try ClaudeWebSessionStore.save(
+                    session, account: ClaudeWebSessionStore.legacyAccount)
             } catch {
                 sissyLog("sissy: could not file the claude.ai session: \(error)")
                 return .failure(.undecryptable)
@@ -571,7 +583,9 @@ actor UsageEngine {
     /// probe, which is where it was before the import.
     func forgetClaudeWebSession() async {
         guard lifecycle == .running else { return }
-        try? ClaudeWebSessionStore.delete()
+        for account in ClaudeWebSessionStore.storedAccounts() {
+            try? ClaudeWebSessionStore.delete(account: account)
+        }
         await stopClaudeLimits()
         await startClaudeLimits(userInitiated: false)
         await reemit()
@@ -639,7 +653,9 @@ actor UsageEngine {
 
     /// Whether a claude.ai session is filed. Asked without decrypting one, so
     /// Settings can say so on a build whose grant has lapsed.
-    nonisolated var hasClaudeWebSession: Bool { ClaudeWebSessionStore.isPresent() }
+    nonisolated var hasClaudeWebSession: Bool {
+        !ClaudeWebSessionStore.storedAccounts().isEmpty
+    }
 
     /// What a user pressing refresh on one provider reaches.
     ///
