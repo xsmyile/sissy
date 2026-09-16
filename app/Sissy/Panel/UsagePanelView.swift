@@ -155,7 +155,7 @@ struct UsagePanelView: View {
                                 row: open,
                                 openOnAccount: openAccount,
                                 onSelectAccount: { selectAccount($0) },
-                                onAddAccount: { model.settingsTab = .providers },
+                                onAddAccount: { model.engine.addClaudeAccount() },
                                 switchFailure: model.engine.accountSwitchFailure,
                                 switchingAccount: model.engine.switchingClaudeAccount,
                                 refresh: { model.refreshProvider(open.id) },

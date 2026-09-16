@@ -76,6 +76,9 @@ enum ClaudeAccountLinkCopy {
 
     static let cancel = "Cancel"
     static let link = "Link"
+    static let retry = "Try again"
+    static let failureTitle = "Sissy could not link that account"
+    static let working = "Linking…"
 
     static func failure(_ why: ClaudeWebAccountLink.Failure) -> String {
         switch why {
@@ -135,10 +138,6 @@ struct ProvidersSettingsView: View {
     let model: SissyModel
 
     @State private var showingWebSessionDetail = false
-    /// Which organisation the pending link is aimed at. Nil until someone
-    /// picks, which is what keeps `Link` from committing a default nobody
-    /// chose.
-    @State private var pickedOrganization: String?
 
     private static let markSize: CGFloat = 18
     /// Wide enough that the detail reads as a paragraph rather than a column.
@@ -283,15 +282,15 @@ struct ProvidersSettingsView: View {
     /// Links another Claude account, which is the only way to read one the
     /// CLI is not signed into.
     ///
-    /// Here rather than in the panel because it is configuration: it opens a
-    /// window, spends a login, and files a credential. The panel's own picker
-    /// stays a view selector and reaches this row rather than reproducing it,
-    /// so a pending organisation question has one place to be drawn.
+    /// The button is never disabled while a login is up: the window it opens
+    /// floats, but a press here is also how someone gets back to one they have
+    /// lost, and `present` brings the existing window forward rather than
+    /// opening a second. The whole flow happens in that window, so this row
+    /// carries only the way in and whatever the last attempt failed with.
     @ViewBuilder
     private var linkedAccounts: some View {
         LabeledContent {
             Button(ClaudeAccountLinkCopy.addTitle) { model.engine.addClaudeAccount() }
-                .disabled(model.engine.linkingClaudeAccount)
         } label: {
             Text(ClaudeAccountLinkCopy.label)
             if let why = model.engine.claudeWebLinkFailure {
@@ -300,56 +299,6 @@ struct ProvidersSettingsView: View {
                 Text(ClaudeAccountLinkCopy.caption)
             }
         }
-        if let choice = model.engine.claudeWebLinkChoice {
-            organizationChoice(choice)
-        }
-    }
-
-    /// The one question a link cannot answer for itself.
-    ///
-    /// Drawn only for an account that holds more than one organisation
-    /// answering the usage question — a personal plan and a team seat on one
-    /// address. The session is not filed until this is answered, because a
-    /// reader that picked for itself would be free to pick differently on the
-    /// next poll.
-    ///
-    /// A radio group rather than a button per organisation: a row of buttons
-    /// reads as several actions where there is one, and it says nothing about
-    /// which is selected while you decide. Committing is its own button, so
-    /// the choice can be changed before it is spent — the link writes a
-    /// credential and re-linking costs another login.
-    private func organizationChoice(_ choice: ClaudeWebLinkChoice) -> some View {
-        LabeledContent {
-            HStack(spacing: 8) {
-                Button(ClaudeAccountLinkCopy.cancel) { model.engine.cancelClaudeWebLink() }
-                Button(ClaudeAccountLinkCopy.link) {
-                    guard let pickedOrganization else { return }
-                    model.engine.chooseClaudeWebOrganization(pickedOrganization)
-                }
-                .disabled(pickedOrganization == nil)
-            }
-        } label: {
-            Text(ClaudeAccountLinkCopy.chooseLabel)
-            Text(ClaudeAccountLinkCopy.chooseCaption(choice.identity.email))
-            Picker("", selection: organizationBinding(choice)) {
-                ForEach(UsageFormat.organizationChoices(choice.organizations), id: \.id) {
-                    organization in
-                    Text(organization.label).tag(organization.id)
-                }
-            }
-            .pickerStyle(.radioGroup)
-            .labelsHidden()
-        }
-    }
-
-    /// Defaults to nothing picked, so the link is a choice someone made rather
-    /// than the first row happening to be selected — which is the whole reason
-    /// the question is asked instead of derived.
-    private func organizationBinding(_ choice: ClaudeWebLinkChoice) -> Binding<String> {
-        Binding(
-            get: { pickedOrganization ?? "" },
-            set: { pickedOrganization = $0 }
-        )
     }
 
     private var webSessionDetailButton: some View {

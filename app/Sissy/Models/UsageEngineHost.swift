@@ -305,61 +305,76 @@ final class UsageEngineHost {
     /// filed. The panel's `Add account…` is disabled meanwhile: two logins
     /// would race for the same keychain item.
     private(set) var linkingClaudeAccount = false
-    /// The one question a link could not answer for itself. Never the session.
-    private(set) var claudeWebLinkChoice: ClaudeWebLinkChoice?
     private(set) var claudeWebLinkFailure: ClaudeWebAccountLink.Failure?
 
-    /// Opens claude.ai's own login and files whatever session comes back.
+    /// Opens claude.ai's own login and links whatever account it produces.
     ///
-    /// The window is Sissy's only one and exists for this gesture alone — see
-    /// `ClaudeWebLoginWindow`. Closing it without signing in is a cancellation
-    /// and leaves nothing behind.
+    /// The whole flow lives in that window — see `ClaudeWebLoginWindow`. A
+    /// second press while it is open brings it back to the front rather than
+    /// being refused, because Sissy has no Dock icon and that press is the
+    /// only way back to a window that went behind.
     func addClaudeAccount() {
-        guard let engine, !linkingClaudeAccount else { return }
+        guard let engine else { return }
+        guard loginWindow == nil else {
+            loginWindow?.present(onSession: { _ in }, onCancel: {})
+            return
+        }
         linkingClaudeAccount = true
         claudeWebLinkFailure = nil
-        claudeWebLinkChoice = nil
         let window = ClaudeWebLoginWindow()
         loginWindow = window
-        window.present { [weak self] session in
-            guard let self else { return }
-            loginWindow = nil
-            guard let session else {
-                linkingClaudeAccount = false
-                return
-            }
-            Task { [weak self] in
-                let outcome = await engine.linkClaudeWebSession(session)
+        window.present(
+            onSession: { [weak self] session in
                 guard let self else { return }
+                Task { [weak self] in
+                    let outcome = await engine.linkClaudeWebSession(session)
+                    guard let self, let window = loginWindow else { return }
+                    switch outcome {
+                    case .success(let choice):
+                        guard let choice else { return complete(window) }
+                        window.ask(choice) { [weak self] organization in
+                            self?.pick(organization, in: window)
+                        }
+                    case .failure(let why):
+                        claudeWebLinkFailure = why
+                        window.report(ClaudeAccountLinkCopy.failure(why)) { [weak self] in
+                            self?.addClaudeAccount()
+                        }
+                    }
+                }
+            },
+            onCancel: { [weak self] in
+                guard let self else { return }
+                loginWindow = nil
                 linkingClaudeAccount = false
-                switch outcome {
-                case .success(let choice):
-                    claudeWebLinkChoice = choice
-                    claudeWebSession = engine.hasClaudeWebSession
-                case .failure(let why):
-                    claudeWebLinkFailure = why
+                Task { await engine.cancelClaudeWebLink() }
+            })
+    }
+
+    private func pick(_ organization: String, in window: ClaudeWebLoginWindow) {
+        guard let engine else { return }
+        Task { [weak self] in
+            let outcome = await engine.chooseClaudeWebOrganization(organization)
+            guard let self else { return }
+            switch outcome {
+            case .success:
+                complete(window)
+            case .failure(let why):
+                claudeWebLinkFailure = why
+                window.report(ClaudeAccountLinkCopy.failure(why)) { [weak self] in
+                    self?.addClaudeAccount()
                 }
             }
         }
     }
 
-    /// Answers the organisation question, which is what files the session.
-    func chooseClaudeWebOrganization(_ organization: String) {
-        guard let engine else { return }
-        claudeWebLinkChoice = nil
-        Task { [weak self] in
-            let outcome = await engine.chooseClaudeWebOrganization(organization)
-            guard let self else { return }
-            if case .failure(let why) = outcome { claudeWebLinkFailure = why }
-            claudeWebSession = engine.hasClaudeWebSession
-        }
-    }
-
-    /// Walks away from it. The session was never written, so nothing is left.
-    func cancelClaudeWebLink() {
-        claudeWebLinkChoice = nil
-        guard let engine else { return }
-        Task { await engine.cancelClaudeWebLink() }
+    /// Takes the window down on a link that landed, and lets the surfaces
+    /// notice the account that just appeared.
+    private func complete(_ window: ClaudeWebLoginWindow) {
+        window.finish()
+        loginWindow = nil
+        linkingClaudeAccount = false
+        claudeWebSession = engine?.hasClaudeWebSession ?? false
     }
 
     /// Forgets it, handing the reading back to the OAuth probe.

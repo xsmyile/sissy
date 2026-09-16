@@ -18,8 +18,7 @@ struct PanelProviderPage: View {
     /// was clicked. The picker overrides it and nothing else does.
     let openOnAccount: String?
     let onSelectAccount: (String) -> Void
-    /// Aims the Settings window at the tab that links an account, for the
-    /// menu item that opens it.
+    /// Opens the login window that links another account.
     let onAddAccount: () -> Void
     /// Why the last switch did not happen, when one did not. Shown under the
     /// identity, because a switch that quietly failed leaves the user typing
@@ -293,23 +292,17 @@ struct PanelProviderPage: View {
         )
     }
 
-    /// Reaches the one control that links an account, which lives in Settings.
+    /// Links another account, from where someone looking at their accounts
+    /// already is.
     ///
-    /// A link opens a window, spends a login and files a credential, so it is
-    /// configuration rather than a reading and it is drawn where the other
-    /// credential controls already are. This is a way *to* it and not a second
-    /// copy of it, which is what keeps a pending organisation question with
-    /// one place to be answered.
-    ///
-    /// `SettingsLink` is the only public way to open that scene and it takes
-    /// no action closure, so the simultaneous gesture is what aims it — the
-    /// same shape the panel header's own settings button uses. The tab is a
-    /// live binding, so a window already open follows it too.
+    /// A plain `Button`, because the whole link now happens in its own window
+    /// and Settings is no longer on the way to anything. It also could not
+    /// have stayed a `SettingsLink`: a `simultaneousGesture` is the only way
+    /// to aim that at a tab, and inside an AppKit menu it does not fire —
+    /// measured on the dev build, the item opened Settings on whatever tab was
+    /// last shown.
     private var addAccount: some View {
-        SettingsLink {
-            Text(ClaudeAccountLinkCopy.addTitle)
-        }
-        .simultaneousGesture(TapGesture().onEnded { onAddAccount() })
+        Button(ClaudeAccountLinkCopy.addTitle, action: onAddAccount)
     }
 
     /// Said once here rather than at the call site: this control rewrites the
