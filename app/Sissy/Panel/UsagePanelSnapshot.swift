@@ -688,8 +688,8 @@ struct UsagePanelSnapshot: Equatable {
             let reading = byID[id]
             let identity = known.accounts.first { $0.uuid == id }
             let plan = UsageFormat.plan(
-                reading?.plan ?? identity?.organizationType,
-                tier: reading?.planTier ?? identity?.rateLimitTier,
+                reading?.plan ?? identity?.plan,
+                tier: reading?.planTier ?? identity?.planTier,
                 seat: reading?.account?.seat)
             let observedAt = reading?.limitsObservedAt
             return AccountEntry(

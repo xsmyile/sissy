@@ -5,13 +5,17 @@ import Foundation
 /// The name is frequently not one a human chose: measured 2026-09-16 on two
 /// accounts, claude.ai auto-generates `<name>'s Individual Org` and
 /// `<email>'s Organization` for the organisation that comes with a personal
-/// plan, and the two patterns differ. So the plan travels beside it — the same
+/// plan, and the two patterns differ. So the plan travels beside it — the
 /// token `.claude.json` puts in `organizationType`, which `UsageFormat.plan`
 /// already words — and a surface asking someone to choose can say what each
 /// one *is* rather than repeat a machine-generated string at them.
 struct ClaudeWebOrganization: Sendable, Codable, Equatable, Identifiable {
     let id: String
     let name: String
+    /// The plan in the vocabulary `UsageFormat` words, which is the vendor's
+    /// token with its `claude_` namespace stripped — the same form
+    /// `ClaudeAccountIdentity.plan` answers in, so one organisation and the
+    /// account it belongs to cannot label the same plan two ways.
     let plan: String?
 }
 

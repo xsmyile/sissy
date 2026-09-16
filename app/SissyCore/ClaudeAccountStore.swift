@@ -19,6 +19,50 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     let rateLimitTier: String?
 
     var id: String { uuid }
+
+    /// The account as a row carries it. The seat is nil because this type
+    /// holds none: claude.ai answers `seat_tier` and the OAuth profile does
+    /// not, so an identity archived from a credential cannot name one.
+    var providerAccount: ProviderAccount? {
+        ProviderAccount(email: email, organization: organization)
+    }
+
+    /// The plan and its tier in the vocabulary the frame carries: `team`
+    /// rather than `claude_team`, `max_5x` rather than `default_claude_max_5x`.
+    ///
+    /// `UsageFormat` derives its words from the token rather than mapping it,
+    /// so a prefixed one does not render a little wrong — it renders as a
+    /// different plan. `words("claude_team")` is "Claude Team", and
+    /// `tierParts("default_claude_max_5x")` splits a base that matches no
+    /// plan, which put "Claude Team" and "Default Claude Max 5x" on the rows
+    /// of every archived account.
+    var plan: String? {
+        UsageReaderShared.sanitizedPlanToken(Self.stripping(Self.planPrefix, from: organizationType))
+    }
+
+    var planTier: String? {
+        UsageReaderShared.sanitizedPlanToken(Self.stripping(Self.tierPrefix, from: rateLimitTier))
+    }
+
+    /// `organizationType` prefixes the plan the CLI displays: `claude_max`
+    /// against the bare `max` its own label switch takes. Verified against
+    /// 2.1.267, whose enumeration is exactly pro / max / team / enterprise.
+    static let planPrefix = "claude_"
+
+    /// `rateLimitTier` prefixes the tier the same way: `default_claude_max_5x`
+    /// for the account metered at Max 5x. Only the two `max` multipliers
+    /// appear in 2.1.267, which is why the tier is treated as a decoration on
+    /// the plan and never as the plan itself.
+    static let tierPrefix = "default_claude_"
+
+    /// Shared with `ClaudeProfileSource`, which reads the same two tokens out
+    /// of `.claude.json`: the OAuth profile and the CLI's config spell them
+    /// identically, so one normaliser answers for both rather than two that
+    /// can come to disagree about what a plan is called.
+    static func stripping(_ prefix: String, from raw: String?) -> String? {
+        guard let raw else { return nil }
+        return raw.hasPrefix(prefix) ? String(raw.dropFirst(prefix.count)) : raw
+    }
 }
 
 /// Resolves an access token to the account that owns it.

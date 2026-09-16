@@ -115,11 +115,9 @@ struct ClaudeCodeSignals: SourceSignals {
             let signals = source.currentSignals()
             byAccount[source.account] = AccountSignals(
                 id: source.account,
-                account: identity.map {
-                    ProviderAccount(email: $0.email, organization: $0.organization, seat: nil)
-                } ?? signals.account,
-                plan: identity?.organizationType ?? signals.plan,
-                planTier: identity?.rateLimitTier ?? signals.planTier,
+                account: identity.map(\.providerAccount) ?? signals.account,
+                plan: identity?.plan ?? signals.plan,
+                planTier: identity?.planTier ?? signals.planTier,
                 windows: signals.windows,
                 credits: signals.credits,
                 limitsState: signals.limitsState,
