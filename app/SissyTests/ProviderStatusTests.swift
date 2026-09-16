@@ -417,6 +417,17 @@ final class ProviderStatusTests: XCTestCase {
         XCTAssertEqual(StatusTreeGeometry.visibleRows(tree, expanded: []), 2)
         XCTAssertEqual(StatusTreeGeometry.visibleRows(tree, expanded: ["g1"]), 3)
     }
+
+    // MARK: The card
+
+    /// The tree moved off the page into a card so the page would stop changing
+    /// height, and a row that came out narrower would be a second change
+    /// nobody asked for.
+    func testTheCardGivesTheTreeTheMeasureItHadOnThePage() {
+        XCTAssertEqual(
+            StatusTreeGeometry.cardWidth - 2 * StatusTreeGeometry.cardPadding,
+            PanelMetrics.width - 2 * PanelMetrics.gutter)
+    }
 }
 
 /// Counts callbacks from whichever isolation they arrive on.
