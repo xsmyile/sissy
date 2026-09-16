@@ -42,12 +42,57 @@ struct ClaudeCodeSignals: SourceSignals {
         let sources = webSources.load()
         let signedIn = accounts.currentSnapshot()
         var reading = Self.merge(
-            profile: profile.currentSignals(),
+            profile: Self.attributed(profile.currentAttributed(), to: signedIn),
             web: Self.webReading(for: signedIn.activeUUID, among: sources),
             probe: limitsProbe?.currentSignals())
         reading.accounts = Self.perAccount(
             reading, sources: sources, known: signedIn, links: webLinks.load())
         return reading
+    }
+
+    /// The config file's reading, kept only for the account it belongs to.
+    ///
+    /// `.claude.json` is Claude Code's and only Claude Code writes it, so a
+    /// switch Sissy made reaches the keychain at once and that file not at
+    /// all — until some `claude` re-fetches its profile. Measured 2026-09-16:
+    /// a switch at 16:26:53 left a file rewritten at 16:29:31 whose
+    /// `oauthAccount` had been fetched at 12:28:10 and had not moved, so the
+    /// row carried one account's id under another account's name, which is
+    /// the pairing `ProviderSignals` exists to prevent.
+    ///
+    /// The file names its own owner, so the reading is attributed rather than
+    /// trusted: an identity that contradicts the signed-in account gives way
+    /// to the registry's, and credits that contradict it are dropped, because
+    /// nothing else on the row can say whose money they were. The two halves
+    /// are judged separately for the reason `Attributed` carries two owners.
+    ///
+    /// Where either uuid is unknown there is no contradiction, and the
+    /// reading stands exactly as it always has: an older CLI writes no
+    /// `accountUuid`, and a registry that has identified nobody claims no
+    /// active account — which is every install that never switched.
+    ///
+    /// Agreement keeps the file whole rather than substituting anyway: it is
+    /// the richer of the two, and the only one of them that names the seat.
+    static func attributed(
+        _ reading: ClaudeProfileSource.Attributed,
+        to signedIn: ClaudeAccountRegistry.Snapshot
+    ) -> ProviderSignals {
+        var signals = reading.signals
+        if contradicts(reading.profileOwner, signedIn.activeUUID) {
+            let identity = signedIn.accounts.first { $0.uuid == signedIn.activeUUID }
+            signals.account = identity?.providerAccount
+            signals.plan = identity?.plan
+            signals.planTier = identity?.planTier
+        }
+        if contradicts(reading.creditsOwner, signedIn.activeUUID) {
+            signals.credits = nil
+        }
+        return signals
+    }
+
+    private static func contradicts(_ owner: String?, _ active: String?) -> Bool {
+        guard let owner, let active else { return false }
+        return owner != active
     }
 
     /// The session reading the row itself may show, which is the signed-in
