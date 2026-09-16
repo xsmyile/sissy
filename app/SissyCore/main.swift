@@ -18,11 +18,16 @@ struct ScanEntry: Encodable {
     let credits: ScanCredits?
 }
 
-/// The credits block of a `--scan` entry, in the account's own currency.
+/// The credits block of a `--scan` entry, in whichever unit the vendor
+/// answered in. Each figure is absent where that vendor named none, so a
+/// reading this tool prints can be told from a reading of zero.
 struct ScanCredits: Encodable {
-    let used: String
-    let cap: String
-    let currency: String
+    let used: String?
+    let cap: String?
+    let balance: String?
+    /// The account's ISO 4217 code, or absent for a vendor that counts credits
+    /// and prices them in nothing.
+    let currency: String?
     let observedAt: Date
 }
 
@@ -169,12 +174,18 @@ if args.contains("--scan") {
                 filesWatched: p.filesWatched(),
                 plan: signals.plan,
                 planTier: signals.planTier,
-                credits: signals.credits.map {
-                    ScanCredits(
-                        used: NSDecimalNumber(decimal: $0.used).stringValue,
-                        cap: NSDecimalNumber(decimal: $0.cap).stringValue,
-                        currency: $0.currency,
-                        observedAt: $0.observedAt)
+                credits: signals.credits.map { (credits: ProviderCredits) in
+                    let figure = { (value: Decimal?) in
+                        value.map { NSDecimalNumber(decimal: $0).stringValue }
+                    }
+                    var currency: String?
+                    if case .money(let code, _) = credits.unit { currency = code }
+                    return ScanCredits(
+                        used: figure(credits.used),
+                        cap: figure(credits.cap),
+                        balance: figure(credits.balance),
+                        currency: currency,
+                        observedAt: credits.observedAt)
                 }
             )
             await p.stop()

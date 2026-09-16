@@ -12,8 +12,8 @@ final class ClaudeWebSourceTests: XCTestCase {
 
     private static func credits(_ used: Int) -> ProviderCredits {
         ProviderCredits(
-            isEnabled: true, usedMinor: used, capMinor: 30_000, currency: "EUR", exponent: 2,
-            observedAt: Date())
+            isEnabled: true, unit: .money(currency: "EUR", exponent: 2),
+            usedMinor: used, capMinor: 30_000, observedAt: Date())
     }
 
     private func source(

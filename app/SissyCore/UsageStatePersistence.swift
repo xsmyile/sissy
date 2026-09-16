@@ -123,6 +123,13 @@ struct UsageStateSnapshot: Codable, Equatable {
         /// outlived their own resets. Nil for a snapshot from before the
         /// field, and for a token that named none of the claims.
         var accountFingerprint: String?
+        /// Last credit balance Codex named, for the reason the plan above is
+        /// carried: it rides the same `rate_limits` block, so a reader that
+        /// resumed with its offsets at EOF has nothing left to re-read and the
+        /// Credits section would be missing until the CLI's next turn. Nil for
+        /// a snapshot from before the field and for a Codex that has never
+        /// written the key.
+        var credits: ProviderCredits?
     }
 
     struct FileModel: Codable, Equatable {

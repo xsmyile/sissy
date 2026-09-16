@@ -290,11 +290,15 @@ struct UsagePanelSnapshot: Equatable {
     /// apart from the day's cost, which is Sissy's estimate of the tokens
     /// rather than the vendor's charge.
     struct CreditsRow: Equatable {
-        /// `€58.95 of €100.00`, or the spend alone when no cap is set.
+        /// `€58.95 of €100.00`, the spend alone when no cap is set, or the
+        /// balance for a vendor that answers only for what is left.
         let amount: String
         /// Absent without a cap: a percentage of no ceiling is not a number.
         let percent: Int?
-        let fraction: Double
+        /// Absent for the same reason, and the bar goes with it — drawing one
+        /// at zero against no ceiling is inventing the denominator the row was
+        /// built not to invent.
+        let fraction: Double?
         /// What is left, when the cap says, and when the reading was taken.
         let caption: String
         /// True once the cap is reached, which is the one state on this row
@@ -585,13 +589,20 @@ struct UsagePanelSnapshot: Equatable {
     /// "how much of my own ceiling have I used", and neither of those has a
     /// ceiling or a spend to report. That is most accounts, and a permanent
     /// "Not enabled" under every provider page is a row that never changes.
+    ///
+    /// A balance answers none of those three and still has something to say,
+    /// which is the whole of Codex's reading: it names what is left and never
+    /// a spend or a cap, so it would fail a test written for the question
+    /// Anthropic answers. A confirmed zero passes here — it is a reading, and
+    /// the one an account that has never bought credits has.
     private static func makeCredits(_ credits: ProviderCredits?, now: Date) -> CreditsRow? {
-        guard let credits, credits.isEnabled, credits.hasCap || credits.usedMinor > 0 else {
-            return nil
-        }
+        guard let credits, credits.isEnabled, credits.hasReading,
+            credits.hasCap || (credits.usedMinor ?? 0) > 0 || credits.balanceMinor != nil,
+            let amount = UsageFormat.creditsAmount(credits)
+        else { return nil }
         return CreditsRow(
-            amount: UsageFormat.creditsAmount(credits),
-            percent: credits.hasCap ? Int((credits.fraction * 100).rounded()) : nil,
+            amount: amount,
+            percent: credits.fraction.map { Int(($0 * 100).rounded()) },
             fraction: credits.fraction,
             caption: UsageFormat.creditsCaption(credits, now: now),
             capReached: credits.capReached
