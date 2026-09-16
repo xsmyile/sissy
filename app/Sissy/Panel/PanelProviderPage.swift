@@ -56,11 +56,42 @@ struct PanelProviderPage: View {
 
     /// The account the page is reading, or nil while there is one account and
     /// the row's own fields are it.
+    ///
+    /// Once it names an account, **every** field below comes from that
+    /// account and none falls back to the row. The row's are the signed-in
+    /// account's, so a `??` behind a nil on the viewed one pairs one
+    /// account's identity with another's reading — the shape `ProviderSignals`
+    /// exists to prevent, and one this page could produce in the ordinary
+    /// case: an account with no session linked has no credits and no reading
+    /// time of its own, and would have shown the CLI account's under its own
+    /// name and organisation.
     private var viewed: UsagePanelSnapshot.AccountEntry? {
         guard !row.accounts.isEmpty else { return nil }
         return row.accounts.first { $0.id == viewedAccount }
             ?? row.accounts.first { $0.isSignedIn }
             ?? row.accounts.first
+    }
+
+    private var shownCredits: UsagePanelSnapshot.CreditsRow? {
+        viewed.map(\.credits) ?? row.credits
+    }
+
+    private var shownEmail: String? { viewed.map(\.email) ?? row.account?.email }
+
+    private var shownOrganization: String? {
+        viewed.map(\.organization) ?? row.account?.organization
+    }
+
+    private var shownPlan: String? { viewed.map(\.plan) ?? row.plan }
+
+    private var shownPlanTier: String? { viewed.map(\.planTier) ?? row.planTier }
+
+    private var shownWindowsCaption: String? {
+        viewed.map(\.windowsCaption) ?? row.windowsCaption
+    }
+
+    private var shownNotice: UsagePanelSnapshot.LimitsNotice? {
+        viewed.map(\.notice) ?? row.notice
     }
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
@@ -78,7 +109,7 @@ struct PanelProviderPage: View {
             Divider()
             limits
 
-            if let credits = viewed?.credits ?? row.credits {
+            if let credits = shownCredits {
                 Divider()
                 self.credits(credits)
             }
@@ -115,12 +146,10 @@ struct PanelProviderPage: View {
     /// a label on the app.
     @ViewBuilder
     private var identity: some View {
-        if row.account != nil || row.plan != nil || !row.accounts.isEmpty
-            || viewed != nil
-        {
+        if row.account != nil || row.plan != nil || !row.accounts.isEmpty {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    if let email = viewed?.email ?? row.account?.email {
+                    if let email = shownEmail {
                         Text(email)
                             .font(.system(size: 12, weight: .medium))
                             .lineLimit(1)
@@ -289,14 +318,14 @@ struct PanelProviderPage: View {
     private var organisation: some View {
         if row.account?.organization != nil || row.plan != nil {
             HStack(spacing: 6) {
-                if let organization = viewed?.organization ?? row.account?.organization {
+                if let organization = shownOrganization {
                     Text(organization)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                if let plan = viewed?.plan ?? row.plan {
-                    PlanBadge(plan: plan, tier: viewed?.planTier ?? row.planTier)
+                if let plan = shownPlan {
+                    PlanBadge(plan: plan, tier: shownPlanTier)
                 }
                 if let viewed, viewed.isSignedIn, row.accounts.count > 1 {
                     Text(ClaudeAccountSwitchCopy.signedInBadge)
@@ -319,7 +348,9 @@ struct PanelProviderPage: View {
 
     /// The windows of the account being read, which is the row's own while
     /// there is one account.
-    private var shownWindows: [UsagePanelSnapshot.WindowRow] { viewed?.windows ?? row.windows }
+    private var shownWindows: [UsagePanelSnapshot.WindowRow] {
+        viewed.map(\.windows) ?? row.windows
+    }
 
     /// Every window this provider reports, shortest first, with the reason
     /// they are missing when they are.
@@ -342,7 +373,7 @@ struct PanelProviderPage: View {
             HStack(spacing: 6) {
                 SectionLabel(text: "Limits")
                 Spacer(minLength: 0)
-                if let caption = viewed?.windowsCaption ?? row.windowsCaption {
+                if let caption = shownWindowsCaption {
                     Text(caption)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -350,12 +381,12 @@ struct PanelProviderPage: View {
                 }
             }
 
-            if let notice = viewed?.notice ?? row.notice {
+            if let notice = shownNotice {
                 LimitsNoticeView(notice: notice, act: refresh)
             }
 
             if shownWindows.isEmpty {
-                if (viewed?.notice ?? row.notice) == nil {
+                if shownNotice == nil {
                     Text(
                         viewed.map { $0.isReadable } == false
                             ? UsageFormat.unlinkedAccountCaption

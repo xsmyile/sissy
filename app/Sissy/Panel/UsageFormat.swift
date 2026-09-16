@@ -865,18 +865,7 @@ enum UsageFormat {
     }
 }
 
-/// What a failed account switch says.
-///
-/// Each case is a different thing for the user to do, which is why they are
-/// not one sentence: an account that has never signed in needs a login, and a
-/// keychain that said no needs the user to allow it.
-/// Said on the page of an account Sissy knows but holds no reading for: it
-/// has an archived credential and no live source, which is every account
-/// signed into this CLI that has not had a session linked to it.
-///
-/// Worded as a state rather than an instruction while the control that would
-/// fix it does not exist yet. A sentence telling someone to press a button
-/// that is not there is worse than one that simply says what is true.
+/// How the panel words an account of a vendor that has more than one.
 extension UsageFormat {
     /// A vendor's name with the account qualifying it, for the Overview row
     /// that has to tell two accounts of one vendor apart.
@@ -891,10 +880,23 @@ extension UsageFormat {
         "\(provider) · \(organization ?? fallback)"
     }
 
+    /// Said on the page of an account Sissy knows but holds no reading for:
+    /// it has an archived credential and no live source, which is every
+    /// account signed into this CLI that has not had a session linked to it.
+    ///
+    /// Worded as a state rather than an instruction while the control that
+    /// would fix it does not exist yet. A sentence telling someone to press a
+    /// button that is not there is worse than one that simply says what is
+    /// true.
     static let unlinkedAccountCaption =
         "Sissy has no live source for this account, so it cannot read its limits."
 }
 
+/// What a failed account switch says.
+///
+/// Each case is a different thing for the user to do, which is why they are
+/// not one sentence: an account that has never signed in needs a login, and a
+/// keychain that said no needs the user to allow it.
 enum ClaudeAccountSwitchCopy {
     /// Asked before the credential is written, because the write reaches a
     /// program that is not Sissy and a menu item that does it silently is a
