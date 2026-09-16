@@ -57,6 +57,35 @@ struct ProviderRowSnapshot: Equatable {
 /// It says what the thing is before the button is pressed, because it is a
 /// whole browser session rather than a read-only usage token, and a user who
 /// only finds that out afterwards was not asked.
+/// What linking another Claude account says.
+enum ClaudeAccountLinkCopy {
+    static let label = "Linked accounts"
+    static let addTitle = "Add account…"
+
+    static let caption =
+        "Sissy reads the account Claude Code is signed into for free. Linking another "
+        + "signs in to claude.ai once, in a window that closes itself, and reads its "
+        + "limits and credits beside it."
+
+    static let chooseLabel = "Which organisation?"
+
+    static func chooseCaption(_ email: String?) -> String {
+        let account = email ?? "That account"
+        return "\(account) has more than one. Sissy reads the one you pick, and keeps reading it."
+    }
+
+    static let cancel = "Cancel"
+
+    static func failure(_ why: ClaudeWebAccountLink.Failure) -> String {
+        switch why {
+        case .unidentified:
+            return "claude.ai would not say which account that session is for. Try again."
+        case .noSubscription:
+            return "That account is on no Claude plan Sissy can read limits for."
+        }
+    }
+}
+
 enum ClaudeWebSessionCopy {
     static let importTitle = "Import from Claude.app"
     static let forgetTitle = "Forget session"
@@ -126,6 +155,7 @@ struct ProvidersSettingsView: View {
                         } else {
                             claudeWebSession
                         }
+                        linkedAccounts
                     }
                 }
             }
@@ -242,6 +272,54 @@ struct ProvidersSettingsView: View {
             } else if !model.engine.claudeWebSession {
                 Text(ClaudeWebSessionCopy.caption)
             }
+        }
+    }
+
+    /// Links another Claude account, which is the only way to read one the
+    /// CLI is not signed into.
+    ///
+    /// Here rather than in the panel because it is configuration: it opens a
+    /// window, spends a login, and files a credential. The panel's own picker
+    /// stays a view selector and reaches this row rather than reproducing it,
+    /// so a pending organisation question has one place to be drawn.
+    @ViewBuilder
+    private var linkedAccounts: some View {
+        LabeledContent {
+            Button(ClaudeAccountLinkCopy.addTitle) { model.engine.addClaudeAccount() }
+                .disabled(model.engine.linkingClaudeAccount)
+        } label: {
+            Text(ClaudeAccountLinkCopy.label)
+            if let why = model.engine.claudeWebLinkFailure {
+                Text(ClaudeAccountLinkCopy.failure(why))
+            } else {
+                Text(ClaudeAccountLinkCopy.caption)
+            }
+        }
+        if let choice = model.engine.claudeWebLinkChoice {
+            organizationChoice(choice)
+        }
+    }
+
+    /// The one question a link cannot answer for itself.
+    ///
+    /// Drawn only for an account that holds more than one organisation
+    /// answering the usage question — a personal plan and a team seat on one
+    /// address. The session is not filed until this is answered, because a
+    /// reader that picked for itself would be free to pick differently on the
+    /// next poll.
+    private func organizationChoice(_ choice: ClaudeWebLinkChoice) -> some View {
+        LabeledContent {
+            HStack(spacing: 8) {
+                ForEach(choice.organizations) { organization in
+                    Button(organization.name) {
+                        model.engine.chooseClaudeWebOrganization(organization.id)
+                    }
+                }
+                Button(ClaudeAccountLinkCopy.cancel) { model.engine.cancelClaudeWebLink() }
+            }
+        } label: {
+            Text(ClaudeAccountLinkCopy.chooseLabel)
+            Text(ClaudeAccountLinkCopy.chooseCaption(choice.identity.email))
         }
     }
 
