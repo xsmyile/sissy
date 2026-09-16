@@ -5,19 +5,23 @@
   Sissy
 </h1>
 
-**What your AI coding agents are costing you, in the macOS menu bar.**
+**The numbers you keep checking, in the macOS menu bar.**
 
-Sissy tails the session logs Claude Code and Codex already write, prices every
-turn as it lands, and keeps the day's cost, the rate-limit pressure and where
-the money went one click away. No API key, no account, no telemetry, and
-nothing to grant at first launch.
+Sissy reads what is already on your Mac and keeps the answer one click away, so
+what you would otherwise open a browser or a terminal for sits behind one icon.
+No API key, no account of its own, no telemetry, and nothing to grant at first
+launch.
+
+What it answers for today is what your coding agents cost: Claude Code and
+Codex, priced as each turn lands, with the rate-limit pressure and the
+per-repository split beside it.
 
 [![Release](https://img.shields.io/github/v/release/xsmyile/sissy?style=flat-square&color=black)](../../releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/xsmyile/sissy/ci.yml?branch=master&style=flat-square&color=black&label=ci)](../../actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square)](#install)
 [![License](https://img.shields.io/github/license/xsmyile/sissy?style=flat-square&color=black)](./LICENSE)
 
-[Install](#install) • [What you see](#what-you-see) • [Supported CLIs](#supported-clis) • [Privacy](#privacy) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build from source](#build-from-source)
+[Install](#install) • [What you see](#what-you-see) • [Supported CLIs](#supported-clis) • [Privacy](#privacy) • [Uninstall](#uninstall) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build from source](#build-from-source)
 
 <img src="assets/overview.png" alt="The Sissy panel open on the Overview: the day's cost over a period you pick, a rate-limit gauge per account, and where the day went by repository." width="380" />
 
@@ -26,10 +30,11 @@ nothing to grant at first launch.
 ## Why
 
 A subscription hides the meter. A flat monthly fee tells you nothing about what
-a day of agents actually cost, which CLI ate it, which repository it went on, or
-how close you are to the rate limit that will stop your session mid-task. All of
-it is already on disk, in files the CLIs write anyway. Sissy reads them and puts
-the answer where you will see it.
+a day of agents actually cost, which account ate it, which repository it went
+on, or how close you are to the rate limit that will stop your session mid-task.
+The logs are already on disk, and the limits are one read away with the
+credential the CLI already stored. Sissy reads both and puts the answer where
+you will see it.
 
 ## Install
 
@@ -111,24 +116,20 @@ switched back. *Always* stops after eight hours rather than going quiet. Neither
 overrides closing the lid, and the hold lasts exactly as long as Sissy runs. Quit
 and the Mac sleeps normally again, with nothing left behind to undo.
 
-<p align="center">
-  <img src="assets/settings-general.png" alt="Settings ▸ General: start at login, whether the gauges print what is spent or what is left, the session-hook switch, keep-awake, and the usage archive with its export and its delete." width="520" />
-</p>
-
 ### Settings
 
 **⌘,** or the gear in the panel. *General* is where start-at-login lives, along
-with whether the gauges print what is spent or what is left, the session-hook
-switch, keep-awake, and the usage archive: where it sits, an export, and a
-button that deletes it. *Providers* is each CLI's state, the accounts linked to
-it, and the vendor status switch. *About* carries **Copy diagnostics**, which is
-what an issue needs.
+with whether Sissy animates, whether the gauges print what is spent or what is
+left, the session-hook switch, keep-awake, and the usage archive: where it sits,
+an export, and a button that deletes it. *Providers* is each CLI's state, the
+accounts linked to it, and the vendor status switch. *About* carries **Copy
+diagnostics**, which is what an issue needs.
 
 ## Supported CLIs
 
 | CLI | Reads | Reports |
 |---|---|---|
-| Claude Code | `~/.claude/projects/**/*.jsonl`, honoring `CLAUDE_CONFIG_DIR` | tokens, cost, per-repository split, 5-hour and weekly windows, plan, credits |
+| Claude Code | `~/.claude/projects/**/*.jsonl`, honoring `CLAUDE_CONFIG_DIR` | tokens, cost, per-repository split, every rate-limit window the account publishes, plan, credits |
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl`, honoring `CODEX_HOME` | tokens, cost, per-repository split, the windows the CLI reports, plan, credit balance |
 
 Claude Code is always on; Codex is picked up whenever its session directory
@@ -138,8 +139,10 @@ Two ceilings worth knowing about. Codex publishes its limits only on its own
 turn events, so those gauges are always one turn behind. That is the shape of
 the CLI, not a bug. Claude's limits come from the credential Claude Code already
 stored, so they are as fresh as the last time that CLI ran; the refresh button
-on the provider page re-reads it, and on a Mac where the token lives in the
-keychain rather than in a file, macOS may ask for access at that moment.
+on the provider page re-reads it. That read costs no dialog either way: the
+credential is a file in the CLI's own config directory, and where macOS keeps it
+in the login keychain instead, Sissy reads it through `/usr/bin/security`, which
+is already on that item's access list.
 
 Adding a CLI that writes append-only JSONL is a `SourceAdapter` rather than a
 second reader. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
@@ -179,12 +182,44 @@ nothing. On a first run Sissy fills that record in once from what the CLIs
 already logged, so the wider windows are not empty for a month.
 
 **Anything Sissy writes outside its own folder is off by default** and named
-before you switch it on. There is one such switch today. *Name projects even
-when Sissy is off* adds one line to `~/.claude/settings.json` and one to
-`~/.codex/hooks.json`, so a session writes down which repository it is working
+before you switch it on. There is one such switch, and one button that does the
+same on the spot. The switch is *Name projects even when Sissy is off*; it adds
+one line to `~/.claude/settings.json` and one to `~/.codex/hooks.json`, so a
+session writes down which repository it is working
 in while that directory still exists. Without it, work in a worktree deleted
 while Sissy was not running counts towards no project at all. Switching it off
-takes both lines and the script back out.
+takes both lines and the script back out. The button is *Use in CLI*, which
+writes the account you picked into the slot Claude Code reads its credential
+from. Nothing else Sissy does touches it.
+
+## Uninstall
+
+```bash
+brew uninstall --cask sissy
+```
+
+Or drag **Sissy** out of Applications. Either way the counting stops and the Mac
+goes back to how it was: no daemon to kill, no power assertion still held,
+nothing listening anywhere.
+
+Three things survive on purpose, because they are the three Sissy was given
+permission to keep:
+
+- **The usage archive**, under `~/Library/Application Support/Sissy/`. Settings
+  ▸ General deletes it on a button, or remove the folder yourself.
+- **Archived Claude accounts**, if you ever pressed *Use in CLI*. They sit in a
+  keychain item of Sissy's own; Settings ▸ Providers forgets them.
+- **The session hooks**, if you ever switched *Name projects even when Sissy is
+  off* on. Switch it back off **before** you uninstall and Sissy takes them out
+  itself.
+
+That last one is the only thing Sissy cannot clean up after the fact, so it is
+worth saying plainly. Uninstall with the switch still on and two lines stay
+behind: a `SessionStart` entry in `~/.claude/settings.json` and one in
+`~/.codex/hooks.json`, both naming a `session-start.sh` that is no longer there.
+They are inert — the shell finds no script, drains stdin and exits 0 — but they
+are in two files that belong to other programs, and Sissy is gone and cannot
+reach them. Delete the two entries by hand.
 
 ## How it works
 
@@ -249,7 +284,8 @@ normally signed bundle: `CODE_SIGNING_ALLOWED=NO` is fine for CI, not for
 testing that switch.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest: the linters, the self-test, and
-what Sissy will and will not take.
+what Sissy will and will not take. The
+[code of conduct](CODE_OF_CONDUCT.md) applies to all of it.
 
 ## Credits
 
