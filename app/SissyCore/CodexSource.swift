@@ -476,8 +476,8 @@ final class CodexAdapter: SourceAdapter {
         // `output_tokens` is already gross — it includes reasoning tokens.
         // Verified against real rollouts: `total_tokens == input + output`
         // (reasoning is NOT added on top). `reasoning_output_tokens` is a
-        // sub-breakdown for observability, not an additive counter. ccusage
-        // uses `output_tokens` alone for the same reason.
+        // sub-breakdown of it rather than an additive counter, so nothing
+        // reads it. ccusage uses `output_tokens` alone for the same reason.
 
         let model = fileModels[line.url] ?? Self.defaultModel
         logUnpricedModelOnce(for: model)
