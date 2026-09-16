@@ -68,12 +68,15 @@ cannot pair one moment's plan with another's windows.
 
 `providers[].windows` carries that CLI's subscription rate-limit windows,
 ordered shortest first here rather than by whichever producer filled them —
-the panel dims every row after the leading one, so a weekly bucket a vendor
+the panel lifts the one window a provider leads on, so a weekly bucket a vendor
 listed first would take the emphasis from the session one that binds sooner.
 Each is identified by its `minutes` rather than by its position —
 vendors do not agree on an order, and Codex's own `primary` bucket is not always
-the session one. `usedPercent` is a percentage of the window's allowance; a
-bucket whose reset has passed is dropped before the frame is built. Empty for a
+the session one. `usedPercent` is a percentage of the window's allowance. A
+bucket whose reset has passed keeps its row and loses its figure: the panel
+draws a dash where the percentage was and no bar at all, because a source whose
+readings ride the CLI's own turns cannot re-read on demand, and dropping the
+window took the row off the page between a reset and the next turn. Empty for a
 provider that publishes no limits — an API-key user, or a CLI that has not
 surfaced a window yet — which is what puts the panel row back on its
 share-of-today bar.
@@ -270,12 +273,17 @@ view graph live, which is precisely the cost `UsagePanelController` drops its
 host on close to avoid. `Panel/PanelComponents.swift` holds what both pages
 draw, so a bar or a badge cannot drift a point between them.
 
-The one gauge the Overview leads on is the window with the *least* headroom
-across every provider, ties going to the shorter window. A session bucket with
-room left says nothing while the weekly one behind it is nearly spent, so a
-headline led by the roomier of the two would be reassuring and wrong. It is read
-off the provider rows rather than off the slices, so the Overview's gauge and
-the same gauge repeated on that provider's page are one object down to the pace.
+The Overview carries a gauge per readable account rather than one across every
+provider. A single one reports the tightest and silently implies the rest are
+fine — measured on a day with Claude and Codex both at 100%, it named Codex and
+Claude vanished — and with two accounts linked the question has two answers,
+which is the whole reason for linking the second. Which window an account leads
+on is `UsagePanelSnapshot.binding`: the one its current rate empties before its
+own reset, soonest first, ties to the shorter period, and the percentage only as
+the fallback for windows that project nothing. A window that has rolled over is
+never a candidate. The rows are read off the provider rows rather than off the
+slices, so a gauge on the Overview and the same gauge on that provider's page
+are one object down to the pace.
 
 `Models/Preferences.swift` holds only what the app itself remembers
 (`sissyMotion`, `retiredServerAgent`) in `preferences.json`. Everything about
@@ -304,18 +312,19 @@ resolved activation and, for a provider that is metering, what its scan found �
 and the two ways to find nothing are kept apart, because a data dir that is not
 there is a different problem from one that is there and empty. Both name the path.
 `ProviderRowSnapshot.make` is the pure function the tests target, as
-`HeaderSnapshot.make` is for the header. "Show Claude Code limits" lives on the
-Claude Code row: it is a property of that provider and reads as one beside that
-provider's state. Its caption is split — what the switch shows and that macOS
-will ask stay on screen, because a permission prompt the app did not warn about
-is what Sissy's first-run promise exists to avoid; the read-only guarantee and
-the expect-it-again-after-an-update note sit behind an `info.circle` popover. A
-button rather than a `help` tooltip, which only a hovering pointer ever finds.
+`HeaderSnapshot.make` is for the header. There is no "Show Claude Code limits"
+switch: it existed to make a keychain prompt expected, and there is no prompt —
+the limits read Claude Code's own credential, from its config directory or
+through `/usr/bin/security`, so the row states the source instead of offering a
+choice about it. What the tab does carry beside each row is the account work:
+the claude.ai sessions linked to it, and `Add account…`, which opens the one
+window Sissy ever shows.
 
-There is no on/off switch on the page yet — turning a provider off at runtime
-means stopping a live tail, and turning it back on means building a new one: a
-provider that has stopped stays stopped, the same rule the engine follows. A row
-that is off therefore says where the switch that turned it off lives.
+Each provider has an on/off switch, and flipping it is a new engine rather than
+a mutated one: `UsageEngine`'s lifecycle is terminal, so `setProvider` persists
+the toggle and then tears the engine down and builds another from the file. It
+costs what a relaunch costs, which is nothing — every reader resumes from its
+own snapshot's offsets.
 
 ## Lifecycle and login items
 
