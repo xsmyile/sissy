@@ -18,8 +18,7 @@ nothing to grant at first launch.
 
 [Install](#install) • [What you see](#what-you-see) • [Supported CLIs](#supported-clis) • [Privacy](#privacy) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build from source](#build-from-source)
 
-<!-- SHOT 1: hero. Menu bar with Sissy plus the panel open on the Overview, dark mode,
-     synthetic data. Replaces assets/usage-panel.png, which shows the pre-0.1.9 layout. -->
+<img src="assets/overview.png" alt="The Sissy panel open on the Overview: the day's cost over a period you pick, a rate-limit gauge per account, and where the day went by repository." width="380" />
 
 </div>
 
@@ -64,8 +63,6 @@ her eye when nothing is reaching the app, and that is the whole of the
 peripheral signal: no number up there, nothing to read at a glance you did not
 ask for. Click for the panel, right-click for the short menu.
 
-<!-- SHOT 2: the Overview. Headline plus period control, two provider gauge rows, projects. -->
-
 ### The Overview answers two questions
 
 **What has this cost**, over a window you pick (`Today`, `7 days`, `30 days`,
@@ -87,7 +84,10 @@ Under that, where the day went **by repository**, not by directory. A worktree
 counts against the repository it was cut from, so one project reads as one row
 instead of eleven small ones.
 
-<!-- SHOT 3: a provider page. Account and plan badge, Limits, Credits, Today, By project. -->
+<p align="center">
+  <img src="assets/provider-claude.png" alt="A Claude account's provider page: the seat and plan, every rate-limit window with what is left and when it resets, the day, and the repositories it went on." width="300" />
+  <img src="assets/provider-codex.png" alt="A Codex account's provider page: the plan, the weekly window with its pace, a session window awaiting a reading, the day, and the repositories it went on." width="300" />
+</p>
 
 ### A provider page per account
 
@@ -96,8 +96,6 @@ which plan, every rate-limit window it publishes with the time each resets, the
 credit balance where the vendor reports one, its own day, and its own
 repositories. The vendor's own status page is down there too, so "is it me or
 them" costs no browser tab.
-
-<!-- SHOT 4: the repository card. A project row clicked open, showing forge and path. -->
 
 Click a repository for its card: the forge it is pushed to, a link to the page,
 and the path on disk.
@@ -112,7 +110,9 @@ switched back. *Always* stops after eight hours rather than going quiet. Neither
 overrides closing the lid, and the hold lasts exactly as long as Sissy runs. Quit
 and the Mac sleeps normally again, with nothing left behind to undo.
 
-<!-- SHOT 5: Settings ▸ Providers. Linked accounts, Use in CLI, provider status. -->
+<p align="center">
+  <img src="assets/settings-general.png" alt="Settings ▸ General: start at login, whether the gauges print what is spent or what is left, the session-hook switch, keep-awake, and the usage archive with its export and its delete." width="520" />
+</p>
 
 ### Settings
 
