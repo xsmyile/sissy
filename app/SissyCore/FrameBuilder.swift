@@ -134,7 +134,10 @@ enum ProviderLimitsState: Sendable, Equatable {
 struct ProviderAccount: Sendable, Equatable {
     /// The address the CLI is signed in as.
     let email: String?
-    /// Organisation the seat belongs to, where the vendor names one.
+    /// Organisation the seat belongs to, where the vendor names one. Nil
+    /// rather than empty: both readers take it through
+    /// `UsageReaderShared.sanitizedDisplayText`, and the panel prints it
+    /// unguarded on the strength of that.
     let organization: String?
     /// Seat within that organisation, as the vendor's own token
     /// (`team_tier_1`). Raw rather than a label, the same division `plan`
