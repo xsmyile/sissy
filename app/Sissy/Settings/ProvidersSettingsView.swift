@@ -74,6 +74,12 @@ enum ClaudeAccountLinkCopy {
         return "\(account) has more than one. Sissy reads the one you pick, and keeps reading it."
     }
 
+    static let unlinkHelp =
+        "Forget this account's claude.ai session. The Claude Code sign-in Sissy archived "
+        + "for it stays, so you can still switch to it."
+
+    static func unlink(_ account: String) -> String { "Unlink \(account)" }
+
     static let cancel = "Cancel"
     static let link = "Link"
     static let retry = "Try again"
@@ -297,6 +303,45 @@ struct ProvidersSettingsView: View {
                 Text(ClaudeAccountLinkCopy.failure(why))
             } else {
                 Text(ClaudeAccountLinkCopy.caption)
+            }
+        }
+        ForEach(sortedLinks, id: \.identity.uuid) { link in
+            linkedAccount(link)
+        }
+    }
+
+    /// Ordered by the name they are drawn under rather than by the uuid they
+    /// are keyed by, which is the order the engine deliberately does not have:
+    /// the words are this layer's.
+    private var sortedLinks: [ClaudeWebLink] {
+        model.engine.linkedClaudeAccounts.sorted {
+            UsageFormat.accountLabel($0.identity) < UsageFormat.accountLabel($1.identity)
+        }
+    }
+
+    /// One linked account, with the control that unlinks it.
+    ///
+    /// A trash rather than a labelled button because the row already names
+    /// what it acts on, and the whole list is one gesture repeated. What it
+    /// deletes is the session and nothing else — the archived Claude Code
+    /// sign-in beside it is not something the user linked, and Sissy cannot
+    /// make another — which the help text says before the click rather than
+    /// after it.
+    private func linkedAccount(_ link: ClaudeWebLink) -> some View {
+        let label = UsageFormat.accountLabel(link.identity)
+        return LabeledContent {
+            Button {
+                model.engine.forgetClaudeWebSession(account: link.identity.uuid)
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help(ClaudeAccountLinkCopy.unlinkHelp)
+            .accessibilityLabel(ClaudeAccountLinkCopy.unlink(label))
+        } label: {
+            Text(label)
+            if let organization = link.identity.organization {
+                Text(organization)
             }
         }
     }

@@ -765,6 +765,34 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// Unlinks one account's claude.ai session, leaving every other one where
+    /// it is.
+    ///
+    /// The session is the only half of an account the user added, and the only
+    /// half Sissy can put back: another sign-in is a window away. The archived
+    /// CLI credential is untouched here on purpose — Sissy took that one
+    /// itself the first time the account was active, cannot mint a second, and
+    /// deleting it while the CLI is on that account leaves one copy in a slot
+    /// the next switch overwrites. Two lifetimes, which is what
+    /// `ClaudeWebSessionIndex` is a separate list for.
+    ///
+    /// The keying pass is cancelled and joined first for the reason
+    /// `forgetClaudeWebSession` gives: a pass suspended on its identifying
+    /// request could otherwise name its held session as this very account and
+    /// write it back after the delete. What it costs is a session still under
+    /// the holding key, which the next launch keys.
+    func forgetClaudeWebSession(account: String) async {
+        guard lifecycle == .running else { return }
+        claudeWebAdoptionTask?.cancel()
+        await claudeWebAdoptionTask?.value
+        claudeWebAdoptionTask = nil
+        if pendingClaudeWebLink?.choice.identity.uuid == account { pendingClaudeWebLink = nil }
+        try? ClaudeWebSessionStore.delete(account: account)
+        try? claudeWebIndex.forget(uuid: account)
+        claudeWebLinks.store(claudeWebIndex.load())
+        await followStoredClaudeWebSessions()
+    }
+
     /// Makes an account the one Claude Code starts as.
     ///
     /// Safe to write the CLI's slots here precisely because they are not where
@@ -829,6 +857,17 @@ actor UsageEngine {
     /// Settings can say so on a build whose grant has lapsed.
     nonisolated var hasClaudeWebSession: Bool {
         !ClaudeWebSessionStore.storedAccounts().isEmpty
+    }
+
+    /// The accounts a claude.ai session is linked for, as the index names
+    /// them. Read without decrypting one, on the rule above: the list is
+    /// answerable on a build whose keychain grant has lapsed, which is the
+    /// only reason Settings can draw it at all.
+    ///
+    /// Unordered, because ordering it means wording each one and the words
+    /// are the app's.
+    nonisolated var linkedClaudeAccounts: [ClaudeWebLink] {
+        Array(claudeWebLinks.load().values)
     }
 
     /// What a user pressing refresh on one provider reaches.
