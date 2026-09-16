@@ -2,40 +2,32 @@ import XCTest
 
 @testable import Sissy
 
-/// The hooks switch against the app going away.
+/// The hooks switch where the pass behind it cannot run.
 ///
-/// Registering the hook writes two other programs' configuration files, and
-/// `stop()` joins the pass it finds before tearing the engine down. A pass
-/// started inside that join is one nothing awaits and nothing can cancel: the
-/// process exits on `applicationShouldTerminate`'s reply, which can land
-/// between the two targets and leave one CLI registered and the other not.
+/// Registering the hook rewrites two other programs' configuration files, so
+/// where this switch sits is a claim about files Sissy does not own. Two
+/// windows on this object leave the pass unable to start: `stop()` suspended
+/// on the pass it joined, and the stretch a provider switch spends with the
+/// engine already released. In both, the flip has to go nowhere rather than be
+/// published against nothing — a dropped *off* otherwise says two other
+/// programs have stopped running Sissy's line while they have not, and the
+/// next launch re-affirms from the file and undoes the click.
 ///
-/// Refusing to start is the recoverable end of it — an install is re-affirmed
-/// at the next launch, a removal is retried from `agentHooksRemovalPending` —
-/// so the refusal is the fix rather than a cancellation.
+/// From outside the class the two windows are one behaviour. A host with no
+/// engine is the only shape a test can build without starting a real one
+/// against this machine's own trees, so what is pinned here is that no flip is
+/// shown that was not written, never which of the two guards refused it.
 @MainActor
 final class AgentHooksTeardownTests: XCTestCase {
 
-    /// The Settings switch, flipped inside the window where `stop()` is
-    /// suspended on the pass it joined. The published flag goes nowhere with
-    /// it: nothing is written after this point, and a switch showing the
-    /// position it was moved to claims a configuration that is not on disk.
-    func testTheSwitchIsRefusedOnceTeardownHasBegun() async {
+    /// `releaseEngine` clears the engine before awaiting the stop it is built
+    /// on, and the General tab's switch is not disabled while a provider
+    /// switch runs — so this window is reachable by a click.
+    func testAFlipThatCannotReachThePassIsNotPublished() {
         let host = UsageEngineHost()
 
-        await host.stop()
         host.setAgentHooks(true)
 
         XCTAssertFalse(host.agentHooks)
-    }
-
-    /// The same gesture before teardown, so the refusal above is read as the
-    /// stop rather than as a host with nothing wired to it.
-    func testTheSwitchIsTakenWhileTheAppIsRunning() {
-        let host = UsageEngineHost()
-
-        host.setAgentHooks(true)
-
-        XCTAssertTrue(host.agentHooks)
     }
 }
