@@ -282,6 +282,28 @@ final class UsageEngineHistoryTests: XCTestCase {
         )
     }
 
+    /// The backfill is a second writer to the archive and is not the
+    /// aggregator's, so a deletion has to end it rather than only tell the
+    /// providers to forget — and has to record it as covered, or the next
+    /// launch goes back for the days that were just deleted.
+    func testDeletingTheArchiveStopsTheBackfillComingBackForIt() async throws {
+        try writeClaudeTurn()
+        let engine = makeEngine()
+        _ = try await firstFrame(from: engine)
+
+        await engine.deleteHistory()
+        await engine.stop()
+
+        let ledger = ArchiveBackfillLedger.load(
+            from: ArchiveBackfillLedger.defaultURL(in: tempDir))
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: 90))
+        XCTAssertNil(
+            ArchiveBackfill.uncovered(
+                window, coverage: ledger.coverage[ProviderID.claudeCode],
+                meteredThrough: Date()),
+            "a deletion the next launch undoes is a deletion that did not happen")
+    }
+
     /// Retention is the engine's to enforce because a provider switched off is
     /// never built, and the days it recorded are still in the archive. Nothing
     /// but the engine walks a directory whose tail is not running.

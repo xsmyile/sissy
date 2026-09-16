@@ -272,8 +272,19 @@ actor LocalUsageProvider: UsageProvider {
     /// of seconds, and a window that moved underneath it would admit a
     /// different set of days at its end than at its start.
     private var retainWindowStart: Date {
-        backfill?.lowerBound
-            ?? Date().addingTimeInterval(-Double(retainDays) * Self.secondsPerDay)
+        backfill?.lowerBound ?? Self.liveWindowStart(retainDays: retainDays)
+    }
+
+    /// The oldest instant a live tail counts, derived here so the backfill can
+    /// end its own window exactly where this begins.
+    ///
+    /// Rolling absolute time, not calendar days — which is why the backfill
+    /// must ask rather than recompute: across a daylight-saving boundary a
+    /// day is 23 or 25 hours, so two subtractions written two ways disagree
+    /// about which day this lands in, and the two windows would then either
+    /// both claim a day or leave one to nobody.
+    static func liveWindowStart(retainDays: Int, now: Date = Date()) -> Date {
+        now.addingTimeInterval(-Double(retainDays) * secondsPerDay)
     }
 
     private static let secondsPerDay: TimeInterval = 86_400
@@ -414,13 +425,17 @@ actor LocalUsageProvider: UsageProvider {
     /// would refuse to repair on a machine where a worktree has since been
     /// deleted.
     ///
-    /// The project ledger is read and never fed here: the inbox is consumed
-    /// on read, and a pass that drained it would take entries the tail has not
-    /// seen yet out from under the resolver that is caching answers from them.
+    /// The ledger is asked about git before the first byte is read, so the
+    /// attribution a pass can give does not depend on whether the live tail
+    /// happened to be scheduled first — both are detached, and nothing orders
+    /// them. What is *not* done here is the inbox: it is consumed on read, and
+    /// a pass that drained it would take entries out from under the tail's own
+    /// resolver, which caches what it is told for the life of the process.
     func backfillArchive(onDaysWritten: @Sendable () async -> Void = {}) async -> Int {
         guard backfill != nil, historyRoot != nil, lifecycle == .idle else { return 0 }
         lifecycle = .running
         defer { lifecycle = .stopped }
+        adapter.projects.ledger.refreshKnownRepositories()
         let files = enumerateJSONLSortedByMTime()
         watchedCounter.store(files.count)
         let cal = Calendar.current

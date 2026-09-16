@@ -165,45 +165,116 @@ final class UsageBackfillTests: XCTestCase {
         XCTAssertEqual(first.models, second.models, "a whole-day write replaces, never accumulates")
     }
 
-    func testAnEmptyLedgerOwesAPass() throws {
-        let ledger = ArchiveBackfillLedger()
-        XCTAssertTrue(ledger.isDue(provider: ProviderID.claudeCode, coveringFrom: try day(-29)))
+    private func span(_ from: Int, _ through: Int) throws -> Range<Date> {
+        try day(from)..<(try day(through))
     }
 
-    func testALedgerThatCoveredTheWindowOwesNothing() throws {
-        let ledger = ArchiveBackfillLedger()
-            .recording(provider: ProviderID.claudeCode, coveredFrom: try day(-29))
-        XCTAssertFalse(ledger.isDue(provider: ProviderID.claudeCode, coveringFrom: try day(-29)))
-        XCTAssertFalse(
-            ledger.isDue(provider: ProviderID.claudeCode, coveringFrom: try day(-28)),
-            "a day rolling over moves the window's start forward, which is not a new ask")
+    func testAnEmptyRecordLeavesTheWholeWindowUncovered() throws {
+        let window = try span(-89, -1)
+        XCTAssertEqual(
+            ArchiveBackfill.uncovered(window, coverage: nil, meteredThrough: nil), window)
     }
 
-    func testWideningRetentionOwesAnotherPass() throws {
+    func testAWindowAlreadyCoveredIsNotPassedOverAgain() throws {
+        let window = try span(-89, -1)
         let ledger = ArchiveBackfillLedger()
-            .recording(provider: ProviderID.claudeCode, coveredFrom: try day(-29))
-        XCTAssertTrue(ledger.isDue(provider: ProviderID.claudeCode, coveringFrom: try day(-89)))
+            .recording(provider: ProviderID.claudeCode, covered: window)
+        XCTAssertNil(
+            ArchiveBackfill.uncovered(
+                window, coverage: ledger.coverage[ProviderID.claudeCode],
+                meteredThrough: try day(0)))
+    }
+
+    /// The correction this rule exists for. A Mac shut for a fortnight comes
+    /// back with days the tail's 48 h cannot reach; asking only "has a pass
+    /// run" answered no and left them unarchived for good.
+    func testAMacThatWasOffLeavesThoseDaysUncovered() throws {
+        let ledger = ArchiveBackfillLedger()
+            .recording(provider: ProviderID.claudeCode, covered: try span(-103, -15))
+        let uncovered = try XCTUnwrap(
+            ArchiveBackfill.uncovered(
+                try span(-89, -1),
+                coverage: ledger.coverage[ProviderID.claudeCode],
+                meteredThrough: try day(-14)))
+        XCTAssertEqual(uncovered.lowerBound, try day(-14))
+        XCTAssertEqual(uncovered.upperBound, try day(-1))
+    }
+
+    /// The tail archives every day it runs across, so a relaunch owes nothing
+    /// and must not re-read the tree to prove it.
+    func testAPlainRelaunchOwesNothing() throws {
+        let ledger = ArchiveBackfillLedger()
+            .recording(provider: ProviderID.claudeCode, covered: try span(-89, -2))
+        XCTAssertNil(
+            ArchiveBackfill.uncovered(
+                try span(-88, -1),
+                coverage: ledger.coverage[ProviderID.claudeCode],
+                meteredThrough: try day(-1)))
+    }
+
+    func testWideningRetentionAsksForTheWholeWindowAgain() throws {
+        let ledger = ArchiveBackfillLedger()
+            .recording(provider: ProviderID.claudeCode, covered: try span(-29, -1))
+        let window = try span(-89, -1)
+        XCTAssertEqual(
+            ArchiveBackfill.uncovered(
+                window, coverage: ledger.coverage[ProviderID.claudeCode],
+                meteredThrough: try day(0)),
+            window)
     }
 
     func testOneProvidersPassSaysNothingAboutAnothers() throws {
+        let window = try span(-89, -1)
         let ledger = ArchiveBackfillLedger()
-            .recording(provider: ProviderID.claudeCode, coveredFrom: try day(-29))
-        XCTAssertTrue(ledger.isDue(provider: ProviderID.codex, coveringFrom: try day(-29)))
+            .recording(provider: ProviderID.claudeCode, covered: window)
+        XCTAssertEqual(
+            ArchiveBackfill.uncovered(
+                window, coverage: ledger.coverage[ProviderID.codex], meteredThrough: try day(0)),
+            window)
+    }
+
+    /// A top-up pass covers days, not months. Replacing the record with its
+    /// span would throw away the history the first pass indexed.
+    func testATopUpPassExtendsTheRecordRatherThanReplacingIt() throws {
+        let ledger = ArchiveBackfillLedger()
+            .recording(provider: ProviderID.claudeCode, covered: try span(-89, -15))
+            .recording(provider: ProviderID.claudeCode, covered: try span(-14, -1))
+        let coverage = try XCTUnwrap(ledger.coverage[ProviderID.claudeCode])
+        XCTAssertEqual(coverage.fromDay, try day(-89))
+        XCTAssertEqual(coverage.throughDay, try day(-1))
+    }
+
+    /// The tail's window is rolling seconds and the backfill's is calendar
+    /// days; derived apart they disagree about which day they meet in across a
+    /// daylight-saving boundary, and a day then belongs to both or to neither.
+    func testTheWindowEndsOnTheTailsOwnBoundaryAcrossADaylightShift() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Rome"))
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = calendar.timeZone
+        let now = try XCTUnwrap(formatter.date(from: "2026-10-26T00:30:00+01:00"))
+        let window = try XCTUnwrap(
+            ArchiveBackfill.window(
+                retentionDays: Self.retentionDays, liveRetainDays: 2, now: now,
+                calendar: calendar))
+        let tailCuts = calendar.startOfDay(
+            for: LocalUsageProvider.liveWindowStart(retainDays: 2, now: now))
+        XCTAssertEqual(
+            window.upperBound, calendar.date(byAdding: .day, value: 1, to: tailCuts),
+            "the newest day a pass writes is the one the tail suppresses, whatever the clock did")
     }
 
     func testTheLedgerRoundTripsThroughDisk() throws {
         let url = ArchiveBackfillLedger.defaultURL(in: stateDir)
         let ledger = ArchiveBackfillLedger()
-            .recording(provider: ProviderID.claudeCode, coveredFrom: try day(-29))
+            .recording(provider: ProviderID.claudeCode, covered: try span(-89, -1))
         try ArchiveBackfillLedger.save(ledger, to: url)
         XCTAssertEqual(ArchiveBackfillLedger.load(from: url), ledger)
     }
 
     func testALedgerFileThisBuildCannotReadOwesAPass() throws {
         let url = ArchiveBackfillLedger.defaultURL(in: stateDir)
-        try Data("{\"schemaVersion\":99,\"coveredFrom\":{}}".utf8).write(to: url)
-        XCTAssertTrue(
-            ArchiveBackfillLedger.load(from: url)
-                .isDue(provider: ProviderID.claudeCode, coveringFrom: try day(-29)))
+        try Data("{\"schemaVersion\":99,\"coverage\":{}}".utf8).write(to: url)
+        XCTAssertNil(ArchiveBackfillLedger.load(from: url).coverage[ProviderID.claudeCode])
     }
 }

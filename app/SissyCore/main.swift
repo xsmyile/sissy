@@ -193,6 +193,10 @@ if args.contains("--scan") {
 if args.contains("--backfill") {
     // Runs the archive backfill against the config's own state dir and prints
     // what the archive holds afterwards, a row per day per provider per model.
+    // Always the whole window: it neither reads nor writes the coverage record
+    // the app keeps, so a run is repeatable and says nothing about what the app
+    // still owes. Point it at a `--config` of its own — without one it writes
+    // into the same `history/` a running Sissy is writing.
     // That is the shape `ccusage <provider> --json` answers in, so the
     // agreement the issue asks for — a backfilled day landing on the oracle to
     // the token and the microdollar — is assertable in CI. `--scan` cannot:
