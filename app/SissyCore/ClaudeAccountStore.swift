@@ -169,11 +169,4 @@ struct ClaudeAccountStore: Sendable {
         if index.activeUUID == uuid { index.activeUUID = nil }
         try saveIndex(index)
     }
-
-    /// Drops every stored credential, for the Settings button that empties
-    /// what Sissy keeps.
-    func forgetAll() throws {
-        for account in loadIndex().accounts { try secrets.delete(account.uuid) }
-        try saveIndex(Index())
-    }
 }
