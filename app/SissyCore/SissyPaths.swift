@@ -6,8 +6,8 @@ import Foundation
 /// id, so a Debug `sissy-cli` reads what a dev `Sissy.app` wrote.
 enum SissyPaths {
     /// True when the running bundle id ends in `.dev`. False for a bundle with
-    /// no identifier at all, so a test harness cannot pollute a `Sissy-Dev/`
-    /// tree nothing else reads.
+    /// no identifier at all, so a `swift test` binary cannot pollute a
+    /// `Sissy-Dev/` tree nothing else reads.
     static let isDev: Bool = {
         // `sissy-cli` is a command-line tool, not a `.app`, but its Info.plist
         // lives in the binary's `__TEXT,__info_plist` section via
@@ -22,13 +22,34 @@ enum SissyPaths {
     /// all live under a single isolated tree.
     static var supportDirName: String { isDev ? "Sissy-Dev" : "Sissy" }
 
+    /// True when a test runner launched this process.
+    ///
+    /// The unit tests are hosted inside `Sissy.app`, so the bundle id they run
+    /// under is the dev app's own and `isDev` answers for both: every
+    /// `xcodebuild test` appended its stderr to the log of the Sissy the
+    /// developer was running, which is the one file read after a crash.
+    /// Xcode exports the variable before the host process starts, so this
+    /// answers the same whenever it is first asked.
+    static let isTestHarness: Bool =
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
+    /// Where a test harness's own tree goes, keyed by pid so two suites run
+    /// from two worktrees never share one. Under `$TMPDIR`, which the system
+    /// prunes, because nothing here is meant to be read after the run.
+    private static var testRoot: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("sissy-tests-\(ProcessInfo.processInfo.processIdentifier)")
+    }
+
     static var appSupportDir: URL {
-        URL(fileURLWithPath: NSHomeDirectory())
+        if isTestHarness { return testRoot.appendingPathComponent("Application Support") }
+        return URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Library/Application Support/\(supportDirName)")
     }
 
     static var logsDir: URL {
-        URL(fileURLWithPath: NSHomeDirectory())
+        if isTestHarness { return testRoot.appendingPathComponent("Logs") }
+        return URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Library/Logs/\(supportDirName)")
     }
 }
