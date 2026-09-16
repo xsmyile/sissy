@@ -565,7 +565,28 @@ final class UsageEngineHost {
     private func deliver(_ frame: FrameData) {
         if frame.keepAwake.mode != keepAwakeMode { keepAwakeMode = frame.keepAwake.mode }
         syncClaudeCredentialSource()
+        syncClaudeAccounts()
         model?.applyFrame(frame)
+    }
+
+    /// Re-reads which accounts the registry has archived.
+    ///
+    /// The registry learns an account on its own watch — a `/login`, a switch
+    /// made outside Sissy, a token rotation — and none of those is an action
+    /// the app took, so nothing else here would ever hear about it. Driven off
+    /// the frame because that is the one thing arriving on the registry's own
+    /// cadence; the compare is what keeps a steady state from invalidating the
+    /// panel's view graph on every emit.
+    ///
+    /// Without it the switcher could not appear at all: the property was
+    /// written only by `activateClaudeAccount` and `forgetClaudeAccount`,
+    /// which are reachable only from the control that the list it populates is
+    /// what draws.
+    private func syncClaudeAccounts() {
+        guard let engine else { return }
+        let snapshot = engine.claudeAccountSnapshot
+        guard snapshot != claudeAccounts else { return }
+        claudeAccounts = snapshot
     }
 
     /// Re-reads which credential Claude's limits came from.
