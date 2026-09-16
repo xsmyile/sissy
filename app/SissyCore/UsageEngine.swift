@@ -70,6 +70,20 @@ actor UsageEngine {
     /// One reader per linked claude.ai session, shared with the adapter's
     /// signals so both see the same set the moment it changes.
     private let claudeWebSources = LockedValue<[ClaudeWebSource]>([])
+    /// What each linked session is, read once at launch and republished
+    /// whenever a link changes. A `LockedValue` for the reason the sources
+    /// are: the adapter's signals read it while the emitting provider still
+    /// holds its actor.
+    private let claudeWebLinks = LockedValue<[String: ClaudeWebLink]>([:])
+    private let claudeWebIndex: ClaudeWebSessionIndex
+    /// A session waiting on the one question only the user can answer: which
+    /// of its account's organisations it should be read for.
+    ///
+    /// Held here rather than written, because a session filed without that
+    /// answer is one every poll would guess at. It is dropped if the question
+    /// goes unanswered, which costs the user the login again and costs the
+    /// Mac nothing.
+    private var pendingClaudeWebLink: (session: String, choice: ClaudeWebLinkChoice)?
     /// Reads each metering vendor's public status page. Constructed for the
     /// providers that are metering and inert until `start` — a vendor Sissy
     /// was told to leave alone makes no request, which is the same rule its
@@ -236,6 +250,10 @@ actor UsageEngine {
                 store: ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: stateDir)),
                 slot: .live(home: claudeHome))
         self.claudeAccounts = accountRegistry
+        let webIndex = ClaudeWebSessionIndex(
+            url: ClaudeWebSessionIndex.defaultURL(in: stateDir))
+        self.claudeWebIndex = webIndex
+        self.claudeWebLinks.store(webIndex.load())
         var ownLimits: ClaudeLimitsProbe?
         var providers: [any UsageProvider] = []
         for resolved in self.resolvedProviders where resolved.activation.isMetering {
@@ -278,6 +296,7 @@ actor UsageEngine {
                         pricingOverride: config.pricingOverride,
                         limitsProbe: probe,
                         webSources: self.claudeWebSources,
+                        webLinks: self.claudeWebLinks,
                         profile: ClaudeProfileSource(url: home.claudeProfileURL),
                         accounts: accountRegistry,
                         ledger: projectLedger
@@ -493,8 +512,19 @@ actor UsageEngine {
     private func startClaudeWebAdoption() {
         claudeWebAdoptionTask?.cancel()
         let me = self
+        let index = claudeWebIndex
+        let links = claudeWebLinks
         claudeWebAdoptionTask = Task {
-            guard case .adopted = await ClaudeWebSessionAdoption.run() else { return }
+            let outcome = await ClaudeWebSessionAdoption.run(
+                remember: { link in
+                    do {
+                        try index.remember(link)
+                        links.store(index.load())
+                    } catch {
+                        sissyLog("sissy: adopted the session but could not name it: \(error)")
+                    }
+                })
+            guard case .adopted = outcome else { return }
             // The key the session sat under is gone, so the reader built for
             // it is now pointed at nothing. Following the store is what turns
             // that reader into one for the account the session turned out to
@@ -618,6 +648,98 @@ actor UsageEngine {
         }
     }
 
+    /// Files a session the login window came back with, and says whether one
+    /// question is left.
+    ///
+    /// Two round trips to claude.ai before anything is written: who the
+    /// session belongs to, and what it could be read for. An account with one
+    /// organisation that answers the usage question — every account measured
+    /// so far — is linked outright and the user is asked nothing. An account
+    /// with several holds the session here until they say which, because
+    /// membership order is the server's and a reader that picked for itself
+    /// would be free to pick differently on the next poll.
+    func linkClaudeWebSession(
+        _ session: String
+    ) async -> Result<ClaudeWebLinkChoice?, ClaudeWebAccountLink.Failure> {
+        guard lifecycle == .running else { return .success(nil) }
+        let outcome: ClaudeWebAccountLink.Outcome
+        do {
+            outcome = try await ClaudeWebAccountLink.resolve(session: session)
+        } catch let failure as ClaudeWebAccountLink.Failure {
+            sissyLog("sissy: claude.ai would not say what the new session is for: \(failure)")
+            return .failure(failure)
+        } catch {
+            sissyLog("sissy: claude.ai would not say what the new session is for: \(error)")
+            return .failure(.unidentified)
+        }
+
+        switch outcome {
+        case .linked(let link):
+            return await store(session: session, as: link).map { nil }
+        case .choice(let identity, let organizations):
+            let choice = ClaudeWebLinkChoice(identity: identity, organizations: organizations)
+            pendingClaudeWebLink = (session: session, choice: choice)
+            return .success(choice)
+        }
+    }
+
+    /// The pending question, for the panel to draw. Never the session.
+    var claudeWebLinkChoice: ClaudeWebLinkChoice? { pendingClaudeWebLink?.choice }
+
+    /// Answers it, which is what finally files the session.
+    ///
+    /// The organisation has to be one the question offered: the panel is the
+    /// only caller, but a link recorded against an organisation this account
+    /// does not hold would poll a path claude.ai answers 403 to, forever.
+    func chooseClaudeWebOrganization(
+        _ organization: String
+    ) async -> Result<Void, ClaudeWebAccountLink.Failure> {
+        guard lifecycle == .running, let pending = pendingClaudeWebLink else {
+            return .success(())
+        }
+        guard pending.choice.organizations.contains(where: { $0.id == organization }) else {
+            return .failure(.noSubscription)
+        }
+        pendingClaudeWebLink = nil
+        return await store(
+            session: pending.session,
+            as: ClaudeWebLink(identity: pending.choice.identity, organization: organization))
+    }
+
+    /// Drops a link the user walked away from. The session goes with it: it
+    /// was never written, and holding one nobody asked to keep is holding a
+    /// claude.ai session for no reading.
+    func cancelClaudeWebLink() {
+        pendingClaudeWebLink = nil
+    }
+
+    /// The session, its link, and the reader for both.
+    ///
+    /// The index is written after the session and never before: an entry
+    /// naming a session that is not filed would have the panel offer an
+    /// account with nothing behind it, where a session with no entry is just
+    /// one whose organisation is derived, which is what every reader did
+    /// before links existed.
+    private func store(
+        session: String,
+        as link: ClaudeWebLink
+    ) async -> Result<Void, ClaudeWebAccountLink.Failure> {
+        do {
+            try ClaudeWebSessionStore.save(session, account: link.identity.uuid)
+        } catch {
+            sissyLog("sissy: could not file the linked claude.ai session: \(error)")
+            return .failure(.unidentified)
+        }
+        do {
+            try claudeWebIndex.remember(link)
+            claudeWebLinks.store(claudeWebIndex.load())
+        } catch {
+            sissyLog("sissy: filed the claude.ai session but not what it is for: \(error)")
+        }
+        await followStoredClaudeWebSessions()
+        return .success(())
+    }
+
     /// Forgets the imported session and hands the reading back to the OAuth
     /// probe, which is where it was before the import.
     /// Every stored session goes, not only the one a reader is using: the
@@ -635,9 +757,12 @@ actor UsageEngine {
         claudeWebAdoptionTask?.cancel()
         await claudeWebAdoptionTask?.value
         claudeWebAdoptionTask = nil
+        pendingClaudeWebLink = nil
         for account in ClaudeWebSessionStore.storedAccounts() {
             try? ClaudeWebSessionStore.delete(account: account)
         }
+        try? claudeWebIndex.forgetAll()
+        claudeWebLinks.store([:])
         await stopClaudeLimits()
         await startClaudeLimits(userInitiated: false)
         await reemit()
@@ -1025,9 +1150,10 @@ actor UsageEngine {
             await source.retire()
         }
         let kept = existing.filter { stored.contains($0.account) }
+        let links = claudeWebLinks.load()
         let added = stored.subtracting(kept.map(\.account))
             .sorted()
-            .map { ClaudeWebSource(account: $0) }
+            .map { ClaudeWebSource(account: $0, organization: links[$0]?.organization) }
         claudeWebSources.store(kept + added)
     }
 
