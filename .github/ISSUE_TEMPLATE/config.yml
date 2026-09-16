@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/xsmyile/sissy/security/advisories/new
     about: Report privately. Please do not open a public issue.
   - name: Sissy's numbers disagree with ccusage
-    url: https://github.com/xsmyile/sissy/blob/master/README.md#privacy
+    url: https://github.com/xsmyile/sissy/blob/master/README.md#how-it-works
     about: Check `ccusage --version` first. A stale Homebrew build reports a different figure.
