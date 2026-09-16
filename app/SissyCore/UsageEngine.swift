@@ -641,7 +641,7 @@ actor UsageEngine {
         _ organization: String
     ) async -> Result<Void, ClaudeWebAccountLink.Failure> {
         guard lifecycle == .running, let pending = pendingClaudeWebLink else {
-            return .success(())
+            return .failure(.interrupted)
         }
         guard pending.choice.organizations.contains(where: { $0.id == organization }) else {
             return .failure(.noSubscription)
@@ -652,9 +652,11 @@ actor UsageEngine {
             as: ClaudeWebLink(identity: pending.choice.identity, organization: organization))
     }
 
-    /// Drops a link the user walked away from. The session goes with it: it
-    /// was never written, and holding one nobody asked to keep is holding a
-    /// claude.ai session for no reading.
+    /// Drops a link the user walked away from.
+    ///
+    /// There is nothing to delete: the session was never written, and this is
+    /// the only place it was held. Holding one nobody asked to keep would be
+    /// holding a claude.ai session for a reading that will never be made.
     func cancelClaudeWebLink() {
         pendingClaudeWebLink = nil
     }

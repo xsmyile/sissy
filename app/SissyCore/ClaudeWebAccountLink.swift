@@ -57,6 +57,11 @@ enum ClaudeWebAccountLink {
     enum Failure: Error, Equatable {
         case unidentified
         case noSubscription
+        /// The question was answered and the session it belonged to was no
+        /// longer held. Its own case rather than `unidentified`, because
+        /// claude.ai answered fine and what to do about it is different: the
+        /// login is made again, and nothing about the account was wrong.
+        case interrupted
     }
 
     /// Resolves a session, asking claude.ai who it belongs to and what it

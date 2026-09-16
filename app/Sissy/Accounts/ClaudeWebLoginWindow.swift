@@ -45,6 +45,15 @@ import WebKit
 final class ClaudeWebLoginWindow: NSObject {
     static let loginURL = URL(string: "https://claude.ai/login")!
     private static let host = "claude.ai"
+
+    /// claude.ai itself or a subdomain of it, and nothing that merely ends in
+    /// those characters. Used by both the cookie the login produces and the
+    /// links it offers, because two spellings of one rule is how they come to
+    /// disagree: this one was `hasSuffix(host)` on the cookie, which a host
+    /// called `notclaude.ai` satisfies.
+    private static func isClaude(_ host: String) -> Bool {
+        host == Self.host || host.hasSuffix(".\(Self.host)")
+    }
     private static let contentSize = NSSize(width: 520, height: 680)
     private static let promptSize = NSSize(width: 420, height: 260)
     private static let title = "Add Claude account"
@@ -184,7 +193,7 @@ extension ClaudeWebLoginWindow: WKHTTPCookieStoreObserver {
             guard
                 let session = cookies.first(where: {
                     $0.name == ClaudeWebSessionStore.cookieName
-                        && $0.domain.hasSuffix(Self.host)
+                        && Self.isClaude($0.domain)
                         && !$0.value.isEmpty
                 })
             else { return }
@@ -203,7 +212,7 @@ extension ClaudeWebLoginWindow: WKNavigationDelegate {
         guard navigationAction.navigationType == .linkActivated,
             let url = navigationAction.request.url,
             let host = url.host(),
-            host != Self.host, !host.hasSuffix(".\(Self.host)")
+            !Self.isClaude(host)
         else { return .allow }
         NSWorkspace.shared.open(url)
         return .cancel
