@@ -9,9 +9,11 @@ final class ClaudeWebSessionStoreTests: XCTestCase {
     /// A per-run account, so a test can write to the real keychain without
     /// ever addressing the item the user's own import lives in.
     private lazy var account = "test-\(UUID().uuidString)"
+    private lazy var secondAccount = "test-\(UUID().uuidString)"
 
     override func tearDown() {
         try? ClaudeWebSessionStore.delete(account: account)
+        try? ClaudeWebSessionStore.delete(account: secondAccount)
         super.tearDown()
     }
 
@@ -107,6 +109,29 @@ final class ClaudeWebSessionStoreTests: XCTestCase {
         else {
             return XCTFail("a forgotten session still reads as something")
         }
+    }
+
+    /// Unlinking one account leaves every other account's session where it
+    /// is, which is the whole of what the trash on a Settings row promises.
+    ///
+    /// The control used to be one "Forget session" that deleted every stored
+    /// session at once, so a user with two linked accounts who wanted rid of
+    /// one lost both.
+    func testForgettingOneAccountsSessionLeavesTheOthers() throws {
+        let other = "sk-ant-sid01-" + String(repeating: "b", count: 100)
+        try ClaudeWebSessionStore.save(session, account: account)
+        try ClaudeWebSessionStore.save(other, account: secondAccount)
+
+        try ClaudeWebSessionStore.delete(account: account)
+
+        XCTAssertFalse(ClaudeWebSessionStore.storedAccounts().contains(account))
+        guard
+            case .found(let kept) = ClaudeWebSessionStore.load(
+                account: secondAccount, allowingInteraction: false)
+        else {
+            return XCTFail("forgetting one account's session took another's with it")
+        }
+        XCTAssertEqual(kept.accessToken, other)
     }
 
     /// Forgetting something that is already gone is what the caller asked for,
