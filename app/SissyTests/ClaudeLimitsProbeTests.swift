@@ -301,19 +301,20 @@ final class ClaudeLimitsProbeTests: XCTestCase {
                 ClaudeLimitsProbe.Reading(
                     windows: [
                         UsageWindow(
-                            minutes: 300, usedPercent: 10, resetsAt: .distantFuture,
-                            scope: accessToken)!
+                            minutes: 300,
+                            usedPercent: accessToken == "first" ? 10 : 20,
+                            resetsAt: .distantFuture)!
                     ],
                     credits: nil)
             })
 
         _ = await probe.refreshOnce {}
-        XCTAssertEqual(probe.currentSignals().windows.map(\.scope), ["first"])
+        XCTAssertEqual(probe.currentSignals().windows.map(\.usedPercent), [10])
 
         token.update { $0 = "second" }
         _ = await probe.refreshOnce {}
 
-        XCTAssertEqual(probe.currentSignals().windows.map(\.scope), ["second"])
+        XCTAssertEqual(probe.currentSignals().windows.map(\.usedPercent), [20])
         await probe.stop()
     }
 }

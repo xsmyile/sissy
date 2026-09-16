@@ -119,12 +119,19 @@ actor ClaudeAccountRegistry {
 
     /// Reads the active credential and archives it when it is one Sissy has
     /// not seen. Cheap when nothing has changed, which is the ordinary case.
-    func captureActive() async {
-        guard let credential = slot.read() else { return }
+    ///
+    /// Answers whether the published snapshot moved, so the caller can emit on
+    /// the one event that produces no token of its own — someone signing into
+    /// a different account in a terminal Sissy is not watching.
+    @discardableResult
+    func captureActive() async -> Bool {
+        guard let credential = slot.read() else { return false }
         guard let parsed = ClaudeCredentialsStore.parse(credential),
             parsed.accessToken != lastSeenToken
-        else { return }
+        else { return false }
+        let before = published.load()
         await file(credential: credential, markActive: true)
+        return published.load() != before
     }
 
     /// Makes an archived account the one Claude Code starts as.

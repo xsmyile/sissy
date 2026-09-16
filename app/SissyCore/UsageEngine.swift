@@ -455,11 +455,16 @@ actor UsageEngine {
     /// it is cheap: an unchanged credential costs one `security` call and no
     /// request. Only a token Sissy has not filed buys a round trip to identify
     /// it, which is roughly once per token rotation.
+    ///
+    /// An account it has not seen before re-emits, because nothing else will:
+    /// a `/login` produces no token event of its own, and the switcher would
+    /// otherwise wait for an unrelated frame to carry the new list to the app.
     private func startClaudeAccountWatch() {
         let registry = claudeAccounts
+        let me = self
         claudeAccountsTask = Task.detached {
             while !Task.isCancelled {
-                await registry.captureActive()
+                if await registry.captureActive() { await me.reemit() }
                 do {
                     try await Task.sleep(for: Self.claudeAccountPollInterval)
                 } catch {
@@ -579,23 +584,35 @@ actor UsageEngine {
     /// every account it has seen, so whatever this overwrites is still
     /// recoverable in a click. It runs from the panel's own control and from
     /// nothing else.
+    /// Guarded on the lifecycle for the reason every other control here is:
+    /// the host captures the engine strongly in an unstructured `Task`, so a
+    /// switch that lands after `stop()` would build the probe a fresh poll
+    /// loop and hold the dead engine alive through its callback.
+    ///
+    /// The row is emitted between the switch and the re-read rather than after
+    /// both, because the re-read is a credential and an HTTP round trip and a
+    /// control that sits in its old position for the length of one reads as a
+    /// click that did nothing. Same rule the provider toggle already follows.
+    ///
+    /// The identity on the row and the windows under it come from two places
+    /// that both answer for the account this just changed — the CLI's config
+    /// file and the CLI's credential — and neither is watched, so left to
+    /// their own cadences the switch half-happens: the address moves on the
+    /// next tail read while the gauges keep the percentages of the account the
+    /// user left.
+    ///
+    /// The imported claude.ai session is deliberately not refreshed. It is
+    /// Claude.app's account rather than the CLI's, and this control did not
+    /// touch it.
     func activateClaudeAccount(uuid: String) async -> Result<Void, ClaudeAccountRegistry.Failure> {
+        guard lifecycle == .running else { return .failure(.notArchived) }
         let outcome = await claudeAccounts.activate(uuid: uuid)
         if case .failure(let why) = outcome {
             sissyLog("sissy: could not switch Claude Code to \(uuid): \(why)")
             await reemit()
             return outcome
         }
-        // The identity on the row and the windows under it come from two
-        // places that both answer for the account this just changed — the
-        // CLI's config file and the CLI's credential — and neither is watched.
-        // Left to their own cadences the switch reads as half-done: the
-        // address changes on the next tail read while the gauges keep the
-        // percentages of the account the user just left.
-        //
-        // The imported claude.ai session is deliberately not refreshed. It is
-        // Claude.app's account rather than the CLI's, and this control did not
-        // touch it.
+        await reemit()
         let me = self
         await claudeOwnLimits?.refresh { await me.reemit() }
         await aggregator.refreshSignals(for: ProviderID.claudeCode)

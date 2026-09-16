@@ -138,6 +138,30 @@ final class ClaudeAccountRegistryTests: XCTestCase {
 
     /// The poll runs every couple of minutes and the token rotates in tens of
     /// minutes, so an unchanged credential must not buy a request.
+    /// The capture is what a `/login` in a terminal Sissy is not watching
+    /// reaches, and it produces no token event of its own — so it has to say
+    /// whether anything moved, or the switcher waits for an unrelated frame to
+    /// carry the new account to the app. The second call must answer false:
+    /// re-emitting on every 120 s poll would rebuild the panel for nothing.
+    func testCaptureReportsOnlyTheCaptureThatChangedSomething() async {
+        let vault = Vault()
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(vault) { token in
+            ClaudeAccountIdentity(
+                uuid: "u-\(token)", email: nil, organization: nil,
+                organizationType: nil, rateLimitTier: nil)
+        }
+
+        let first = await registry.captureActive()
+        let unchanged = await registry.captureActive()
+        vault.active = credential("tok-b")
+        let switched = await registry.captureActive()
+
+        XCTAssertTrue(first)
+        XCTAssertFalse(unchanged)
+        XCTAssertTrue(switched)
+    }
+
     func testCaptureIdentifiesAnUnchangedCredentialOnlyOnce() async {
         let vault = Vault()
         vault.active = credential("tok-a")

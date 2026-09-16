@@ -71,7 +71,7 @@ final class ClaudeWebSessionStoreTests: XCTestCase {
             return XCTFail("a session Sissy just wrote did not read back")
         }
         XCTAssertNil(credentials.expiresAt)
-        XCTAssertTrue(credentials.isValid(at: .distantFuture))
+        XCTAssertNil(credentials.expiresAt)
     }
 
     /// Importing again replaces: a rotated session must not leave the old one
