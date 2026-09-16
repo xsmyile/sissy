@@ -169,6 +169,16 @@ actor LocalUsageProvider: UsageProvider {
     /// provider directory there is, including one whose provider is switched
     /// off and therefore never built.
     private let historyRoot: URL?
+    /// The span of events this provider counts, when it is a backfill pass
+    /// rather than the live tail.
+    ///
+    /// Non-nil turns the whole instance around: it counts this fixed range
+    /// instead of the rolling window, it is driven by `backfillArchive()`
+    /// rather than `start()`, and it writes day files and nothing else — no
+    /// snapshot, no watcher, no emit. The range ends where the tail's window
+    /// begins, so the two never write the same day and no coverage check has
+    /// to arbitrate between them.
+    private let backfill: Range<Date>?
 
     private var fileOffsets: [URL: UInt64] = [:]
     private var fileMTimes: [URL: TimeInterval] = [:]
@@ -256,11 +266,30 @@ actor LocalUsageProvider: UsageProvider {
     /// and derived in one place so every reader of it agrees: the day the
     /// parser cuts, the day the buckets drop and the day the archive refuses
     /// to freeze are all the same day.
+    ///
+    /// A backfill pass answers with its own range instead. It is computed once
+    /// and fixed, where the tail's slides with the clock: the pass takes tens
+    /// of seconds, and a window that moved underneath it would admit a
+    /// different set of days at its end than at its start.
     private var retainWindowStart: Date {
-        Date().addingTimeInterval(-Double(retainDays) * Self.secondsPerDay)
+        backfill?.lowerBound
+            ?? Date().addingTimeInterval(-Double(retainDays) * Self.secondsPerDay)
     }
 
     private static let secondsPerDay: TimeInterval = 86_400
+
+    /// Files consumed between cooperative yields. Without them the actor pins
+    /// one Swift concurrency thread for a whole scan, and the check after the
+    /// yield is what lets a teardown interrupt one.
+    private static let yieldInterval = 4
+
+    /// Days the live tail answers for. Two, since v0.1.0.
+    ///
+    /// It bounds three separate things — the cold scan at launch, the dedup
+    /// ledger and day buckets held in memory, and **which days the tail owns
+    /// in the archive**. Only the third is a statement about the archive, and
+    /// `ArchiveBackfill` owns every day older than it.
+    static let defaultRetainDays = 2
 
     /// FSEvents coalescing window. Higher = more batching (lower CPU, more
     /// notifications coalesced into one wake); lower = snappier UI updates.
@@ -271,10 +300,11 @@ actor LocalUsageProvider: UsageProvider {
 
     init(
         adapter: sending any SourceAdapter,
-        retainDays: Int = 2,
+        retainDays: Int = LocalUsageProvider.defaultRetainDays,
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
-        historyRoot: URL? = nil
+        historyRoot: URL? = nil,
+        backfill: Range<Date>? = nil
     ) {
         let descriptor = adapter.descriptor
         self.adapter = adapter
@@ -286,6 +316,7 @@ actor LocalUsageProvider: UsageProvider {
         self.pollInterval = pollInterval
         self.persistenceURL = persistenceURL
         self.historyRoot = historyRoot
+        self.backfill = backfill
     }
 
     /// The adapter's own reading, with the live-activity marker this tail
@@ -308,6 +339,10 @@ actor LocalUsageProvider: UsageProvider {
     }
 
     func start(onChange: @escaping @Sendable (DayTotals) async -> Void) async {
+        guard backfill == nil else {
+            sissyLog("sissy: \(id) refused to tail — this provider is a backfill pass")
+            return
+        }
         guard lifecycle == .idle else { return }
         lifecycle = .running
         self.onChange = onChange
@@ -354,6 +389,70 @@ actor LocalUsageProvider: UsageProvider {
                 await self?.poll()
             }
         }
+    }
+
+    /// Writes the archive for every day older than the window the live tail
+    /// owns, reading the CLIs' own logs, and answers with how many day files
+    /// it wrote. The one entry point for a provider built with a `backfill`
+    /// range.
+    ///
+    /// It reads the same trees through the same adapter as the tail, which is
+    /// the whole design: the rules that make a metered day land on `ccusage`
+    /// exactly — a Claude turn billed by the growth in its output, a Codex
+    /// `token_count` whose running total has not moved, a forked session
+    /// replaying its parent — are the tail's, so a backfilled day inherits
+    /// them rather than reimplementing them. It keeps none of what it learns:
+    /// no snapshot is written, so the tail resumes from the byte it left off
+    /// at whether this ran or not.
+    ///
+    /// Days are flushed as they are *proved* complete rather than at the end.
+    /// Files come newest first, so once one of mtime `M` has been consumed no
+    /// unread file can carry an event later than `M`, and every day after
+    /// `M`'s is final. Writing them then is what fills the panel's windows in
+    /// while the pass runs; writing only them is what stops an interrupted
+    /// pass from freezing a day it had read half of, which `isCoveredBy`
+    /// would refuse to repair on a machine where a worktree has since been
+    /// deleted.
+    ///
+    /// The project ledger is read and never fed here: the inbox is consumed
+    /// on read, and a pass that drained it would take entries the tail has not
+    /// seen yet out from under the resolver that is caching answers from them.
+    func backfillArchive(onDaysWritten: @Sendable () async -> Void = {}) async -> Int {
+        guard backfill != nil, historyRoot != nil, lifecycle == .idle else { return 0 }
+        lifecycle = .running
+        defer { lifecycle = .stopped }
+        let files = enumerateJSONLSortedByMTime()
+        watchedCounter.store(files.count)
+        let cal = Calendar.current
+        var written = 0
+        var interrupted = false
+        for (index, file) in files.enumerated() {
+            _ = ingestNewLines(in: file.url)
+            if index % Self.yieldInterval == Self.yieldInterval - 1 {
+                await Task.yield()
+                if Task.isCancelled {
+                    interrupted = true
+                    break
+                }
+            }
+            let complete = saveHistoryIfDirty(
+                finalizedAfter: cal.startOfDay(for: Date(timeIntervalSince1970: file.mtime)))
+            if complete > 0 {
+                written += complete
+                await onDaysWritten()
+            }
+        }
+        if !interrupted {
+            let remaining = saveHistoryIfDirty(force: true)
+            if remaining > 0 {
+                written += remaining
+                await onDaysWritten()
+            }
+        }
+        sissyLog(
+            "sissy: \(id) backfill read \(files.count) log file(s) and wrote \(written) "
+                + "archived day(s)\(interrupted ? " before it was cancelled" : "")")
+        return written
     }
 
     func stop() async {
@@ -431,8 +530,8 @@ actor LocalUsageProvider: UsageProvider {
         if rescanAll {
             let files = enumerateJSONLSortedByMTime()
             watchedCounter.store(files.count)
-            for url in files {
-                if ingestNewLines(in: url) { dirty = true }
+            for file in files {
+                if ingestNewLines(in: file.url) { dirty = true }
             }
         } else {
             // Dedup via Set: a single turn can produce multiple events for the
@@ -559,8 +658,8 @@ actor LocalUsageProvider: UsageProvider {
         var dirtySinceEmit = false
         var lastEmitAt = Date.distantPast
         let emitThrottle = UsageReaderShared.pollEmitThrottle
-        for (i, url) in files.enumerated() {
-            if ingestNewLines(in: url) { dirtySinceEmit = true }
+        for (i, file) in files.enumerated() {
+            if ingestNewLines(in: file.url) { dirtySinceEmit = true }
             // Cooperative concurrency: without these yields the actor pins
             // one Swift concurrency thread for the entire backfill scan,
             // starving everything else that awaits on it — the readiness
@@ -569,7 +668,7 @@ actor LocalUsageProvider: UsageProvider {
             // an in-flight cold scan instead of waiting for every file to
             // drain: a cancelled boot task on the way down, or a `stop()`
             // that landed while the yield had the actor released.
-            if i % 4 == 3 {
+            if i % Self.yieldInterval == Self.yieldInterval - 1 {
                 await Task.yield()
                 if Task.isCancelled || lifecycle == .stopped { return }
             }
@@ -603,10 +702,21 @@ actor LocalUsageProvider: UsageProvider {
         saveHistoryIfDirty()
     }
 
+    /// One candidate session log and the mtime it was ordered by.
+    ///
+    /// The mtime is carried rather than recomputed because the backfill reads
+    /// the ordering as a guarantee: files come newest first, so once a file of
+    /// mtime `M` has been consumed no unread file can hold an event later than
+    /// `M`, and every day after `M`'s is therefore complete.
+    private struct ScannedFile {
+        let url: URL
+        let mtime: TimeInterval
+    }
+
     /// Every `.jsonl` under the tree, newest first. Any name is accepted —
     /// Codex writes `rollout-*.jsonl` and Claude Code a UUID, and a fork that
     /// renames either still gets read.
-    private func enumerateJSONLSortedByMTime() -> [URL] {
+    private func enumerateJSONLSortedByMTime() -> [ScannedFile] {
         guard
             let it = FileManager.default.enumerator(
                 at: root,
@@ -615,9 +725,7 @@ actor LocalUsageProvider: UsageProvider {
             )
         else { return [] }
         let cutoff = retainWindowStart
-        // Carry mtime through so we can sort the candidate set without a
-        // second `attributesOfItem` pass.
-        var candidates: [(url: URL, mtime: TimeInterval)] = []
+        var candidates: [ScannedFile] = []
         while let u = it.nextObject() as? URL {
             guard u.pathExtension == "jsonl" else { continue }
             guard let attrs = try? FileManager.default.attributesOfItem(atPath: u.path),
@@ -628,10 +736,10 @@ actor LocalUsageProvider: UsageProvider {
                 // retain window so skip permanently.
                 continue
             }
-            candidates.append((u, mtimeDate.timeIntervalSince1970))
+            candidates.append(ScannedFile(url: u, mtime: mtimeDate.timeIntervalSince1970))
         }
         candidates.sort { $0.mtime > $1.mtime }
-        return candidates.map(\.url)
+        return candidates
     }
 
     private func ingest(_ event: UsageEvent) {
@@ -690,6 +798,12 @@ actor LocalUsageProvider: UsageProvider {
             retainCutoff: retainWindowStart
         )
         guard let event = adapter.event(from: line, seen: &seenEventKeys) else { return false }
+        // Rejected here rather than at the adapter's own cutoff, and
+        // deliberately after it has been asked: Codex's per-file bookkeeping —
+        // which turn a copy repeats, where its running total stands — is
+        // updated for events it does not bill, and an upper bound enforced
+        // inside the adapter would skip that for every day the tail owns.
+        if let backfill, event.timestamp >= backfill.upperBound { return false }
         ingest(event)
         return true
     }
@@ -1019,14 +1133,31 @@ actor LocalUsageProvider: UsageProvider {
     /// A day whose write fails is kept dirty and retried on the next flush;
     /// the others are still attempted, because one unwritable day must not
     /// cost the day that is about to leave the retain window.
-    private func saveHistoryIfDirty(force: Bool = false) {
-        guard let historyRoot, !historyDirtyDays.isEmpty else { return }
+    @discardableResult
+    private func saveHistoryIfDirty(force: Bool = false, finalizedAfter: Date? = nil) -> Int {
+        guard let historyRoot, !historyDirtyDays.isEmpty else { return 0 }
         let now = Date()
-        if !force && now.timeIntervalSince(lastHistorySaveAt) < Self.saveThrottle { return }
+        if !force, finalizedAfter == nil,
+            now.timeIntervalSince(lastHistorySaveAt) < Self.saveThrottle
+        {
+            return 0
+        }
         let dayFmt = UsageReaderShared.dayFormatter
         var unwritten: Set<Date> = []
+        var written = 0
         for day in historyDirtyDays {
+            if let finalizedAfter, day <= finalizedAfter {
+                unwritten.insert(day)
+                continue
+            }
             guard let totals = dailyModelTotals[day], !totals.isEmpty else { continue }
+            if refusesUnpricedDays, Self.holdsAnUnpricedModel(totals) {
+                sissyLog(
+                    "sissy: \(id) left \(dayFmt.string(from: day)) out of the archive — it holds "
+                        + "a model no pricing source carries, and a day written short is frozen "
+                        + "short")
+                continue
+            }
             let record = UsageHistoryDay(
                 day: dayFmt.string(from: day),
                 provider: id,
@@ -1045,6 +1176,7 @@ actor LocalUsageProvider: UsageProvider {
             }
             do {
                 try UsageHistoryStore.save(record, in: historyRoot)
+                written += 1
             } catch {
                 // Same call as the snapshot's: the day stays dirty and the
                 // next flush retries it. Logged because an archive that
@@ -1058,6 +1190,30 @@ actor LocalUsageProvider: UsageProvider {
         }
         historyDirtyDays = unwritten
         lastHistorySaveAt = now
+        return written
+    }
+
+    /// Whether a day may be refused for holding a model no rate covers.
+    ///
+    /// Only a backfill pass may. The tail meters a day that is still running:
+    /// a refusal there would keep today out of the archive for the whole of
+    /// it, because `applyPriceCatalog` prices events from the refresh onwards
+    /// and never reprices what is already counted. A backfilled day is past
+    /// and nothing will grow it back, so writing it short freezes it short —
+    /// which is the worse of the two, and the one this guards.
+    private var refusesUnpricedDays: Bool { backfill != nil }
+
+    /// Whether any row here is a model no pricing source carried.
+    ///
+    /// Read off the rows rather than carried on the event, because it is
+    /// already there: `Pricing.cost` answers zero only when no rate resolved,
+    /// and Claude Code's one legitimately free shape — the `<synthetic>` turn
+    /// it writes for its own local notices — carries no tokens either, so
+    /// tokens without cost names an unpriced model and nothing else.
+    private static func holdsAnUnpricedModel(
+        _ totals: [UsageHistoryRow: UsageHistoryTotals]
+    ) -> Bool {
+        totals.contains { $0.value.totalTokens > 0 && $0.value.cost == 0 }
     }
 
     /// Throttled atomic save. `force=true` bypasses throttle (used by stop).

@@ -100,6 +100,21 @@ jobs:
           {"type":"event_msg","timestamp":"$T2","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":2100,"cached_input_tokens":1800,"output_tokens":52,"reasoning_output_tokens":8,"total_tokens":2152},"total_token_usage":{"input_tokens":16397,"cached_input_tokens":11400,"output_tokens":413,"reasoning_output_tokens":48,"total_tokens":16810}}}}
           {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":900,"cached_input_tokens":400,"output_tokens":30,"reasoning_output_tokens":5,"total_tokens":930},"total_token_usage":{"input_tokens":17297,"cached_input_tokens":11800,"output_tokens":443,"reasoning_output_tokens":53,"total_tokens":17740}}}}
           JSONL
+          # A day the live tail's 48h window never reaches, for `--backfill`.
+          # `--scan` cannot assert this one: it runs the tail's own window and
+          # reports today, so every day the archive is filled in from would be
+          # invisible to it. The file is stamped to its own day so the pass
+          # exercises the rule that decides when a day is final — files come
+          # newest first, and a day is written once no unread file can still
+          # carry it.
+          PAST_DAY=$(date -u -v-5d +"%Y-%m-%d")
+          PAST=$(date -u -v-5d +"%Y-%m-%dT12:00:00.000Z")
+          cat > "$FIX/claude/projects/p/past.jsonl" <<JSONL
+          {"type":"assistant","timestamp":"$PAST","requestId":"p1","message":{"id":"pm1","model":"claude-opus-5","usage":{"input_tokens":700,"output_tokens":1500,"cache_read_input_tokens":40000,"cache_creation_input_tokens":6000,"cache_creation":{"ephemeral_5m_input_tokens":2000,"ephemeral_1h_input_tokens":4000}}}}
+          {"type":"assistant","timestamp":"$PAST","requestId":"p2","message":{"id":"pm2","model":"claude-sonnet-5","usage":{"input_tokens":400,"output_tokens":600,"cache_read_input_tokens":8000,"cache_creation_input_tokens":0}}}
+          JSONL
+          touch -t "$(date -u -v-5d +"%Y%m%d1200")" "$FIX/claude/projects/p/past.jsonl"
+          echo "PAST_DAY=$PAST_DAY" >> "$GITHUB_ENV"
           cat > "$RUNNER_TEMP/oracle.json" <<JSON
           {"claudeDataDir":"$FIX/claude/projects","codexDataDir":"$FIX/codex/sessions","pollIntervalSeconds":60,"providers":{"claudeCode":true,"codex":true}}
           JSON
@@ -183,4 +198,58 @@ jobs:
                   print(f"::error::{f}")
               sys.exit(1)
           print("sissy-cli and ccusage agree exactly")
+          PY
+
+      - name: Compare a backfilled day against ccusage
+        run: |
+          # The archive starts the day Sissy first runs; the CLIs' logs go back
+          # months, and `--backfill` is what indexes the difference. A day it
+          # writes is past and nothing will grow it back, so the agreement that
+          # matters is the one asserted here rather than on today's totals.
+          "$DD/sissy-cli" --config "$RUNNER_TEMP/oracle.json" --backfill \
+            > "$RUNNER_TEMP/sissy-archive.json"
+          python3 - <<'PY'
+          import json, os, sys
+          tmp = os.environ["RUNNER_TEMP"]
+          day = os.environ["PAST_DAY"]
+          archive = json.load(open(f"{tmp}/sissy-archive.json"))
+          claude = json.load(open(f"{tmp}/ccu-claude.json"))
+
+          mine = [d for d in archive if d["day"] == day and d["provider"] == "claude-code"]
+          theirs = [
+              r for r in claude.get("daily", [])
+              if r.get("period") == day or r.get("date") == day
+          ]
+          failures = []
+          if not mine:
+              failures.append(f"the backfill archived no claude-code day for {day}")
+          if not theirs:
+              failures.append(f"ccusage reported no claude-code row for {day}")
+
+          if not failures:
+              rows = mine[0]["models"]
+              got = {
+                  "inputTokens": sum(r["inputTokens"] for r in rows),
+                  "outputTokens": sum(r["outputTokens"] for r in rows),
+                  "cacheReadTokens": sum(r["cacheReadTokens"] for r in rows),
+                  "cacheCreationTokens": sum(r["cacheCreationTokens"] for r in rows),
+              }
+              want = {k: theirs[0][k] for k in got}
+              cost = sum(float(r["cost"]) for r in rows)
+              print(f"{day}: {got} vs {want} | cost {cost:.6f} vs {theirs[0]['totalCost']:.6f}")
+              for key, value in got.items():
+                  if value != want[key]:
+                      failures.append(f"{day}: {key} {value} vs ccusage {want[key]}")
+              # Sissy rounds per event and ccusage per day, so the two differ in
+              # the last place they both carry and nowhere else.
+              if abs(cost - theirs[0]["totalCost"]) > 1e-6:
+                  failures.append(
+                      f"{day}: cost {cost:.6f} vs ccusage {theirs[0]['totalCost']:.6f}"
+                  )
+
+          if failures:
+              for f in failures:
+                  print(f"::error::{f}")
+              sys.exit(1)
+          print(f"the backfilled {day} lands on ccusage exactly")
           PY

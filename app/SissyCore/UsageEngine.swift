@@ -45,6 +45,14 @@ actor UsageEngine {
     /// in-flight fetch instead of leaving it to finish against a torn-down
     /// engine.
     private var priceCatalogTask: Task<Void, Never>?
+    /// Handle on the one-time archive backfill, for the same reason: it is a
+    /// read of the whole log tree and a quit has to interrupt it rather than
+    /// wait for it.
+    private var backfillTask: Task<Void, Never>?
+    /// The catalog the cold scan settled on, kept so the archive backfill
+    /// prices historical events against exactly the rates the tail used. Nil
+    /// is the embedded seed, which is a rate source rather than a failure.
+    private var initialPriceCatalog: PriceCatalog?
     /// Whether a provider has produced a reading yet. It is what a config
     /// change re-emits against: before the first one there is nothing to
     /// rebuild, and the change lands on the first real frame instead.
@@ -103,6 +111,13 @@ actor UsageEngine {
     /// How long the rollups are reused before the day files are read again.
     /// Long enough that frames do not walk the archive, short enough that a
     /// window is never visibly behind the day it includes.
+    ///
+    /// It survives the archive growing from days to months: measured on real
+    /// files, a day is about 819 bytes over four rows, so a full 90-day
+    /// two-provider archive is ~150 KB and decodes in under 2 ms. What a
+    /// backfill needs is not a longer interval but a frame —
+    /// `invalidateHistoryRollups` — since an idle Mac emits nothing and the
+    /// panel would otherwise hold yesterday's windows until the next turn.
     private static let historyRollupTTL: TimeInterval = 2
 
     /// An engine runs once. `stopped` is terminal on purpose: the app builds a
@@ -318,6 +333,115 @@ actor UsageEngine {
                 await me.rebuildAndEmit(today: today, slices: slices)
             }
         }
+        // After the tail, never before it: the backfill reads the project
+        // ledger and the tail is what feeds it — the inbox, and the worktree
+        // lists git keeps. A pass that got there first would resolve fewer
+        // paths, which costs attribution the tail could have given it.
+        startArchiveBackfill()
+    }
+
+    /// Fills the archive in from the CLIs' own logs, once per provider, for
+    /// every day older than the window the live tail owns.
+    ///
+    /// Detached and at `utility`, because it reads the whole log tree — about
+    /// 870 MB and 35 s on one real machine — and the app is usable throughout.
+    /// Each provider gets its own pass and its own record, so a CLI switched
+    /// on months from now fills its own history in without touching the one
+    /// beside it.
+    ///
+    /// The record is written only where a pass ran to completion. A cancelled
+    /// one leaves nothing behind but the days it had already proved whole, and
+    /// the next launch asks again.
+    private func startArchiveBackfill() {
+        guard lifecycle == .running,
+            config.resolvedHistoryRetentionDays > 0,
+            let window = ArchiveBackfill.window(
+                retentionDays: config.resolvedHistoryRetentionDays)
+        else { return }
+        let ledgerURL = ArchiveBackfillLedger.defaultURL(in: stateDir)
+        let ledger = ArchiveBackfillLedger.load(from: ledgerURL)
+        let due =
+            resolvedProviders
+            .filter { $0.activation.isMetering }
+            .filter { ledger.isDue(provider: $0.id, coveringFrom: window.lowerBound) }
+            .map(\.home)
+        guard !due.isEmpty else { return }
+        let me = self
+        let stateDir = self.stateDir
+        let pricingOverride = config.pricingOverride
+        let projectLedger = self.projectLedger
+        let catalog = initialPriceCatalog
+        backfillTask = Task.detached(priority: .utility) {
+            for home in due {
+                if Task.isCancelled { return }
+                let provider = Self.backfillProvider(
+                    home: home,
+                    window: window,
+                    historyRoot: stateDir,
+                    pricingOverride: pricingOverride,
+                    ledger: projectLedger)
+                if let catalog { await provider.applyPriceCatalog(catalog) }
+                _ = await provider.backfillArchive { await me.invalidateHistoryRollups() }
+                if Task.isCancelled { return }
+                await me.recordArchiveBackfill(
+                    provider: home.id, coveredFrom: window.lowerBound, at: ledgerURL)
+            }
+        }
+    }
+
+    /// One provider's backfill reader: the same adapter the tail uses, over
+    /// the same tree, with a window of its own and nothing persisted but day
+    /// files.
+    private static func backfillProvider(
+        home: ProviderHome,
+        window: Range<Date>,
+        historyRoot: URL,
+        pricingOverride: [String: ModelPricing]?,
+        ledger: ProjectLedger
+    ) -> LocalUsageProvider {
+        switch home.id {
+        case ProviderID.codex:
+            return LocalUsageProvider.codex(
+                codexDir: home.dataDir,
+                id: home.id,
+                historyRoot: historyRoot,
+                pricingOverride: pricingOverride,
+                ledger: ledger,
+                backfill: window)
+        default:
+            return LocalUsageProvider.claudeCode(
+                claudeDir: home.dataDir,
+                id: home.id,
+                historyRoot: historyRoot,
+                pricingOverride: pricingOverride,
+                profile: ClaudeProfileSource(url: home.claudeProfileURL),
+                ledger: ledger,
+                backfill: window)
+        }
+    }
+
+    /// Records that one provider's history has been indexed as far back as
+    /// the window asked for. Read-modify-write on the actor, so two providers
+    /// finishing close together cannot drop each other's entry.
+    private func recordArchiveBackfill(provider: String, coveredFrom start: Date, at url: URL) {
+        let updated = ArchiveBackfillLedger.load(from: url)
+            .recording(provider: provider, coveredFrom: start)
+        do {
+            try ArchiveBackfillLedger.save(updated, to: url)
+        } catch {
+            // The pass itself succeeded and its days are on disk. Losing the
+            // record costs one repeat of a pass that rewrites the same
+            // numbers, which is why this is logged rather than propagated.
+            sissyLog(
+                "sissy: could not record the \(provider) archive backfill at \(url.path): \(error)")
+        }
+    }
+
+    /// Drops the cached archive rollups so the next frame reads the day files
+    /// again. What makes the panel's windows fill in while a backfill runs.
+    private func invalidateHistoryRollups() async {
+        historyRollupAt = .distantPast
+        await reemit()
     }
 
     /// Keeps the account archive level with whichever account is signed in.
@@ -354,6 +478,7 @@ actor UsageEngine {
         // cancellation and bails out of its file enumeration loops before
         // anything else is torn down.
         bootTask?.cancel()
+        backfillTask?.cancel()
         claudeAccountsTask?.cancel()
         priceCatalogTask?.cancel()
         keepAwakeDeadlineTask?.cancel()
@@ -370,6 +495,7 @@ actor UsageEngine {
         await statusMonitor.stop()
         await aggregator.stop()
         bootTask = nil
+        backfillTask = nil
         claudeAccountsTask = nil
         priceCatalogTask = nil
     }
@@ -1072,6 +1198,7 @@ actor UsageEngine {
                     + "seed, refresh continues in the background")
         }
         guard lifecycle == .running else { return }
+        initialPriceCatalog = resolved
         if let resolved {
             await aggregator.applyPriceCatalog(resolved)
         }
