@@ -46,6 +46,7 @@ actor ClaudeWebSource: SourceSignals {
     /// contract must not reach claude.ai.
     private let fetchSource: @Sendable (String, String?) async throws -> Reading
 
+    private var retired = false
     private var cached: String?
     /// Organization the windows belong to, kept so the ordinary poll is one
     /// request rather than two. Dropped whenever the session is.
@@ -90,7 +91,7 @@ actor ClaudeWebSource: SourceSignals {
     /// setting was already on reads silently and shows no limits if the grant
     /// has gone stale.
     func start(userInitiated: Bool, onRefresh: @Sendable @escaping () async -> Void) {
-        guard pollTask == nil else { return }
+        guard !retired, pollTask == nil else { return }
         _ = begin(userInitiated: userInitiated, onRefresh: onRefresh)
     }
 
@@ -135,6 +136,19 @@ actor ClaudeWebSource: SourceSignals {
             if clearingState { $0.limitsState = .quiet }
         }
         lastReported = nil
+    }
+
+    /// Stops this reader for good, for a session that is no longer stored.
+    ///
+    /// Distinct from `stop()`, which the limits switch uses and `refresh`
+    /// undoes. Rebuilding the reader set suspends, so a `start` loop that read
+    /// the set before the rebuild can reach a reader the rebuild discarded;
+    /// giving that reader a poll loop leaves one nothing holds a handle to,
+    /// which `stopClaudeLimits` cannot reach and which keeps the engine alive
+    /// through its own callback.
+    func retire() {
+        retired = true
+        stop()
     }
 
     private func cancelRequests() {

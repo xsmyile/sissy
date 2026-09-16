@@ -732,10 +732,6 @@ actor UsageEngine {
             if let own = claudeOwnLimits {
                 await own.refresh { await me.reemit() }
             }
-            // A session claude.ai has closed cannot be refreshed into working
-            // again, and re-reading the same dead string is the button failing
-            // at its only job. The notice beside it says "Import again", so
-            // that is what this does.
             // Only a session claude.ai has actually closed is re-imported:
             // re-reading a dead string is the button failing at its only job,
             // and re-importing a live one would overwrite every other
@@ -1009,11 +1005,24 @@ actor UsageEngine {
     /// rebuilt. A reader that survives is kept rather than replaced: it is an
     /// actor with a poll loop and a reading already published, and building a
     /// fresh one would blank that account's gauges until its next request.
+    ///
+    /// The holding key gets no reader. A session waiting there is one Sissy
+    /// cannot yet name, and a reader for it would publish an account whose id
+    /// is the literal holding key — a second row on the Overview for the
+    /// session already on the first, labelled with a string no user has seen.
+    /// It is a reader the moment the keying pass says whose it is.
+    ///
+    /// A dropped reader is retired rather than stopped, because this suspends:
+    /// a `start` loop that read the set before this call can reach a reader
+    /// this call has just discarded, and a poll loop on an object nothing
+    /// holds outlives `stop()` and keeps the engine alive through its own
+    /// callback.
     private func rebuildClaudeWebSources() async {
         let stored = Set(ClaudeWebSessionStore.storedAccounts())
+            .subtracting([ClaudeWebSessionStore.unkeyedAccount])
         let existing = claudeWebSources.load()
         for source in existing where !stored.contains(source.account) {
-            await source.stop()
+            await source.retire()
         }
         let kept = existing.filter { stored.contains($0.account) }
         let added = stored.subtracting(kept.map(\.account))
