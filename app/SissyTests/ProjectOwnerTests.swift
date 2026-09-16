@@ -2,35 +2,35 @@ import XCTest
 
 @testable import Sissy
 
-/// The account a repository is pushed to, read off its `origin` remote — what
-/// keeps two `website` checkouts under different accounts from rendering one
-/// label.
+/// The forge a repository is pushed to, read off its `origin` remote — the
+/// account that keeps two `website` checkouts under different accounts from
+/// rendering one label, and the page the project card opens.
 final class ProjectOwnerTests: XCTestCase {
 
     // MARK: The two shapes git writes
 
     func testAnSCPStyleRemoteNamesItsAccount() {
         XCTAssertEqual(
-            ProjectResolver.owner(ofRemoteURL: "git@github.com:radonforge/website.git"),
+            ProjectResolver.remote(ofRemoteURL: "git@github.com:radonforge/website.git")?.owner,
             "radonforge")
     }
 
     func testAnHTTPSRemoteNamesItsAccount() {
         XCTAssertEqual(
-            ProjectResolver.owner(ofRemoteURL: "https://github.com/radonforge/website.git"),
+            ProjectResolver.remote(ofRemoteURL: "https://github.com/radonforge/website.git")?.owner,
             "radonforge")
     }
 
     func testARemoteWithoutTheGitSuffixNamesItsAccount() {
         XCTAssertEqual(
-            ProjectResolver.owner(ofRemoteURL: "https://github.com/radonforge/website"),
+            ProjectResolver.remote(ofRemoteURL: "https://github.com/radonforge/website")?.owner,
             "radonforge")
     }
 
     func testAnSSHURLCarryingAPortNamesItsAccount() {
         XCTAssertEqual(
-            ProjectResolver.owner(
-                ofRemoteURL: "ssh://git@ssh.github.com:443/radonforge/website.git"),
+            ProjectResolver.remote(
+                ofRemoteURL: "ssh://git@ssh.github.com:443/radonforge/website.git")?.owner,
             "radonforge")
     }
 
@@ -38,7 +38,7 @@ final class ProjectOwnerTests: XCTestCase {
     /// the account is the group the repository sits directly under.
     func testASelfHostedForgeNamesTheGroup() {
         XCTAssertEqual(
-            ProjectResolver.owner(ofRemoteURL: "git@gitlab.sermix.com:mastersoft/cbdesign.git"),
+            ProjectResolver.remote(ofRemoteURL: "git@gitlab.sermix.com:mastersoft/cbdesign.git")?.owner,
             "mastersoft")
     }
 
@@ -46,7 +46,45 @@ final class ProjectOwnerTests: XCTestCase {
     /// the whole hierarchy — that is the label a person says out loud.
     func testANestedGroupNamesTheInnermostOne() {
         XCTAssertEqual(
-            ProjectResolver.owner(ofRemoteURL: "https://gitlab.com/group/sub/repo.git"), "sub")
+            ProjectResolver.remote(ofRemoteURL: "https://gitlab.com/group/sub/repo.git")?.owner,
+            "sub")
+    }
+
+    // MARK: The way to the page
+
+    /// An `ssh` remote names no page, so the card's is composed from the host
+    /// it does name.
+    func testAnSSHRemoteComposesItsPage() {
+        let remote = ProjectResolver.remote(ofRemoteURL: "git@github.com:radonforge/website.git")
+
+        XCTAssertEqual(remote?.page, URL(string: "https://github.com/radonforge/website"))
+        XCTAssertEqual(remote?.repository, "website")
+        XCTAssertEqual(remote?.host, "github.com")
+    }
+
+    /// A remote a browser can already open is kept as it is, port and all: a
+    /// self-hosted forge on a port serves its pages there, and composing one
+    /// from the bare host would drop it.
+    func testAWebRemoteKeepsItsOwnSchemeAndPort() {
+        XCTAssertEqual(
+            ProjectResolver.remote(ofRemoteURL: "https://git.example.com:8443/team/app.git")?.page,
+            URL(string: "https://git.example.com:8443/team/app"))
+    }
+
+    /// `ssh.github.com` on 443 is a transport endpoint and serves no page, so
+    /// the row keeps the repository and offers no way out to it.
+    func testAnSSHRemoteOnAPortOffersNoPage() {
+        XCTAssertNil(
+            ProjectResolver.remote(
+                ofRemoteURL: "ssh://git@ssh.github.com:443/radonforge/website.git")?.page)
+    }
+
+    /// The owner is the innermost group, and the page is the whole hierarchy
+    /// — the forge needs every segment to answer.
+    func testANestedGroupKeepsItsWholeHierarchyInThePage() {
+        XCTAssertEqual(
+            ProjectResolver.remote(ofRemoteURL: "https://gitlab.com/group/sub/repo.git")?.page,
+            URL(string: "https://gitlab.com/group/sub/repo"))
     }
 
     // MARK: What must not be turned into an account
@@ -54,25 +92,25 @@ final class ProjectOwnerTests: XCTestCase {
     /// A directory on this Mac is not a forge, so the enclosing folder must
     /// not be dressed up as an account.
     func testAPathRemoteNamesNobody() {
-        XCTAssertNil(ProjectResolver.owner(ofRemoteURL: "/Users/d/repos/bare.git"))
+        XCTAssertNil(ProjectResolver.remote(ofRemoteURL: "/Users/d/repos/bare.git"))
     }
 
     /// `file://` is the same path wearing a scheme: its host is empty and its
     /// first segment is a directory.
     func testAFileURLRemoteNamesNobody() {
-        XCTAssertNil(ProjectResolver.owner(ofRemoteURL: "file:///Users/d/repos/bare.git"))
+        XCTAssertNil(ProjectResolver.remote(ofRemoteURL: "file:///Users/d/repos/bare.git"))
     }
 
     func testARelativeRemoteNamesNobody() {
-        XCTAssertNil(ProjectResolver.owner(ofRemoteURL: "../sibling"))
+        XCTAssertNil(ProjectResolver.remote(ofRemoteURL: "../sibling"))
     }
 
     func testARemoteWithNoAccountSegmentNamesNobody() {
-        XCTAssertNil(ProjectResolver.owner(ofRemoteURL: "git@github.com:website.git"))
+        XCTAssertNil(ProjectResolver.remote(ofRemoteURL: "git@github.com:website.git"))
     }
 
     func testAnEmptyRemoteNamesNobody() {
-        XCTAssertNil(ProjectResolver.owner(ofRemoteURL: ""))
+        XCTAssertNil(ProjectResolver.remote(ofRemoteURL: ""))
     }
 
     // MARK: Reading it off a repository
@@ -87,7 +125,7 @@ final class ProjectOwnerTests: XCTestCase {
                 	fetch = +refs/heads/*:refs/remotes/origin/*
                 """)
 
-        XCTAssertEqual(ProjectResolver().repositoryOwner(for: repository), "radonforge")
+        XCTAssertEqual(ProjectResolver().repositoryRemote(for: repository)?.owner, "radonforge")
     }
 
     /// Only `origin` answers. A fork's `upstream` names somebody else's
@@ -102,7 +140,7 @@ final class ProjectOwnerTests: XCTestCase {
                 	url = git@github.com:radonforge/website.git
                 """)
 
-        XCTAssertEqual(ProjectResolver().repositoryOwner(for: repository), "radonforge")
+        XCTAssertEqual(ProjectResolver().repositoryRemote(for: repository)?.owner, "radonforge")
     }
 
     func testARepositoryWithNoOriginNamesNobody() throws {
@@ -112,14 +150,14 @@ final class ProjectOwnerTests: XCTestCase {
                 	bare = false
                 """)
 
-        XCTAssertNil(ProjectResolver().repositoryOwner(for: repository))
+        XCTAssertNil(ProjectResolver().repositoryRemote(for: repository))
     }
 
     /// A checkout that has been deleted since its rows were counted has no
     /// config left to read, and the row keeps the plain name it has.
     func testAGoneCheckoutNamesNobody() {
         XCTAssertNil(
-            ProjectResolver().repositoryOwner(for: "/nowhere/deleted-\(UUID().uuidString)"))
+            ProjectResolver().repositoryRemote(for: "/nowhere/deleted-\(UUID().uuidString)"))
     }
 
     // MARK: -

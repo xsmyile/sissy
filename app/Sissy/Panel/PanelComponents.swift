@@ -289,8 +289,17 @@ struct SectionLabel: View {
 /// One project's share of a day: the repository's own name, what it cost, and
 /// a bar for its share. The path stays in the tooltip — a client's name is a
 /// directory's name — and the remainder row puts its reason there instead.
+///
+/// A row that names a repository opens a card on a click. **A click rather
+/// than a hover**: the tooltip already belongs to the hover and is the only
+/// place the path is readable, and a list a pointer crosses on its way
+/// somewhere else is no place to open a window. The card is a second window —
+/// measured on macOS 27, it does not dismiss the panel it opens from, and the
+/// panel's own outside-click monitor stays silent for a click inside it.
 struct ProjectRowView: View {
     let row: UsagePanelSnapshot.ProjectRow
+
+    @State private var showingCard = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -316,6 +325,77 @@ struct ProjectRowView: View {
             }
             ShareBar(share: row.share, tint: .secondary)
         }
-        .help(row.tooltip ?? "")
+        .contentShape(.rect)
+        .onTapGesture { showingCard = row.repository != nil }
+        .pointerStyle(row.repository == nil ? nil : .link)
+        .help(help)
+        .popover(isPresented: $showingCard, arrowEdge: .trailing) {
+            if let repository = row.repository {
+                ProjectCardView(repository: repository, path: row.tooltip)
+            }
+        }
     }
+
+    private var help: String {
+        guard let tooltip = row.tooltip else { return "" }
+        guard row.repository != nil else { return tooltip }
+        return tooltip + "\n" + Self.cardHint
+    }
+
+    private static let cardHint = "Click for the repository"
+}
+
+/// What a project row knows about its repository beyond its own name: where
+/// it is pushed, where it sits on this Mac, and the way to its page.
+///
+/// The path is written with a `~` for the home directory and left selectable,
+/// because the two things anyone does with a path are read it and paste it.
+/// It is the same path the row hovers — a card that opened on a click has to
+/// answer without one, for anyone who got here without the tooltip.
+struct ProjectCardView: View {
+    let repository: UsagePanelSnapshot.RepositoryLink
+    let path: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(repository.label)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            forge
+            if let path {
+                Divider()
+                Text((path as NSString).abbreviatingWithTildeInPath)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(12)
+        .frame(width: Self.width, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var forge: some View {
+        if let page = repository.page {
+            Link(destination: page) {
+                HStack(spacing: 4) {
+                    Text(repository.host)
+                    Image(systemName: "arrow.up.forward")
+                }
+                .font(.system(size: 10))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Open \(repository.label) on \(repository.host)")
+        } else {
+            Text(repository.host)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private static let width: CGFloat = 240
 }

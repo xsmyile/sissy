@@ -337,7 +337,7 @@ final class PanelPagesTests: XCTestCase {
                     projects: [
                         ProjectTotals(
                             path: "/src/website", tokens: 200, cost: Decimal(2),
-                            owner: "radonforge"),
+                            remote: Self.websiteRemote),
                         ProjectTotals(path: "/src/sissy", tokens: 100, cost: Decimal(1)),
                     ])
             ]))
@@ -347,11 +347,38 @@ final class PanelPagesTests: XCTestCase {
         XCTAssertEqual(page.map(\.owner), ["radonforge", nil])
     }
 
+    /// The row that names a repository carries the card's whole content, so a
+    /// click has something to open; the one that names none carries nothing,
+    /// which is what makes the click do nothing rather than open an empty
+    /// card.
+    func testOnlyARowWithAForgeCarriesARepositoryCard() throws {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame([
+                slice(
+                    "claude-code",
+                    tokens: 300,
+                    cost: "3.00",
+                    projects: [
+                        ProjectTotals(
+                            path: "/src/website", tokens: 200, cost: Decimal(2),
+                            remote: Self.websiteRemote),
+                        ProjectTotals(path: "/src/sissy", tokens: 100, cost: Decimal(1)),
+                    ])
+            ]))
+
+        let page = try XCTUnwrap(snapshot.providers.first?.projects)
+        XCTAssertEqual(page[0].repository?.label, "radonforge/website")
+        XCTAssertEqual(page[0].repository?.host, "github.com")
+        XCTAssertEqual(
+            page[0].repository?.page, URL(string: "https://github.com/radonforge/website"))
+        XCTAssertNil(page[1].repository)
+    }
+
     /// The rows that stand for no single repository never claim an account.
     func testTheFoldedAndUnattributedRowsNameNoAccount() throws {
         let owned = (1...7).map {
             ProjectTotals(
-                path: "/src/p\($0)", tokens: 10, cost: Decimal(1), owner: "radonforge")
+                path: "/src/p\($0)", tokens: 10, cost: Decimal(1), remote: Self.websiteRemote)
         }
         let snapshot = UsagePanelSnapshot.make(
             frame: frame([slice("claude-code", tokens: 100, cost: "10.00", projects: owned)]))
@@ -362,7 +389,15 @@ final class PanelPagesTests: XCTestCase {
         XCTAssertNil(page[4].owner)
         XCTAssertEqual(page[5].name, UsageFormat.projectsUnattributed)
         XCTAssertNil(page[5].owner)
+        XCTAssertNil(page[4].repository)
+        XCTAssertNil(page[5].repository)
     }
+
+    private static let websiteRemote = ProjectRemote(
+        host: "github.com",
+        owner: "radonforge",
+        repository: "website",
+        page: URL(string: "https://github.com/radonforge/website"))
 
     /// The fold keeps the dearest projects and pushes the rest into one row.
     /// Folding a prefix of an unordered list would hide the day's largest

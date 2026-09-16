@@ -637,7 +637,7 @@ actor LocalUsageProvider: UsageProvider {
                 path: $0,
                 tokens: tokens[$0] ?? 0,
                 cost: cost[$0] ?? 0,
-                owner: adapter.projects.repositoryOwner(for: $0)
+                remote: adapter.projects.repositoryRemote(for: $0)
             )
         }
     }

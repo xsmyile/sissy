@@ -1,5 +1,26 @@
 import Foundation
 
+/// A repository's `origin`, in the parts a row can show.
+///
+/// The owner is why this is read at all — a repository's own name is not
+/// unique — and the rest is what the panel's project card adds to it: the
+/// forge the work is pushed to, and the way there.
+struct ProjectRemote: Sendable, Equatable {
+    /// The forge's host, with no user and no port: `github.com`.
+    let host: String
+    /// The account the repository sits directly under. A forge that nests
+    /// groups answers the innermost one, which is the label the user types.
+    let owner: String
+    /// The repository's own name, without the `.git` a clone writes.
+    let repository: String
+    /// The page for the repository, when the remote names one rather than
+    /// implying it. An `ssh` remote carrying a port names a transport
+    /// endpoint and not a web host — `ssh.github.com` on 443 serves no page —
+    /// so that one answers nil and the card shows the repository without a
+    /// way out to it.
+    let page: URL?
+}
+
 /// Resolves a working directory to the project the work belongs to.
 ///
 /// A project is a **repository**, not a directory. `legion/frontend` is not
@@ -68,11 +89,15 @@ final class ProjectResolver {
     private static let gitEntryName = ".git"
     private static let originSection = "[remote \"origin\"]"
     private static let urlKey = "url"
+    private static let schemeSeparator = "://"
+    private static let gitSuffix = ".git"
+    private static let webScheme = "https"
+    private static let webSchemes: Set<String> = ["http", "https"]
 
     private let fileManager: FileManager
     let ledger: ProjectLedger
     private var cache: [String: String?] = [:]
-    private var owners: [String: String?] = [:]
+    private var remotes: [String: ProjectRemote?] = [:]
 
     init(ledger: ProjectLedger = ProjectLedger(), fileManager: FileManager = .default) {
         self.ledger = ledger
@@ -86,13 +111,13 @@ final class ProjectResolver {
         return resolved
     }
 
-    /// The account a repository belongs to on the forge it is pushed to —
-    /// `radonforge` for `radonforge/website` — read from its `origin` remote.
+    /// The forge a repository is pushed to, read from its `origin` remote.
     ///
-    /// It exists because a repository's own name is not unique: `website`
-    /// under two different accounts is two projects rendering one label, and
-    /// the path that tells them apart is in a tooltip nobody hovers. The owner
-    /// is the shortest thing that separates them.
+    /// The owner is why it is read: a repository's own name is not unique —
+    /// `website` under two different accounts is two projects rendering one
+    /// label, and the path that tells them apart is in a tooltip nobody
+    /// hovers. The host and the page are what the project card adds, so the
+    /// row that names a repository is also the way to it.
     ///
     /// Nil whenever the answer would be invented. A repository with no
     /// `origin`, one whose `origin` is a path on this Mac rather than a forge,
@@ -102,12 +127,13 @@ final class ProjectResolver {
     /// answer.
     ///
     /// A forge that nests groups — `gitlab.com/group/sub/repo` — answers
-    /// `sub`, which is the account the repository sits directly under rather
-    /// than the whole hierarchy. That is the label the user types.
-    func repositoryOwner(for project: String) -> String? {
-        if let hit = owners[project] { return hit }
-        let resolved = readRepositoryOwner(project)
-        owners[project] = resolved
+    /// `sub` for the owner, which is the account the repository sits directly
+    /// under rather than the whole hierarchy. That is the label the user
+    /// types; the page keeps the hierarchy, which is what the forge needs.
+    func repositoryRemote(for project: String) -> ProjectRemote? {
+        if let hit = remotes[project] { return hit }
+        let resolved = readRepositoryRemote(project)
+        remotes[project] = resolved
         return resolved
     }
 
@@ -189,29 +215,43 @@ final class ProjectResolver {
         return nil
     }
 
-    private func readRepositoryOwner(_ project: String) -> String? {
+    private func readRepositoryRemote(_ project: String) -> ProjectRemote? {
         guard let url = originURL(ofRepository: project) else { return nil }
-        return Self.owner(ofRemoteURL: url)
+        return Self.remote(ofRemoteURL: url)
     }
 
-    /// The segment before the repository name in a remote that names a forge.
+    /// A remote that names a forge, parsed.
     ///
     /// Both shapes git writes are accepted: an SCP-like `git@host:owner/repo`
-    /// and a URL `scheme://[user@]host/owner/repo`. Anything naming a path on
-    /// this Mac answers nil rather than the enclosing folder — a bare path
-    /// with no scheme and no `host:`, and equally a `file://` URL, whose host
-    /// is empty and whose first segment is a directory rather than an account.
-    static func owner(ofRemoteURL remote: String) -> String? {
+    /// and a URL `scheme://[user@]host[:port]/owner/repo`. Anything naming a
+    /// path on this Mac answers nil rather than the enclosing folder — a bare
+    /// path with no scheme and no `host:`, and equally a `file://` URL, whose
+    /// host is empty and whose first segment is a directory rather than an
+    /// account.
+    ///
+    /// The page is the remote itself when the remote is already one a browser
+    /// can open, port and all, and `https://<host>/<path>` when it is not.
+    /// That second one is a substitution rather than a reading, so it is only
+    /// made where the host is the whole address: an `ssh` URL naming a port is
+    /// pointing at a transport, and composing a page from it invents a link
+    /// that answers nothing.
+    static func remote(ofRemoteURL remote: String) -> ProjectRemote? {
         let trimmed = remote.trimmingCharacters(in: .whitespaces)
+        let scheme: String?
+        let authority: Substring
         let path: String
-        if let scheme = trimmed.range(of: "://") {
-            let afterScheme = trimmed[scheme.upperBound...]
+        if let separator = trimmed.range(of: Self.schemeSeparator) {
+            let afterScheme = trimmed[separator.upperBound...]
             guard let slash = afterScheme.firstIndex(of: "/"), slash != afterScheme.startIndex
             else { return nil }
+            scheme = String(trimmed[trimmed.startIndex..<separator.lowerBound]).lowercased()
+            authority = afterScheme[afterScheme.startIndex..<slash]
             path = String(afterScheme[afterScheme.index(after: slash)...])
         } else if let colon = trimmed.firstIndex(of: ":") {
-            let host = trimmed[trimmed.startIndex..<colon]
-            guard !host.isEmpty, !host.contains("/") else { return nil }
+            let head = trimmed[trimmed.startIndex..<colon]
+            guard !head.isEmpty, !head.contains("/") else { return nil }
+            scheme = nil
+            authority = head
             path = String(trimmed[trimmed.index(after: colon)...])
         } else {
             return nil
@@ -222,6 +262,28 @@ final class ProjectResolver {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         guard segments.count >= 2 else { return nil }
-        return segments[segments.count - 2]
+        let endpoint = authority.split(separator: "@").last.map(String.init) ?? ""
+        let hostAndPort = endpoint.split(separator: ":", omittingEmptySubsequences: false)
+        guard let host = hostAndPort.first.map(String.init), !host.isEmpty else { return nil }
+        let port = hostAndPort.count > 1 ? String(hostAndPort[1]) : nil
+        let name = segments[segments.count - 1]
+        let repository =
+            name.hasSuffix(Self.gitSuffix) ? String(name.dropLast(Self.gitSuffix.count)) : name
+        let trail = (segments.dropLast() + [repository]).joined(separator: "/")
+        return ProjectRemote(
+            host: host,
+            owner: segments[segments.count - 2],
+            repository: repository,
+            page: page(scheme: scheme, host: host, port: port, trail: trail)
+        )
+    }
+
+    private static func page(scheme: String?, host: String, port: String?, trail: String) -> URL? {
+        if let scheme, Self.webSchemes.contains(scheme) {
+            let endpoint = port.map { "\(host):\($0)" } ?? host
+            return URL(string: "\(scheme)://\(endpoint)/\(trail)")
+        }
+        guard port == nil else { return nil }
+        return URL(string: "\(Self.webScheme)://\(host)/\(trail)")
     }
 }
