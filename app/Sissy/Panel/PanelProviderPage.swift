@@ -15,6 +15,9 @@ struct PanelProviderPage: View {
     /// carries no choices, and never straight from the menu: picking proposes
     /// and the confirmation commits.
     let onSelectAccount: (String) -> Void
+    /// Aims the Settings window at the tab that links an account, for the
+    /// menu item that opens it.
+    let onAddAccount: () -> Void
     /// Why the last switch did not happen, when one did not. Shown under the
     /// identity, because a switch that quietly failed leaves the user typing
     /// `claude` and meeting the account they thought they had left.
@@ -251,6 +254,8 @@ struct PanelProviderPage: View {
                     }
                 }
                 .pickerStyle(.inline)
+                Divider()
+                addAccount
             } label: {
                 Image(systemName: "person.2")
                     .font(.system(size: 11, weight: .medium))
@@ -282,6 +287,25 @@ struct PanelProviderPage: View {
             get: { viewed?.id ?? "" },
             set: { picked in viewedAccount = picked }
         )
+    }
+
+    /// Reaches the one control that links an account, which lives in Settings.
+    ///
+    /// A link opens a window, spends a login and files a credential, so it is
+    /// configuration rather than a reading and it is drawn where the other
+    /// credential controls already are. This is a way *to* it and not a second
+    /// copy of it, which is what keeps a pending organisation question with
+    /// one place to be answered.
+    ///
+    /// `SettingsLink` is the only public way to open that scene and it takes
+    /// no action closure, so the simultaneous gesture is what aims it — the
+    /// same shape the panel header's own settings button uses. The tab is a
+    /// live binding, so a window already open follows it too.
+    private var addAccount: some View {
+        SettingsLink {
+            Text(ClaudeAccountLinkCopy.addTitle)
+        }
+        .simultaneousGesture(TapGesture().onEnded { onAddAccount() })
     }
 
     /// Said once here rather than at the call site: this control rewrites the
