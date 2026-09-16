@@ -41,6 +41,7 @@ actor UsageEngine {
     /// it sees, which is what makes switching back to one possible at all.
     private let claudeAccounts: ClaudeAccountRegistry
     private var claudeAccountsTask: Task<Void, Never>?
+    private var claudeWebAdoptionTask: Task<Void, Never>?
     /// Handle on the pricing-catalog refresh loop so `stop()` can cancel an
     /// in-flight fetch instead of leaving it to finish against a torn-down
     /// engine.
@@ -327,7 +328,7 @@ actor UsageEngine {
         // Sissy to leave alone.
         if meteringClaudeCode {
             startClaudeAccountWatch()
-            adoptLegacyClaudeWebSession()
+            startClaudeWebAdoption()
         }
         bootTask = Task.detached { [aggregator] in
             await aggregator.start { today, slices in
@@ -475,14 +476,18 @@ actor UsageEngine {
         }
     }
 
-    /// Re-files a session imported before sessions were keyed by account.
+    /// Keys whatever session is waiting under the holding key.
     ///
-    /// Detached because it costs a request to claude.ai and a launch must not
-    /// wait on one. It races nothing: the rekey writes the new item before
-    /// dropping the old, so a reader that runs mid-pass finds the same session
-    /// under whichever key it happens to see.
-    private func adoptLegacyClaudeWebSession() {
-        Task.detached { _ = await ClaudeWebSessionAdoption.run() }
+    /// Owned rather than detached. It costs a request to claude.ai, so a
+    /// launch must not wait on it — but a task nothing holds outlives `stop()`
+    /// and, since an engine is rebuilt on every provider toggle, toggling
+    /// would leave overlapping passes writing the same items. The handle is
+    /// what `stop()` cancels and what `forgetClaudeWebSession` joins before it
+    /// deletes, which is the only thing that stops a pass in flight from
+    /// putting back a session the user just asked to be rid of.
+    private func startClaudeWebAdoption() {
+        claudeWebAdoptionTask?.cancel()
+        claudeWebAdoptionTask = Task { _ = await ClaudeWebSessionAdoption.run() }
     }
 
     /// How often the active credential is re-read. Long on purpose: a token
@@ -501,6 +506,7 @@ actor UsageEngine {
         bootTask?.cancel()
         backfillTask?.cancel()
         claudeAccountsTask?.cancel()
+        claudeWebAdoptionTask?.cancel()
         priceCatalogTask?.cancel()
         keepAwakeDeadlineTask?.cancel()
         keepAwakeDeadlineTask = nil
@@ -518,6 +524,7 @@ actor UsageEngine {
         bootTask = nil
         backfillTask = nil
         claudeAccountsTask = nil
+        claudeWebAdoptionTask = nil
         priceCatalogTask = nil
     }
 
@@ -570,19 +577,39 @@ actor UsageEngine {
         case .success(let session):
             do {
                 try ClaudeWebSessionStore.save(
-                    session, account: ClaudeWebSessionStore.legacyAccount)
+                    session, account: ClaudeWebSessionStore.unkeyedAccount)
             } catch {
                 sissyLog("sissy: could not file the claude.ai session: \(error)")
                 return .failure(.undecryptable)
             }
+            // Filed under the holding key first and keyed afterwards, never
+            // the other way round: identifying it is a request that can fail,
+            // and a session held only in memory while that request runs is one
+            // an interruption loses. The pass is the same one a launch runs,
+            // so an import that could not reach claude.ai is keyed by the next
+            // launch rather than staying unkeyed for good.
+            startClaudeWebAdoption()
             return .success(())
         }
     }
 
     /// Forgets the imported session and hands the reading back to the OAuth
     /// probe, which is where it was before the import.
+    /// Every stored session goes, not only the one a reader is using: the
+    /// user asked for the imported session to be gone, and leaving a second
+    /// account's behind would keep answering for claude.ai under a switch they
+    /// just turned off.
+    ///
+    /// The keying pass is cancelled *and joined* first. Cancellation alone is
+    /// observed between steps, so a pass suspended on its identifying request
+    /// could otherwise write its held session back after the delete and leave
+    /// `hasClaudeWebSession` true again — the same shape as the archive rule,
+    /// where forgetting has to end a pass in flight rather than race it.
     func forgetClaudeWebSession() async {
         guard lifecycle == .running else { return }
+        claudeWebAdoptionTask?.cancel()
+        await claudeWebAdoptionTask?.value
+        claudeWebAdoptionTask = nil
         for account in ClaudeWebSessionStore.storedAccounts() {
             try? ClaudeWebSessionStore.delete(account: account)
         }

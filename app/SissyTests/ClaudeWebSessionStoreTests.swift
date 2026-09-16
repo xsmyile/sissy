@@ -92,15 +92,15 @@ final class ClaudeWebSessionStoreTests: XCTestCase {
     /// Presence is asked without decrypting, so Settings can say "a session is
     /// set" on a build whose grant has lapsed.
     func testPresenceIsAnsweredWithoutReadingTheSecret() throws {
-        XCTAssertFalse(ClaudeWebSessionStore.isPresent(account: account))
+        XCTAssertFalse(ClaudeWebSessionStore.storedAccounts().contains(account))
         try ClaudeWebSessionStore.save(session, account: account)
-        XCTAssertTrue(ClaudeWebSessionStore.isPresent(account: account))
+        XCTAssertTrue(ClaudeWebSessionStore.storedAccounts().contains(account))
     }
 
     func testForgettingASessionLeavesNothingBehind() throws {
         try ClaudeWebSessionStore.save(session, account: account)
         try ClaudeWebSessionStore.delete(account: account)
-        XCTAssertFalse(ClaudeWebSessionStore.isPresent(account: account))
+        XCTAssertFalse(ClaudeWebSessionStore.storedAccounts().contains(account))
         guard
             case .absent = ClaudeWebSessionStore.load(
                 account: account, allowingInteraction: false)

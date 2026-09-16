@@ -28,6 +28,9 @@ enum ClaudeWebSessionAdoption {
         case unidentified
         /// The keychain refused the move. Same treatment, for the same reason.
         case keychainRefused(ClaudeWebSessionStoreError)
+        /// The item is there and this read was not allowed to have it, which
+        /// is what a re-signed build meets. Emphatically not `nothingToAdopt`.
+        case unreadable
     }
 
     /// The keychain half, behind closures.
@@ -37,17 +40,13 @@ enum ClaudeWebSessionAdoption {
     /// *decides* — especially that it never ends holding none — has to be
     /// provable without the developer's own login keychain taking part.
     struct Store: Sendable {
-        var read: @Sendable (String) -> String?
+        var read: @Sendable (String) -> ClaudeCredentialsLookup
         var write: @Sendable (String, String) throws -> Void
         var delete: @Sendable (String) throws -> Void
 
         static let keychain = Self(
             read: { account in
-                guard
-                    case .found(let session) = ClaudeWebSessionStore.load(
-                        account: account, allowingInteraction: false)
-                else { return nil }
-                return session.accessToken
+                ClaudeWebSessionStore.load(account: account, allowingInteraction: false)
             },
             write: { account, session in
                 try ClaudeWebSessionStore.save(session, account: account)
@@ -66,8 +65,20 @@ enum ClaudeWebSessionAdoption {
         identify: @Sendable (String) async throws -> ClaudeAccountIdentity =
             ClaudeWebAccountProfile.resolve
     ) async -> Outcome {
-        guard let session = store.read(ClaudeWebSessionStore.legacyAccount) else {
+        let session: String
+        switch store.read(ClaudeWebSessionStore.unkeyedAccount) {
+        case .found(let held):
+            session = held.accessToken
+        case .absent:
             return .nothingToAdopt
+        case .interactionRequired, .denied, .unreachable, .unreadable, .timedOut:
+            // Not `.nothingToAdopt`: the item is there and this read could not
+            // have it. Silently reporting nothing to do would leave a session
+            // unkeyed forever on a re-signed build with no line saying why.
+            sissyLog(
+                "sissy: the keychain would not release the unkeyed claude.ai session; "
+                    + "it stays where it is until a read is allowed")
+            return .unreadable
         }
 
         let identity: ClaudeAccountIdentity
@@ -75,18 +86,19 @@ enum ClaudeWebSessionAdoption {
             identity = try await identify(session)
         } catch {
             sissyLog(
-                "sissy: claude.ai would not say which account the imported session belongs to; "
-                    + "leaving it where it is and trying again next launch")
+                "sissy: claude.ai would not say which account the imported session belongs to "
+                    + "(\(error)); leaving it where it is and trying again")
             return .unidentified
         }
 
         do {
             try store.write(identity.uuid, session)
-            try store.delete(ClaudeWebSessionStore.legacyAccount)
+            try store.delete(ClaudeWebSessionStore.unkeyedAccount)
         } catch let failure as ClaudeWebSessionStoreError {
-            sissyLog("sissy: could not re-file the imported claude.ai session: \(failure)")
+            sissyLog("sissy: could not file the claude.ai session under its account: \(failure)")
             return .keychainRefused(failure)
         } catch {
+            sissyLog("sissy: could not file the claude.ai session under its account: \(error)")
             return .keychainRefused(.keychain(errSecIO))
         }
         sissyLog("sissy: adopted the imported claude.ai session under its own account")

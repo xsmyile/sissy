@@ -19,14 +19,14 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
     /// the user an import for a condition that clears itself, and the legacy
     /// item is what makes the next launch try again.
     func testAnUnidentifiedSessionIsLeftWhereItIs() async {
-        let vault = Vault([ClaudeWebSessionStore.legacyAccount: "sk-ant-sid-old"])
+        let vault = Vault([ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-old"])
 
         let outcome = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in
             throw ClaudeAccountProfile.Failure.malformedPayload
         }
 
         XCTAssertEqual(outcome, .unidentified)
-        XCTAssertEqual(vault.contents, [ClaudeWebSessionStore.legacyAccount: "sk-ant-sid-old"])
+        XCTAssertEqual(vault.contents, [ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-old"])
     }
 
     /// The ordinary case after this ships, and every launch after the first.
@@ -42,7 +42,7 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
     /// The move itself: one session, under the account it turned out to
     /// belong to, and the un-keyed item gone.
     func testAnIdentifiedSessionMovesUnderItsAccount() async {
-        let vault = Vault([ClaudeWebSessionStore.legacyAccount: "sk-ant-sid-old"])
+        let vault = Vault([ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-old"])
 
         let outcome = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in Self.identity }
 
@@ -56,12 +56,27 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
     /// still there to be adopted; a missing session would need the user.
     func testAnInterruptedMoveLeavesTwoCopiesRatherThanNone() async {
         let vault = Vault(
-            [ClaudeWebSessionStore.legacyAccount: "sk-ant-sid-old"], failDelete: true)
+            [ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-old"], failDelete: true)
 
         _ = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in Self.identity }
 
         XCTAssertEqual(vault.contents["c805523f"], "sk-ant-sid-old")
-        XCTAssertEqual(vault.contents[ClaudeWebSessionStore.legacyAccount], "sk-ant-sid-old")
+        XCTAssertEqual(vault.contents[ClaudeWebSessionStore.unkeyedAccount], "sk-ant-sid-old")
+    }
+
+    /// A keychain that will not release the item is not the same as no item.
+    ///
+    /// Reporting nothing to adopt would leave a session unkeyed for good on a
+    /// re-signed build, with no line in the log saying which of the two it
+    /// was — and the item is right there, untouched.
+    func testAKeychainThatWillNotReleaseTheSessionSaysSo() async {
+        let vault = Vault([:], unreadable: [ClaudeWebSessionStore.unkeyedAccount])
+
+        let outcome = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in
+            Self.identity
+        }
+
+        XCTAssertEqual(outcome, .unreadable)
     }
 
     /// The keychain half, in memory. The pass itself is the code under test.
@@ -69,17 +84,23 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
         private let lock = NSLock()
         private var items: [String: String]
         private let failDelete: Bool
+        private let unreadable: Set<String>
 
-        init(_ items: [String: String], failDelete: Bool = false) {
+        init(_ items: [String: String], failDelete: Bool = false, unreadable: Set<String> = []) {
             self.items = items
             self.failDelete = failDelete
+            self.unreadable = unreadable
         }
 
         var contents: [String: String] { lock.withLock { items } }
 
         func store() -> ClaudeWebSessionAdoption.Store {
             ClaudeWebSessionAdoption.Store(
-                read: { [self] account in lock.withLock { items[account] } },
+                read: { [self] account in
+                    guard !unreadable.contains(account) else { return .interactionRequired }
+                    guard let session = lock.withLock({ items[account] }) else { return .absent }
+                    return .found(ClaudeCredentials(accessToken: session, expiresAt: nil))
+                },
                 write: { [self] account, session in
                     lock.withLock { items[account] = session }
                 },
