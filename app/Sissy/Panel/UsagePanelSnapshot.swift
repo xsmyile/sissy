@@ -389,6 +389,16 @@ struct UsagePanelSnapshot: Equatable {
         /// Title for the control beside it, nil when there is nothing this
         /// app can do.
         let action: String?
+        /// What that control does. A claude.ai session the vendor has closed
+        /// is not something a refresh can revive — the account is linked
+        /// again, in the window that linked it — where every other notice is
+        /// asking for the reading to be attempted once more.
+        let kind: Kind
+
+        enum Kind: Equatable {
+            case refresh
+            case link
+        }
     }
 
     struct ProjectRow: Equatable, Identifiable {
@@ -593,8 +603,7 @@ struct UsagePanelSnapshot: Equatable {
                     : slice.limitsObservedAt.map {
                         UsageFormat.windowsCaption(observedAt: $0, now: now)
                     },
-                notice: UsageFormat.limitsNotice(slice.limitsState)
-                    .map { LimitsNotice(message: $0.message, action: $0.action) },
+                notice: UsageFormat.limitsNotice(slice.limitsState),
                 account: makeAccount(slice.account),
                 projects: makeProjects(
                     slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
@@ -716,8 +725,7 @@ struct UsagePanelSnapshot: Equatable {
                     UsageFormat.windowsCaption(observedAt: $0, now: now)
                 },
                 credits: makeCredits(reading?.credits, now: now),
-                notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet)
-                    .map { LimitsNotice(message: $0.message, action: $0.action) },
+                notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet),
                 isReadable: reading != nil,
                 isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID),
                 isSwitchable: switchable.contains(id))

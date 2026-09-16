@@ -403,7 +403,8 @@ struct PanelProviderPage: View {
             }
 
             if let notice = shownNotice {
-                LimitsNoticeView(notice: notice, act: refresh)
+                LimitsNoticeView(
+                    notice: notice, act: notice.kind == .link ? onAddAccount : refresh)
             }
 
             if shownWindows.isEmpty {

@@ -558,20 +558,30 @@ enum UsageFormat {
     /// already had the diagnosis and nobody read it. `.quiet` is the common
     /// case and says nothing at all — a row that explains itself every time
     /// it is fine is a row nobody reads when it is not.
-    static func limitsNotice(_ state: ProviderLimitsState) -> (message: String, action: String?)? {
+    static func limitsNotice(
+        _ state: ProviderLimitsState
+    ) -> UsagePanelSnapshot.LimitsNotice? {
         switch state {
         case .quiet:
             return nil
         case .needsAuthorization:
-            return ("Sissy needs your permission to read Claude Code's token again", "Allow")
+            return .init(
+                message: "Sissy needs your permission to read Claude Code's token again",
+                action: "Allow", kind: .refresh)
         case .refused:
-            return ("Keychain access was refused, so the limits stay hidden", "Try again")
+            return .init(
+                message: "Keychain access was refused, so the limits stay hidden",
+                action: "Try again", kind: .refresh)
         case .signedOut:
-            return ("Claude Code is not signed in on this Mac", nil)
+            return .init(
+                message: "Claude Code is not signed in on this Mac", action: nil, kind: .refresh)
         case .sessionExpired:
-            return ("The claude.ai session has ended", "Import again")
+            return .init(
+                message: "The claude.ai session has ended", action: "Link again", kind: .link)
         case .credentialUnreachable:
-            return ("Sissy cannot read this account's sign-in, so its limits stay hidden", nil)
+            return .init(
+                message: "Sissy cannot read this account's sign-in, so its limits stay hidden",
+                action: nil, kind: .refresh)
         }
     }
 
