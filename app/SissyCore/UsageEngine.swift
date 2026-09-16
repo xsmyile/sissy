@@ -583,7 +583,22 @@ actor UsageEngine {
         let outcome = await claudeAccounts.activate(uuid: uuid)
         if case .failure(let why) = outcome {
             sissyLog("sissy: could not switch Claude Code to \(uuid): \(why)")
+            await reemit()
+            return outcome
         }
+        // The identity on the row and the windows under it come from two
+        // places that both answer for the account this just changed — the
+        // CLI's config file and the CLI's credential — and neither is watched.
+        // Left to their own cadences the switch reads as half-done: the
+        // address changes on the next tail read while the gauges keep the
+        // percentages of the account the user just left.
+        //
+        // The imported claude.ai session is deliberately not refreshed. It is
+        // Claude.app's account rather than the CLI's, and this control did not
+        // touch it.
+        let me = self
+        await claudeOwnLimits?.refresh { await me.reemit() }
+        await aggregator.refreshSignals(for: ProviderID.claudeCode)
         await reemit()
         return outcome
     }
