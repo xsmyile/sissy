@@ -32,10 +32,12 @@ struct PanelProviderStatus: View {
     let provider: String
     let row: UsagePanelSnapshot.StatusRow
 
-    /// Which groups are open. Local to the view, and gone when the panel
-    /// closes: `UsagePanelController` drops the host on close, and a tree that
-    /// reopened three levels deep on a day nothing is wrong would be answering
-    /// a question from last week.
+    /// Which groups are open. Local to the view, and emptied when the card
+    /// shuts rather than when the panel does: a card is opened to ask a
+    /// question and dismissed once it is answered, so one reopened three
+    /// levels deep is answering the question before last. The panel dropping
+    /// its host clears it too, one level up, but that is the backstop and no
+    /// longer the rule.
     @State private var expanded: Set<String> = []
     @State private var showingComponents = false
 
@@ -54,6 +56,9 @@ struct PanelProviderStatus: View {
             .padding(.vertical, 10)
             .popover(isPresented: $showingComponents, arrowEdge: .trailing) {
                 if hasTree { card }
+            }
+            .onChange(of: showingComponents) { _, isOpen in
+                if !isOpen { expanded.removeAll() }
             }
     }
 
