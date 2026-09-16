@@ -170,3 +170,79 @@ struct ClaudeAccountStore: Sendable {
         try saveIndex(index)
     }
 }
+
+/// Resolves a claude.ai session to the account that owns it.
+///
+/// Deliberately the same `ClaudeAccountIdentity` `ClaudeAccountProfile`
+/// produces from the OAuth endpoint, because measured 2026-09-16 the two
+/// vendors' endpoints name one account with one id: `api/oauth/profile` and
+/// `claude.ai/api/account` both answered `c805523f…` for the same person. So a
+/// session and a CLI credential file under one key and the account list is one
+/// list, rather than two that have to be reconciled by email address.
+///
+/// Four of the five fields map exactly — the uuid, the address, the
+/// organisation's name and its plan, whose token is character-for-character
+/// the one `.claude.json` puts in `organizationType`, so one formatter words
+/// both. The fifth does not and is left nil rather than guessed: claude.ai
+/// reports `rate_limit_tier` in a taxonomy of its own (`default_raven`) where
+/// the OAuth profile reports `default_claude_max_5x`. Two vocabularies, so a
+/// Max account reads "Max" here and "Max 5x" there — a missing decoration
+/// rather than a wrong reading.
+///
+/// The seat is a sixth thing claude.ai answers for (`seat_tier`, measured to
+/// equal the CLI's) and this type carries no field for it, so a Team account
+/// resolved from a session is badged "Team" where the CLI badges it "Team
+/// Premium". That is the consumer's question rather than the parser's, and it
+/// is settled where the seat is actually read.
+///
+/// Only the parse lives here. Fetching it belongs beside the session, in
+/// `ClaudeWebSource`, which is what keeps the cookie leaving this module
+/// through paths that file owns.
+enum ClaudeWebAccountProfile {
+    private static let idKey = "uuid"
+    private static let emailKey = "email_address"
+    private static let membershipsKey = "memberships"
+    private static let organizationKey = "organization"
+    private static let organizationNameKey = "name"
+    /// The plan, under the name claude.ai gives it. Measured to carry the
+    /// identical token `.claude.json` puts in `organizationType`.
+    private static let planKey = "analytics_subscription_plan"
+
+    /// Pure, so the shape of the reply is testable without claude.ai — and so
+    /// a field they rename costs a nil rather than a throw, on the same rule
+    /// `ClaudeAccountProfile.parse` follows. The id is the exception: it is the
+    /// key the session would be filed under, and there is nothing to file
+    /// without one.
+    ///
+    /// The organisation is picked by capability and by nothing else. An
+    /// account that holds no `chat` organisation is on no chat plan, so it
+    /// answers no organisation and no plan rather than borrowing the first
+    /// membership listed — the measured account's other organisation reports
+    /// `api_individual`, which would badge a subscription with an API tier
+    /// nobody is on. `ClaudeWebSource` falls back to the first for the same
+    /// payload, and should: there the fallback buys a usage reading that is
+    /// otherwise impossible, where here the identity is already complete from
+    /// the uuid and the fallback would buy only a label that can be wrong.
+    /// Membership order is the server's, so it could also differ between two
+    /// polls of one account.
+    static func parse(_ payload: [String: Any]) throws -> ClaudeAccountIdentity {
+        guard let uuid = payload[idKey] as? String, !uuid.isEmpty else {
+            throw ClaudeAccountProfile.Failure.malformedPayload
+        }
+        let organization = subscriptionOrganization(in: payload)
+        return ClaudeAccountIdentity(
+            uuid: uuid,
+            email: payload[emailKey] as? String,
+            organization: organization?[organizationNameKey] as? String,
+            organizationType: organization?[planKey] as? String,
+            rateLimitTier: nil
+        )
+    }
+
+    private static func subscriptionOrganization(in payload: [String: Any]) -> [String: Any]? {
+        let memberships = (payload[membershipsKey] as? [Any] ?? [])
+            .compactMap { $0 as? [String: Any] }
+            .compactMap { $0[organizationKey] as? [String: Any] }
+        return ClaudeWebSource.subscriptionOrganization(among: memberships)
+    }
+}
