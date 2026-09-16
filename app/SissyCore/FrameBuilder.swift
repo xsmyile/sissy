@@ -51,6 +51,31 @@ struct UsageWindow: Sendable, Equatable, Codable {
         self.resetsAt = resetsAt
         self.scope = scope
     }
+
+    /// The windows a panel draws, in the order it stacks them.
+    ///
+    /// The order is here rather than at each producer because the panel draws
+    /// the list as it is handed: two vendors listing the same two periods the
+    /// other way round would stack their blocks differently for no reason a
+    /// reader could see. Which row the block *leads* on is not positional —
+    /// `UsagePanelSnapshot.binding` decides that from the pace.
+    ///
+    /// A bucket past its own reset is kept rather than dropped. Dropping it
+    /// was only ever safe for a source that can re-read on demand, and Codex
+    /// is not one: its buckets ride the CLI's own turns, so between a reset
+    /// and the next turn the whole session row left the page with nothing
+    /// said — measured 2026-09-16, a 5 h window resetting at 12:30 UTC was
+    /// gone at 12:55 while the weekly beside it kept a caption implying the
+    /// block was current. The reading it carries is stale in the one way that
+    /// matters, so the app words it as rolled over and prints no figure for
+    /// it; what it must not do is state the period no longer exists, which is
+    /// what an absent row says.
+    ///
+    /// One rule in one place because a provider's reading and an account's
+    /// are drawn side by side, and two copies of this would eventually differ.
+    static func ordered(_ windows: [UsageWindow]) -> [UsageWindow] {
+        windows.sorted { ($0.minutes, $0.scope ?? "") < ($1.minutes, $1.scope ?? "") }
+    }
 }
 
 /// One project's share of a day.

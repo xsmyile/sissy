@@ -19,14 +19,79 @@ import Foundation
 /// amendment to one that is.
 struct ClaudeCodeSignals: SourceSignals {
     let limitsProbe: ClaudeLimitsProbe?
-    let webSource: ClaudeWebSource?
+    /// The claude.ai readers, one per linked account.
+    ///
+    /// Held behind a `LockedValue` rather than as an array because the set
+    /// changes while the adapter lives — a session linked, a session
+    /// forgotten — and the adapter's signals object is built once, at
+    /// construction. Read nonisolated for the reason everything here is: the
+    /// aggregator asks while the emitting provider still holds its actor.
+    let webSources: LockedValue<[ClaudeWebSource]>
     let profile: ClaudeProfileSource
+    /// Who the CLI is signed in as, which is the account the probe's reading
+    /// and the config file's identity both belong to. Read from the registry
+    /// rather than from `.claude.json`, because only the CLI writes that file
+    /// and a switch Sissy made is not in it until some `claude` runs.
+    let accounts: ClaudeAccountRegistry
 
     func currentSignals() -> ProviderSignals {
-        Self.merge(
+        let sources = webSources.load()
+        let signedIn = accounts.currentSnapshot()
+        var reading = Self.merge(
             profile: profile.currentSignals(),
-            web: webSource?.currentSignals(),
+            web: sources.first(where: { $0.account == signedIn.activeUUID })?.currentSignals()
+                ?? sources.first?.currentSignals(),
             probe: limitsProbe?.currentSignals())
+        reading.accounts = Self.perAccount(
+            reading, sources: sources, known: signedIn)
+        return reading
+    }
+
+    /// One entry per account Sissy can read, the signed-in one included.
+    ///
+    /// Left empty while there is one, which is what keeps a single-account
+    /// install rendering exactly as it did: the surfaces fall back to the
+    /// reading above, which is that account's anyway. A list of one would put
+    /// a switcher and a qualified name in front of someone with nothing to
+    /// switch between.
+    static func perAccount(
+        _ reading: ProviderSignals,
+        sources: [ClaudeWebSource],
+        known: ClaudeAccountRegistry.Snapshot
+    ) -> [AccountSignals] {
+        var byAccount: [String: AccountSignals] = [:]
+        if let active = known.activeUUID {
+            byAccount[active] = AccountSignals(
+                id: active,
+                account: reading.account,
+                plan: reading.plan,
+                planTier: reading.planTier,
+                windows: reading.windows,
+                credits: reading.credits,
+                limitsState: reading.limitsState,
+                limitsObservedAt: reading.limitsObservedAt,
+                isSignedIn: true)
+        }
+        for source in sources where source.account != known.activeUUID {
+            let identity = known.accounts.first { $0.uuid == source.account }
+            let signals = source.currentSignals()
+            byAccount[source.account] = AccountSignals(
+                id: source.account,
+                account: identity.map {
+                    ProviderAccount(email: $0.email, organization: $0.organization, seat: nil)
+                } ?? signals.account,
+                plan: identity?.organizationType ?? signals.plan,
+                planTier: identity?.rateLimitTier ?? signals.planTier,
+                windows: signals.windows,
+                credits: signals.credits,
+                limitsState: signals.limitsState,
+                limitsObservedAt: signals.limitsObservedAt,
+                isSignedIn: false)
+        }
+        guard byAccount.count > 1 else { return [] }
+        return byAccount.values.sorted { lhs, rhs in
+            (lhs.isSignedIn ? 0 : 1, lhs.id) < (rhs.isSignedIn ? 0 : 1, rhs.id)
+        }
     }
 
     /// The config file's reading, with whichever limits reader is actually
@@ -95,8 +160,9 @@ final class ClaudeCodeAdapter: SourceAdapter {
         id: String = ProviderID.claudeCode,
         pricingOverride: [String: ModelPricing]?,
         limitsProbe: ClaudeLimitsProbe?,
-        webSource: ClaudeWebSource?,
+        webSources: LockedValue<[ClaudeWebSource]>,
         profile: ClaudeProfileSource,
+        accounts: ClaudeAccountRegistry,
         ledger: ProjectLedger
     ) {
         self.pricingOverride = pricingOverride.map(PricingTable.init)
@@ -107,7 +173,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
             root: claudeDir,
             watcherLabel: "sissy.usage.fswatch",
             signals: ClaudeCodeSignals(
-                limitsProbe: limitsProbe, webSource: webSource, profile: profile)
+                limitsProbe: limitsProbe, webSources: webSources, profile: profile,
+                accounts: accounts)
         )
     }
 
@@ -349,8 +416,9 @@ extension LocalUsageProvider {
         historyRoot: URL? = nil,
         pricingOverride: [String: ModelPricing]? = nil,
         limitsProbe: ClaudeLimitsProbe? = nil,
-        webSource: ClaudeWebSource? = nil,
+        webSources: LockedValue<[ClaudeWebSource]> = LockedValue([]),
         profile: ClaudeProfileSource = ClaudeProfileSource(),
+        accounts: ClaudeAccountRegistry = .inert(),
         ledger: ProjectLedger = ProjectLedger(),
         backfill: Range<Date>? = nil
     ) -> LocalUsageProvider {
@@ -360,8 +428,9 @@ extension LocalUsageProvider {
                 id: id,
                 pricingOverride: pricingOverride,
                 limitsProbe: limitsProbe,
-                webSource: webSource,
+                webSources: webSources,
                 profile: profile,
+                accounts: accounts,
                 ledger: ledger
             ),
             retainDays: retainDays,

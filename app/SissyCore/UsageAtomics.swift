@@ -12,6 +12,45 @@ final class LockedValue<Value: Sendable>: @unchecked Sendable {
     func update(_ change: (inout Value) -> Void) { lock.withLock { change(&value) } }
 }
 
+/// One account's own reading of the limits it is under.
+///
+/// Deliberately a smaller type than `ProviderSignals` rather than a nesting of
+/// it: a provider answers for a day's tokens, a plan and an activity stamp,
+/// and an account answers for none of those. What an account has is an
+/// identity and a ceiling, and a type that carried the rest would invite a
+/// caller to read a token count off something that never counted any.
+///
+/// The spend is deliberately absent and cannot be added. A Claude Code log
+/// line names no account, so the tokens belong to the config home rather than
+/// to whoever was signed in when it was written — a day spanning a sign-in is
+/// genuinely one number across two accounts. The gauge is the whole of what an
+/// account answers for.
+struct AccountSignals: Sendable, Equatable, Identifiable {
+    /// Anthropic's own account uuid, which is the key both the OAuth profile
+    /// and claude.ai name this account with — measured, one id across both.
+    let id: String
+    let account: ProviderAccount?
+    let plan: String?
+    let planTier: String?
+    var windows: [UsageWindow] = []
+    var credits: ProviderCredits?
+    var limitsState: ProviderLimitsState = .quiet
+    var limitsObservedAt: Date?
+    /// Whether this is the account the CLI itself is signed in as, which is
+    /// the one whose future spend lands in the day beside it.
+    var isSignedIn: Bool = false
+
+    /// The same reading ordered by period, on the rule
+    /// `ProviderSignals.live()` applies to its own — a bucket past its reset
+    /// kept with the rest, so an account's gauges and the row above them
+    /// cannot disagree about whether a window still exists.
+    func live() -> Self {
+        var copy = self
+        copy.windows = UsageWindow.ordered(windows)
+        return copy
+    }
+}
+
 /// Everything one source answers for besides its token totals, published as a
 /// single value.
 ///
@@ -54,28 +93,32 @@ struct ProviderSignals: Sendable, Equatable {
     /// separates a turn landing now from a reconstruction of the ones that
     /// landed before Sissy was launched.
     var lastActivityAt: Date?
+    /// Every account this provider can answer for, the signed-in one
+    /// included, in a stable order.
+    ///
+    /// Empty for a provider that answers for one account, which is every
+    /// provider until a second session is linked — and what makes a
+    /// single-account install render exactly as it did before this existed.
+    ///
+    /// The fields above are that signed-in account's reading and stay where
+    /// they are: they are what a row, a badge and a gauge have always read,
+    /// and moving them would churn every consumer to express something none
+    /// of them asked a different question about. This is the list the
+    /// surfaces that *do* ask iterate, and the signed-in account appears in
+    /// it too, so nothing has to special-case the first one.
+    var accounts: [AccountSignals] = []
 
-    /// The same reading, ordered by the period each bucket measures.
+    /// The same reading ordered by the period each bucket measures, and every
+    /// account's reading behind it given the same treatment — one of them is
+    /// this same reading under its own name, and two rows drawn from one
+    /// moment must not disagree about which of their windows has rolled over.
     ///
-    /// The order is here rather than at each producer because the panel draws
-    /// the list in the order it is handed: two vendors listing the same two
-    /// periods the other way round would stack their blocks differently for
-    /// no reason a reader could see. Which row the block *leads* on is not
-    /// positional — `UsagePanelSnapshot.binding` decides it from the pace.
-    ///
-    /// A bucket past its own reset is kept rather than dropped. Dropping it
-    /// was only ever safe for a source that can re-read on demand, and Codex
-    /// is not one: its buckets ride the CLI's own turns, so between a reset
-    /// and the next turn the whole session row left the page with nothing
-    /// said — measured 2026-09-16, a 5 h window resetting at 12:30 UTC was
-    /// gone at 12:55 while the weekly beside it kept a caption implying the
-    /// block was current. The reading it carries is stale in the one way that
-    /// matters, so the app words it as rolled over and prints no figure for
-    /// it; what it must not do is state the period no longer exists, which is
-    /// what an absent row says.
+    /// What ordering means, and why a bucket past its reset stays in the
+    /// list, is `UsageWindow.ordered`.
     func live() -> Self {
         var copy = self
-        copy.windows = windows.sorted { ($0.minutes, $0.scope ?? "") < ($1.minutes, $1.scope ?? "") }
+        copy.windows = UsageWindow.ordered(windows)
+        copy.accounts = accounts.map { $0.live() }
         return copy
     }
 }

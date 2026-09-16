@@ -63,32 +63,23 @@ actor ClaudeWebSource: SourceSignals {
         let credits: ProviderCredits?
     }
 
-    /// The imported session, read under the caller's own interaction rule.
-    ///
-    /// Sessions are filed under the account they belong to, and this reads
-    /// whichever one is stored. Exact while an install holds one, and what a
-    /// reader per account replaces — a source built for an account takes that
-    /// account's session rather than looking one up.
-    ///
-    /// The holding key wins when both are there, because that state means an
-    /// import has just landed and has not been identified yet: it is the newer
-    /// of the two, and preferring the keyed one would go on reading a session
-    /// the user has already replaced. Sorted otherwise, so two calls a moment
-    /// apart cannot answer for different accounts.
-    static func storedSession(allowingInteraction: Bool) -> ClaudeCredentialsLookup {
-        let stored = ClaudeWebSessionStore.storedAccounts()
-        guard
-            let account = stored.first(where: { $0 == ClaudeWebSessionStore.unkeyedAccount })
-                ?? stored.first
-        else { return .absent }
-        return ClaudeWebSessionStore.load(account: account, allowingInteraction: allowingInteraction)
-    }
+    /// Which account's session this reader spends. One reader per stored
+    /// session, so nothing ever picks between them — a source built for an
+    /// account reads that account's item and no other.
+    let account: String
 
     init(
-        sessionSource: @escaping @Sendable (Bool) async -> ClaudeCredentialsLookup = storedSession,
+        account: String,
+        sessionSource: (@Sendable (Bool) async -> ClaudeCredentialsLookup)? = nil,
         fetchSource: @escaping @Sendable (String, String?) async throws -> Reading = fetch
     ) {
-        self.sessionSource = sessionSource
+        self.account = account
+        self.sessionSource =
+            sessionSource
+            ?? { allowingInteraction in
+                ClaudeWebSessionStore.load(
+                    account: account, allowingInteraction: allowingInteraction)
+            }
         self.fetchSource = fetchSource
     }
 

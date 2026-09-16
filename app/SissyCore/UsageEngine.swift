@@ -67,7 +67,9 @@ actor UsageEngine {
     /// nothing runs until `startClaudeLimits` finds one — because the adapter
     /// that publishes its reading is assembled once, at launch, and an import
     /// that arrives later must not need a new provider to be seen.
-    private let claudeWebSource: ClaudeWebSource
+    /// One reader per linked claude.ai session, shared with the adapter's
+    /// signals so both see the same set the moment it changes.
+    private let claudeWebSources = LockedValue<[ClaudeWebSource]>([])
     /// Reads each metering vendor's public status page. Constructed for the
     /// providers that are metering and inert until `start` — a vendor Sissy
     /// was told to leave alone makes no request, which is the same rule its
@@ -178,7 +180,6 @@ actor UsageEngine {
         config: ServerConfig,
         configURL: URL = ServerConfig.defaultURL,
         limitsProbe: ClaudeLimitsProbe? = nil,
-        webSource: ClaudeWebSource = ClaudeWebSource(),
         claudeAccounts: ClaudeAccountRegistry? = nil,
         statusMonitor: ProviderStatusMonitor? = nil,
         keepAwakePolicy: KeepAwakePolicy = .default
@@ -226,12 +227,15 @@ actor UsageEngine {
             statusMonitor
             ?? ProviderStatusMonitor(
                 providers: self.resolvedProviders.filter { $0.activation.isMetering }.map(\.id))
-        self.claudeWebSource = webSource
-        self.claudeAccounts =
+        // Built before the providers rather than after: the Claude adapter's
+        // signals hold it, because who the CLI is signed in as is what says
+        // which of the per-account readings is the one the row already shows.
+        let accountRegistry =
             claudeAccounts
             ?? ClaudeAccountRegistry(
                 store: ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: stateDir)),
                 slot: .live(home: claudeHome))
+        self.claudeAccounts = accountRegistry
         var ownLimits: ClaudeLimitsProbe?
         var providers: [any UsageProvider] = []
         for resolved in self.resolvedProviders where resolved.activation.isMetering {
@@ -273,8 +277,9 @@ actor UsageEngine {
                         historyRoot: historyRoot,
                         pricingOverride: config.pricingOverride,
                         limitsProbe: probe,
-                        webSource: webSource,
+                        webSources: self.claudeWebSources,
                         profile: ClaudeProfileSource(url: home.claudeProfileURL),
+                        accounts: accountRegistry,
                         ledger: projectLedger
                     ))
             }
@@ -487,7 +492,27 @@ actor UsageEngine {
     /// putting back a session the user just asked to be rid of.
     private func startClaudeWebAdoption() {
         claudeWebAdoptionTask?.cancel()
-        claudeWebAdoptionTask = Task { _ = await ClaudeWebSessionAdoption.run() }
+        let me = self
+        claudeWebAdoptionTask = Task {
+            guard case .adopted = await ClaudeWebSessionAdoption.run() else { return }
+            // The key the session sat under is gone, so the reader built for
+            // it is now pointed at nothing. Following the store is what turns
+            // that reader into one for the account the session turned out to
+            // belong to, rather than one reporting a signed-out account.
+            await me.followStoredClaudeWebSessions()
+        }
+    }
+
+    /// Brings the readers level with what is actually stored, and starts the
+    /// ones that are new. Idempotent: a reader already polling is left alone.
+    private func followStoredClaudeWebSessions() async {
+        guard lifecycle == .running else { return }
+        await rebuildClaudeWebSources()
+        let me = self
+        for source in claudeWebSources.load() {
+            await source.start(userInitiated: false) { await me.reemit() }
+        }
+        await reemit()
     }
 
     /// How often the active credential is re-read. Long on purpose: a token
@@ -711,13 +736,20 @@ actor UsageEngine {
             // again, and re-reading the same dead string is the button failing
             // at its only job. The notice beside it says "Import again", so
             // that is what this does.
-            if hasClaudeWebSession {
-                if claudeWebSource.currentSignals().limitsState == .sessionExpired {
-                    _ = await importClaudeWebSession()
+            // Only a session claude.ai has actually closed is re-imported:
+            // re-reading a dead string is the button failing at its only job,
+            // and re-importing a live one would overwrite every other
+            // account's reader with whichever session Claude.app happens to
+            // hold.
+            var reimport = false
+            for source in claudeWebSources.load() {
+                if await source.currentSignals().limitsState == .sessionExpired {
+                    reimport = true
                 } else {
-                    await claudeWebSource.refresh { await me.reemit() }
+                    await source.refresh { await me.reemit() }
                 }
             }
+            if reimport { _ = await importClaudeWebSession() }
         }
         if config.statusChecks {
             await statusMonitor.refresh(provider: id) { await me.reemit() }
@@ -963,8 +995,31 @@ actor UsageEngine {
         if !hasClaudeWebSession {
             _ = await adoptClaudeWebSession(allowingInteraction: userInitiated)
         }
-        guard hasClaudeWebSession else { return }
-        await claudeWebSource.start(userInitiated: userInitiated) { await me.reemit() }
+        await rebuildClaudeWebSources()
+        for source in claudeWebSources.load() {
+            await source.start(userInitiated: userInitiated) { await me.reemit() }
+        }
+    }
+
+    /// Builds one reader per stored session, and drops the readers whose
+    /// sessions have gone.
+    ///
+    /// The set is what the adapter's signals read, so replacing it is how a
+    /// session linked or forgotten reaches the frame without the adapter being
+    /// rebuilt. A reader that survives is kept rather than replaced: it is an
+    /// actor with a poll loop and a reading already published, and building a
+    /// fresh one would blank that account's gauges until its next request.
+    private func rebuildClaudeWebSources() async {
+        let stored = Set(ClaudeWebSessionStore.storedAccounts())
+        let existing = claudeWebSources.load()
+        for source in existing where !stored.contains(source.account) {
+            await source.stop()
+        }
+        let kept = existing.filter { stored.contains($0.account) }
+        let added = stored.subtracting(kept.map(\.account))
+            .sorted()
+            .map { ClaudeWebSource(account: $0) }
+        claudeWebSources.store(kept + added)
     }
 
     /// Records whether the CLI turned out to keep a credential Sissy can read,
@@ -977,7 +1032,9 @@ actor UsageEngine {
     /// stopping one that never started is a no-op, and asking would be a
     /// second place for the answer to be wrong.
     private func stopClaudeLimits() async {
-        await claudeWebSource.stop()
+        for source in claudeWebSources.load() {
+            await source.stop()
+        }
         await claudeOwnLimits?.stop()
     }
 
