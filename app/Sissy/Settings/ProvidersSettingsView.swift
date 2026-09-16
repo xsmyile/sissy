@@ -109,6 +109,39 @@ enum ClaudeAccountLinkCopy {
     }
 }
 
+/// How one linked account is named in the list.
+///
+/// A pure function of the account, for the reason `ProviderRowSnapshot` is one:
+/// the fallbacks are the whole substance of this row and they are worth holding
+/// without a window.
+///
+/// The person's name leads where there is one, with the address beside it in
+/// secondary text and the organisation underneath. The address leads where
+/// there is no name, which is exactly the row every account had before — the
+/// fallback is the old shape rather than a second one to maintain.
+///
+/// Nothing on the row repeats itself. An account named by its address carries
+/// no second copy of it, and one the vendor named no address for is titled by
+/// its organisation and then keeps no caption — a row that says the same thing
+/// twice reads as two different facts.
+struct LinkedAccountRowSnapshot: Equatable {
+    let title: String
+    /// The address, only where it is not already the title.
+    let address: String?
+    let organization: String?
+
+    static func make(_ account: ClaudeWebAccount) -> Self {
+        guard let identity = account.identity else {
+            return Self(title: account.id, address: nil, organization: nil)
+        }
+        let title = identity.name ?? UsageFormat.accountLabel(identity)
+        return Self(
+            title: title,
+            address: identity.name == nil ? nil : identity.email,
+            organization: identity.organization == title ? nil : identity.organization)
+    }
+}
+
 enum ClaudeLimitsSourceCopy {
     static let ownCredentialLabel = "Limits source"
     static let ownCredentialState = "This account's own sign-in"
@@ -272,10 +305,25 @@ struct ProvidersSettingsView: View {
     /// Ordered by the name they are drawn under rather than by the uuid they
     /// are keyed by, which is the order the engine deliberately does not have:
     /// the words are this layer's.
+    ///
+    /// The address breaks a tie, because one person holding two seats is the
+    /// case this list exists for and their rows lead on the same word.
     private var sortedAccounts: [ClaudeWebAccount] {
-        model.engine.linkedClaudeAccounts.sorted { Self.label(of: $0) < Self.label(of: $1) }
+        model.engine.linkedClaudeAccounts.sorted { lhs, rhs in
+            let left = LinkedAccountRowSnapshot.make(lhs)
+            let right = LinkedAccountRowSnapshot.make(rhs)
+            return (left.title, left.address ?? "") < (right.title, right.address ?? "")
+        }
     }
 
+    /// What the confirmation and the screen reader call an account, which is
+    /// deliberately the address rather than the title the row leads on.
+    ///
+    /// One person holding two seats reads as one name twice, and a dialog that
+    /// asks whether to forget "Davide Tacchini" when both rows say so is a
+    /// destructive question nobody can answer. The address is unique by
+    /// construction, which is the property this one call site needs.
+    ///
     /// An account with no identity is one whose session was filed before
     /// anything could name it. Its uuid is a poor label and the only honest
     /// one — and a row under it is what makes that session removable.
@@ -292,7 +340,7 @@ struct ProvidersSettingsView: View {
     /// make another — which the help text says before the click rather than
     /// after it.
     private func linkedAccount(_ account: ClaudeWebAccount) -> some View {
-        let label = Self.label(of: account)
+        let row = LinkedAccountRowSnapshot.make(account)
         return LabeledContent {
             Button(role: .destructive) {
                 unlinking = account
@@ -301,13 +349,26 @@ struct ProvidersSettingsView: View {
             }
             .buttonStyle(.borderless)
             .help(ClaudeAccountLinkCopy.unlinkHelp)
-            .accessibilityLabel(ClaudeAccountLinkCopy.unlink(label))
+            .accessibilityLabel(ClaudeAccountLinkCopy.unlink(Self.label(of: account)))
         } label: {
-            Text(label)
-            if let organization = account.identity?.organization {
+            Self.title(row)
+            if let organization = row.organization {
                 Text(organization)
             }
         }
     }
 
+    /// The title with the address trailing it, as one `Text` rather than a
+    /// stack: `LabeledContent` styles the first view of its label as the title
+    /// and everything after it as a caption, so a second view here would put
+    /// the address on a line of its own under a name it belongs beside.
+    ///
+    /// Interpolated rather than concatenated — `Text.+` is deprecated as of
+    /// macOS 26 — which is also what keeps the address in secondary text
+    /// inside a title the form styles as a whole.
+    private static func title(_ row: LinkedAccountRowSnapshot) -> Text {
+        guard let address = row.address else { return Text(row.title) }
+        let trailing = Text(address).foregroundStyle(.secondary)
+        return Text("\(row.title)   \(trailing)")
+    }
 }

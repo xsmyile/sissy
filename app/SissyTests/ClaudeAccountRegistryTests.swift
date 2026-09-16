@@ -76,6 +76,38 @@ final class ClaudeAccountProfileTests: XCTestCase {
     func testParseRefusesAPayloadWithNoAccountId() {
         XCTAssertThrowsError(try ClaudeAccountProfile.parse(["organization": ["name": "x"]]))
     }
+
+    /// Measured 2026-09-16: the profile carries `full_name` and `display_name`
+    /// side by side on the account. The full name leads, because the display
+    /// name is what the account chose to be shown as and can be a handle.
+    func testParseTakesTheOwnersName() throws {
+        let identity = try ClaudeAccountProfile.parse([
+            "account": [
+                "uuid": "u-1", "full_name": "Davide Tacchini", "display_name": "dtac",
+            ]
+        ])
+
+        XCTAssertEqual(identity.name, "Davide Tacchini")
+    }
+
+    func testTheDisplayNameAnswersForAnAccountWithNoFullName() throws {
+        let identity = try ClaudeAccountProfile.parse([
+            "account": ["uuid": "u-1", "display_name": "dtac"]
+        ])
+
+        XCTAssertEqual(identity.name, "dtac")
+    }
+
+    /// An account that filled in neither is named by its address, so the name
+    /// has to be absent rather than empty: a blank title would leave the row
+    /// with nothing on it.
+    func testAnAccountWithNoNameAnswersNone() throws {
+        let identity = try ClaudeAccountProfile.parse([
+            "account": ["uuid": "u-1", "full_name": "   "]
+        ])
+
+        XCTAssertNil(identity.name)
+    }
 }
 
 final class ClaudeAccountRegistryTests: XCTestCase {
