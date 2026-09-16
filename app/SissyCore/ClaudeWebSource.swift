@@ -331,16 +331,24 @@ actor ClaudeWebSource: SourceSignals {
     /// The selection itself, so the rule is testable without claude.ai.
     static func subscriptionOrganization(in payload: [Any]) throws -> String {
         let organizations = payload.compactMap { $0 as? [String: Any] }
-        let subscription = organizations.first { organization in
-            let capabilities = organization["capabilities"] as? [Any] ?? []
-            return capabilities.contains { ($0 as? String) == subscriptionCapability }
-        }
+        let subscription = subscriptionOrganization(among: organizations)
         guard let uuid = (subscription ?? organizations.first)?["uuid"] as? String,
             !uuid.isEmpty
         else {
             throw ClaudeLimitsError.malformedPayload
         }
         return uuid
+    }
+
+    /// The organisation itself rather than its id, for the caller that wants
+    /// what is written on it. Shared with `ClaudeWebAccountProfile` so the two
+    /// readers of this payload cannot come to disagree about which of an
+    /// account's organisations the subscription is.
+    static func subscriptionOrganization(among organizations: [[String: Any]]) -> [String: Any]? {
+        organizations.first { organization in
+            let capabilities = organization["capabilities"] as? [Any] ?? []
+            return capabilities.contains { ($0 as? String) == subscriptionCapability }
+        }
     }
 
     private static func get(_ path: String, session: String) async throws -> [String: Any] {
