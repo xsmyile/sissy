@@ -17,9 +17,13 @@ final class SissyMenuBarAnimator {
 
     /// Which set of images the same pose is drawn from.
     ///
-    /// Orthogonal to the pose on purpose: the eye is lit or not for a reason
-    /// that has nothing to do with whether it is open, and a manual hold with
-    /// nothing arriving is exactly the pair — shut and lit — worth showing.
+    /// Orthogonal to the pose because the two answer different questions: the
+    /// pose is whether anything is reaching the app, the artwork whether the
+    /// Mac is being held awake. Only three of the four pairs are reachable
+    /// today — `SissyModel.keepAwake` reports `active` off the frame, and no
+    /// frame is exactly what makes the pose shut — so a lit eye is always an
+    /// open one. Keeping them independent here is what stops that becoming a
+    /// rule the drawing relies on.
     enum Artwork {
         case template
         case lit
@@ -62,6 +66,10 @@ final class SissyMenuBarAnimator {
         let eyes: Frames
     }
     private var playbackTask: Task<Void, Never>?
+    /// Which frame of a gesture the button is showing, and nil while it rests.
+    /// The playback loop's dedup reads it rather than keeping its own, so a
+    /// redraw from outside the loop is not undone by the next tick.
+    private var drawnFrame: Int?
     private var generation: UInt = 0
     private let reduceMotion: () -> Bool
 
@@ -94,16 +102,25 @@ final class SissyMenuBarAnimator {
             )
         }
         silhouettes = try build(SissyArtwork.silhouette)
-        lit = try? LitFrames(eyeless: build(SissyArtwork.eyeless), eyes: build(SissyArtwork.eye))
+        do {
+            lit = try LitFrames(eyeless: build(SissyArtwork.eyeless), eyes: build(SissyArtwork.eye))
+        } catch {
+            lit = nil
+            NSLog("sissy: eye tint unavailable: %@", error.localizedDescription)
+        }
         eyeOverlay = lit == nil ? nil : SissyEyeOverlay.installed(on: button)
         self.button = button
         self.reduceMotion = reduceMotion
         drawResting()
     }
 
+    /// The overlay goes with the animator. It is a subview of a button the
+    /// animator only borrows, so leaving it behind would hand a rebuilt
+    /// animator a second one to draw over.
     isolated deinit {
         playbackTask?.cancel()
-        drawResting()
+        eyeOverlay?.removeFromSuperview()
+        button?.image = restingImage
     }
 
     /// One blink. A request that arrives during playback is dropped, never
@@ -131,15 +148,20 @@ final class SissyMenuBarAnimator {
         drawResting()
     }
 
-    /// Lights the eye, or puts it out, without disturbing a gesture: the
-    /// overlay tracks the silhouette frame by frame either way, so a hold
-    /// taken mid-blink lights the rest of it and the resting frame after.
+    /// Lights the eye, or puts it out, and redraws whatever is on screen so
+    /// both layers move together.
+    ///
+    /// The frame on screen is redrawn rather than left to the gesture: the
+    /// playback loop only writes when the frame index changes, and frames 6-9
+    /// are one index held for four frames' worth of time. A flip landing in
+    /// that window would show the lit eye over a body still drawn from the
+    /// other set — the eye ink fringing through the blue, or no eye at all —
+    /// which is the pairing the eyeless split exists to prevent.
     func setArtwork(_ newArtwork: Artwork) {
         guard newArtwork != artwork, let eyeOverlay else { return }
         artwork = newArtwork
         eyeOverlay.isHidden = newArtwork != .lit
-        guard !isPlaying else { return }
-        drawResting()
+        if let drawnFrame { draw(frame: drawnFrame) } else { drawResting() }
     }
 
     /// Cancels a running gesture and restores the resting frame immediately.
@@ -165,7 +187,6 @@ final class SissyMenuBarAnimator {
         playbackTask = Task { @MainActor [weak self] in
             let clock = ContinuousClock()
             let started = clock.now
-            var lastIndex = -1
             defer { self?.finish(generation: token) }
 
             while !Task.isCancelled {
@@ -174,9 +195,8 @@ final class SissyMenuBarAnimator {
                 else { return }
 
                 guard let step = motion.step(at: started.duration(to: clock.now)) else { return }
-                if step.index != lastIndex {
+                if self?.drawnFrame != step.index {
                     self?.draw(frame: step.index)
-                    lastIndex = step.index
                 }
 
                 // Absolute deadlines skip overdue frames instead of stretching
@@ -192,11 +212,13 @@ final class SissyMenuBarAnimator {
     /// The one place both layers are written, so the eye can never be left on
     /// a frame the silhouette under it has moved off.
     private func drawResting() {
+        drawnFrame = nil
         button?.image = restingImage
         draw(eye: lit?.eyes.resting(pose))
     }
 
     private func draw(frame index: Int) {
+        drawnFrame = index
         button?.image = bodyFrames.blink[index]
         draw(eye: lit?.eyes.blink[index])
     }
