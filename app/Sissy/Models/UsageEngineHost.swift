@@ -573,10 +573,13 @@ final class UsageEngineHost {
     ///
     /// The registry learns an account on its own watch — a `/login`, a switch
     /// made outside Sissy, a token rotation — and none of those is an action
-    /// the app took, so nothing else here would ever hear about it. Driven off
-    /// the frame because that is the one thing arriving on the registry's own
-    /// cadence; the compare is what keeps a steady state from invalidating the
-    /// panel's view graph on every emit.
+    /// the app took, so nothing else here would hear about it. It is reached
+    /// from both paths that publish, for the reason the credential source
+    /// beside it is: the frame, which the registry re-emits on when it files
+    /// something, and the readiness a surface asks for when it opens, which is
+    /// the path that exists precisely because a frame may not come. The
+    /// compare is what keeps a steady state from invalidating the panel's view
+    /// graph on every emit.
     ///
     /// Without it the switcher could not appear at all: the property was
     /// written only by `activateClaudeAccount` and `forgetClaudeAccount`,
@@ -610,6 +613,7 @@ final class UsageEngineHost {
     private func apply(_ readiness: [ProviderReadiness]) {
         providers = readiness
         syncClaudeCredentialSource()
+        syncClaudeAccounts()
         let scans = readiness.compactMap(\.scan)
         filesWatched = scans.reduce(0) { $0 + $1.filesWatched }
         isWarm = scans.allSatisfy(\.isWarm)

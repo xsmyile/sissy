@@ -160,9 +160,10 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// Re-reads the credentials with the dialog allowed and polls at once,
     /// returning only once that request has finished.
     ///
-    /// The gesture behind a user asking for their limits back, and the only
-    /// other thing besides flipping the switch that may put a keychain dialog
-    /// on screen. Two things stand between a running probe and a fresh read
+    /// The gesture behind a user asking for their limits back. It is one of
+    /// the reads allowed to put a keychain dialog on screen, alongside the
+    /// start a flipped switch makes and the switch of account the panel
+    /// offers. Two things stand between a running probe and a fresh read
     /// and this clears both: the poll task, which makes `start` a no-op while
     /// it lives, and the deduped log line, so the outcome of the read the user
     /// just asked for is actually recorded.
@@ -230,8 +231,10 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// It was written when this read was `SecItemCopyMatching`, which could
     /// raise the legacy keychain panel and earn a grant that a token rotation
     /// invalidated; the engine now injects `ClaudeCodeCredentials.load`, which
-    /// is a file read that falls back to `/usr/bin/security`, asks macOS for
-    /// nothing and costs about a millisecond once every five minutes.
+    /// asks macOS for nothing. Where the CLI keeps `.credentials.json` that is
+    /// a file read costing about a millisecond; where it does not, it is a
+    /// `/usr/bin/security` spawn, which is the expensive arm and still only
+    /// once every five minutes.
     ///
     /// The read is a suspension a `stop()` or a second `refresh` can land in,
     /// which is what `stamp` guards. The generation is checked rather than

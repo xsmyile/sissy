@@ -21,10 +21,6 @@ struct ClaudeCredentials: Sendable, Equatable {
     /// status code there.
     let expiresAt: Date?
 
-    func isValid(at moment: Date = Date()) -> Bool {
-        guard let expiresAt else { return true }
-        return expiresAt > moment
-    }
 }
 
 /// Outcome of a keychain lookup. Absence and refusal are different states:
