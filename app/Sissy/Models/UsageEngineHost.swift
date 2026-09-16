@@ -155,8 +155,15 @@ final class UsageEngineHost {
         // a rebuild waiting here would leave `switchingProvider` true and
         // every toggle dead for the rest of the session. A rebuild is not
         // going anywhere, so it lets the pass finish on its own.
-        await agentHooksTask?.value
-        agentHooksTask = nil
+        //
+        // The handle is re-read rather than assumed: this is a suspension on
+        // the main actor and the Settings switch is reachable across it, so
+        // clearing whatever is there would drop a pass nothing awaits and
+        // nothing can cancel. `isStopped` is what makes that unreachable;
+        // this is what keeps it unreachable if it ever stops being.
+        let joined = agentHooksTask
+        await joined?.value
+        if agentHooksTask == joined { agentHooksTask = nil }
         await tearDown()
     }
 
@@ -373,8 +380,11 @@ final class UsageEngineHost {
         Task { await engine.deleteHistory() }
     }
 
+    /// Refused once teardown has begun, the published flag with it: nothing
+    /// will be written after that point, and a switch left showing the
+    /// position it was moved to claims a configuration that is not on disk.
     func setAgentHooks(_ enabled: Bool) {
-        guard enabled != agentHooks else { return }
+        guard !isStopped, enabled != agentHooks else { return }
         agentHooks = enabled
         applyAgentHooks(enabled)
     }
@@ -397,8 +407,17 @@ final class UsageEngineHost {
     /// a removal interrupted half-way is retried at the next launch instead of
     /// leaving a line in someone else's configuration under a switch that is
     /// already off.
+    ///
+    /// No pass begins once teardown has: `stop()` joins the one it finds and
+    /// the process exits on its reply, so a pass started inside that window is
+    /// one nothing awaits and nothing can cancel, writing two other programs'
+    /// files after the app has said it is done. Refusing to start is the
+    /// recoverable end of it — an install is re-affirmed at the next launch,
+    /// a removal is retried from `agentHooksRemovalPending` — where a pass
+    /// killed between its two targets leaves one CLI registered and the other
+    /// not, which nothing goes back for.
     private func applyAgentHooks(_ enabled: Bool) {
-        guard let engine else { return }
+        guard let engine, !isStopped else { return }
         // A test host is not a user launching Sissy. `xcodebuild test` runs the
         // app against this machine's real `Sissy-Dev` tree, so without this the
         // suite rewrites the developer's own `~/.claude/settings.json` and
@@ -421,6 +440,13 @@ final class UsageEngineHost {
         let previous = agentHooksTask
         agentHooksTask = Task.detached(priority: .utility) {
             await previous?.value
+            // Asked again here, and not only at the call: a pass queued behind
+            // another waits out an install — a script copy, an `sh -n` and two
+            // rewrites — and teardown can begin across that wait. What it is
+            // still untouched at is this line, which is the only place the
+            // refusal is free.
+            let stopping = await MainActor.run { host.isStopped }
+            guard !stopping else { return }
             // Persist the retry before touching either foreign configuration.
             await engine.setAgentHooks(enabled: enabled, removalPending: !enabled)
             let installer = AgentHookInstaller(stateDirectory: stateDirectory, targets: targets)

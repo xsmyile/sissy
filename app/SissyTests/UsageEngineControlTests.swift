@@ -271,6 +271,37 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertFalse(state.coversScreen)
     }
 
+    // MARK: The agent-hooks switch
+
+    /// The intent is written before either foreign configuration is touched,
+    /// and the app touches them from its own `start()` — ahead of the Task
+    /// that boots this engine. So the write has to land on an engine that has
+    /// not started yet, or the launch of a run with a removal outstanding
+    /// persists nothing and the next launch does not go back for it.
+    func testTheSwitchIsPersistedBeforeTheEngineHasBooted() async throws {
+        let engine = makeEngine()
+
+        await engine.setAgentHooks(enabled: false, removalPending: true)
+
+        XCTAssertEqual(try ServerConfig.load(from: configURL).agentHooksRemovalPending, true)
+    }
+
+    /// The other end of the same call. The hooks pass holds the engine it was
+    /// built with, and a provider switch stops that engine without joining the
+    /// pass — so the write can arrive after `stop()` and put this engine's own
+    /// copy of the config back over whatever replaced it.
+    func testAStoppedEngineWritesNothing() async {
+        let engine = makeEngine()
+        await engine.start { _ in }
+        await engine.stop()
+
+        await engine.setAgentHooks(enabled: true)
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: configURL.path),
+            "an engine that has stopped wrote server.json")
+    }
+
     // MARK: The automatic mode
 
     /// The whole point of the automatic mode: the hold is earned by a turn

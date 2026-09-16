@@ -539,7 +539,16 @@ actor UsageEngine {
     /// Records the choice. Registering and unregistering the hook itself is
     /// the app's, because it needs the script out of the app bundle — the
     /// engine only owns what `server.json` says.
+    ///
+    /// `.stopped`, not `.running`, which is the whole of the guard: the app
+    /// registers the hook from its own `start()`, ahead of the boot Task that
+    /// reaches `start()` here, so a guard on `.running` would silently drop
+    /// the launch's own write and leave a pending removal un-retried. What it
+    /// refuses is the other end — a provider switch stops this engine without
+    /// joining the hooks pass, and the pass still holds the reference it was
+    /// built with, so its write would land from an object that is gone.
     func setAgentHooks(enabled: Bool, removalPending: Bool = false) async {
+        guard lifecycle != .stopped else { return }
         guard enabled != config.agentHooks || removalPending != config.agentHooksRemovalPending
         else { return }
         config.agentHooks = enabled
