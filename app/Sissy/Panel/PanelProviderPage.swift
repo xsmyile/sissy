@@ -56,15 +56,8 @@ struct PanelProviderPage: View {
                 self.credits(credits)
             }
 
-            if let strip {
-                Divider()
-                PanelDayBars(strip: strip, tint: tint)
-                    .padding(.horizontal, PanelMetrics.gutter)
-                    .padding(.vertical, 12)
-            }
-
             Divider()
-            today
+            day
 
             if !row.projects.isEmpty {
                 Divider()
@@ -288,7 +281,34 @@ struct PanelProviderPage: View {
         .padding(.vertical, 12)
     }
 
-    // MARK: Today
+    // MARK: The day
+
+    /// What this provider has spent today, and the days behind it for scale.
+    ///
+    /// One block rather than two, because they were always one question. The
+    /// strip's last bar is labelled `Today` and hovering it printed the very
+    /// figures the row below was already printing — so the row was a heading
+    /// with nothing under it, in a panel where a heading and a figure on one
+    /// line mean a block follows. It heads this one.
+    ///
+    /// Today leads and the window under it is the caption, which is also what
+    /// decides which of the two the hover moves: the pointed day replaces the
+    /// caption, never the headline. A figure a reader came for should not
+    /// change out from under the pointer on its way to the bars.
+    ///
+    /// The strip is absent until the archive reaches past today — a fresh
+    /// install, or the archive switched off — and the headline is what stays,
+    /// which is why it belongs to the page rather than to the strip.
+    private var day: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            today
+            if let strip {
+                PanelDayBars(strip: strip, tint: tint)
+            }
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 12)
+    }
 
     private var today: some View {
         HStack(spacing: 6) {
@@ -298,8 +318,6 @@ struct PanelProviderPage: View {
                 .font(.system(size: 12))
                 .monospacedDigit()
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 10)
     }
 
     // MARK: Projects
