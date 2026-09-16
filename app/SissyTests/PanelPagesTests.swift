@@ -219,12 +219,12 @@ final class PanelPagesTests: XCTestCase {
     /// today's spenders, and a day rolls over under an open popover. The page
     /// falls back home rather than rendering a row that no longer exists.
     func testAPageWhoseProviderLeftTheFrameFallsBackHome() {
-        XCTAssertNil(UsagePanelView.openRow(.provider("codex"), in: [row("claude-code")]))
+        XCTAssertNil(UsagePanelView.openRow(.provider("codex", account: nil), in: [row("claude-code")]))
     }
 
     func testThePageResolvesToItsOwnProvider() {
         let open = UsagePanelView.openRow(
-            .provider("codex"), in: [row("claude-code"), row("codex")])
+            .provider("codex", account: nil), in: [row("claude-code"), row("codex")])
 
         XCTAssertEqual(open?.id, "codex")
     }

@@ -888,6 +888,35 @@ extension UsageFormat {
     /// would fix it does not exist yet. A sentence telling someone to press a
     /// button that is not there is worse than one that simply says what is
     /// true.
+    /// The organisations of one account, labelled for someone choosing between
+    /// them.
+    ///
+    /// The plan rather than the name, because claude.ai auto-generates the
+    /// name of the organisation a personal plan comes with and does it in more
+    /// than one shape — measured 2026-09-16, `<name>'s Individual Org` on one
+    /// account and `<email>'s Organization` on another. Recognising that from
+    /// the string would be a regex over the vendor's English copy; the plan is
+    /// a field, and it is the same token the badge beside the account is
+    /// already worded from.
+    ///
+    /// The name comes back only where it is needed: two organisations on one
+    /// plan are told apart by nothing else, and an organisation whose plan the
+    /// vendor did not name has only its name to go on.
+    static func organizationChoices(
+        _ organizations: [ClaudeWebOrganization]
+    ) -> [(id: String, label: String)] {
+        let labels = organizations.map { plan($0.plan, tier: nil, seat: nil)?.label }
+        var counts: [String: Int] = [:]
+        for label in labels.compactMap({ $0 }) { counts[label, default: 0] += 1 }
+        return zip(organizations, labels).map { organization, label in
+            guard let label else { return (organization.id, organization.name) }
+            guard counts[label] == 1 else {
+                return (organization.id, "\(label) · \(organization.name)")
+            }
+            return (organization.id, label)
+        }
+    }
+
     static let unlinkedAccountCaption =
         "Sissy has no live source for this account, so it cannot read its limits."
 }

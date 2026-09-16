@@ -208,6 +208,10 @@ struct UsagePanelSnapshot: Equatable {
         /// Which page this opens, which is the vendor's — an account is a
         /// reading on that page rather than a page of its own.
         let provider: String
+        /// Which of that vendor's accounts this row reads, so the page opens
+        /// on the one that was clicked. Nil for a vendor drawing one row,
+        /// where the page's own fields are already that account's.
+        let account: String?
         let name: String
         let windows: [WindowRow]
         let notice: LimitsNotice?
@@ -638,14 +642,15 @@ struct UsagePanelSnapshot: Equatable {
             guard readable.count > 1 else {
                 return [
                     GaugeRow(
-                        id: row.id, provider: row.id, name: row.name, windows: row.windows,
-                        notice: row.notice, status: row.status)
+                        id: row.id, provider: row.id, account: nil, name: row.name,
+                        windows: row.windows, notice: row.notice, status: row.status)
                 ]
             }
             return readable.map { account in
                 GaugeRow(
                     id: "\(row.id)#\(account.id)",
                     provider: row.id,
+                    account: account.id,
                     name: UsageFormat.accountQualifiedName(
                         row.name, organization: account.organization, fallback: account.label),
                     windows: account.windows,

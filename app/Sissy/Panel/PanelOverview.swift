@@ -27,7 +27,7 @@ struct PanelOverview: View {
     /// does not carry it: a provider that spent nothing today has no slice,
     /// and that is exactly the provider the recap is about.
     let meteringProviders: Int
-    let openProvider: (String) -> Void
+    let openProvider: (String, String?) -> Void
     let selectPeriod: (UsagePeriod) -> Void
 
     var body: some View {
@@ -133,7 +133,7 @@ struct PanelOverview: View {
             SectionLabel(text: providersLabel)
             ForEach(snapshot.gaugeRows) { row in
                 Button {
-                    openProvider(row.provider)
+                    openProvider(row.provider, row.account)
                 } label: {
                     providerRow(row)
                 }

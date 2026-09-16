@@ -65,7 +65,9 @@ struct UsagePanelView: View {
 
     enum Page: Equatable {
         case overview
-        case provider(String)
+        /// The vendor's page, and which of its accounts to open on — the row
+        /// that was clicked, so a gauge per account leads where it reads.
+        case provider(String, account: String?)
     }
 
     /// Cadence for both readouts the panel keeps on its own clock: the
@@ -90,13 +92,20 @@ struct UsagePanelView: View {
     /// The provider the current page is about, when there is one and the frame
     /// still carries it.
     ///
+    /// Which account the open page was aimed at, or nil on the Overview and
+    /// for a vendor whose Overview row is not per account.
+    private var openAccount: String? {
+        guard case .provider(_, let account) = page else { return nil }
+        return account
+    }
+
     /// A provider can leave the frame while its page is open — the slices are
     /// today's spenders, and a day rolls over — so the page falls back home
     /// rather than rendering a row that no longer exists.
     static func openRow(_ page: Page, in providers: [UsagePanelSnapshot.ProviderRow])
         -> UsagePanelSnapshot.ProviderRow?
     {
-        guard case .provider(let id) = page else { return nil }
+        guard case .provider(let id, _) = page else { return nil }
         return providers.first { $0.id == id }
     }
 
@@ -144,6 +153,7 @@ struct UsagePanelView: View {
                             let slice = live?.frame.providers.first { $0.id == open.id }
                             PanelProviderPage(
                                 row: open,
+                                openOnAccount: openAccount,
                                 onSelectAccount: { selectAccount($0) },
                                 onAddAccount: { model.settingsTab = .providers },
                                 switchFailure: model.engine.accountSwitchFailure,
@@ -161,7 +171,7 @@ struct UsagePanelView: View {
                                 meteringProviders: model.engine.providers.count {
                                     $0.activation.isMetering
                                 },
-                                openProvider: { page = .provider($0) },
+                                openProvider: { page = .provider($0, account: $1) },
                                 selectPeriod: { model.setUsagePeriod($0) }
                             )
                         }
