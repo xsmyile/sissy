@@ -159,61 +159,105 @@ struct ProviderAccount: Sendable, Equatable {
     }
 }
 
-/// Money a vendor has billed against a spend cap the user set, in the
-/// account's own currency.
+/// What a credits figure counts.
 ///
-/// Kept in minor units with the exponent the vendor stated rather than
-/// converted on the way in: the currency is the account's, not the machine's,
-/// and a division done here would be a rounding nobody asked for. It is
-/// deliberately not comparable with `ProviderSlice.cost`, which is Sissy's own
-/// estimate of what the metered tokens were worth — one is what was charged,
-/// the other what was counted, and the panel keeps them apart.
-struct ProviderCredits: Sendable, Equatable {
+/// Anthropic bills a spend cap in the account's own currency; OpenAI answers
+/// with a count of credits and names no currency for it. Putting a currency on
+/// the second would be a figure Sissy made up, and giving Codex a shape of its
+/// own would be a second row on the same page answering the same question —
+/// which is how two formatters that drift apart get started. So the unit rides
+/// on the reading and `UsageFormat` words each.
+enum CreditsUnit: Sendable, Equatable, Codable {
+    /// Minor units of an ISO 4217 currency, with the exponent the vendor
+    /// stated. Read rather than assumed to be 2: not every currency has
+    /// hundredths.
+    case money(currency: String, exponent: Int)
+    /// A count of credits the vendor prices in nothing.
+    case credits
+
+    /// Where the minor units put the decimal point.
+    ///
+    /// Two for a count as well, so a balance a vendor spells `"12.5"` survives
+    /// the way in. Storing counts whole would truncate it, and truncation is a
+    /// figure Sissy made up as surely as a currency would be; the formatter
+    /// trims the zeroes a whole count does not need.
+    var exponent: Int {
+        switch self {
+        case .money(_, let exponent): return exponent
+        case .credits: return 2
+        }
+    }
+}
+
+/// What a vendor has billed against a spend cap the user set, and what is left
+/// on the account, in whichever unit that vendor answers in.
+///
+/// Kept in minor units rather than converted on the way in: the currency is the
+/// account's, not the machine's, and a division done here would be a rounding
+/// nobody asked for. It is deliberately not comparable with
+/// `ProviderSlice.cost`, which is Sissy's own estimate of what the metered
+/// tokens were worth — one is what was charged, the other what was counted, and
+/// the panel keeps them apart.
+///
+/// Every figure is optional because a source answers for the ones it can and
+/// nothing about the rest, and folding those together invents a number: Codex
+/// publishes a balance and neither a spend nor a cap, while Claude Code's
+/// cached reply publishes a spend and a cap and no balance.
+struct ProviderCredits: Sendable, Equatable, Codable {
     /// False when the vendor reports the facility switched off, which renders
     /// as a sentence rather than an empty gauge.
     let isEnabled: Bool
-    let usedMinor: Int
-    /// The cap, in the same units. Zero when the account has none set, which
-    /// is a spend with no ceiling rather than a ceiling of nothing.
-    let capMinor: Int
-    /// ISO 4217 code as the vendor gave it (`EUR`), so the app formats in the
-    /// account's currency instead of assuming the machine's.
-    let currency: String
-    /// Where the minor units put the decimal point. Read rather than assumed
-    /// to be 2: not every currency has hundredths.
-    let exponent: Int
+    let unit: CreditsUnit
+    /// What has been billed against the cap. Nil for a source that answers
+    /// only for what is left, which is not a spend of nothing.
+    let usedMinor: Int?
+    /// The ceiling, in the same units. Zero where the vendor answers for one
+    /// and the account has none set, nil where it does not answer at all — a
+    /// spend with no ceiling and an unknown ceiling are different readings,
+    /// and only the first can say the spend is uncapped.
+    let capMinor: Int?
     /// When the vendor last answered, as the vendor stamped it — not when the
     /// file was read. A reading is shown with this beside it, because a cached
     /// one is the ordinary case and a number with no age is a claim of being
     /// current.
     let observedAt: Date
-    /// Prepaid balance left, in the same units. Nil where the source cannot
-    /// answer for it: the spend against a cap and the money still on the
-    /// account are two different questions, and the CLI's cached reply only
-    /// carries the first.
+    /// What is left on the account. Nil where the source cannot answer for it:
+    /// the spend against a cap and the balance still on the account are two
+    /// different questions, and the CLI's cached reply only carries the first.
     var balanceMinor: Int?
 
-    var hasCap: Bool { capMinor > 0 }
-    var capReached: Bool { hasCap && usedMinor >= capMinor }
-    /// Zero without a cap: a bar drawn against no ceiling would be inventing
-    /// one.
-    var fraction: Double {
-        guard hasCap else { return 0 }
+    /// Whether the vendor answered with a figure at all. A reading of zero is
+    /// one; a source that named neither a spend nor a balance is not, and gets
+    /// no row rather than a row of zeroes.
+    var hasReading: Bool { usedMinor != nil || balanceMinor != nil }
+    var hasCap: Bool { (capMinor ?? 0) > 0 }
+    var capReached: Bool {
+        guard let capMinor, capMinor > 0, let usedMinor else { return false }
+        return usedMinor >= capMinor
+    }
+
+    /// How much of the cap the spend has taken, and nil without both: a bar
+    /// drawn against no ceiling would be inventing one.
+    var fraction: Double? {
+        guard let capMinor, capMinor > 0, let usedMinor else { return nil }
         return min(1, Double(usedMinor) / Double(capMinor))
     }
 
-    /// The amount as money, for a formatter that takes a `Decimal`.
+    /// The figure as a decimal, for a formatter that takes one.
     func amount(_ minor: Int) -> Decimal {
         var scaled = Decimal(minor)
         var result = Decimal()
-        NSDecimalMultiplyByPowerOf10(&result, &scaled, Int16(-exponent), .plain)
+        NSDecimalMultiplyByPowerOf10(&result, &scaled, Int16(-unit.exponent), .plain)
         return result
     }
 
-    var used: Decimal { amount(usedMinor) }
-    var cap: Decimal { amount(capMinor) }
-    var remaining: Decimal { amount(max(0, capMinor - usedMinor)) }
-    /// The prepaid balance as money, when the source answered for one.
+    var used: Decimal? { usedMinor.map(amount) }
+    var cap: Decimal? { capMinor.map(amount) }
+    /// What the cap still covers, and nil without both figures to subtract.
+    var remaining: Decimal? {
+        guard let capMinor, let usedMinor else { return nil }
+        return amount(max(0, capMinor - usedMinor))
+    }
     var balance: Decimal? { balanceMinor.map(amount) }
 }
 

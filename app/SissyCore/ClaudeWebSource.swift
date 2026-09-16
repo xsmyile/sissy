@@ -309,10 +309,10 @@ actor ClaudeWebSource: SourceSignals {
         org: String,
         session: String
     ) async throws -> ProviderCredits? {
-        guard var credits else { return nil }
+        guard var credits, case .money(let currency, _) = credits.unit else { return credits }
         let body = try? await get("\(organizationsPath)/\(org)/\(prepaidPath)", session: session)
         credits.balanceMinor = body.flatMap {
-            ClaudeUsagePayload.balance($0, currency: credits.currency)
+            ClaudeUsagePayload.balance($0, currency: currency)
         }
         return credits
     }

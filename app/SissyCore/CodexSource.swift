@@ -27,6 +27,11 @@ final class CodexAdapter: SourceAdapter {
     /// not meaning: each bucket carries its own `window_minutes`.
     private static let rateLimitBuckets = ["primary", "secondary"]
 
+    /// Locale the vendor's own numbers are read against. A balance arrives as
+    /// text and `Decimal(string:)` takes the machine's separator, which on this
+    /// one is a comma — left to it, `"12.5"` parses as `12`.
+    private static let vendorLocale = Locale(identifier: "en_US_POSIX")
+
     /// Everything this adapter answers for besides tokens: the windows, the
     /// plan Codex names on the same `rate_limits` block as them, and the
     /// account `auth.json` names. One box because the three are read together
@@ -398,6 +403,9 @@ final class CodexAdapter: SourceAdapter {
         if let plan = UsageReaderShared.sanitizedPlanToken(dict["plan_type"] as? String) {
             published.update { $0.plan = plan }
         }
+        if let credits = Self.credits(dict["credits"], observedAt: observedAt) {
+            published.update { $0.credits = credits }
+        }
         let windows = Self.rateLimitBuckets.compactMap { key -> UsageWindow? in
             guard let bucket = dict[key] as? [String: Any],
                 let minutes = bucket["window_minutes"] as? Int,
@@ -416,6 +424,61 @@ final class CodexAdapter: SourceAdapter {
             $0.limitsObservedAt = observedAt
         }
         latestWindowsAt = observedAt
+    }
+
+    /// The credit balance Codex writes on the same `rate_limits` block as the
+    /// windows and the plan.
+    ///
+    /// Balance only: OpenAI names no spend and, measured across 10 306 blocks
+    /// on one machine, sends `individual_limit: null` on every one of them, so
+    /// there is no ceiling to draw a bar against and the row is a line.
+    ///
+    /// The three ways this reading goes missing are three different facts and
+    /// none of them is zero, which is why each answers nil rather than a
+    /// figure: the key is absent on a Codex older than 2026-05-18, `balance`
+    /// is null where the CLI has the key and not the number, and `unlimited`
+    /// describes a pool a balance says nothing about. `has_credits` is
+    /// deliberately not read as `isEnabled` — it reports whether a finite pool
+    /// exists, not whether the facility is switched off, and a confirmed zero
+    /// beside `has_credits: false` is the ordinary reading on an account that
+    /// has never bought any.
+    static func credits(_ raw: Any?, observedAt: Date) -> ProviderCredits? {
+        guard let dict = raw as? [String: Any],
+            dict["unlimited"] as? Bool != true,
+            let balanceMinor = creditsMinor(dict["balance"])
+        else { return nil }
+        return ProviderCredits(
+            isEnabled: true,
+            unit: .credits,
+            usedMinor: nil,
+            capMinor: nil,
+            observedAt: observedAt,
+            balanceMinor: balanceMinor
+        )
+    }
+
+    /// A credit balance in the minor units `CreditsUnit.credits` counts in.
+    ///
+    /// The vendor spells it as a string (`"0"`), so the text is checked for
+    /// the shape of a non-negative decimal before it is parsed: `Decimal` reads
+    /// as far as it understands and answers with what it got, which turns
+    /// `"12 credits"` into `12` rather than into nothing.
+    private static func creditsMinor(_ raw: Any?) -> Int? {
+        let text: String
+        switch raw {
+        case let value as String: text = value
+        case let value as NSNumber: text = value.stringValue
+        default: return nil
+        }
+        guard !text.isEmpty, text.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ".") }),
+            text.filter({ $0 == "." }).count <= 1,
+            var parsed = Decimal(string: text, locale: vendorLocale), parsed >= 0
+        else { return nil }
+        var scaled = Decimal()
+        NSDecimalMultiplyByPowerOf10(&scaled, &parsed, Int16(CreditsUnit.credits.exponent), .plain)
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        return Int(exactly: NSDecimalNumber(decimal: rounded))
     }
 
     /// Parses a `token_count` event line. Returns nil for any non-billable
@@ -543,7 +606,10 @@ final class CodexAdapter: SourceAdapter {
             if let through = entry.copyingThrough { fileReplay[fileURL] = .copying(through: through) }
         }
         accountFingerprint = resume.accountFingerprint
-        published.update { $0.plan = resume.plan }
+        published.update {
+            $0.plan = resume.plan
+            $0.credits = resume.credits
+        }
         guard !resume.rateLimitWindows.isEmpty else { return true }
         published.update {
             $0.windows = resume.rateLimitWindows
@@ -576,13 +642,11 @@ final class CodexAdapter: SourceAdapter {
                         }()
                     )
                 },
-            // Raw, not `live()`: a bucket that expires between save and load
-            // is dropped on read anyway, and filtering here would throw away
-            // one that still has seconds left.
             rateLimitWindows: published.load().windows,
             rateLimitWindowsAt: latestWindowsAt,
             plan: published.load().plan,
-            accountFingerprint: accountFingerprint
+            accountFingerprint: accountFingerprint,
+            credits: published.load().credits
         )
     }
 }

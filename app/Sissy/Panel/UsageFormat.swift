@@ -791,10 +791,21 @@ enum UsageFormat {
     /// Both halves go through the account's own currency rather than the
     /// machine's, because the cap is a figure the user typed on the vendor's
     /// site and a euro rendered as a dollar is a different number.
-    static func creditsAmount(_ credits: ProviderCredits) -> String {
-        let used = money(credits.used, currency: credits.currency)
-        guard credits.hasCap else { return used }
-        return "\(used) of \(money(credits.cap, currency: credits.currency))"
+    ///
+    /// A vendor answering only for what is left leads on the balance instead:
+    /// there is no spend to put first and no cap to put it against, and the
+    /// figure someone opens this section for is the one they have.
+    ///
+    /// Nil where the reading names neither, which is a reading of nothing — an
+    /// empty headline over a bar and a caption would say the vendor answered
+    /// and hide what it answered with.
+    static func creditsAmount(_ credits: ProviderCredits) -> String? {
+        guard let used = credits.used else {
+            return credits.balance.map { amount($0, in: credits.unit) }
+        }
+        let spent = amount(used, in: credits.unit)
+        guard let cap = credits.cap, credits.hasCap else { return spent }
+        return "\(spent) of \(amount(cap, in: credits.unit))"
     }
 
     /// The line under the credits bar: what is left, and when the vendor last
@@ -812,11 +823,11 @@ enum UsageFormat {
         var parts: [String] = []
         if credits.capReached {
             parts.append("Cap reached")
-        } else if credits.hasCap {
-            parts.append("\(money(credits.remaining, currency: credits.currency)) left")
+        } else if let remaining = credits.remaining, credits.hasCap {
+            parts.append("\(amount(remaining, in: credits.unit)) left")
         }
-        if let balance = credits.balance {
-            parts.append("\(money(balance, currency: credits.currency)) prepaid")
+        if let balance = credits.balance, credits.usedMinor != nil {
+            parts.append("\(amount(balance, in: credits.unit)) prepaid")
         }
         parts.append(observedLabel(credits.observedAt, now: now, calendar: calendar))
         return parts.joined(separator: " · ")
@@ -837,8 +848,20 @@ enum UsageFormat {
         return observedAt.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 
-    private static func money(_ amount: Decimal, currency: String) -> String {
-        amount.formatted(.currency(code: currency).precision(.fractionLength(2)))
+    /// One credits figure in the unit its vendor answered in.
+    ///
+    /// The count keeps two decimals at most and prints none it does not need,
+    /// where the money keeps exactly two: a balance is a quantity and `0.00`
+    /// credits reads as money that is not money, while a price with one
+    /// decimal reads as a typo.
+    private static func amount(_ value: Decimal, in unit: CreditsUnit) -> String {
+        switch unit {
+        case .money(let currency, _):
+            return value.formatted(.currency(code: currency).precision(.fractionLength(2)))
+        case .credits:
+            let count = value.formatted(.number.precision(.fractionLength(0...2)))
+            return value == 1 ? "\(count) credit" : "\(count) credits"
+        }
     }
 }
 

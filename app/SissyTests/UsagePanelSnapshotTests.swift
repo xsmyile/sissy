@@ -52,10 +52,9 @@ final class UsagePanelSnapshotTests: XCTestCase {
     ) -> ProviderCredits {
         ProviderCredits(
             isEnabled: isEnabled,
+            unit: .money(currency: "EUR", exponent: 2),
             usedMinor: used,
             capMinor: cap,
-            currency: "EUR",
-            exponent: 2,
             observedAt: Date(timeIntervalSince1970: 1_789_303_000)
         )
     }
@@ -398,7 +397,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         )
         let row = try XCTUnwrap(snapshot.providers.first?.credits)
         XCTAssertEqual(row.percent, 59)
-        XCTAssertEqual(row.fraction, 0.5895, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(row.fraction), 0.5895, accuracy: 0.0001)
         XCTAssertFalse(row.capReached)
         XCTAssertTrue(row.amount.contains(" of "), "the cap is missing from the headline")
     }
@@ -411,9 +410,66 @@ final class UsagePanelSnapshotTests: XCTestCase {
         )
         let row = try XCTUnwrap(snapshot.providers.first?.credits)
         XCTAssertNil(row.percent)
-        XCTAssertEqual(row.fraction, 0)
+        XCTAssertNil(row.fraction)
         XCTAssertFalse(row.amount.contains(" of "))
         XCTAssertFalse(row.caption.contains("left"))
+    }
+
+    /// Codex answers for what is left and for neither a spend nor a cap, so it
+    /// fails every test written for the question Anthropic answers — and still
+    /// has the figure someone opens this section for.
+    func testABalanceOnlyReadingLeadsOnTheBalance() throws {
+        let row = try XCTUnwrap(balanceRow(0))
+
+        XCTAssertEqual(row.amount, "0 credits")
+        XCTAssertNil(row.percent)
+        XCTAssertNil(row.fraction)
+        XCTAssertFalse(row.capReached)
+    }
+
+    /// A count is a quantity, not money: it keeps the decimals it has and
+    /// prints none it does not, and it is never given a currency — `"0"` with a
+    /// `$` in front of it is a figure Sissy made up.
+    ///
+    /// The fraction is asserted through the same formatter rather than as
+    /// `"12.5"`, for the reason the money halves above are: a number formatter
+    /// answers in the machine's locale, and this one writes `12,5`.
+    func testACreditCountIsWordedAsAQuantity() throws {
+        let half = Decimal(string: "12.5")!.formatted(.number.precision(.fractionLength(0...2)))
+        XCTAssertEqual(try XCTUnwrap(balanceRow(1250)).amount, "\(half) credits")
+        XCTAssertEqual(try XCTUnwrap(balanceRow(100)).amount, "1 credit")
+        XCTAssertEqual(try XCTUnwrap(balanceRow(0)).amount, "0 credits")
+    }
+
+    /// The prepaid clause belongs beside a spend. With the balance already the
+    /// headline it would print the same figure twice on one row.
+    func testABalanceOnlyCaptionIsItsAgeAlone() throws {
+        let row = try XCTUnwrap(balanceRow(0))
+
+        XCTAssertFalse(row.caption.contains("prepaid"))
+        XCTAssertFalse(row.caption.contains("left"))
+    }
+
+    /// No spend, no cap and no balance is a source that answered nothing, and
+    /// a row of zeroes would be Sissy answering for it.
+    func testAReadingThatNamesNoFigureGetsNoRow() {
+        let empty = ProviderCredits(
+            isEnabled: true, unit: .credits, usedMinor: nil, capMinor: nil,
+            observedAt: Date(timeIntervalSince1970: 1_789_303_000))
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 100, "1.00", credits: empty)])
+        )
+
+        XCTAssertNil(snapshot.providers.first?.credits)
+    }
+
+    private func balanceRow(_ balanceMinor: Int) -> UsagePanelSnapshot.CreditsRow? {
+        let credits = ProviderCredits(
+            isEnabled: true, unit: .credits, usedMinor: nil, capMinor: nil,
+            observedAt: Date(timeIntervalSince1970: 1_789_303_000), balanceMinor: balanceMinor)
+        return UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 100, "1.00", credits: credits)])
+        ).providers.first?.credits
     }
 
     func testCreditsAtTheCapSaySoInsteadOfNamingWhatIsLeft() throws {

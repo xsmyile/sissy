@@ -343,14 +343,16 @@ struct PanelProviderPage: View {
                     .foregroundStyle(credits.capReached ? Color.red : .primary)
             }
 
-            HStack(spacing: 8) {
-                ShareBar(share: credits.fraction, tint: credits.capReached ? .red : tint)
+            if let fraction = credits.fraction {
+                HStack(spacing: 8) {
+                    ShareBar(share: fraction, tint: credits.capReached ? .red : tint)
 
-                if let percent = credits.percent {
-                    Text("\(percent)%")
-                        .font(.system(size: 11))
-                        .monospacedDigit()
-                        .frame(width: 32, alignment: .trailing)
+                    if let percent = credits.percent {
+                        Text("\(percent)%")
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+                            .frame(width: 32, alignment: .trailing)
+                    }
                 }
             }
 

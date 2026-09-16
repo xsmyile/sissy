@@ -1094,7 +1094,7 @@ func runClaudeLimitsParseTests() {
     let billed = ClaudeProfileSource.readCredits(creditsBlob)
     expect("credits used", billed?.usedMinor, 5895)
     expect("credits cap", billed?.capMinor, 10000)
-    expect("credits currency is the account's", billed?.currency, "EUR")
+    expect("credits currency is the account's", billed?.unit, .money(currency: "EUR", exponent: 2))
     expect("credits amount scales by the stated exponent", billed?.used, Decimal(string: "58.95")!)
     expect("credits remaining", billed?.remaining, Decimal(string: "41.05")!)
     expect("credits cap not reached", billed?.capReached, false)
@@ -1136,17 +1136,35 @@ func runClaudeLimitsParseTests() {
 
     // A spend with no ceiling draws no bar: a fraction of nothing would be
     // inventing the cap the account does not have.
+    let euros = CreditsUnit.money(currency: "EUR", exponent: 2)
     let uncapped = ProviderCredits(
-        isEnabled: true, usedMinor: 500, capMinor: 0, currency: "EUR", exponent: 2,
+        isEnabled: true, unit: euros, usedMinor: 500, capMinor: 0,
         observedAt: Date(timeIntervalSince1970: 0))
-    expect("an uncapped spend has no fraction", uncapped.fraction, 0)
+    expect("an uncapped spend has no fraction", uncapped.fraction == nil, true)
     expect("an uncapped spend has not reached a cap", uncapped.capReached, false)
 
     let spent = ProviderCredits(
-        isEnabled: true, usedMinor: 10_500, capMinor: 10_000, currency: "EUR", exponent: 2,
+        isEnabled: true, unit: euros, usedMinor: 10_500, capMinor: 10_000,
         observedAt: Date(timeIntervalSince1970: 0))
     expect("a spend past the cap reads as reached", spent.capReached, true)
     expect("a spend past the cap does not overfill the bar", spent.fraction, 1)
+
+    // A vendor that answers only for what is left is a reading, and a cap it
+    // never named is not a cap of zero: without both figures there is no
+    // fraction, which is what keeps a bar off a row with no denominator.
+    let balanceOnly = ProviderCredits(
+        isEnabled: true, unit: .credits, usedMinor: nil, capMinor: nil,
+        observedAt: Date(timeIntervalSince1970: 0), balanceMinor: 0)
+    expect("a balance-only reading is a reading", balanceOnly.hasReading, true)
+    expect("a balance-only reading has no fraction", balanceOnly.fraction == nil, true)
+    expect("a balance-only reading claims no cap", balanceOnly.hasCap, false)
+    expect("a balance-only reading names no spend", balanceOnly.used == nil, true)
+    expect("a credit count keeps two decimals", balanceOnly.balance, Decimal(0))
+
+    let nothingSaid = ProviderCredits(
+        isEnabled: true, unit: .credits, usedMinor: nil, capMinor: nil,
+        observedAt: Date(timeIntervalSince1970: 0))
+    expect("a source that answered nothing is not a reading", nothingSaid.hasReading, false)
 
     // Measured shape of `~/.codex/auth.json`: the plan is a claim inside the
     // id_token, under a namespace key spelled as a URL. The fixture's payload
@@ -1534,7 +1552,8 @@ func runCodexRateLimitTest() {
     let limits =
         #"{"primary":{"used_percent":8.0,"window_minutes":10080,"#
         + #""resets_at":\#(liveReset)},"secondary":{"used_percent":25.0,"#
-        + #""window_minutes":300,"resets_at":\#(staleReset)},"plan_type":"plus"}"#
+        + #""window_minutes":300,"resets_at":\#(staleReset)},"plan_type":"plus","#
+        + #""credits":{"has_credits":false,"unlimited":false,"balance":"0"}}"#
     let payload = """
         {"type":"turn_context","timestamp":"\(nowStr)","payload":{"turn_id":"t1","model":"gpt-5-codex"}}
         {"type":"event_msg","timestamp":"\(nowStr)","payload":{"type":"token_count","info":\(usage),"rate_limits":\(limits)}}
@@ -1548,6 +1567,7 @@ func runCodexRateLimitTest() {
     let sem = DispatchSemaphore(value: 0)
     let box = TestBox<[UsageWindow]>([])
     let planBox = TestBox<String?>(nil)
+    let creditsBox = TestBox<ProviderCredits?>(nil)
     Task {
         let reader = LocalUsageProvider.codex(
             codexDir: tempDir,
@@ -1558,6 +1578,7 @@ func runCodexRateLimitTest() {
         await reader.start { _ in }
         box.value = await reader.currentSignals().windows
         planBox.value = await reader.currentSignals().plan
+        creditsBox.value = await reader.currentSignals().credits
         await reader.stop()
         sem.signal()
     }
@@ -1569,6 +1590,40 @@ func runCodexRateLimitTest() {
     expect("codex window keyed by minutes", box.value.last?.minutes, 10_080)
     expect("codex window percentage", box.value.last?.usedPercent, 8.0)
     expect("codex plan read off the limits block", planBox.value, "plus")
+    expect("codex balance read off the limits block", creditsBox.value?.balanceMinor, 0)
+    expect("codex credits are counted, not priced", creditsBox.value?.unit, .credits)
+    expect("codex names no spend", creditsBox.value?.usedMinor == nil, true)
+    expect("codex names no cap", creditsBox.value?.capMinor == nil, true)
+
+    // The three ways this reading goes missing are three different facts and
+    // none of them is a balance of zero. `has_credits: false` is not one of
+    // them: it says the account holds no finite pool, which is exactly the
+    // account whose confirmed zero this row exists to print.
+    let observed = Date(timeIntervalSince1970: 1_789_000_000)
+    expect(
+        "a rollout with no credits key answers nothing",
+        CodexAdapter.credits(nil, observedAt: observed) == nil, true)
+    let nullBalance: [String: Any] = ["has_credits": false, "unlimited": false, "balance": NSNull()]
+    expect(
+        "a null balance is not a balance of zero",
+        CodexAdapter.credits(nullBalance, observedAt: observed) == nil, true)
+    let unlimited: [String: Any] = ["has_credits": true, "unlimited": true, "balance": "0"]
+    expect(
+        "an unlimited pool publishes no figure",
+        CodexAdapter.credits(unlimited, observedAt: observed) == nil, true)
+    let fractional: [String: Any] = ["has_credits": true, "unlimited": false, "balance": "12.5"]
+    expect(
+        "a fractional balance survives the way in",
+        CodexAdapter.credits(fractional, observedAt: observed)?.balance,
+        Decimal(string: "12.5")!)
+    let numeric: [String: Any] = ["has_credits": true, "unlimited": false, "balance": 7]
+    expect(
+        "a balance sent as a number reads the same as one sent as text",
+        CodexAdapter.credits(numeric, observedAt: observed)?.balance, Decimal(7))
+    let garbled: [String: Any] = ["has_credits": true, "unlimited": false, "balance": "12 credits"]
+    expect(
+        "a balance Decimal would half-parse is refused",
+        CodexAdapter.credits(garbled, observedAt: observed) == nil, true)
 }
 
 /// Verifies a snapshot predating `fileModels` is discarded rather than
@@ -1680,7 +1735,7 @@ func runCodexWindowPersistenceTest() {
 
     let line = """
         {"type":"turn_context","timestamp":"\(ts)","payload":{"turn_id":"t1","model":"o3"}}
-        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500},"total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500}},"rate_limits":{"primary":{"used_percent":4.0,"window_minutes":300,"resets_at":\(resets)},"secondary":{"used_percent":17.0,"window_minutes":10080,"resets_at":\(resets)},"plan_type":"pro"}}}
+        {"type":"event_msg","timestamp":"\(ts)","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500},"total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":500,"reasoning_output_tokens":0,"total_tokens":1500}},"rate_limits":{"primary":{"used_percent":4.0,"window_minutes":300,"resets_at":\(resets)},"secondary":{"used_percent":17.0,"window_minutes":10080,"resets_at":\(resets)},"plan_type":"pro","credits":{"has_credits":true,"unlimited":false,"balance":"2.5"}}}}
         """ + "\n"
     try? line.write(to: jsonl, atomically: true, encoding: .utf8)
 
@@ -1700,6 +1755,7 @@ func runCodexWindowPersistenceTest() {
     let sem2 = DispatchSemaphore(value: 0)
     let box = TestBox<[UsageWindow]>([])
     let planBox = TestBox<String?>(nil)
+    let creditsBox = TestBox<ProviderCredits?>(nil)
     Task {
         let r = LocalUsageProvider.codex(
             codexDir: tempDir, retainDays: 2, pollInterval: .seconds(60),
@@ -1707,6 +1763,7 @@ func runCodexWindowPersistenceTest() {
         await r.start { _ in }
         box.value = r.currentSignals().windows
         planBox.value = r.currentSignals().plan
+        creditsBox.value = r.currentSignals().credits
         await r.stop()
         sem2.signal()
     }
@@ -1723,6 +1780,7 @@ func runCodexWindowPersistenceTest() {
     // nothing left to re-read, so a plan that did not survive the restart
     // would leave the row without one until the next Codex turn.
     expect("codex plan survives restart", planBox.value, "pro")
+    expect("codex balance survives restart", creditsBox.value?.balanceMinor, 250)
 }
 
 /// Verifies the Codex reader recovers its per-file model state across a

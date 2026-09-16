@@ -73,8 +73,8 @@ final class ClaudeSignalsMergeTests: XCTestCase {
 
     private var cached: ProviderCredits {
         ProviderCredits(
-            isEnabled: true, usedMinor: 35934, capMinor: 37500, currency: "EUR",
-            exponent: 2, observedAt: Date(timeIntervalSince1970: 0))
+            isEnabled: true, unit: .money(currency: "EUR", exponent: 2),
+            usedMinor: 35934, capMinor: 37500, observedAt: Date(timeIntervalSince1970: 0))
     }
 
     /// A reader that has produced nothing yet but has something to say about

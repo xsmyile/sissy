@@ -91,10 +91,9 @@ enum ClaudeUsagePayload {
         else { return nil }
         return ProviderCredits(
             isEnabled: spend["enabled"] as? Bool ?? true,
+            unit: .money(currency: used.currency, exponent: used.exponent),
             usedMinor: used.minor,
             capMinor: cap.minor,
-            currency: used.currency,
-            exponent: used.exponent,
             observedAt: observedAt,
             balanceMinor: balanceMinor
         )
