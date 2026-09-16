@@ -683,9 +683,6 @@ actor UsageEngine {
         }
     }
 
-    /// The pending question, for the panel to draw. Never the session.
-    var claudeWebLinkChoice: ClaudeWebLinkChoice? { pendingClaudeWebLink?.choice }
-
     /// Answers it, which is what finally files the session.
     ///
     /// The organisation has to be one the question offered: the panel is the
