@@ -1,0 +1,44 @@
+# Notice
+
+## What the MIT licence covers
+
+[LICENSE](LICENSE) is the MIT licence and it covers Sissy's **source code**:
+everything under `app/`, `scripts/` and `.github/`, and the prose in
+`README.md`, `AGENTS.md`, `CREDITS.md` and `docs/`.
+
+## What it does not cover
+
+Sissy's **name** and Sissy's **artwork** are not licensed by this repository.
+All rights to them are reserved by the copyright holder named in `LICENSE`.
+They are:
+
+- `assets/sissy-icon.png`, the app icon as shown in the README
+- `app/Sissy/Resources/AppIcon.icon/`, the icon the app ships
+- `app/Sissy/Resources/Assets.xcassets/SissyMenuBarTemplate*.imageset/` and
+  `SissyMenuBarSleepingTemplate*.imageset/`, the menu bar silhouettes
+- `app/Sissy/Resources/Assets.xcassets/SissyMotion/`, the 24-frame blink
+- the screenshots under `assets/`, which show the same marks
+
+The motion geometry those frames are rendered from lives outside this
+repository and is not published.
+
+So: build Sissy, run it, read it, fork it, redistribute it. The MIT licence
+says yes to all of that. What it does not say yes to is shipping a fork
+**called Sissy** or **wearing Sissy's face**, or using either to suggest that
+the copyright holder made your build or endorses it. Replace the name and the
+artwork and the rest is yours.
+
+It is the usual arrangement for an app with its own identity: the code is
+open, the identity is not.
+
+## Third-party marks Sissy draws
+
+The Claude, OpenAI, GitHub and GitLab marks in
+`Assets.xcassets/ProviderMark*.imageset/` and `ForgeMark*.imageset/` are not
+Sissy's to license either. They are their owners' trademarks, used nominatively
+to say which CLI a row is about and where a repository is pushed. The paths the
+marks are drawn from come from Simple Icons (CC0), and
+[CREDITS.md](CREDITS.md) has the detail; CC0 does not travel to the trademarks.
+
+None of Anthropic, OpenAI, GitHub or GitLab is affiliated with Sissy, and none
+of them endorses it.
