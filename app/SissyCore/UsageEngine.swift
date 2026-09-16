@@ -859,15 +859,27 @@ actor UsageEngine {
         !ClaudeWebSessionStore.storedAccounts().isEmpty
     }
 
-    /// The accounts a claude.ai session is linked for, as the index names
-    /// them. Read without decrypting one, on the rule above: the list is
-    /// answerable on a build whose keychain grant has lapsed, which is the
-    /// only reason Settings can draw it at all.
+    /// The accounts a claude.ai session is filed for, named by whatever can
+    /// name them.
     ///
-    /// Unordered, because ordering it means wording each one and the words
-    /// are the app's.
-    nonisolated var linkedClaudeAccounts: [ClaudeWebLink] {
-        Array(claudeWebLinks.load().values)
+    /// Read off the sessions, which is the record of what exists, rather than
+    /// off the links, which are a naming this build writes best-effort — the
+    /// same source `hasClaudeWebSession` and `rebuildClaudeWebSources` already
+    /// answer from, so the three cannot disagree about which accounts Sissy is
+    /// reading. The holding key is not an account and gets no row, for the
+    /// reason no reader is built for it.
+    ///
+    /// Nothing is decrypted, on the rule above: the list is answerable on a
+    /// build whose keychain grant has lapsed, which is the only reason
+    /// Settings can draw it at all.
+    ///
+    /// Unordered, because ordering it means wording each one and the words are
+    /// the app's.
+    nonisolated var linkedClaudeAccounts: [ClaudeWebAccount] {
+        ClaudeWebAccount.list(
+            stored: ClaudeWebSessionStore.storedAccounts(),
+            links: claudeWebLinks.load(),
+            archived: claudeAccounts.currentSnapshot().accounts)
     }
 
     /// What a user pressing refresh on one provider reaches.
