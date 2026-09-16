@@ -79,8 +79,11 @@ enum ArchiveBackfill {
             let through = coverage.throughDay,
             calendar.startOfDay(for: from) <= calendar.startOfDay(for: window.lowerBound)
         else { return window }
-        let tailReach = meteredThrough.map { calendar.startOfDay(for: $0) } ?? .distantPast
-        let start = max(calendar.startOfDay(for: through), tailReach)
+        var start: Date = calendar.startOfDay(for: through)
+        if let meteredThrough {
+            let tailReach: Date = calendar.startOfDay(for: meteredThrough)
+            if tailReach > start { start = tailReach }
+        }
         guard start < window.upperBound else { return nil }
         return start..<window.upperBound
     }
@@ -94,7 +97,10 @@ enum ArchiveBackfill {
     /// real install. A snapshot that is missing or unreadable answers nil,
     /// which leaves the record from the last pass to speak alone.
     static func lastMetered(snapshotAt url: URL) -> Date? {
-        try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return nil
+        }
+        return attributes[.modificationDate] as? Date
     }
 }
 
@@ -146,11 +152,15 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// the months the first pass indexed.
     func recording(provider: String, covered span: Range<Date>) -> Self {
         let formatter = UsageReaderShared.dayFormatter
+        var from: Date = span.lowerBound
+        var through: Date = span.upperBound
+        if let existing = coverage[provider] {
+            if let existingFrom = existing.fromDay, existingFrom < from { from = existingFrom }
+            if let existingThrough = existing.throughDay, existingThrough > through {
+                through = existingThrough
+            }
+        }
         var updated = self
-        let existing = coverage[provider]
-        let from = [existing?.fromDay, span.lowerBound].compactMap { $0 }.min() ?? span.lowerBound
-        let through =
-            [existing?.throughDay, span.upperBound].compactMap { $0 }.max() ?? span.upperBound
         updated.coverage[provider] = Coverage(
             from: formatter.string(from: from), through: formatter.string(from: through))
         return updated

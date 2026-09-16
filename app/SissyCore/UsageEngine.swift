@@ -360,17 +360,17 @@ actor UsageEngine {
         else { return }
         let ledgerURL = ArchiveBackfillLedger.defaultURL(in: stateDir)
         let ledger = ArchiveBackfillLedger.load(from: ledgerURL)
-        let due =
-            resolvedProviders
-            .filter { $0.activation.isMetering }
-            .compactMap { provider -> (home: ProviderHome, span: Range<Date>)? in
+        var due: [(home: ProviderHome, span: Range<Date>)] = []
+        for provider in resolvedProviders where provider.activation.isMetering {
+            let snapshot: URL = Self.persistenceURL(for: provider.home, in: stateDir)
+            guard
                 let span = ArchiveBackfill.uncovered(
                     window,
                     coverage: ledger.coverage[provider.id],
-                    meteredThrough: ArchiveBackfill.lastMetered(
-                        snapshotAt: Self.persistenceURL(for: provider.home, in: stateDir)))
-                return span.map { (provider.home, $0) }
-            }
+                    meteredThrough: ArchiveBackfill.lastMetered(snapshotAt: snapshot))
+            else { continue }
+            due.append((home: provider.home, span: span))
+        }
         guard !due.isEmpty else { return }
         let me = self
         let stateDir = self.stateDir
