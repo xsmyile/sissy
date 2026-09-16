@@ -140,24 +140,19 @@ struct ProviderAccount: Sendable, Equatable {
     /// (`team_tier_1`). Raw rather than a label, the same division `plan`
     /// draws: `UsageFormat` is what decides whether it can word one.
     let seat: String?
-    /// When the subscription renews, for the one vendor that says.
-    let renewsAt: Date?
-
     /// Fails when the vendor answered for nothing, so "signed in as nobody"
     /// and "no account line" are the same absence rather than an empty row.
     init?(
         email: String? = nil,
         organization: String? = nil,
-        seat: String? = nil,
-        renewsAt: Date? = nil
+        seat: String? = nil
     ) {
-        guard email != nil || organization != nil || seat != nil || renewsAt != nil else {
+        guard email != nil || organization != nil || seat != nil else {
             return nil
         }
         self.email = email
         self.organization = organization
         self.seat = seat
-        self.renewsAt = renewsAt
     }
 }
 

@@ -512,27 +512,6 @@ enum UsageFormat {
         }
     }
 
-    /// Everything on the account line except the address: the organisation
-    /// the seat belongs to, and when the subscription renews.
-    ///
-    /// Nil rather than an empty string when neither vendor answered, so the
-    /// caller drops the line instead of drawing a blank one. A renewal
-    /// already past is dropped on its own: the claim is read off a file the
-    /// CLI refreshes on its own schedule, so a stale date is the ordinary
-    /// case and "renewed 3 Aug" answers nothing.
-    static func accountDetails(
-        organization: String?,
-        renewsAt: Date?,
-        now: Date = Date()
-    ) -> String? {
-        var parts: [String] = []
-        if let organization, !organization.isEmpty { parts.append(organization) }
-        if let renewsAt, renewsAt > now {
-            parts.append("renews " + renewsAt.formatted(.dateTime.day().month(.abbreviated)))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
     /// Why a provider's page shows no limit windows, when nothing went wrong.
     ///
     /// The blank is not a fault and must not read as one. On Codex the

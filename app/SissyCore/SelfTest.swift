@@ -2089,10 +2089,10 @@ func runProviderAccountTests() {
     )
 
     // Measured shape of the id_token's claims: the address is top-level, the
-    // organisation and the renewal sit under the namespace key.
+    // organisation sits under the namespace key.
     let codexClaims = Data(
         #"""
-        {"email":"someone@example.com","https://api.openai.com/auth":{"chatgpt_plan_type":"plus","chatgpt_subscription_active_until":"2026-07-08T14:02:21+00:00","organizations":[{"title":"Work","is_default":false},{"title":"Personal","is_default":true}]}}
+        {"email":"someone@example.com","https://api.openai.com/auth":{"chatgpt_plan_type":"plus","organizations":[{"title":"Work","is_default":false},{"title":"Personal","is_default":true}]}}
         """#.utf8
     )
     .base64EncodedString()
@@ -2103,11 +2103,6 @@ func runProviderAccountTests() {
     let codex = CodexAuthSource.parse(codexBlob)
     expect("codex reads the address off the id_token", codex?.account?.email, "someone@example.com")
     expect("codex takes the organisation the account defaults to", codex?.account?.organization, "Personal")
-    expect(
-        "codex reads when the subscription renews",
-        codex?.account?.renewsAt,
-        UsageReaderShared.parseTimestamp("2026-07-08T14:02:21+00:00")
-    )
 
     // The floor keeps a poll every minute off a 300 KB file; a person pressing
     // refresh is the one caller it must not apply to.
