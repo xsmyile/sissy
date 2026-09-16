@@ -2,13 +2,22 @@ import SwiftUI
 
 /// What the vendor says about itself, on the page about that vendor.
 ///
-/// It sits at the foot of the page because of what opening it does: the tree
-/// is the one block here whose height a click changes, and anywhere above the
-/// limits it pushes them, the day and the projects down the page every time it
-/// is opened. The move costs the alarm nothing — a degraded vendor already
-/// colours its own name on the Overview and carries the sentence in that row's
-/// tooltip, so "is it me or them" is answered before this page is open. On
-/// every other day it is one quiet line.
+/// **The tree opens in a card of its own, not underneath the line.** It used to
+/// expand in place, which made this the one block on the page whose height a
+/// click changed — the reason it was moved to the foot, where there is nothing
+/// left below it to push. A card takes even that away: the page is the same
+/// height open or shut, and the tree is bounded by its own window instead of by
+/// what the page can spare. The gesture is the one the project rows use, and
+/// what makes it safe is the same measurement: on macOS 27 a nested `.popover`
+/// does not dismiss the transient panel, its wheel scrolls, and a click outside
+/// closes both together.
+///
+/// It stays at the foot all the same. The reason is no longer the height, it is
+/// the question: what the vendor says about itself is the least-asked reading
+/// on this page, and a degraded vendor has already coloured its own name on the
+/// Overview and put the sentence in that row's tooltip, so "is it me or them"
+/// is answered before this page is open. On every other day it is one quiet
+/// line.
 ///
 /// The age is on its own clock rather than in the snapshot. The monitor
 /// publishes nothing while a vendor keeps answering the same thing — that is
@@ -40,15 +49,26 @@ struct PanelProviderStatus: View {
     private var hasTree: Bool { !row.components.isEmpty }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: StatusTreeGeometry.rowSpacing) {
-            header
-            if showingComponents && hasTree {
-                tree
-                pageLink
+        header
+            .padding(.horizontal, PanelMetrics.gutter)
+            .padding(.vertical, 10)
+            .popover(isPresented: $showingComponents, arrowEdge: .trailing) {
+                if hasTree { card }
             }
+    }
+
+    /// The vendor's services, in a window of their own.
+    ///
+    /// As wide as the page it came off rather than wider: measured against
+    /// OpenAI's own names, the longest of them fits the page's measure today,
+    /// so width is not what this buys — the page holding still is.
+    private var card: some View {
+        VStack(alignment: .leading, spacing: StatusTreeGeometry.rowSpacing) {
+            tree
+            pageLink
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 10)
+        .padding(StatusTreeGeometry.cardPadding)
+        .frame(width: StatusTreeGeometry.cardWidth, alignment: .leading)
     }
 
     // MARK: The line
@@ -240,6 +260,14 @@ private struct Chevron: View {
 /// rendering anything, the way the bar's geometry already is.
 enum StatusTreeGeometry {
     static let rowHeight: CGFloat = 18
+    static let cardPadding: CGFloat = 12
+    /// Sized so the rows inside the card keep exactly the measure they had on
+    /// the page: the page's own gutters come off, the card's padding goes back
+    /// on. `StatusTreeCardTests` is what holds the two in step, because the
+    /// point of the card is that nothing about the tree reads differently in
+    /// it.
+    static let cardWidth: CGFloat =
+        PanelMetrics.width - 2 * PanelMetrics.gutter + 2 * cardPadding
     static let rowSpacing: CGFloat = 6
     /// Past this the tree scrolls inside itself rather than growing the page.
     ///
