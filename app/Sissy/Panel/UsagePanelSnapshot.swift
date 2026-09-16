@@ -335,6 +335,11 @@ struct UsagePanelSnapshot: Equatable {
         /// twice. The name still comes from the directory, so a row never
         /// changes what it was already called.
         let owner: String?
+        /// The repository as its forge names it, for the card a click on the
+        /// row opens. Nil for a row that stands for no repository and for one
+        /// whose remote names no forge — both of which have nothing to open,
+        /// so the click does nothing rather than opening an empty card.
+        let repository: RepositoryLink?
         /// What the row hovers: a repository's full path, or why a row that is
         /// not a repository is there. Nil on the folded row, which stands for
         /// several. A project path is a client's name as often as not, so the
@@ -343,6 +348,19 @@ struct UsagePanelSnapshot: Equatable {
         let tokens: String
         let cost: String
         let share: Double
+    }
+
+    /// A repository on the forge it is pushed to.
+    ///
+    /// `label` is the forge's own name for it, which is not always the
+    /// directory's: a clone renamed on disk keeps the row the name the user
+    /// gave it and the card the name the forge answers to.
+    struct RepositoryLink: Equatable {
+        let label: String
+        let host: String
+        /// Nil for a remote that names no page — the card then says where the
+        /// repository lives without claiming a way there.
+        let page: URL?
     }
 
     /// One rate-limit gauge. `fraction` is clamped for the bar while
@@ -601,7 +619,11 @@ struct UsagePanelSnapshot: Equatable {
             ProjectRow(
                 id: project.path,
                 name: UsageFormat.projectName(project.path),
-                owner: project.owner,
+                owner: project.remote?.owner,
+                repository: project.remote.map {
+                    RepositoryLink(
+                        label: "\($0.owner)/\($0.repository)", host: $0.host, page: $0.page)
+                },
                 tooltip: project.path,
                 tokens: UsageFormat.tokens(project.tokens),
                 cost: UsageFormat.cost(project.cost),
@@ -616,6 +638,7 @@ struct UsagePanelSnapshot: Equatable {
                     id: Self.foldedProjectRowID,
                     name: UsageFormat.projectsFolded(count: rest.count),
                     owner: nil,
+                    repository: nil,
                     tooltip: nil,
                     tokens: UsageFormat.tokens(rest.reduce(0) { $0 + $1.tokens }),
                     cost: UsageFormat.cost(restCost),
@@ -638,6 +661,7 @@ struct UsagePanelSnapshot: Equatable {
                 id: Self.unattributedRowID,
                 name: UsageFormat.projectsUnattributed,
                 owner: nil,
+                repository: nil,
                 tooltip: UsageFormat.projectsUnattributedReason,
                 tokens: UsageFormat.tokens(totalTokens - namedTokens),
                 cost: UsageFormat.cost(unnamedCost),
