@@ -59,6 +59,15 @@ enum ClaudeWebSessionAdoption {
     /// an interruption leaves is two copies of one session — which the next
     /// pass clears, because the legacy item is still there to be adopted.
     ///
+    /// The drop is conditional on the holding key still containing the
+    /// session this pass read, which is what keeps two passes from destroying
+    /// an import. A pass is cancelled rather than joined when a new session
+    /// arrives, and cancellation is observed at suspension points only: a pass
+    /// suspended on its identifying request resumes after the new session has
+    /// been filed, and an unconditional delete would take that session with
+    /// it — leaving the import it was reported as succeeding gone from the
+    /// Mac entirely.
+    ///
     /// `identify` is the one part of this that leaves the machine.
     static func run(
         store: Store = .keychain,
@@ -93,7 +102,15 @@ enum ClaudeWebSessionAdoption {
 
         do {
             try store.write(identity.uuid, session)
-            try store.delete(ClaudeWebSessionStore.unkeyedAccount)
+            if case .found(let holding) = store.read(ClaudeWebSessionStore.unkeyedAccount),
+                holding.accessToken == session
+            {
+                try store.delete(ClaudeWebSessionStore.unkeyedAccount)
+            } else {
+                sissyLog(
+                    "sissy: a newer claude.ai session is waiting to be keyed; "
+                        + "leaving it for the next pass")
+            }
         } catch let failure as ClaudeWebSessionStoreError {
             sissyLog("sissy: could not file the claude.ai session under its account: \(failure)")
             return .keychainRefused(failure)
