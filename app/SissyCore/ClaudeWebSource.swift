@@ -47,6 +47,9 @@ actor ClaudeWebSource: SourceSignals {
     private let fetchSource: @Sendable (String, String?) async throws -> Reading
 
     private var retired = false
+    /// What the link recorded, which a `stop()` must not drop: the derived one
+    /// is a cache and this is an answer.
+    private let linkedOrganization: String?
     private var cached: String?
     /// Organization the windows belong to, kept so the ordinary poll is one
     /// request rather than two. Dropped whenever the session is.
@@ -69,12 +72,20 @@ actor ClaudeWebSource: SourceSignals {
     /// account reads that account's item and no other.
     let account: String
 
+    /// `organization` is the one recorded when the account was linked. Nil is
+    /// a session adopted before links existed, which derives it per poll as
+    /// every reader used to — the fallback, never the preference: membership
+    /// order is the server's, so two polls of an account holding a personal
+    /// plan and a team seat can derive different answers.
     init(
         account: String,
+        organization: String? = nil,
         sessionSource: (@Sendable (Bool) async -> ClaudeCredentialsLookup)? = nil,
         fetchSource: @escaping @Sendable (String, String?) async throws -> Reading = fetch
     ) {
         self.account = account
+        self.linkedOrganization = organization
+        self.organization = organization
         self.sessionSource =
             sessionSource
             ?? { allowingInteraction in
@@ -128,7 +139,7 @@ actor ClaudeWebSource: SourceSignals {
     func stop(clearingState: Bool = true) {
         cancelRequests()
         cached = nil
-        organization = nil
+        organization = linkedOrganization
         published.update {
             $0.windows = []
             $0.credits = nil
@@ -377,11 +388,40 @@ actor ClaudeWebSource: SourceSignals {
     /// readers of this payload cannot come to disagree about which of an
     /// account's organisations the subscription is.
     static func subscriptionOrganization(among organizations: [[String: Any]]) -> [String: Any]? {
-        organizations.first { organization in
+        subscriptionOrganizations(among: organizations).first
+    }
+
+    /// Every organisation of an account that answers the usage question.
+    ///
+    /// More than one is what makes the choice the user's rather than the
+    /// parser's: a personal plan and a team seat on one address both name
+    /// `chat`, membership order is the server's, and picking the first would
+    /// pick differently between two polls. The link records which one, so
+    /// nothing downstream ever derives it again.
+    static func subscriptionOrganizations(among organizations: [[String: Any]])
+        -> [[String: Any]]
+    {
+        organizations.filter { organization in
             let capabilities = organization["capabilities"] as? [Any] ?? []
             return capabilities.contains { ($0 as? String) == subscriptionCapability }
         }
     }
+
+    /// Every organisation a session could be read for, named as claude.ai
+    /// names them.
+    static func subscriptionOrganizations(session: String) async throws
+        -> [ClaudeWebOrganization]
+    {
+        let payload = try await getArray(organizationsPath, session: session)
+        let organizations = payload.compactMap { $0 as? [String: Any] }
+        return subscriptionOrganizations(among: organizations).compactMap { organization in
+            guard let uuid = organization["uuid"] as? String, !uuid.isEmpty else { return nil }
+            return ClaudeWebOrganization(
+                id: uuid, name: organization[organizationNameKey] as? String ?? uuid)
+        }
+    }
+
+    private static let organizationNameKey = "name"
 
     private static func get(_ path: String, session: String) async throws -> [String: Any] {
         let data = try await send(path, session: session)

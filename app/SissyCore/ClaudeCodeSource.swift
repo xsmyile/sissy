@@ -27,6 +27,10 @@ struct ClaudeCodeSignals: SourceSignals {
     /// construction. Read nonisolated for the reason everything here is: the
     /// aggregator asks while the emitting provider still holds its actor.
     let webSources: LockedValue<[ClaudeWebSource]>
+    /// What each linked session turned out to be, which is the only place an
+    /// account reached through a session alone is named: it has no archived
+    /// CLI credential, so the account index holds nothing for it.
+    let webLinks: LockedValue<[String: ClaudeWebLink]>
     let profile: ClaudeProfileSource
     /// Who the CLI is signed in as, which is the account the probe's reading
     /// and the config file's identity both belong to. Read from the registry
@@ -42,7 +46,7 @@ struct ClaudeCodeSignals: SourceSignals {
             web: Self.webReading(for: signedIn.activeUUID, among: sources),
             probe: limitsProbe?.currentSignals())
         reading.accounts = Self.perAccount(
-            reading, sources: sources, known: signedIn)
+            reading, sources: sources, known: signedIn, links: webLinks.load())
         return reading
     }
 
@@ -88,7 +92,8 @@ struct ClaudeCodeSignals: SourceSignals {
     static func perAccount(
         _ reading: ProviderSignals,
         sources: [ClaudeWebSource],
-        known: ClaudeAccountRegistry.Snapshot
+        known: ClaudeAccountRegistry.Snapshot,
+        links: [String: ClaudeWebLink] = [:]
     ) -> [AccountSignals] {
         var byAccount: [String: AccountSignals] = [:]
         if let active = known.activeUUID {
@@ -104,7 +109,9 @@ struct ClaudeCodeSignals: SourceSignals {
                 isSignedIn: true)
         }
         for source in sources where source.account != known.activeUUID {
-            let identity = known.accounts.first { $0.uuid == source.account }
+            let identity =
+                known.accounts.first { $0.uuid == source.account }
+                ?? links[source.account]?.identity
             let signals = source.currentSignals()
             byAccount[source.account] = AccountSignals(
                 id: source.account,
@@ -191,6 +198,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
         pricingOverride: [String: ModelPricing]?,
         limitsProbe: ClaudeLimitsProbe?,
         webSources: LockedValue<[ClaudeWebSource]>,
+        webLinks: LockedValue<[String: ClaudeWebLink]>,
         profile: ClaudeProfileSource,
         accounts: ClaudeAccountRegistry,
         ledger: ProjectLedger
@@ -203,8 +211,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
             root: claudeDir,
             watcherLabel: "sissy.usage.fswatch",
             signals: ClaudeCodeSignals(
-                limitsProbe: limitsProbe, webSources: webSources, profile: profile,
-                accounts: accounts)
+                limitsProbe: limitsProbe, webSources: webSources, webLinks: webLinks,
+                profile: profile, accounts: accounts)
         )
     }
 
@@ -447,6 +455,7 @@ extension LocalUsageProvider {
         pricingOverride: [String: ModelPricing]? = nil,
         limitsProbe: ClaudeLimitsProbe? = nil,
         webSources: LockedValue<[ClaudeWebSource]> = LockedValue([]),
+        webLinks: LockedValue<[String: ClaudeWebLink]> = LockedValue([:]),
         profile: ClaudeProfileSource = ClaudeProfileSource(),
         accounts: ClaudeAccountRegistry = .inert(),
         ledger: ProjectLedger = ProjectLedger(),
@@ -459,6 +468,7 @@ extension LocalUsageProvider {
                 pricingOverride: pricingOverride,
                 limitsProbe: limitsProbe,
                 webSources: webSources,
+                webLinks: webLinks,
                 profile: profile,
                 accounts: accounts,
                 ledger: ledger

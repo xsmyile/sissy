@@ -120,6 +120,33 @@ final class ClaudeAccountRowsTests: XCTestCase {
         XCTAssertNil(archived?.credits)
     }
 
+    /// An account reached through a session alone is named by its link.
+    ///
+    /// It has no archived CLI credential, so the account index holds nothing
+    /// for it: without the link its reading carries no identity at all and the
+    /// row it draws is labelled with the raw Anthropic uuid — the ordinary
+    /// case the moment sessions can be linked rather than imported.
+    func testALinkNamesAnAccountTheAccountIndexDoesNot() {
+        let sessionOnly = ClaudeAccountIdentity(
+            uuid: archivedUUID, email: "davide@radonforge.com", organization: "Radon Forge",
+            organizationType: "claude_team", rateLimitTier: nil)
+        let source = ClaudeWebSource(
+            account: archivedUUID,
+            sessionSource: { _ in .absent },
+            fetchSource: { _, _ in throw ClaudeLimitsError.malformedPayload })
+
+        let accounts = ClaudeCodeSignals.perAccount(
+            ProviderSignals(),
+            sources: [source],
+            known: ClaudeAccountRegistry.Snapshot(accounts: [], activeUUID: signedInUUID),
+            links: [archivedUUID: ClaudeWebLink(identity: sessionOnly, organization: "org-2")])
+
+        let linked = accounts.first { $0.id == archivedUUID }
+        XCTAssertEqual(linked?.account?.email, "davide@radonforge.com")
+        XCTAssertEqual(linked?.account?.organization, "Radon Forge")
+        XCTAssertEqual(linked?.plan, "claude_team")
+    }
+
     /// One account is no list: the picker is a control over a choice, and a
     /// single-account install must render exactly as it did before there were
     /// accounts at all.

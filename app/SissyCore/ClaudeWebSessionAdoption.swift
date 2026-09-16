@@ -69,10 +69,19 @@ enum ClaudeWebSessionAdoption {
     /// Mac entirely.
     ///
     /// `identify` is the one part of this that leaves the machine.
+    ///
+    /// `remember` files what the session turned out to belong to. It costs
+    /// this pass nothing — the identity is already in hand — and it is the
+    /// only thing that names an adopted account on the panel: an account
+    /// reached through a session alone has no archived CLI credential, so the
+    /// account index holds nothing for it and its row would carry the raw
+    /// Anthropic uuid. The organisation stays unrecorded, because nobody was
+    /// asked and a capability-picked one is a guess rather than an answer.
     static func run(
         store: Store = .keychain,
         identify: @Sendable (String) async throws -> ClaudeAccountIdentity =
-            ClaudeWebAccountProfile.resolve
+            ClaudeWebAccountProfile.resolve,
+        remember: @Sendable (ClaudeWebLink) -> Void = { _ in }
     ) async -> Outcome {
         let session: String
         switch store.read(ClaudeWebSessionStore.unkeyedAccount) {
@@ -118,6 +127,7 @@ enum ClaudeWebSessionAdoption {
             sissyLog("sissy: could not file the claude.ai session under its account: \(error)")
             return .keychainRefused(.keychain(errSecIO))
         }
+        remember(ClaudeWebLink(identity: identity, organization: nil))
         sissyLog("sissy: adopted the imported claude.ai session under its own account")
         return .adopted(uuid: identity.uuid)
     }
