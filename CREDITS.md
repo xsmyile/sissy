@@ -1,10 +1,11 @@
 # Credits
 
-Everything Sissy itself is made of is covered by [LICENSE](LICENSE).
+Sissy's own source code is covered by [LICENSE](LICENSE); its name and its
+artwork are not, and [NOTICE](NOTICE) says what that means.
 
-No third-party code ships in Sissy. These are the projects it reads from —
-and one it takes two pictures from — all owed a credit whether or not a licence
-asks for one.
+As it ships today, no third-party code travels with Sissy. These are the
+projects it reads from, and one it takes two pictures from. All are owed a
+credit whether or not a licence asks for one.
 
 - [`ccusage`](https://github.com/ccusage/ccusage): the cost oracle Sissy
   measures itself against, and where its reading of the Claude Code and Codex
@@ -16,6 +17,10 @@ asks for one.
   under CC0.
 
 ## Trademarks
+
+"Sissy", the Sissy icon and the mascot artwork are the copyright holder's
+own marks. They travel with neither the MIT licence nor a fork: [NOTICE](NOTICE)
+is where that is set out.
 
 Sissy draws the Claude and OpenAI marks to identify which CLI a row is about,
 and the GitHub and GitLab marks to identify where a repository is pushed. They
