@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="assets/sissy-icon.png" alt="" width="128" />
-
-# Sissy
+<h1>
+  <img src="assets/sissy-icon.png" alt="" width="128" /><br />
+  Sissy
+</h1>
 
 **What your AI coding agents are costing you, in the macOS menu bar.**
 
