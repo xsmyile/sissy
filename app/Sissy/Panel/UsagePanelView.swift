@@ -146,6 +146,7 @@ struct UsagePanelView: View {
                                 row: open,
                                 onSelectAccount: { selectAccount($0) },
                                 switchFailure: model.engine.accountSwitchFailure,
+                                switchingAccount: model.engine.switchingClaudeAccount,
                                 refresh: { model.refreshProvider(open.id) },
                                 loadHistory: {
                                     await model.engine.usageHistorySeries(provider: $0)

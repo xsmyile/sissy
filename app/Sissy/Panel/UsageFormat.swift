@@ -835,6 +835,37 @@ enum UsageFormat {
 /// not one sentence: an account that has never signed in needs a login, and a
 /// keychain that said no needs the user to allow it.
 enum ClaudeAccountSwitchCopy {
+    /// Asked before the credential is written, because the write reaches a
+    /// program that is not Sissy and a menu item that does it silently is a
+    /// footgun whatever its tooltip says.
+    static func confirmTitle(_ label: String) -> String {
+        "Switch Claude Code to \(label)?"
+    }
+
+    /// The sentence a user cannot work out for themselves, measured
+    /// 2026-09-16: Claude Code holds its account for the life of a session and
+    /// rewrites the credential on every token refresh, so a `claude` that is
+    /// already running puts its own account back within minutes. Sissy cannot
+    /// prevent that — the slot is the CLI's — so the only honest thing is to
+    /// say it before the switch rather than let the row quietly revert.
+    static let confirmBody =
+        "Your next `claude` starts as it. A session that is already open will switch it back "
+        + "when it next refreshes its token, so quit it first."
+
+    /// Said on the same row as the two buttons: the account being left is not
+    /// lost, which is the whole reason this is safe to offer at all.
+    static let confirmReassurance = "Sissy keeps the account you are leaving."
+
+    static let confirmAction = "Switch"
+    static let confirmCancel = "Cancel"
+
+    /// Shown while the credential is written and the reading behind it
+    /// re-read. It is a keychain write plus a network round trip, so without
+    /// it the panel sits unchanged for seconds and the click reads as nothing.
+    static func switching(_ label: String) -> String {
+        "Switching to \(label)…"
+    }
+
     static let forgetFailure =
         "The keychain would not let Sissy delete that saved sign-in, so it is still there"
 
