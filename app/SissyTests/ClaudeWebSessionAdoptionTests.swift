@@ -50,6 +50,31 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
         XCTAssertEqual(vault.contents, ["c805523f": "sk-ant-sid-old"])
     }
 
+    /// A pass that resumes after a newer session was imported leaves that
+    /// session alone.
+    ///
+    /// The pass is cancelled and not joined when a session arrives, and
+    /// cancellation is observed at suspension points only, so one suspended on
+    /// its identifying request resumes with the holding key already holding
+    /// somebody else's import. Deleting it there costs the user the import
+    /// they were told had succeeded.
+    func testAPassResumingAfterANewImportLeavesItAlone() async {
+        let vault = Vault([ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-first"])
+
+        let outcome = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in
+            vault.replace(ClaudeWebSessionStore.unkeyedAccount, with: "sk-ant-sid-second")
+            return Self.identity
+        }
+
+        XCTAssertEqual(outcome, .adopted(uuid: "c805523f"))
+        XCTAssertEqual(
+            vault.contents,
+            [
+                "c805523f": "sk-ant-sid-first",
+                ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-second",
+            ])
+    }
+
     /// The invariant the write order exists for: a pass cut short after the
     /// write and before the delete leaves two copies of one session, never
     /// none. The duplicate clears on the next pass, because the legacy item is
@@ -93,6 +118,10 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
         }
 
         var contents: [String: String] { lock.withLock { items } }
+
+        func replace(_ account: String, with session: String) {
+            lock.withLock { items[account] = session }
+        }
 
         func store() -> ClaudeWebSessionAdoption.Store {
             ClaudeWebSessionAdoption.Store(
