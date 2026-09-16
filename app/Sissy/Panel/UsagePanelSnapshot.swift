@@ -673,6 +673,14 @@ struct UsagePanelSnapshot: Equatable {
     /// Fewer than two accounts is no list at all: the row's own fields are
     /// that account's reading, and a picker over one choice is a control that
     /// does nothing.
+    ///
+    /// The identity leads on every field it can answer for, which is what
+    /// keeps a row's name and its address from coming off two different
+    /// accounts: `label` read it first and `email` did not, so one row named
+    /// one account and printed the address of another. The seat is the
+    /// exception and stays on the reading — an archived identity holds none,
+    /// so identity-first there would take the badge off the account whose
+    /// config file does match.
     static func accountEntries(
         readings: [AccountSignals],
         known: ClaudeAccountRegistry.Snapshot,
@@ -696,8 +704,8 @@ struct UsagePanelSnapshot: Equatable {
                 id: id,
                 label: identity.map(UsageFormat.accountLabel)
                     ?? reading?.account?.email ?? id,
-                email: reading?.account?.email ?? identity?.email,
-                organization: reading?.account?.organization ?? identity?.organization,
+                email: identity?.email ?? reading?.account?.email,
+                organization: identity?.organization ?? reading?.account?.organization,
                 plan: plan?.label,
                 planTier: plan?.tier,
                 windows: (reading?.windows ?? []).map {

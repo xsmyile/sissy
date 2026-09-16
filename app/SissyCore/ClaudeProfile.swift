@@ -43,7 +43,7 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
 
     private let url: URL
     private let lock = NSLock()
-    private var signals = ProviderSignals()
+    private var attributed = Attributed()
     private var lastParsedAt: Date = .distantPast
     private var lastMTime: TimeInterval = 0
 
@@ -53,12 +53,45 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     private static let emailKey = "emailAddress"
     private static let organizationKey = "organizationName"
 
+    /// Whose account the block is about. Both blocks this type reads name it
+    /// under the same key, and they are not the same answer.
+    private static let accountKey = "accountUuid"
+
     /// Plan, its limit tier and the account they belong to, held together so
     /// neither a tier nor an identity can outlive the plan it decorates.
     struct Profile: Sendable, Equatable {
         let plan: String
         let tier: String?
         let account: ProviderAccount?
+        /// The account `oauthAccount` says it describes, nil where the block
+        /// names none — which is every CLI old enough not to write it.
+        let owner: String?
+
+        init(plan: String, tier: String?, account: ProviderAccount?, owner: String? = nil) {
+            self.plan = plan
+            self.tier = tier
+            self.account = account
+            self.owner = owner
+        }
+    }
+
+    /// The file's reading with the account each half of it names.
+    ///
+    /// Two owners rather than one because the two blocks are written at
+    /// different moments and can name different accounts: a running `claude`
+    /// holds its own identity in memory, so the usage cache is refreshed
+    /// under the account the CLI started as long after the credential has
+    /// moved on. Measured 2026-09-16, a cache fetched 39 s after a switch was
+    /// still stamped with the previous account — folding the two into one
+    /// owner would attribute the money by the profile's uuid.
+    ///
+    /// Read as one value for the reason `ProviderSignals` is one: a caller
+    /// taking the reading from one call and the owner from the next could
+    /// pair one moment's identity with another's answer for whose it was.
+    struct Attributed: Sendable, Equatable {
+        var signals = ProviderSignals()
+        var profileOwner: String?
+        var creditsOwner: String?
     }
 
     /// Keys of the cached usage payload, which is the endpoint's answer stored
@@ -88,7 +121,11 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     /// Every field is nil until a refresh finds one, and nil for good for an
     /// API-key user or a config file with no `oauthAccount` — which leaves the
     /// panel row without a plan rather than guessing at one.
-    func currentSignals() -> ProviderSignals { lock.withLock { signals } }
+    func currentSignals() -> ProviderSignals { currentAttributed().signals }
+
+    /// The reading and the account each half of it belongs to, which is what
+    /// `ClaudeCodeSignals` needs to tell a stale profile from this one's.
+    func currentAttributed() -> Attributed { lock.withLock { attributed } }
 
     /// Re-reads the file when it has changed on disk and the floor has
     /// passed. A file that has stopped naming a plan clears the held one — a
@@ -118,11 +155,15 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
         else { return }
         let reading = Self.readProfile(root)
         let billed = Self.readCredits(root)
+        let billedOwner = Self.creditsOwner(root)
         lock.withLock {
             let profile = if case .found(let found) = reading { found } else { nil as Profile? }
-            signals = ProviderSignals(
-                plan: profile?.plan, planTier: profile?.tier,
-                account: profile?.account, credits: billed)
+            attributed = Attributed(
+                signals: ProviderSignals(
+                    plan: profile?.plan, planTier: profile?.tier,
+                    account: profile?.account, credits: billed),
+                profileOwner: profile?.owner,
+                creditsOwner: billedOwner)
             lastParsedAt = now
             lastMTime = mtime
         }
@@ -170,9 +211,23 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
                     organization: UsageReaderShared.sanitizedDisplayText(
                         account[organizationKey] as? String),
                     seat: UsageReaderShared.sanitizedPlanToken(account[seatKey] as? String)
-                )
+                ),
+                owner: owner(account[accountKey])
             )
         )
+    }
+
+    /// The account the cached usage reply belongs to, which is the vendor's
+    /// own stamp on it rather than anything Sissy derives.
+    private static func creditsOwner(_ root: [String: Any]) -> String? {
+        owner((root[usageCacheKey] as? [String: Any])?[accountKey])
+    }
+
+    /// An empty stamp is no stamp: a blank uuid contradicts every account,
+    /// and would take a reading off the row on the strength of nothing.
+    private static func owner(_ raw: Any?) -> String? {
+        guard let uuid = raw as? String, !uuid.isEmpty else { return nil }
+        return uuid
     }
 
     /// The vendor's own answer for what it has billed against the spend cap,
