@@ -506,9 +506,9 @@ actor UsageEngine {
     /// launch must not wait on it — but a task nothing holds outlives `stop()`
     /// and, since an engine is rebuilt on every provider toggle, toggling
     /// would leave overlapping passes writing the same items. The handle is
-    /// what `stop()` cancels and what `forgetClaudeWebSession` joins before it
-    /// deletes, which is the only thing that stops a pass in flight from
-    /// putting back a session the user just asked to be rid of.
+    /// what `stop()` cancels and what `forgetClaudeWebSession(account:)` joins
+    /// before it deletes, which is the only thing that stops a pass in flight
+    /// from putting back a session the user just asked to be rid of.
     private func startClaudeWebAdoption() {
         claudeWebAdoptionTask?.cancel()
         let me = self
@@ -594,57 +594,6 @@ actor UsageEngine {
                 dataDir: $0.dataDir,
                 scan: progress[$0.id]
             )
-        }
-    }
-
-    /// Imports the claude.ai session Claude.app is holding and switches the
-    /// reading over to it.
-    ///
-    /// The one gesture allowed to raise the Safe Storage dialog, and the only
-    /// write on this path. It is deliberately not reachable from a poll or a
-    /// launch: a permission is asked for when the user asks for the thing that
-    /// needs it.
-    func importClaudeWebSession() async -> Result<Void, ClaudeWebCookieImport.Failure> {
-        guard lifecycle == .running else { return .success(()) }
-        let outcome = await adoptClaudeWebSession(allowingInteraction: true)
-        await stopClaudeLimits()
-        await startClaudeLimits(userInitiated: true)
-        await reemit()
-        return outcome
-    }
-
-    /// Imports and switches over, or says why it could not.
-    ///
-    /// `allowingInteraction` is the difference between the button and a launch
-    /// finding the switch already on. Only the button may raise the Safe
-    /// Storage dialog; the launch reads silently and, where the grant is
-    /// already given, has the live source running before anyone opens the
-    /// panel — which is the whole of "it just works" and costs no prompt.
-    private func adoptClaudeWebSession(
-        allowingInteraction: Bool
-    ) async -> Result<Void, ClaudeWebCookieImport.Failure> {
-        switch ClaudeWebCookieImport.session(password: {
-            ClaudeWebCookieImport.safeStoragePassword(allowingInteraction: allowingInteraction)
-        }) {
-        case .failure(let why):
-            sissyLog("sissy: importing the claude.ai session found none: \(why)")
-            return .failure(why)
-        case .success(let session):
-            do {
-                try ClaudeWebSessionStore.save(
-                    session, account: ClaudeWebSessionStore.unkeyedAccount)
-            } catch {
-                sissyLog("sissy: could not file the claude.ai session: \(error)")
-                return .failure(.undecryptable)
-            }
-            // Filed under the holding key first and keyed afterwards, never
-            // the other way round: identifying it is a request that can fail,
-            // and a session held only in memory while that request runs is one
-            // an interruption loses. The pass is the same one a launch runs,
-            // so an import that could not reach claude.ai is keyed by the next
-            // launch rather than staying unkeyed for good.
-            startClaudeWebAdoption()
-            return .success(())
         }
     }
 
@@ -737,34 +686,6 @@ actor UsageEngine {
         return .success(())
     }
 
-    /// Forgets the imported session and hands the reading back to the OAuth
-    /// probe, which is where it was before the import.
-    /// Every stored session goes, not only the one a reader is using: the
-    /// user asked for the imported session to be gone, and leaving a second
-    /// account's behind would keep answering for claude.ai under a switch they
-    /// just turned off.
-    ///
-    /// The keying pass is cancelled *and joined* first. Cancellation alone is
-    /// observed between steps, so a pass suspended on its identifying request
-    /// could otherwise write its held session back after the delete and leave
-    /// `hasClaudeWebSession` true again — the same shape as the archive rule,
-    /// where forgetting has to end a pass in flight rather than race it.
-    func forgetClaudeWebSession() async {
-        guard lifecycle == .running else { return }
-        claudeWebAdoptionTask?.cancel()
-        await claudeWebAdoptionTask?.value
-        claudeWebAdoptionTask = nil
-        pendingClaudeWebLink = nil
-        for account in ClaudeWebSessionStore.storedAccounts() {
-            try? ClaudeWebSessionStore.delete(account: account)
-        }
-        try? claudeWebIndex.forgetAll()
-        claudeWebLinks.store([:])
-        await stopClaudeLimits()
-        await startClaudeLimits(userInitiated: false)
-        await reemit()
-    }
-
     /// Unlinks one account's claude.ai session, leaving every other one where
     /// it is.
     ///
@@ -776,11 +697,11 @@ actor UsageEngine {
     /// the next switch overwrites. Two lifetimes, which is what
     /// `ClaudeWebSessionIndex` is a separate list for.
     ///
-    /// The keying pass is cancelled and joined first for the reason
-    /// `forgetClaudeWebSession` gives: a pass suspended on its identifying
-    /// request could otherwise name its held session as this very account and
-    /// write it back after the delete. What it costs is a session still under
-    /// the holding key, which the next launch keys.
+    /// The keying pass is cancelled *and joined* first. Cancellation alone is
+    /// observed between steps, so a pass suspended on its identifying request
+    /// could otherwise name its held session as this very account and write it
+    /// back after the delete. What that costs is a session still under the
+    /// holding key, which the next launch keys.
     func forgetClaudeWebSession(account: String) async {
         guard lifecycle == .running else { return }
         claudeWebAdoptionTask?.cancel()
@@ -905,20 +826,14 @@ actor UsageEngine {
             if let own = claudeOwnLimits {
                 await own.refresh { await me.reemit() }
             }
-            // Only a session claude.ai has actually closed is re-imported:
-            // re-reading a dead string is the button failing at its only job,
-            // and re-importing a live one would overwrite every other
-            // account's reader with whichever session Claude.app happens to
-            // hold.
-            var reimport = false
-            for source in claudeWebSources.load() {
-                if await source.currentSignals().limitsState == .sessionExpired {
-                    reimport = true
-                } else {
-                    await source.refresh { await me.reemit() }
-                }
+            // A session claude.ai has closed is left alone: re-reading a dead
+            // string is the button failing at its only job, and the only thing
+            // that can replace one is a fresh sign-in, which the notice beside
+            // it offers.
+            for source in claudeWebSources.load()
+            where await source.currentSignals().limitsState != .sessionExpired {
+                await source.refresh { await me.reemit() }
             }
-            if reimport { _ = await importClaudeWebSession() }
         }
         if config.statusChecks {
             await statusMonitor.refresh(provider: id) { await me.reemit() }
@@ -1156,14 +1071,10 @@ actor UsageEngine {
                 await me.reemit()
             }
         }
-        // The imported claude.ai session runs beside it rather than instead of
+        // The linked claude.ai sessions run beside it rather than instead of
         // it: `ClaudeCodeSignals.merge` prefers the CLI's own reading and falls
-        // back to this one, which is the only answer left on a Mac nobody has
-        // signed the CLI into. It is imported rather than asked for, so a user
-        // who already granted that permission needs no second button.
-        if !hasClaudeWebSession {
-            _ = await adoptClaudeWebSession(allowingInteraction: userInitiated)
-        }
+        // back to these, which are the only answer left on a Mac nobody has
+        // signed the CLI into.
         await rebuildClaudeWebSources()
         for source in claudeWebSources.load() {
             await source.start(userInitiated: userInitiated) { await me.reemit() }

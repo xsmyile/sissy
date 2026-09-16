@@ -107,55 +107,19 @@ enum ClaudeAccountLinkCopy {
     }
 }
 
-enum ClaudeWebSessionCopy {
-    static let importTitle = "Import from Claude.app"
-    static let forgetTitle = "Forget session"
-    static let importedLabel = "Reading claude.ai"
-
-    static let caption =
-        "Claude Code's own reading only updates when you type /usage. Importing the "
-        + "session Claude.app is signed in with keeps the windows and the credits live."
-
-    static let detail =
-        "Sissy copies the claude.ai session cookie out of Claude.app into a keychain item "
-        + "of its own, and reads it back from there. macOS asks once, when you press "
-        + "Import — Claude.app's key has not changed since 2024, so the permission is not "
-        + "asked for again. The cookie is a whole claude.ai session, not a read-only "
-        + "usage token: it never leaves this Mac except as a request to claude.ai, and it "
-        + "is not in the logs, the diagnostics or the export. Forget deletes it."
-
-    static let detailButtonLabel = "What importing does"
-
+enum ClaudeLimitsSourceCopy {
     static let ownCredentialLabel = "Limits source"
     static let ownCredentialState = "This account's own sign-in"
     static let ownCredentialCaption =
         "Claude Code keeps its OAuth token in its own config directory, and it belongs to "
         + "whichever account is signed in there, so that is the account Sissy reads limits "
         + "for."
-
-    /// One sentence per way the import can come up empty, each naming what to
-    /// do rather than what failed.
-    static func failure(_ why: ClaudeWebCookieImport.Failure) -> String {
-        switch why {
-        case .noStore:
-            return "Claude.app is not installed on this Mac."
-        case .noSession:
-            return "Claude.app is installed but not signed in."
-        case .noKey:
-            return "macOS did not let Sissy read Claude.app's key. Try Import again."
-        case .unreadableStore:
-            return "Claude.app's cookie store could not be read."
-        case .undecryptable:
-            return "Claude.app's cookies are in a format this version does not read."
-        }
-    }
 }
 
 /// Where each provider's numbers come from, and what it is doing about them.
 struct ProvidersSettingsView: View {
     let model: SissyModel
 
-    @State private var showingWebSessionDetail = false
     /// The account a confirmation is open for. A session is a secret the user
     /// cannot read back and did not have to type, so the one click that
     /// deletes it is asked about first — this one was pressed by accident on
@@ -163,24 +127,19 @@ struct ProvidersSettingsView: View {
     @State private var unlinking: ClaudeWebAccount?
 
     private static let markSize: CGFloat = 18
-    /// Wide enough that the detail reads as a paragraph rather than a column.
-    private static let detailPopoverWidth: CGFloat = 280
 
     var body: some View {
         Form {
             ForEach(model.engine.providers, id: \.id) { readiness in
                 Section {
                     row(readiness)
-                    // Only under a Claude Code that is being metered. Where
-                    // it is not there is no limits probe to hand a session to
-                    // and no slice for the windows to ride on, so the import
-                    // would raise Claude.app's dialog to change nothing —
-                    // which is the one thing a permission prompt may never do.
+                    // Only under a Claude Code that is being metered: where it
+                    // is not there is no limits probe and no slice for the
+                    // windows to ride on, so a session linked here would read
+                    // for a provider the user has told Sissy to leave alone.
                     if readiness.id == ProviderID.claudeCode, readiness.activation.isMetering {
                         if model.engine.claudeUsesOwnCredential {
                             ownCredentialRow
-                        } else {
-                            claudeWebSession
                         }
                         linkedAccounts
                     }
@@ -240,10 +199,10 @@ struct ProvidersSettingsView: View {
     /// dialog, no cookie, and no grant that a re-signed build invalidates.
     private var ownCredentialRow: some View {
         LabeledContent {
-            Text(ClaudeWebSessionCopy.ownCredentialState).foregroundStyle(.secondary)
+            Text(ClaudeLimitsSourceCopy.ownCredentialState).foregroundStyle(.secondary)
         } label: {
-            Text(ClaudeWebSessionCopy.ownCredentialLabel)
-            Text(ClaudeWebSessionCopy.ownCredentialCaption)
+            Text(ClaudeLimitsSourceCopy.ownCredentialLabel)
+            Text(ClaudeLimitsSourceCopy.ownCredentialCaption)
         }
     }
 
@@ -281,37 +240,6 @@ struct ProvidersSettingsView: View {
             get: { readiness.activation.isMetering },
             set: { model.engine.setProvider(readiness.id, enabled: $0) }
         )
-    }
-
-    /// Shown only when the CLI keeps no credential Sissy can read, which is a
-    /// CLI nobody has signed into. Otherwise there is nothing to import: the
-    /// limits already come from the account that is signed in.
-    private var claudeWebSession: some View {
-        LabeledContent {
-            if model.engine.claudeWebSession {
-                Button(ClaudeWebSessionCopy.forgetTitle) {
-                    model.engine.forgetClaudeWebSession()
-                }
-            } else {
-                Button(ClaudeWebSessionCopy.importTitle) {
-                    model.engine.importClaudeWebSession()
-                }
-                .disabled(model.engine.importingClaudeWebSession)
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(
-                    model.engine.claudeWebSession
-                        ? ClaudeWebSessionCopy.importedLabel
-                        : ClaudeWebSessionCopy.importTitle)
-                webSessionDetailButton
-            }
-            if let why = model.engine.claudeWebImportFailure {
-                Text(ClaudeWebSessionCopy.failure(why))
-            } else if !model.engine.claudeWebSession {
-                Text(ClaudeWebSessionCopy.caption)
-            }
-        }
     }
 
     /// Links another Claude account, which is the only way to read one the
@@ -380,19 +308,4 @@ struct ProvidersSettingsView: View {
         }
     }
 
-    private var webSessionDetailButton: some View {
-        Button {
-            showingWebSessionDetail = true
-        } label: {
-            Image(systemName: "info.circle")
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(ClaudeWebSessionCopy.detailButtonLabel)
-        .popover(isPresented: $showingWebSessionDetail, arrowEdge: .bottom) {
-            Text(ClaudeWebSessionCopy.detail)
-                .font(.callout)
-                .frame(width: Self.detailPopoverWidth)
-                .padding()
-        }
-    }
 }

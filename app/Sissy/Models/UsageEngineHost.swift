@@ -283,28 +283,6 @@ final class UsageEngineHost {
     /// from. Stored rather than read through to the engine on each access:
     /// the engine holds it behind a lock, which no view is observing.
     private(set) var linkedClaudeAccounts: [ClaudeWebAccount] = []
-    /// Why the last import found nothing, kept so Settings says which of the
-    /// several ways it can come up empty happened. Cleared by the next
-    /// attempt, and by a successful one.
-    private(set) var claudeWebImportFailure: ClaudeWebCookieImport.Failure?
-    private(set) var importingClaudeWebSession = false
-
-    /// Imports the session Claude.app is holding. The click that is allowed
-    /// to raise the Safe Storage dialog, and the only one.
-    func importClaudeWebSession() {
-        guard let engine, !importingClaudeWebSession else { return }
-        importingClaudeWebSession = true
-        claudeWebImportFailure = nil
-        Task { [weak self] in
-            let outcome = await engine.importClaudeWebSession()
-            guard let self else { return }
-            importingClaudeWebSession = false
-            claudeWebSession = engine.hasClaudeWebSession
-            linkedClaudeAccounts = engine.linkedClaudeAccounts
-            if case .failure(let why) = outcome { claudeWebImportFailure = why }
-        }
-    }
-
     /// The login window, kept for as long as it is open and dropped with it.
     private var loginWindow: ClaudeWebLoginWindow?
     /// Whether a login is in flight, from the click until the session is
@@ -384,25 +362,12 @@ final class UsageEngineHost {
         linkedClaudeAccounts = engine?.linkedClaudeAccounts ?? []
     }
 
-    /// Forgets it, handing the reading back to the OAuth probe.
-    func forgetClaudeWebSession() {
-        guard let engine, claudeWebSession else { return }
-        claudeWebImportFailure = nil
-        Task { [weak self] in
-            await engine.forgetClaudeWebSession()
-            guard let self else { return }
-            claudeWebSession = engine.hasClaudeWebSession
-            linkedClaudeAccounts = engine.linkedClaudeAccounts
-        }
-    }
-
     /// Unlinks one account's claude.ai session.
     ///
     /// The archived Claude Code sign-in stays: it is not something the user
     /// linked, Sissy cannot make another, and only `claude /login` can.
     func forgetClaudeWebSession(account: String) {
         guard let engine else { return }
-        claudeWebImportFailure = nil
         Task { [weak self] in
             await engine.forgetClaudeWebSession(account: account)
             guard let self else { return }
