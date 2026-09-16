@@ -29,7 +29,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
             windows: [window(18)], limitsState: .quiet, limitsObservedAt: observedAt)
         signals.account = ProviderAccount(
             email: "master@example.com", organization: "Master Soft Srl", seat: nil)
-        signals.plan = "claude_team"
+        signals.plan = "team"
         return signals
     }
 
@@ -144,7 +144,36 @@ final class ClaudeAccountRowsTests: XCTestCase {
         let linked = accounts.first { $0.id == archivedUUID }
         XCTAssertEqual(linked?.account?.email, "davide@radonforge.com")
         XCTAssertEqual(linked?.account?.organization, "Radon Forge")
-        XCTAssertEqual(linked?.plan, "claude_team")
+        XCTAssertEqual(linked?.plan, "team")
+    }
+
+    /// An archived account's plan reaches the row in the vocabulary the
+    /// formatter words.
+    ///
+    /// The vendor prefixes both tokens and `.claude.json`'s reader strips
+    /// them, so passing an identity's through raw labelled every account but
+    /// the signed-in one "Claude Team", metered at "Default Claude Max 5x".
+    func testAnArchivedAccountsPlanIsStrippedToTheFramesVocabulary() {
+        let source = ClaudeWebSource(
+            account: archivedUUID,
+            sessionSource: { _ in .absent },
+            fetchSource: { _, _ in throw ClaudeLimitsError.malformedPayload })
+
+        let accounts = ClaudeCodeSignals.perAccount(
+            ProviderSignals(),
+            sources: [source],
+            known: ClaudeAccountRegistry.Snapshot(
+                accounts: [
+                    ClaudeAccountIdentity(
+                        uuid: archivedUUID, email: nil, organization: "Radon Forge",
+                        organizationType: "claude_team",
+                        rateLimitTier: "default_claude_max_5x")
+                ],
+                activeUUID: signedInUUID))
+
+        let archived = accounts.first { $0.id == archivedUUID }
+        XCTAssertEqual(archived?.plan, "team")
+        XCTAssertEqual(archived?.planTier, "max_5x")
     }
 
     /// One account is no list: the picker is a control over a choice, and a

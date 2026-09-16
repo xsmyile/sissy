@@ -29,7 +29,7 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
     /// answers the usage question, so there is nothing to ask.
     func testOneSubscriptionOrganizationLinksOutright() async throws {
         let outcome = try await resolve(organizations: [
-            ClaudeWebOrganization(id: "org-1", name: "Master Soft Srl", plan: "claude_team")
+            ClaudeWebOrganization(id: "org-1", name: "Master Soft Srl", plan: "team")
         ])
 
         XCTAssertEqual(
@@ -40,8 +40,8 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
     /// Several, and the pick becomes the user's. Nothing is filed meanwhile.
     func testSeveralSubscriptionOrganizationsAskInstead() async throws {
         let organizations = [
-            ClaudeWebOrganization(id: "org-1", name: "Master Soft Srl", plan: "claude_team"),
-            ClaudeWebOrganization(id: "org-2", name: "Radon Forge", plan: "claude_max"),
+            ClaudeWebOrganization(id: "org-1", name: "Master Soft Srl", plan: "team"),
+            ClaudeWebOrganization(id: "org-2", name: "Radon Forge", plan: "max"),
         ]
 
         let outcome = try await resolve(organizations: organizations)
@@ -68,7 +68,7 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
             _ = try await resolve(
                 organizations: [
                     ClaudeWebOrganization(
-                        id: "org-1", name: "Master Soft Srl", plan: "claude_team")
+                        id: "org-1", name: "Master Soft Srl", plan: "team")
                 ],
                 identify: { _ in throw ClaudeAccountProfile.Failure.badStatus(401) })
             XCTFail("expected the link to fail")
@@ -82,24 +82,24 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
     /// measured on two accounts, so the name cannot be pattern-matched.
     func testOrganizationsAreLabelledByPlan() {
         let labels = UsageFormat.organizationChoices([
-            ClaudeWebOrganization(id: "org-1", name: "Radon Forge", plan: "claude_team"),
+            ClaudeWebOrganization(id: "org-1", name: "Radon Forge", plan: "team"),
             ClaudeWebOrganization(
-                id: "org-2", name: "davide@radonforge.com's Organization", plan: "claude_pro"),
+                id: "org-2", name: "davide@radonforge.com's Organization", plan: "pro"),
         ])
 
-        XCTAssertEqual(labels.map(\.label), ["Claude Team", "Claude Pro"])
+        XCTAssertEqual(labels.map(\.label), ["Team", "Pro"])
     }
 
     /// Two organisations on one plan are told apart by nothing but their
     /// names, so there the name comes back.
     func testTwoOrganizationsOnOnePlanKeepTheirNames() {
         let labels = UsageFormat.organizationChoices([
-            ClaudeWebOrganization(id: "org-1", name: "Radon Forge", plan: "claude_team"),
-            ClaudeWebOrganization(id: "org-2", name: "Acme Srl", plan: "claude_team"),
+            ClaudeWebOrganization(id: "org-1", name: "Radon Forge", plan: "team"),
+            ClaudeWebOrganization(id: "org-2", name: "Acme Srl", plan: "team"),
         ])
 
         XCTAssertEqual(
-            labels.map(\.label), ["Claude Team · Radon Forge", "Claude Team · Acme Srl"])
+            labels.map(\.label), ["Team · Radon Forge", "Team · Acme Srl"])
     }
 
     /// An organisation the vendor named no plan for has only its name.

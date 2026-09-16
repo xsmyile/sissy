@@ -28,18 +28,6 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     /// which costs about a millisecond.
     private static let minimumReparseInterval: TimeInterval = 60
 
-    /// `oauthAccount.organizationType` prefixes the plan the CLI displays:
-    /// `claude_max` against the bare `max` its own label switch takes.
-    /// Verified against 2.1.267, whose enumeration is exactly
-    /// pro / max / team / enterprise.
-    private static let planPrefix = "claude_"
-
-    /// `oauthAccount.userRateLimitTier` prefixes the tier the same way:
-    /// `default_claude_max_5x` for the account metered at Max 5x. Only the
-    /// two `max` multipliers appear in 2.1.267, which is why the tier is
-    /// treated as a decoration on the plan and never as the plan itself.
-    private static let tierPrefix = "default_claude_"
-
     /// Claude Code's config file, in the config home the CLI resolves for
     /// itself: `CLAUDE_CONFIG_DIR` when set, `$HOME` otherwise — the same
     /// env-var deference `ServerConfig.resolvedCodexDataDir` pays `CODEX_HOME`.
@@ -163,11 +151,15 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     private static func readProfile(_ root: [String: Any]) -> Reading {
         guard let account = root["oauthAccount"] as? [String: Any],
             let plan = UsageReaderShared.sanitizedPlanToken(
-                stripping(planPrefix, from: account["organizationType"] as? String)
+                ClaudeAccountIdentity.stripping(
+                    ClaudeAccountIdentity.planPrefix,
+                    from: account["organizationType"] as? String)
             )
         else { return .absent }
         let tier = UsageReaderShared.sanitizedPlanToken(
-            stripping(tierPrefix, from: account["userRateLimitTier"] as? String)
+            ClaudeAccountIdentity.stripping(
+                ClaudeAccountIdentity.tierPrefix,
+                from: account["userRateLimitTier"] as? String)
         )
         return .found(
             Profile(
@@ -204,10 +196,5 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
         else { return nil }
         return ClaudeUsagePayload.credits(
             body, observedAt: Date(timeIntervalSince1970: fetchedAtMs / 1000))
-    }
-
-    private static func stripping(_ prefix: String, from raw: String?) -> String? {
-        guard let raw else { return nil }
-        return raw.hasPrefix(prefix) ? String(raw.dropFirst(prefix.count)) : raw
     }
 }

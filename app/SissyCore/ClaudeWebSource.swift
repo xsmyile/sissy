@@ -412,14 +412,21 @@ actor ClaudeWebSource: SourceSignals {
     static func subscriptionOrganizations(session: String) async throws
         -> [ClaudeWebOrganization]
     {
-        let payload = try await getArray(organizationsPath, session: session)
+        organizations(in: try await getArray(organizationsPath, session: session))
+    }
+
+    /// The mapping itself, so the plan a choice is labelled by is testable
+    /// without claude.ai — as the selection beside it already is.
+    static func organizations(in payload: [Any]) -> [ClaudeWebOrganization] {
         let organizations = payload.compactMap { $0 as? [String: Any] }
         return subscriptionOrganizations(among: organizations).compactMap { organization in
             guard let uuid = organization["uuid"] as? String, !uuid.isEmpty else { return nil }
             return ClaudeWebOrganization(
                 id: uuid,
                 name: organization[organizationNameKey] as? String ?? uuid,
-                plan: organization[organizationPlanKey] as? String)
+                plan: ClaudeAccountIdentity.stripping(
+                    ClaudeAccountIdentity.planPrefix,
+                    from: organization[organizationPlanKey] as? String))
         }
     }
 
