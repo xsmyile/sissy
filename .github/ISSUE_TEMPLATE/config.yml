@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/xsmyile/sissy/security/advisories/new
+    about: Report privately. Please do not open a public issue.
+  - name: Sissy's numbers disagree with ccusage
+    url: https://github.com/xsmyile/sissy/blob/master/README.md#privacy
+    about: Check `ccusage --version` first. A stale Homebrew build reports a different figure.

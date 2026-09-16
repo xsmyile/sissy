@@ -1,0 +1,45 @@
+name: Bug report
+description: Something Sissy does that it should not, or a number that looks wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a security problem, please do not file it here. See
+        [SECURITY.md](https://github.com/xsmyile/sissy/blob/master/SECURITY.md).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >
+        Settings ▸ About ▸ **Copy diagnostics**, pasted here. It carries the
+        version, the OS, what the readers have found and which `ccusage` builds
+        are installed, and no costs, paths or credentials.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: ccusage
+    attributes:
+      label: "`ccusage --version`, if this is about a number"
+      description: >
+        A Homebrew install pinned at 20.1.0 bills 1-hour cache writes at the
+        5-minute rate and will never upgrade off itself, which looks like Sissy
+        over-billing by about 7%.
+      placeholder: "20.0.20"
+
+  - type: textarea
+    id: anything
+    attributes:
+      label: Anything else
+      description: Screenshots, log excerpts (Settings ▸ General ▸ Open logs), a hunch.
