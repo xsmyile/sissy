@@ -134,6 +134,16 @@ struct ClaudeCodeSignals: SourceSignals {
     /// A single-account install is unchanged, because the decision that keeps
     /// it unchanged is the downstream one: one known account and one reading
     /// are one id, and no picker is offered over one choice.
+    ///
+    /// The link names an account before the archive does, and this is the one
+    /// branch where that is not arbitrary: it draws the accounts the CLI is
+    /// *not* on, and an archived identity is frozen at the build that filed
+    /// it. Sissy cannot re-ask — `captureActive` only ever reads the active
+    /// slot, and an archived access token expires with no refresh Sissy is
+    /// allowed to spend — so the link is the only identity a non-active
+    /// account can still update. Measured 2026-09-16: an account archived
+    /// before `seat` existed kept badging "Team" against a live "Team
+    /// Premium", and would have kept it through a fresh link.
     static func perAccount(
         _ reading: ProviderSignals,
         sources: [ClaudeWebSource],
@@ -155,8 +165,8 @@ struct ClaudeCodeSignals: SourceSignals {
         }
         for source in sources where source.account != known.activeUUID {
             let identity =
-                known.accounts.first { $0.uuid == source.account }
-                ?? links[source.account]?.identity
+                links[source.account]?.identity
+                ?? known.accounts.first { $0.uuid == source.account }
             let signals = source.currentSignals()
             byAccount[source.account] = AccountSignals(
                 id: source.account,

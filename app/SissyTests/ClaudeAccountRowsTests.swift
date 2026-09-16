@@ -176,6 +176,76 @@ final class ClaudeAccountRowsTests: XCTestCase {
         XCTAssertEqual(archived?.planTier, "max_5x")
     }
 
+    /// An archived identity is frozen at the build that filed it, and Sissy
+    /// cannot re-ask for a non-active account: `captureActive` reads only the
+    /// active slot, and the archived token expires with no refresh Sissy may
+    /// spend. So the link wins here — measured 2026-09-16, an account archived
+    /// before the seat existed kept badging "Team" against a live "Team
+    /// Premium", and would have kept it through a fresh link.
+    func testALinkNamesAnAccountAheadOfTheFrozenArchive() {
+        let source = ClaudeWebSource(
+            account: archivedUUID,
+            sessionSource: { _ in .absent },
+            fetchSource: { _, _ in throw ClaudeLimitsError.malformedPayload })
+        let linked = ClaudeAccountIdentity(
+            uuid: archivedUUID, email: "davide@radonforge.com", organization: "Radon Forge",
+            organizationType: "claude_team", rateLimitTier: nil, seat: "team_tier_1")
+
+        let accounts = ClaudeCodeSignals.perAccount(
+            ProviderSignals(),
+            sources: [source],
+            known: ClaudeAccountRegistry.Snapshot(
+                accounts: [identity(archivedUUID, organization: "Radon Forge")],
+                activeUUID: signedInUUID),
+            links: [archivedUUID: ClaudeWebLink(identity: linked, organization: "org-2")])
+
+        XCTAssertEqual(accounts.first { $0.id == archivedUUID }?.account?.seat, "team_tier_1")
+    }
+
+    /// A row's name and its address come off one account: the reading's, which
+    /// is already attributed and already the fresher of the two.
+    func testARowIsNamedFromItsOwnReading() {
+        let now = Date()
+        var reading = ProviderSignals()
+        reading.account = ProviderAccount(
+            email: "davide@radonforge.com", organization: "Radon Forge", seat: "team_tier_1")
+
+        let rows = entries(
+            readings: ClaudeCodeSignals.perAccount(
+                reading,
+                sources: [],
+                known: ClaudeAccountRegistry.Snapshot(
+                    accounts: [], activeUUID: signedInUUID)),
+            known: [
+                identity(signedInUUID, organization: "Master Soft Srl"),
+                identity(archivedUUID, organization: "Radon Forge"),
+            ],
+            now: now)
+
+        let signedIn = rows.first { $0.id == signedInUUID }
+        XCTAssertEqual(signedIn?.label, "davide@radonforge.com")
+        XCTAssertEqual(signedIn?.email, "davide@radonforge.com")
+        XCTAssertEqual(signedIn?.organization, "Radon Forge")
+    }
+
+    /// An account with no reading has only the archive to be named from, which
+    /// is what keeps a switchable account off no list.
+    func testAnAccountWithNoReadingIsNamedFromTheArchive() {
+        let now = Date()
+        let rows = entries(
+            readings: [],
+            known: [
+                identity(signedInUUID, organization: "Master Soft Srl"),
+                identity(archivedUUID, organization: "Radon Forge"),
+            ],
+            now: now)
+
+        XCTAssertEqual(
+            rows.first { $0.id == archivedUUID }?.email,
+            identity(archivedUUID, organization: "Radon Forge").email)
+        XCTAssertEqual(rows.first { $0.id == archivedUUID }?.organization, "Radon Forge")
+    }
+
     /// One account is no list: the picker is a control over a choice, and a
     /// single-account install must render exactly as it did before there were
     /// accounts at all.

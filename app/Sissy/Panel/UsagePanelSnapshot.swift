@@ -683,14 +683,18 @@ struct UsagePanelSnapshot: Equatable {
     /// that account's reading, and a picker over one choice is a control that
     /// does nothing.
     ///
-    /// The identity leads on every field it can answer for, which is what
-    /// keeps a row's name and its address from coming off two different
-    /// accounts: `label` read it first and `email` did not, so one row named
-    /// one account and printed the address of another. The seat is the
-    /// exception and stays reading-first, because the reading is the only one
-    /// of the two that can carry the CLI's own — an account whose config file
-    /// does match names its seat there, and identity-first would replace a
-    /// current answer with an archived one.
+    /// A row's name, address, organisation and seat come off **one** account,
+    /// resolved once: the reading's, and the archived identity only where
+    /// there is no reading at all. They used to be ordered field by field,
+    /// which is how one row came to print the name of one account and the
+    /// address of another.
+    ///
+    /// Reading-first is safe now and was not before: `ClaudeCodeSignals`
+    /// attributes the config file to the account it names and resolves a
+    /// non-active account from its link ahead of the archive, so whatever
+    /// reaches a row is already that row's account and already the freshest
+    /// of the answers. The archive is the fallback because it is the only one
+    /// that can name an account Sissy holds a credential for and no session.
     static func accountEntries(
         readings: [AccountSignals],
         known: ClaudeAccountRegistry.Snapshot,
@@ -705,17 +709,17 @@ struct UsagePanelSnapshot: Equatable {
         let entries = ids.map { id -> AccountEntry in
             let reading = byID[id]
             let identity = known.accounts.first { $0.uuid == id }
+            let account = reading?.account ?? identity?.providerAccount
             let plan = UsageFormat.plan(
                 reading?.plan ?? identity?.plan,
                 tier: reading?.planTier ?? identity?.planTier,
-                seat: reading?.account?.seat ?? identity?.seat)
+                seat: account?.seat)
             let observedAt = reading?.limitsObservedAt
             return AccountEntry(
                 id: id,
-                label: identity.map(UsageFormat.accountLabel)
-                    ?? reading?.account?.email ?? id,
-                email: identity?.email ?? reading?.account?.email,
-                organization: identity?.organization ?? reading?.account?.organization,
+                label: UsageFormat.accountLabel(account) ?? id,
+                email: account?.email,
+                organization: account?.organization,
                 plan: plan?.label,
                 planTier: plan?.tier,
                 windows: (reading?.windows ?? []).map {
