@@ -2,17 +2,24 @@
 
 Everything Sissy itself is made of is covered by [LICENSE](LICENSE).
 
-No third-party code ships in Sissy. These are the projects it reads from,
-and they are owed a credit whether or not a licence asks for one.
+No third-party code ships in Sissy. These are the projects it reads from —
+and one it takes two pictures from — all owed a credit whether or not a licence
+asks for one.
 
 - [`ccusage`](https://github.com/ccusage/ccusage): the cost oracle Sissy
   measures itself against, and where its reading of the Claude Code and Codex
   JSONL schemas comes from.
 - [LiteLLM](https://github.com/BerriAI/litellm): the model price table Sissy
   fetches at runtime, which is what `ccusage` prices from too.
+- [Simple Icons](https://github.com/simple-icons/simple-icons): where the
+  GitHub and GitLab marks on the panel's repository card come from, released
+  under CC0.
 
 ## Trademarks
 
-Sissy draws the Claude and OpenAI marks to identify which CLI a row is about.
-They are the trademarks of Anthropic and OpenAI respectively, used nominatively;
-neither company is affiliated with Sissy, and neither endorses it.
+Sissy draws the Claude and OpenAI marks to identify which CLI a row is about,
+and the GitHub and GitLab marks to identify where a repository is pushed. They
+are the trademarks of Anthropic, OpenAI, GitHub and GitLab respectively, used
+nominatively; none of those companies is affiliated with Sissy, and none
+endorses it. The files the marks are drawn from are Simple Icons' (CC0); the
+trademarks are not, and CC0 does not travel to them.

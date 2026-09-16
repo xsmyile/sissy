@@ -381,21 +381,74 @@ struct ProjectCardView: View {
     private var forge: some View {
         if let page = repository.page {
             Link(destination: page) {
-                HStack(spacing: 4) {
-                    Text(repository.host)
-                    Image(systemName: "arrow.up.forward")
-                }
-                .font(.system(size: 10))
+                forgeLine
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .help("Open \(repository.label) on \(repository.host)")
         } else {
-            Text(repository.host)
-                .font(.system(size: 10))
+            forgeLine
                 .foregroundStyle(.secondary)
         }
     }
 
+    private var forgeLine: some View {
+        HStack(spacing: 4) {
+            ForgeMark(host: repository.host)
+            Text(repository.host)
+            if repository.page != nil {
+                Image(systemName: "arrow.up.forward")
+            }
+        }
+        .font(.system(size: 10))
+    }
+
     private static let width: CGFloat = 240
+}
+
+/// The forge's own mark, where Sissy ships one.
+///
+/// Matched on the host *containing* the name rather than on an exact domain,
+/// because a self-hosted GitLab is the ordinary case at work and
+/// `gitlab.sermix.com` is as much GitLab as `gitlab.com` is. A forge that says
+/// neither — a GitHub Enterprise on a company domain, a Gitea — gets the
+/// generic branch glyph rather than a guess between the two, which is the same
+/// answer `ProviderMark` gives a provider it ships no asset for.
+///
+/// Template assets, so the mark takes the colour of the line it sits on and
+/// one file serves light and dark.
+struct ForgeMark: View {
+    let host: String
+
+    private static let size: CGFloat = 11
+
+    var body: some View {
+        mark
+            .resizable()
+            .scaledToFit()
+            .frame(width: Self.size, height: Self.size)
+    }
+
+    private var mark: Image {
+        guard let asset = Self.assetName(forHost: host) else {
+            return Image(systemName: Self.genericSymbol)
+        }
+        return Image(asset)
+    }
+
+    /// Which mark a host gets, or nil for the generic glyph.
+    ///
+    /// GitHub is looked for first, so a host naming both — a mirror called
+    /// `github.gitlab.example.com` — answers the one it leads with rather than
+    /// whichever the compiler reached first.
+    static func assetName(forHost host: String) -> String? {
+        let host = host.lowercased()
+        if host.contains(Self.gitHubName) { return "ForgeMarkGitHub" }
+        if host.contains(Self.gitLabName) { return "ForgeMarkGitLab" }
+        return nil
+    }
+
+    private static let gitHubName = "github"
+    private static let gitLabName = "gitlab"
+    private static let genericSymbol = "arrow.triangle.branch"
 }
