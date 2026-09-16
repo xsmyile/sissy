@@ -197,6 +197,7 @@ final class UsageEngineHost {
         refreshTasks.values.forEach { $0.cancel() }
         refreshTasks.removeAll()
         refreshing.removeAll()
+        switchingClaudeAccount = nil
         guard let engine else { return }
         self.engine = nil
         await engine.stop()
@@ -220,21 +221,40 @@ final class UsageEngineHost {
     /// no second copy of something the keychain decides.
     private(set) var claudeAccounts = ClaudeAccountRegistry.Snapshot()
 
+    /// Which account a switch is running for, or nil when none is.
+    ///
+    /// Published because the work is a keychain write and a network round trip
+    /// behind it: without a word on screen the panel sits unchanged for
+    /// seconds and the click reads as a control that did nothing. It carries
+    /// the uuid rather than a flag so the page can name the account it is
+    /// moving to rather than saying "working".
+    private(set) var switchingClaudeAccount: String?
+
     /// Makes an archived account the one Claude Code starts as.
     ///
     /// Sissy holds its own copy of every account it has seen signed in, so
     /// this overwrites the CLI's slots without putting any credential beyond
     /// recovery — which is the whole difference from the version that lost
     /// one.
+    ///
+    /// Non-re-entrant, on the same grounds as the refresh button: a second
+    /// click while the first write is in flight would race two credentials
+    /// into one slot.
     func activateClaudeAccount(uuid: String) {
-        guard let engine else { return }
+        guard let engine, switchingClaudeAccount == nil else { return }
         accountSwitchFailure = nil
+        switchingClaudeAccount = uuid
         Task { [weak self] in
+            let startedAt = ContinuousClock.now
             let outcome = await engine.activateClaudeAccount(uuid: uuid)
             if case .failure(let why) = outcome {
                 self?.accountSwitchFailure = ClaudeAccountSwitchCopy.failure(why)
             }
             self?.claudeAccounts = engine.claudeAccountSnapshot
+            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
+                try? await Task.sleep(for: rest)
+            }
+            self?.switchingClaudeAccount = nil
         }
     }
 

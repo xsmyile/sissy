@@ -544,4 +544,26 @@ final class UsageFormatTests: XCTestCase {
                 "\(state.mode)/\(state.active) promises a Mac that stays up without naming the lid")
         }
     }
+
+    /// The switch reaches Claude Code's own credential, so the confirmation
+    /// has to name the account rather than ask an abstract question.
+    func testTheSwitchConfirmationNamesTheAccount() {
+        XCTAssertEqual(
+            ClaudeAccountSwitchCopy.confirmTitle("Radon Forge"),
+            "Switch Claude Code to Radon Forge?")
+        XCTAssertEqual(
+            ClaudeAccountSwitchCopy.switching("Radon Forge"), "Switching to Radon Forge…")
+    }
+
+    /// Measured 2026-09-16: a `claude` that is already running rewrites the
+    /// credential on its next token refresh and puts its own account back, so
+    /// a switch made under an open session silently reverts within minutes.
+    /// Sissy cannot prevent it — the slot belongs to the CLI — so the warning
+    /// is the whole mitigation and it must not quietly go missing.
+    func testTheSwitchConfirmationWarnsAboutAnOpenSession() {
+        let body = ClaudeAccountSwitchCopy.confirmBody
+
+        XCTAssertTrue(body.contains("already open"))
+        XCTAssertTrue(body.contains("quit it first"))
+    }
 }

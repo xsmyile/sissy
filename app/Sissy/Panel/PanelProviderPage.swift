@@ -10,13 +10,18 @@ import SwiftUI
 /// at costs nothing.
 struct PanelProviderPage: View {
     let row: UsagePanelSnapshot.ProviderRow
-    /// Switches the vendor to another of its accounts. Never called for a
-    /// vendor with one account, whose row carries no choices.
+    /// Switches the vendor to another of its accounts, after the user has
+    /// confirmed it. Never called for a vendor with one account, whose row
+    /// carries no choices, and never straight from the menu: picking proposes
+    /// and the confirmation commits.
     let onSelectAccount: (String) -> Void
     /// Why the last switch did not happen, when one did not. Shown under the
     /// identity, because a switch that quietly failed leaves the user typing
     /// `claude` and meeting the account they thought they had left.
     let switchFailure: String?
+    /// The account a switch is running for, or nil when none is. Named rather
+    /// than a flag so the page can say which account it is moving to.
+    let switchingAccount: String?
     let refresh: () -> Void
     /// This provider's archived days, read once when the page opens. A closure
     /// rather than a value because the read walks the archive and the page is
@@ -35,6 +40,11 @@ struct PanelProviderPage: View {
     /// the frame and a stored strip would freeze it at the moment the page was
     /// opened while the `Today` row below it kept moving.
     @State private var series: [UsageHistoryDaySummary] = []
+    /// The account picked but not yet confirmed. Picking is not switching:
+    /// the write reaches Claude Code's own credential, and the one thing a
+    /// user cannot work out for themselves — that an open session undoes it —
+    /// has to be said before it happens rather than discovered afterwards.
+    @State private var pendingAccount: UsagePanelSnapshot.AccountChoice?
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
 
@@ -106,7 +116,15 @@ struct PanelProviderPage: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, PanelMetrics.gutter)
             .padding(.vertical, 10)
-            if let switchFailure {
+            if let pendingAccount, switchingAccount == nil {
+                switchConfirmation(pendingAccount)
+            }
+            if let switchingAccount,
+                let choice = row.accounts.first(where: { $0.id == switchingAccount })
+            {
+                switchProgress(choice)
+            }
+            if let switchFailure, pendingAccount == nil, switchingAccount == nil {
                 Text(switchFailure)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -114,6 +132,52 @@ struct PanelProviderPage: View {
                     .padding(.bottom, 10)
             }
         }
+    }
+
+    /// The question, the warning and the two answers, inside the panel.
+    ///
+    /// Not an `NSAlert`: Sissy has no windows, and a switch offered from a
+    /// popover should not summon one to ask about itself.
+    @ViewBuilder
+    private func switchConfirmation(_ choice: UsagePanelSnapshot.AccountChoice)
+        -> some View
+    {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(ClaudeAccountSwitchCopy.confirmTitle(choice.label))
+                .font(.system(size: 12, weight: .medium))
+            Text(ClaudeAccountSwitchCopy.confirmBody)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Text(ClaudeAccountSwitchCopy.confirmReassurance)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(ClaudeAccountSwitchCopy.confirmCancel) { pendingAccount = nil }
+                Button(ClaudeAccountSwitchCopy.confirmAction) {
+                    pendingAccount = nil
+                    onSelectAccount(choice.id)
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private func switchProgress(_ choice: UsagePanelSnapshot.AccountChoice) -> some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+            Text(ClaudeAccountSwitchCopy.switching(choice.label))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.bottom, 10)
     }
 
     /// Switches which of this vendor's accounts is signed in.
@@ -159,7 +223,9 @@ struct PanelProviderPage: View {
     private var accountBinding: Binding<String> {
         Binding(
             get: { row.accounts.first(where: \.isSelected)?.id ?? "" },
-            set: { onSelectAccount($0) }
+            set: { picked in
+                pendingAccount = row.accounts.first { $0.id == picked }
+            }
         )
     }
 
@@ -167,8 +233,7 @@ struct PanelProviderPage: View {
     /// credential the CLI starts with, and a tooltip that described it as a
     /// view would be selling a credential change as a filter.
     static let accountPickerHelp =
-        "Sign Claude Code in as this account. The next `claude` you run starts as it, "
-        + "and Sissy keeps the one you are leaving so you can switch back."
+        "Choose which account Claude Code signs in as. Sissy asks before it changes anything."
 
     /// The organisation and the plan on one line, either of which can be the
     /// only one there: a personal account names no organisation, and an
