@@ -343,7 +343,7 @@ extension LocalUsageProvider {
         claudeDir: URL = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".claude/projects"),
         id: String = ProviderID.claudeCode,
-        retainDays: Int = 2,
+        retainDays: Int = LocalUsageProvider.defaultRetainDays,
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
         historyRoot: URL? = nil,
@@ -351,7 +351,8 @@ extension LocalUsageProvider {
         limitsProbe: ClaudeLimitsProbe? = nil,
         webSource: ClaudeWebSource? = nil,
         profile: ClaudeProfileSource = ClaudeProfileSource(),
-        ledger: ProjectLedger = ProjectLedger()
+        ledger: ProjectLedger = ProjectLedger(),
+        backfill: Range<Date>? = nil
     ) -> LocalUsageProvider {
         LocalUsageProvider(
             adapter: ClaudeCodeAdapter(
@@ -366,7 +367,8 @@ extension LocalUsageProvider {
             retainDays: retainDays,
             pollInterval: pollInterval,
             persistenceURL: persistenceURL,
-            historyRoot: historyRoot
+            historyRoot: historyRoot,
+            backfill: backfill
         )
     }
 }

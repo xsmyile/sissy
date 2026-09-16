@@ -592,12 +592,13 @@ extension LocalUsageProvider {
     static func codex(
         codexDir: URL = CodexAdapter.defaultDir(),
         id: String = ProviderID.codex,
-        retainDays: Int = 2,
+        retainDays: Int = LocalUsageProvider.defaultRetainDays,
         pollInterval: Duration = .seconds(60),
         persistenceURL: URL? = nil,
         historyRoot: URL? = nil,
         pricingOverride: [String: ModelPricing]? = nil,
-        ledger: ProjectLedger = ProjectLedger()
+        ledger: ProjectLedger = ProjectLedger(),
+        backfill: Range<Date>? = nil
     ) -> LocalUsageProvider {
         LocalUsageProvider(
             adapter: CodexAdapter(
@@ -605,7 +606,8 @@ extension LocalUsageProvider {
             retainDays: retainDays,
             pollInterval: pollInterval,
             persistenceURL: persistenceURL,
-            historyRoot: historyRoot
+            historyRoot: historyRoot,
+            backfill: backfill
         )
     }
 }

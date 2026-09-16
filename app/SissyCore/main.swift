@@ -190,6 +190,60 @@ if args.contains("--scan") {
     exit(0)
 }
 
+if args.contains("--backfill") {
+    // Runs the archive backfill against the config's own state dir and prints
+    // what the archive holds afterwards, a row per day per provider per model.
+    // That is the shape `ccusage <provider> --json` answers in, so the
+    // agreement the issue asks for — a backfilled day landing on the oracle to
+    // the token and the microdollar — is assertable in CI. `--scan` cannot:
+    // it runs the tail's own 48 h window and reports today alone.
+    let sem = DispatchSemaphore(value: 0)
+    Task.detached {
+        defer { sem.signal() }
+        let stateDir = configURL.deletingLastPathComponent()
+        guard
+            let window = ArchiveBackfill.window(
+                retentionDays: config.resolvedHistoryRetentionDays)
+        else {
+            sissyLog("sissy: --backfill has no window to cover — check historyRetentionDays")
+            return
+        }
+        let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
+        if config.remotePricingEnabled, let cached = PriceCatalogSource.loadCache() {
+            sissyLog(
+                "sissy: --backfill pricing from cached catalog "
+                    + "(fetched \(ISO8601DateFormatter().string(from: cached.fetchedAt)))")
+        }
+        let catalog = config.remotePricingEnabled ? PriceCatalogSource.loadCache() : nil
+        for vendor in [ProviderID.claudeCode, ProviderID.codex] {
+            let home = config.providerHome(vendor: vendor)
+            let provider: LocalUsageProvider =
+                vendor == ProviderID.codex
+                ? LocalUsageProvider.codex(
+                    codexDir: home.dataDir, id: home.id, historyRoot: stateDir,
+                    pricingOverride: config.pricingOverride, ledger: projectLedger,
+                    backfill: window)
+                : LocalUsageProvider.claudeCode(
+                    claudeDir: home.dataDir, id: home.id, historyRoot: stateDir,
+                    pricingOverride: config.pricingOverride,
+                    profile: ClaudeProfileSource(url: home.claudeProfileURL),
+                    ledger: projectLedger, backfill: window)
+            if let catalog { await provider.applyPriceCatalog(catalog) }
+            _ = await provider.backfillArchive()
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(UsageHistoryStore.allDays(in: stateDir)),
+            let text = String(data: data, encoding: .utf8)
+        {
+            print(text)
+        }
+    }
+    sem.wait()
+    exit(0)
+}
+
 // No flag, nothing to do. This binary used to be a LaunchAgent; the app runs
 // the engine in-process now and it exists for CI — the self-test, the ccusage
 // oracle's scan, the pricing seed and the catalog refresh. Saying so beats
@@ -199,6 +253,7 @@ sissyLog(
     sissy-cli: no mode given. This binary is a CI tool, not a service.
       --self-test         pure formatter, pricing and parser assertions
       --scan              today's totals as JSON, optionally --scan-provider <id>
+      --backfill          index what the CLIs already logged, then dump the archive
       --dump-seed         regenerate PricingSeed.swift from a live LiteLLM fetch
       --refresh-catalog   put a live LiteLLM catalog in the cache
       --config <path>     read an isolated server.json instead of the real one
