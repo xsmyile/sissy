@@ -84,8 +84,8 @@ struct PanelProviderPage: View {
     // MARK: Identity
 
     /// Who this is, under the name the header already prints: the address the
-    /// CLI is signed in as, the organisation and renewal where the vendor
-    /// says, and the plan that account is on. Every field comes off a file the
+    /// CLI is signed in as, the organisation where the vendor names one, and
+    /// the plan that account is on. Every field comes off a file the
     /// adapter was already reading, so the block costs no new source and no
     /// permission.
     ///
@@ -169,10 +169,10 @@ struct PanelProviderPage: View {
     /// API-key user is on no plan.
     @ViewBuilder
     private var organisation: some View {
-        if row.account?.details != nil || row.plan != nil {
+        if row.account?.organization != nil || row.plan != nil {
             HStack(spacing: 6) {
-                if let details = row.account?.details {
-                    Text(details)
+                if let organization = row.account?.organization {
+                    Text(organization)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

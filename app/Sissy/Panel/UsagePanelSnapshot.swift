@@ -297,16 +297,15 @@ struct UsagePanelSnapshot: Equatable {
     }
 
     /// An account as the provider page prints it: the address on its own
-    /// line, everything else worded and joined under it.
+    /// line, the organisation under it.
     ///
     /// The seat is deliberately absent — `UsageFormat.plan` has already
     /// folded it into the badge for the one vendor that publishes one, and a
     /// line repeating what the badge above it says is a line nobody reads.
     struct AccountRow: Equatable {
         let email: String?
-        /// Organisation and renewal, joined. Nil when the vendor answered for
-        /// neither.
-        let details: String?
+        /// Organisation the seat belongs to. Nil when the vendor named none.
+        let organization: String?
     }
 
     /// A limits problem worded, with whether a refresh can do anything about
@@ -477,7 +476,7 @@ struct UsagePanelSnapshot: Equatable {
                     },
                 notice: UsageFormat.limitsNotice(slice.limitsState)
                     .map { LimitsNotice(message: $0.message, action: $0.action) },
-                account: makeAccount(slice.account, now: now),
+                account: makeAccount(slice.account),
                 projects: makeProjects(
                     slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
                 credits: makeCredits(slice.credits, now: now),
@@ -549,12 +548,9 @@ struct UsagePanelSnapshot: Equatable {
     /// The account as a page prints it, or nil when the vendor answered for
     /// nothing a page would show. An account carrying only a seat is that
     /// case: the badge above already says it.
-    private static func makeAccount(_ account: ProviderAccount?, now: Date) -> AccountRow? {
-        guard let account else { return nil }
-        let details = UsageFormat.accountDetails(
-            organization: account.organization, renewsAt: account.renewsAt, now: now)
-        guard account.email != nil || details != nil else { return nil }
-        return AccountRow(email: account.email, details: details)
+    private static func makeAccount(_ account: ProviderAccount?) -> AccountRow? {
+        guard let account, account.email != nil || account.organization != nil else { return nil }
+        return AccountRow(email: account.email, organization: account.organization)
     }
 
     /// Rows a popover can hold. Past this the answer is a report, and a

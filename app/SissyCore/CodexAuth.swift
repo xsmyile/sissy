@@ -20,7 +20,6 @@ enum CodexAuthSource {
     /// a JWT claim key that happens to be spelled as one.
     private static let claimNamespace = "https://api.openai.com/auth"
     private static let planClaimKey = "chatgpt_plan_type"
-    private static let renewalClaimKey = "chatgpt_subscription_active_until"
     private static let organizationsClaimKey = "organizations"
     private static let organizationTitleKey = "title"
     private static let organizationDefaultKey = "is_default"
@@ -91,9 +90,7 @@ enum CodexAuthSource {
             plan: UsageReaderShared.sanitizedPlanToken(auth[planClaimKey] as? String),
             account: ProviderAccount(
                 email: UsageReaderShared.sanitizedDisplayText(claims[emailClaimKey] as? String),
-                organization: organization(in: auth),
-                renewsAt: (auth[renewalClaimKey] as? String)
-                    .flatMap(UsageReaderShared.parseTimestamp)
+                organization: organization(in: auth)
             ),
             fingerprint: fingerprint(claims: claims, auth: auth)
         )

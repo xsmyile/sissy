@@ -224,41 +224,6 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertNil(UsageFormat.limitsNotice(.quiet))
     }
 
-    // MARK: Account line
-
-    /// The order and the separator are ours; the date's own rendering is
-    /// Foundation's and depends on the reader's locale, so the assertion
-    /// stops where our decision does.
-    func testTheAccountLineJoinsTheOrganisationAndTheRenewal() throws {
-        let line = try XCTUnwrap(
-            UsageFormat.accountDetails(
-                organization: "Radonforge",
-                renewsAt: Date(timeIntervalSince1970: 1_792_000_000),
-                now: Date(timeIntervalSince1970: 1_789_000_000)))
-
-        XCTAssertTrue(line.hasPrefix("Radonforge · renews "), line)
-        XCTAssertGreaterThan(line.count, "Radonforge · renews ".count)
-    }
-
-    func testTheOrganisationStandsAloneWhenNoRenewalIsKnown() {
-        XCTAssertEqual(
-            UsageFormat.accountDetails(organization: "Radonforge", renewsAt: nil), "Radonforge")
-    }
-
-    /// The claim is read off a file the CLI refreshes on its own schedule, so
-    /// a date already past is the ordinary case rather than a fact — and
-    /// "renews 3 Aug" printed in September answers nothing.
-    func testARenewalAlreadyPastIsDropped() {
-        XCTAssertNil(
-            UsageFormat.accountDetails(
-                organization: nil, renewsAt: Date(timeIntervalSince1970: 1_700_000_000),
-                now: Date(timeIntervalSince1970: 1_789_000_000)))
-    }
-
-    func testAVendorThatAnswersForNeitherHalfCarriesNoLine() {
-        XCTAssertNil(UsageFormat.accountDetails(organization: nil, renewsAt: nil))
-    }
-
     // MARK: An empty limits block
 
     /// Nothing to switch on any more, so an empty block is a reading that has

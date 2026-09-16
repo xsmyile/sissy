@@ -30,7 +30,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
         windows: [UsageWindow] = [],
         plan: String? = nil,
         planTier: String? = nil,
-        credits: ProviderCredits? = nil
+        credits: ProviderCredits? = nil,
+        account: ProviderAccount? = nil
     ) -> ProviderSlice {
         ProviderSlice(
             id: id,
@@ -39,7 +40,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
             windows: windows,
             plan: plan,
             planTier: planTier,
-            credits: credits
+            credits: credits,
+            account: account
         )
     }
 
@@ -185,6 +187,30 @@ final class UsagePanelSnapshotTests: XCTestCase {
             now: now
         )
         return try XCTUnwrap(snapshot.providers.first?.windows.first)
+    }
+
+    // MARK: Account
+
+    func testTheAccountRowCarriesTheOrganisationUnderTheAddress() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice(
+                    "claude-code", 1000, "1.00",
+                    account: ProviderAccount(email: "someone@example.com", organization: "Radonforge"))
+            ])
+        )
+        XCTAssertEqual(snapshot.providers.first?.account?.organization, "Radonforge")
+    }
+
+    /// The badge above the line already says the seat, so an account that
+    /// answered for nothing else is a line with nothing on it.
+    func testAnAccountCarryingOnlyASeatDrawsNoRow() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                slice("claude-code", 1000, "1.00", account: ProviderAccount(seat: "team_tier_1"))
+            ])
+        )
+        XCTAssertNil(snapshot.providers.first?.account)
     }
 
     // MARK: Plan
