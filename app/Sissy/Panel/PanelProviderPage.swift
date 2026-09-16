@@ -138,6 +138,10 @@ struct PanelProviderPage: View {
     ///
     /// Not an `NSAlert`: Sissy has no windows, and a switch offered from a
     /// popover should not summon one to ask about itself.
+    ///
+    /// Escape cancels and nothing is the default action: the commit writes
+    /// another program's credential, so it is reached by aiming at it and
+    /// never by a return key pressed at a panel.
     @ViewBuilder
     private func switchConfirmation(_ choice: UsagePanelSnapshot.AccountChoice)
         -> some View
@@ -155,11 +159,11 @@ struct PanelProviderPage: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button(ClaudeAccountSwitchCopy.confirmCancel) { pendingAccount = nil }
+                    .keyboardShortcut(.cancelAction)
                 Button(ClaudeAccountSwitchCopy.confirmAction) {
                     pendingAccount = nil
                     onSelectAccount(choice.id)
                 }
-                .keyboardShortcut(.defaultAction)
             }
             .controlSize(.small)
         }
