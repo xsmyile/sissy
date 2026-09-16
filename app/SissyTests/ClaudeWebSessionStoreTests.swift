@@ -151,8 +151,126 @@ final class ClaudeWebSessionStoreTests: XCTestCase {
 
 /// The session is a whole claude.ai login. Nothing that leaves the machine may
 /// carry it, and a test rather than a convention is what holds that.
+///
+/// Asserted with more than one stored, because every surface here changed from
+/// holding one session to holding a set and a leak of the second would read as
+/// the first still being safe.
+///
+/// The export is the one surface not asserted, and deliberately:
+/// `UsageHistoryExport` takes `[UsageHistoryDay]`, which names days, models and
+/// project paths and has no account on it at all — a test there would assert
+/// that a type with no path to the secret does not carry it.
 final class ClaudeWebSessionSecrecyTests: XCTestCase {
     private static let session = "sk-ant-sid01-" + String(repeating: "s", count: 100)
+    private static let second = "sk-ant-sid01-" + String(repeating: "t", count: 100)
+
+    private func identity(_ uuid: String) -> ClaudeAccountIdentity {
+        ClaudeAccountIdentity(
+            uuid: uuid, email: "someone@example.com", organization: "Example Ltd",
+            organizationType: "claude_team", rateLimitTier: nil, seat: "team_tier_1")
+    }
+
+    /// Every string anywhere inside a value, however deeply nested. A leak is
+    /// a field somebody added, so the sweep is over the whole shape rather
+    /// than over the fields this test thought to name.
+    private func strings(in value: Any) -> [String] {
+        var found: [String] = []
+        if let text = value as? String { found.append(text) }
+        for child in Mirror(reflecting: value).children {
+            found.append(contentsOf: strings(in: child.value))
+        }
+        return found
+    }
+
+    private func assertNoSession(
+        in value: Any, _ message: String, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let leaked = strings(in: value).filter {
+            $0.contains(ClaudeWebSessionStore.sessionPrefix)
+        }
+        XCTAssertTrue(
+            leaked.isEmpty, "\(message): \(leaked.count) string(s) carried a session",
+            file: file, line: line)
+    }
+
+    /// The readings the frame is built from, taken off sources that are
+    /// holding the sessions and have just spent them on a request.
+    func testNoReadingCarriesTheSessionItWasReadWith() async {
+        let sources = [
+            source(account: "u-1", session: Self.session),
+            source(account: "u-2", session: Self.second),
+        ]
+        for source in sources { await source.refresh {} }
+
+        let accounts = ClaudeCodeSignals.perAccount(
+            ProviderSignals(),
+            sources: sources,
+            known: ClaudeAccountRegistry.Snapshot(accounts: [], activeUUID: nil),
+            links: [
+                "u-1": ClaudeWebLink(identity: identity("u-1"), organization: "org-1"),
+                "u-2": ClaudeWebLink(identity: identity("u-2"), organization: "org-2"),
+            ])
+
+        XCTAssertEqual(accounts.count, 2)
+        // The sweep has to be able to fail: a walk that reached nothing would
+        // report no leak for ever. This string is nested two optionals deep.
+        XCTAssertTrue(strings(in: accounts).contains("someone@example.com"))
+        assertNoSession(in: accounts, "the per-account readings")
+        for source in sources { assertNoSession(in: source.currentSignals(), "a published reading") }
+    }
+
+    private func source(account: String, session: String) -> ClaudeWebSource {
+        ClaudeWebSource(
+            account: account,
+            organization: "org-\(account)",
+            sessionSource: { _ in .found(ClaudeCredentials(accessToken: session, expiresAt: nil)) },
+            fetchSource: { _, org in
+                ClaudeWebSource.Reading(
+                    organization: org ?? "org", windows: [], credits: nil)
+            })
+    }
+
+    /// The file that names what each session is for sits beside the sessions
+    /// and holds none of them: it is readable without the keychain, which is
+    /// the whole reason it exists.
+    func testTheLinkIndexHoldsNoSession() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("secrecy-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let index = ClaudeWebSessionIndex(url: ClaudeWebSessionIndex.defaultURL(in: directory))
+
+        try index.remember(ClaudeWebLink(identity: identity("u-1"), organization: "org-1"))
+        try index.remember(ClaudeWebLink(identity: identity("u-2"), organization: "org-2"))
+
+        let written = try String(
+            contentsOf: ClaudeWebSessionIndex.defaultURL(in: directory), encoding: .utf8)
+        XCTAssertFalse(written.contains(ClaudeWebSessionStore.sessionPrefix))
+        assertNoSession(in: index.load(), "the loaded links")
+    }
+
+    /// What the login window hands the app when one question is left. The
+    /// session stays in the engine until it is answered, so a view that could
+    /// be screenshotted never holds one.
+    func testTheQuestionHandedToTheAppHoldsNoSession() async throws {
+        let named = identity("u-1")
+        let outcome = try await ClaudeWebAccountLink.resolve(
+            session: Self.session,
+            identify: { _ in named },
+            organizations: { _ in
+                [
+                    ClaudeWebOrganization(id: "org-1", name: "Example Ltd", plan: "team"),
+                    ClaudeWebOrganization(id: "org-2", name: "Other Ltd", plan: "max"),
+                ]
+            })
+
+        guard case .choice(let identity, let organizations) = outcome else {
+            return XCTFail("expected an account with more than one organisation to ask")
+        }
+        let choice = ClaudeWebLinkChoice(identity: identity, organizations: organizations)
+        XCTAssertTrue(strings(in: choice).contains("Other Ltd"))
+        assertNoSession(in: choice, "the choice handed to the app")
+    }
 
     func testTheDiagnosticsReportNamesTheSourceAndNotTheSession() throws {
         let account = "test-\(UUID().uuidString)"
