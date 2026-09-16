@@ -754,9 +754,16 @@ enum UsageFormat {
     /// such accounts would otherwise render the same word and the menu would
     /// offer a choice nobody could make.
     static func accountLabel(_ identity: ClaudeAccountIdentity) -> String {
-        if let email = identity.email, !email.isEmpty { return email }
-        if let organization = identity.organization, !organization.isEmpty { return organization }
-        return identity.uuid
+        accountLabel(identity.providerAccount) ?? identity.uuid
+    }
+
+    /// The same rule for a reading's own account, which is what a row that has
+    /// one is named from. Nil where the vendor answered for neither, so the
+    /// caller falls back to the uuid rather than printing an empty row.
+    static func accountLabel(_ account: ProviderAccount?) -> String? {
+        if let email = account?.email, !email.isEmpty { return email }
+        if let organization = account?.organization, !organization.isEmpty { return organization }
+        return nil
     }
 
     private static func accountQualifier(_ id: String, account: ProviderAccount?) -> String? {
