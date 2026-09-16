@@ -39,21 +39,52 @@ struct ClaudeCodeSignals: SourceSignals {
         let signedIn = accounts.currentSnapshot()
         var reading = Self.merge(
             profile: profile.currentSignals(),
-            web: sources.first(where: { $0.account == signedIn.activeUUID })?.currentSignals()
-                ?? sources.first?.currentSignals(),
+            web: Self.webReading(for: signedIn.activeUUID, among: sources),
             probe: limitsProbe?.currentSignals())
         reading.accounts = Self.perAccount(
             reading, sources: sources, known: signedIn)
         return reading
     }
 
+    /// The session reading the row itself may show, which is the signed-in
+    /// account's or none.
+    ///
+    /// A session filed under another account is never it. Laying one over the
+    /// row puts that account's windows, credits and reading time under the
+    /// signed-in account's name and plan — two accounts on one row, which is
+    /// the failure `ProviderSignals` exists to prevent and the one #130
+    /// measured on the cached copy. An account the CLI is not on is a row of
+    /// its own or nothing.
+    ///
+    /// The exception is an active account Sissy has not identified: with
+    /// nobody named there is no identity for a reading to contradict, and a
+    /// single session is then the only answer on a Mac whose CLI keeps no
+    /// credential at all. More than one and there is a choice to get wrong, so
+    /// it answers with none.
+    static func webReading(
+        for activeUUID: String?, among sources: [ClaudeWebSource]
+    ) -> ProviderSignals? {
+        guard let activeUUID else {
+            return sources.count == 1 ? sources[0].currentSignals() : nil
+        }
+        return sources.first { $0.account == activeUUID }?.currentSignals()
+    }
+
     /// One entry per account Sissy can read, the signed-in one included.
     ///
-    /// Left empty while there is one, which is what keeps a single-account
-    /// install rendering exactly as it did: the surfaces fall back to the
-    /// reading above, which is that account's anyway. A list of one would put
-    /// a switcher and a qualified name in front of someone with nothing to
-    /// switch between.
+    /// Published whatever its count, a lone reading included. Whether a
+    /// picker is drawn at all is decided downstream and against a wider set:
+    /// the accounts the registry *knows*, which holds every account signed
+    /// into on this Mac whether or not a source answers for it. Withholding a
+    /// single reading here on the grounds that one account needs no picker
+    /// therefore withheld it exactly where a picker was drawn anyway —
+    /// measured 2026-09-16, two known accounts and one live source put "no
+    /// live source" under the account the CLI was signed into and reading
+    /// fine.
+    ///
+    /// A single-account install is unchanged, because the decision that keeps
+    /// it unchanged is the downstream one: one known account and one reading
+    /// are one id, and no picker is offered over one choice.
     static func perAccount(
         _ reading: ProviderSignals,
         sources: [ClaudeWebSource],
@@ -88,7 +119,6 @@ struct ClaudeCodeSignals: SourceSignals {
                 limitsObservedAt: signals.limitsObservedAt,
                 isSignedIn: false)
         }
-        guard byAccount.count > 1 else { return [] }
         return byAccount.values.sorted { lhs, rhs in
             (lhs.isSignedIn ? 0 : 1, lhs.id) < (rhs.isSignedIn ? 0 : 1, rhs.id)
         }
