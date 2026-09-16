@@ -199,7 +199,7 @@ struct WindowRowView: View {
 
                 Spacer(minLength: 8)
 
-                Text("\(window.percent)%")
+                Text(window.reading)
                     .font(.system(size: 11, weight: weight))
                     .monospacedDigit()
                     .foregroundStyle(emphasis)

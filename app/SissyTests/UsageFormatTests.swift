@@ -116,6 +116,29 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.countdown(48 * 60), "48m")
     }
 
+    func testTheUsedReadingPrintsTheVendorsOwnFigure() {
+        XCTAssertEqual(UsageFormat.windowPercent(86, as: .used), "86%")
+    }
+
+    func testTheLeftReadingSubtractsTheVendorsFigureFromTheWindow() {
+        XCTAssertEqual(UsageFormat.windowPercent(86, as: .left), "14%")
+    }
+
+    /// A vendor can report past its own ceiling. Read from the spent end that
+    /// overshoot is the honest figure; read from the other end it would be a
+    /// negative headroom, which is not a quantity anyone is owed.
+    func testAWindowPastItsCeilingKeepsTheOvershootAndFloorsTheHeadroom() {
+        XCTAssertEqual(UsageFormat.windowPercent(105, as: .used), "105%")
+        XCTAssertEqual(UsageFormat.windowPercent(105, as: .left), "0%")
+    }
+
+    /// The row prints the bare figure because the bar beside it names the
+    /// axis; the tooltip has room for the word and no bar.
+    func testTheTooltipReadingCarriesTheWordTheRowLeavesToTheBar() {
+        XCTAssertEqual(UsageFormat.windowReading(86, as: .used), "86% used")
+        XCTAssertEqual(UsageFormat.windowReading(86, as: .left), "14% left")
+    }
+
     func testPaceCaptionWordsAReserveThatLastsUntilTheReset() {
         XCTAssertEqual(
             UsageFormat.paceCaption(deltaPercent: -30, runsOutAt: nil),

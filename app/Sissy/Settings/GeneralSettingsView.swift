@@ -155,6 +155,7 @@ struct GeneralSettingsView: View {
             Section {
                 startAtLogin
                 animateSissy
+                limitsReading
                 agentHooks
                 // Only ever reached by a configuration Sissy could not
                 // rewrite. The launch path retries on its own; this is for
@@ -222,6 +223,39 @@ struct GeneralSettingsView: View {
                     + "Follows Reduce Motion."
             )
         }
+    }
+
+    /// Which end of a rate-limit window the panel's gauges print.
+    ///
+    /// A picker of two rather than a switch: both ends are readings and
+    /// neither is the feature being turned on, which is what a switch would
+    /// say. The caption names the one thing the choice does *not* move, since
+    /// the bar is what the eye reads first and it fills the same way either
+    /// way — the mark on it sits where even consumption would have got to, and
+    /// a fill measured from the other end would put the two on opposite sides.
+    private var limitsReading: some View {
+        LabeledContent {
+            Picker("Limits show", selection: limitsReadingBinding) {
+                ForEach(LimitsReading.allCases, id: \.self) { reading in
+                    Text(UsageFormat.limitsReadingTitle(reading)).tag(reading)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        } label: {
+            Text("Limits show")
+            Text(
+                "Whether a rate-limit gauge prints what has been spent or what is still "
+                    + "there. The bar fills with what has been spent either way."
+            )
+        }
+    }
+
+    private var limitsReadingBinding: Binding<LimitsReading> {
+        Binding(
+            get: { model.preferences.limitsReading },
+            set: { model.setLimitsReading($0) }
+        )
     }
 
     private var agentHooks: some View {
