@@ -41,13 +41,33 @@ struct ClaudeCodeSignals: SourceSignals {
     func currentSignals() -> ProviderSignals {
         let sources = webSources.load()
         let signedIn = accounts.currentSnapshot()
+        let file = profile.currentAttributed()
+        let active = Self.activeAccount(file, signedIn)
         var reading = Self.merge(
-            profile: Self.attributed(profile.currentAttributed(), to: signedIn),
-            web: Self.webReading(for: signedIn.activeUUID, among: sources),
+            profile: Self.attributed(file, to: signedIn),
+            web: Self.webReading(for: active, among: sources),
             probe: limitsProbe?.currentSignals())
         reading.accounts = Self.perAccount(
-            reading, sources: sources, known: signedIn, links: webLinks.load())
+            reading, sources: sources, known: signedIn, active: active, links: webLinks.load())
         return reading
+    }
+
+    /// Who the row is for: the registry's answer where it has one, and the
+    /// config file's own stamp where it has none.
+    ///
+    /// The registry has none whenever it has never identified a credential —
+    /// offline at launch, a keychain that would not answer, an engine built
+    /// without one. That used to mean nobody was named at all, and every
+    /// judgement below stood down: a lone session was laid over the row
+    /// whoever it belonged to, and a `cachedUsageUtilization` stamped with
+    /// another account was kept. `.claude.json` names its own owner, so
+    /// something is named even then, and it is the CLI's own answer for which
+    /// account it is signed in as.
+    static func activeAccount(
+        _ reading: ClaudeProfileSource.Attributed,
+        _ signedIn: ClaudeAccountRegistry.Snapshot
+    ) -> String? {
+        signedIn.activeUUID ?? reading.profileOwner
     }
 
     /// The config file's reading, kept only for the account it belongs to.
@@ -78,13 +98,14 @@ struct ClaudeCodeSignals: SourceSignals {
         to signedIn: ClaudeAccountRegistry.Snapshot
     ) -> ProviderSignals {
         var signals = reading.signals
-        if contradicts(reading.profileOwner, signedIn.activeUUID) {
-            let identity = signedIn.accounts.first { $0.uuid == signedIn.activeUUID }
+        let active = activeAccount(reading, signedIn)
+        if contradicts(reading.profileOwner, active) {
+            let identity = signedIn.accounts.first { $0.uuid == active }
             signals.account = identity?.providerAccount
             signals.plan = identity?.plan
             signals.planTier = identity?.planTier
         }
-        if contradicts(reading.creditsOwner, signedIn.activeUUID) {
+        if contradicts(reading.creditsOwner, active) {
             signals.credits = nil
         }
         return signals
@@ -105,11 +126,14 @@ struct ClaudeCodeSignals: SourceSignals {
     /// measured on the cached copy. An account the CLI is not on is a row of
     /// its own or nothing.
     ///
-    /// The exception is an active account Sissy has not identified: with
-    /// nobody named there is no identity for a reading to contradict, and a
-    /// single session is then the only answer on a Mac whose CLI keeps no
-    /// credential at all. More than one and there is a choice to get wrong, so
-    /// it answers with none.
+    /// The exception is an account nobody has named — neither the registry
+    /// nor the config file, which is a Mac whose CLI keeps no credential at
+    /// all. There a single session is the only answer there is, and no
+    /// identity exists for it to contradict. More than one and there is a
+    /// choice to get wrong, so it answers with none. The caller passes
+    /// `activeAccount`, never the registry's field alone: a file naming its
+    /// own owner is a name, and laying another account's session over it is
+    /// the pairing this whole type exists to prevent.
     static func webReading(
         for activeUUID: String?, among sources: [ClaudeWebSource]
     ) -> ProviderSignals? {
@@ -135,6 +159,11 @@ struct ClaudeCodeSignals: SourceSignals {
     /// it unchanged is the downstream one: one known account and one reading
     /// are one id, and no picker is offered over one choice.
     ///
+    /// `active` is who the caller resolved the signed-in account to be, which
+    /// is the registry's answer or the config file's own stamp. Defaulting to
+    /// the registry's field keeps a caller that has no file reading — every
+    /// test of this rule — saying what it always said.
+    ///
     /// The link names an account before the archive does, and this is the one
     /// branch where that is not arbitrary: it draws the accounts the CLI is
     /// *not* on, and an archived identity is frozen at the build that filed
@@ -148,10 +177,12 @@ struct ClaudeCodeSignals: SourceSignals {
         _ reading: ProviderSignals,
         sources: [ClaudeWebSource],
         known: ClaudeAccountRegistry.Snapshot,
+        active: String? = nil,
         links: [String: ClaudeWebLink] = [:]
     ) -> [AccountSignals] {
+        let signedInUUID = active ?? known.activeUUID
         var byAccount: [String: AccountSignals] = [:]
-        if let active = known.activeUUID {
+        if let active = signedInUUID {
             byAccount[active] = AccountSignals(
                 id: active,
                 account: reading.account,
@@ -163,7 +194,7 @@ struct ClaudeCodeSignals: SourceSignals {
                 limitsObservedAt: reading.limitsObservedAt,
                 isSignedIn: true)
         }
-        for source in sources where source.account != known.activeUUID {
+        for source in sources where source.account != signedInUUID {
             let identity =
                 links[source.account]?.identity
                 ?? known.accounts.first { $0.uuid == source.account }

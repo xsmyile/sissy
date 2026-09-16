@@ -120,6 +120,56 @@ final class ClaudeProfileAttributionTests: XCTestCase {
         XCTAssertEqual(signals.credits, credits)
     }
 
+    /// With the registry silent the file still names someone, and that name is
+    /// what the two halves are judged against.
+    ///
+    /// The registry is silent whenever it has never identified a credential —
+    /// offline at launch, a keychain that would not answer. Judging against
+    /// nothing kept a `cachedUsageUtilization` stamped with a different
+    /// account on the row, which is #130 again in the one state that used to
+    /// stand every check down.
+    func testTheFilesOwnStampStandsInForASilentRegistry() {
+        let signals = ClaudeCodeSignals.attributed(
+            fileReading(profileOwner: staleUUID, creditsOwner: activeUUID),
+            to: ClaudeAccountRegistry.Snapshot(accounts: [], activeUUID: nil))
+
+        XCTAssertEqual(signals.account?.email, "davide.tacchini@mastersoft.it")
+        XCTAssertNil(signals.credits)
+    }
+
+    /// And a session belonging to someone else is not laid over that name.
+    ///
+    /// One session used to answer for the row whenever the registry named
+    /// nobody, which put one account's windows, credits and reading time
+    /// under the name the config file carried.
+    func testASessionForAnotherAccountIsNotLaidOverTheFilesOwner() {
+        let file = fileReading(profileOwner: staleUUID, creditsOwner: staleUUID)
+        let active = ClaudeCodeSignals.activeAccount(
+            file, ClaudeAccountRegistry.Snapshot(accounts: [], activeUUID: nil))
+
+        XCTAssertEqual(active, staleUUID)
+        XCTAssertNil(ClaudeCodeSignals.webReading(for: active, among: [source(activeUUID)]))
+    }
+
+    /// The exception survives: where nothing at all names an account — a Mac
+    /// whose CLI keeps no credential — a lone session is the only answer there
+    /// is, and there is no identity for it to contradict.
+    func testALoneSessionStillAnswersWhenNothingNamesAnAccount() {
+        let file = fileReading(profileOwner: nil, creditsOwner: nil)
+        let active = ClaudeCodeSignals.activeAccount(
+            file, ClaudeAccountRegistry.Snapshot(accounts: [], activeUUID: nil))
+
+        XCTAssertNil(active)
+        XCTAssertNotNil(ClaudeCodeSignals.webReading(for: active, among: [source(activeUUID)]))
+    }
+
+    private func source(_ account: String) -> ClaudeWebSource {
+        ClaudeWebSource(
+            account: account,
+            sessionSource: { _ in .absent },
+            fetchSource: { _, _ in throw ClaudeLimitsError.malformedPayload })
+    }
+
     /// Both owners are the vendor's own stamps on its own blocks, read off
     /// the file rather than derived from anything beside it.
     func testBothOwnersAreReadFromTheFile() throws {

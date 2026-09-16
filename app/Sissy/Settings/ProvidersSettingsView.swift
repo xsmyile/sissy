@@ -103,6 +103,8 @@ enum ClaudeAccountLinkCopy {
             return "claude.ai would not say which account that session is for. Try again."
         case .noSubscription:
             return "That account is on no Claude plan Sissy can read limits for."
+        case .interrupted:
+            return "The sign-in was interrupted before Sissy could file it. Sign in again."
         }
     }
 }
