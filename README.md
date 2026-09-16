@@ -4,27 +4,38 @@
 
 # Sissy
 
-**Today's AI coding spend, in your macOS menu bar.**
+**What your AI coding agents are costing you, in the macOS menu bar.**
 
-Sissy tails the session logs your AI CLIs already write, sums the day across all of them, and keeps tokens, cost and rate-limit headroom one click away. No API key, no account, no telemetry.
+Sissy tails the session logs Claude Code and Codex already write, prices every
+turn as it lands, and keeps the day's cost, the rate-limit pressure and where
+the money went one click away. No API key, no account, no telemetry, and
+nothing to grant at first launch.
 
 [![Release](https://img.shields.io/github/v/release/xsmyile/sissy?style=flat-square&color=black)](../../releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/xsmyile/sissy/ci.yml?branch=master&style=flat-square&color=black&label=ci)](../../actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square)](#install)
 [![License](https://img.shields.io/github/license/xsmyile/sissy?style=flat-square&color=black)](./LICENSE)
 
-[Install](#install) • [What you see](#what-you-see) • [Supported CLIs](#supported-clis) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build from source](#build-from-source)
+[Install](#install) • [What you see](#what-you-see) • [Supported CLIs](#supported-clis) • [Privacy](#privacy) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build from source](#build-from-source)
+
+<!-- SHOT 1: hero. Menu bar with Sissy plus the panel open on the Overview, dark mode,
+     synthetic data. Replaces assets/usage-panel.png, which shows the pre-0.1.9 layout. -->
 
 </div>
 
 ## Why
 
-Subscription plans hide the meter. A flat monthly fee tells you nothing about what a day of agents actually cost, which CLI ate it, or how close you are to the rate limit that will stop your session mid-task. The numbers are already on disk. Sissy reads them and puts them where you'll see them.
+A subscription hides the meter. A flat monthly fee tells you nothing about what
+a day of agents actually cost, which CLI ate it, which repository it went on, or
+how close you are to the rate limit that will stop your session mid-task. All of
+it is already on disk, in files the CLIs write anyway. Sissy reads them and puts
+the answer where you will see it.
 
 ## Install
 
 macOS 26 or later, Apple Silicon or Intel.
 
-### Homebrew (recommended)
+### Homebrew
 
 ```bash
 brew install --cask xsmyile/sissy/sissy
@@ -34,96 +45,230 @@ brew install --cask xsmyile/sissy/sissy
 
 ### Manual
 
-Grab the latest `Sissy-x.y.z.dmg` from [Releases](../../releases/latest), open it, and drag **Sissy** into Applications.
+Take the latest `Sissy-x.y.z.dmg` from [Releases](../../releases/latest), open
+it, drag **Sissy** into Applications. The build is Developer ID signed and
+notarized, so there is no `xattr` workaround and no right-click → Open.
 
-Either way: launch Sissy and it starts tailing. It lives in the menu bar — no dock icon, no window — and asks for nothing on first run. Nothing it does reaches outside its own folder unless you switch it on: the one thing that can is **Name projects even when Sissy is off**, in Settings → General, which adds a line to `~/.claude/settings.json` and `~/.codex/hooks.json` so a session says which repository it is working in before the directory can be deleted. Switching it off takes both lines back out. The build is Developer ID signed and notarized, so there's no `xattr` workaround and no right-click → Open.
+Either way it starts tailing the moment it launches, and lives in the menu bar
+rather than the Dock. **The first launch asks for nothing**: no Full Disk
+Access, no keychain dialog, no prompt of any kind. That is a rule rather than a
+list of what Sissy happens to need today. Anything that costs a permission, or
+that writes outside Sissy's own folder, is off until you switch it on, asks at
+that moment rather than at launch, and says what it will do before you flip it.
+A module left off does not exist as far as the system is concerned.
 
 ## What you see
 
-The menu bar carries today's token total. Click it for the overview:
+Sissy sits in the menu bar as herself. She blinks when usage lands and shuts
+her eye when nothing is reaching the app, and that is the whole of the
+peripheral signal: no number up there, nothing to read at a glance you did not
+ask for. Click for the panel, right-click for the short menu.
 
-- what today has cost, with its tokens and burn rate beside it,
-- **headroom** — how much is left of the tightest rate-limit window across every CLI, with a mark for where even consumption would have put it by now,
-- the day split across the CLIs as one bar, and where the money went by project,
-- what the archive adds up to before today.
+<!-- SHOT 2: the Overview. Headline plus period control, two provider gauge rows, projects. -->
 
-Click a CLI in that split for its own page: the account it is signed in as, every rate-limit window it reports with the time each resets, its own day, and its own projects. The refresh there re-reads what no log line carries — on Claude Code that is the token itself, and macOS may ask for permission.
+### The Overview answers two questions
 
-The cup in the panel's header is **keep awake**: click it and the Mac stops idling to sleep under a running agent. It holds three modes — *never*, *while agents are working*, *always* — and a click switches between off and one of the two armed ones; hover the cup to see which. To pick, right-click the cup or open Settings; right-clicking the menu bar icon says whether the Mac is being held and for how long. *While agents are working* is the mode no generic caffeinate can offer: Sissy holds the Mac while turns are landing and lets go ten minutes after they stop, so nothing has to be switched back. *Always* stops after eight hours. Neither overrides closing the lid, and the hold lasts only while Sissy is running: quit and the Mac sleeps normally again.
+**What has this cost**, over a window you pick (`Today`, `7 days`, `30 days`,
+`All`), with the tokens and the burn rate under it. The period is a popup on the
+headline's own row, so the panel does not grow a section per timescale. Where
+the archive does not go back as far as the window you asked for, a grey line
+under the figure says how far it does go.
 
-Right-click for the short menu; **Settings…** (⌘,) holds *Start at login*, the keep-awake mode and the Claude Code limits opt-in.
+**Is there room to keep working.** One row per account, each carrying the
+rate-limit window it will run out of *first*. That is a question about pace
+rather than percentages: a session bucket at 40% that lasts until its reset
+matters less than a weekly at 35% that empties in two days. The bar fills with
+what has been spent, and the mark on it sits where even consumption would have
+reached by now, so you can see you are ahead of pace instead of working it out.
+Link a second Claude account and it gets its own row, because "am I about to be
+cut off" has one answer per account.
 
-<p align="center">
-  <img src="assets/usage-panel.png" alt="Sissy's usage panel" width="420" />
-</p>
+Under that, where the day went **by repository**, not by directory. A worktree
+counts against the repository it was cut from, so one project reads as one row
+instead of eleven small ones.
+
+<!-- SHOT 3: a provider page. Account and plan badge, Limits, Credits, Today, By project. -->
+
+### A provider page per account
+
+Click a row for everything about that one account: who it is signed in as and on
+which plan, every rate-limit window it publishes with the time each resets, the
+credit balance where the vendor reports one, its own day, and its own
+repositories. The vendor's own status page is down there too, so "is it me or
+them" costs no browser tab.
+
+<!-- SHOT 4: the repository card. A project row clicked open, showing forge and path. -->
+
+Click a repository for its card: the forge it is pushed to, a link to the page,
+and the path on disk.
+
+### Keep awake
+
+The cup in the panel header stops the Mac idling to sleep under a running agent.
+Three modes: *Never*, *While agents are working*, *Always*. The middle one is
+the one no generic `caffeinate` can offer, because Sissy holds the Mac while
+turns are landing and lets go ten minutes after they stop, so nothing has to be
+switched back. *Always* stops after eight hours rather than going quiet. Neither
+overrides closing the lid, and the hold lasts exactly as long as Sissy runs. Quit
+and the Mac sleeps normally again, with nothing left behind to undo.
+
+<!-- SHOT 5: Settings ▸ Providers. Linked accounts, Use in CLI, provider status. -->
+
+### Settings
+
+**⌘,** or the gear in the panel. *General* is where start-at-login lives, along
+with whether the gauges print what is spent or what is left, the session-hook
+switch, keep-awake, and the usage archive: where it sits, an export, and a
+button that deletes it. *Providers* is each CLI's state, the accounts linked to
+it, and the vendor status switch. *About* carries **Copy diagnostics**, which is
+what an issue needs.
 
 ## Supported CLIs
 
-| CLI | Reads | Tracks |
+| CLI | Reads | Reports |
 |---|---|---|
-| Claude Code | `~/.claude/projects/**/*.jsonl` | tokens, cost, 5-hour and weekly subscription windows (opt-in) |
-| Codex | `~/.codex/sessions/**/rollout-*.jsonl`, honoring `CODEX_HOME` | tokens, cost, the rate-limit windows the CLI reports |
+| Claude Code | `~/.claude/projects/**/*.jsonl`, honoring `CLAUDE_CONFIG_DIR` | tokens, cost, per-repository split, 5-hour and weekly windows, plan, credits |
+| Codex | `~/.codex/sessions/**/rollout-*.jsonl`, honoring `CODEX_HOME` | tokens, cost, per-repository split, the windows the CLI reports, plan, credit balance |
 
-Claude Code is always on. Codex is picked up whenever its session directory exists. Force either one on or off with `providers` in `server.json`. Every active CLI gets its own row in the panel.
+Claude Code is always on; Codex is picked up whenever its session directory
+exists. Either can be forced on or off from Settings ▸ Providers.
 
-Codex reports its limits only on its own turn events, so those gauges are always one turn behind. Claude Code's come from an opt-in read of the token the CLI already stored; until you enable it, the panel shows cost and tokens only.
+Two ceilings worth knowing about. Codex publishes its limits only on its own
+turn events, so those gauges are always one turn behind. That is the shape of
+the CLI, not a bug. Claude's limits come from the credential Claude Code already
+stored, so they are as fresh as the last time that CLI ran; the refresh button
+on the provider page re-reads it, and on a Mac where the token lives in the
+keychain rather than in a file, macOS may ask for access at that moment.
 
-Adding a CLI is one `UsageProvider` implementation. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-
-## How it works
-
-Sissy is one process. It watches the log directories, prices each turn as it lands, and renders the combined reading — no helper, no socket, no port. Counting runs while Sissy runs; the numbers live in the CLIs' own log files either way, so a relaunch picks up exactly where it left off. Switch on **Start at login** if you want a day counted from the moment you sit down.
-
-There is no price table in the source. Rates come from [LiteLLM](https://github.com/BerriAI/litellm)'s public price list, fetched at runtime and cached for a day, with a snapshot compiled in as the offline floor. A CLI that ships a new model therefore prices correctly without a Sissy release. It is also the source [`ccusage`](https://github.com/ccusage/ccusage) reads, which is why the two agree on the same logs. CI asserts it on every change to the engine, and weekly regardless.
+Adding a CLI that writes append-only JSONL is a `SourceAdapter` rather than a
+second reader. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Privacy
 
-Your session logs never leave the machine; Sissy reads them and renders a number. It listens on no port and makes exactly two kinds of outbound request:
+Your session logs never leave the machine. Sissy reads them, prices them, and
+renders a number. It listens on no port, has no account of its own, and does no
+analytics and no crash reporting.
 
-- LiteLLM's price list on `raw.githubusercontent.com`, once a day;
-- `api.anthropic.com/api/oauth/usage`, only with Claude Code limits enabled, using the OAuth token the CLI already stored, read-only, never refreshed, never written back.
+Everything it sends over the network is a reading you asked for, and each one
+has a switch. As it stands there are four:
 
-Sissy keeps one record of its own: a day-by-model tally under `~/Library/Application Support/Sissy/history/`, so the panel can show more than today. It is the totals, not your prompts — Settings ▸ General names the folder and deletes it, and `historyRetentionDays` bounds how far back it goes.
+| Host | When | Why | Off switch |
+|---|---|---|---|
+| `raw.githubusercontent.com` | once a day | LiteLLM's public model price list | `remotePricing: false` pins pricing to the compiled-in snapshot and takes Sissy fully offline |
+| `api.anthropic.com` | while Claude Code is metering | the usage and profile endpoints, with the OAuth token Claude Code already stored. Read-only, never refreshed, never written back | switch the Claude Code provider off |
+| `claude.ai` | only for an account you linked yourself | that account's usage and credits | unlink the account |
+| `status.claude.com`, `status.openai.com` | on a poll | each vendor's own public status page. No account, no credential, no identity | `statusChecks: false` |
 
-No analytics, no crash reporting, no account.
+**What Sissy reads on disk**, so there are no surprises: the two session-log
+trees, the CLIs' own config files, and Claude Code's own OAuth token, which is
+what the rate-limit windows come from. The token lives either in the CLI's
+config directory or in the login keychain. Sissy never refreshes it, because
+Anthropic's refresh tokens rotate on use and spending one would sign you out of
+your own terminal, and never writes it except on an account switch you clicked.
+The one place outside your home directory it reads today is Homebrew's `bin`,
+and only when you press **Copy diagnostics**, to say which `ccusage` builds are
+installed. [SECURITY.md](SECURITY.md) is the longer version.
+
+**What Sissy keeps**: one day-by-model record under
+`~/Library/Application Support/Sissy/history/`, so the panel can answer for more
+than today. It holds totals, never prompts. Settings names the folder, deletes
+it on a button, and `historyRetentionDays` bounds it, with `0` recording
+nothing. On a first run Sissy fills that record in once from what the CLIs
+already logged, so the wider windows are not empty for a month.
+
+**Anything Sissy writes outside its own folder is off by default** and named
+before you switch it on. There is one such switch today. *Name projects even
+when Sissy is off* adds one line to `~/.claude/settings.json` and one to
+`~/.codex/hooks.json`, so a session writes down which repository it is working
+in while that directory still exists. Without it, work in a worktree deleted
+while Sissy was not running counts towards no project at all. Switching it off
+takes both lines and the script back out.
+
+## How it works
+
+The metering runs in a single process. Sissy watches the log directories,
+prices each turn as it lands, and renders the combined reading. No daemon, no
+socket, and nothing listening on a port. Counting happens while Sissy runs; the
+numbers live in the CLIs' own files either way, so a relaunch resumes at the
+byte it stopped at and loses nothing.
+*Start at login* is what keeps a day complete.
+
+There is no price table in the source. Rates come from
+[LiteLLM](https://github.com/BerriAI/litellm)'s public price list, fetched at
+runtime and cached for a day, with a generated snapshot compiled in as the
+offline floor. A CLI that ships a new model therefore prices correctly without a
+Sissy release. LiteLLM is also what [`ccusage`](https://github.com/ccusage/ccusage)
+prices from, which is why the two agree on the same logs; CI asserts that
+agreement on every engine change, and weekly regardless.
+
+If Sissy and `ccusage` disagree on your machine, check `ccusage --version`
+first: a Homebrew install pinned at 20.1.0 bills 1-hour cache writes at the
+5-minute rate and will never upgrade off itself, which looks like Sissy
+over-billing by about 7%.
 
 ## Configuration
 
-The app writes `~/Library/Application Support/Sissy/server.json`; every key is optional.
+Everything has a default and nothing has to be configured. The app writes
+`~/Library/Application Support/Sissy/server.json`; the rows marked ▸ are also in
+Settings.
 
 | Key | Default | Effect |
 |---|---|---|
-| `providers` | auto-detect | force `claudeCode` / `codex` on or off |
+| `providers` | auto-detect | force `claudeCode` / `codex` on or off ▸ |
 | `claudeDataDir`, `codexDataDir` | `~/.claude/projects`, `~/.codex/sessions` | where to look |
-| `claudeLimits` | `false` | read the CLI's OAuth token to show the 5-hour and weekly windows |
-| `keepAwake` | `off` | `auto` holds the Mac while agents are working and lets go after 10 minutes of silence; `on` holds it until you switch off, or for 8 hours — a closed lid sleeps anyway |
-| `keepScreenAwake` | on | whether that hold covers the screen too; `false` lets the display sleep and the Mac lock itself while the Mac stays awake |
-| `remotePricing` | on | fetch rates at runtime; `false` pins to the built-in snapshot and goes fully offline |
+| `statusChecks` | `true` | read each vendor's public status page ▸ |
+| `keepAwake` | `off` | `auto` holds the Mac while agents are working and lets go after 10 minutes of silence; `on` holds it until you switch off, or for 8 hours ▸ |
+| `keepScreenAwake` | `true` | whether that hold covers the screen too; `false` lets the display sleep and the Mac lock itself while the work carries on ▸ |
+| `agentHooks` | `false` | register the `SessionStart` hook with both CLIs so a session names its repository ▸ |
+| `historyRetentionDays` | `90` | days of day-by-model history kept under `history/`; `0` records none ▸ |
+| `remotePricing` | `true` | fetch rates at runtime; `false` pins to the built-in snapshot |
 | `pricingOverride` | none | per-model rates that win over both sources |
-| `historyRetentionDays` | `90` | days of the day-by-model history kept under `history/`; `0` records none, and deleting what is there is the button in Settings |
 | `pollIntervalSeconds` | `60` | safety-net poll between filesystem events |
 
 ## Build from source
 
 ```bash
+brew install xcodegen
+cd app && xcodegen generate
+xcodebuild -project Sissy.xcodeproj -scheme Sissy -configuration Debug build
+```
+
+Or, to run what you just built as a proper signed app:
+
+```bash
 scripts/dev-build-app.sh
 ```
 
-The script builds into `~/.cache/sissy/build-dev`, removes dev bundles left by
-other worktrees or by a plain `xcodebuild`, and relaunches the result, so
-exactly one dev app exists no matter which branch you build. Pass
-`RELAUNCH=0` to skip the relaunch.
+It builds into `~/.cache/sissy/build-dev`, clears dev bundles other worktrees
+left behind, and relaunches, so exactly one dev Sissy exists whichever branch
+you are on. It keeps its own support directory, so it never disturbs an
+installed copy. *Start at login* goes through `SMAppService`, which needs a
+normally signed bundle: `CODE_SIGNING_ALLOWED=NO` is fine for CI, not for
+testing that switch.
 
-**Start at login** goes through `SMAppService`, which requires a normally signed app build: `CODE_SIGNING_ALLOWED=NO` is fine for CI but not for testing that switch locally.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rest: the linters, the self-test, and
+what Sissy will and will not take.
 
 ## Credits
 
-Usage parsing follows [`ccusage`](https://github.com/ccusage/ccusage): both the JSONL schemas (Claude Code and Codex rollouts) and per-model pricing come from there.
+As it ships today, nothing third-party links into Sissy. Its reading of the
+Claude Code and Codex log formats, and its pricing, follow
+[`ccusage`](https://github.com/ccusage/ccusage);
+the rates themselves come from [LiteLLM](https://github.com/BerriAI/litellm).
+[CREDITS.md](CREDITS.md) says it properly.
+
+Sissy is not affiliated with Anthropic, OpenAI, GitHub or GitLab, and none of
+them endorses it. Their marks appear only to say which CLI a row is about and
+where a repository is pushed.
 
 ## The name
 
-Named after my cat: she naps, judges, demands cuddles (A LOT of cuddles), and is, objectively, fabulous. The icon is her.
+Named after my cat: she naps, judges, demands cuddles (A LOT of cuddles), and
+is, objectively, fabulous. The icon is her.
 
 ## License
 
-[MIT](./LICENSE). Sissy links no third-party code; the projects it reads from are credited in [CREDITS.md](./CREDITS.md).
+The source code is [MIT](./LICENSE). Sissy's name and her artwork are not, and
+[NOTICE](./NOTICE) says what that means. Fork it, ship it, sell it; just not
+wearing her face.
