@@ -32,16 +32,25 @@ struct AcknowledgementsView: View {
                 "The model price table Sissy fetches at runtime, which is what ccusage prices from too.",
             url: URL(string: "https://github.com/BerriAI/litellm")!
         ),
+        Credit(
+            name: "Simple Icons",
+            detail:
+                "Where the GitHub and GitLab marks on the panel's repository card come from, released under CC0.",
+            url: URL(string: "https://github.com/simple-icons/simple-icons")!
+        ),
     ]
 
-    /// Not a credit, and deliberately not in the list above: the list is for
-    /// projects Sissy reads, and this is about two pictures it draws. The
-    /// marks identify whose account a row is about, which is nominative use;
-    /// saying so out loud is cheaper than leaving a reader to wonder whether
-    /// Sissy is something either vendor made.
+    /// Not a credit, and deliberately not in the list above: that list is for
+    /// projects, and this is about four pictures. The marks identify which CLI
+    /// a row is about and where a repository is pushed, which is nominative
+    /// use; saying so out loud is cheaper than leaving a reader to wonder
+    /// whether Sissy is something one of those vendors made. Simple Icons is
+    /// credited above for the files, which is a separate thing from the marks
+    /// they draw: CC0 covers the drawing and never the trademark.
     private static let trademarkNotice =
-        "The Claude and OpenAI marks are used to identify which CLI a row is about. "
-        + "They are the trademarks of Anthropic and OpenAI, who have nothing to do with Sissy."
+        "The Claude and OpenAI marks identify which CLI a row is about, and the GitHub and "
+        + "GitLab marks where a repository is pushed. They are the trademarks of Anthropic, "
+        + "OpenAI, GitHub and GitLab, who have nothing to do with Sissy."
 
     private static let creditsURL = URL(
         string: "https://github.com/xsmyile/sissy/blob/master/CREDITS.md")!
