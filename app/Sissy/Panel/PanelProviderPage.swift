@@ -441,28 +441,31 @@ struct PanelProviderPage: View {
     /// The colour is reserved for a reached cap. That is the same axis the
     /// limits are on — headroom running out — and not a judgement on how much
     /// was spent, which is a line Sissy does not draw.
+    ///
+    /// Built to the shape of a window row above it, which it was not: measured
+    /// 2026-09-16, this block put 11-13 pt between its heading and its bar and
+    /// 13-15 pt between the bar and its caption where `WindowRowView` puts 4
+    /// and 5, so the one section answering the same question in the same two
+    /// figures and a bar stood 82.5 pt tall against a window's 32.5. Two things
+    /// did it: a section's spacing used between a row's own parts, and the
+    /// percentage parked beside the bar, where an 11 pt line is three times the
+    /// height of the 5 pt it sits next to and the bar floats in the middle of
+    /// the row it inflated. The percentage belongs with the amount it is a
+    /// percentage *of*, on the heading line both already share.
     private func credits(_ credits: UsagePanelSnapshot.CreditsRow) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 SectionLabel(text: "Credits")
                 Spacer(minLength: 0)
-                Text(credits.amount)
+                Text(UsageFormat.creditsReading(amount: credits.amount, percent: credits.percent))
                     .font(.system(size: 12))
                     .monospacedDigit()
                     .foregroundStyle(credits.capReached ? Color.red : .primary)
+                    .lineLimit(1)
             }
 
             if let fraction = credits.fraction {
-                HStack(spacing: 8) {
-                    ShareBar(share: fraction, tint: credits.capReached ? .red : tint)
-
-                    if let percent = credits.percent {
-                        Text("\(percent)%")
-                            .font(.system(size: 11))
-                            .monospacedDigit()
-                            .frame(width: 32, alignment: .trailing)
-                    }
-                }
+                ShareBar(share: fraction, tint: credits.capReached ? .red : tint)
             }
 
             Text(credits.caption)
