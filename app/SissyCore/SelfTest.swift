@@ -1505,8 +1505,10 @@ func runCodexAuthFallbackTest() {
 /// Codex ships its subscription limits on the same `token_count` event the
 /// reader already parses. Two properties matter and neither is obvious from
 /// the payload: a bucket is identified by `window_minutes` and not by its
-/// `primary`/`secondary` key, and a bucket whose `resets_at` has passed
-/// describes a window that no longer exists.
+/// `primary`/`secondary` key, and a bucket whose `resets_at` has passed is
+/// published rather than dropped — Codex answers only on its own turns, so
+/// the reader dropping it took the whole row off the page until someone used
+/// the CLI. Wording it as rolled over is the panel's.
 func runCodexRateLimitTest() {
     print("=== CodexAdapter.rateLimits ===")
     let fm = FileManager.default
@@ -1561,11 +1563,11 @@ func runCodexRateLimitTest() {
     }
     sem.wait()
 
-    expect("codex keeps only unexpired windows", box.value.count, 1)
-    expect("codex window keyed by minutes", box.value.first?.minutes, 10_080)
-    expect("codex window percentage", box.value.first?.usedPercent, 8.0)
-    // The plan rides the same block, and unlike a window it does not expire:
-    // the stale bucket above is dropped while the plan stays.
+    expect("codex publishes a rolled-over window beside a live one", box.value.count, 2)
+    expect("codex windows ordered by period", box.value.first?.minutes, 300)
+    expect("codex rolled-over bucket keeps its own reading", box.value.first?.usedPercent, 25.0)
+    expect("codex window keyed by minutes", box.value.last?.minutes, 10_080)
+    expect("codex window percentage", box.value.last?.usedPercent, 8.0)
     expect("codex plan read off the limits block", planBox.value, "plus")
 }
 

@@ -165,8 +165,15 @@ struct UsagePanelSnapshot: Equatable {
     /// its own caption spoke in pace, so a session at 40% that lasts until
     /// reset outranked a weekly at 35% running out in two days — the window
     /// the user actually meets, drawn quiet under one that never binds.
+    ///
+    /// A window that has rolled over since the reading is not a candidate: its
+    /// percentage measures a period that has ended, and both things this
+    /// chooses for — the emphasis on the page and the Overview's one gauge —
+    /// would then report it as the pressure a user is under now. With every
+    /// window rolled over there is no binding one, which is the dash the
+    /// Overview already draws for a provider that has answered nothing.
     static func binding(_ windows: [WindowRow]) -> WindowRow? {
-        windows.min(by: bindsSooner)
+        windows.filter { !$0.hasRolledOver }.min(by: bindsSooner)
     }
 
     private static func bindsSooner(_ lhs: WindowRow, _ rhs: WindowRow) -> Bool {
@@ -391,6 +398,22 @@ struct UsagePanelSnapshot: Equatable {
         let resetsAt: Date?
         /// Nil in the window's first minutes, where the projection is noise.
         let pace: Pace?
+        /// Whether the period turned over after the vendor last answered for
+        /// it, which makes every figure on this row describe a period that has
+        /// ended.
+        ///
+        /// The row is kept and drawn without a reading rather than dropped:
+        /// Codex answers only on its own turns, so dropping it took the
+        /// session row off the page for as long as nobody used the CLI. It is
+        /// drawn without a bar for the reason the Overview draws a dash — an
+        /// empty gauge is a measurement, and this is the absence of one.
+        ///
+        /// Strictly past the reset, never on it. A reading taken at the very
+        /// instant a period ends is the one case where withholding it would be
+        /// guessing at a roll-over rather than observing one, and the panel
+        /// already has a shape for a window with nothing left to project
+        /// from — the percentage, with no pace under it.
+        let hasRolledOver: Bool
     }
 
     /// Where even consumption would have put this window by now, and what the
@@ -496,7 +519,8 @@ struct UsagePanelSnapshot: Equatable {
                 cost: UsageFormat.cost(slice.cost),
                 windows: slice.windows.map {
                     makeWindow(
-                        $0, observedAt: slice.limitsObservedAt ?? now, reading: limitsReading)
+                        $0, observedAt: slice.limitsObservedAt ?? now, reading: limitsReading,
+                        now: now)
                 },
                 windowsCaption: slice.windows.isEmpty
                     ? nil
@@ -674,7 +698,7 @@ struct UsagePanelSnapshot: Equatable {
     private static let unattributedRowID = "sissy.projects.unattributed"
 
     private static func makeWindow(
-        _ window: UsageWindow, observedAt: Date, reading: LimitsReading
+        _ window: UsageWindow, observedAt: Date, reading: LimitsReading, now: Date
     ) -> WindowRow {
         let percent = Int(window.usedPercent.rounded())
         return WindowRow(
@@ -686,7 +710,8 @@ struct UsagePanelSnapshot: Equatable {
             readingSentence: UsageFormat.windowReading(percent, as: reading),
             fraction: min(max(window.usedPercent / 100, 0), 1),
             resetsAt: window.resetsAt,
-            pace: makePace(window, observedAt: observedAt)
+            pace: makePace(window, observedAt: observedAt),
+            hasRolledOver: window.resetsAt.map { $0 < now } ?? false
         )
     }
 
