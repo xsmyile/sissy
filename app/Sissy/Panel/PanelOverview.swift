@@ -313,7 +313,7 @@ struct PanelOverview: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
                 .frame(width: Self.percentWidth, alignment: .trailing)
-                .help(UsageFormat.noWindowsCaption(row.id))
+                .help(UsageFormat.noWindowsCaption(row.provider))
         }
     }
 
