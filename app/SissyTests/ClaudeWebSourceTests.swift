@@ -20,7 +20,7 @@ final class ClaudeWebSourceTests: XCTestCase {
         lookup: @escaping @Sendable (Bool) async -> ClaudeCredentialsLookup,
         fetch: @escaping @Sendable (String, String?) async throws -> ClaudeWebSource.Reading
     ) -> ClaudeWebSource {
-        ClaudeWebSource(sessionSource: lookup, fetchSource: fetch)
+        ClaudeWebSource(account: "c805523f", sessionSource: lookup, fetchSource: fetch)
     }
 
     private static func found(_ token: String) -> ClaudeCredentialsLookup {
