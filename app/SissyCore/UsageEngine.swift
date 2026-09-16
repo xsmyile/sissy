@@ -363,8 +363,14 @@ actor UsageEngine {
         let due =
             resolvedProviders
             .filter { $0.activation.isMetering }
-            .filter { ledger.isDue(provider: $0.id, coveringFrom: window.lowerBound) }
-            .map(\.home)
+            .compactMap { provider -> (home: ProviderHome, span: Range<Date>)? in
+                let span = ArchiveBackfill.uncovered(
+                    window,
+                    coverage: ledger.coverage[provider.id],
+                    meteredThrough: ArchiveBackfill.lastMetered(
+                        snapshotAt: Self.persistenceURL(for: provider.home, in: stateDir)))
+                return span.map { (provider.home, $0) }
+            }
         guard !due.isEmpty else { return }
         let me = self
         let stateDir = self.stateDir
@@ -372,19 +378,18 @@ actor UsageEngine {
         let projectLedger = self.projectLedger
         let catalog = initialPriceCatalog
         backfillTask = Task.detached(priority: .utility) {
-            for home in due {
+            for (home, span) in due {
                 if Task.isCancelled { return }
                 let provider = Self.backfillProvider(
                     home: home,
-                    window: window,
+                    window: span,
                     historyRoot: stateDir,
                     pricingOverride: pricingOverride,
                     ledger: projectLedger)
                 if let catalog { await provider.applyPriceCatalog(catalog) }
                 _ = await provider.backfillArchive { await me.invalidateHistoryRollups() }
                 if Task.isCancelled { return }
-                await me.recordArchiveBackfill(
-                    provider: home.id, coveredFrom: window.lowerBound, at: ledgerURL)
+                await me.recordArchiveBackfill(provider: home.id, covered: span, at: ledgerURL)
             }
         }
     }
@@ -423,9 +428,9 @@ actor UsageEngine {
     /// Records that one provider's history has been indexed as far back as
     /// the window asked for. Read-modify-write on the actor, so two providers
     /// finishing close together cannot drop each other's entry.
-    private func recordArchiveBackfill(provider: String, coveredFrom start: Date, at url: URL) {
+    private func recordArchiveBackfill(provider: String, covered span: Range<Date>, at url: URL) {
         let updated = ArchiveBackfillLedger.load(from: url)
-            .recording(provider: provider, coveredFrom: start)
+            .recording(provider: provider, covered: span)
         do {
             try ArchiveBackfillLedger.save(updated, to: url)
         } catch {
@@ -1156,6 +1161,7 @@ actor UsageEngine {
     /// out after the files were gone, and nothing would remove it again — the
     /// user's deletion would fail with nothing to show for it.
     func deleteHistory() async {
+        await stopArchiveBackfill()
         await aggregator.forgetArchivedDays()
         do {
             try UsageHistoryStore.removeAll(in: stateDir)
@@ -1166,6 +1172,36 @@ actor UsageEngine {
         historyRollups = [:]
         historyRollupAt = .distantPast
         await reemit()
+    }
+
+    /// Ends the backfill and records every metering provider as covered, which
+    /// is what a deletion needs from it.
+    ///
+    /// The pass is a second writer to the archive and it is not the
+    /// aggregator's, so `forgetArchivedDays` does not reach it: a flush landing
+    /// after the files were removed would put days back that the user had just
+    /// asked Sissy to forget, and nothing would take them out again. Awaiting
+    /// the task rather than only cancelling it is what makes that impossible —
+    /// cancellation is observed between files, so a write can still be in
+    /// flight when `cancel()` returns.
+    ///
+    /// Recording the window as covered is the other half. A pass cut short
+    /// writes no record, so the next launch would go back for the days that
+    /// were just deleted — which is the same promise the record's own location
+    /// outside `history/` exists to keep.
+    private func stopArchiveBackfill() async {
+        guard let task = backfillTask else { return }
+        backfillTask = nil
+        task.cancel()
+        await task.value
+        guard let window = ArchiveBackfill.window(retentionDays: config.resolvedHistoryRetentionDays)
+        else { return }
+        for provider in resolvedProviders where provider.activation.isMetering {
+            recordArchiveBackfill(
+                provider: provider.id,
+                covered: window,
+                at: ArchiveBackfillLedger.defaultURL(in: stateDir))
+        }
     }
 
     /// Picks the rate catalog the cold backfill will run against, then starts
