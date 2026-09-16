@@ -1595,10 +1595,11 @@ func runCodexRateLimitTest() {
     expect("codex names no spend", creditsBox.value?.usedMinor == nil, true)
     expect("codex names no cap", creditsBox.value?.capMinor == nil, true)
 
-    // The three ways this reading goes missing are three different facts and
-    // none of them is a balance of zero. `has_credits: false` is not one of
-    // them: it says the account holds no finite pool, which is exactly the
-    // account whose confirmed zero this row exists to print.
+    // The two ways this reading goes missing are two different facts and
+    // neither is a balance of zero. Neither flag beside it is one: `has_credits`
+    // says the account holds no finite pool, which is exactly the account whose
+    // confirmed zero this row exists to print, and `unlimited` says nothing
+    // about a figure the vendor did send.
     let observed = Date(timeIntervalSince1970: 1_789_000_000)
     expect(
         "a rollout with no credits key answers nothing",
@@ -1607,10 +1608,16 @@ func runCodexRateLimitTest() {
     expect(
         "a null balance is not a balance of zero",
         CodexAdapter.credits(nullBalance, observedAt: observed) == nil, true)
-    let unlimited: [String: Any] = ["has_credits": true, "unlimited": true, "balance": "0"]
+    let unlimitedWithBalance: [String: Any] = [
+        "has_credits": true, "unlimited": true, "balance": "14",
+    ]
     expect(
-        "an unlimited pool publishes no figure",
-        CodexAdapter.credits(unlimited, observedAt: observed) == nil, true)
+        "an unlimited pool keeps a balance it reported anyway",
+        CodexAdapter.credits(unlimitedWithBalance, observedAt: observed)?.balance, Decimal(14))
+    let unlimitedOnly: [String: Any] = ["has_credits": true, "unlimited": true]
+    expect(
+        "an unlimited pool with no balance still publishes nothing",
+        CodexAdapter.credits(unlimitedOnly, observedAt: observed) == nil, true)
     let fractional: [String: Any] = ["has_credits": true, "unlimited": false, "balance": "12.5"]
     expect(
         "a fractional balance survives the way in",
