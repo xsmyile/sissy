@@ -87,6 +87,43 @@ final class ProjectOwnerTests: XCTestCase {
             URL(string: "https://gitlab.com/group/sub/repo"))
     }
 
+    /// git writes an IPv6 host in brackets, and the colon that separates it
+    /// from the path is the one after the bracket — every colon before it
+    /// belongs to the address.
+    func testABracketedIPv6HostIsNotSplitDownTheMiddle() {
+        let remote = ProjectResolver.remote(ofRemoteURL: "git@[2001:db8::1]:mastersoft/cbdesign.git")
+
+        XCTAssertEqual(remote?.host, "[2001:db8::1]")
+        XCTAssertEqual(remote?.owner, "mastersoft")
+        XCTAssertEqual(remote?.page, URL(string: "https://[2001:db8::1]/mastersoft/cbdesign"))
+    }
+
+    func testABracketedIPv6HostOnAPortKeepsItsAccountAndOffersNoPage() {
+        let remote = ProjectResolver.remote(
+            ofRemoteURL: "ssh://git@[2001:db8::1]:2222/mastersoft/cbdesign.git")
+
+        XCTAssertEqual(remote?.host, "[2001:db8::1]")
+        XCTAssertEqual(remote?.owner, "mastersoft")
+        XCTAssertNil(remote?.page)
+    }
+
+    /// A `#` in a segment is part of the path, and a page built by pasting
+    /// strings together would have the browser read it as a fragment and open
+    /// a shorter repository that is not this one.
+    func testASegmentCarryingAFragmentMarkerIsEscapedIntoThePage() {
+        XCTAssertEqual(
+            ProjectResolver.remote(ofRemoteURL: "https://git.example.com/team/we#ird.git")?.page,
+            URL(string: "https://git.example.com/team/we%23ird"))
+    }
+
+    /// `.git` as the whole segment is the repository's name rather than the
+    /// suffix on one, and stripping it would leave the row nothing to say.
+    func testARepositoryNamedOnlyForTheSuffixKeepsIt() {
+        XCTAssertEqual(
+            ProjectResolver.remote(ofRemoteURL: "https://git.example.com/team/.git")?.repository,
+            ".git")
+    }
+
     // MARK: What must not be turned into an account
 
     /// A directory on this Mac is not a forge, so the enclosing folder must
