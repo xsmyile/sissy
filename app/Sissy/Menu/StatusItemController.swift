@@ -151,6 +151,19 @@ final class StatusItemController: NSObject {
             icon.isAsleep ? .asleep : .awake,
             animated: model.preferences.sissyMotion
         )
+        sissyAnimator?.setArtwork(artwork(for: icon))
+    }
+
+    /// The lit eye is the one thing on the button that is not a template
+    /// image, and an open menu is the one moment that matters: AppKit inverts
+    /// a template to white against the highlight and leaves anything else
+    /// exactly as it is, which in a light menu bar is a black cat on a filled
+    /// row. The menu is also the surface that says the hold in words, so
+    /// nothing is lost by handing the template back for as long as it is up.
+    private func artwork(for icon: SissyModel.StatusIconSnapshot)
+        -> SissyMenuBarAnimator.Artwork
+    {
+        icon.isHolding && !isMenuOpen ? .lit : .template
     }
 
     /// A blink when a frame lands is Sissy noticing new numbers.
@@ -219,9 +232,11 @@ extension StatusItemController: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
         refreshHoldItem()
+        refreshIcon(model.menuSnapshot.statusIcon)
     }
 
     func menuDidClose(_ menu: NSMenu) {
         isMenuOpen = false
+        refreshIcon(model.menuSnapshot.statusIcon)
     }
 }

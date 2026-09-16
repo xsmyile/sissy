@@ -195,6 +195,7 @@ struct UsagePanelView: View {
                 isAsleep: menuHeader.isAsleep,
                 lastFrameAt: model.lastFrameAt,
                 motionEnabled: model.preferences.sissyMotion,
+                isHolding: model.keepAwake.active,
                 size: Self.sissySize
             )
 

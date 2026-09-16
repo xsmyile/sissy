@@ -31,6 +31,11 @@ struct PanelSissy: View {
     /// itself is never drawn.
     let lastFrameAt: Date?
     let motionEnabled: Bool
+    /// Whether the Mac is being held awake, which lights the eye here for the
+    /// same reason it lights it in the menu bar. Both surfaces or neither: the
+    /// panel is opened from the button, and a signal that goes out on the way
+    /// in reads as the click having switched something off.
+    let isHolding: Bool
     let size: CGFloat
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -90,12 +95,23 @@ struct PanelSissy: View {
     /// animates: swapping the asset on one `Image` snaps, while fading a pair
     /// of them carries the eye shut the way the menu bar's own frames do.
     private func image(_ assetName: String) -> some View {
+        ZStack {
+            if isHolding {
+                layer(SissyArtwork.eyelessAssetName(for: assetName), tint: .secondary)
+                layer(SissyArtwork.eyeAssetName(for: assetName), tint: .blue)
+            } else {
+                layer(assetName, tint: .secondary)
+            }
+        }
+    }
+
+    private func layer(_ assetName: String, tint: some ShapeStyle) -> some View {
         Image(assetName)
             .renderingMode(.template)
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(tint)
     }
 
     private func scheduleBlink() {
