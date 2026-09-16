@@ -27,9 +27,15 @@ enum ClaudeWebSessionStore {
     /// Service the item is filed under. A literal rather than a provider id:
     /// renaming a provider must not orphan a credential the user imported.
     static let keychainService = "com.radonforge.sissy.claude-web"
-    /// Which session, for an install that holds more than one. One account
-    /// today; the parameter is what stops #130 from having to rewrite this.
-    static let defaultAccount = "claude-web"
+    /// Where a session sat before sessions were keyed by account.
+    ///
+    /// One install can hold several, filed under the Anthropic account uuid
+    /// each belongs to, which is the same key `ClaudeAccountStore` files a CLI
+    /// credential under — measured, both vendors' endpoints name an account
+    /// with one id. This is the un-keyed item an install imported before that
+    /// was true; `ClaudeWebSessionAdoption` re-files it and nothing writes it
+    /// again.
+    static let legacyAccount = "claude-web"
 
     /// Prefix claude.ai's session cookie carries, kept so a paste can be
     /// recognised as a session before it is spent on a request.
@@ -42,7 +48,7 @@ enum ClaudeWebSessionStore {
     /// costs no ACL check and cannot raise a dialog. That is what lets
     /// Settings say "a session is set" on a re-signed build, where actually
     /// reading it would prompt.
-    static func isPresent(account: String = defaultAccount) -> Bool {
+    static func isPresent(account: String) -> Bool {
         var query = identity(account: account)
         query[kSecReturnAttributes as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -56,7 +62,7 @@ enum ClaudeWebSessionStore {
     /// `.interactionRequired` rather than interrupt — the same rule, for the
     /// same reason, as the item next door.
     static func load(
-        account: String = defaultAccount,
+        account: String,
         allowingInteraction: Bool
     ) -> ClaudeCredentialsLookup {
         var query = ClaudeCredentialsStore.makeQuery(
@@ -77,7 +83,7 @@ enum ClaudeWebSessionStore {
     /// Add-then-update rather than delete-then-add: a delete that succeeds
     /// followed by an add that fails would leave the user with no session and
     /// no way to tell that from one they never imported.
-    static func save(_ session: String, account: String = defaultAccount) throws {
+    static func save(_ session: String, account: String) throws {
         let normalized = normalize(session)
         guard !normalized.isEmpty, let data = normalized.data(using: .utf8) else {
             throw ClaudeWebSessionStoreError.empty
@@ -99,22 +105,45 @@ enum ClaudeWebSessionStore {
 
     /// Forgets the session. An item that was not there is not a failure: the
     /// caller asked for it gone and it is gone.
-    static func delete(account: String = defaultAccount) throws {
+    static func delete(account: String) throws {
         let status = SecItemDelete(identity(account: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw ClaudeWebSessionStoreError.keychain(status)
         }
     }
 
+    /// Every account a session is filed under, in no particular order.
+    ///
+    /// Attributes only and never the data, for the reason `isPresent` is: the
+    /// keychain authorizes a read of the *secret*, so asking which items exist
+    /// costs no ACL check and cannot raise a dialog. That is what lets the
+    /// engine decide how many readers to build before any of them has read
+    /// anything, and on a build whose grant has lapsed.
+    static func storedAccounts() -> [String] {
+        var query = baseQuery()
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
+        var items: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &items) == errSecSuccess,
+            let attributes = items as? [[String: Any]]
+        else { return [] }
+        return attributes.compactMap { $0[kSecAttrAccount as String] as? String }
+    }
+
+    private static func baseQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+        ]
+    }
+
     /// What the item is, with neither a value nor a read on it. Shared by
     /// every operation so an add, an update and a delete cannot drift into
     /// addressing different items.
     private static func identity(account: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: account,
-        ]
+        var query = baseQuery()
+        query[kSecAttrAccount as String] = account
+        return query
     }
 
     /// A session as it is worth storing.

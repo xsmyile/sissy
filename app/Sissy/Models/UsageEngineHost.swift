@@ -277,7 +277,7 @@ final class UsageEngineHost {
     /// Whether a claude.ai session is filed, so Settings can offer the right
     /// button. Asked without decrypting one, so it is answerable on a build
     /// whose keychain grant has lapsed.
-    private(set) var claudeWebSession: Bool = ClaudeWebSessionStore.isPresent()
+    private(set) var claudeWebSession: Bool = !ClaudeWebSessionStore.storedAccounts().isEmpty
     /// Why the last import found nothing, kept so Settings says which of the
     /// several ways it can come up empty happened. Cleared by the next
     /// attempt, and by a successful one.
