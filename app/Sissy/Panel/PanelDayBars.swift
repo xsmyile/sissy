@@ -66,20 +66,26 @@ struct PanelDayBars: View {
         hovered.flatMap { key in strip.rows.first { $0.id == key } }
     }
 
-    /// The header reads the strip until the pointer names a day, and that day
+    /// The caption reads the strip until the pointer names a day, and that day
     /// after.
     ///
     /// It is the same row either way rather than a second line that appears on
     /// hover: the panel sizes to its content, so a block that grew under the
     /// pointer would push everything below it down as the pointer crossed it.
     /// The strip carries no axis, so this row is where a value is read.
+    ///
+    /// It is drawn as a caption rather than as a heading because the block it
+    /// belongs to already has one — today's own figures, which the page keeps
+    /// above this line and the pointer never moves.
     var body: some View {
         VStack(alignment: .leading, spacing: DayBarGeometry.headerGap) {
             HStack(spacing: 6) {
-                SectionLabel(text: pointed?.title ?? strip.label)
+                Text(pointed?.title ?? strip.label)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Text(pointed?.figures ?? strip.total)
-                    .font(.system(size: 11))
+                    .font(.system(size: 10))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
