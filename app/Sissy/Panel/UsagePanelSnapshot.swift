@@ -358,7 +358,15 @@ struct UsagePanelSnapshot: Equatable {
         /// which period binds sooner.
         let minutes: Int
         let label: String
+        /// The vendor's own figure, raw and always the *used* end of the
+        /// window. It is what `binding` orders on and what the Overview turns
+        /// orange, neither of which may move because the user chose to read
+        /// the gauge from the other end.
         let percent: Int
+        /// That figure as the row prints it, which is the end the user chose.
+        let reading: String
+        /// The same, with the noun that names the end, for the tooltip.
+        let readingSentence: String
         let fraction: Double
         /// Nil for a window the vendor has not started, which is a bar at
         /// zero with nothing to count down to.
@@ -397,13 +405,14 @@ struct UsagePanelSnapshot: Equatable {
         frame: FrameData,
         period: UsagePeriod = .today,
         claudeAccounts: ClaudeAccountRegistry.Snapshot = .init(),
+        limitsReading: LimitsReading = .used,
         now: Date = Date()
     ) -> Self {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
         let rows = makeRows(
             frame.providers, claudeAccounts: claudeAccounts, status: frame.providerStatus,
-            totalTokens: totalTokens, now: now)
+            totalTokens: totalTokens, limitsReading: limitsReading, now: now)
         let periods = availablePeriods(frame.history)
         let resolved = periods.contains(period) ? period : .today
         let rollup = frame.history[resolved]
@@ -452,6 +461,7 @@ struct UsagePanelSnapshot: Equatable {
         claudeAccounts: ClaudeAccountRegistry.Snapshot,
         status: [String: ProviderStatusReading],
         totalTokens: Int,
+        limitsReading: LimitsReading,
         now: Date
     ) -> [ProviderRow] {
         slices.map { slice in
@@ -467,7 +477,8 @@ struct UsagePanelSnapshot: Equatable {
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
                 windows: slice.windows.map {
-                    makeWindow($0, observedAt: slice.limitsObservedAt ?? now)
+                    makeWindow(
+                        $0, observedAt: slice.limitsObservedAt ?? now, reading: limitsReading)
                 },
                 windowsCaption: slice.windows.isEmpty
                     ? nil
@@ -638,12 +649,17 @@ struct UsagePanelSnapshot: Equatable {
     private static let foldedProjectRowID = "sissy.projects.rest"
     private static let unattributedRowID = "sissy.projects.unattributed"
 
-    private static func makeWindow(_ window: UsageWindow, observedAt: Date) -> WindowRow {
-        WindowRow(
+    private static func makeWindow(
+        _ window: UsageWindow, observedAt: Date, reading: LimitsReading
+    ) -> WindowRow {
+        let percent = Int(window.usedPercent.rounded())
+        return WindowRow(
             id: "\(window.minutes)-\(window.scope ?? "")",
             minutes: window.minutes,
             label: UsageFormat.windowLabel(minutes: window.minutes, scope: window.scope),
-            percent: Int(window.usedPercent.rounded()),
+            percent: percent,
+            reading: UsageFormat.windowPercent(percent, as: reading),
+            readingSentence: UsageFormat.windowReading(percent, as: reading),
             fraction: min(max(window.usedPercent / 100, 0), 1),
             resetsAt: window.resetsAt,
             pace: makePace(window, observedAt: observedAt)

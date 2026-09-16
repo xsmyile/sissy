@@ -178,7 +178,7 @@ struct PanelOverview: View {
     /// is "how long has this got", which is the page's caption verbatim rather
     /// than a second wording of it.
     private static func bindingHelp(_ window: UsagePanelSnapshot.WindowRow) -> String {
-        let head = "\(window.label) · \(window.percent)% used"
+        let head = "\(window.label) · \(window.readingSentence)"
         guard let caption = UsageFormat.windowCaption(window) else { return head }
         return head + "\n" + caption
     }
@@ -299,7 +299,7 @@ struct PanelOverview: View {
                 pace: binding.pace
             )
             .frame(minWidth: Self.gaugeMinWidth)
-            Text("\(binding.percent)%")
+            Text(binding.reading)
                 .font(.system(size: 12))
                 .monospacedDigit()
                 .foregroundStyle(

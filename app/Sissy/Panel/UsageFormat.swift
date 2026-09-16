@@ -1,5 +1,22 @@
 import Foundation
 
+/// Which end of a rate-limit window its gauge prints: what has been spent, or
+/// what is still there.
+///
+/// A wording rather than a measurement. The vendor publishes one number and
+/// both readings are that number, so this never reaches `WindowRow.percent` —
+/// which is what orders the windows and what decides when the Overview's
+/// figure goes orange, and both have to land in the same place whichever way
+/// the user reads the bar. For the same reason the bar itself always fills
+/// with what has been spent: the pace mark sits at `elapsed / duration`, and a
+/// fill measured from the other end would put the mark on the wrong side of it.
+enum LimitsReading: String, Codable, CaseIterable, Sendable {
+    /// What the window has taken, which is what the vendor reports.
+    case used
+    /// What is left of it — the same reading, subtracted.
+    case left
+}
+
 /// Display formatters shared by the menubar menu and the usage panel.
 ///
 /// The only place a number on screen is worded. The frame carries the day's
@@ -169,6 +186,39 @@ enum UsageFormat {
                 + "closing the lid sleeps it anyway" + modes
         case (.on, false):
             return "Switched on · the Mac is not being held awake" + modes
+        }
+    }
+
+    /// A window's gauge, in the reading the user chose.
+    ///
+    /// `left` is floored at zero. A vendor can report past 100% and the used
+    /// reading keeps that overshoot, because there the figure above the
+    /// ceiling is the honest one; from the other end it would be a negative
+    /// headroom, and nobody is owed less than nothing.
+    static func windowPercent(_ percent: Int, as reading: LimitsReading) -> String {
+        switch reading {
+        case .used: return "\(percent)%"
+        case .left: return "\(max(fullWindowPercent - percent, 0))%"
+        }
+    }
+
+    /// The same figure with the word that says which end of the window it is.
+    ///
+    /// For the tooltip, where there is room for it. On the row the bar beside
+    /// it carries that, and the noun would cost the column its width.
+    static func windowReading(_ percent: Int, as reading: LimitsReading) -> String {
+        "\(windowPercent(percent, as: reading)) \(reading.rawValue)"
+    }
+
+    private static let fullWindowPercent = 100
+
+    /// What the Settings picker calls each end of a window. Said in terms of
+    /// the window rather than of the number — "Used" and "Left" alone are two
+    /// adjectives with no subject, and the row's own label supplies it once.
+    static func limitsReadingTitle(_ reading: LimitsReading) -> String {
+        switch reading {
+        case .used: return "What is spent"
+        case .left: return "What is left"
         }
     }
 

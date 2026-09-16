@@ -296,6 +296,15 @@ final class SissyModel {
         savePreferences()
     }
 
+    /// Which end of a rate-limit window its gauge prints. A wording, so it
+    /// reaches the panel through `UsagePanelSnapshot` like every other number
+    /// on screen and nothing about the readings themselves moves.
+    func setLimitsReading(_ reading: LimitsReading) {
+        guard reading != preferences.limitsReading else { return }
+        preferences.limitsReading = reading
+        savePreferences()
+    }
+
     /// Registers or removes the app's own login item. Failures are the
     /// user's to see rather than the caller's to handle: the switch has no
     /// second way to get the app opened at login.

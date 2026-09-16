@@ -8,10 +8,21 @@ final class PreferencesTests: XCTestCase {
 
         XCTAssertTrue(prefs.sissyMotion)
         XCTAssertFalse(prefs.retiredServerAgent)
+        XCTAssertEqual(prefs.limitsReading, .used)
+    }
+
+    /// The gauges have always read from the spent end. A file written before
+    /// the choice existed has to keep them there — the other end is a
+    /// preference, not an upgrade.
+    func testAFileWithoutTheLimitsKeyKeepsTheGaugesOnWhatIsSpent() throws {
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data("{}".utf8))
+
+        XCTAssertEqual(prefs.limitsReading, .used)
     }
 
     func testRoundTripJSON() throws {
-        let original = Preferences(sissyMotion: false, retiredServerAgent: true)
+        let original = Preferences(
+            sissyMotion: false, retiredServerAgent: true, limitsReading: .left)
         let data = try JSONEncoder().encode(original)
 
         XCTAssertEqual(try JSONDecoder().decode(Preferences.self, from: data), original)

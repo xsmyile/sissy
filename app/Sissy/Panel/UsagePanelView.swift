@@ -118,7 +118,8 @@ struct UsagePanelView: View {
             UsagePanelSnapshot.make(
                 frame: $0.frame,
                 period: model.preferences.usagePeriod,
-                claudeAccounts: model.engine.claudeAccounts)
+                claudeAccounts: model.engine.claudeAccounts,
+                limitsReading: model.preferences.limitsReading)
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
         return VStack(alignment: .leading, spacing: 0) {

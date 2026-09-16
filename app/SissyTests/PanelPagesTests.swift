@@ -66,14 +66,44 @@ final class PanelPagesTests: XCTestCase {
     }
 
     private func windows(
-        _ windows: [UsageWindow], observedAt: Date? = nil
+        _ windows: [UsageWindow], observedAt: Date? = nil,
+        reading: LimitsReading = .used
     ) -> [UsagePanelSnapshot.WindowRow] {
         UsagePanelSnapshot.make(
             frame: frame([
                 slice("claude-code", windows: windows, limitsObservedAt: observedAt)
             ]),
+            limitsReading: reading,
             now: Self.now
         ).providers[0].windows
+    }
+
+    /// Reading a gauge from the other end is a wording. It must not reach
+    /// `percent`, which is what orders the windows and what decides when the
+    /// Overview's figure goes orange — a user who prefers headroom would
+    /// otherwise have the block lead on the *emptiest* window and the warning
+    /// fire on the quietest one.
+    func testTheHeadroomReadingWordsTheRowWithoutMovingTheReading() throws {
+        let spent = try window(300, 86)
+        let used = windows([spent])
+        let left = windows([spent], reading: .left)
+
+        XCTAssertEqual(used[0].reading, "86%")
+        XCTAssertEqual(left[0].reading, "14%")
+        XCTAssertEqual(left[0].readingSentence, "14% left")
+        XCTAssertEqual(left[0].percent, used[0].percent)
+        XCTAssertEqual(left[0].fraction, used[0].fraction)
+    }
+
+    /// The same, across a pair: which window binds is the rate's answer, and
+    /// the wording has no vote in it.
+    func testTheHeadroomReadingLeavesTheBindingWindowWhereItWas() throws {
+        let pair = [try window(300, 40, elapsed: 0.9), try window(10080, 35, elapsed: 0.2)]
+
+        XCTAssertEqual(
+            UsagePanelSnapshot.binding(windows(pair, reading: .left))?.id,
+            UsagePanelSnapshot.binding(windows(pair))?.id
+        )
     }
 
     // MARK: Headroom
@@ -123,6 +153,8 @@ final class PanelPagesTests: XCTestCase {
                 minutes: minutes,
                 label: "",
                 percent: percent,
+                reading: "\(percent)%",
+                readingSentence: "\(percent)% used",
                 fraction: Double(percent) / 100,
                 resetsAt: Self.now.addingTimeInterval(7200),
                 pace: UsagePanelSnapshot.Pace(

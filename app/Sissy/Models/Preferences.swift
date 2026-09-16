@@ -22,15 +22,22 @@ struct Preferences: Codable, Equatable {
     /// here rather than in `server.json` because it changes what is rendered
     /// and nothing about what is metered.
     var usagePeriod: UsagePeriod = .today
+    /// Which end of a rate-limit window its gauge prints. Here for the reason
+    /// `usagePeriod` is: it changes what is rendered and nothing about what is
+    /// metered. `used` is the vendor's own end and the one Sissy has always
+    /// shown, so a file written before this key existed keeps its gauges.
+    var limitsReading: LimitsReading = .used
 
     init(
         sissyMotion: Bool = true,
         retiredServerAgent: Bool = false,
         usagePeriod: UsagePeriod = .today,
+        limitsReading: LimitsReading = .used,
     ) {
         self.sissyMotion = sissyMotion
         self.retiredServerAgent = retiredServerAgent
         self.usagePeriod = usagePeriod
+        self.limitsReading = limitsReading
     }
 
     /// Backwards-compatible decoder so a `preferences.json` written by an
@@ -41,6 +48,7 @@ struct Preferences: Codable, Equatable {
         sissyMotion = Self.decodeSissyMotion(from: decoder)
         retiredServerAgent = (try? c.decode(Bool.self, forKey: .retiredServerAgent)) ?? false
         usagePeriod = (try? c.decode(UsagePeriod.self, forKey: .usagePeriod)) ?? .today
+        limitsReading = (try? c.decode(LimitsReading.self, forKey: .limitsReading)) ?? .used
     }
 
     /// `sissyMotion` was persisted as `mascotMotion` up to and including
