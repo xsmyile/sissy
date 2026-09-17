@@ -120,6 +120,7 @@ final class UsageEngineHost {
         self.engine = engine
         linkedClaudeAccounts = engine.linkedClaudeAccounts
         linkedCodexAccounts = engine.linkedCodexAccounts
+        forgeConnections = engine.forgeConnections
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
         statusChecks = config.statusChecks
@@ -361,6 +362,7 @@ final class UsageEngineHost {
         claudeWebSession = engine?.hasClaudeWebSession ?? false
         linkedClaudeAccounts = engine?.linkedClaudeAccounts ?? []
         linkedCodexAccounts = engine?.linkedCodexAccounts ?? []
+        forgeConnections = engine?.forgeConnections ?? []
     }
 
     /// Opens OpenAI's own login and links whatever account it produces.
@@ -429,6 +431,61 @@ final class UsageEngineHost {
                     self?.addCodexAccount()
                 }
             }
+        }
+    }
+
+    /// The forges the user has connected. Settings lists these; the panel draws
+    /// what they answered, which travels on the frame instead.
+    private(set) var forgeConnections: [ForgeConnection] = []
+    /// Set while a connection is being filed, so the control that started it
+    /// can say so: it is a keychain write plus the first read of two counters.
+    private(set) var connectingForge: String?
+    /// Why the last attempt did not connect, nil once one has.
+    ///
+    /// It exists because the sheet must not dismiss on a failure: the token was
+    /// typed or pasted and is gone the moment that window closes, so a keychain
+    /// write that failed would leave no row, no explanation and nothing to
+    /// retry with.
+    private(set) var forgeConnectFailure: String?
+
+    /// The tokens `gh` and `glab` already hold, read on the click that offers
+    /// them and never before — the rule every credential in this app is
+    /// acquired under.
+    ///
+    /// **Off the main actor, because the read is a subprocess.** `gh`'s token
+    /// comes back through `/usr/bin/security`, which means a fork, a pipe and a
+    /// wait with a five-second budget per host; run where the sheet is built it
+    /// would freeze the whole app — the Cancel button included — for as long as
+    /// the keychain took to answer.
+    func forgeTokenCandidates() async -> [ForgeTokenCandidate] {
+        guard let engine else { return [] }
+        return await Task.detached { engine.forgeTokenCandidates() }.value
+    }
+
+    /// Connects a forge with a token the user supplied or accepted.
+    ///
+    /// The outcome lands on `forgeConnectFailure` rather than being dropped, so
+    /// the sheet can stay open with what was typed still in it.
+    func connectForge(_ connection: ForgeConnection, token: String) {
+        guard let engine, connectingForge == nil else { return }
+        connectingForge = connection.id
+        forgeConnectFailure = nil
+        Task { [weak self] in
+            let connected = await engine.connectForge(connection, token: token)
+            guard let self else { return }
+            connectingForge = nil
+            forgeConnections = engine.forgeConnections
+            forgeConnectFailure = connected ? nil : ForgeConnectCopy.connectFailed
+        }
+    }
+
+    /// Disconnects a forge: the record, its token and the row it answered for.
+    func disconnectForge(id: String) {
+        guard let engine else { return }
+        Task { [weak self] in
+            await engine.disconnectForge(id: id)
+            guard let self else { return }
+            forgeConnections = engine.forgeConnections
         }
     }
 
