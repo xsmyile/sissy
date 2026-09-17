@@ -324,8 +324,8 @@ actor ClaudeLimitsProbe: SourceSignals {
             return Self.refreshInterval
         } catch {
             guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-            if case ClaudeLimitsError.rateLimited(let retryAfter) = error {
-                let backoff = ClaudeLimitsError.backoffSeconds(retryAfter: retryAfter)
+            if case UsageRequestError.rateLimited(let retryAfter) = error {
+                let backoff = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
                 let until = Date().addingTimeInterval(backoff)
                 published.update { $0.limitsState = .rateLimited(until: until) }
                 report(
@@ -355,13 +355,13 @@ actor ClaudeLimitsProbe: SourceSignals {
         request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw ClaudeLimitsError.malformedPayload }
+        guard let http = response as? HTTPURLResponse else { throw UsageRequestError.malformedPayload }
         if http.statusCode == 429 {
-            throw ClaudeLimitsError.rateLimited(retryAfter: ClaudeLimitsError.retryAfter(http))
+            throw UsageRequestError.rateLimited(retryAfter: UsageRequestError.retryAfter(http))
         }
-        guard http.statusCode == 200 else { throw ClaudeLimitsError.badStatus(http.statusCode) }
+        guard http.statusCode == 200 else { throw UsageRequestError.badStatus(http.statusCode) }
         guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ClaudeLimitsError.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
         return parse(payload, observedAt: Date())
     }

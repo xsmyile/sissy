@@ -312,7 +312,7 @@ enum ClaudeWebAccountProfile {
     static func resolve(session: String) async throws -> ClaudeAccountIdentity {
         do {
             return try parse(await ClaudeWebSource.account(session: session))
-        } catch let failure as ClaudeLimitsError {
+        } catch let failure as UsageRequestError {
             switch failure {
             case .badStatus(let code): throw ClaudeAccountProfile.Failure.badStatus(code)
             case .rateLimited: throw ClaudeAccountProfile.Failure.rateLimited

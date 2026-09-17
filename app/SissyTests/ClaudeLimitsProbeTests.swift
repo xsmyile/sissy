@@ -354,11 +354,11 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     /// Foreign input: a figure shorter than an ordinary poll is what earned
     /// the 429, and one longer than the ceiling is not worth trusting.
     func testTheRetryAfterHeaderIsClamped() {
-        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: 0), 300)
-        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: 5), 300)
-        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: 86_400), 3600)
-        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: nil), 1800)
-        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: -1), 1800)
+        XCTAssertEqual(UsageRequestError.backoffSeconds(retryAfter: 0), 300)
+        XCTAssertEqual(UsageRequestError.backoffSeconds(retryAfter: 5), 300)
+        XCTAssertEqual(UsageRequestError.backoffSeconds(retryAfter: 86_400), 3600)
+        XCTAssertEqual(UsageRequestError.backoffSeconds(retryAfter: nil), 1800)
+        XCTAssertEqual(UsageRequestError.backoffSeconds(retryAfter: -1), 1800)
     }
 
     /// A request issued before the deadline the vendor named can only be
@@ -398,7 +398,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
             },
             fetch: { _ in
                 duringRequest.store(probe.load()?.currentSignals().limitsState)
-                throw ClaudeLimitsError.rateLimited(retryAfter: 1684)
+                throw UsageRequestError.rateLimited(retryAfter: 1684)
             })
         probe.store(built)
 
@@ -434,7 +434,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
                         ],
                         credits: nil)
                 }
-                throw ClaudeLimitsError.rateLimited(retryAfter: retryAfter)
+                throw UsageRequestError.rateLimited(retryAfter: retryAfter)
             })
     }
 }

@@ -167,7 +167,7 @@ final class ClaudeProfileAttributionTests: XCTestCase {
         ClaudeWebSource(
             account: account,
             sessionSource: { _ in .absent },
-            fetchSource: { _, _ in throw ClaudeLimitsError.malformedPayload })
+            fetchSource: { _, _ in throw UsageRequestError.malformedPayload })
     }
 
     /// Both owners are the vendor's own stamps on its own blocks, read off
