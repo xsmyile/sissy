@@ -36,6 +36,21 @@ enum ProviderPalette {
         }
     }
 
+    /// What a merged request and an opened issue read as on a forge row.
+    ///
+    /// The system's own purple and green rather than either vendor's hex, for
+    /// the reason `statusTint` takes the system's: a triplet hand-picked in one
+    /// appearance is the wrong one in the other, and these sit on a row whose
+    /// background follows the popover.
+    ///
+    /// Green because both forges paint an open issue green, so it is recognised
+    /// rather than learnt. Purple because GitHub paints a merged pull request
+    /// purple and GitLab paints its merged badge blue — there is no shared
+    /// colour to copy, so the one that matters is that it is neither of the two
+    /// both forges *do* agree on: green for open and red for closed.
+    static let forgeMerged = Color.purple
+    static let forgeIssue = Color.green
+
     /// The vendor's own mark, for the providers Sissy ships one for.
     ///
     /// Template assets, so every surface tints them with `tint(for:)` and one

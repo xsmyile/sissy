@@ -77,6 +77,7 @@ enum ForgeWindow {
 enum ForgeAlias {
     static func contributions(_ period: UsagePeriod) -> String { "contrib" + suffix(period) }
     static func merged(_ period: UsagePeriod) -> String { "merged" + suffix(period) }
+    static func issues(_ period: UsagePeriod) -> String { "issues" + suffix(period) }
 
     private static func suffix(_ period: UsagePeriod) -> String {
         switch period {
@@ -92,12 +93,13 @@ enum ForgeAlias {
 ///
 /// **One request per poll where the vendor allows it, and never one per
 /// repository.** Measured 2026-09-17: GitHub answers every period's
-/// contribution total *and* every period's merged-pull-request count in a
-/// single GraphQL document costing 1 point of 5000 per hour; GitLab answers the
-/// merged counts in one GraphQL query and each period's activity total in the
-/// `x-total` header of a one-row REST page, which is five small requests. A
-/// reader that asked per repository would be spending a request on each of the
-/// thirty-odd repositories a real day touches, for two numbers.
+/// contribution total, merged-pull-request count and opened-issue count in a
+/// single GraphQL document costing 1 point of 5000 per hour; GitLab takes two
+/// GraphQL documents — the second only because the login the first returns is
+/// what the root `issues` field filters on — plus each period's activity total
+/// in the `x-total` header of a one-row REST page, which is six small requests.
+/// A reader that asked per repository would be spending a request on each of
+/// the thirty-odd repositories a real day touches, for three numbers.
 ///
 /// The failure vocabulary is `ForgeReadFailure` rather than HTTP's, because the
 /// row has to say what the user can do about it and "the VPN is off" and "the
@@ -169,13 +171,22 @@ enum ForgeActivityFeed {
     /// A GraphQL document posted, with the document itself kept out of the log
     /// on failure: it carries no secret, but it does carry the account's own
     /// query and there is nothing a reader could do with it.
+    ///
+    /// **Anything the vendor told us goes in `variables`, never in the
+    /// document.** GitLab has no "issues I authored" field on `currentUser`, so
+    /// that count is asked through the root `issues(authorUsername:)` with a
+    /// name the previous reply supplied — and a login spliced into a query
+    /// string is a forge deciding what Sissy asks for. The dates are Sissy's
+    /// own and stay inline.
     static func graphQL(
-        _ url: URL, query: String, token: String, header: String, scheme: String?
+        _ url: URL, query: String, variables: [String: String] = [:], token: String,
+        header: String, scheme: String?
     ) async throws -> [String: Any] {
         var request = request(url, token: token, header: header, scheme: scheme)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["query": query])
+        request.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["query": query, "variables": variables])
         guard request.httpBody != nil else { throw ForgeReadFailure.malformed }
         let (data, _) = try await send(request)
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -250,7 +261,8 @@ enum GitHubActivityFeed {
 
     /// Every period aliased into one document, because the cost is per document
     /// rather than per field: measured 2026-09-17, four contribution ranges and
-    /// four searches together cost 1.
+    /// eight searches together still cost 1 point of the 5000 an hour, because
+    /// a `search` asked for `first: 1` is one request node whatever it counts.
     static func document(now: Date) -> String {
         let contributions = UsagePeriod.allCases.map { period in
             let range =
@@ -259,23 +271,43 @@ enum GitHubActivityFeed {
             let alias = ForgeAlias.contributions(period)
             return "\(alias): contributionsCollection\(range) { \(calendarField) }"
         }
-        let merged = UsagePeriod.allCases.map { period in
-            let scope =
+        let searches = UsagePeriod.allCases.flatMap { period -> [String] in
+            let since =
                 ForgeWindow.start(of: period, now: now)
-                .map { " merged:>=\(ForgeWindow.vendorDay($0))" } ?? ""
-            let alias = ForgeAlias.merged(period)
-            let terms = "is:pr author:@me is:merged\(scope)"
-            return "\(alias): search(query: \"\(terms)\", type: ISSUE, first: 1) { issueCount }"
+                .map(ForgeWindow.vendorDay) ?? ""
+            return [
+                count(ForgeAlias.merged(period), "is:pr author:@me is:merged", "merged", since),
+                count(ForgeAlias.issues(period), "is:issue author:@me", "created", since),
+            ]
         }
         return """
             query {
               viewer { login \(contributions.joined(separator: " ")) }
-              \(merged.joined(separator: "\n  "))
+              \(searches.joined(separator: "\n  "))
             }
             """
     }
 
+    /// One aliased search, scoped to a window unless the window is unbounded.
+    ///
+    /// The qualifier is named by the caller because the two counters are over
+    /// two different events: a pull request enters the merged figure when it is
+    /// merged and an issue enters the opened figure when it is created, and a
+    /// row that asked `created:` for both would be counting the pull requests
+    /// this account *opened* under a mark that says merged.
+    private static func count(
+        _ alias: String, _ terms: String, _ qualifier: String, _ since: String
+    ) -> String {
+        let scope = since.isEmpty ? "" : " \(qualifier):>=\(since)"
+        return "\(alias): search(query: \"\(terms)\(scope)\", type: ISSUE, first: 1)"
+            + " { issueCount }"
+    }
+
     private static let calendarField = "contributionCalendar { totalContributions }"
+
+    private static func issueCount(_ payload: [String: Any], _ alias: String) -> Int? {
+        (payload[alias] as? [String: Any])?["issueCount"] as? Int
+    }
 
     static func parse(
         _ payload: [String: Any], connection: ForgeConnection, now: Date
@@ -285,6 +317,7 @@ enum GitHubActivityFeed {
         else { throw ForgeReadFailure.malformed }
         var contributions: [UsagePeriod: Int] = [:]
         var merged: [UsagePeriod: Int] = [:]
+        var issues: [UsagePeriod: Int] = [:]
         for period in UsagePeriod.allCases {
             if let block = viewer[ForgeAlias.contributions(period)] as? [String: Any],
                 let calendar = block["contributionCalendar"] as? [String: Any],
@@ -292,19 +325,18 @@ enum GitHubActivityFeed {
             {
                 contributions[period] = total
             }
-            if let block = payload[ForgeAlias.merged(period)] as? [String: Any],
-                let count = block["issueCount"] as? Int
-            {
-                merged[period] = count
-            }
+            if let count = issueCount(payload, ForgeAlias.merged(period)) { merged[period] = count }
+            if let count = issueCount(payload, ForgeAlias.issues(period)) { issues[period] = count }
         }
         // A reply that named the account and no figure at all is a shape this
         // build does not understand rather than a quiet week.
-        guard !contributions.isEmpty || !merged.isEmpty else { throw ForgeReadFailure.malformed }
+        guard !contributions.isEmpty || !merged.isEmpty || !issues.isEmpty else {
+            throw ForgeReadFailure.malformed
+        }
         return ForgeActivityReading(
             id: connection.id, kind: connection.kind, host: connection.host, login: login,
             activity: ForgeActivity(
-                contributions: contributions, merged: merged,
+                contributions: contributions, merged: merged, issues: issues,
                 contributionsBoundedToOneYear: true),
             readAt: now, failure: nil)
     }
@@ -336,6 +368,11 @@ enum GitLabActivityFeed {
         _ connection: ForgeConnection, token: String, now: Date
     ) async throws -> ForgeActivityReading {
         let merged = try await mergedCounts(connection, token: token, now: now)
+        let issues = await issueCounts(
+            connection, token: token, author: merged.username, now: now)
+        // The one call above that cannot report a cancellation, so it is asked
+        // for here rather than four requests later.
+        try Task.checkCancellation()
         var contributions: [UsagePeriod: Int] = [:]
         for period in UsagePeriod.allCases {
             contributions[period] = try await events(
@@ -344,7 +381,7 @@ enum GitLabActivityFeed {
         return ForgeActivityReading(
             id: connection.id, kind: connection.kind, host: connection.host, login: merged.username,
             activity: ForgeActivity(
-                contributions: contributions, merged: merged.counts,
+                contributions: contributions, merged: merged.counts, issues: issues,
                 contributionsBoundedToOneYear: false),
             readAt: now, failure: nil)
     }
@@ -375,13 +412,73 @@ enum GitLabActivityFeed {
             let scope =
                 ForgeWindow.start(of: period, now: now)
                 .map { ", mergedAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
-            return "\(ForgeAlias.merged(period)): authoredMergeRequests(state: merged\(scope)) { count }"
+            return
+                "\(ForgeAlias.merged(period)): authoredMergeRequests(state: merged\(scope)) { count }"
         }
         return """
             query {
               currentUser { username \(fields.joined(separator: " ")) }
             }
             """
+    }
+
+    /// The issues this account opened, per window.
+    ///
+    /// A second document rather than a second field, because `CurrentUser`
+    /// has no authored-issues connection — measured 2026-09-17 against 19.3,
+    /// which answers `Field 'createdIssues' doesn't exist on type
+    /// 'CurrentUser'` — so the count comes off the root `issues` field, which
+    /// needs the login the first document just returned. A GraphQL argument
+    /// cannot be fed from another field in the same document, so this is one
+    /// more request and not a rearrangement of the one before it.
+    static func issuesDocument(now: Date) -> String {
+        let fields = UsagePeriod.allCases.map { period -> String in
+            let scope =
+                ForgeWindow.start(of: period, now: now)
+                .map { ", createdAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
+            return "\(ForgeAlias.issues(period)): issues(authorUsername: $author\(scope)) { count }"
+        }
+        return """
+            query($author: String!) {
+              \(fields.joined(separator: "\n  "))
+            }
+            """
+    }
+
+    /// Every window's issue count, or none of them.
+    ///
+    /// Non-throwing on purpose: this is the one figure on the row an older
+    /// GitLab may not serve at all, and a reading that already carries the
+    /// contributions, the merges and the account must not be thrown away
+    /// because the third counter was refused. It is the type's own rule read
+    /// from the other end — a period is absent rather than zero when it could
+    /// not be read — and a token the instance would not accept has already
+    /// failed the document before this one.
+    ///
+    /// **What it therefore cannot report is a cancellation**, and not because
+    /// of the `try?`: `send` has already erased the distinction, mapping every
+    /// transport error — a refusal, a dropped connection, a cancelled task —
+    /// onto `ForgeReadFailure.unreachable`. So `read` checks the task itself
+    /// after this returns, which is the cancellation path for the one call in
+    /// it that has none of its own.
+    private static func issueCounts(
+        _ connection: ForgeConnection, token: String, author: String, now: Date
+    ) async -> [UsagePeriod: Int] {
+        guard let root = connection.root else { return [:] }
+        let endpoint = root.appendingPathComponent(graphQLPath)
+        guard
+            let payload = try? await ForgeActivityFeed.graphQL(
+                endpoint, query: issuesDocument(now: now), variables: ["author": author],
+                token: token, header: tokenHeader, scheme: nil)
+        else { return [:] }
+        var counts: [UsagePeriod: Int] = [:]
+        for period in UsagePeriod.allCases {
+            guard let block = payload[ForgeAlias.issues(period)] as? [String: Any],
+                let count = block["count"] as? Int
+            else { continue }
+            counts[period] = count
+        }
+        return counts
     }
 
     /// One period's event count, read from the header rather than the body.

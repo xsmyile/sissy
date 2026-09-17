@@ -27,14 +27,21 @@ final class ForgeActivityTests: XCTestCase {
         "contribWeek":{"contributionCalendar":{"totalContributions":704}},
         "contribMonth":{"contributionCalendar":{"totalContributions":1009}},
         "contribAll":{"contributionCalendar":{"totalContributions":4138}}},
-        "mergedToday":{"issueCount":28},"mergedWeek":{"issueCount":155},
-        "mergedMonth":{"issueCount":208},"mergedAll":{"issueCount":403}}}
+        "mergedToday":{"issueCount":28},"issuesToday":{"issueCount":7},
+        "mergedWeek":{"issueCount":155},"issuesWeek":{"issueCount":58},
+        "mergedMonth":{"issueCount":208},"issuesMonth":{"issueCount":80},
+        "mergedAll":{"issueCount":403},"issuesAll":{"issueCount":188}}}
         """
 
     private static let gitLabReply = """
         {"data":{"currentUser":{"username":"davide",
         "mergedToday":{"count":15},"mergedWeek":{"count":91},
         "mergedMonth":{"count":133},"mergedAll":{"count":523}}}}
+        """
+
+    private static let gitLabIssuesReply = """
+        {"data":{"issuesToday":{"count":17},"issuesWeek":{"count":54},
+        "issuesMonth":{"count":62},"issuesAll":{"count":285}}}
         """
 
     private static let gitHub = ForgeConnection.gitHub()
@@ -103,6 +110,7 @@ final class ForgeActivityTests: XCTestCase {
         let documents = [
             GitHubActivityFeed.document(now: Self.measuredDay),
             GitLabActivityFeed.document(now: Self.measuredDay),
+            GitLabActivityFeed.issuesDocument(now: Self.measuredDay),
         ]
         for document in documents {
             let range = NSRange(document.startIndex..., in: document)
@@ -127,6 +135,8 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertEqual(reading.contributions(for: .all), 4138)
         XCTAssertEqual(reading.merged(for: .today), 28)
         XCTAssertEqual(reading.merged(for: .all), 403)
+        XCTAssertEqual(reading.issues(for: .today), 7)
+        XCTAssertEqual(reading.issues(for: .all), 188)
         XCTAssertNil(reading.failure)
     }
 
@@ -169,6 +179,7 @@ final class ForgeActivityTests: XCTestCase {
     func testGitHubDocumentAsksForTheMeasuredWindows() throws {
         let document = GitHubActivityFeed.document(now: Self.measuredDay)
         XCTAssertTrue(document.contains("mergedToday: search"))
+        XCTAssertTrue(document.contains("issuesToday: search"))
         let today = try XCTUnwrap(ForgeWindow.start(of: .today, now: Self.measuredDay))
         let month = try XCTUnwrap(ForgeWindow.start(of: .thirtyDays, now: Self.measuredDay))
         XCTAssertTrue(
@@ -182,12 +193,20 @@ final class ForgeActivityTests: XCTestCase {
             document.contains(
                 "contribToday: contributionsCollection(from: \"\(ForgeWindow.vendorDay(today))\")"),
             document)
+        // Two windows on one row is what the day form exists to stop, so the
+        // issue search is scoped by the same string as the merge beside it and
+        // by its own qualifier — a pull request enters the merge count when it
+        // is merged, an issue the opened count when it is created.
+        XCTAssertTrue(
+            document.contains("is:issue author:@me created:>=\(ForgeWindow.vendorDay(today))"),
+            document)
         XCTAssertTrue(document.contains("contributionCalendar { totalContributions }"))
         XCTAssertTrue(document.contains("viewer { login"))
         // `all` names no range at all, which is how the widest figure is asked
         // for without tripping the one-year refusal.
         XCTAssertTrue(document.contains("contribAll: contributionsCollection {"))
         XCTAssertFalse(document.contains("mergedAll: search(query: \"is:pr author:@me is:merged merged"))
+        XCTAssertFalse(document.contains("issuesAll: search(query: \"is:issue author:@me created"))
     }
 
     /// `github.com` answers on its own API host; an Enterprise install answers
@@ -218,6 +237,45 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertTrue(document.contains("currentUser { username"))
         XCTAssertTrue(document.contains("authoredMergeRequests(state: merged, mergedAfter:"))
         XCTAssertTrue(document.contains("mergedAll: authoredMergeRequests(state: merged) { count }"))
+    }
+
+    /// GitLab has no authored-issues field on `currentUser` — measured
+    /// 2026-09-17 against 19.3, which answers `Field 'createdIssues' doesn't
+    /// exist on type 'CurrentUser'` — so the count comes off the root `issues`
+    /// field, filtered by the login the first document returned. **That login
+    /// travels as a variable**: it is a name the vendor supplied, and a name
+    /// spliced into a query string is a forge deciding what Sissy asks for.
+    func testGitLabIssuesDocumentTakesTheAuthorAsAVariableRatherThanSplicingIt() {
+        let document = GitLabActivityFeed.issuesDocument(now: Self.measuredDay)
+        XCTAssertTrue(document.hasPrefix("query($author: String!)"), document)
+        XCTAssertTrue(document.contains("issues(authorUsername: $author, createdAfter:"))
+        XCTAssertTrue(document.contains("issuesAll: issues(authorUsername: $author) { count }"))
+    }
+
+    func testGitLabIssuesReplyReadsBackEveryWindow() throws {
+        let counts = try payload(Self.gitLabIssuesReply)
+        for (period, expected) in [
+            (UsagePeriod.today, 17), (.sevenDays, 54), (.thirtyDays, 62), (.all, 285),
+        ] {
+            let block = try XCTUnwrap(counts[ForgeAlias.issues(period)] as? [String: Any])
+            XCTAssertEqual(block["count"] as? Int, expected)
+        }
+    }
+
+    /// `after` is exclusive, measured: `after=2026-09-17` answered `x-total: 0`
+    /// on a day that had 95 events. So a window starting on a day names the day
+    /// before it, and the widest window names none.
+    func testGitLabEventsURLNamesTheDayBeforeTheWindowStarts() throws {
+        let today = try XCTUnwrap(
+            GitLabActivityFeed.eventsURL(Self.gitLab, period: .today, now: Self.measuredDay))
+        XCTAssertTrue(today.absoluteString.contains("after=2026-09-16"), today.absoluteString)
+        XCTAssertTrue(today.absoluteString.contains("per_page=1"))
+        let week = try XCTUnwrap(
+            GitLabActivityFeed.eventsURL(Self.gitLab, period: .sevenDays, now: Self.measuredDay))
+        XCTAssertTrue(week.absoluteString.contains("after=2026-09-10"), week.absoluteString)
+        let everything = try XCTUnwrap(
+            GitLabActivityFeed.eventsURL(Self.gitLab, period: .all, now: Self.measuredDay))
+        XCTAssertFalse(everything.absoluteString.contains("after="))
     }
 
     // MARK: Connections

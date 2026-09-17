@@ -14,17 +14,17 @@ enum ForgeKind: String, Sendable, Codable, Equatable, CaseIterable {
 
 /// What one forge account did, per period, in the vendor's own arithmetic.
 ///
-/// **The two figures are the vendor's and are never summed across vendors.**
+/// **The figures are the vendor's and are never summed across vendors.**
 /// GitHub answers with its own contribution-graph total — measured 2026-09-17,
-/// 115 for a day where it also reported 32 commits, 10 pull requests and 2
-/// issues, because the calendar counts contributions to private repositories
-/// the breakdown leaves out. GitLab has no equivalent Sissy can read: its
-/// `users/<name>/calendar.json` answered 200 with `{}` on a self-hosted 19.3
-/// instance the same day, so the count here is the number of events GitLab
-/// recorded for the user, which is push, merge-request, issue and comment
-/// activity. Two vendors counting two things is two readings; adding them
-/// would invent a third, which is the rule `ProviderCredits` already holds for
-/// money in two currencies.
+/// 128 for a day whose itemised commits, issues and pull requests came to 56,
+/// the other 72 being `restrictedContributionsCount`, the private-repository
+/// work the breakdown will not name. GitLab has no equivalent Sissy can read:
+/// its `users/<name>/calendar.json` answered 200 with `{}` on a self-hosted
+/// 19.3 instance the same day, so the count here is the number of events
+/// GitLab recorded for the user, which is push, merge-request, issue and
+/// comment activity. Two vendors counting two things is two readings; adding
+/// them would invent a third, which is the rule `ProviderCredits` already
+/// holds for money in two currencies.
 ///
 /// A period is absent rather than zero when it could not be read. The whole
 /// reading fails together in practice — one request answers every period — but
@@ -37,6 +37,20 @@ struct ForgeActivity: Sendable, Equatable {
     /// recognises from their own profile, and "merged by me" on a team counts
     /// other people's work.
     let merged: [UsagePeriod: Int]
+    /// Issues this account opened in the window.
+    ///
+    /// Opened rather than open: every other figure on the row is something
+    /// that happened inside the window the control names, and a count of what
+    /// is open right now would be the one reading on the block that did not
+    /// move when the window did. What is still on this account's plate is a
+    /// state, and a state belongs beside the work rather than inside a period.
+    ///
+    /// Read from each vendor's own search rather than from the contribution
+    /// breakdown beside it: measured 2026-09-17, GitHub's
+    /// `totalIssueContributions` answered 2 for a day whose search answered 7,
+    /// the difference being the private repositories the breakdown folds into
+    /// `restrictedContributionsCount` without itemising.
+    let issues: [UsagePeriod: Int]
     /// Whether `contributions[.all]` is the vendor's whole record or a year of
     /// it. GitHub's contributions query takes a range and refuses one wider
     /// than a year, so `all` there is the last twelve months while `merged`
@@ -44,7 +58,8 @@ struct ForgeActivity: Sendable, Equatable {
     /// say, since `All` is the one window a user reads as "everything".
     let contributionsBoundedToOneYear: Bool
 
-    static let empty = Self(contributions: [:], merged: [:], contributionsBoundedToOneYear: false)
+    static let empty = Self(
+        contributions: [:], merged: [:], issues: [:], contributionsBoundedToOneYear: false)
 }
 
 /// One forge connection's last reading, or the fact that there is not one.
@@ -93,10 +108,12 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     /// is still a reading; one that never answered is not.
     func hasFigures(for period: UsagePeriod) -> Bool {
         contributions(for: period) != nil || merged(for: period) != nil
+            || issues(for: period) != nil
     }
 
     func contributions(for period: UsagePeriod) -> Int? { activity.contributions[period] }
     func merged(for period: UsagePeriod) -> Int? { activity.merged[period] }
+    func issues(for period: UsagePeriod) -> Int? { activity.issues[period] }
 }
 
 /// Why a forge would not answer.

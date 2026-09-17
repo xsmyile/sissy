@@ -13,13 +13,14 @@ final class ForgeRowTests: XCTestCase {
     private static let readAt = Date(timeIntervalSince1970: 1_789_600_000)
 
     private static func reading(
-        _ connection: ForgeConnection, login: String, contributions: Int, merged: Int,
+        _ connection: ForgeConnection, login: String, contributions: Int, merged: Int, issues: Int,
         at when: Date = readAt
     ) -> ForgeActivityReading {
         ForgeActivityReading(
             id: connection.id, kind: connection.kind, host: connection.host, login: login,
             activity: ForgeActivity(
                 contributions: [.today: contributions], merged: [.today: merged],
+                issues: [.today: issues],
                 contributionsBoundedToOneYear: connection.kind == .gitHub),
             readAt: when, failure: nil)
     }
@@ -50,30 +51,52 @@ final class ForgeRowTests: XCTestCase {
     func testWithNoArchiveTheRowsAnswerToday() {
         let frame = FrameBuilder.build(
             today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [],
-            forge: [Self.reading(Self.gitHub, login: "xsmyile", contributions: 314, merged: 25)])
+            forge: [
+                Self.reading(
+                    Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7)
+            ])
         let snapshot = UsagePanelSnapshot.make(frame: frame, period: .all, now: Self.readAt)
         XCTAssertEqual(snapshot.period, .today)
-        XCTAssertEqual(snapshot.forge.first?.figures, "314 · 25 merged")
+        XCTAssertEqual(snapshot.forge.first?.contributions, "128")
     }
 
-    func testTheRowPrintsBothFiguresAndTheAccountThatAnswered() throws {
+    func testTheRowPrintsEveryFigureAndTheAccountThatAnswered() throws {
         let row = try XCTUnwrap(
-            rows([Self.reading(Self.gitHub, login: "xsmyile", contributions: 314, merged: 25)])
-                .first)
+            rows([
+                Self.reading(
+                    Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7)
+            ]).first)
         XCTAssertEqual(row.login, "xsmyile")
-        XCTAssertEqual(row.figures, "314 · 25 merged")
+        XCTAssertEqual(row.contributions, "128")
+        XCTAssertEqual(row.merged, "28")
+        XCTAssertEqual(row.issues, "7")
         XCTAssertNil(row.notice)
+    }
+
+    /// The word left the row when the mark arrived, so the mark has to be able
+    /// to introduce itself — and in the vendor's own noun, since a GitLab row
+    /// saying "pull requests" is naming something that forge does not have.
+    func testEachMarkCarriesItsOwnMeaningInTheVendorsNoun() throws {
+        let both = rows([
+            Self.reading(Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7),
+            Self.reading(Self.gitLab, login: "davide", contributions: 123, merged: 15, issues: 17),
+        ])
+        XCTAssertEqual(both.first?.mergedHelp, "Pull requests you opened and had merged")
+        XCTAssertEqual(both.last?.mergedHelp, "Merge requests you opened and had merged")
+        XCTAssertEqual(both.first?.issuesHelp, "Issues you opened on GitHub")
+        XCTAssertEqual(both.last?.issuesHelp, "Issues you opened on GitLab")
     }
 
     /// Never summed: two vendors counting two different things are two
     /// readings, and a total across them would belong to neither.
     func testTwoConnectionsStayTwoRows() {
         let both = rows([
-            Self.reading(Self.gitHub, login: "xsmyile", contributions: 314, merged: 25),
-            Self.reading(Self.gitLab, login: "team-user", contributions: 95, merged: 11),
+            Self.reading(Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7),
+            Self.reading(Self.gitLab, login: "davide", contributions: 123, merged: 15, issues: 17),
         ])
         XCTAssertEqual(both.count, 2)
-        XCTAssertEqual(both.map(\.figures), ["314 · 25 merged", "95 · 11 merged"])
+        XCTAssertEqual(both.map(\.contributions), ["128", "123"])
+        XCTAssertEqual(both.map(\.merged), ["28", "15"])
     }
 
     /// A reading that never arrived gets a dash and the reason, never a zero.
@@ -82,7 +105,7 @@ final class ForgeRowTests: XCTestCase {
     func testAConnectionThatNeverAnsweredGetsNoFiguresAndAReason() throws {
         let row = try XCTUnwrap(
             rows([.unavailable(Self.gitLab, failure: .unreachable, at: Self.readAt)]).first)
-        XCTAssertNil(row.figures)
+        XCTAssertFalse(row.hasFigures)
         XCTAssertEqual(row.notice, "could not be reached")
     }
 
@@ -91,11 +114,11 @@ final class ForgeRowTests: XCTestCase {
         let stale = ForgeActivityReading(
             id: Self.gitHub.id, kind: .gitHub, host: Self.gitHub.host, login: "xsmyile",
             activity: ForgeActivity(
-                contributions: [.today: 314], merged: [.today: 25],
+                contributions: [.today: 128], merged: [.today: 28], issues: [.today: 7],
                 contributionsBoundedToOneYear: true),
             readAt: Self.readAt.addingTimeInterval(-7200), failure: .unreachable)
         let row = try XCTUnwrap(rows([stale]).first)
-        XCTAssertEqual(row.figures, "314 · 25 merged")
+        XCTAssertEqual(row.contributions, "128")
         XCTAssertEqual(row.notice, "last read 2h ago")
     }
 
@@ -104,10 +127,13 @@ final class ForgeRowTests: XCTestCase {
     func testAWindowWithNoAnswerGetsNoFigure() throws {
         let row = try XCTUnwrap(
             rows(
-                [Self.reading(Self.gitHub, login: "xsmyile", contributions: 314, merged: 25)],
+                [
+                    Self.reading(
+                        Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7)
+                ],
                 period: .thirtyDays
             ).first)
-        XCTAssertNil(row.figures)
+        XCTAssertFalse(row.hasFigures)
     }
 
     /// The widest window is the one place `All` means two things on GitHub, so
@@ -115,7 +141,10 @@ final class ForgeRowTests: XCTestCase {
     func testTheWidestWindowSaysTheContributionsReachBackAYear() throws {
         let row = try XCTUnwrap(
             rows(
-                [Self.reading(Self.gitHub, login: "xsmyile", contributions: 4126, merged: 400)],
+                [
+                    Self.reading(
+                        Self.gitHub, login: "xsmyile", contributions: 4138, merged: 403, issues: 188)
+                ],
                 period: .all
             ).first)
         XCTAssertTrue(row.tooltip.contains("one year"), row.tooltip)
