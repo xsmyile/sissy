@@ -21,6 +21,12 @@ It runs unsandboxed with the network-client entitlement, keeps its metering in
 a single process, and binds no port. The surface worth looking at is small, so
 here it is:
 
+**Files it reads.** The two session-log trees — `~/.claude/projects` and
+`~/.codex/sessions`, or wherever `CLAUDE_CONFIG_DIR` and `CODEX_HOME` point —
+the CLIs' own config files beside them, and the credential below. The one place
+outside your home directory it reads is Homebrew's `bin`, and only when you
+press **Copy diagnostics**, to say which `ccusage` builds are installed.
+
 **Credentials it reads, never mints.** To show rate-limit windows, Sissy reads
 Claude Code's own OAuth token. It comes from `<config home>/.credentials.json`
 where the CLI keeps one, otherwise from the login keychain through

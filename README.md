@@ -26,15 +26,6 @@ per-repository split beside it.
 
 </div>
 
-## Why
-
-A subscription hides the meter. A flat monthly fee tells you nothing about what
-a day of agents actually cost, which account ate it, which repository it went
-on, or how close you are to the rate limit that will stop your session mid-task.
-The logs are already on disk, and the limits are one read away with the
-credential the CLI already stored. Sissy reads both and puts the answer where
-you will see it.
-
 ## Install
 
 macOS 26 or later, Apple Silicon or Intel.
@@ -130,10 +121,14 @@ diagnostics**, which is what an issue needs.
 
 ## Supported CLIs
 
-| CLI | Reads | Reports |
-|---|---|---|
-| Claude Code | `~/.claude/projects/**/*.jsonl`, honoring `CLAUDE_CONFIG_DIR` | tokens, cost, per-repository split, every rate-limit window the account publishes, plan, credits |
-| Codex | `~/.codex/sessions/**/rollout-*.jsonl`, honoring `CODEX_HOME` | tokens, cost, per-repository split, the windows the CLI reports, plan, credit balance |
+| CLI | Reads |
+|---|---|
+| Claude Code | `~/.claude/projects/**/*.jsonl`, honoring `CLAUDE_CONFIG_DIR` |
+| Codex | `~/.codex/sessions/**/rollout-*.jsonl`, honoring `CODEX_HOME` |
+
+Sissy reports the same things for both: tokens, cost, the per-repository split,
+every rate-limit window the account publishes, the plan, and the credits where
+the vendor reports any.
 
 Claude Code is on unless you switch it off; Codex is picked up whenever its
 session directory exists. Either can be forced on or off from
@@ -161,22 +156,15 @@ analytics and no crash reporting.
 Everything it sends over the network is a reading you asked for, and each one
 has a switch. As it stands there are four:
 
-| Host | When | Why | Off switch |
-|---|---|---|---|
-| `raw.githubusercontent.com` | once a day | LiteLLM's public model price list | `remotePricing: false` pins pricing to the compiled-in snapshot and takes Sissy fully offline |
-| `api.anthropic.com` | while Claude Code is metering | the usage and profile endpoints, with the OAuth token Claude Code already stored. Read-only, never refreshed, never written back | switch the Claude Code provider off |
-| `claude.ai` | only for an account you linked yourself | that account's usage and credits | unlink the account |
-| `status.claude.com`, `status.openai.com` | on a poll | each vendor's own public status page. No account, no credential, no identity | `statusChecks: false` |
+| Host | What for | Off switch |
+|---|---|---|
+| `raw.githubusercontent.com` | LiteLLM's public model price list, once a day | `remotePricing: false` pins pricing to the compiled-in snapshot and takes Sissy fully offline |
+| `api.anthropic.com` | the usage and profile endpoints, with the OAuth token Claude Code already stored — read-only, never refreshed, never written back | switch the Claude Code provider off |
+| `claude.ai` | usage and credits for an account you linked yourself | unlink the account |
+| `status.claude.com`, `status.openai.com` | each vendor's own public status page, on a poll. No account, no credential, no identity | `statusChecks: false` |
 
-**What Sissy reads on disk**, so there are no surprises: the two session-log
-trees, the CLIs' own config files, and Claude Code's own OAuth token, which is
-what the rate-limit windows come from. The token lives either in the CLI's
-config directory or in the login keychain. Sissy never refreshes it, because
-Anthropic's refresh tokens rotate on use and spending one would sign you out of
-your own terminal, and never writes it except on an account switch you clicked.
-The one place outside your home directory it reads today is Homebrew's `bin`,
-and only when you press **Copy diagnostics**, to say which `ccusage` builds are
-installed. [SECURITY.md](SECURITY.md) is the longer version.
+[SECURITY.md](SECURITY.md) has the other half: what Sissy reads on disk, and
+which credential the rate-limit windows come from.
 
 **What Sissy keeps**: one day-by-model record under
 `~/Library/Application Support/Sissy/history/`, so the panel can answer for more
@@ -186,15 +174,12 @@ nothing. On a first run Sissy fills that record in once from what the CLIs
 already logged, so the wider windows are not empty for a month.
 
 **Anything Sissy writes outside its own folder is off by default** and named
-before you switch it on. There is one such switch, and one button that does the
-same on the spot. The switch is *Name projects even when Sissy is off*; it adds
-one line to `~/.claude/settings.json` and one to `~/.codex/hooks.json`, so a
-session writes down which repository it is working
-in while that directory still exists. Without it, work in a worktree deleted
-while Sissy was not running counts towards no project at all. Switching it off
-takes both lines and the script back out. The button is *Use in CLI*, which
-writes the account you picked into the slot Claude Code reads its credential
-from. Nothing else Sissy does touches it.
+before you switch it on. Today that is one switch and one button: *Name projects
+even when Sissy is off*, which adds a line to `~/.claude/settings.json` and one
+to `~/.codex/hooks.json` and takes both back out when you switch it off; and
+*Use in CLI*, which writes the account you picked into the slot Claude Code
+reads its credential from. [Uninstall](#uninstall) says what survives if you
+remove Sissy without switching the first one back off.
 
 ## Uninstall
 
@@ -274,22 +259,10 @@ cd app && xcodegen generate
 xcodebuild -project Sissy.xcodeproj -scheme Sissy -configuration Debug build
 ```
 
-Or, to run what you just built as a proper signed app:
-
-```bash
-scripts/dev-build-app.sh
-```
-
-It builds into `~/.cache/sissy/build-dev`, clears dev bundles other worktrees
-left behind, and relaunches, so exactly one dev Sissy exists whichever branch
-you are on. It keeps its own support directory, so it never disturbs an
-installed copy. *Start at login* goes through `SMAppService`, which needs a
-normally signed bundle: `CODE_SIGNING_ALLOWED=NO` is fine for CI, not for
-testing that switch.
-
-[CONTRIBUTING.md](CONTRIBUTING.md) has the rest: the linters, the self-test, and
-what Sissy will and will not take. The
-[code of conduct](CODE_OF_CONDUCT.md) applies to all of it.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rest: the signed dev build that
+*Start at login* has to be tested from, the linters, the self-test, and what
+Sissy will and will not take. The [code of conduct](CODE_OF_CONDUCT.md) applies
+to all of it.
 
 ## Credits
 
@@ -297,11 +270,8 @@ As it ships today, nothing third-party links into Sissy. Its reading of the
 Claude Code and Codex log formats, and its pricing, follow
 [`ccusage`](https://github.com/ccusage/ccusage);
 the rates themselves come from [LiteLLM](https://github.com/BerriAI/litellm).
-[CREDITS.md](CREDITS.md) says it properly.
-
-Sissy is not affiliated with Anthropic, OpenAI, GitHub or GitLab, and none of
-them endorses it. Their marks appear only to say which CLI a row is about and
-where a repository is pushed.
+[CREDITS.md](CREDITS.md) says it properly, and covers the vendor marks Sissy
+draws to say which CLI a row is about and where a repository is pushed.
 
 ## The name
 
