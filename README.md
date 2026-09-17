@@ -81,17 +81,18 @@ counts against the repository it was cut from, so one project reads as one row
 instead of eleven small ones.
 
 <p align="center">
-  <img src="assets/provider-claude.png" alt="A Claude account's provider page: the seat and plan, every rate-limit window with what is left and when it resets, the day, and the repositories it went on." width="300" />
-  <img src="assets/provider-codex.png" alt="A Codex account's provider page: the plan, the weekly window with its pace, a session window awaiting a reading, the day, and the repositories it went on." width="300" />
+  <img src="assets/provider-claude.png" alt="A Claude account's provider page: the seat and plan, every rate-limit window with what is left and when it resets, and under them the CLI's day and the repositories it went on." width="300" />
+  <img src="assets/provider-codex.png" alt="A Codex account's provider page: the plan, the weekly window with its pace, a session window awaiting a reading, and under them the CLI's day and the repositories it went on." width="300" />
 </p>
 
 ### A provider page per account
 
-Click a row for everything about that one account: who it is signed in as and on
-which plan, every rate-limit window it publishes with the time each resets, the
-credit balance where the vendor reports one, its own day, and its own
-repositories. The vendor's own status page is down there too, so "is it me or
-them" costs no browser tab.
+Click a row for the account it names: who it is signed in as and on which plan,
+every rate-limit window it publishes with the time each resets, and the credit
+balance where the vendor reports one. Under those sit that CLI's own day and its
+own repositories — the CLI's, not the account's, because a log line carries no
+account id and Sissy will not split a day it cannot attribute. The vendor's own
+status page is down there too, so "is it me or them" costs no browser tab.
 
 Click a repository for its card: the forge it is pushed to, a link to the page,
 and the path on disk.
@@ -158,20 +159,25 @@ has a switch. As it stands there are four:
 
 | Host | What for | Off switch |
 |---|---|---|
-| `raw.githubusercontent.com` | LiteLLM's public model price list, once a day | `remotePricing: false` pins pricing to the compiled-in snapshot and takes Sissy fully offline |
+| `raw.githubusercontent.com` | LiteLLM's public model price list, once a day | `remotePricing: false` pins pricing to the compiled-in snapshot |
 | `api.anthropic.com` | the usage and profile endpoints, with the OAuth token Claude Code already stored — read-only, never refreshed, never written back | switch the Claude Code provider off |
 | `claude.ai` | usage and credits for an account you linked yourself | unlink the account |
 | `status.claude.com`, `status.openai.com` | each vendor's own public status page, on a poll. No account, no credential, no identity | `statusChecks: false` |
 
-[SECURITY.md](SECURITY.md) has the other half: what Sissy reads on disk, and
-which credential the rate-limit windows come from.
+Each row is its own switch and there is no single one behind all four: pinning
+the rates leaves the other three running. [SECURITY.md](SECURITY.md) has the
+other half — what Sissy reads on disk, and which credential the rate-limit
+windows come from.
 
 **What Sissy keeps**: one day-by-model record under
 `~/Library/Application Support/Sissy/history/`, so the panel can answer for more
 than today. It holds totals, never prompts. Settings names the folder, deletes
 it on a button, and `historyRetentionDays` bounds it, with `0` recording
 nothing. On a first run Sissy fills that record in once from what the CLIs
-already logged, so the wider windows are not empty for a month.
+already logged, so the wider windows are not empty for a month. Beside it, in a
+keychain item of its own, sits a copy of each Claude credential it has seen
+active — that is what *Use in CLI* switches between, and
+[Uninstall](#uninstall) says how to remove them.
 
 **Anything Sissy writes outside its own folder is off by default** and named
 before you switch it on. Today that is one switch and one button: *Name projects
@@ -191,24 +197,32 @@ Or drag **Sissy** out of Applications. Either way the counting stops and the Mac
 goes back to how it was: no daemon to kill, no power assertion still held,
 nothing listening anywhere.
 
-Three things survive on purpose, because they are the three Sissy was given
-permission to keep:
+Three things survive, and each has its own way out:
 
 - **The usage archive**, under `~/Library/Application Support/Sissy/`. Settings
   ▸ General deletes it on a button, or remove the folder yourself.
-- **Archived Claude accounts**, if you ever pressed *Use in CLI*. They sit in a
-  keychain item of Sissy's own; Settings ▸ Providers forgets them.
+- **Archived Claude accounts.** While Claude Code is metering, Sissy keeps a
+  copy of whichever credential it finds active, so *Use in CLI* can put it back
+  later. They sit in a keychain item of Sissy's own
+  (`com.radonforge.sissy.claude-account`) and have no control of their own yet;
+  Keychain Access deletes them. A claude.ai session you linked is a separate
+  item (`com.radonforge.sissy.claude-web`), and that one Settings ▸ Providers
+  removes on its row.
 - **The session hooks**, if you ever switched *Name projects even when Sissy is
   off* on. Switch it back off **before** you uninstall and Sissy takes them out
   itself.
 
-That last one is the only thing Sissy cannot clean up after the fact, so it is
-worth saying plainly. Uninstall with the switch still on and two lines stay
-behind: a `SessionStart` entry in `~/.claude/settings.json` and one in
-`~/.codex/hooks.json`, both naming a `session-start.sh` that is no longer there.
-They are inert — the shell finds no script, drains stdin and exits 0 — but they
-are in two files that belong to other programs, and Sissy is gone and cannot
-reach them. Delete the two entries by hand.
+The hooks are the case worth saying plainly, because they are the one thing
+that goes on running once Sissy is gone. Uninstall with the switch still on and
+two lines stay behind: a `SessionStart` entry in `~/.claude/settings.json` and
+one in `~/.codex/hooks.json`, both naming `session-start.sh`. That script lives
+in Sissy's own folder rather than in the app bundle, so dragging the app to the
+Trash does not take it: every CLI session goes on running it, resolving the
+repository and writing a line nothing reads any more. Remove
+`~/Library/Application Support/Sissy/` and the script goes with it, after which
+the two lines are inert — the shell finds nothing, drains stdin and exits 0.
+They are still in files that belong to other programs, so delete the entries by
+hand either way.
 
 ## How it works
 
