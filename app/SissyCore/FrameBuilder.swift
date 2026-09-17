@@ -450,6 +450,15 @@ struct FrameData: Sendable, Equatable {
     /// exists on a Mac where neither CLI has run. Empty while nothing is
     /// connected, which is every install until the user connects one.
     let forge: [ForgeActivityReading]
+    /// Which repositories commit under a name their forge does not expect,
+    /// and which agree, for every repository the ledger names.
+    ///
+    /// Beside the projects rather than on them: a project row is today's
+    /// spend and exists only for a repository that was worked in during the
+    /// window, where this answers for every repository Sissy knows — which is
+    /// the set the question is about. Empty where there is no git to read
+    /// with, and while the sweep has not run.
+    let identities: [RepositoryIdentity]
 
     /// Defaulted so a frame can be built without naming the split: a caller
     /// that has none is saying there is none, and every test and future field
@@ -463,7 +472,8 @@ struct FrameData: Sendable, Equatable {
         history: [UsagePeriod: UsageHistoryRollup] = [:],
         projects: [ProjectTotals] = [],
         providerStatus: [String: ProviderStatusReading] = [:],
-        forge: [ForgeActivityReading] = []
+        forge: [ForgeActivityReading] = [],
+        identities: [RepositoryIdentity] = []
     ) {
         self.tokens = tokens
         self.cost = cost
@@ -474,6 +484,7 @@ struct FrameData: Sendable, Equatable {
         self.projects = projects
         self.providerStatus = providerStatus
         self.forge = forge
+        self.identities = identities
     }
 }
 
@@ -490,7 +501,8 @@ enum FrameBuilder {
         keepAwake: KeepAwakeState = .off,
         history: [UsagePeriod: UsageHistoryRollup] = [:],
         providerStatus: [String: ProviderStatusReading] = [:],
-        forge: [ForgeActivityReading] = []
+        forge: [ForgeActivityReading] = [],
+        identities: [RepositoryIdentity] = []
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
         return FrameData(
@@ -502,7 +514,8 @@ enum FrameBuilder {
             history: history,
             projects: combinedProjects(providers),
             providerStatus: providerStatus,
-            forge: forge
+            forge: forge,
+            identities: identities
         )
     }
 

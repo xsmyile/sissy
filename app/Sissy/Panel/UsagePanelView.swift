@@ -82,6 +82,12 @@ struct UsagePanelView: View {
         /// back has to land on the page that was left, not on that vendor's
         /// first account.
         case projects(String?, account: String?)
+        /// Which repositories commit under a name their forge does not
+        /// expect, one level in from the Overview. `focus` is the repository
+        /// the page was opened about — a project row's own, or the single
+        /// repository the Overview's line names — and nil where it was opened
+        /// to read the whole list.
+        case identities(focus: String?)
     }
 
     /// Cadence for both readouts the panel keeps on its own clock: the
@@ -115,7 +121,7 @@ struct UsagePanelView: View {
     /// for a vendor whose Overview row is not per account.
     private var openAccount: String? {
         switch page {
-        case .overview: nil
+        case .overview, .identities: nil
         case .provider(_, let account), .services(_, let account),
             .projects(_, let account):
             account
@@ -129,7 +135,7 @@ struct UsagePanelView: View {
         -> UsagePanelSnapshot.ProviderRow?
     {
         switch page {
-        case .overview: return nil
+        case .overview, .identities: return nil
         case .provider(let id, _), .services(let id, _):
             return providers.first { $0.id == id }
         case .projects(let id, _):
@@ -186,6 +192,7 @@ struct UsagePanelView: View {
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
         let services = servicesReading(of: open)
         let projects = projectsPage(of: live?.frame)
+        let identityFocus = Self.identityFocus(page)
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 if let projects {
@@ -195,6 +202,8 @@ struct UsagePanelView: View {
                         open, live: live,
                         back: services == nil
                             ? .overview : .provider(open.id, account: openAccount))
+                } else if case .identities = page {
+                    identitiesHeader
                 } else {
                     header(live)
                 }
@@ -210,7 +219,11 @@ struct UsagePanelView: View {
                 Group {
                     if let snapshot {
                         if let projects {
-                            PanelProjectsPage(page: projects)
+                            PanelProjectsPage(
+                                page: projects,
+                                openIdentities: { page = .identities(focus: $0) })
+                        } else if case .identities = page {
+                            PanelIdentities(rows: snapshot.identities, focus: identityFocus)
                         } else if let open, let services {
                             PanelProviderStatusPage(provider: open.id, row: services)
                         } else if let open {
@@ -239,6 +252,7 @@ struct UsagePanelView: View {
                                 openProjects: {
                                     page = .projects(open.id, account: $0)
                                 },
+                                openIdentities: { page = .identities(focus: $0) },
                                 loadHistory: {
                                     await model.engine.usageHistorySeries(provider: $0)
                                 },
@@ -253,6 +267,7 @@ struct UsagePanelView: View {
                                 },
                                 openProvider: { page = .provider($0, account: $1) },
                                 openProjects: { page = .projects(nil, account: nil) },
+                                openIdentities: { page = .identities(focus: $0) },
                                 selectPeriod: { model.setUsagePeriod($0) }
                             )
                         }
@@ -281,6 +296,55 @@ struct UsagePanelView: View {
     }
 
     // MARK: Header
+
+    /// Which repository the identities page was opened about, if any.
+    static func identityFocus(_ page: Page) -> String? {
+        guard case .identities(let focus) = page else { return nil }
+        return focus
+    }
+
+    /// The identities page's own header: the way back, the title, and a
+    /// re-read.
+    ///
+    /// The refresh is not a nicety here. A user on this page has usually just
+    /// corrected a repository in a terminal, and waiting out a sweep interval
+    /// to watch the row clear reads as the correction not having worked.
+    private var identitiesHeader: some View {
+        HStack(spacing: 8) {
+            Button {
+                page = .overview
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Back to today")
+
+            Text("Identities")
+                .font(.system(size: Self.headerTitleSize, weight: .semibold))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            Button {
+                model.engine.refreshIdentities()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .glassEffect(.regular, in: .circle)
+            .help("Read every repository's commit identity again")
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 10)
+    }
 
     private func header(_ live: SissyModel.LiveFrame?) -> some View {
         let menuHeader = model.menuSnapshot.header

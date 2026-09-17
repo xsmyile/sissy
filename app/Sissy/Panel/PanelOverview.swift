@@ -29,6 +29,10 @@ struct PanelOverview: View {
     let meteringProviders: Int
     let openProvider: (String, String?) -> Void
     let openProjects: () -> Void
+
+    /// Opens the identities page, on the repository named or on the whole
+    /// list where none is.
+    let openIdentities: (String?) -> Void
     let selectPeriod: (UsagePeriod) -> Void
 
     var body: some View {
@@ -49,7 +53,55 @@ struct PanelOverview: View {
                 Divider()
                 forge
             }
+
+            if let alert = snapshot.identityAlert {
+                Divider()
+                identityAlert(alert)
+            }
         }
+    }
+
+    // MARK: Identities
+
+    /// One line, and only when a repository commits under a name its forge
+    /// does not expect.
+    ///
+    /// **Silent on an ordinary day, which is the whole design.** A badge per
+    /// project row was the alternative and it is the wrong axis: the project
+    /// list is ordered by spend and answers where the money went, so a mark
+    /// about identity riding on it is the decorative signal on the cost axis
+    /// this panel already refuses. A row that exists only when there is
+    /// something to act on costs a healthy Mac nothing at all, and names the
+    /// repository rather than a count whenever there is only one — because
+    /// naming it is the whole of the remaining work.
+    ///
+    /// It sits under the projects rather than over them. Sissy's reason for
+    /// being in the menu bar is the day's spend, and a reading that is right
+    /// on most days does not get to push it down.
+    private func identityAlert(_ alert: UsagePanelSnapshot.IdentityAlert) -> some View {
+        Button {
+            openIdentities(alert.repository)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                Text(alert.summary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help("Show every repository's commit identity")
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 10)
     }
 
     // MARK: Headline
@@ -365,7 +417,9 @@ struct PanelOverview: View {
             .buttonStyle(.plain)
             .help("Show every project")
             ForEach(snapshot.projects) { row in
-                ProjectRowView(row: row)
+                ProjectRowView(
+                    row: row,
+                    checkIdentity: row.repository == nil ? nil : { openIdentities(row.id) })
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)

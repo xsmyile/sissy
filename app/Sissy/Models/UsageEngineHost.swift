@@ -534,6 +534,22 @@ final class UsageEngineHost {
         }
     }
 
+    /// Re-reads every repository's commit identity, for the identities page's
+    /// own button.
+    ///
+    /// One task at a time: the sweep spawns a `git` per repository and a user
+    /// pressing the button twice would run two of them over the same set for
+    /// no second answer.
+    func refreshIdentities() {
+        guard let engine, identityRefresh == nil else { return }
+        identityRefresh = Task {
+            await engine.refreshIdentities()
+            identityRefresh = nil
+        }
+    }
+
+    private var identityRefresh: Task<Void, Never>?
+
     /// What is left of the floor once the work has taken its time, and nil
     /// once there is nothing left to wait for.
     static func remainingFloor(elapsed: Duration) -> Duration? {

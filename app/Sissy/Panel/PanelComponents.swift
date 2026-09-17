@@ -434,6 +434,13 @@ struct ProjectRowView: View {
     /// money instead, is two readings in one colour.
     var showsProviders: Bool = false
 
+    /// Opens this repository's commit identity, where there is a repository to
+    /// open one for. On the right-click with the rest, which is where Apple's
+    /// own guidance puts a small number of actions relevant to the current
+    /// view — and a menu is the system's mechanism rather than a window of
+    /// Sissy's, so it cannot resize the panel underneath it.
+    var checkIdentity: (() -> Void)?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
@@ -535,6 +542,10 @@ struct ProjectRowView: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(path, forType: .string)
                 }
+            }
+            if let checkIdentity {
+                Divider()
+                Button("Check Identity…", action: checkIdentity)
             }
         }
     }

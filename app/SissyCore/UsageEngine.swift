@@ -117,6 +117,7 @@ actor UsageEngine {
     /// a forge reader holds resumes from an offset. What it costs is one poll.
     private let forgeIndex: ForgeConnectionIndex
     private var forgeMonitor: ForgeActivityMonitor
+    private let identityMonitor: GitIdentityMonitor
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
@@ -247,6 +248,7 @@ actor UsageEngine {
         // invalidates a tail's snapshot may take it with it.
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         self.projectLedger = projectLedger
+        self.identityMonitor = GitIdentityMonitor(ledger: projectLedger)
         let limitsBackoff = LimitsBackoffStore(
             url: LimitsBackoffLedger.defaultURL(in: stateDir))
         self.limitsBackoff = limitsBackoff
@@ -413,6 +415,7 @@ actor UsageEngine {
             await startStatusChecks()
         }
         await startForgeActivity()
+        await startIdentityChecks()
         await applyKeepAwake()
         guard lifecycle == .running else { return }
         let me = self
@@ -648,6 +651,7 @@ actor UsageEngine {
         await stopCodexLimits()
         await statusMonitor.stop()
         await forgeMonitor.stop()
+        await identityMonitor.stop()
         await aggregator.stop()
         bootTask = nil
         backfillTask = nil
@@ -1106,6 +1110,7 @@ actor UsageEngine {
         lastAgentActivityAt = Date()
         statusMonitor.noteActivity()
         forgeMonitor.noteActivity()
+        identityMonitor.noteActivity()
     }
 
     /// Takes or releases the automatic hold when the agents change the answer.
@@ -1457,6 +1462,20 @@ actor UsageEngine {
         }
     }
 
+    /// Starts the identity sweep, under the same guard `startStatusChecks`
+    /// carries and for the same reason: `start()` reaches here across
+    /// suspensions a `stop()` can land in, and the monitor only knows whether
+    /// it is running rather than whether the engine still is.
+    private func startIdentityChecks() async {
+        guard lifecycle == .running else { return }
+        let me = self
+        await identityMonitor.start { await me.reemit() }
+        guard lifecycle == .running else {
+            await identityMonitor.stop()
+            return
+        }
+    }
+
     /// Every forge the user has connected, for the Settings list.
     ///
     /// Read from the index rather than from the monitor, so a build whose
@@ -1527,6 +1546,15 @@ actor UsageEngine {
         await forgeMonitor.stop()
         forgeMonitor = ForgeActivityMonitor(connections: forgeIndex.load())
         await startForgeActivity()
+    }
+
+    /// Re-reads every repository's commit identity now, for the panel's own
+    /// refresh: a user who has just corrected a repository is looking at the
+    /// row that said so, and waiting out the sweep interval to see it clear
+    /// reads as the correction not having worked.
+    func refreshIdentities() async {
+        let me = self
+        await identityMonitor.sweepOnce { await me.reemit() }
     }
 
     /// Switches the status readings on or off at runtime, and persists it.
@@ -1647,7 +1675,8 @@ actor UsageEngine {
                 coversScreen: keepAwakeCoversScreen),
             history: currentHistory(now: now),
             providerStatus: statusMonitor.currentStatus(),
-            forge: forgeMonitor.currentReadings()
+            forge: forgeMonitor.currentReadings(),
+            identities: identityMonitor.currentIdentities()
         )
         await onFrame?(frame)
     }
