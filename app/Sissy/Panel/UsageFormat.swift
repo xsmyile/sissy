@@ -1073,3 +1073,106 @@ enum ClaudeAccountSwitchCopy {
         }
     }
 }
+
+/// How the panel words a connected forge's two counters.
+extension UsageFormat {
+
+    /// The name a forge answers to on a row and in a control.
+    static func forgeName(_ kind: ForgeKind) -> String {
+        switch kind {
+        case .gitHub: "GitHub"
+        case .gitLab: "GitLab"
+        }
+    }
+
+    /// A contribution or merge count, grouped and never abbreviated.
+    ///
+    /// Deliberately not `tokens`, which compacts: a token count is read as a
+    /// magnitude where these are read as exact figures, and "1.2K
+    /// contributions" is the same as not answering. Four digits is the widest
+    /// a year of them reaches — measured 2026-09-17, 4125 and 3673 on the two
+    /// forges of one account — so the grouped form still fits the row.
+    static func forgeCount(_ count: Int) -> String {
+        forgeCountFormatter.string(from: NSNumber(value: count)) ?? "\(count)"
+    }
+
+    private static let forgeCountFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+
+    /// The figures as the row prints them, nil when there are none for the
+    /// window on screen.
+    ///
+    /// Either half may be missing on its own and the row says what it has: a
+    /// vendor that answered one query and refused the other is not a quiet day
+    /// in either of them. Both missing is no reading, which the caller answers
+    /// with the reason instead.
+    static func forgeFigures(contributions: Int?, merged: Int?) -> String? {
+        var parts: [String] = []
+        if let contributions { parts.append(forgeCount(contributions)) }
+        if let merged { parts.append("\(forgeCount(merged)) merged") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// What a row says instead of, or beside, its figures.
+    ///
+    /// A refused token and a host that could not be reached are separate
+    /// sentences because they need separate things from the user, and neither
+    /// of them is a zero: this user's own GitLab routes over a tunnel, so a
+    /// laptop off the VPN would otherwise report a day with no work on it.
+    /// When there are figures behind the failure the age is what the row says,
+    /// because figures that were true an hour ago plus how old they are is a
+    /// more useful reading than an error where a number was.
+    static func forgeNotice(
+        _ failure: ForgeReadFailure?, readAt: Date, hasFigures: Bool, now: Date = Date()
+    ) -> String? {
+        guard let failure else { return nil }
+        if hasFigures { return "last read " + age(now.timeIntervalSince(readAt)) }
+        switch failure {
+        case .unauthorized: return "the token was refused"
+        case .rateLimited: return "asked to slow down"
+        case .unreachable: return "could not be reached"
+        case .malformed: return "answered something Sissy could not read"
+        case .noCredential: return "no token"
+        case .credentialUnreadable: return "the keychain would not answer"
+        }
+    }
+
+    /// The hover for a forge row: what each figure counts, in the vendor's own
+    /// terms, plus the caveat the window carries.
+    ///
+    /// It says what it counts because the two vendors do not count the same
+    /// thing and the row has room for neither explanation: GitHub answers with
+    /// its own contribution total and GitLab with the events it recorded. And
+    /// on the widest window it says that GitHub's contributions reach back a
+    /// year where the merge count beside them reaches back for ever, which is
+    /// the one place `All` means two things on one line.
+    static func forgeTooltip(
+        _ kind: ForgeKind, host: String, login: String?, period: UsagePeriod,
+        boundedToOneYear: Bool
+    ) -> String {
+        var lines = [forgeName(kind) + " · " + host]
+        if let login { lines.append("Read as \(login)") }
+        switch kind {
+        case .gitHub:
+            lines.append("Contributions as GitHub counts them, plus pull requests you had merged")
+        case .gitLab:
+            lines.append("Events GitLab recorded for you, plus merge requests you had merged")
+        }
+        if period == .all, boundedToOneYear {
+            lines.append("Contributions reach back one year; the merge count is every one")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// The heading over the forge rows, naming the window they are over for
+    /// the reason the project section names its own day: the block under a
+    /// control is the one that has to say which choice it is answering.
+    static func forgeSectionLabel(_ period: UsagePeriod) -> String {
+        let window = period == .all ? "all time" : periodLabel(period).lowercased()
+        return "Contributions · " + window
+    }
+}

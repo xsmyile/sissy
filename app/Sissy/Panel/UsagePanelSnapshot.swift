@@ -41,6 +41,35 @@ struct UsagePanelSnapshot: Equatable {
     /// row offers to open — the fold is a row about the rest of the list and
     /// cannot say how long the list is without being read as a project.
     let projectCount: Int
+    /// One row per connected forge, over the same window the headline is on.
+    /// Empty until the user connects one, and the panel then draws no section
+    /// rather than a heading over nothing.
+    let forge: [ForgeRow]
+
+    /// One connected forge's two counters, as the Overview prints them.
+    ///
+    /// `login` is on the row because it is the only thing on the line that says
+    /// whose figures these are, and a CLI's own configuration cannot be trusted
+    /// to answer that: measured 2026-09-17, `gh`'s configuration named one
+    /// account for a token that answered as another. The forge's mark beside it
+    /// is `ForgeMark`, which the project rows already carry.
+    ///
+    /// `figures` and `notice` are both optional and both may be present. A
+    /// reading that has gone stale keeps its figures and takes an age beside
+    /// them; one that never arrived has a reason and no figures. Neither state
+    /// is a zero, which is the rule the whole panel is on — an empty gauge is a
+    /// measurement and this would be the absence of one.
+    struct ForgeRow: Equatable, Identifiable {
+        let id: String
+        let kind: ForgeKind
+        let host: String
+        let login: String?
+        /// `115 · 25 merged`, nil when the window has no reading at all.
+        let figures: String?
+        /// Why there is no figure, or how old the one beside it is.
+        let notice: String?
+        let tooltip: String
+    }
 
     /// One day of a provider's recent spend, as a bar on its page.
     ///
@@ -564,7 +593,8 @@ struct UsagePanelSnapshot: Equatable {
             usedToday: frame.providers.count { $0.tokens > 0 },
             projects: makeProjects(
                 frame.projects, totalTokens: totalTokens, totalCost: totalCost),
-            projectCount: frame.projects.count
+            projectCount: frame.projects.count,
+            forge: makeForge(frame.forge, period: resolved, now: now)
         )
     }
 
@@ -614,6 +644,36 @@ struct UsagePanelSnapshot: Equatable {
         /// When, how many, and how much — today's own total rather than the
         /// headline's, which is over whatever period the user picked.
         let subtitle: String
+    }
+
+    /// The forge rows for the window the headline resolved to.
+    ///
+    /// The window is the resolved one rather than the requested one, so the
+    /// rows cannot answer a period the control is not showing. That does tie
+    /// the forge to the archive on a fresh install — with nothing archived the
+    /// control does not appear and every row reads today — and it is the right
+    /// way round: the block sits under a period the user picked for the money,
+    /// and two windows under one control would be worse than one window that
+    /// starts narrow.
+    private static func makeForge(
+        _ readings: [ForgeActivityReading], period: UsagePeriod, now: Date
+    ) -> [ForgeRow] {
+        readings.map { reading in
+            let figures = UsageFormat.forgeFigures(
+                contributions: reading.contributions(for: period),
+                merged: reading.merged(for: period))
+            return ForgeRow(
+                id: reading.id,
+                kind: reading.kind,
+                host: reading.host,
+                login: reading.login,
+                figures: figures,
+                notice: UsageFormat.forgeNotice(
+                    reading.failure, readAt: reading.readAt, hasFigures: figures != nil, now: now),
+                tooltip: UsageFormat.forgeTooltip(
+                    reading.kind, host: reading.host, login: reading.login, period: period,
+                    boundedToOneYear: reading.activity.contributionsBoundedToOneYear))
+        }
     }
 
     /// Which windows the headline may be put over: today, which needs no
