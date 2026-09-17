@@ -270,8 +270,14 @@ Settings.
 ```bash
 brew install xcodegen
 cd app && xcodegen generate
-xcodebuild -project Sissy.xcodeproj -scheme Sissy -configuration Debug build
+xcodebuild -project Sissy.xcodeproj -scheme Sissy -configuration Debug build \
+  CODE_SIGNING_ALLOWED=NO
 ```
+
+The project carries this repository's own Development Team, so
+`CODE_SIGNING_ALLOWED=NO` is what builds it without an Apple Developer account
+of your own — it is what CI passes too. Drop it and set `DEVELOPMENT_TEAM` to
+yours when you need a signed bundle.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest: the signed dev build that
 *Start at login* has to be tested from, the linters, the self-test, and what
