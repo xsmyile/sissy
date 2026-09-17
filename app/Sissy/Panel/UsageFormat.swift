@@ -620,11 +620,11 @@ enum UsageFormat {
     ///
     /// The blank is not a fault and must not read as one. On Codex the
     /// windows ride the CLI's own events, so an idle session simply has not
-    /// sent one. On Claude Code a switch in Settings is what turns them on at
-    /// all, and `limitsEnabled` is what stops this telling someone who has
-    /// already flipped it to go and flip it — a reading that has not landed
-    /// yet and a module that was never switched on look identical from here,
-    /// and only the app knows which it is.
+    /// sent one; on Claude Code they come off a poll of the credential the CLI
+    /// already keeps, so the first reading may not have landed yet. Neither
+    /// sentence may send anyone to Settings: the switch that used to gate
+    /// Claude's limits is gone, and a caption pointing at a control that is
+    /// not there is worse than the blank it was explaining.
     static func noWindowsCaption(_ id: String) -> String {
         switch id {
         case ProviderID.claudeCode:

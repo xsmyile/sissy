@@ -1,0 +1,30 @@
+# Names a docstring may cite that this source does not declare:
+# platform APIs, environment variables, external files, vendor UI.
+AGENTS.md
+CFFIXED_USER_HOME
+Conversations
+FSEventStreamScheduleWithRunLoop
+GPTs
+IgnoreSelf
+LSUIElement
+M
+Material.bar
+NSPanel
+Optional
+PATH
+PATH_MAX
+RTLD_DEFAULT
+RawRepresentable
+Responses
+RunAtLoad
+_NSPopoverWindow
+argv
+caffeinate
+getcwd
+json.dumps
+notclaude.ai
+objectWillChange
+project.yml
+sizeThatFits
+systemRed
+willSet

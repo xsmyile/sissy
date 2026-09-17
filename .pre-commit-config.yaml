@@ -19,6 +19,13 @@ repos:
         files: ^app/(Sissy|SissyCore)/.*\.swift$
         pass_filenames: false
 
+      - id: doc-refs
+        name: doc-refs
+        entry: python3 scripts/check-doc-refs.py
+        language: system
+        files: ^(app/(Sissy|SissyCore|SissyTests)/.*\.swift|scripts/check-doc-refs\.py|\.docref-baseline)$
+        pass_filenames: false
+
       - id: shellcheck
         name: shellcheck
         entry: shellcheck
