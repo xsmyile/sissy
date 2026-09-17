@@ -135,11 +135,13 @@ Claude Code is on unless you switch it off; Codex is picked up whenever its
 session directory exists. Either can be forced on or off from
 Settings ▸ Providers.
 
-Two ceilings worth knowing about. Codex publishes its limits only on its own
-turn events, so those gauges are always one turn behind. That is the shape of
-the CLI, not a bug. Claude's limits come from the credential Claude Code already
-stored, so they are as fresh as the last time that CLI ran; the refresh button
-on the provider page re-reads it. That read costs no dialog either way: the
+Limits come from each vendor's own usage endpoint, read with the credential its
+CLI already stored — Claude's from `api.anthropic.com`, Codex's from
+`chatgpt.com`. Both are as fresh as the last poll, and the refresh button on the
+provider page asks again. Codex's turn events are still read and still fill the
+gauges in when nothing else can: a Mac that is offline, or a token the CLI has
+not renewed, falls back to whatever the last turn said, with its age on the
+row. That read costs no dialog either way: the
 credential is a file in the CLI's own config directory, and where macOS keeps it
 in the login keychain instead, Sissy reads it through `/usr/bin/security`, which
 is already on that item's access list.
@@ -155,17 +157,19 @@ renders a number. It listens on no port, has no account of its own, and does no
 analytics and no crash reporting.
 
 Everything it sends over the network is a reading you asked for, and each one
-has a switch. As it stands there are four:
+has a switch. As it stands there are six:
 
 | Host | What for | Off switch |
 |---|---|---|
 | `raw.githubusercontent.com` | LiteLLM's public model price list, once a day | `remotePricing: false` pins pricing to the compiled-in snapshot |
 | `api.anthropic.com` | the usage and profile endpoints, with the OAuth token Claude Code already stored — read-only, never refreshed, never written back | switch the Claude Code provider off |
-| `claude.ai` | usage and credits for an account you linked yourself | unlink the account |
+| `claude.ai` | usage and credits for a Claude account you linked yourself | unlink the account |
+| `chatgpt.com` | the Codex usage endpoint, with the OAuth token Codex already stored and with one of Sissy's own for each account you linked | switch the Codex provider off, or unlink the account |
+| `auth.openai.com` | signing in, once, when you link a Codex account — the vendor's own page in a window | nothing to switch: it opens only on that button |
 | `status.claude.com`, `status.openai.com` | each vendor's own public status page, on a poll. No account, no credential, no identity | `statusChecks: false` |
 
-Each row is its own switch and there is no single one behind all four: pinning
-the rates leaves the other three running. [SECURITY.md](SECURITY.md) has the
+Each row is its own switch and there is no single one behind all of them:
+pinning the rates leaves the rest running. [SECURITY.md](SECURITY.md) has the
 other half — what Sissy reads on disk, and which credential the rate-limit
 windows come from.
 
@@ -214,6 +218,11 @@ Three things survive, and each has its own way out:
   Keychain Access deletes them. A claude.ai session you linked is a separate
   item (`com.radonforge.sissy.claude-web`), and that one Settings ▸ Providers
   removes on its row.
+- **Linked Codex accounts.** Signing one in puts its OpenAI credential in a
+  keychain item of Sissy's own (`com.radonforge.sissy.codex-oauth`), which
+  Settings ▸ Providers removes on its row. Codex itself is never written: the
+  account your terminal is on does not change when you link one here, or when
+  you unlink it.
 - **The session hooks**, if you ever switched *Name projects even when Sissy is
   off* on. Switch it back off **before** you uninstall and Sissy takes them out
   itself.

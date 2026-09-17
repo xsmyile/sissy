@@ -284,7 +284,7 @@ final class UsageEngineHost {
 
     /// Opens claude.ai's own login and links whatever account it produces.
     ///
-    /// The whole flow lives in that window — see `ClaudeWebLoginWindow`. A
+    /// The whole flow lives in that window — see `VendorLoginWindow`. A
     /// second press while it is open brings it back to the front rather than
     /// being refused, because Sissy has no Dock icon and that press is the
     /// only way back to a window that went behind.
