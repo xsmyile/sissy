@@ -592,6 +592,7 @@ struct UsagePanelSnapshot: Equatable {
                     // reading for is an account it holds nothing for.
                     known: slice.id == ProviderID.claudeCode
                         ? claudeAccounts : ClaudeAccountRegistry.Snapshot(),
+                    provider: slice.id,
                     reading: limitsReading, now: now),
                 plan: plan?.label,
                 planTier: plan?.tier,
@@ -607,7 +608,7 @@ struct UsagePanelSnapshot: Equatable {
                     : slice.limitsObservedAt.map {
                         UsageFormat.windowsCaption(observedAt: $0, now: now)
                     },
-                notice: UsageFormat.limitsNotice(slice.limitsState),
+                notice: UsageFormat.limitsNotice(slice.limitsState, provider: slice.id),
                 account: makeAccount(slice.account),
                 projects: makeProjects(
                     slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
@@ -702,6 +703,7 @@ struct UsagePanelSnapshot: Equatable {
     static func accountEntries(
         readings: [AccountSignals],
         known: ClaudeAccountRegistry.Snapshot,
+        provider: String,
         reading limitsReading: LimitsReading,
         now: Date
     ) -> [AccountEntry] {
@@ -734,7 +736,7 @@ struct UsagePanelSnapshot: Equatable {
                     UsageFormat.windowsCaption(observedAt: $0, now: now)
                 },
                 credits: makeCredits(reading?.credits, now: now),
-                notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet),
+                notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet, provider: provider),
                 isReadable: reading != nil,
                 isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID),
                 isSwitchable: switchable.contains(id))

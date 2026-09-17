@@ -227,16 +227,17 @@ final class UsageFormatTests: XCTestCase {
     /// Every notice names what to do. The one state Sissy cannot fix offers
     /// no control rather than a button that would do nothing.
     func testALapsedGrantOffersTheOneClickThatRecoversIt() {
-        let notice = UsageFormat.limitsNotice(.needsAuthorization)
+        let notice = UsageFormat.limitsNotice(.needsAuthorization, provider: ProviderID.claudeCode)
         XCTAssertEqual(notice?.action, "Allow")
     }
 
     func testARefusalOffersARetryRatherThanNothing() {
-        XCTAssertEqual(UsageFormat.limitsNotice(.refused)?.action, "Try again")
+        XCTAssertEqual(
+            UsageFormat.limitsNotice(.refused, provider: ProviderID.claudeCode)?.action, "Try again")
     }
 
     func testACLIThatIsNotSignedInOffersNoControl() {
-        let notice = UsageFormat.limitsNotice(.signedOut)
+        let notice = UsageFormat.limitsNotice(.signedOut, provider: ProviderID.claudeCode)
         XCTAssertNotNil(notice?.message)
         XCTAssertNil(notice?.action)
     }
@@ -244,7 +245,27 @@ final class UsageFormatTests: XCTestCase {
     /// The common case, and the reason a row that is fine says nothing: one
     /// that explains itself every time is one nobody reads when it matters.
     func testWorkingLimitsSayNothing() {
-        XCTAssertNil(UsageFormat.limitsNotice(.quiet))
+        XCTAssertNil(UsageFormat.limitsNotice(.quiet, provider: ProviderID.claudeCode))
+    }
+
+    /// Every sentence in a notice names something — the CLI that is signed
+    /// out, the vendor that is refusing, the sign-in that has ended — so a row
+    /// saying another vendor's words sends somebody to fix the wrong thing.
+    func testANoticeIsWordedForTheProviderItIsOn() throws {
+        let signedOut = try XCTUnwrap(
+            UsageFormat.limitsNotice(.signedOut, provider: ProviderID.codex))
+        XCTAssertTrue(signedOut.message.contains("Codex"), signedOut.message)
+        XCTAssertFalse(signedOut.message.contains("Claude"), signedOut.message)
+
+        let expired = try XCTUnwrap(
+            UsageFormat.limitsNotice(.sessionExpired, provider: ProviderID.codex))
+        XCTAssertTrue(expired.message.contains("OpenAI"), expired.message)
+        XCTAssertEqual(expired.kind, .link)
+
+        let blocked = try XCTUnwrap(
+            UsageFormat.limitsNotice(
+                .rateLimited(until: Date(timeIntervalSince1970: 0)), provider: ProviderID.codex))
+        XCTAssertTrue(blocked.message.hasPrefix("OpenAI"), blocked.message)
     }
 
     // MARK: An empty limits block
@@ -351,7 +372,8 @@ final class UsageFormatTests: XCTestCase {
         let until = try XCTUnwrap(
             clock.calendar.date(byAdding: .minute, value: 70, to: clock.now))
 
-        let notice = try XCTUnwrap(UsageFormat.limitsNotice(.rateLimited(until: until)))
+        let notice = try XCTUnwrap(
+            UsageFormat.limitsNotice(.rateLimited(until: until), provider: ProviderID.claudeCode))
 
         XCTAssertEqual(
             notice.message,

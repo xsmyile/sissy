@@ -275,7 +275,6 @@ final class UsageEngineHost {
     /// The Codex accounts Settings lists, and the only surface one can be
     /// unlinked from.
     private(set) var linkedCodexAccounts: [CodexLinkedAccount] = []
-    private(set) var linkingCodexAccount = false
     /// Whether a login is in flight, from the click until the session is
     /// filed. The panel's `Add account…` is disabled meanwhile: two logins
     /// would race for the same keychain item.
@@ -327,12 +326,12 @@ final class UsageEngineHost {
     }
 
     /// The organisation question as the window draws it.
-    static func question(_ choice: ClaudeWebLinkChoice) -> VendorLoginWindow.Question {
-        VendorLoginWindow.Question(
+    static func question(_ choice: ClaudeWebLinkChoice) -> VendorLoginQuestion {
+        VendorLoginQuestion(
             title: ClaudeAccountLinkCopy.chooseLabel,
             caption: ClaudeAccountLinkCopy.chooseCaption(choice.identity.email),
             options: UsageFormat.organizationChoices(choice.organizations).map {
-                VendorLoginWindow.Question.Option(id: $0.id, label: $0.label)
+                VendorLoginQuestion.Option(id: $0.id, label: $0.label)
             })
     }
 
@@ -359,7 +358,6 @@ final class UsageEngineHost {
         window.finish()
         loginWindow = nil
         linkingClaudeAccount = false
-        linkingCodexAccount = false
         claudeWebSession = engine?.hasClaudeWebSession ?? false
         linkedClaudeAccounts = engine?.linkedClaudeAccounts ?? []
         linkedCodexAccounts = engine?.linkedCodexAccounts ?? []
@@ -378,7 +376,6 @@ final class UsageEngineHost {
             loginWindow?.present(onCredential: { _ in }, onCancel: {})
             return
         }
-        linkingCodexAccount = true
         let flow = CodexOAuth.begin()
         let window = VendorLoginWindow(vendor: .codex(flow: flow))
         loginWindow = window
@@ -404,18 +401,17 @@ final class UsageEngineHost {
             onCancel: { [weak self] in
                 guard let self else { return }
                 loginWindow = nil
-                linkingCodexAccount = false
                 Task { await engine.cancelCodexLink() }
             })
     }
 
     /// The workspace question as the window draws it.
-    static func question(_ choice: CodexLinkChoice) -> VendorLoginWindow.Question {
-        VendorLoginWindow.Question(
+    static func question(_ choice: CodexLinkChoice) -> VendorLoginQuestion {
+        VendorLoginQuestion(
             title: CodexAccountLinkCopy.chooseLabel,
             caption: CodexAccountLinkCopy.chooseCaption(choice.identity.email),
             options: choice.workspaces.map {
-                VendorLoginWindow.Question.Option(
+                VendorLoginQuestion.Option(
                     id: $0.id, label: UsageFormat.workspaceLabel($0))
             })
     }

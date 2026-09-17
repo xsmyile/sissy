@@ -1081,6 +1081,12 @@ actor UsageEngine {
         }
     }
 
+    private var meteringCodex: Bool {
+        resolvedProviders.contains {
+            $0.id == ProviderID.codex && $0.activation.isMetering
+        }
+    }
+
     /// `userInitiated` is the difference between someone flipping the switch
     /// and a launch finding it already on. Only the first may raise the
     /// keychain dialog — that is the whole of the rule that a permission is
@@ -1288,15 +1294,22 @@ actor UsageEngine {
 
     /// One reader per stored credential, renewing its own item as it goes.
     static func linkedCodexSources(links: [String: CodexAccountLink]) -> [CodexUsageSource] {
-        CodexAccountStore.storedAccounts().map { id in
-            CodexUsageSource(
-                account: id,
-                workspace: links[id]?.workspace?.name,
-                credentialSource: { allowingInteraction in
-                    await CodexAccountStore.supply(
-                        account: id, allowingInteraction: allowingInteraction)
-                })
-        }
+        CodexAccountStore.storedAccounts().map { linkedCodexSource(id: $0, links: links) }
+    }
+
+    /// One reader for one linked account. The renewal rides on the store,
+    /// which is what owns the item: a refresh token is redeemed once, so the
+    /// copy that holds it is the copy that may spend it.
+    static func linkedCodexSource(
+        id: String, links: [String: CodexAccountLink]
+    ) -> CodexUsageSource {
+        CodexUsageSource(
+            account: id,
+            workspace: links[id]?.workspace?.name,
+            credentialSource: { allowingInteraction in
+                await CodexAccountStore.supply(
+                    account: id, allowingInteraction: allowingInteraction)
+            })
     }
 
     /// Builds a reader per stored credential and drops the ones whose
@@ -1309,7 +1322,11 @@ actor UsageEngine {
     /// read the set before this call can reach a reader this call discarded,
     /// and a poll loop on an object nothing holds outlives `stop()`.
     private func rebuildCodexSources() async {
-        let stored = Set(CodexAccountStore.storedAccounts())
+        // A provider that is switched off has no reader, whatever the keychain
+        // holds: the rule is that a module which is off does not exist as far
+        // as the system is concerned, and a linked account polling OpenAI for
+        // a row that is not on the panel is exactly that.
+        let stored = meteringCodex ? Set(CodexAccountStore.storedAccounts()) : []
         let existing = codexSources.load()
         for source in existing where source.account.map({ !stored.contains($0) }) ?? false {
             await source.retire()
@@ -1320,15 +1337,7 @@ actor UsageEngine {
         let links = codexLinks.load()
         let added = stored.subtracting(kept.compactMap(\.account))
             .sorted()
-            .map { id in
-                CodexUsageSource(
-                    account: id,
-                    workspace: links[id]?.workspace?.name,
-                    credentialSource: { allowingInteraction in
-                        await CodexAccountStore.supply(
-                            account: id, allowingInteraction: allowingInteraction)
-                    })
-            }
+            .map { Self.linkedCodexSource(id: $0, links: links) }
         codexSources.store(kept + added)
     }
 

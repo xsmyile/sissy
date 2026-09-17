@@ -30,7 +30,7 @@ enum CodexOAuth {
     /// keeps Sissy from binding a port for the length of a login.
     static let redirectURI = "http://localhost:1455/auth/callback"
     static let scope = "openid profile email offline_access"
-    private static let authorizeURL = "https://auth.openai.com/oauth/authorize"
+    private static let authorizeURL = URL(string: "https://auth.openai.com/oauth/authorize")!
     private static let tokenURL = URL(string: "https://auth.openai.com/oauth/token")!
     private static let requestTimeout: TimeInterval = 30
     private static let verifierBytes = 48
@@ -77,7 +77,7 @@ enum CodexOAuth {
         let verifier = randomToken()
         let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64URLEncoded
         let state = randomToken()
-        var components = URLComponents(string: authorizeURL)
+        var components = URLComponents(url: authorizeURL, resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "client_id", value: clientID),
@@ -92,14 +92,9 @@ enum CodexOAuth {
             URLQueryItem(name: "codex_cli_simplified_flow", value: "true"),
             URLQueryItem(name: "state", value: state),
         ]
-        guard let url = components?.url else {
-            // Unreachable with a literal base and percent-encoded items, and
-            // the fallback is the bare authorize page rather than a crash: a
-            // login that starts one step early is recoverable, a trap is not.
-            return Flow(
-                url: URL(string: authorizeURL)!, state: state, verifier: verifier)
-        }
-        return Flow(url: url, state: state, verifier: verifier)
+        // The fallback is the bare authorize page rather than a crash: a login
+        // that starts one step early is recoverable, a trap is not.
+        return Flow(url: components?.url ?? authorizeURL, state: state, verifier: verifier)
     }
 
     /// Redeems the code the window came back with.

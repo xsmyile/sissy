@@ -569,15 +569,30 @@ enum UsageFormat {
     /// the calendar. That rule is for a reset days out; this one is an hour
     /// away at most, so the question is never which day — measured, a 1800 s
     /// block beginning at 23:50 read "until Fri".
+    /// Why a row has no reading, in the vendor's own words.
+    ///
+    /// Provider-aware because every sentence here names something: the CLI
+    /// that is signed out, the vendor that is refusing, the sign-in that has
+    /// ended. Said in one vendor's vocabulary they are worse than silence — a
+    /// Codex row reading "Claude Code is not signed in on this Mac" sends
+    /// somebody to fix the wrong terminal.
     static func limitsNotice(
-        _ state: ProviderLimitsState
+        _ state: ProviderLimitsState,
+        provider: String
     ) -> UsagePanelSnapshot.LimitsNotice? {
+        let cli = providerName(provider)
+        let isCodex = provider == ProviderID.codex
+        let vendor = isCodex ? "OpenAI" : "Anthropic"
         switch state {
         case .quiet:
             return nil
         case .needsAuthorization:
+            // Two different items: the CLI's own token for Claude Code, and
+            // the sign-in Sissy holds for a linked account. Both are read out
+            // of the keychain and both recover on one click.
+            let secret = isCodex ? "this account's sign-in" : "\(cli)'s token"
             return .init(
-                message: "Sissy needs your permission to read Claude Code's token again",
+                message: "Sissy needs your permission to read \(secret) again",
                 action: "Allow", kind: .refresh)
         case .refused:
             return .init(
@@ -585,17 +600,17 @@ enum UsageFormat {
                 action: "Try again", kind: .refresh)
         case .signedOut:
             return .init(
-                message: "Claude Code is not signed in on this Mac", action: nil, kind: .refresh)
+                message: "\(cli) is not signed in on this Mac", action: nil, kind: .refresh)
         case .sessionExpired:
-            return .init(
-                message: "The claude.ai session has ended", action: "Link again", kind: .link)
+            let ended = isCodex ? "The OpenAI sign-in" : "The claude.ai session"
+            return .init(message: "\(ended) has ended", action: "Link again", kind: .link)
         case .credentialUnreachable:
             return .init(
                 message: "Sissy cannot read this account's sign-in, so its limits stay hidden",
                 action: nil, kind: .refresh)
         case .rateLimited(let until):
             return .init(
-                message: "Anthropic is not answering for limits until "
+                message: "\(vendor) is not answering for limits until "
                     + until.formatted(.dateTime.hour().minute()),
                 action: nil, kind: .refresh)
         }

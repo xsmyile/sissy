@@ -52,7 +52,6 @@ actor CodexUsageSource: SourceSignals {
     private let workspace: String?
 
     private var retired = false
-    private var cached: CodexCredential?
     private var mayInteract = false
     private var pollTask: Task<Void, Never>?
     private var firstRequest: Task<Duration, Never>?
@@ -113,7 +112,6 @@ actor CodexUsageSource: SourceSignals {
     /// this reader stopping is what puts the row back on them.
     func stop(clearingState: Bool = true) {
         cancelRequests()
-        cached = nil
         observed.store(nil)
         published.update {
             $0.windows = []
@@ -148,7 +146,6 @@ actor CodexUsageSource: SourceSignals {
     /// windows, and a refresh that blanks the gauges it is restoring reads as
     /// a failure for as long as the request takes.
     func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
-        cached = nil
         if case .rateLimited(let until) = published.load().limitsState, until > Date() { return }
         cancelRequests()
         lastReported = nil
@@ -176,8 +173,17 @@ actor CodexUsageSource: SourceSignals {
         case wait(Duration)
     }
 
+    /// Read on every poll rather than held.
+    ///
+    /// `ClaudeWebSource` holds its session because reading it can raise a
+    /// dialog; neither credential here can — one is a file, the other is an
+    /// item Sissy wrote — and holding one has a cost that outweighs the read.
+    /// The CLI's `auth.json` is rewritten by `codex login`, and its tokens
+    /// live ten days: a reader that kept the first one it saw would go on
+    /// asking OpenAI about the account the user *left*, under the name the
+    /// tail had already moved on to, until that token expired. Two accounts on
+    /// one row, for up to ten days.
     private func currentCredential(generation stamp: Int) async -> Credential {
-        if let cached, !cached.isExpired() { return .ready(cached) }
         let interactive = mayInteract
         mayInteract = false
         let outcome = await credentialSource(interactive)
@@ -195,7 +201,6 @@ actor CodexUsageSource: SourceSignals {
                 report("the Codex access token has expired; waiting for it to be renewed")
                 return .wait(Self.refreshInterval)
             }
-            cached = found
             observed.store(found.userId)
             return .ready(found)
         case .missing:
@@ -274,7 +279,6 @@ actor CodexUsageSource: SourceSignals {
             return .seconds(backoff)
         }
         if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
-            cached = nil
             published.update { $0.limitsState = .sessionExpired }
             report("the Codex credential was refused (status \(code)); sign in again")
             return Self.refreshInterval

@@ -54,8 +54,8 @@ struct CodexLinkedAccount: Sendable, Equatable, Identifiable {
     let id: String
     let link: CodexAccountLink?
 
-    static func list(stored: [String], links: [String: CodexAccountLink]) -> [CodexLinkedAccount] {
-        stored.map { CodexLinkedAccount(id: $0, link: links[$0]) }
+    static func list(stored: [String], links: [String: CodexAccountLink]) -> [Self] {
+        stored.map { Self(id: $0, link: links[$0]) }
     }
 }
 
