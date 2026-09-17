@@ -298,54 +298,31 @@ struct SectionLabel: View {
 /// a bar for its share. The path stays in the tooltip — a client's name is a
 /// directory's name — and the remainder row puts its reason there instead.
 ///
-/// **A row that names a repository answers for itself in a menu.** What it has
-/// to offer is two actions — the page the work is pushed to, and the path on
-/// this Mac — and Apple's guidance puts exactly that in a menu: *"a context
-/// menu lets people access a small number of frequently used actions relevant
-/// to their current view or task"* (Human Interface Guidelines, Menus). It was
-/// a `.popover` card until 0.1.10, which is the one thing the same guidance
-/// rules out here — *"Never show a cascade or hierarchy of popovers, in which
-/// one emerges from another"* — and `PanelProviderStatus` records what that
-/// cost the panel when it was measured.
+/// **The forge's mark sits after the name and is the way to the page.** It is
+/// the one control on the row, it costs the row no height, and a row that has
+/// no mark is saying something true — there is nothing to open — where a mark
+/// placed *before* the name would push the names of repositories one step
+/// right and leave every other row's starting at the gutter, which is the rule
+/// the bars were given a line of their own to keep.
 ///
-/// A menu gives up nothing a card was buying. It is the system's own mechanism
-/// rather than a window of Sissy's, so it cannot resize the panel, it does not
-/// dismiss the popover it opens over — measured on macOS 27 — and it may reach
-/// past the panel's edge, which is the only thing the 240 pt card did that the
-/// panel's own 340 pt could not hold.
+/// It replaced a `.popover` card and then a pull-down `Menu`, in two steps for
+/// two reasons. The card because Apple's guidance forbids a popover inside a
+/// popover — *"Never show a cascade or hierarchy of popovers, in which one
+/// emerges from another"* (Human Interface Guidelines, Popovers) — and
+/// `PanelProviderStatus` records what ignoring it cost the panel. The menu
+/// because a pull-down opened over the rows below it, which is a lot of a
+/// 340 pt panel spent on two items, and because macOS draws no icon in a
+/// SwiftUI menu item, so the mark had nowhere to be there.
 ///
-/// What it does give up is a path the pointer can select, so the path stays
-/// where it already was — on the hover — and goes where it was being selected
-/// to reach: the clipboard.
-///
-/// **A click rather than a hover**: the tooltip already belongs to the hover
-/// and is the only place the path is readable, and a list a pointer crosses on
-/// its way somewhere else is no place to open anything. The right-click
-/// carries the same items, the way the keep-awake switch carries its modes.
+/// The two actions live on the **right-click**, which is where macOS puts a
+/// row's own commands — *"a context menu lets people access a small number of
+/// frequently used actions relevant to their current view or task"* (Human
+/// Interface Guidelines, Menus) — and neither is the only way to anything: the
+/// repository's name is on the row and its path is on the hover.
 struct ProjectRowView: View {
     let row: UsagePanelSnapshot.ProjectRow
 
     var body: some View {
-        Group {
-            if hasActions {
-                Menu {
-                    actions
-                } label: {
-                    line
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .pointerStyle(.link)
-            } else {
-                line
-            }
-        }
-        .help(help)
-        .contextMenu { actions }
-    }
-
-    private var line: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 HStack(spacing: 0) {
@@ -362,6 +339,7 @@ struct ProjectRowView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+                forgeLink
                 Spacer(minLength: 0)
                 Text("\(row.tokens) · \(row.cost)")
                     .font(.system(size: 12))
@@ -370,6 +348,24 @@ struct ProjectRowView: View {
             ShareBar(share: row.share, tint: .secondary)
         }
         .contentShape(.rect)
+        .help(row.tooltip ?? "")
+        .contextMenu { actions }
+    }
+
+    /// The mark only where there is a page behind it: a remote that names a
+    /// port is pointing at a transport rather than at a site, and that row
+    /// keeps its repository with no way out to it.
+    @ViewBuilder
+    private var forgeLink: some View {
+        if let repository = row.repository, let page = repository.page {
+            Link(destination: page) {
+                ForgeMark(host: repository.host)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .pointerStyle(.link)
+            .help("Open \(repository.label) on \(repository.host)")
+        }
     }
 
     /// The repository's page and its path — and nothing at all for a row that
@@ -381,37 +377,17 @@ struct ProjectRowView: View {
         if let repository = row.repository {
             if let page = repository.page {
                 Link(destination: page) {
-                    Label {
-                        Text("Open on \(repository.host)")
-                    } icon: {
-                        ForgeMark(host: repository.host)
-                    }
+                    Text("Open on \(repository.host)")
                 }
             }
             if let path = row.tooltip {
-                Button {
+                Button("Copy Path") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(path, forType: .string)
-                } label: {
-                    Label("Copy Path", systemImage: Self.copySymbol)
                 }
             }
         }
     }
-
-    private var hasActions: Bool {
-        guard let repository = row.repository else { return false }
-        return repository.page != nil || row.tooltip != nil
-    }
-
-    private var help: String {
-        guard let tooltip = row.tooltip else { return "" }
-        guard hasActions else { return tooltip }
-        return tooltip + "\n" + Self.menuHint
-    }
-
-    private static let menuHint = "Click for its page and its path"
-    private static let copySymbol = "doc.on.clipboard"
 }
 
 /// The forge's own mark, where Sissy ships one.
