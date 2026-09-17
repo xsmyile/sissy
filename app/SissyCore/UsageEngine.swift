@@ -190,6 +190,11 @@ actor UsageEngine {
     private let resolvedProviders: [ResolvedProvider]
     /// The limits reader built on Claude Code's own credential.
     private let claudeOwnLimits: ClaudeLimitsProbe?
+    /// Where every limits reader records the vendor refusing it, so a reader
+    /// rebuilt inside a block waits it out instead of spending a request on
+    /// it. One store for all of them: the readers are actors and an account
+    /// adds another, and a file each would be a file per credential.
+    private let limitsBackoff: LimitsBackoffStore
     /// Whether the CLI keeps a credential Sissy can read.
     ///
     /// Answered off the construction path — finding out costs a `security`
@@ -234,6 +239,9 @@ actor UsageEngine {
         // invalidates a tail's snapshot may take it with it.
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         self.projectLedger = projectLedger
+        let limitsBackoff = LimitsBackoffStore(
+            url: LimitsBackoffLedger.defaultURL(in: stateDir))
+        self.limitsBackoff = limitsBackoff
         let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
         let claudeHome = config.providerHome(vendor: ProviderID.claudeCode)
@@ -289,10 +297,15 @@ actor UsageEngine {
                 let authURL = home.codexAuthURL
                 self.codexSources.store(
                     [
-                        CodexUsageSource(credentialSource: { _ in
-                            CodexAuthSource.credential(at: authURL)
-                        })
-                    ] + Self.linkedCodexSources(links: self.codexLinks.load()))
+                        CodexUsageSource(
+                            credentialSource: { _ in
+                                CodexAuthSource.credential(at: authURL)
+                            },
+                            backoff: limitsBackoff.slot(
+                                for: LimitsBackoffLedger.codexKey(account: nil)))
+                    ]
+                        + Self.linkedCodexSources(
+                            links: self.codexLinks.load(), backoff: limitsBackoff))
                 providers.append(
                     LocalUsageProvider.codex(
                         codexDir: home.dataDir,
@@ -317,9 +330,11 @@ actor UsageEngine {
                 // CLI nobody has signed into.
                 let probe =
                     limitsProbe
-                    ?? ClaudeLimitsProbe(credentials: { _, _ in
-                        ClaudeCodeCredentials.load(home: home)
-                    })
+                    ?? ClaudeLimitsProbe(
+                        credentials: { _, _ in
+                            ClaudeCodeCredentials.load(home: home)
+                        },
+                        backoff: limitsBackoff.slot(for: LimitsBackoffLedger.claudeCLIKey))
                 ownLimits = probe
                 providers.append(
                     LocalUsageProvider.claudeCode(
@@ -790,6 +805,12 @@ actor UsageEngine {
         }
         await reemit()
         let me = self
+        // The block a refusal left belongs to the credential that earned it,
+        // and that credential has just been replaced. Keeping it would leave
+        // the account the user switched *to* with no limits until a deadline
+        // its own token never met — and, now the record outlives the process,
+        // past a relaunch as well.
+        await claudeOwnLimits?.clearBackoff()
         await claudeOwnLimits?.refresh { await me.reemit() }
         await aggregator.refreshSignals(for: ProviderID.claudeCode)
         await reemit()
@@ -1155,7 +1176,13 @@ actor UsageEngine {
         let links = claudeWebLinks.load()
         let added = stored.subtracting(kept.map(\.account))
             .sorted()
-            .map { ClaudeWebSource(account: $0, organization: links[$0]?.organization) }
+            .map {
+                ClaudeWebSource(
+                    account: $0,
+                    organization: links[$0]?.organization,
+                    backoff: limitsBackoff.slot(
+                        for: LimitsBackoffLedger.claudeWebKey(account: $0)))
+            }
         claudeWebSources.store(kept + added)
     }
 
@@ -1293,15 +1320,19 @@ actor UsageEngine {
     }
 
     /// One reader per stored credential, renewing its own item as it goes.
-    static func linkedCodexSources(links: [String: CodexAccountLink]) -> [CodexUsageSource] {
-        CodexAccountStore.storedAccounts().map { linkedCodexSource(id: $0, links: links) }
+    static func linkedCodexSources(
+        links: [String: CodexAccountLink], backoff: LimitsBackoffStore? = nil
+    ) -> [CodexUsageSource] {
+        CodexAccountStore.storedAccounts().map {
+            linkedCodexSource(id: $0, links: links, backoff: backoff)
+        }
     }
 
     /// One reader for one linked account. The renewal rides on the store,
     /// which is what owns the item: a refresh token is redeemed once, so the
     /// copy that holds it is the copy that may spend it.
     static func linkedCodexSource(
-        id: String, links: [String: CodexAccountLink]
+        id: String, links: [String: CodexAccountLink], backoff: LimitsBackoffStore? = nil
     ) -> CodexUsageSource {
         CodexUsageSource(
             account: id,
@@ -1309,7 +1340,8 @@ actor UsageEngine {
             credentialSource: { allowingInteraction in
                 await CodexAccountStore.supply(
                     account: id, allowingInteraction: allowingInteraction)
-            })
+            },
+            backoff: backoff?.slot(for: LimitsBackoffLedger.codexKey(account: id)))
     }
 
     /// Builds a reader per stored credential and drops the ones whose
@@ -1337,7 +1369,7 @@ actor UsageEngine {
         let links = codexLinks.load()
         let added = stored.subtracting(kept.compactMap(\.account))
             .sorted()
-            .map { Self.linkedCodexSource(id: $0, links: links) }
+            .map { Self.linkedCodexSource(id: $0, links: links, backoff: limitsBackoff) }
         codexSources.store(kept + added)
     }
 

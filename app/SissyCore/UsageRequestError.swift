@@ -19,7 +19,7 @@ extension UsageRequestError {
     private static let retryAfterFloor: TimeInterval = 300
     /// A ceiling because the header is foreign input, and because a block
     /// longer than this is indistinguishable from one Sissy simply waits out.
-    private static let retryAfterCeiling: TimeInterval = 3600
+    static let retryAfterCeiling: TimeInterval = 3600
     /// What a 429 with no `Retry-After` is worth waiting.
     private static let blindBackoff: TimeInterval = 1800
 

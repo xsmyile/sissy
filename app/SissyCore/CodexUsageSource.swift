@@ -50,6 +50,9 @@ actor CodexUsageSource: SourceSignals {
     /// Workspace name recorded when the account was linked, which the reply
     /// does not carry: OpenAI names the account it answered for by id only.
     private let workspace: String?
+    /// Where a refusal is written down so the next run honours it, keyed by
+    /// this reader's own credential.
+    private let backoff: LimitsBackoffSlot?
 
     private var retired = false
     private var mayInteract = false
@@ -64,10 +67,12 @@ actor CodexUsageSource: SourceSignals {
         credentialSource: @escaping @Sendable (Bool) async -> CodexCredentialReading,
         fetchSource:
             @escaping @Sendable (CodexCredential) async throws ->
-            CodexUsagePayload.Reading = fetch
+            CodexUsagePayload.Reading = fetch,
+        backoff: LimitsBackoffSlot? = nil
     ) {
         self.account = account
         self.workspace = workspace
+        self.backoff = backoff
         self.credentialSource = credentialSource
         self.fetchSource = fetchSource
     }
@@ -226,6 +231,7 @@ actor CodexUsageSource: SourceSignals {
     }
 
     private func readAndFetch(generation stamp: Int) async -> Duration {
+        if let wait = await recordedBackoff(generation: stamp) { return wait }
         let credential: CodexCredential
         switch await currentCredential(generation: stamp) {
         case .ready(let found): credential = found
@@ -238,11 +244,24 @@ actor CodexUsageSource: SourceSignals {
                 report("OpenAI answered for a different account than the one asked for")
             }
             publish(reading)
+            await backoff?.record(nil)
             return Self.refreshInterval
         } catch {
             guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-            return handle(error)
+            return await handle(error)
         }
+    }
+
+    /// The wait a refusal recorded on an earlier run still has left, guarded
+    /// by the generation on the reasoning the Claude probe's twin carries.
+    private func recordedBackoff(generation stamp: Int) async -> Duration? {
+        guard let until = await backoff?.deadline() else { return nil }
+        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+        let remaining = until.timeIntervalSinceNow
+        guard remaining > 0 else { return nil }
+        published.update { $0.limitsState = .rateLimited(until: until) }
+        report("still refused by OpenAI until \(until); waiting rather than asking")
+        return .seconds(remaining)
     }
 
     /// What the row takes from one reply.
@@ -270,13 +289,14 @@ actor CodexUsageSource: SourceSignals {
     /// rather than spending a token OpenAI has retired. The windows stay,
     /// because the last reading and its age are still true and this row's
     /// other source — the CLI's own turns — is still writing them.
-    private func handle(_ error: Error) -> Duration {
+    private func handle(_ error: Error) async -> Duration {
         if case UsageRequestError.rateLimited(let retryAfter) = error {
-            let backoff = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
-            let until = Date().addingTimeInterval(backoff)
+            let seconds = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
+            let until = Date().addingTimeInterval(seconds)
             published.update { $0.limitsState = .rateLimited(until: until) }
+            await backoff?.record(until)
             report("OpenAI answered 429; backing off until \(until)")
-            return .seconds(backoff)
+            return .seconds(seconds)
         }
         if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
             published.update { $0.limitsState = .sessionExpired }

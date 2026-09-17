@@ -415,7 +415,8 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     /// give another — the shape every assertion above is about.
     private func rateLimitedProbe(
         retryAfter: TimeInterval,
-        counting fetches: LockedValue<Int> = LockedValue(0)
+        counting fetches: LockedValue<Int> = LockedValue(0),
+        backoff: LimitsBackoffSlot? = nil
     ) -> ClaudeLimitsProbe {
         ClaudeLimitsProbe(
             credentials: { _, _ in
@@ -435,6 +436,128 @@ final class ClaudeLimitsProbeTests: XCTestCase {
                         credits: nil)
                 }
                 throw UsageRequestError.rateLimited(retryAfter: retryAfter)
-            })
+            },
+            backoff: backoff)
+    }
+
+    /// A refusal is written down so the run after this one honours it.
+    ///
+    /// The deadline is the vendor's own, which is what makes the record worth
+    /// keeping: a request made inside the block is refused again and moves it
+    /// further out — measured 2026-09-17, from 08:26:44 to 09:30:24 across
+    /// three restarts.
+    func testAVendorRefusalIsRecordedForTheNextRun() async {
+        let held = LockedValue<Date?>(nil)
+        let probe = rateLimitedProbe(retryAfter: 1684, backoff: slot(held))
+
+        _ = await probe.refreshOnce {}
+        _ = await probe.refreshOnce {}
+
+        XCTAssertEqual(held.load()?.timeIntervalSinceNow ?? 0, 1684, accuracy: 5)
+        await probe.stop()
+    }
+
+    /// And the run after it waits rather than asking.
+    ///
+    /// The hole this closes: the state a 429 publishes lives in memory, so
+    /// every relaunch — a login item, a provider switched off and on, a build
+    /// — used to spend a request on a vendor that was still refusing.
+    func testABlockRecordedOnAnEarlierRunCostsNoRequest() async {
+        let held = LockedValue<Date?>(Date().addingTimeInterval(900))
+        let fetches = LockedValue(0)
+        let probe = succeedingProbe(backoff: slot(held), counting: fetches)
+
+        let delay = await probe.refreshOnce {}
+
+        XCTAssertEqual(fetches.load(), 0, "a rebuilt reader spent a request that was refused")
+        guard case .rateLimited = probe.currentSignals().limitsState else {
+            return XCTFail("the recorded block never reached the row")
+        }
+        XCTAssertEqual(Double(delay.components.seconds), 900, accuracy: 5)
+        await probe.stop()
+    }
+
+    /// A reading answers the question the block stood in for, so the record
+    /// goes with it rather than being left to expire on its own.
+    func testAReadingTakesTheRecordedBlockOut() async {
+        let held = LockedValue<Date?>(Date().addingTimeInterval(-1))
+        let probe = succeedingProbe(backoff: slot(held))
+
+        _ = await probe.refreshOnce {}
+
+        XCTAssertNil(held.load())
+        await probe.stop()
+    }
+
+    /// The account switch is the one event that makes a refusal stop being
+    /// this reader's: the endpoint authenticates a credential, and the next
+    /// request spends a different one. Without this the account switched *to*
+    /// had no limits until a deadline its own token never met.
+    func testAnAccountSwitchDropsTheRecordedBlock() async {
+        let held = LockedValue<Date?>(Date().addingTimeInterval(900))
+        let fetches = LockedValue(0)
+        let probe = succeedingProbe(backoff: slot(held), counting: fetches)
+        _ = await probe.refreshOnce {}
+        XCTAssertEqual(fetches.load(), 0)
+
+        await probe.clearBackoff()
+        _ = await probe.refreshOnce {}
+
+        XCTAssertEqual(fetches.load(), 1, "the new account was held to the old one's block")
+        XCTAssertNil(held.load())
+        XCTAssertEqual(probe.currentSignals().limitsState, .quiet)
+        await probe.stop()
+    }
+
+    /// Reading the record is a suspension like any other, and a `stop()` can
+    /// land in it: the switch has just cleared the row, and a block restored
+    /// over that is a notice under a module the user turned off.
+    ///
+    /// Observed from inside the read, because that is the only place the gap
+    /// exists.
+    func testAStopDuringTheRecordReadDoesNotRestoreTheBlock() async {
+        let probe = LockedValue<ClaudeLimitsProbe?>(nil)
+        let built = succeedingProbe(
+            backoff: LimitsBackoffSlot(
+                deadline: {
+                    await probe.load()?.stop()
+                    return Date().addingTimeInterval(900)
+                },
+                record: { _ in }))
+        probe.store(built)
+
+        _ = await built.refreshOnce {}
+
+        XCTAssertEqual(built.currentSignals().limitsState, .quiet)
+    }
+
+    /// A slot held in memory, which is the whole contract: a deadline that is
+    /// still ahead, and somewhere to write the next one. Expired entries are
+    /// filtered here exactly as the store filters them.
+    private func slot(_ held: LockedValue<Date?>) -> LimitsBackoffSlot {
+        LimitsBackoffSlot(
+            deadline: { held.load().flatMap { $0 > Date() ? $0 : nil } },
+            record: { held.store($0) })
+    }
+
+    /// A probe the vendor answers, so the assertion is whether the request
+    /// happened at all.
+    private func succeedingProbe(
+        backoff: LimitsBackoffSlot?,
+        counting fetches: LockedValue<Int> = LockedValue(0)
+    ) -> ClaudeLimitsProbe {
+        ClaudeLimitsProbe(
+            credentials: { _, _ in
+                .found(ClaudeCredentials(accessToken: "token", expiresAt: .distantFuture))
+            },
+            fetch: { _ in
+                fetches.update { $0 += 1 }
+                return ClaudeLimitsProbe.Reading(
+                    windows: [
+                        UsageWindow(minutes: 300, usedPercent: 10, resetsAt: .distantFuture)!
+                    ],
+                    credits: nil)
+            },
+            backoff: backoff)
     }
 }
