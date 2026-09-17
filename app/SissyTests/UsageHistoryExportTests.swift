@@ -68,7 +68,7 @@ final class UsageHistoryExportTests: XCTestCase {
     /// either one moves every column to its right and the money lands under
     /// the wrong heading.
     func testASeparatorInAPathIsQuotedRatherThanSplittingTheRow() {
-        let path = "/Users/dev/acme, inc/api"
+        let path = "/Users/smyile/acme, inc/api"
         let csv = UsageHistoryExport.csv([
             day(
                 "2026-09-14", provider: "claude-code",
@@ -78,7 +78,7 @@ final class UsageHistoryExportTests: XCTestCase {
 
         XCTAssertEqual(
             lines(csv)[1],
-            "2026-09-14,claude-code,opus,api,\"/Users/dev/acme, inc/api\",10,1,2,3,1"
+            "2026-09-14,claude-code,opus,api,\"/Users/smyile/acme, inc/api\",10,1,2,3,1"
         )
     }
 

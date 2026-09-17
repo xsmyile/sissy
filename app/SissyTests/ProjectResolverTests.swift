@@ -189,7 +189,7 @@ final class ProjectResolverTests: XCTestCase {
     /// grow the snapshot without end.
     func testWhatIsCarriedBetweenRunsIsBounded() {
         let many = (1...(ProjectLedger.maxCheckouts + 10)).map {
-            ProjectCheckout(directory: "/Users/d/gone/\($0)", project: "/Users/d/dev/sissy")
+            ProjectCheckout(directory: "/Users/smyile/gone/\($0)", project: "/Users/smyile/dev/sissy")
         }
 
         ledger.adopt(many)

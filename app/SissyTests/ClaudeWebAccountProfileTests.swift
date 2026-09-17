@@ -9,7 +9,7 @@ import XCTest
 /// organisations, the subscription second in the list.
 final class ClaudeWebAccountProfileTests: XCTestCase {
     private func payload(
-        uuid: String = "c805523f-9d83-47ca-bb1a-4d6c94dd75bf",
+        uuid: String = "a1b2c3d4-9d83-47ca-bb1a-4d6c94dd75bf",
         organizations: [[String: Any]]? = nil
     ) -> [String: Any] {
         [
@@ -22,7 +22,7 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
 
     private let subscriptionOrganization: [String: Any] = [
         "uuid": "1001ddb9-0acb-481b-927e-00244ed840ba",
-        "name": "Master Soft Srl",
+        "name": "Acme Srl",
         "capabilities": ["chat", "raven"],
         "analytics_subscription_plan": "claude_team",
         "rate_limit_tier": "default_raven",
@@ -42,7 +42,7 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
     func testTheAccountIsIdentifiedByAnthropicsOwnID() throws {
         let identity = try ClaudeWebAccountProfile.parse(payload())
 
-        XCTAssertEqual(identity.uuid, "c805523f-9d83-47ca-bb1a-4d6c94dd75bf")
+        XCTAssertEqual(identity.uuid, "a1b2c3d4-9d83-47ca-bb1a-4d6c94dd75bf")
         XCTAssertEqual(identity.email, "someone@example.com")
     }
 
@@ -52,7 +52,7 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
     func testThePlanComesFromTheSubscriptionOrganizationNotTheFirst() throws {
         let identity = try ClaudeWebAccountProfile.parse(payload())
 
-        XCTAssertEqual(identity.organization, "Master Soft Srl")
+        XCTAssertEqual(identity.organization, "Acme Srl")
         XCTAssertEqual(identity.organizationType, "claude_team")
     }
 
@@ -62,14 +62,14 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
     /// subscription's name.
     func testTheSeatComesFromTheSubscriptionMembership() throws {
         let identity = try ClaudeWebAccountProfile.parse([
-            "uuid": "c805523f",
+            "uuid": "a1b2c3d4",
             "memberships": [
                 ["organization": individualOrganization, "seat_tier": "team_standard"],
                 ["organization": subscriptionOrganization, "seat_tier": "team_tier_1"],
             ],
         ])
 
-        XCTAssertEqual(identity.organization, "Master Soft Srl")
+        XCTAssertEqual(identity.organization, "Acme Srl")
         XCTAssertEqual(identity.seat, "team_tier_1")
     }
 
@@ -77,7 +77,7 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
     /// membership to take a seat off either.
     func testAnAccountWithNoSubscriptionNamesNoSeat() throws {
         let identity = try ClaudeWebAccountProfile.parse([
-            "uuid": "c805523f",
+            "uuid": "a1b2c3d4",
             "memberships": [
                 ["organization": individualOrganization, "seat_tier": "team_standard"]
             ],
@@ -93,9 +93,9 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
     /// address it has always been named by.
     func testTheOwnersNameIsReadWhereTheReplyCarriesOne() throws {
         var carrying = payload()
-        carrying["full_name"] = "Davide Tacchini"
+        carrying["full_name"] = "Davide"
 
-        XCTAssertEqual(try ClaudeWebAccountProfile.parse(carrying).name, "Davide Tacchini")
+        XCTAssertEqual(try ClaudeWebAccountProfile.parse(carrying).name, "Davide")
         XCTAssertNil(try ClaudeWebAccountProfile.parse(payload()).name)
     }
 
@@ -118,7 +118,7 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
         let identity = try ClaudeWebAccountProfile.parse(
             payload(organizations: [individualOrganization]))
 
-        XCTAssertEqual(identity.uuid, "c805523f-9d83-47ca-bb1a-4d6c94dd75bf")
+        XCTAssertEqual(identity.uuid, "a1b2c3d4-9d83-47ca-bb1a-4d6c94dd75bf")
         XCTAssertNil(identity.organization)
         XCTAssertNil(identity.organizationType)
     }
@@ -129,17 +129,17 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
     /// none of them costs the account.
     func testAPayloadWithNothingUsableUnderMembershipsStillIdentifies() throws {
         let shapes: [[String: Any]] = [
-            ["uuid": "c805523f", "email_address": "someone@example.com"],
-            ["uuid": "c805523f", "memberships": []],
-            ["uuid": "c805523f", "memberships": ["not-an-object"]],
-            ["uuid": "c805523f", "memberships": [["organization": "not-an-object"]]],
-            ["uuid": "c805523f", "memberships": [["seat_tier": "team_tier_1"]]],
+            ["uuid": "a1b2c3d4", "email_address": "someone@example.com"],
+            ["uuid": "a1b2c3d4", "memberships": []],
+            ["uuid": "a1b2c3d4", "memberships": ["not-an-object"]],
+            ["uuid": "a1b2c3d4", "memberships": [["organization": "not-an-object"]]],
+            ["uuid": "a1b2c3d4", "memberships": [["seat_tier": "team_tier_1"]]],
         ]
 
         for shape in shapes {
             let identity = try ClaudeWebAccountProfile.parse(shape)
 
-            XCTAssertEqual(identity.uuid, "c805523f")
+            XCTAssertEqual(identity.uuid, "a1b2c3d4")
             XCTAssertNil(identity.organizationType)
         }
     }

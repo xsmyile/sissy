@@ -26,15 +26,15 @@ final class CodexIdentityTests: XCTestCase {
     /// either way, which is what made the pair contradict itself.
     func testADifferentAccountBringsItsOwnPlan() throws {
         let adapter = makeAdapter()
-        try writeAuth(plan: "plus", email: "first@example.test")
+        try writeAuth(plan: "plus", email: "first@example.com")
         _ = adapter.prepareToStart()
 
-        try writeAuth(plan: "pro", email: "second@example.test")
+        try writeAuth(plan: "pro", email: "second@example.com")
         _ = adapter.refreshOutOfBandState()
 
         XCTAssertEqual(adapter.descriptor.signals.currentSignals().plan, "pro")
         XCTAssertEqual(
-            adapter.descriptor.signals.currentSignals().account?.email, "second@example.test")
+            adapter.descriptor.signals.currentSignals().account?.email, "second@example.com")
     }
 
     /// Signing out, or switching the CLI to an API key, leaves no
@@ -42,7 +42,7 @@ final class CodexIdentityTests: XCTestCase {
     /// leave the previous account on screen.
     func testSwitchingToAnAPIKeyClearsTheAccountAndThePlan() throws {
         let adapter = makeAdapter()
-        try writeAuth(plan: "plus", email: "first@example.test")
+        try writeAuth(plan: "plus", email: "first@example.com")
         _ = adapter.prepareToStart()
 
         try Data(#"{"auth_mode":"apikey","OPENAI_API_KEY":"fixture"}"#.utf8)
@@ -58,7 +58,7 @@ final class CodexIdentityTests: XCTestCase {
     /// for no reason the user could name.
     func testAFileThatWillNotParseLeavesTheRowAlone() throws {
         let adapter = makeAdapter()
-        try writeAuth(plan: "plus", email: "first@example.test")
+        try writeAuth(plan: "plus", email: "first@example.com")
         _ = adapter.prepareToStart()
 
         try Data("{ not json".utf8).write(to: root.appendingPathComponent("auth.json"))
@@ -66,7 +66,7 @@ final class CodexIdentityTests: XCTestCase {
 
         XCTAssertEqual(adapter.descriptor.signals.currentSignals().plan, "plus")
         XCTAssertEqual(
-            adapter.descriptor.signals.currentSignals().account?.email, "first@example.test")
+            adapter.descriptor.signals.currentSignals().account?.email, "first@example.com")
     }
 
     /// A token naming none of the claims the digest is built from cannot say
@@ -75,7 +75,7 @@ final class CodexIdentityTests: XCTestCase {
     /// correct — on a file Codex rewrites on every token refresh.
     func testATokenThatNamesNobodyIsNotTreatedAsADifferentAccount() throws {
         let adapter = makeAdapter()
-        try writeAuth(plan: "plus", email: "first@example.test")
+        try writeAuth(plan: "plus", email: "first@example.com")
         _ = adapter.prepareToStart()
 
         try writeAnonymousAuth()

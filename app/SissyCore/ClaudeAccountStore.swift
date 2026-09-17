@@ -279,7 +279,7 @@ struct ClaudeAccountStore: Sendable {
 /// Deliberately the same `ClaudeAccountIdentity` `ClaudeAccountProfile`
 /// produces from the OAuth endpoint, because measured 2026-09-16 the two
 /// vendors' endpoints name one account with one id: `api/oauth/profile` and
-/// `claude.ai/api/account` both answered `c805523f…` for the same person. So a
+/// `claude.ai/api/account` both answered the same uuid for one person. So a
 /// session and a CLI credential file under one key and the account list is one
 /// list, rather than two that have to be reconciled by email address.
 ///

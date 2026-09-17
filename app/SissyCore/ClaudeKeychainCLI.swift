@@ -18,8 +18,8 @@ import Foundation
 /// changes any of it — the ACL is the item's, not the app's.
 ///
 /// Measured 2026-09-15 against Claude Code 2.1.272 on macOS 27, from a process
-/// that had never touched the item: a read of `Claude Code-credentials-a8264a74`
-/// returned its 2 377 bytes and a write back to it exited 0, both with no panel.
+/// that had never touched the item: a read of a scoped credential item returned
+/// its 2 377 bytes and a write back to it exited 0, both with no panel.
 enum ClaudeKeychainCLI {
     /// Why a call came back with nothing. Absence is not a failure — it is an
     /// account nobody has signed into — so it is its own case rather than a
@@ -104,9 +104,8 @@ enum ClaudeKeychainCLI {
     /// is the name for it rather than the hash of its path.
     ///
     /// Claude Code 2.1+ scopes the rest by config directory. Verified
-    /// 2026-09-15 against the two homes on one Mac — `~/.claude` hashes to
-    /// `8a380954` and `~/.claude-mastersoft` to `a8264a74`, and both items
-    /// exist under exactly those names.
+    /// 2026-09-15 against the two homes on one Mac: each item existed under
+    /// exactly the name this rule produces for its own path.
     static func claudeService(for home: URL) -> String {
         guard home != AccountDefaults.claudeHome else { return claudeService }
         return scopedClaudeService(for: home.path)

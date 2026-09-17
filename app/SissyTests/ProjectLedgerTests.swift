@@ -134,7 +134,7 @@ final class ProjectLedgerTests: XCTestCase {
 
         ledger.adopt(
             (1...(ProjectLedger.maxCheckouts + 10)).map {
-                ProjectCheckout(directory: "/Users/d/gone/\($0)", project: "/Users/d/dev/sissy")
+                ProjectCheckout(directory: "/Users/smyile/gone/\($0)", project: "/Users/smyile/dev/sissy")
             })
 
         XCTAssertEqual(ledger.all().count, ProjectLedger.maxCheckouts)

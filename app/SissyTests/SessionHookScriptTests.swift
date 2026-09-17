@@ -150,7 +150,7 @@ final class SessionHookScriptTests: XCTestCase {
     func testAnUndecodableWorkingDirectoryIsNotGuessedAt() throws {
         let repository = try makeRepository("sissy")
 
-        try run(payload: #"{"cwd":"/Users/davide\/dev/sissy"}"#, from: repository.path)
+        try run(payload: #"{"cwd":"/Users/smyile\/dev/sissy"}"#, from: repository.path)
 
         XCTAssertEqual(recorded(), [ProjectCheckout(directory: repository.path, project: repository.path)])
     }

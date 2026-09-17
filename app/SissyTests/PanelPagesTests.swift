@@ -287,10 +287,10 @@ final class PanelPagesTests: XCTestCase {
     func testAProviderPageCarriesTheAddressItIsSignedInAs() throws {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame([
-                slice("claude-code", account: ProviderAccount(email: "me@example.com"))
+                slice("claude-code", account: ProviderAccount(email: "someone@example.com"))
             ]))
 
-        XCTAssertEqual(try XCTUnwrap(snapshot.providers.first?.account).email, "me@example.com")
+        XCTAssertEqual(try XCTUnwrap(snapshot.providers.first?.account).email, "someone@example.com")
     }
 
     /// The badge above the line already says the seat, so an account that

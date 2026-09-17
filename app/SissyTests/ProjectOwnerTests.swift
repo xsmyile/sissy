@@ -38,8 +38,8 @@ final class ProjectOwnerTests: XCTestCase {
     /// the account is the group the repository sits directly under.
     func testASelfHostedForgeNamesTheGroup() {
         XCTAssertEqual(
-            ProjectResolver.remote(ofRemoteURL: "git@gitlab.sermix.com:mastersoft/cbdesign.git")?.owner,
-            "mastersoft")
+            ProjectResolver.remote(ofRemoteURL: "git@gitlab.example.com:radonforge/storefront.git")?.owner,
+            "radonforge")
     }
 
     /// Nested groups answer the one the repository sits directly under, not
@@ -91,19 +91,19 @@ final class ProjectOwnerTests: XCTestCase {
     /// from the path is the one after the bracket — every colon before it
     /// belongs to the address.
     func testABracketedIPv6HostIsNotSplitDownTheMiddle() {
-        let remote = ProjectResolver.remote(ofRemoteURL: "git@[2001:db8::1]:mastersoft/cbdesign.git")
+        let remote = ProjectResolver.remote(ofRemoteURL: "git@[2001:db8::1]:radonforge/storefront.git")
 
         XCTAssertEqual(remote?.host, "[2001:db8::1]")
-        XCTAssertEqual(remote?.owner, "mastersoft")
-        XCTAssertEqual(remote?.page, URL(string: "https://[2001:db8::1]/mastersoft/cbdesign"))
+        XCTAssertEqual(remote?.owner, "radonforge")
+        XCTAssertEqual(remote?.page, URL(string: "https://[2001:db8::1]/radonforge/storefront"))
     }
 
     func testABracketedIPv6HostOnAPortKeepsItsAccountAndOffersNoPage() {
         let remote = ProjectResolver.remote(
-            ofRemoteURL: "ssh://git@[2001:db8::1]:2222/mastersoft/cbdesign.git")
+            ofRemoteURL: "ssh://git@[2001:db8::1]:2222/radonforge/storefront.git")
 
         XCTAssertEqual(remote?.host, "[2001:db8::1]")
-        XCTAssertEqual(remote?.owner, "mastersoft")
+        XCTAssertEqual(remote?.owner, "radonforge")
         XCTAssertNil(remote?.page)
     }
 
@@ -129,13 +129,13 @@ final class ProjectOwnerTests: XCTestCase {
     /// A directory on this Mac is not a forge, so the enclosing folder must
     /// not be dressed up as an account.
     func testAPathRemoteNamesNobody() {
-        XCTAssertNil(ProjectResolver.remote(ofRemoteURL: "/Users/d/repos/bare.git"))
+        XCTAssertNil(ProjectResolver.remote(ofRemoteURL: "/Users/smyile/repos/bare.git"))
     }
 
     /// `file://` is the same path wearing a scheme: its host is empty and its
     /// first segment is a directory.
     func testAFileURLRemoteNamesNobody() {
-        XCTAssertNil(ProjectResolver.remote(ofRemoteURL: "file:///Users/d/repos/bare.git"))
+        XCTAssertNil(ProjectResolver.remote(ofRemoteURL: "file:///Users/smyile/repos/bare.git"))
     }
 
     func testARelativeRemoteNamesNobody() {

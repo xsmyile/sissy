@@ -10,7 +10,7 @@ import XCTest
 /// login keychain taking part.
 final class ClaudeWebSessionAdoptionTests: XCTestCase {
     private static let identity = ClaudeAccountIdentity(
-        uuid: "c805523f", email: "someone@example.com", organization: "Master Soft Srl",
+        uuid: "a1b2c3d4", email: "someone@example.com", organization: "Acme Srl",
         organizationType: "claude_team", rateLimitTier: nil)
 
     /// A session that claude.ai will not identify stays exactly where it is.
@@ -31,12 +31,12 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
 
     /// The ordinary case after this ships, and every launch after the first.
     func testAnInstallWithNoLegacySessionDoesNothing() async {
-        let vault = Vault(["c805523f": "sk-ant-sid-keyed"])
+        let vault = Vault(["a1b2c3d4": "sk-ant-sid-keyed"])
 
         let outcome = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in Self.identity }
 
         XCTAssertEqual(outcome, .nothingToAdopt)
-        XCTAssertEqual(vault.contents, ["c805523f": "sk-ant-sid-keyed"])
+        XCTAssertEqual(vault.contents, ["a1b2c3d4": "sk-ant-sid-keyed"])
     }
 
     /// The move itself: one session, under the account it turned out to
@@ -46,8 +46,8 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
 
         let outcome = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in Self.identity }
 
-        XCTAssertEqual(outcome, .adopted(uuid: "c805523f"))
-        XCTAssertEqual(vault.contents, ["c805523f": "sk-ant-sid-old"])
+        XCTAssertEqual(outcome, .adopted(uuid: "a1b2c3d4"))
+        XCTAssertEqual(vault.contents, ["a1b2c3d4": "sk-ant-sid-old"])
     }
 
     /// A pass that resumes after a newer session was imported leaves that
@@ -66,11 +66,11 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
             return Self.identity
         }
 
-        XCTAssertEqual(outcome, .adopted(uuid: "c805523f"))
+        XCTAssertEqual(outcome, .adopted(uuid: "a1b2c3d4"))
         XCTAssertEqual(
             vault.contents,
             [
-                "c805523f": "sk-ant-sid-first",
+                "a1b2c3d4": "sk-ant-sid-first",
                 ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-second",
             ])
     }
@@ -85,7 +85,7 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
 
         _ = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in Self.identity }
 
-        XCTAssertEqual(vault.contents["c805523f"], "sk-ant-sid-old")
+        XCTAssertEqual(vault.contents["a1b2c3d4"], "sk-ant-sid-old")
         XCTAssertEqual(vault.contents[ClaudeWebSessionStore.unkeyedAccount], "sk-ant-sid-old")
     }
 

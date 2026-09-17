@@ -10,7 +10,7 @@ import XCTest
 /// consecutive polls of one session.
 final class ClaudeWebAccountLinkTests: XCTestCase {
     private static let identity = ClaudeAccountIdentity(
-        uuid: "c805523f", email: "someone@example.com", organization: "Master Soft Srl",
+        uuid: "a1b2c3d4", email: "someone@example.com", organization: "Acme Srl",
         organizationType: "claude_team", rateLimitTier: nil)
 
     private func resolve(
@@ -29,7 +29,7 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
     /// answers the usage question, so there is nothing to ask.
     func testOneSubscriptionOrganizationLinksOutright() async throws {
         let outcome = try await resolve(organizations: [
-            ClaudeWebOrganization(id: "org-1", name: "Master Soft Srl", plan: "team")
+            ClaudeWebOrganization(id: "org-1", name: "Acme Srl", plan: "team")
         ])
 
         XCTAssertEqual(
@@ -40,7 +40,7 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
     /// Several, and the pick becomes the user's. Nothing is filed meanwhile.
     func testSeveralSubscriptionOrganizationsAskInstead() async throws {
         let organizations = [
-            ClaudeWebOrganization(id: "org-1", name: "Master Soft Srl", plan: "team"),
+            ClaudeWebOrganization(id: "org-1", name: "Acme Srl", plan: "team"),
             ClaudeWebOrganization(id: "org-2", name: "Radon Forge", plan: "max"),
         ]
 
@@ -68,7 +68,7 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
             _ = try await resolve(
                 organizations: [
                     ClaudeWebOrganization(
-                        id: "org-1", name: "Master Soft Srl", plan: "team")
+                        id: "org-1", name: "Acme Srl", plan: "team")
                 ],
                 identify: { _ in throw ClaudeAccountProfile.Failure.badStatus(401) })
             XCTFail("expected the link to fail")
@@ -84,7 +84,7 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
         let labels = UsageFormat.organizationChoices([
             ClaudeWebOrganization(id: "org-1", name: "Radon Forge", plan: "team"),
             ClaudeWebOrganization(
-                id: "org-2", name: "davide@radonforge.com's Organization", plan: "pro"),
+                id: "org-2", name: "davide@example.com's Organization", plan: "pro"),
         ])
 
         XCTAssertEqual(labels.map(\.label), ["Team", "Pro"])
@@ -116,7 +116,7 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
     func testOnlyChatOrganizationsAreOffered() {
         let payload: [[String: Any]] = [
             ["uuid": "org-api", "name": "API", "capabilities": ["api_individual"]],
-            ["uuid": "org-1", "name": "Master Soft Srl", "capabilities": ["chat", "claude_pro"]],
+            ["uuid": "org-1", "name": "Acme Srl", "capabilities": ["chat", "claude_pro"]],
             ["uuid": "org-2", "name": "Radon Forge", "capabilities": ["chat"]],
         ]
 
@@ -156,43 +156,43 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
     }
 
     func testALinkSurvivesARoundTrip() throws {
-        try index.remember(link("c805523f", organization: "org-1"))
+        try index.remember(link("a1b2c3d4", organization: "org-1"))
 
-        XCTAssertEqual(index.load()["c805523f"]?.organization, "org-1")
-        XCTAssertEqual(index.load()["c805523f"]?.identity.email, "c805523f@example.com")
+        XCTAssertEqual(index.load()["a1b2c3d4"]?.organization, "org-1")
+        XCTAssertEqual(index.load()["a1b2c3d4"]?.identity.email, "a1b2c3d4@example.com")
     }
 
     /// Linking the same account again replaces its entry: the session it
     /// describes has just been replaced too.
     func testRelinkingAnAccountReplacesItsEntry() throws {
-        try index.remember(link("c805523f", organization: "org-1"))
-        try index.remember(link("c805523f", organization: "org-2"))
+        try index.remember(link("a1b2c3d4", organization: "org-1"))
+        try index.remember(link("a1b2c3d4", organization: "org-2"))
 
         XCTAssertEqual(index.load().count, 1)
-        XCTAssertEqual(index.load()["c805523f"]?.organization, "org-2")
+        XCTAssertEqual(index.load()["a1b2c3d4"]?.organization, "org-2")
     }
 
     /// A session adopted from Claude.app was never asked about, so it records
     /// no organisation rather than the one a capability happened to pick.
     func testAnAdoptedSessionRecordsNoOrganization() throws {
-        try index.remember(link("c805523f", organization: nil))
+        try index.remember(link("a1b2c3d4", organization: nil))
 
-        XCTAssertNil(index.load()["c805523f"]?.organization)
-        XCTAssertNotNil(index.load()["c805523f"])
+        XCTAssertNil(index.load()["a1b2c3d4"]?.organization)
+        XCTAssertNotNil(index.load()["a1b2c3d4"])
     }
 
     func testForgettingOneLeavesTheOthers() throws {
-        try index.remember(link("c805523f", organization: "org-1"))
-        try index.remember(link("dbab20e1", organization: "org-2"))
+        try index.remember(link("a1b2c3d4", organization: "org-1"))
+        try index.remember(link("e5f6a7b8", organization: "org-2"))
 
-        try index.forget(uuid: "c805523f")
+        try index.forget(uuid: "a1b2c3d4")
 
-        XCTAssertEqual(Array(index.load().keys), ["dbab20e1"])
+        XCTAssertEqual(Array(index.load().keys), ["e5f6a7b8"])
     }
 
     func testForgettingEverythingEmptiesIt() throws {
-        try index.remember(link("c805523f", organization: "org-1"))
-        try index.remember(link("dbab20e1", organization: "org-2"))
+        try index.remember(link("a1b2c3d4", organization: "org-1"))
+        try index.remember(link("e5f6a7b8", organization: "org-2"))
 
         try index.forgetAll()
 
@@ -207,8 +207,8 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
 /// claude.ai with no row in Settings and no way to stop it. Measured on the
 /// dev build 2026-09-16: one of two stored sessions was listed.
 final class ClaudeWebAccountListTests: XCTestCase {
-    private let linked = "dbab20e1"
-    private let unnamed = "c805523f"
+    private let linked = "e5f6a7b8"
+    private let unnamed = "a1b2c3d4"
 
     private func identity(_ uuid: String, email: String, name: String? = nil)
         -> ClaudeAccountIdentity
@@ -223,13 +223,13 @@ final class ClaudeWebAccountListTests: XCTestCase {
             stored: [linked],
             links: [
                 linked: ClaudeWebLink(
-                    identity: identity(linked, email: "davide@radonforge.com"),
+                    identity: identity(linked, email: "davide@example.com"),
                     organization: "org-1")
             ],
             archived: [])
 
         XCTAssertEqual(accounts.map(\.id), [linked])
-        XCTAssertEqual(accounts.first?.identity?.email, "davide@radonforge.com")
+        XCTAssertEqual(accounts.first?.identity?.email, "davide@example.com")
     }
 
     /// A session filed before anything could name it still gets a row, and the
@@ -238,10 +238,10 @@ final class ClaudeWebAccountListTests: XCTestCase {
         let accounts = ClaudeWebAccount.list(
             stored: [unnamed],
             links: [:],
-            archived: [identity(unnamed, email: "davide.tacchini@mastersoft.it")])
+            archived: [identity(unnamed, email: "smyile@example.com")])
 
         XCTAssertEqual(accounts.map(\.id), [unnamed])
-        XCTAssertEqual(accounts.first?.identity?.email, "davide.tacchini@mastersoft.it")
+        XCTAssertEqual(accounts.first?.identity?.email, "smyile@example.com")
     }
 
     /// A link is written once and never rewritten, so an account linked before
@@ -254,13 +254,13 @@ final class ClaudeWebAccountListTests: XCTestCase {
             stored: [linked],
             links: [
                 linked: ClaudeWebLink(
-                    identity: identity(linked, email: "davide@radonforge.com"),
+                    identity: identity(linked, email: "davide@example.com"),
                     organization: "org-1")
             ],
             archived: [identity(linked, email: "stale@example.com", name: "Davide")])
 
         XCTAssertEqual(accounts.first?.identity?.name, "Davide")
-        XCTAssertEqual(accounts.first?.identity?.email, "davide@radonforge.com")
+        XCTAssertEqual(accounts.first?.identity?.email, "davide@example.com")
     }
 
     /// Only the name is borrowed. Filling every nil would restore the tier
@@ -276,7 +276,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
             links: [
                 linked: ClaudeWebLink(
                     identity: ClaudeAccountIdentity(
-                        uuid: linked, email: "davide@radonforge.com", organization: "Radon Forge",
+                        uuid: linked, email: "davide@example.com", organization: "Radon Forge",
                         organizationType: "claude_team", rateLimitTier: nil, seat: "team_tier_1"),
                     organization: "org-1")
             ],
@@ -297,7 +297,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
             stored: [linked],
             links: [
                 linked: ClaudeWebLink(
-                    identity: identity(linked, email: "davide@radonforge.com", name: "Davide"),
+                    identity: identity(linked, email: "davide@example.com", name: "Davide"),
                     organization: "org-1")
             ],
             archived: [identity(linked, email: "stale@example.com", name: "Old Name")])
@@ -330,7 +330,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
             stored: [],
             links: [
                 linked: ClaudeWebLink(
-                    identity: identity(linked, email: "davide@radonforge.com"),
+                    identity: identity(linked, email: "davide@example.com"),
                     organization: "org-1")
             ],
             archived: [])

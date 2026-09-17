@@ -397,7 +397,7 @@ struct ProvidersSettingsView: View {
     /// deliberately the address rather than the title the row leads on.
     ///
     /// One person holding two seats reads as one name twice, and a dialog that
-    /// asks whether to forget "Davide Tacchini" when both rows say so is a
+    /// asks whether to forget one name when both rows carry it is a
     /// destructive question nobody can answer. The address is unique by
     /// construction, which is the property this one call site needs.
     ///

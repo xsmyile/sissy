@@ -8,12 +8,12 @@ import XCTest
 /// Sissy identifies an account through is measured to answer with a name, so
 /// every install has to read correctly without one.
 final class LinkedAccountRowTests: XCTestCase {
-    private let uuid = "c805523f"
+    private let uuid = "a1b2c3d4"
 
     private func account(
         name: String? = nil,
-        email: String? = "davide.tacchini@mastersoft.it",
-        organization: String? = "Master Soft Srl"
+        email: String? = "smyile@example.com",
+        organization: String? = "Acme Srl"
     ) -> ClaudeWebAccount {
         ClaudeWebAccount(
             id: uuid,
@@ -29,11 +29,11 @@ final class LinkedAccountRowTests: XCTestCase {
     /// The name leads and the address sits beside it, because the address is
     /// what the account is keyed by and the name is what it is recognised by.
     func testANamedAccountLeadsOnItsNameWithTheAddressBeside() {
-        let row = LinkedAccountRowSnapshot.make(account(name: "Davide Tacchini"))
+        let row = LinkedAccountRowSnapshot.make(account(name: "Davide"))
 
-        XCTAssertEqual(row.title, "Davide Tacchini")
-        XCTAssertEqual(row.address, "davide.tacchini@mastersoft.it")
-        XCTAssertEqual(row.organization, "Master Soft Srl")
+        XCTAssertEqual(row.title, "Davide")
+        XCTAssertEqual(row.address, "smyile@example.com")
+        XCTAssertEqual(row.organization, "Acme Srl")
     }
 
     /// The row every account had before a name could be read, which is still
@@ -41,16 +41,16 @@ final class LinkedAccountRowTests: XCTestCase {
     func testAnUnnamedAccountKeepsTheAddressAsItsTitle() {
         let row = LinkedAccountRowSnapshot.make(account())
 
-        XCTAssertEqual(row.title, "davide.tacchini@mastersoft.it")
+        XCTAssertEqual(row.title, "smyile@example.com")
         XCTAssertNil(row.address)
-        XCTAssertEqual(row.organization, "Master Soft Srl")
+        XCTAssertEqual(row.organization, "Acme Srl")
     }
 
     /// A row that said the same thing twice would read as two different facts.
     func testTheAddressIsNotRepeatedUnderItself() {
         let row = LinkedAccountRowSnapshot.make(account(name: nil, organization: nil))
 
-        XCTAssertEqual(row.title, "davide.tacchini@mastersoft.it")
+        XCTAssertEqual(row.title, "smyile@example.com")
         XCTAssertNil(row.address)
         XCTAssertNil(row.organization)
     }
@@ -60,10 +60,10 @@ final class LinkedAccountRowTests: XCTestCase {
     /// one, and a row under it is what makes that session removable.
     ///
     /// The organisation that became the title takes its caption with it. A row
-    /// printing "Master Soft Srl" over "Master Soft Srl" reads as two facts.
+    /// printing "Acme Srl" over "Acme Srl" reads as two facts.
     func testAnAccountWithNoAddressFallsToTheOrganisationAndThenTheKey() {
         let organisationOnly = LinkedAccountRowSnapshot.make(account(email: nil))
-        XCTAssertEqual(organisationOnly.title, "Master Soft Srl")
+        XCTAssertEqual(organisationOnly.title, "Acme Srl")
         XCTAssertNil(organisationOnly.address)
         XCTAssertNil(organisationOnly.organization)
 

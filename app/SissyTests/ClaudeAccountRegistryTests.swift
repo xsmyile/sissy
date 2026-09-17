@@ -7,11 +7,11 @@ import XCTest
 final class ClaudeKeychainServiceTests: XCTestCase {
     func testScopedServiceHashesTheConfigDirectory() {
         XCTAssertEqual(
-            ClaudeKeychainCLI.scopedClaudeService(for: "/Users/davide/.claude-mastersoft"),
-            "Claude Code-credentials-a8264a74")
+            ClaudeKeychainCLI.scopedClaudeService(for: "/Users/smyile/.claude-work"),
+            "Claude Code-credentials-89c4b9c5")
         XCTAssertEqual(
-            ClaudeKeychainCLI.scopedClaudeService(for: "/Users/davide/.claude"),
-            "Claude Code-credentials-8a380954")
+            ClaudeKeychainCLI.scopedClaudeService(for: "/Users/smyile/.claude"),
+            "Claude Code-credentials-1918062b")
     }
 
     func testDefaultHomeKeepsTheUnscopedService() {
@@ -32,23 +32,23 @@ final class ClaudeKeychainServiceTests: XCTestCase {
             ClaudeKeychainCLI.claudeLoginName(environment: ["USER": "first@example.com"]),
             "claude-code-user")
         XCTAssertEqual(
-            ClaudeKeychainCLI.claudeLoginName(environment: ["USER": "davide"]), "davide")
+            ClaudeKeychainCLI.claudeLoginName(environment: ["USER": "smyile"]), "smyile")
     }
 }
 
 final class ClaudeAccountProfileTests: XCTestCase {
     func testParseTakesTheAccountAndItsOrganisation() throws {
         let identity = try ClaudeAccountProfile.parse([
-            "account": ["uuid": "u-1", "email": "a@example.com"],
+            "account": ["uuid": "u-1", "email": "someone@example.com"],
             "organization": [
-                "name": "Master Soft Srl",
+                "name": "Acme Srl",
                 "organization_type": "claude_team",
                 "rate_limit_tier": "default_claude_max_5x",
             ],
         ])
         XCTAssertEqual(identity.uuid, "u-1")
-        XCTAssertEqual(identity.email, "a@example.com")
-        XCTAssertEqual(identity.organization, "Master Soft Srl")
+        XCTAssertEqual(identity.email, "someone@example.com")
+        XCTAssertEqual(identity.organization, "Acme Srl")
         XCTAssertEqual(identity.organizationType, "claude_team")
         XCTAssertEqual(identity.rateLimitTier, "default_claude_max_5x")
     }
@@ -83,19 +83,19 @@ final class ClaudeAccountProfileTests: XCTestCase {
     func testParseTakesTheOwnersName() throws {
         let identity = try ClaudeAccountProfile.parse([
             "account": [
-                "uuid": "u-1", "full_name": "Davide Tacchini", "display_name": "dtac",
+                "uuid": "u-1", "full_name": "Davide", "display_name": "smyile",
             ]
         ])
 
-        XCTAssertEqual(identity.name, "Davide Tacchini")
+        XCTAssertEqual(identity.name, "Davide")
     }
 
     func testTheDisplayNameAnswersForAnAccountWithNoFullName() throws {
         let identity = try ClaudeAccountProfile.parse([
-            "account": ["uuid": "u-1", "display_name": "dtac"]
+            "account": ["uuid": "u-1", "display_name": "smyile"]
         ])
 
-        XCTAssertEqual(identity.name, "dtac")
+        XCTAssertEqual(identity.name, "smyile")
     }
 
     /// An account that filled in neither is named by its address, so the name
@@ -170,7 +170,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         vault.active = credential("tok-a")
         let registry = makeRegistry(vault) { _ in
             ClaudeAccountIdentity(
-                uuid: "u-a", email: "a@example.com", organization: "A",
+                uuid: "u-a", email: "someone@example.com", organization: "A",
                 organizationType: "claude_team", rateLimitTier: nil)
         }
         await registry.captureActive()

@@ -10,13 +10,13 @@ import XCTest
 /// under another account's name — measured 2026-09-16 on the dev build, on a
 /// config whose profile had last been fetched four hours earlier.
 final class ClaudeProfileAttributionTests: XCTestCase {
-    private let activeUUID = "dbab20e1"
-    private let staleUUID = "c805523f"
+    private let activeUUID = "e5f6a7b8"
+    private let staleUUID = "a1b2c3d4"
 
     private var activeIdentity: ClaudeAccountIdentity {
         ClaudeAccountIdentity(
             uuid: activeUUID,
-            email: "davide@radonforge.com",
+            email: "davide@example.com",
             organization: "Radon Forge",
             organizationType: "claude_team",
             rateLimitTier: "default_claude_max_5x")
@@ -38,8 +38,8 @@ final class ClaudeProfileAttributionTests: XCTestCase {
         signals.plan = "team"
         signals.planTier = "max_5x"
         signals.account = ProviderAccount(
-            email: "davide.tacchini@mastersoft.it",
-            organization: "Master Soft Srl",
+            email: "smyile@example.com",
+            organization: "Acme Srl",
             seat: "team_tier_1")
         signals.credits = credits
         return ClaudeProfileSource.Attributed(
@@ -57,7 +57,7 @@ final class ClaudeProfileAttributionTests: XCTestCase {
             fileReading(profileOwner: staleUUID, creditsOwner: staleUUID),
             to: snapshot(active: activeUUID))
 
-        XCTAssertEqual(signals.account?.email, "davide@radonforge.com")
+        XCTAssertEqual(signals.account?.email, "davide@example.com")
         XCTAssertEqual(signals.account?.organization, "Radon Forge")
         XCTAssertEqual(signals.plan, "team")
         XCTAssertEqual(signals.planTier, "max_5x")
@@ -82,7 +82,7 @@ final class ClaudeProfileAttributionTests: XCTestCase {
             fileReading(profileOwner: activeUUID, creditsOwner: staleUUID),
             to: snapshot(active: activeUUID))
 
-        XCTAssertEqual(signals.account?.email, "davide.tacchini@mastersoft.it")
+        XCTAssertEqual(signals.account?.email, "smyile@example.com")
         XCTAssertNil(signals.credits)
     }
 
@@ -104,7 +104,7 @@ final class ClaudeProfileAttributionTests: XCTestCase {
             fileReading(profileOwner: nil, creditsOwner: nil),
             to: snapshot(active: activeUUID))
 
-        XCTAssertEqual(signals.account?.email, "davide.tacchini@mastersoft.it")
+        XCTAssertEqual(signals.account?.email, "smyile@example.com")
         XCTAssertEqual(signals.credits, credits)
     }
 
@@ -116,7 +116,7 @@ final class ClaudeProfileAttributionTests: XCTestCase {
             fileReading(profileOwner: staleUUID, creditsOwner: staleUUID),
             to: ClaudeAccountRegistry.Snapshot(accounts: [], activeUUID: nil))
 
-        XCTAssertEqual(signals.account?.email, "davide.tacchini@mastersoft.it")
+        XCTAssertEqual(signals.account?.email, "smyile@example.com")
         XCTAssertEqual(signals.credits, credits)
     }
 
@@ -133,7 +133,7 @@ final class ClaudeProfileAttributionTests: XCTestCase {
             fileReading(profileOwner: staleUUID, creditsOwner: activeUUID),
             to: ClaudeAccountRegistry.Snapshot(accounts: [], activeUUID: nil))
 
-        XCTAssertEqual(signals.account?.email, "davide.tacchini@mastersoft.it")
+        XCTAssertEqual(signals.account?.email, "smyile@example.com")
         XCTAssertNil(signals.credits)
     }
 

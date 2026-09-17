@@ -14,7 +14,7 @@ final class ForgeMarkTests: XCTestCase {
     /// A self-hosted GitLab is the ordinary case at work, and it is as much
     /// GitLab as gitlab.com is.
     func testASelfHostedForgeIsRecognisedByTheNameInItsHost() {
-        XCTAssertEqual(ForgeMark.assetName(forHost: "gitlab.sermix.com"), "ForgeMarkGitLab")
+        XCTAssertEqual(ForgeMark.assetName(forHost: "gitlab.example.com"), "ForgeMarkGitLab")
     }
 
     /// A forge whose host says neither gets the generic glyph rather than a
