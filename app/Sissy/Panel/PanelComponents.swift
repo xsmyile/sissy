@@ -355,6 +355,10 @@ struct ProjectRowView: View {
     /// The mark only where there is a page behind it: a remote that names a
     /// port is pointing at a transport rather than at a site, and that row
     /// keeps its repository with no way out to it.
+    ///
+    /// The mark is a picture with no words in it, so the sentence the pointer
+    /// gets is the sentence VoiceOver gets: a link whose label is its own
+    /// image reads as "link" and nothing else.
     @ViewBuilder
     private var forgeLink: some View {
         if let repository = row.repository, let page = repository.page {
@@ -364,7 +368,8 @@ struct ProjectRowView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .pointerStyle(.link)
-            .help("Open \(repository.label) on \(repository.host)")
+            .help(Self.openHelp(repository))
+            .accessibilityLabel(Self.openHelp(repository))
         }
     }
 
@@ -387,6 +392,10 @@ struct ProjectRowView: View {
                 }
             }
         }
+    }
+
+    private static func openHelp(_ repository: UsagePanelSnapshot.RepositoryLink) -> String {
+        "Open \(repository.label) on \(repository.host)"
     }
 }
 
