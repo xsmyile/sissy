@@ -51,3 +51,25 @@ extension UsageRequestError {
         return TimeInterval(header.trimmingCharacters(in: .whitespaces))
     }
 }
+
+extension UsageRequestError: CustomStringConvertible {
+    /// What the log says this refusal was.
+    ///
+    /// `localizedDescription` on a bare enum answers `error 1` and drops the
+    /// status code, which is the whole of what a persistent refusal has to
+    /// say — three readers log this type and every one of them was reporting
+    /// a number nobody could act on. `CustomStringConvertible` rather than
+    /// `LocalizedError`: none of this reaches a surface a user reads, and
+    /// `errorDescription` would promise that it does.
+    var description: String {
+        switch self {
+        case .rateLimited(let retryAfter):
+            guard let retryAfter else { return "429 with no Retry-After" }
+            return "429, Retry-After \(Int(retryAfter))s"
+        case .badStatus(let code):
+            return "HTTP \(code)"
+        case .malformedPayload:
+            return "the reply did not parse"
+        }
+    }
+}

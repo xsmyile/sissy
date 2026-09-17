@@ -604,6 +604,15 @@ enum UsageFormat {
         case .sessionExpired:
             let ended = isCodex ? "The OpenAI sign-in" : "The claude.ai session"
             return .init(message: "\(ended) has ended", action: "Link again", kind: .link)
+        case .credentialRefused:
+            // No action, deliberately. The credential is Claude Code's own and
+            // the CLI rotates it on its own schedule, so every button this row
+            // could carry would either do nothing or send someone to re-link
+            // an account that is not linked.
+            return .init(
+                message: "\(vendor) refused \(cli)'s sign-in, so the limits stay hidden "
+                    + "until the CLI renews it",
+                action: nil, kind: .refresh)
         case .credentialUnreachable:
             return .init(
                 message: "Sissy cannot read this account's sign-in, so its limits stay hidden",

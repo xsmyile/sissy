@@ -315,7 +315,7 @@ actor ClaudeWebSource: SourceSignals {
             report("the claude.ai session was refused (status \(code)); import it again")
             return Self.refreshInterval
         }
-        report("the claude.ai usage request failed: \(error.localizedDescription)")
+        report("the claude.ai usage request failed: \(error)")
         return Self.refreshInterval
     }
 
