@@ -142,7 +142,14 @@ enum ClaudeAccountLinkCopy {
         + "Code sign-in it archived stays, so the account is still one you can switch to — "
         + "and you can link the session again from this window."
 
-    static let unlinkConfirm = "Forget session"
+    /// One word, because a longer one does not survive the alert's layout:
+    /// every button is given the widest one's fitting width, and a row that
+    /// passes ~110 pt is stacked vertically at full width instead. Measured
+    /// 2026-09-17 on macOS 27, "Forget session" renders 114 pt and drew
+    /// Cancel above it, where `CodexAccountLinkCopy` — the same dialog, one
+    /// word shorter — drew both inline. The title already names what is
+    /// being forgotten.
+    static let unlinkConfirm = "Forget"
 
     static let cancel = "Cancel"
     static let link = "Link"
