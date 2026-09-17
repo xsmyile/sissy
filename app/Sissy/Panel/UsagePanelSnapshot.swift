@@ -511,10 +511,6 @@ struct UsagePanelSnapshot: Equatable {
         var isOverPace: Bool { deltaPercent > 0 }
     }
 
-    /// `selected` names which account of each vendor to draw, keyed by vendor.
-    /// A vendor it does not name, or names an account the frame no longer
-    /// carries, falls back to that vendor's first account — a row must not
-    /// vanish because a preference outlived the account it points at.
     static func make(
         frame: FrameData,
         period: UsagePeriod = .today,

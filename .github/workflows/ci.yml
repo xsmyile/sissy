@@ -14,6 +14,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: shellcheck
         run: shellcheck scripts/*.sh app/Sissy/Resources/*.sh
+      - name: doc references
+        run: python3 scripts/check-doc-refs.py
       - name: actionlint
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
