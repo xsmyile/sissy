@@ -5,10 +5,10 @@ import Foundation
 /// plan, the account and the credits from the CLI's own config file — which is
 /// why the last three are readable whether or not the user turned limits on.
 ///
-/// Whichever limits source is running answers for everything it can, credits
+/// Whichever limits source is answering answers for everything it can, credits
 /// included — and answers for them even when its answer is "none". Not a
-/// chain of fallbacks: exactly one source is running and the config file's
-/// copy is not a second opinion to fill in behind it. That copy is the
+/// chain of fallbacks: the config file's copy is not a second opinion to fill
+/// in behind a live reader. That copy is the
 /// endpoint's reply as of the last time the CLI asked, which is only when the
 /// user typed `/usage`, so pairing a live window with it would be two moments
 /// on one row — and, measured 2026-09-15, two *accounts* on one row: a config
@@ -216,19 +216,19 @@ struct ClaudeCodeSignals: SourceSignals {
     }
 
     /// The config file's reading, with whichever limits reader is actually
-    /// running laid over it.
+    /// answering laid over it.
     ///
-    /// Exactly one reader is: the engine starts one and stops both, and a
-    /// stopped one clears its reading and its state. So the answer is the one
-    /// that has produced a reading, and failing that the one with something to
-    /// say about why it has not — a stopped source is silent, a running one
-    /// that was refused still has to explain itself.
+    /// A reader that has produced a reading answers; failing that, the one
+    /// with something to say about why it has not — a stopped source is
+    /// silent, a running one that was refused still has to explain itself,
+    /// and the notice is the only way back from most of those states.
     ///
-    /// Asking *which* rather than preferring the web source by position is the
-    /// whole of it: both are constructed at launch whether or not either runs,
-    /// so `webSource != nil` answers "was one built", never "is one reading",
-    /// and taking it for the second silently took the OAuth probe's windows
-    /// off the panel for everyone who had not imported a session.
+    /// Asking *which* rather than preferring the web source by position is
+    /// the older half of the rule: both are constructed at launch whether or
+    /// not either runs, so `webSource != nil` answers "was one built", never
+    /// "is one reading", and taking it for the second silently took the OAuth
+    /// probe's windows off the panel for everyone who had not imported a
+    /// session.
     ///
     /// Static and taking its inputs so the rule is testable without two
     /// actors, which is what it was missing when it was wrong.
@@ -239,15 +239,40 @@ struct ClaudeCodeSignals: SourceSignals {
     ) -> ProviderSignals {
         var reading = profile
         let readings = [probe, web].compactMap { $0 }
-        guard
-            let live = readings.first(where: { $0.limitsObservedAt != nil })
-                ?? readings.first(where: { $0.limitsState != .quiet })
-        else { return reading }
+        guard let live = answering(among: readings) else { return reading }
         reading.windows = live.windows
         reading.limitsState = live.limitsState
         reading.limitsObservedAt = live.limitsObservedAt
         reading.credits = live.credits
         return reading
+    }
+
+    /// Which reader the row takes its windows from, given that both of them
+    /// run: the engine starts the probe and every session beside it.
+    ///
+    /// Rank first, and the rank is the CLI's own credential — it is the
+    /// vendor's own endpoint, where the session is the fallback for a Mac
+    /// that keeps no credential to read. What unseats it is the vendor
+    /// refusing it: a reader being told to come back later stops being the
+    /// freshest thing on the row the moment the other has a later reading.
+    /// Measured 2026-09-17, the probe was refused from 15:15 and the row held
+    /// its own 15:12 reading with only its age moving, on an account with a
+    /// claude.ai reader polling beside it that could not take the row however
+    /// much later its reading was. It is the rule `CodexSignals.merge`
+    /// settles its own two sources with, narrowed to the case where rank is
+    /// the thing that goes wrong.
+    ///
+    /// Only readers that have read anything are compared by stamp. One with
+    /// nothing read yet cannot be newer than anything, and its state reaching
+    /// the row is a separate question the fallback answers. Two readings of
+    /// the same moment keep the ranked one, which is rank doing its job.
+    private static func answering(among readings: [ProviderSignals]) -> ProviderSignals? {
+        let read = readings.filter { $0.limitsObservedAt != nil }
+        guard let preferred = read.first else {
+            return readings.first { $0.limitsState != .quiet }
+        }
+        guard case .rateLimited = preferred.limitsState else { return preferred }
+        return read.max { ($0.limitsObservedAt ?? .distantPast) < ($1.limitsObservedAt ?? .distantPast) }
     }
 }
 
