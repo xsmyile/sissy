@@ -558,6 +558,17 @@ enum UsageFormat {
     /// already had the diagnosis and nobody read it. `.quiet` is the common
     /// case and says nothing at all — a row that explains itself every time
     /// it is fine is a row nobody reads when it is not.
+    ///
+    /// The one wording that names neither is the vendor refusing to answer,
+    /// because there is nothing to do and no button that would help — and it
+    /// is still the most important of them, since it is the only state where
+    /// the windows themselves stay on screen with an age that keeps growing.
+    ///
+    /// Its deadline is a clock time and deliberately not `resetLabel`, which
+    /// turns into a bare weekday once the instant is not on today's page of
+    /// the calendar. That rule is for a reset days out; this one is an hour
+    /// away at most, so the question is never which day — measured, a 1800 s
+    /// block beginning at 23:50 read "until Fri".
     static func limitsNotice(
         _ state: ProviderLimitsState
     ) -> UsagePanelSnapshot.LimitsNotice? {
@@ -581,6 +592,11 @@ enum UsageFormat {
         case .credentialUnreachable:
             return .init(
                 message: "Sissy cannot read this account's sign-in, so its limits stay hidden",
+                action: nil, kind: .refresh)
+        case .rateLimited(let until):
+            return .init(
+                message: "Anthropic is not answering for limits until "
+                    + until.formatted(.dateTime.hour().minute()),
                 action: nil, kind: .refresh)
         }
     }

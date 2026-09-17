@@ -21,6 +21,43 @@ final class ClaudeSignalsMergeTests: XCTestCase {
             windows: windows, limitsState: state, limitsObservedAt: observedAt)
     }
 
+    /// A block ends when the vendor said it would, whether or not a poll was
+    /// able to go back and be refused again.
+    ///
+    /// The path that needs it: the sleep runs out, and the poll that follows
+    /// cannot spend a request at all — an access token the CLI has not
+    /// renewed, a keychain that did not answer — so it returns before
+    /// reaching the endpoint and publishes nothing. Without this the row
+    /// would go on naming a deadline in the past for as long as that lasted.
+    func testAVendorBlockDoesNotOutliveTheDeadlineItNamed() {
+        let now = Date()
+        let expired = signals(state: .rateLimited(until: now.addingTimeInterval(-1)))
+
+        XCTAssertEqual(expired.live(at: now).limitsState, .quiet)
+    }
+
+    func testAVendorBlockStandsUntilThatDeadline() {
+        let now = Date()
+        let standing = signals(state: .rateLimited(until: now.addingTimeInterval(60)))
+
+        XCTAssertEqual(
+            standing.live(at: now).limitsState, .rateLimited(until: now.addingTimeInterval(60)))
+    }
+
+    /// Every account's reading is given the same treatment for the reason its
+    /// windows are: two rows drawn from one moment must not disagree.
+    func testAnAccountsBlockExpiresWithTheRowsAbove() {
+        let now = Date()
+        var reading = signals()
+        reading.accounts = [
+            AccountSignals(
+                id: "account", account: nil, plan: nil, planTier: nil,
+                limitsState: .rateLimited(until: now.addingTimeInterval(-1)))
+        ]
+
+        XCTAssertEqual(reading.live(at: now).accounts.map(\.limitsState), [.quiet])
+    }
+
     /// Both readers exist at launch. Which one answers is which one has read,
     /// never which one was constructed.
     func testTheProbeAnswersWhenNoSessionWasImported() {

@@ -317,4 +317,124 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         XCTAssertEqual(probe.currentSignals().windows.map(\.usedPercent), [20])
         await probe.stop()
     }
+
+    /// The defect this caught, measured 2026-09-17: the endpoint had been
+    /// answering 429 since 01:14, every poll published nothing, and by 07:00
+    /// all three windows of the last good reading had rolled over. The panel
+    /// said "awaiting a reading" — Codex's sentence for a source that cannot
+    /// be re-read on demand — where the truth was that the vendor was
+    /// refusing to give one.
+    ///
+    /// The windows stay: they are the last true reading and their age is what
+    /// the row is for.
+    func testABlockedVendorIsPublishedWithoutDroppingTheLastReading() async {
+        let probe = rateLimitedProbe(retryAfter: 1684)
+
+        _ = await probe.refreshOnce {}
+        _ = await probe.refreshOnce {}
+
+        guard case .rateLimited(let until) = probe.currentSignals().limitsState else {
+            return XCTFail("a 429 left the row with nothing to say")
+        }
+        XCTAssertEqual(until.timeIntervalSinceNow, 1684, accuracy: 5)
+        XCTAssertEqual(probe.currentSignals().windows.map(\.usedPercent), [10])
+        await probe.stop()
+    }
+
+    /// The vendor's own `Retry-After` is what the panel promises and what the
+    /// loop sleeps, so the two cannot disagree.
+    func testTheBackoffTakesTheVendorsOwnFigure() async {
+        let probe = rateLimitedProbe(retryAfter: 1684)
+        _ = await probe.refreshOnce {}
+        let delay = await probe.refreshOnce {}
+        XCTAssertEqual(delay, .seconds(1684))
+        await probe.stop()
+    }
+
+    /// Foreign input: a figure shorter than an ordinary poll is what earned
+    /// the 429, and one longer than the ceiling is not worth trusting.
+    func testTheRetryAfterHeaderIsClamped() {
+        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: 0), 300)
+        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: 5), 300)
+        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: 86_400), 3600)
+        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: nil), 1800)
+        XCTAssertEqual(ClaudeLimitsError.backoffSeconds(retryAfter: -1), 1800)
+    }
+
+    /// A request issued before the deadline the vendor named can only be
+    /// refused again, and it is not free: measured 2026-09-17, the instant
+    /// stood still across refusals 77 s apart and had moved 142 s further out
+    /// 24 minutes later, which is a window that rolls over the requests made
+    /// into it. So the button spends nothing, and the notice beside it
+    /// already says when there would be something to spend it on.
+    func testRefreshDoesNotSpendARequestTheVendorHasRefused() async {
+        let fetches = LockedValue(0)
+        let probe = rateLimitedProbe(retryAfter: 1684, counting: fetches)
+
+        _ = await probe.refreshOnce {}
+        _ = await probe.refreshOnce {}
+        XCTAssertEqual(fetches.load(), 2)
+
+        await probe.refresh {}
+
+        XCTAssertEqual(fetches.load(), 2, "refresh hammered an endpoint that had said no")
+        await probe.stop()
+    }
+
+    /// The gap this closed: the credential read at the top of every poll
+    /// wrote `.quiet`, which is its answer for the states that are about the
+    /// credential — and a vendor's block is not one. So for the length of the
+    /// request that was about to be refused again the row had nothing on it,
+    /// and any emit from the tail in that window drew a panel with no notice.
+    ///
+    /// Observed from inside the request, because that is the only place the
+    /// gap exists.
+    func testACredentialReadDoesNotLiftAVendorBlock() async {
+        let probe = LockedValue<ClaudeLimitsProbe?>(nil)
+        let duringRequest = LockedValue<ProviderLimitsState?>(nil)
+        let built = ClaudeLimitsProbe(
+            credentials: { _, _ in
+                .found(ClaudeCredentials(accessToken: "token", expiresAt: .distantFuture))
+            },
+            fetch: { _ in
+                duringRequest.store(probe.load()?.currentSignals().limitsState)
+                throw ClaudeLimitsError.rateLimited(retryAfter: 1684)
+            })
+        probe.store(built)
+
+        _ = await built.refreshOnce {}
+        _ = await built.refreshOnce {}
+
+        guard case .rateLimited = duringRequest.load() else {
+            return XCTFail("the credential read took the block off the row mid-request")
+        }
+        await built.stop()
+    }
+
+    /// A probe that answers one reading and then meets a vendor refusing to
+    /// give another — the shape every assertion above is about.
+    private func rateLimitedProbe(
+        retryAfter: TimeInterval,
+        counting fetches: LockedValue<Int> = LockedValue(0)
+    ) -> ClaudeLimitsProbe {
+        ClaudeLimitsProbe(
+            credentials: { _, _ in
+                .found(ClaudeCredentials(accessToken: "token", expiresAt: .distantFuture))
+            },
+            fetch: { _ in
+                var attempt = 0
+                fetches.update {
+                    $0 += 1
+                    attempt = $0
+                }
+                guard attempt > 1 else {
+                    return ClaudeLimitsProbe.Reading(
+                        windows: [
+                            UsageWindow(minutes: 300, usedPercent: 10, resetsAt: .distantFuture)!
+                        ],
+                        credits: nil)
+                }
+                throw ClaudeLimitsError.rateLimited(retryAfter: retryAfter)
+            })
+    }
 }

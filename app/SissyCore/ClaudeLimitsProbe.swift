@@ -16,7 +16,6 @@ actor ClaudeLimitsProbe: SourceSignals {
     private static let betaHeader = "oauth-2025-04-20"
     private static let requestTimeout: TimeInterval = 10
     private static let refreshInterval: Duration = .seconds(300)
-    private static let rateLimitedBackoff: Duration = .seconds(1800)
     private static let keychainTimeout: Duration = .seconds(20)
 
     /// Windows, why they are missing when they are, and when the last
@@ -172,6 +171,7 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// a refresh that blanks the gauges it is trying to restore reads as a
     /// failure for as long as the request takes.
     func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
+        if case .rateLimited(let until) = published.load().limitsState, until > Date() { return }
         cancelRequests()
         lastReported = nil
         let request = begin(userInitiated: true, onRefresh: onRefresh)
@@ -248,7 +248,9 @@ actor ClaudeLimitsProbe: SourceSignals {
         guard stamp == generation, !Task.isCancelled else { return .wait(Self.refreshInterval) }
         switch outcome {
         case .found(let found):
-            published.update { $0.limitsState = .quiet }
+            published.update {
+                if $0.limitsState.isAnsweredByACredentialRead { $0.limitsState = .quiet }
+            }
             if let expiresAt = found.expiresAt, expiresAt <= Date() {
                 report(
                     "the Claude Code access token expired at \(expiresAt); waiting for "
@@ -322,11 +324,13 @@ actor ClaudeLimitsProbe: SourceSignals {
             return Self.refreshInterval
         } catch {
             guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-            if case ClaudeLimitsError.rateLimited = error {
+            if case ClaudeLimitsError.rateLimited(let retryAfter) = error {
+                let backoff = ClaudeLimitsError.backoffSeconds(retryAfter: retryAfter)
+                let until = Date().addingTimeInterval(backoff)
+                published.update { $0.limitsState = .rateLimited(until: until) }
                 report(
-                    "the Claude usage endpoint answered 429; backing off for "
-                        + "\(Self.rateLimitedBackoff)")
-                return Self.rateLimitedBackoff
+                    "the Claude usage endpoint answered 429; backing off until \(until)")
+                return .seconds(backoff)
             }
             report("the Claude usage request failed: \(error.localizedDescription)")
             return Self.refreshInterval
@@ -352,7 +356,9 @@ actor ClaudeLimitsProbe: SourceSignals {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ClaudeLimitsError.malformedPayload }
-        if http.statusCode == 429 { throw ClaudeLimitsError.rateLimited }
+        if http.statusCode == 429 {
+            throw ClaudeLimitsError.rateLimited(retryAfter: ClaudeLimitsError.retryAfter(http))
+        }
         guard http.statusCode == 200 else { throw ClaudeLimitsError.badStatus(http.statusCode) }
         guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ClaudeLimitsError.malformedPayload

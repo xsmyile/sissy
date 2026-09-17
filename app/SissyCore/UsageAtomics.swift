@@ -44,9 +44,10 @@ struct AccountSignals: Sendable, Equatable, Identifiable {
     /// `ProviderSignals.live()` applies to its own — a bucket past its reset
     /// kept with the rest, so an account's gauges and the row above them
     /// cannot disagree about whether a window still exists.
-    func live() -> Self {
+    func live(at now: Date = Date()) -> Self {
         var copy = self
         copy.windows = UsageWindow.ordered(windows)
+        copy.limitsState = limitsState.live(at: now)
         return copy
     }
 }
@@ -114,11 +115,14 @@ struct ProviderSignals: Sendable, Equatable {
     /// moment must not disagree about which of their windows has rolled over.
     ///
     /// What ordering means, and why a bucket past its reset stays in the
-    /// list, is `UsageWindow.ordered`.
-    func live() -> Self {
+    /// list, is `UsageWindow.ordered`. Why a vendor's block does not outlive
+    /// the deadline it named, where a window does outlive its reset, is
+    /// `ProviderLimitsState.live(at:)`.
+    func live(at now: Date = Date()) -> Self {
         var copy = self
         copy.windows = UsageWindow.ordered(windows)
-        copy.accounts = accounts.map { $0.live() }
+        copy.limitsState = limitsState.live(at: now)
+        copy.accounts = accounts.map { $0.live(at: now) }
         return copy
     }
 }
