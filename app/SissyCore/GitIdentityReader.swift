@@ -25,8 +25,8 @@ import Foundation
 /// With no `user.email` set anywhere git falls back to the gecos field and the
 /// machine's hostname, and whether it then refuses that guess depends on the
 /// hostname: measured 2026-09-17, a Mac whose hostname yields no domain exits
-/// 128 with `unable to auto-detect email address (got 'davide@blackbird.
-/// (none)')`, while a CI runner whose hostname ends `.local` was served
+/// 128 with `unable to auto-detect email address`, while a CI runner whose
+/// hostname ends `.local` was served
 /// `Anka <runner@…-F66C054AC5DC.local>` with status 0. A reading taken from
 /// that is an address nobody owns, and it would join its forge's electorate
 /// and could become what that forge expects. So the configuration is asked
@@ -114,7 +114,13 @@ enum GitIdentityReader {
         let origins = invoke([
             "config", "--show-origin", "--show-scope", "--get-regexp", userKeyPattern,
         ])
-        let settings = origins.status == 0 ? entries(in: origins.output, repository: repository) : []
+        guard origins.status == 0 || origins.status == noMatchStatus else {
+            return GitIdentityScan(
+                identity: identity(
+                    repository, remote: remote, reading: .unreadable(origins.failure), origin: nil),
+                sources: ambient)
+        }
+        let settings = entries(in: origins.output, repository: repository)
         let sources = ambient + settings.map(\.origin.file).filter { !ambient.contains($0) }
         let origin = winningOrigin(in: settings)
         guard settings.contains(where: { $0.key == emailKey }) else {
@@ -186,6 +192,14 @@ enum GitIdentityReader {
 
     private static let userKeyPattern = "^user\\.(name|email)$"
     private static let emailKey = "user.email"
+    /// What `--get-regexp` exits with when nothing matched, which is the only
+    /// non-zero status that means the configuration was read and holds no
+    /// identity. Anything else is a configuration that could not be read at
+    /// all — measured 2026-09-17, a malformed file exits 128 with `bad config
+    /// line 1 in file …` — and reporting that as "no identity resolves here"
+    /// would tell the user git will refuse their commit when the truth is
+    /// that a file needs repairing.
+    private static let noMatchStatus: Int32 = 1
 
     private static func identity(
         _ repository: String, remote: ProjectRemote?, reading: GitIdentityReading,

@@ -115,6 +115,20 @@ final class GitIdentityTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(read(repository)).reading, .unset)
     }
 
+    /// A configuration git could not read is not a repository with no
+    /// identity. Only `--get-regexp`'s own no-match status means that; any
+    /// other failure is a file that needs repairing, and saying "git would
+    /// refuse the commit" would send the user looking in the wrong place.
+    func testAConfigurationGitCannotReadIsNotAnAbsentIdentity() throws {
+        let repository = try makeRepository("broken-config")
+        writeGlobal("[user\n\tname = Broken\n")
+        let reading = try XCTUnwrap(read(repository))
+        guard case .unreadable(let message) = reading.reading else {
+            return XCTFail("expected git's own refusal, got \(reading.reading)")
+        }
+        XCTAssertFalse(message.isEmpty)
+    }
+
     /// The reader's environment is built, not inherited: `GIT_AUTHOR_EMAIL`
     /// beats every file git resolves, so one in Sissy's own environment would
     /// make every repository on the machine read the same wrong answer.
