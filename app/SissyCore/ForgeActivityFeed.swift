@@ -15,34 +15,6 @@ enum ForgeWindow {
         return calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today) ?? today
     }
 
-    /// Read-only after construction, which is the condition
-    /// `UsageReaderShared` documents for the same escape hatch: only mutating
-    /// `formatOptions` is unsafe on these types, and nothing here does.
-    nonisolated(unsafe) static let iso: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter
-    }()
-
-    /// The same instant with **this Mac's own offset on it**, for a filter that
-    /// would otherwise be read in a calendar that is not the user's.
-    ///
-    /// GitHub's search qualifiers take either a bare date or a timestamp, and a
-    /// bare date is midnight **UTC**: measured 2026-09-17 from Europe/Rome, a
-    /// window whose local start is 00:00+02:00 asked as `merged:>=2026-09-17`
-    /// begins two hours late, so merges in the first two hours of the local day
-    /// fall out of Today while the contributions figure beside them — which is
-    /// asked as an instant — keeps them. The timestamp form fixes it and the
-    /// offset is honoured: measured the same day, the same window asked from
-    /// 14:00+02:00 answered 11 where 14:00+00:00 answered 6 and the whole day
-    /// answered 25.
-    nonisolated(unsafe) static let timestamp: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        formatter.timeZone = .current
-        return formatter
-    }()
-
     /// A day in the `YYYY-MM-DD` form GitLab's `after` takes, in the **local**
     /// calendar.
     ///
@@ -62,6 +34,38 @@ enum ForgeWindow {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
+
+    /// The instant a vendor's own day bucket opens on the date a window starts
+    /// on: that local date at midnight **UTC**.
+    ///
+    /// **Both forges count in whole UTC days, and neither takes an instant.**
+    /// Measured 2026-09-17 from Europe/Rome, GitHub's `contributionCalendar`
+    /// snaps `from` down to the start of the UTC day holding it, so a local
+    /// midnight rendered as the instant it is — `2026-09-16T22:00:00Z` — bought
+    /// the whole of the 16th: 326 contributions where the profile's own square
+    /// for the 17th read 128, and 773 over seven days where the seven squares
+    /// came to 704. Asked from `2026-09-17T00:00:00Z` it answers 128, and from
+    /// noon or 23:00 on that same date it still answers 128, which is what
+    /// proves the bucket is the day rather than the instant. It is also why the
+    /// error is invisible at 30 days on some accounts and not others — it is
+    /// worth whatever the extra day held, which was 0 on 2026-08-18 and 198 on
+    /// 2026-09-16.
+    ///
+    /// So a window is named by its **date** and every figure on the row takes
+    /// the same form, including the two that are genuinely instant filters:
+    /// GitHub's `merged:>=` qualifier and GitLab's `mergedAfter` would
+    /// otherwise sit on a window two hours wider than the contributions beside
+    /// them — measured the same day, 156 merges against the 155 that fall in
+    /// the seven UTC days the contribution figure is over. One row, one window,
+    /// in the calendar the user is reading the heatmap in.
+    ///
+    /// The local date rather than the UTC one, because that is the day the user
+    /// is having: west of Greenwich the two agree for most of the day and east
+    /// of it the local date is the later one, and in both the square the
+    /// heatmap labels with today's date is the UTC day of the same name.
+    static func vendorDay(_ start: Date) -> String { day.string(from: start) + utcMidnight }
+
+    private static let utcMidnight = "T00:00:00Z"
 }
 
 /// The field names the aliased documents use for each period.
@@ -251,14 +255,14 @@ enum GitHubActivityFeed {
         let contributions = UsagePeriod.allCases.map { period in
             let range =
                 ForgeWindow.start(of: period, now: now)
-                .map { "(from: \"\(ForgeWindow.iso.string(from: $0))\")" } ?? ""
+                .map { "(from: \"\(ForgeWindow.vendorDay($0))\")" } ?? ""
             let alias = ForgeAlias.contributions(period)
             return "\(alias): contributionsCollection\(range) { \(calendarField) }"
         }
         let merged = UsagePeriod.allCases.map { period in
             let scope =
                 ForgeWindow.start(of: period, now: now)
-                .map { " merged:>=\(ForgeWindow.timestamp.string(from: $0))" } ?? ""
+                .map { " merged:>=\(ForgeWindow.vendorDay($0))" } ?? ""
             let alias = ForgeAlias.merged(period)
             let terms = "is:pr author:@me is:merged\(scope)"
             return "\(alias): search(query: \"\(terms)\", type: ISSUE, first: 1) { issueCount }"
@@ -370,7 +374,7 @@ enum GitLabActivityFeed {
         let fields = UsagePeriod.allCases.map { period -> String in
             let scope =
                 ForgeWindow.start(of: period, now: now)
-                .map { ", mergedAfter: \"\(ForgeWindow.iso.string(from: $0))\"" } ?? ""
+                .map { ", mergedAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
             return "\(ForgeAlias.merged(period)): authoredMergeRequests(state: merged\(scope)) { count }"
         }
         return """
