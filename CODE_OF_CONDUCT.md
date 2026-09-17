@@ -56,10 +56,9 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the maintainer privately, by direct message to
-[@xsmyile](https://github.com/xsmyile) on GitHub. All complaints will be
-reviewed and investigated promptly and fairly, and the reporter's privacy and
-security will be respected.
+reported to the maintainer privately, at <conduct@smyile.com>. All complaints
+will be reviewed and investigated promptly and fairly, and the reporter's
+privacy and security will be respected.
 
 ## Enforcement Guidelines
 
