@@ -271,7 +271,7 @@ struct PanelProviderPage: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.visible)
             .fixedSize()
-            .help(Self.accountPickerHelp)
+            .help(accountPickerHelp)
         }
     }
 
@@ -310,11 +310,22 @@ struct PanelProviderPage: View {
         Button(ClaudeAccountLinkCopy.addTitle, action: onAddAccount)
     }
 
-    /// Said once here rather than at the call site: this control rewrites the
-    /// credential the CLI starts with, and a tooltip that described it as a
-    /// view would be selling a credential change as a filter.
-    static let accountPickerHelp =
+    /// What the picker does, which is not the same sentence for both vendors.
+    ///
+    /// On Claude Code an account in this menu is one Sissy can sign the CLI in
+    /// as, so the tooltip says so rather than selling a credential change as a
+    /// filter. On Codex there is no such control — a linked account is read
+    /// and never signed in with — so the same words would promise something
+    /// the page cannot do.
+    private var accountPickerHelp: String {
+        row.id == ProviderID.codex ? Self.readOnlyPickerHelp : Self.switchablePickerHelp
+    }
+
+    static let switchablePickerHelp =
         "Choose which account Claude Code signs in as. Sissy asks before it changes anything."
+
+    static let readOnlyPickerHelp =
+        "Choose which account to read. Codex stays on the account it is signed into."
 
     /// Signs Claude Code in as the account being read.
     ///

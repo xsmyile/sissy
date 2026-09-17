@@ -584,11 +584,15 @@ struct UsagePanelSnapshot: Equatable {
             return ProviderRow(
                 id: slice.id,
                 name: UsageFormat.providerName(slice.id),
-                accounts: slice.id == ProviderID.claudeCode
-                    ? accountEntries(
-                        readings: slice.signals.accounts, known: claudeAccounts,
-                        reading: limitsReading, now: now)
-                    : [],
+                accounts: accountEntries(
+                    readings: slice.signals.accounts,
+                    // The archive of credentials Sissy could switch the CLI to
+                    // is Claude Code's alone: a linked Codex account is read
+                    // and never signed in with, so an account it holds no
+                    // reading for is an account it holds nothing for.
+                    known: slice.id == ProviderID.claudeCode
+                        ? claudeAccounts : ClaudeAccountRegistry.Snapshot(),
+                    reading: limitsReading, now: now),
                 plan: plan?.label,
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),

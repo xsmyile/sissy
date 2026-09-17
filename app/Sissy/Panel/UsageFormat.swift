@@ -963,6 +963,20 @@ extension UsageFormat {
         }
     }
 
+    /// What a workspace is called where one has to be picked or named.
+    ///
+    /// The vendor's own name, with what it *is* beside it only when that adds
+    /// something: a personal account and a workspace can share a name on one
+    /// login, and `personal` is the word OpenAI itself uses. A structure this
+    /// build does not know is printed humanised rather than dropped, the same
+    /// rule a status token takes.
+    static func workspaceLabel(_ workspace: CodexWorkspace) -> String {
+        guard let structure = workspace.structure, !structure.isEmpty,
+            structure.lowercased() != workspace.name.lowercased()
+        else { return workspace.name }
+        return "\(workspace.name) · \(humanised(structure))"
+    }
+
     static let unlinkedAccountCaption =
         "Sissy has no live source for this account, so it cannot read its limits."
 }

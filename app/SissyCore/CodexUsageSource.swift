@@ -211,6 +211,9 @@ actor CodexUsageSource: SourceSignals {
             publishFailure(.refused)
             report("reading the Codex credential was refused; the source stops until restarted")
             cancelRequests()
+        case .expired:
+            publishFailure(.sessionExpired)
+            report("the Codex credential is spent and could not be renewed; link it again")
         case .unreadable(let why):
             report("the Codex credential could not be read: \(why)")
         }
