@@ -139,6 +139,56 @@ final class ClaudeSignalsMergeTests: XCTestCase {
         XCTAssertEqual(merged.plan, "max")
     }
 
+    /// The probe leads until the vendor stops answering it.
+    ///
+    /// Measured 2026-09-17: refused from 15:15, the probe held the row on its
+    /// own 15:12 reading, on an account that had a claude.ai reader polling
+    /// beside it. A reader being told to come back later is the one case where
+    /// rank is the wrong question.
+    func testARefusedProbeGivesTheRowToAFresherSession() {
+        let now = Date()
+        let merged = ClaudeCodeSignals.merge(
+            profile: signals(),
+            web: signals(windows: [window(21)], observedAt: now),
+            probe: signals(
+                windows: [window(46)],
+                state: .rateLimited(until: now.addingTimeInterval(3600)),
+                observedAt: now.addingTimeInterval(-180)))
+
+        XCTAssertEqual(merged.windows.map(\.usedPercent), [21])
+        XCTAssertEqual(merged.limitsState, .quiet)
+        XCTAssertEqual(merged.limitsObservedAt, now)
+    }
+
+    /// And keeps it when its own reading is still the later one, which is the
+    /// ordinary case: the session polls on the same interval, so a block does
+    /// not by itself make the other reader fresher.
+    func testARefusedProbeKeepsTheRowWhileItsReadingIsTheLater() {
+        let now = Date()
+        let blocked = ProviderLimitsState.rateLimited(until: now.addingTimeInterval(3600))
+        let merged = ClaudeCodeSignals.merge(
+            profile: signals(),
+            web: signals(windows: [window(21)], observedAt: now.addingTimeInterval(-600)),
+            probe: signals(windows: [window(46)], state: blocked, observedAt: now))
+
+        XCTAssertEqual(merged.windows.map(\.usedPercent), [46])
+        XCTAssertEqual(merged.limitsState, blocked)
+    }
+
+    /// A block with no other reading behind it keeps the row it has. The
+    /// notice is the only thing on screen saying why the age is growing.
+    func testARefusedProbeKeepsTheRowWhenNothingElseHasRead() {
+        let now = Date()
+        let blocked = ProviderLimitsState.rateLimited(until: now.addingTimeInterval(3600))
+        let merged = ClaudeCodeSignals.merge(
+            profile: signals(),
+            web: signals(),
+            probe: signals(windows: [window(46)], state: blocked, observedAt: now))
+
+        XCTAssertEqual(merged.windows.map(\.usedPercent), [46])
+        XCTAssertEqual(merged.limitsState, blocked)
+    }
+
     /// Neither reader running leaves the row on the config file alone, with
     /// no windows and nothing to explain.
     func testNeitherReaderRunningLeavesTheProfileUntouched() {
