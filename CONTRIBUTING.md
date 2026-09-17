@@ -41,12 +41,13 @@ the state of a Sissy you have installed. `Start at login` and the legacy-agent
 retirement both go through `SMAppService`, which needs a normally signed bundle:
 `CODE_SIGNING_ALLOWED=NO` is fine for CI, not for testing those.
 
-Signing is the one thing the script cannot guess. It defaults to this project's
-own Development Team, so on any other machine set yours:
-`DEVELOPMENT_TEAM=XXXXXXXXXX scripts/dev-build-app.sh`. Nothing else in the
-repository needs an Apple Developer account — the plain `xcodebuild` above
-builds without one, and everything but that one switch can be exercised from
-its product.
+Signing is configured for this project's own Development Team in
+`app/project.yml`, and both paths above inherit it. Without an Apple Developer
+account of your own, add `CODE_SIGNING_ALLOWED=NO` to the two `xcodebuild`
+lines, which is what CI does. The dev script is the one path that cannot take
+it — `SMAppService` rejects an unsigned product — so give it your team
+instead, from the repository root:
+`DEVELOPMENT_TEAM=XXXXXXXXXX scripts/dev-build-app.sh`.
 
 ## Before you push
 
@@ -115,8 +116,9 @@ proposing a change. The short version:
   concerned.
 - Anything that outlives Sissy on the machine, or writes outside its own
   folder. There are exactly three exceptions today — the usage archive, the
-  session hooks and the archived Claude credentials — and every one of them is
-  reversible from Settings.
+  session hooks and the archived Claude credentials. The first two are
+  reversible from Settings; the third is not yet, which is a gap rather than a
+  precedent to build on.
 - Anything that opens a port, a socket or a second process.
 - A hand-maintained price table. Rates come from LiteLLM at runtime with a
   generated seed as the floor; a new model must not need a release.
