@@ -768,14 +768,6 @@ actor UsageEngine {
         claudeAccounts.currentSnapshot()
     }
 
-    /// Forgets one archived account, which is the only way a stored secret
-    /// leaves this Mac by Sissy's hand. Throws when the keychain refused, so
-    /// nothing tells the user a secret is gone while it is still filed.
-    func forgetClaudeAccount(uuid: String) async throws {
-        try await claudeAccounts.forget(uuid: uuid)
-        await reemit()
-    }
-
     /// Whether a claude.ai session is filed. Asked without decrypting one, so
     /// Settings can say so on a build whose grant has lapsed.
     nonisolated var hasClaudeWebSession: Bool {
