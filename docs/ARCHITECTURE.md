@@ -91,6 +91,27 @@ because it moves on incidents rather than on polls. Empty while the readings are
 switched off (`statusChecks` in `server.json`, on by default) and for a provider
 with no feed to poll.
 
+`forge` is what each connected git forge last answered: one row per connection,
+carrying the login the token turned out to belong to and two counters per period
+— the vendor's own activity total and the pull or merge requests that account had
+merged. It sits beside the slices for the reason `providerStatus` does and one
+more: a forge is not a metering provider, nothing on it is a token or a cost, and
+a connection exists on a Mac where neither CLI has ever run. Empty until the user
+connects one, which is also the module's only switch.
+
+**The two counters are never summed across forges.** GitHub answers with its own
+contribution-graph total — measured 2026-09-17, 314 on a day whose commit, pull
+request and issue counts came to far less, because the calendar includes private
+contributions the breakdown does not itemise — and GitLab publishes no equivalent
+Sissy can read: `users/<name>/calendar.json` answered 200 with `{}` on a
+self-hosted 19.3 instance with a valid token, so the figure there is the count of
+events GitLab recorded, taken from the `x-total` header of `/api/v4/events` with
+one row requested. Two vendors counting two things is two readings; adding them
+would invent a third belonging to neither, which is the rule `ProviderCredits`
+already holds for money in two currencies. On the widest window GitHub's
+contributions reach back a year where its merge count reaches back for ever,
+which the row says on the hover rather than quietly averaging away.
+
 `providers[].plan` is the account's subscription plan as the vendor's own
 lowercase token — `max`, `team`, `plus` — never a display label: the app words it
 in `UsageFormat`, so a tier a vendor ships after this release still reaches the
@@ -207,6 +228,11 @@ compiled into the app too.
 | `CodexOAuth.swift`              | The PKCE sign-in the login window drives, and the renewal. The Codex CLI's own public client id and loopback redirect — nothing binds the port, the window cancels the navigation and reads the code off the URL. The `state` is checked where the code is read, because that is the whole of what says a code belongs to this login |
 | `CodexAccountLinking.swift`     | Turns a credential into a linked account by asking `backend-api/accounts` which workspaces it can read. One links outright; several hold the credential in the engine, unwritten, until the user answers. A list that could not be read still links, because the credential already names the workspace OpenAI defaults it to — what is lost is a name, not a login |
 | `CodexAccountIndex.swift`       | `codex-accounts.json`: the identity and the chosen workspace beside the credential the keychain holds. Holds no token, so it is readable on a build whose grant has lapsed, and `CodexLinkedAccount.list` is driven by the stored credentials so one whose naming failed still gets a row — and a way to remove it |
+| `ForgeActivity.swift`           | `ForgeKind`, `ForgeActivity` (the two counters per period), `ForgeActivityReading` and `ForgeReadFailure`. The login is on the *reading* and never on the connection: measured 2026-09-17, `gh`'s own configuration named one account while the token in its keychain item answered as another, so a username taken from a CLI's config is a guess about whose numbers these are. A period that could not be read is absent rather than zero |
+| `ForgeConnections.swift`        | `ForgeConnection` (kind plus host — the id, so one host serving two forges is two rows), `ForgeConnectionIndex` (`forge-connections.json`, holding no secret so a lapsed grant still lists what is connected) and `ForgeTokenStore` (`com.radonforge.sissy.forge-token`). No enabled flag: a connection is the switch, and removing it is the off |
+| `ForgeTokenImport.swift`        | Reads the tokens `gh` and `glab` already hold, on the press that offers them and nowhere else. `gh`'s is in the login keychain as `go-keyring-base64:<base64>` and is read through `/usr/bin/security` because that tool is on the item's ACL and this process is not — measured 2026-09-17, no dialog. `glab`'s is plaintext in its own config. Neither CLI's storage is ever written |
+| `ForgeActivityFeed.swift`       | `ForgeWindow` (the archive's own window arithmetic, so the rows count the days the money above them does) and one reader per forge. GitHub answers every period's contributions *and* every period's merged count in one GraphQL document costing 1 point of 5000/h; GitLab takes one GraphQL query plus one header read per period. `after` on GitLab's events is **exclusive**, measured, so a window names the day before it starts |
+| `ForgeActivityMonitor.swift`    | The poll: 5 min while agents are working, 30 min once nothing has, jittered, one value published for every connection. A failure keeps the last figures **and their age** — republishing would date a reading nobody took — and a refused or missing token parks the connection until the user acts, which is what separates this loop from `ProviderStatusMonitor`'s |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow` / `ProviderAccount` / `ProviderCredits`, the burn rate, and the slice and project ordering. No formatters: the frame carries raw numbers and the app words them. `history` is one rollup per `UsagePeriod` the archive answers for, never keyed by `today` — the headline reads that off the live totals beside it |
 | `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` assertion and, when `keepScreenAwake` asks for it, the `PreventUserIdleDisplaySleep` one, plus `KeepAwakeMode` / `KeepAwakeState` / `KeepAwakeHold` / `KeepAwakePolicy`; the mode and the screen setting persist in `server.json`, the assertions die with the process |
