@@ -31,8 +31,13 @@ struct PanelProviderPage: View {
     /// Opens the vendor's services, which are a page of the panel rather than
     /// a surface of this one's: the panel owns which page is on screen, so the
     /// row at the foot of this page asks for the move instead of making it.
-    let openServices: () -> Void
-    let openProjects: () -> Void
+    /// Both carry the account the page is **showing**, not the one it was
+    /// opened on. The picker is this view's own state, so it dies when the
+    /// page leaves the hierarchy — a page that handed its opening argument
+    /// back would return the user to the account they had navigated away
+    /// from, having read another one in between.
+    let openServices: (String?) -> Void
+    let openProjects: (String?) -> Void
     /// This provider's archived days, read once when the page opens. A closure
     /// rather than a value because the read walks the archive and the page is
     /// rebuilt on every frame the engine emits — a value would have to be
@@ -136,7 +141,8 @@ struct PanelProviderPage: View {
             if let status = row.status {
                 Divider()
                 PanelProviderStatus(
-                    provider: row.id, row: status, openServices: openServices)
+                    provider: row.id, row: status,
+                    openServices: { openServices(viewed?.id) })
             }
         }
         .task(id: row.id) {
@@ -547,7 +553,9 @@ struct PanelProviderPage: View {
     /// the fold costs everywhere else on the panel too.
     private var projects: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button(action: openProjects) {
+            Button {
+                openProjects(viewed?.id)
+            } label: {
                 ProjectsSectionLabel(text: "By project", count: row.projectCount)
             }
             .buttonStyle(.plain)

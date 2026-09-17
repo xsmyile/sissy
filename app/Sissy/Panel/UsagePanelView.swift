@@ -234,10 +234,10 @@ struct UsagePanelView: View {
                                 switchingAccount: model.engine.switchingClaudeAccount,
                                 refresh: { model.refreshProvider(open.id) },
                                 openServices: {
-                                    page = .services(open.id, account: openAccount)
+                                    page = .services(open.id, account: $0)
                                 },
                                 openProjects: {
-                                    page = .projects(open.id, account: openAccount)
+                                    page = .projects(open.id, account: $0)
                                 },
                                 loadHistory: {
                                     await model.engine.usageHistorySeries(provider: $0)
