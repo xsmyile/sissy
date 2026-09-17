@@ -48,7 +48,7 @@ Either way it starts tailing the moment it launches, and lives in the menu bar
 rather than the Dock. **The first launch asks for nothing**: no Full Disk
 Access, no keychain dialog, no prompt of any kind. That is a rule rather than a
 list of what Sissy happens to need today. Anything that costs a permission, or
-that writes outside Sissy's own folder, is off until you switch it on, asks at
+that writes into another program's files, is off until you switch it on, asks at
 that moment rather than at launch, and says what it will do before you flip it.
 A module left off does not exist as far as the system is concerned.
 
@@ -179,13 +179,19 @@ keychain item of its own, sits a copy of each Claude credential it has seen
 active — that is what *Use in CLI* switches between, and
 [Uninstall](#uninstall) says how to remove them.
 
-**Anything Sissy writes outside its own folder is off by default** and named
-before you switch it on. Today that is one switch and one button: *Name projects
-even when Sissy is off*, which adds a line to `~/.claude/settings.json` and one
-to `~/.codex/hooks.json` and takes both back out when you switch it off; and
-*Use in CLI*, which writes the account you picked into the slot Claude Code
+**Anything Sissy writes into another program's files is off by default** and
+named before you switch it on. Today that is one switch and one button: *Name
+projects even when Sissy is off*, which adds a line to `~/.claude/settings.json`
+and one to `~/.codex/hooks.json` and takes both back out when you switch it off;
+and *Use in CLI*, which writes the account you picked into the slot Claude Code
 reads its credential from. [Uninstall](#uninstall) says what survives if you
 remove Sissy without switching the first one back off.
+
+What Sissy keeps for itself is the other half of that rule, and that half is
+written without being asked: the archive as the day is metered, the credential
+copy whenever Claude Code is metering and finds an account it has not filed yet.
+Neither touches a file another program owns, and neither reaches the frame, the
+logs, the diagnostics or the export.
 
 ## Uninstall
 
