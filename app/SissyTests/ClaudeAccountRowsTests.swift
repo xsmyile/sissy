@@ -133,7 +133,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         let source = ClaudeWebSource(
             account: archivedUUID,
             sessionSource: { _ in .absent },
-            fetchSource: { _, _ in throw ClaudeLimitsError.malformedPayload })
+            fetchSource: { _, _ in throw UsageRequestError.malformedPayload })
 
         let accounts = ClaudeCodeSignals.perAccount(
             ProviderSignals(),
@@ -157,7 +157,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         let source = ClaudeWebSource(
             account: archivedUUID,
             sessionSource: { _ in .absent },
-            fetchSource: { _, _ in throw ClaudeLimitsError.malformedPayload })
+            fetchSource: { _, _ in throw UsageRequestError.malformedPayload })
 
         let accounts = ClaudeCodeSignals.perAccount(
             ProviderSignals(),
@@ -186,7 +186,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         let source = ClaudeWebSource(
             account: archivedUUID,
             sessionSource: { _ in .absent },
-            fetchSource: { _, _ in throw ClaudeLimitsError.malformedPayload })
+            fetchSource: { _, _ in throw UsageRequestError.malformedPayload })
         let linked = ClaudeAccountIdentity(
             uuid: archivedUUID, email: "davide@radonforge.com", organization: "Radon Forge",
             organizationType: "claude_team", rateLimitTier: nil, seat: "team_tier_1")

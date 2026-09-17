@@ -1,18 +1,19 @@
 import Foundation
 
-/// What a Claude usage request can answer with instead of a reading.
+/// What a usage request can answer with instead of a reading.
 ///
-/// Shared by both readers — the CLI's own credential against
-/// `api.anthropic.com` and the claude.ai session — because the two endpoints
-/// refuse in the same vocabulary, and a file of its own is what lets either
-/// of them grow without the other's carrying it.
-enum ClaudeLimitsError: Error {
+/// Shared by every reader that asks a vendor rather than a log — the CLI's own
+/// credential against `api.anthropic.com`, the claude.ai session, and the
+/// Codex credential against `chatgpt.com` — because they all refuse in HTTP's
+/// vocabulary and a 429 is a 429 whoever sent it. A file of its own is what
+/// lets any of them grow without the others carrying it.
+enum UsageRequestError: Error {
     case rateLimited(retryAfter: TimeInterval?)
     case badStatus(Int)
     case malformedPayload
 }
 
-extension ClaudeLimitsError {
+extension UsageRequestError {
     /// The floor is the ordinary poll interval: coming back sooner than a
     /// poll would have is what earns a 429 in the first place.
     private static let retryAfterFloor: TimeInterval = 300

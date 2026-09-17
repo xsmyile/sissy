@@ -129,7 +129,7 @@ final class ClaudeWebSourceTests: XCTestCase {
     func testASessionThatEndedIsPublishedAsSuch() async {
         let source = source(
             lookup: { _ in Self.found(Self.session) },
-            fetch: { _, _ in throw ClaudeLimitsError.badStatus(401) })
+            fetch: { _, _ in throw UsageRequestError.badStatus(401) })
         _ = await source.refreshOnce {}
         XCTAssertEqual(source.currentSignals().limitsState, .sessionExpired)
         XCTAssertTrue(source.currentSignals().windows.isEmpty)
@@ -144,7 +144,7 @@ final class ClaudeWebSourceTests: XCTestCase {
                 await reads.record(nil)
                 return Self.found(Self.session)
             },
-            fetch: { _, _ in throw ClaudeLimitsError.badStatus(401) })
+            fetch: { _, _ in throw UsageRequestError.badStatus(401) })
         _ = await source.refreshOnce {}
         _ = await source.refreshOnce {}
         let count = await reads.organizations.count
@@ -156,7 +156,7 @@ final class ClaudeWebSourceTests: XCTestCase {
     func testRateLimitingEarnsTheLongBackoff() async {
         let source = source(
             lookup: { _ in Self.found(Self.session) },
-            fetch: { _, _ in throw ClaudeLimitsError.rateLimited(retryAfter: nil) })
+            fetch: { _, _ in throw UsageRequestError.rateLimited(retryAfter: nil) })
         let delay = await source.refreshOnce {}
         XCTAssertEqual(delay, .seconds(1800))
     }
@@ -166,7 +166,7 @@ final class ClaudeWebSourceTests: XCTestCase {
     func testRateLimitingIsPublished() async {
         let source = source(
             lookup: { _ in Self.found(Self.session) },
-            fetch: { _, _ in throw ClaudeLimitsError.rateLimited(retryAfter: nil) })
+            fetch: { _, _ in throw UsageRequestError.rateLimited(retryAfter: nil) })
         _ = await source.refreshOnce {}
         guard case .rateLimited(let until) = source.currentSignals().limitsState else {
             return XCTFail("a 429 left the row with nothing to say")
@@ -181,7 +181,7 @@ final class ClaudeWebSourceTests: XCTestCase {
             lookup: { _ in .interactionRequired },
             fetch: { _, _ in
                 XCTFail("a poll with no session must not reach the network")
-                throw ClaudeLimitsError.malformedPayload
+                throw UsageRequestError.malformedPayload
             })
         _ = await source.refreshOnce {}
         XCTAssertEqual(source.currentSignals().limitsState, .needsAuthorization)
@@ -191,7 +191,7 @@ final class ClaudeWebSourceTests: XCTestCase {
     func testNoImportedSessionReadsAsSignedOut() async {
         let source = source(
             lookup: { _ in .absent },
-            fetch: { _, _ in throw ClaudeLimitsError.malformedPayload })
+            fetch: { _, _ in throw UsageRequestError.malformedPayload })
         _ = await source.refreshOnce {}
         XCTAssertEqual(source.currentSignals().limitsState, .signedOut)
     }

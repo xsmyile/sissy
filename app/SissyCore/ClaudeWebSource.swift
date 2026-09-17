@@ -281,14 +281,14 @@ actor ClaudeWebSource: SourceSignals {
     /// spending a session claude.ai has already closed. The organization goes
     /// with it — the next session may not be the same account's.
     private func handle(_ error: Error) -> Duration {
-        if case ClaudeLimitsError.rateLimited(let retryAfter) = error {
-            let backoff = ClaudeLimitsError.backoffSeconds(retryAfter: retryAfter)
+        if case UsageRequestError.rateLimited(let retryAfter) = error {
+            let backoff = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
             let until = Date().addingTimeInterval(backoff)
             published.update { $0.limitsState = .rateLimited(until: until) }
             report("claude.ai answered 429; backing off until \(until)")
             return .seconds(backoff)
         }
-        if case ClaudeLimitsError.badStatus(let code) = error, code == 401 || code == 403 {
+        if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
             cached = nil
             organization = nil
             publishFailure(.sessionExpired)
@@ -383,7 +383,7 @@ actor ClaudeWebSource: SourceSignals {
         guard let uuid = (subscription ?? organizations.first)?["uuid"] as? String,
             !uuid.isEmpty
         else {
-            throw ClaudeLimitsError.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
         return uuid
     }
@@ -441,7 +441,7 @@ actor ClaudeWebSource: SourceSignals {
     private static func get(_ path: String, session: String) async throws -> [String: Any] {
         let data = try await send(path, session: session)
         guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ClaudeLimitsError.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
         return body
     }
@@ -449,13 +449,13 @@ actor ClaudeWebSource: SourceSignals {
     private static func getArray(_ path: String, session: String) async throws -> [Any] {
         let data = try await send(path, session: session)
         guard let body = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
-            throw ClaudeLimitsError.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
         return body
     }
 
     private static func send(_ path: String, session: String) async throws -> Data {
-        guard let url = URL(string: host + path) else { throw ClaudeLimitsError.malformedPayload }
+        guard let url = URL(string: host + path) else { throw UsageRequestError.malformedPayload }
         var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue(
@@ -464,13 +464,13 @@ actor ClaudeWebSource: SourceSignals {
         request.setValue(userAgent(), forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
-            throw ClaudeLimitsError.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
         if http.statusCode == 429 {
-            throw ClaudeLimitsError.rateLimited(retryAfter: ClaudeLimitsError.retryAfter(http))
+            throw UsageRequestError.rateLimited(retryAfter: UsageRequestError.retryAfter(http))
         }
         guard http.statusCode == 200 else {
-            throw ClaudeLimitsError.badStatus(http.statusCode)
+            throw UsageRequestError.badStatus(http.statusCode)
         }
         return data
     }
