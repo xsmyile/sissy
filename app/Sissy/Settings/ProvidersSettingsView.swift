@@ -58,6 +58,59 @@ struct ProviderRowSnapshot: Equatable {
 /// whole browser session rather than a read-only usage token, and a user who
 /// only finds that out afterwards was not asked.
 /// What linking another Claude account says.
+/// What the Codex account link says.
+///
+/// Its own vocabulary rather than the Claude one's: what is linked is a
+/// sign-in to OpenAI rather than a session on a website, what it is read for is
+/// a workspace rather than an organisation, and what unlinking costs is
+/// different — there is no archived credential left behind, because Sissy
+/// never took one.
+enum CodexAccountLinkCopy {
+    static let label = "Linked accounts"
+    static let addTitle = "Add account…"
+
+    static let caption =
+        "Sissy reads the account Codex is signed into for free. Linking another signs in "
+        + "to OpenAI once, in a window, and reads its limits beside it. Your terminal stays "
+        + "on the account it is on."
+
+    static let chooseLabel = "Which workspace?"
+
+    static func chooseCaption(_ email: String?) -> String {
+        let account = email ?? "That account"
+        return "\(account) has more than one. Sissy reads the one you pick, and keeps reading it."
+    }
+
+    static let unlinkHelp =
+        "Forget this account's OpenAI sign-in. Codex itself is untouched."
+
+    static func unlink(_ account: String) -> String { "Unlink \(account)" }
+
+    static func unlinkTitle(_ account: String) -> String {
+        "Forget the OpenAI sign-in for \(account)?"
+    }
+
+    static let unlinkMessage =
+        "Sissy stops reading this account's limits. Codex keeps whatever account it is "
+        + "signed into, and you can link this one again from this window."
+
+    static let unlinkConfirm = "Forget"
+
+    /// Why a sign-in produced no account. Each names something different to
+    /// do: a refusal is worth trying again, and a token naming no login is not
+    /// something a retry can fix.
+    static func failure(_ why: CodexOAuth.Failure) -> String {
+        switch why {
+        case .refused:
+            return "OpenAI would not complete that sign-in. Try again."
+        case .unidentified:
+            return "That sign-in came back without naming an account, so there is nothing to link."
+        case .interrupted:
+            return "The sign-in did not finish. Try again."
+        }
+    }
+}
+
 enum ClaudeAccountLinkCopy {
     static let label = "Linked accounts"
     static let addTitle = "Add account…"
@@ -160,6 +213,10 @@ struct ProvidersSettingsView: View {
     /// deletes it is asked about first — this one was pressed by accident on
     /// the account its owner was signed into.
     @State private var unlinking: ClaudeWebAccount?
+    /// The Codex account a trash was pressed for, for the same reason: a
+    /// credential the user cannot read back and never typed is not a click to
+    /// get wrong.
+    @State private var unlinkingCodex: CodexLinkedAccount?
 
     private static let markSize: CGFloat = 18
 
@@ -177,6 +234,13 @@ struct ProvidersSettingsView: View {
                             ownCredentialRow
                         }
                         linkedAccounts
+                    }
+                    // Only under a Codex that is being metered, for the reason
+                    // the Claude list is: a credential linked under a provider
+                    // Sissy was told to leave alone would poll for a row that
+                    // does not exist.
+                    if readiness.id == ProviderID.codex, readiness.activation.isMetering {
+                        codexAccounts
                     }
                 }
             }
@@ -196,6 +260,19 @@ struct ProvidersSettingsView: View {
             Button(ClaudeAccountLinkCopy.cancel, role: .cancel) {}
         } message: { _ in
             Text(ClaudeAccountLinkCopy.unlinkMessage)
+        }
+        .confirmationDialog(
+            unlinkingCodex.map { CodexAccountLinkCopy.unlinkTitle(Self.label(of: $0)) } ?? "",
+            isPresented: Binding(
+                get: { unlinkingCodex != nil }, set: { if !$0 { unlinkingCodex = nil } }),
+            presenting: unlinkingCodex
+        ) { account in
+            Button(CodexAccountLinkCopy.unlinkConfirm, role: .destructive) {
+                model.engine.forgetCodexAccount(id: account.id)
+            }
+            Button(ClaudeAccountLinkCopy.cancel, role: .cancel) {}
+        } message: { _ in
+            Text(CodexAccountLinkCopy.unlinkMessage)
         }
         // The readiness poll stops once the scan is warm, so a window opened
         // afterwards would render whatever the last tick left behind.
@@ -370,5 +447,56 @@ struct ProvidersSettingsView: View {
         guard let address = row.address else { return Text(row.title) }
         let trailing = Text(address).foregroundStyle(.secondary)
         return Text("\(row.title)   \(trailing)")
+    }
+
+    /// Links another Codex account, which is the only way to read one the CLI
+    /// is not signed into. Never disabled while the login window is up, for
+    /// the reason the Claude one is not: a press is how someone gets back to a
+    /// window that went behind.
+    @ViewBuilder
+    private var codexAccounts: some View {
+        LabeledContent {
+            Button(CodexAccountLinkCopy.addTitle) { model.engine.addCodexAccount() }
+        } label: {
+            Text(CodexAccountLinkCopy.label)
+            Text(CodexAccountLinkCopy.caption)
+        }
+        ForEach(sortedCodexAccounts) { account in
+            codexAccount(account)
+        }
+    }
+
+    /// Ordered by what the row is drawn under rather than by the id it is
+    /// keyed by, which is the order the engine deliberately does not have.
+    private var sortedCodexAccounts: [CodexLinkedAccount] {
+        model.engine.linkedCodexAccounts.sorted {
+            (Self.label(of: $0), $0.id) < (Self.label(of: $1), $1.id)
+        }
+    }
+
+    /// What the confirmation and the screen reader call a Codex account: the
+    /// address, which is unique where a workspace name is not. An account with
+    /// no link is one whose naming failed — its id is a poor label and the only
+    /// honest one, and a row under it is what makes it removable.
+    private static func label(of account: CodexLinkedAccount) -> String {
+        account.link?.identity.email ?? account.id
+    }
+
+    private func codexAccount(_ account: CodexLinkedAccount) -> some View {
+        LabeledContent {
+            Button(role: .destructive) {
+                unlinkingCodex = account
+            } label: {
+                Image(systemName: "trash").foregroundStyle(.red)
+            }
+            .buttonStyle(.borderless)
+            .help(CodexAccountLinkCopy.unlinkHelp)
+            .accessibilityLabel(CodexAccountLinkCopy.unlink(Self.label(of: account)))
+        } label: {
+            Text(Self.label(of: account))
+            if let workspace = account.link?.workspace {
+                Text(UsageFormat.workspaceLabel(workspace))
+            }
+        }
     }
 }

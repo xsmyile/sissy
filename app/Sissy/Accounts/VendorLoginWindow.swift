@@ -2,35 +2,42 @@ import AppKit
 import SwiftUI
 import WebKit
 
-/// The one window Sissy opens, and the only thing it can do is link a Claude
+/// The one window Sissy opens, and the only thing it can do is link an
 /// account.
 ///
 /// It is a deliberate exception to "three surfaces and none of them is a
-/// window": a session cannot be obtained without the vendor's own login, and
-/// the alternative — asking the user to paste a cookie out of a browser's
-/// inspector — is worse in every way that matters. What keeps the exception
+/// window": a credential cannot be obtained without the vendor's own login,
+/// and both vendors refuse anything that is not a real browser — claude.ai
+/// answers 403, and `auth.openai.com` puts a Cloudflare challenge in front of
+/// the form (measured 2026-09-16 and 2026-09-17). What keeps the exception
 /// from growing into a browser is that there is nothing to browse with. One
 /// window, one starting URL, no address bar, no tabs, no history controls.
 ///
-/// Link clicks that leave claude.ai — terms, privacy, help — are handed to the
-/// default browser rather than followed here, which is what "confined to
-/// claude.ai" means in practice: there is no way to reach another site by
-/// hand. Redirects are followed, because a sign-in is a redirect chain the
-/// vendor owns and a host allowlist would be a guess: measured 2026-09-16,
-/// claude.ai's login page answers 403 to anything but a real browser, so which
-/// identity providers it offers cannot be read from here. A wrong list is a
-/// window that dead-ends on the one account the user came to add.
+/// **One window for both vendors, because the difference is one line.** Claude
+/// signs in and leaves a cookie in the jar; Codex signs in and is redirected
+/// to a URL carrying an authorization code. Everything else — the guardrail,
+/// the reachability, the question afterwards, the failure — is the same
+/// window, and two copies of it would be two places for that guardrail to
+/// drift.
+///
+/// Link clicks that leave the vendor's own hosts — terms, privacy, help — are
+/// handed to the default browser rather than followed here, which is what
+/// "confined to the vendor" means in practice: there is no way to reach
+/// another site by hand. Redirects are followed, because a sign-in is a
+/// redirect chain the vendor owns and a host allowlist would be a guess: the
+/// login pages cannot be read from outside, so which identity providers they
+/// offer is unknown, and a wrong list is a window that dead-ends on the one
+/// account the user came to add.
 ///
 /// The cookie jar is non-persistent, so it exists for the life of the window
 /// and no longer. That is what makes a second link a fresh login rather than a
-/// silent re-link of the account already there, and it keeps a claude.ai
-/// session off this Mac except in the keychain item Sissy files it in.
+/// silent re-link of the account already there.
 ///
 /// **The whole link happens here, not only its first step.** The window stays
-/// up past the cookie, because what follows can need the user: an account with
-/// more than one organisation answering the usage question has to be asked
-/// which, and a session claude.ai will not answer for has to say so somewhere
-/// the person who just typed a code is looking. Closing on the cookie and
+/// up past the credential, because what follows can need the user: an account
+/// with more than one organisation or workspace has to be asked which, and a
+/// credential the vendor will not answer for has to say so somewhere the
+/// person who just typed a code is looking. Closing on the credential and
 /// finishing in Settings put the rest of the flow on a surface they had no
 /// reason to open.
 ///
@@ -42,43 +49,68 @@ import WebKit
 /// mail window into it, and the activation policy goes to `.regular` while it
 /// is up so the Dock and ⌘-Tab can bring it back.
 @MainActor
-final class ClaudeWebLoginWindow: NSObject {
-    static let loginURL = URL(string: "https://claude.ai/login")!
-    private static let host = "claude.ai"
-
-    /// claude.ai itself or a subdomain of it, and nothing that merely ends in
-    /// those characters. Used by both the cookie the login produces and the
-    /// links it offers, because two spellings of one rule is how they come to
-    /// disagree: this one was `hasSuffix(host)` on the cookie, which a host
-    /// called `notclaude.ai` satisfies.
-    private static func isClaude(_ host: String) -> Bool {
-        host == Self.host || host.hasSuffix(".\(Self.host)")
+final class VendorLoginWindow: NSObject {
+    /// What this window signs into, and how it recognises that it has.
+    ///
+    /// Exactly one of `session` and `code` answers for a vendor: a cookie the
+    /// jar receives, or a redirect the page attempts. Both are closures rather
+    /// than cases because what they recognise is the vendor's business and the
+    /// window's job is only to notice it.
+    struct Vendor: Sendable {
+        let title: String
+        let startURL: URL
+        /// Whether a host is part of this vendor's own sign-in.
+        let isInternal: @Sendable (String) -> Bool
+        /// The credential a cookie jar has come to carry, if this vendor ends
+        /// its sign-in that way.
+        let session: (@Sendable ([HTTPCookie]) -> String?)?
+        /// The credential a navigation carries, if this vendor ends its
+        /// sign-in with a redirect.
+        let code: (@Sendable (URL) -> String?)?
     }
+
+    /// The one question a link cannot answer for itself, in the vendor's own
+    /// vocabulary: an organisation for Claude, a workspace for Codex.
+    struct Question {
+        let title: String
+        let caption: String
+        let options: [Option]
+
+        struct Option: Identifiable {
+            let id: String
+            let label: String
+        }
+    }
+
     private static let contentSize = NSSize(width: 520, height: 680)
     private static let promptSize = NSSize(width: 420, height: 260)
-    private static let title = "Add Claude account"
 
+    private let vendor: Vendor
     private var window: NSWindow?
     private var webView: WKWebView?
     private var cookieStore: WKHTTPCookieStore?
-    /// Called with the session the login produced. The window stays up: what
-    /// the caller does next may need this window again.
-    private var onSession: ((String) -> Void)?
+    /// Called with the credential the login produced. The window stays up:
+    /// what the caller does next may need this window again.
+    private var onCredential: ((String) -> Void)?
     /// Called once when the window goes away without the flow completing.
     private var onCancel: (() -> Void)?
     private var finished = false
+
+    init(vendor: Vendor) {
+        self.vendor = vendor
+    }
 
     /// Opens the window, or brings the one already open to the front.
     ///
     /// Re-presenting rather than refusing is the point: the control that opens
     /// this is the only way back to a window that has gone behind, so a second
     /// press has to mean "show me the one I already have".
-    func present(onSession: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+    func present(onCredential: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
         guard window == nil else {
             front()
             return
         }
-        self.onSession = onSession
+        self.onCredential = onCredential
         self.onCancel = onCancel
 
         let configuration = WKWebViewConfiguration()
@@ -87,16 +119,18 @@ final class ClaudeWebLoginWindow: NSObject {
         web.navigationDelegate = self
         webView = web
 
-        let store = configuration.websiteDataStore.httpCookieStore
-        store.add(self)
-        cookieStore = store
+        if vendor.session != nil {
+            let store = configuration.websiteDataStore.httpCookieStore
+            store.add(self)
+            cookieStore = store
+        }
 
         let panel = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.contentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        panel.title = Self.title
+        panel.title = vendor.title
         panel.contentView = web
         panel.isReleasedWhenClosed = false
         panel.delegate = self
@@ -104,20 +138,20 @@ final class ClaudeWebLoginWindow: NSObject {
         panel.center()
         window = panel
 
-        web.load(URLRequest(url: Self.loginURL))
+        web.load(URLRequest(url: vendor.startURL))
         NSApp.setActivationPolicy(.regular)
         front()
     }
 
-    /// Asks which organisation the session should be read for, in the window
-    /// the session was just obtained in.
-    func ask(_ choice: ClaudeWebLinkChoice, onPick: @escaping (String) -> Void) {
+    /// Asks the question the link could not answer, in the window the
+    /// credential was just obtained in.
+    func ask(_ question: Question, onPick: @escaping (String) -> Void) {
         swap(
-            to: ClaudeWebLinkChoiceView(
-                choice: choice,
-                onPick: { [weak self] organization in
+            to: VendorLinkQuestionView(
+                question: question,
+                onPick: { [weak self] choice in
                     self?.working()
-                    onPick(organization)
+                    onPick(choice)
                 },
                 onCancel: { [weak self] in self?.close() }),
             size: Self.promptSize)
@@ -127,7 +161,7 @@ final class ClaudeWebLoginWindow: NSObject {
     /// offers the only thing that can help: the login again.
     func report(_ message: String, onRetry: @escaping () -> Void) {
         swap(
-            to: ClaudeWebLinkFailureView(
+            to: VendorLinkFailureView(
                 message: message,
                 onRetry: { [weak self] in
                     self?.close()
@@ -137,9 +171,9 @@ final class ClaudeWebLoginWindow: NSObject {
             size: Self.promptSize)
     }
 
-    /// Says the session is in hand while the caller resolves it.
+    /// Says the credential is in hand while the caller resolves it.
     func working() {
-        swap(to: ClaudeWebLinkProgressView(), size: Self.promptSize)
+        swap(to: VendorLinkProgressView(), size: Self.promptSize)
     }
 
     /// Takes the window down on a link that completed. `onCancel` is consumed
@@ -170,8 +204,8 @@ final class ClaudeWebLoginWindow: NSObject {
 
     /// Drops the web view and its cookie jar as soon as the login is over.
     ///
-    /// The session is in the caller's hands by then, so a live jar holding a
-    /// second copy of it buys nothing and keeps a claude.ai session in memory
+    /// The credential is in the caller's hands by then, so a live jar holding
+    /// a second copy of it buys nothing and keeps a vendor session in memory
     /// for the length of a question.
     private func releaseWeb() {
         cookieStore?.remove(self)
@@ -180,46 +214,55 @@ final class ClaudeWebLoginWindow: NSObject {
         webView?.stopLoading()
         webView = nil
     }
+
+    /// Hands the credential over exactly once. The copies that follow a
+    /// successful login — further cookies, a retried redirect — have nothing
+    /// left to deliver.
+    private func deliver(_ credential: String) {
+        guard let pending = onCredential else { return }
+        onCredential = nil
+        working()
+        pending(credential)
+    }
 }
 
-extension ClaudeWebLoginWindow: WKHTTPCookieStoreObserver {
+extension VendorLoginWindow: WKHTTPCookieStoreObserver {
     /// Fires for every cookie the site sets, so the hand-off is consumed
-    /// rather than guarded: the copies that follow a successful login have
-    /// nothing left to deliver.
+    /// rather than guarded.
     nonisolated func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
         Task { @MainActor in
-            guard let pending = onSession else { return }
+            guard onCredential != nil, let session = vendor.session else { return }
             let cookies = await cookieStore.allCookies()
-            guard
-                let session = cookies.first(where: {
-                    $0.name == ClaudeWebSessionStore.cookieName
-                        && Self.isClaude($0.domain)
-                        && !$0.value.isEmpty
-                })
-            else { return }
-            onSession = nil
-            working()
-            pending(session.value)
+            guard let found = session(cookies) else { return }
+            deliver(found)
         }
     }
 }
 
-extension ClaudeWebLoginWindow: WKNavigationDelegate {
+extension VendorLoginWindow: WKNavigationDelegate {
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction
     ) async -> WKNavigationActionPolicy {
+        guard let url = navigationAction.request.url else { return .allow }
+        // The redirect that carries a code is cancelled rather than followed:
+        // nothing is listening on the loopback port it names, and the code is
+        // already in the URL. That is what keeps Sissy from binding a port for
+        // the length of a login.
+        if let code = vendor.code?(url) {
+            deliver(code)
+            return .cancel
+        }
         guard navigationAction.navigationType == .linkActivated,
-            let url = navigationAction.request.url,
             let host = url.host(),
-            !Self.isClaude(host)
+            !vendor.isInternal(host)
         else { return .allow }
         NSWorkspace.shared.open(url)
         return .cancel
     }
 }
 
-extension ClaudeWebLoginWindow: NSWindowDelegate {
+extension VendorLoginWindow: NSWindowDelegate {
     nonisolated func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
             releaseWeb()
@@ -227,7 +270,7 @@ extension ClaudeWebLoginWindow: NSWindowDelegate {
             window = nil
             NSApp.setActivationPolicy(.accessory)
             let cancelled = onCancel
-            onSession = nil
+            onCredential = nil
             onCancel = nil
             guard !finished else { return }
             cancelled?()
@@ -235,10 +278,49 @@ extension ClaudeWebLoginWindow: NSWindowDelegate {
     }
 }
 
+extension VendorLoginWindow.Vendor {
+    /// claude.ai's login, which ends in a `sessionKey` cookie.
+    static var claude: Self {
+        Self(
+            title: "Add Claude account",
+            startURL: URL(string: "https://claude.ai/login")!,
+            isInternal: { isHost($0, in: "claude.ai") },
+            session: { cookies in
+                cookies.first {
+                    $0.name == ClaudeWebSessionStore.cookieName
+                        && isHost($0.domain, in: "claude.ai")
+                        && !$0.value.isEmpty
+                }?.value
+            },
+            code: nil)
+    }
+
+    /// OpenAI's login, which ends in a redirect to the CLI's loopback address
+    /// carrying an authorization code.
+    static func codex(flow: CodexOAuth.Flow) -> Self {
+        Self(
+            title: "Add Codex account",
+            startURL: flow.url,
+            isInternal: { host in
+                isHost(host, in: "openai.com") || isHost(host, in: "chatgpt.com")
+            },
+            session: nil,
+            code: { flow.code(fromRedirect: $0) })
+    }
+
+    /// A host that is the vendor's or a subdomain of it, and nothing that
+    /// merely ends in those characters. One spelling of the rule, because two
+    /// is how they come to disagree: this was `hasSuffix(host)` on the Claude
+    /// cookie, which a host called `notclaude.ai` satisfies.
+    private static func isHost(_ host: String, in domain: String) -> Bool {
+        host == domain || host.hasSuffix(".\(domain)")
+    }
+}
+
 /// The one question a link cannot answer for itself, asked in the window the
-/// session was obtained in.
-private struct ClaudeWebLinkChoiceView: View {
-    let choice: ClaudeWebLinkChoice
+/// credential was obtained in.
+private struct VendorLinkQuestionView: View {
+    let question: VendorLoginWindow.Question
     let onPick: (String) -> Void
     let onCancel: () -> Void
 
@@ -249,16 +331,15 @@ private struct ClaudeWebLinkChoiceView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(ClaudeAccountLinkCopy.chooseLabel)
+            Text(question.title)
                 .font(.headline)
-            Text(ClaudeAccountLinkCopy.chooseCaption(choice.identity.email))
+            Text(question.caption)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Picker("", selection: Binding(get: { picked ?? "" }, set: { picked = $0 })) {
-                ForEach(UsageFormat.organizationChoices(choice.organizations), id: \.id) {
-                    organization in
-                    Text(organization.label).tag(organization.id)
+                ForEach(question.options) { option in
+                    Text(option.label).tag(option.id)
                 }
             }
             .pickerStyle(.radioGroup)
@@ -281,7 +362,7 @@ private struct ClaudeWebLinkChoiceView: View {
     }
 }
 
-private struct ClaudeWebLinkProgressView: View {
+private struct VendorLinkProgressView: View {
     var body: some View {
         VStack(spacing: 12) {
             ProgressView()
@@ -294,7 +375,7 @@ private struct ClaudeWebLinkProgressView: View {
     }
 }
 
-private struct ClaudeWebLinkFailureView: View {
+private struct VendorLinkFailureView: View {
     let message: String
     let onRetry: () -> Void
     let onCancel: () -> Void

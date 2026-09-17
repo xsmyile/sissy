@@ -188,7 +188,17 @@ struct UsagePanelView: View {
                                 row: open,
                                 openOnAccount: openAccount,
                                 onSelectAccount: { selectAccount($0) },
-                                onAddAccount: { model.engine.addClaudeAccount() },
+                                onAddAccount: {
+                                    // Which vendor's login opens is the page's
+                                    // own id: the control sits on that
+                                    // provider's account menu, so it can only
+                                    // ever mean "another of these".
+                                    if open.id == ProviderID.codex {
+                                        model.engine.addCodexAccount()
+                                    } else {
+                                        model.engine.addClaudeAccount()
+                                    }
+                                },
                                 switchFailure: model.engine.accountSwitchFailure,
                                 switchingAccount: model.engine.switchingClaudeAccount,
                                 refresh: { model.refreshProvider(open.id) },

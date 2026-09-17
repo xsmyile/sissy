@@ -54,6 +54,11 @@ enum CodexCredentialReading: Sendable, Equatable {
     case needsAuthorization
     /// The user was asked and said no.
     case refused
+    /// The credential is spent and could not be renewed — a refresh token
+    /// OpenAI has retired, which happens when it has been redeemed elsewhere
+    /// or the user revoked the session. Nothing local can repair it, so the
+    /// row says so and the account is linked again.
+    case expired
     /// Present and unparseable, which a half-written file is. Transient by
     /// assumption: the caller keeps its last reading rather than blanking a
     /// row every time the CLI rewrites its tokens.

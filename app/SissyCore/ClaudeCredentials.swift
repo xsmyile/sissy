@@ -26,8 +26,15 @@ struct ClaudeCredentials: Sendable, Equatable {
 /// Outcome of a keychain lookup. Absence and refusal are different states:
 /// the first is a user who has not signed into Claude Code, the second is a
 /// user who said no, and re-asking them on a timer would be harassment.
-enum ClaudeCredentialsLookup: Sendable {
-    case found(ClaudeCredentials)
+///
+/// Generic in what was found because the outcomes are the keychain's rather
+/// than a vendor's: a second item, holding something else, meets the same six
+/// answers and must read them the same way — which is the whole point of
+/// `classify` being one table.
+typealias ClaudeCredentialsLookup = CredentialLookup<ClaudeCredentials>
+
+enum CredentialLookup<Value: Sendable>: Sendable {
+    case found(Value)
     case absent
     case denied
     /// The item is there and this read was not allowed to ask for it.
@@ -193,6 +200,18 @@ enum ClaudeCredentialsStore {
         allowingInteraction: Bool,
         decode: (Data) -> ClaudeCredentials? = Self.parse
     ) -> ClaudeCredentialsLookup {
+        classify(status, data: data, allowingInteraction: allowingInteraction, decoding: decode)
+    }
+
+    /// The same table for an item holding something other than a Claude
+    /// credential. One function because the mapping below is the rule that
+    /// must not drift, not the payload.
+    static func classify<Value>(
+        _ status: OSStatus,
+        data: Data?,
+        allowingInteraction: Bool,
+        decoding decode: (Data) -> Value?
+    ) -> CredentialLookup<Value> {
         switch status {
         case errSecSuccess:
             guard let data, let parsed = decode(data) else {

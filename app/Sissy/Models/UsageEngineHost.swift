@@ -119,6 +119,7 @@ final class UsageEngineHost {
         let engine = UsageEngine(config: config)
         self.engine = engine
         linkedClaudeAccounts = engine.linkedClaudeAccounts
+        linkedCodexAccounts = engine.linkedCodexAccounts
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
         statusChecks = config.statusChecks
@@ -268,7 +269,13 @@ final class UsageEngineHost {
     /// the engine holds it behind a lock, which no view is observing.
     private(set) var linkedClaudeAccounts: [ClaudeWebAccount] = []
     /// The login window, kept for as long as it is open and dropped with it.
-    private var loginWindow: ClaudeWebLoginWindow?
+    /// One at a time whichever vendor it is for: two logins would race for the
+    /// same window and, on one vendor, for the same keychain item.
+    private var loginWindow: VendorLoginWindow?
+    /// The Codex accounts Settings lists, and the only surface one can be
+    /// unlinked from.
+    private(set) var linkedCodexAccounts: [CodexLinkedAccount] = []
+    private(set) var linkingCodexAccount = false
     /// Whether a login is in flight, from the click until the session is
     /// filed. The panel's `Add account…` is disabled meanwhile: two logins
     /// would race for the same keychain item.
@@ -284,15 +291,15 @@ final class UsageEngineHost {
     func addClaudeAccount() {
         guard let engine else { return }
         guard loginWindow == nil else {
-            loginWindow?.present(onSession: { _ in }, onCancel: {})
+            loginWindow?.present(onCredential: { _ in }, onCancel: {})
             return
         }
         linkingClaudeAccount = true
         claudeWebLinkFailure = nil
-        let window = ClaudeWebLoginWindow()
+        let window = VendorLoginWindow(vendor: .claude)
         loginWindow = window
         window.present(
-            onSession: { [weak self] session in
+            onCredential: { [weak self] session in
                 guard let self else { return }
                 Task { [weak self] in
                     let outcome = await engine.linkClaudeWebSession(session)
@@ -300,7 +307,7 @@ final class UsageEngineHost {
                     switch outcome {
                     case .success(let choice):
                         guard let choice else { return complete(window) }
-                        window.ask(choice) { [weak self] organization in
+                        window.ask(Self.question(choice)) { [weak self] organization in
                             self?.pick(organization, in: window)
                         }
                     case .failure(let why):
@@ -319,7 +326,17 @@ final class UsageEngineHost {
             })
     }
 
-    private func pick(_ organization: String, in window: ClaudeWebLoginWindow) {
+    /// The organisation question as the window draws it.
+    static func question(_ choice: ClaudeWebLinkChoice) -> VendorLoginWindow.Question {
+        VendorLoginWindow.Question(
+            title: ClaudeAccountLinkCopy.chooseLabel,
+            caption: ClaudeAccountLinkCopy.chooseCaption(choice.identity.email),
+            options: UsageFormat.organizationChoices(choice.organizations).map {
+                VendorLoginWindow.Question.Option(id: $0.id, label: $0.label)
+            })
+    }
+
+    private func pick(_ organization: String, in window: VendorLoginWindow) {
         guard let engine else { return }
         Task { [weak self] in
             let outcome = await engine.chooseClaudeWebOrganization(organization)
@@ -338,12 +355,96 @@ final class UsageEngineHost {
 
     /// Takes the window down on a link that landed, and lets the surfaces
     /// notice the account that just appeared.
-    private func complete(_ window: ClaudeWebLoginWindow) {
+    private func complete(_ window: VendorLoginWindow) {
         window.finish()
         loginWindow = nil
         linkingClaudeAccount = false
+        linkingCodexAccount = false
         claudeWebSession = engine?.hasClaudeWebSession ?? false
         linkedClaudeAccounts = engine?.linkedClaudeAccounts ?? []
+        linkedCodexAccounts = engine?.linkedCodexAccounts ?? []
+    }
+
+    /// Opens OpenAI's own login and links whatever account it produces.
+    ///
+    /// The same window and the same rules as the Claude link, because the only
+    /// difference is what the sign-in ends in: a cookie there, a redirect
+    /// carrying an authorization code here. What it produces is a credential
+    /// of Sissy's own — the CLI's `auth.json` is never written, so linking an
+    /// account cannot change which account the terminal is on.
+    func addCodexAccount() {
+        guard let engine else { return }
+        guard loginWindow == nil else {
+            loginWindow?.present(onCredential: { _ in }, onCancel: {})
+            return
+        }
+        linkingCodexAccount = true
+        let flow = CodexOAuth.begin()
+        let window = VendorLoginWindow(vendor: .codex(flow: flow))
+        loginWindow = window
+        window.present(
+            onCredential: { [weak self] code in
+                guard let self else { return }
+                Task { [weak self] in
+                    let outcome = await engine.linkCodexAccount(code: code, flow: flow)
+                    guard let self, let window = loginWindow else { return }
+                    switch outcome {
+                    case .success(let choice):
+                        guard let choice else { return complete(window) }
+                        window.ask(Self.question(choice)) { [weak self] workspace in
+                            self?.pickWorkspace(workspace, in: window)
+                        }
+                    case .failure(let why):
+                        window.report(CodexAccountLinkCopy.failure(why)) { [weak self] in
+                            self?.addCodexAccount()
+                        }
+                    }
+                }
+            },
+            onCancel: { [weak self] in
+                guard let self else { return }
+                loginWindow = nil
+                linkingCodexAccount = false
+                Task { await engine.cancelCodexLink() }
+            })
+    }
+
+    /// The workspace question as the window draws it.
+    static func question(_ choice: CodexLinkChoice) -> VendorLoginWindow.Question {
+        VendorLoginWindow.Question(
+            title: CodexAccountLinkCopy.chooseLabel,
+            caption: CodexAccountLinkCopy.chooseCaption(choice.identity.email),
+            options: choice.workspaces.map {
+                VendorLoginWindow.Question.Option(
+                    id: $0.id, label: UsageFormat.workspaceLabel($0))
+            })
+    }
+
+    private func pickWorkspace(_ workspace: String, in window: VendorLoginWindow) {
+        guard let engine else { return }
+        Task { [weak self] in
+            let outcome = await engine.chooseCodexWorkspace(workspace)
+            guard let self else { return }
+            switch outcome {
+            case .success:
+                complete(window)
+            case .failure(let why):
+                window.report(CodexAccountLinkCopy.failure(why)) { [weak self] in
+                    self?.addCodexAccount()
+                }
+            }
+        }
+    }
+
+    /// Unlinks one Codex account's credential. Nothing about the CLI's own
+    /// sign-in moves with it.
+    func forgetCodexAccount(id: String) {
+        guard let engine else { return }
+        Task { [weak self] in
+            await engine.forgetCodexAccount(id: id)
+            guard let self else { return }
+            linkedCodexAccounts = engine.linkedCodexAccounts
+        }
     }
 
     /// Unlinks one account's claude.ai session.

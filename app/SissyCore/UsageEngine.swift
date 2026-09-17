@@ -84,6 +84,18 @@ actor UsageEngine {
     /// it needs no permission Sissy has to ask for, and without it the row's
     /// gauges are only ever as fresh as the last turn.
     private let codexSources = LockedValue<[CodexUsageSource]>([])
+    /// What each linked Codex credential turned out to be, read once at launch
+    /// and republished whenever a link changes.
+    private let codexLinks = LockedValue<[String: CodexAccountLink]>([:])
+    private let codexIndex: CodexAccountIndex
+    /// A credential waiting on the one question only the user can answer:
+    /// which of its login's workspaces it should be read for.
+    ///
+    /// Held rather than written, because a credential filed without that
+    /// answer is one every poll would guess at. Dropped if the question goes
+    /// unanswered, which costs the user the sign-in again and costs the Mac
+    /// nothing.
+    private var pendingCodexLink: (credential: CodexCredential, choice: CodexLinkChoice)?
     /// A session waiting on the one question only the user can answer: which
     /// of its account's organisations it should be read for.
     ///
@@ -262,6 +274,9 @@ actor UsageEngine {
             url: ClaudeWebSessionIndex.defaultURL(in: stateDir))
         self.claudeWebIndex = webIndex
         self.claudeWebLinks.store(webIndex.load())
+        let codexIndex = CodexAccountIndex(url: CodexAccountIndex.defaultURL(in: stateDir))
+        self.codexIndex = codexIndex
+        self.codexLinks.store(codexIndex.load())
         var ownLimits: ClaudeLimitsProbe?
         var providers: [any UsageProvider] = []
         for resolved in self.resolvedProviders where resolved.activation.isMetering {
@@ -272,11 +287,12 @@ actor UsageEngine {
                 // signed in as is that file's to say, and it can change under
                 // Sissy between two polls.
                 let authURL = home.codexAuthURL
-                self.codexSources.store([
-                    CodexUsageSource(credentialSource: { _ in
-                        CodexAuthSource.credential(at: authURL)
-                    })
-                ])
+                self.codexSources.store(
+                    [
+                        CodexUsageSource(credentialSource: { _ in
+                            CodexAuthSource.credential(at: authURL)
+                        })
+                    ] + Self.linkedCodexSources(links: self.codexLinks.load()))
                 providers.append(
                     LocalUsageProvider.codex(
                         codexDir: home.dataDir,
@@ -286,6 +302,7 @@ actor UsageEngine {
                         historyRoot: historyRoot,
                         pricingOverride: config.pricingOverride,
                         usageSources: self.codexSources,
+                        usageLinks: self.codexLinks,
                         ledger: projectLedger
                     ))
             default:
@@ -1150,6 +1167,169 @@ actor UsageEngine {
             await source.stop()
         }
         await claudeOwnLimits?.stop()
+    }
+
+    /// Files the account a sign-in produced, and says whether one question is
+    /// left.
+    ///
+    /// `.success(nil)` is a link that is complete. `.success(choice)` is a
+    /// login holding more than one workspace, whose credential is held here —
+    /// unwritten — until the user says which.
+    func linkCodexAccount(
+        code: String, flow: CodexOAuth.Flow
+    ) async -> Result<CodexLinkChoice?, CodexOAuth.Failure> {
+        guard lifecycle == .running else { return .failure(.interrupted) }
+        let credential: CodexCredential
+        do {
+            credential = try await CodexOAuth.redeem(code: code, flow: flow)
+        } catch let failure as CodexOAuth.Failure {
+            return .failure(failure)
+        } catch {
+            return .failure(.refused)
+        }
+        let outcome: CodexAccountLinking.Outcome
+        do {
+            outcome = try await CodexAccountLinking.resolve(credential: credential)
+        } catch {
+            return .failure(.unidentified)
+        }
+        switch outcome {
+        case .linked(let link):
+            return await store(credential, as: link).map { nil }
+        case .choice(let choice):
+            pendingCodexLink = (credential: credential, choice: choice)
+            return .success(choice)
+        }
+    }
+
+    /// Answers the workspace question and files what was held for it.
+    func chooseCodexWorkspace(_ id: String) async -> Result<Void, CodexOAuth.Failure> {
+        guard lifecycle == .running, let pending = pendingCodexLink else {
+            return .failure(.interrupted)
+        }
+        guard let workspace = pending.choice.workspaces.first(where: { $0.id == id }) else {
+            return .failure(.interrupted)
+        }
+        pendingCodexLink = nil
+        return await store(
+            pending.credential,
+            as: CodexAccountLink(identity: pending.choice.identity, workspace: workspace))
+    }
+
+    /// Drops a credential nobody answered the question for. It was never
+    /// written, so there is nothing to undo.
+    func cancelCodexLink() {
+        pendingCodexLink = nil
+    }
+
+    /// Files the credential and then names it.
+    ///
+    /// The workspace the user chose is written onto the credential rather than
+    /// carried beside it: it is the `ChatGPT-Account-Id` every request is made
+    /// with, and a reader that had to look it up could be handed one the
+    /// credential does not agree with.
+    ///
+    /// A failed `remember` keeps the credential, for the reason the claude.ai
+    /// link does: losing a sign-in to a disk error is worse than a row that
+    /// reads its account by id until the next link.
+    private func store(
+        _ credential: CodexCredential, as link: CodexAccountLink
+    ) async -> Result<Void, CodexOAuth.Failure> {
+        let configured = CodexCredential(
+            accessToken: credential.accessToken,
+            refreshToken: credential.refreshToken,
+            idToken: credential.idToken,
+            accountId: link.workspace?.id ?? credential.accountId,
+            userId: credential.userId,
+            email: credential.email,
+            plan: credential.plan,
+            expiresAt: credential.expiresAt)
+        do {
+            try CodexAccountStore.save(configured, account: link.identity.id)
+        } catch {
+            sissyLog("sissy: the Codex credential could not be filed")
+            return .failure(.refused)
+        }
+        do {
+            try codexIndex.remember(link)
+            codexLinks.store(codexIndex.load())
+        } catch {
+            sissyLog("sissy: the Codex account was signed in but could not be named")
+        }
+        await rebuildCodexSources()
+        await startCodexLimits(userInitiated: true)
+        return .success(())
+    }
+
+    /// Unlinks one Codex account: the credential Sissy holds and the name
+    /// beside it, and nothing else.
+    ///
+    /// The CLI's own `auth.json` is untouched, which is the whole separation
+    /// this feature rests on — linking an account never changed which account
+    /// the terminal is on, and unlinking one must not either.
+    func forgetCodexAccount(id: String) async {
+        guard lifecycle == .running else { return }
+        if pendingCodexLink?.choice.identity.id == id { pendingCodexLink = nil }
+        try? CodexAccountStore.delete(account: id)
+        try? codexIndex.forget(id: id)
+        codexLinks.store(codexIndex.load())
+        await rebuildCodexSources()
+        await reemit()
+    }
+
+    /// Every Codex account Sissy holds a credential for, as Settings lists
+    /// them. Driven by the stored credentials rather than by the links, so a
+    /// credential whose naming failed still gets a row — and a way to remove
+    /// it.
+    nonisolated var linkedCodexAccounts: [CodexLinkedAccount] {
+        CodexLinkedAccount.list(
+            stored: CodexAccountStore.storedAccounts(), links: codexLinks.load())
+    }
+
+    /// One reader per stored credential, renewing its own item as it goes.
+    static func linkedCodexSources(links: [String: CodexAccountLink]) -> [CodexUsageSource] {
+        CodexAccountStore.storedAccounts().map { id in
+            CodexUsageSource(
+                account: id,
+                workspace: links[id]?.workspace?.name,
+                credentialSource: { allowingInteraction in
+                    await CodexAccountStore.supply(
+                        account: id, allowingInteraction: allowingInteraction)
+                })
+        }
+    }
+
+    /// Builds a reader per stored credential and drops the ones whose
+    /// credentials have gone, keeping the CLI's own reader at the head.
+    ///
+    /// A reader that survives is kept rather than replaced: it is an actor
+    /// with a poll loop and a reading already published, and a fresh one would
+    /// blank that account's gauges until its next request. A dropped one is
+    /// retired rather than stopped, because this suspends — a `start` that
+    /// read the set before this call can reach a reader this call discarded,
+    /// and a poll loop on an object nothing holds outlives `stop()`.
+    private func rebuildCodexSources() async {
+        let stored = Set(CodexAccountStore.storedAccounts())
+        let existing = codexSources.load()
+        for source in existing where source.account.map({ !stored.contains($0) }) ?? false {
+            await source.retire()
+        }
+        let kept = existing.filter { source in
+            source.account.map { stored.contains($0) } ?? true
+        }
+        let links = codexLinks.load()
+        let added = stored.subtracting(kept.compactMap(\.account))
+            .sorted()
+            .map { id in
+                CodexUsageSource(
+                    account: id,
+                    workspace: links[id]?.workspace?.name,
+                    credentialSource: { allowingInteraction in
+                        await CodexAccountStore.supply(
+                            account: id, allowingInteraction: allowingInteraction)
+                    })
+            }
+        codexSources.store(kept + added)
     }
 
     /// Starts every Codex usage reader.
