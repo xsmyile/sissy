@@ -56,7 +56,7 @@ final class UsageEngineControlTests: XCTestCase {
         return UsageEngine(
             config: config,
             configURL: configURL,
-            limitsProbe: ClaudeLimitsProbe { _, _ in .absent },
+            limitsProbe: ClaudeLimitsProbe { _ in .absent },
             claudeAccounts: .inert(),
             keepAwakePolicy: keepAwakePolicy
         )
