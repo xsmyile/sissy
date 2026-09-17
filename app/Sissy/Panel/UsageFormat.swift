@@ -1021,6 +1021,72 @@ extension UsageFormat {
 
     static let unlinkedAccountCaption =
         "Sissy has no live source for this account, so it cannot read its limits."
+
+    // MARK: Git identities
+
+    /// Who a commit in a repository would be signed as, or why nobody would.
+    ///
+    /// A failure is quoted rather than reworded: git's own sentence names the
+    /// condition precisely — dubious ownership, a missing directory, a
+    /// repository it will not open — and a paraphrase would lose the part the
+    /// user has to act on.
+    static func identityAuthor(_ reading: GitIdentityReading) -> String {
+        switch reading {
+        case .author(let author):
+            return "\(author.name) <\(author.email)>"
+        case .unset:
+            return "No identity resolves here — git would refuse the commit"
+        case .unreadable(let message):
+            let first = message.split(separator: "\n").first.map(String.init) ?? message
+            return first.isEmpty ? "Git could not read this repository" : first
+        }
+    }
+
+    /// Where the address came from, which is the half that says what to change.
+    static func identityOrigin(_ origin: GitConfigOrigin) -> String {
+        "\(origin.scope) · \(origin.file)"
+    }
+
+    /// What the forge expects, for a repository that does not meet it.
+    ///
+    /// The count is what makes it evidence rather than an opinion: a row that
+    /// merely says a name is wrong is a rule the user has to take on trust,
+    /// where one that says how many repositories on that forge disagree can be
+    /// checked.
+    static func identityExpectation(_ verdict: GitIdentityVerdict, host: String?) -> String? {
+        guard case .unexpected(let expected, let agreeing) = verdict else { return nil }
+        let forge = host ?? "this forge"
+        let repositories = agreeing == 1 ? "repository" : "repositories"
+        return "\(forge) — \(agreeing) \(repositories) there commit as \(expected.name)"
+    }
+
+    /// The Overview's one line, and nothing at all where every repository
+    /// agrees with its forge.
+    ///
+    /// One repository is named, because naming it is the whole of the
+    /// remaining work; several are counted, because a list does not fit a line
+    /// and the page behind it is where a list belongs.
+    static func identityAlert(_ unexpected: [String]) -> String? {
+        switch unexpected.count {
+        case 0: return nil
+        case 1: return "\(unexpected[0]) commits under an unexpected name"
+        default: return "\(unexpected.count) repositories commit under an unexpected name"
+        }
+    }
+
+    /// The control that opens the repositories the page did not need to show.
+    static func identityDisclosure(all: Int) -> String {
+        "Show all \(all)"
+    }
+
+    /// What the page says under its rows.
+    ///
+    /// The count is of what was read, not of what the ledger holds: a checkout
+    /// that has been deleted is not a repository that went unchecked, and
+    /// counting it would make the page claim a shortfall it does not have.
+    static func identityFooter(checked: Int) -> String {
+        "\(checked) \(checked == 1 ? "repository" : "repositories") checked"
+    }
 }
 
 /// What a failed account switch says.

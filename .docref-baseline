@@ -11,12 +11,12 @@ M
 Material.bar
 NSPanel
 Optional
-PATH
 PATH_MAX
 RTLD_DEFAULT
 RawRepresentable
 Responses
 RunAtLoad
+SIGTERM
 _NSPopoverWindow
 argv
 caffeinate

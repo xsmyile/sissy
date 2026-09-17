@@ -24,6 +24,12 @@ import SwiftUI
 /// read against a total it cannot reach is a list with a hole in it.
 struct PanelProjectsPage: View {
     let page: UsagePanelSnapshot.ProjectsPage
+    /// Opens a repository's commit identity from its own row.
+    ///
+    /// The list folds on the Overview, so most repositories are only ever seen
+    /// here — a right-click that offered the check on the folded five and not
+    /// on the rest would put the same row under two different rules.
+    let openIdentities: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -34,7 +40,9 @@ struct PanelProjectsPage: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(page.rows) { row in
-                ProjectRowView(row: row, showsProviders: page.provider == nil)
+                ProjectRowView(
+                    row: row, showsProviders: page.provider == nil,
+                    checkIdentity: row.repository == nil ? nil : { openIdentities(row.id) })
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)

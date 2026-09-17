@@ -1,0 +1,440 @@
+import XCTest
+
+@testable import Sissy
+
+/// What a repository would sign a commit as, and which repositories disagree
+/// with the forge they are pushed to.
+///
+/// The reader half runs against real repositories with a real `git`, because
+/// the whole job is what git's own precedence answers — `includeIf`, scopes,
+/// the gecos refusal — and a stub would be the second precedence engine this
+/// module exists not to write. Each test owns a `HOME` and an
+/// `XDG_CONFIG_HOME` of its own, so nothing here can read or write the
+/// developer's configuration.
+///
+/// One ambient precondition the isolation cannot reach: a `user.email` in
+/// git's **system** scope would give every repository an identity, and
+/// `testReadsNothingWhereGitResolvesNoIdentity` asserts there is none. No system
+/// config on this Mac or on the CI image sets one.
+final class GitIdentityTests: XCTestCase {
+    private var root: URL!
+    private var home: URL!
+    private var git: URL!
+    private var previousXDG: String?
+
+    override func setUpWithError() throws {
+        git = try XCTUnwrap(GitIdentityReader.locate(), "no git on this machine to read with")
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sissy-identity-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        root = Self.realPath(root)
+        home = root.appendingPathComponent("home")
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".config/git"), withIntermediateDirectories: true)
+        previousXDG = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]
+        setenv("XDG_CONFIG_HOME", home.appendingPathComponent(".config").path, 1)
+    }
+
+    override func tearDownWithError() throws {
+        if let previousXDG {
+            setenv("XDG_CONFIG_HOME", previousXDG, 1)
+        } else {
+            unsetenv("XDG_CONFIG_HOME")
+        }
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    // MARK: The reader
+
+    func testReadsTheIdentityAGlobalConfigResolves() throws {
+        writeGlobal("[user]\n\tname = Personal\n\temail = personal@example.com\n")
+        let repository = try makeRepository("solo")
+        let reading = try XCTUnwrap(read(repository))
+        XCTAssertEqual(reading.author, GitAuthor(name: "Personal", email: "personal@example.com"))
+        XCTAssertEqual(reading.origin?.scope, "global")
+    }
+
+    /// A repository's own `user.email` beats the global one, and the origin is
+    /// resolved against the repository — git answers `file:.git/config`
+    /// relative to the working directory, which names no file anyone can open.
+    func testALocalOverrideWinsAndNamesAnAbsoluteFile() throws {
+        writeGlobal("[user]\n\tname = Personal\n\temail = personal@example.com\n")
+        let repository = try makeRepository("overridden")
+        try run(["-C", repository, "config", "user.email", "local@example.com"])
+        let reading = try XCTUnwrap(read(repository))
+        XCTAssertEqual(reading.author?.email, "local@example.com")
+        XCTAssertEqual(reading.origin?.scope, "local")
+        XCTAssertEqual(
+            reading.origin?.file, repository + "/.git/config",
+            "a local origin has to name a path, not git's relative answer")
+    }
+
+    /// The case a folder rule cannot see and the reading must: `includeIf
+    /// gitdir:` matches the git directory, so it is the repository's location
+    /// that decides, never the checkout's.
+    func testAnIncludeIfGitdirRuleIsResolvedByGit() throws {
+        let work = root.appendingPathComponent("work").path
+        try FileManager.default.createDirectory(
+            atPath: work, withIntermediateDirectories: true)
+        let profile = root.appendingPathComponent("work.gitconfig")
+        try "[user]\n\tname = Work\n\temail = work@corp.example.com\n"
+            .write(to: profile, atomically: true, encoding: .utf8)
+        writeGlobal(
+            """
+            [user]
+            \tname = Personal
+            \temail = personal@example.com
+            [includeIf "gitdir:\(work)/"]
+            \tpath = \(profile.path)
+            """)
+        let inside = try makeRepository("work/inside")
+        let outside = try makeRepository("elsewhere")
+        XCTAssertEqual(try XCTUnwrap(read(inside)).author?.email, "work@corp.example.com")
+        XCTAssertEqual(try XCTUnwrap(read(outside)).author?.email, "personal@example.com")
+    }
+
+    /// Git refuses its own gecos guess, and so does the reading: a name
+    /// invented from the hostname is not an identity anyone commits under.
+    func testReadsNothingWhereGitResolvesNoIdentity() throws {
+        writeGlobal("[core]\n\tautocrlf = input\n")
+        let repository = try makeRepository("nameless")
+        let reading = try XCTUnwrap(read(repository))
+        XCTAssertEqual(reading.reading, .unset)
+    }
+
+    /// The reader's environment is built, not inherited: `GIT_AUTHOR_EMAIL`
+    /// beats every file git resolves, so one in Sissy's own environment would
+    /// make every repository on the machine read the same wrong answer.
+    func testTheProcessEnvironmentCannotReachTheReading() throws {
+        writeGlobal("[user]\n\tname = Personal\n\temail = personal@example.com\n")
+        setenv("GIT_AUTHOR_EMAIL", "injected@example.com", 1)
+        defer { unsetenv("GIT_AUTHOR_EMAIL") }
+        let repository = try makeRepository("uninjected")
+        XCTAssertEqual(try XCTUnwrap(read(repository)).author?.email, "personal@example.com")
+    }
+
+    /// A checkout that has been deleted is not a repository that went wrong.
+    func testADirectoryThatIsGoneIsNotAFinding() throws {
+        XCTAssertNil(read(root.appendingPathComponent("never-existed").path))
+    }
+
+    func testADirectoryThatIsNotARepositoryReportsWhatGitSaid() throws {
+        let plain = root.appendingPathComponent("plain")
+        try FileManager.default.createDirectory(
+            at: plain.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        let reading = try XCTUnwrap(read(plain.path))
+        guard case .unreadable(let message) = reading.reading else {
+            return XCTFail("expected git's own refusal, got \(reading.reading)")
+        }
+        XCTAssertFalse(message.isEmpty)
+    }
+
+    /// What the sweep re-stats to know a reading can still stand. A process
+    /// costs ~67 ms whatever it runs, so a round that re-read every repository
+    /// regardless would be the feature's whole cost.
+    func testAReadingNamesEveryFileItCouldChangeWith() throws {
+        writeGlobal("[user]\n\tname = Personal\n\temail = personal@example.com\n")
+        let repository = try makeRepository("watched")
+        let sources = try XCTUnwrap(scan(repository)).sources
+        XCTAssertTrue(
+            sources.contains(repository + "/.git/config"),
+            "a local user.email appearing has to be caught, and it is in no origin until it does")
+        XCTAssertTrue(sources.contains(home.appendingPathComponent(".config/git/config").path))
+    }
+
+    /// An `includeIf` profile is a file the reading came out of, so editing it
+    /// alone has to re-read — nothing else in the chain would have moved.
+    func testAnIncludedProfileIsOneOfTheFilesWatched() throws {
+        let profile = root.appendingPathComponent("work.gitconfig")
+        try "[user]\n\tname = Work\n\temail = work@corp.example.com\n"
+            .write(to: profile, atomically: true, encoding: .utf8)
+        writeGlobal("[include]\n\tpath = \(profile.path)\n")
+        let repository = try makeRepository("included")
+        XCTAssertTrue(try XCTUnwrap(scan(repository)).sources.contains(profile.path))
+    }
+
+    /// A file that is not there yet stamps as absent, so creating it is a
+    /// change rather than a stamp that happens to match.
+    func testAnAbsentFileStampsAsAbsentAndItsCreationIsAChange() throws {
+        let path = root.appendingPathComponent("later.gitconfig").path
+        let before = GitIdentityReader.stamps(of: [path])
+        XCTAssertEqual(before[path], .distantPast)
+        try "[user]\n\temail = x@y\n".write(
+            toFile: path, atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(GitIdentityReader.stamps(of: [path]), before)
+    }
+
+    // MARK: The consensus
+
+    func testOneDissenterIsTheOnlyRowThatChanges() {
+        let work = GitAuthor(name: "Work", email: "work@corp")
+        let personal = GitAuthor(name: "Personal", email: "me@home")
+        let readings =
+            (0..<8).map {
+                reading("repo\($0)", host: "gitlab.example.com", owner: "team", author: work)
+            } + [reading("stray", host: "gitlab.example.com", owner: "team", author: personal)]
+        let judged = GitIdentityConsensus.judged(readings)
+        XCTAssertEqual(
+            judged.filter { $0.verdict == .agrees }.count, 8,
+            "a forge is judged as a whole, so one wrong repository leaves the rest alone")
+        let stray = try? XCTUnwrap(judged.first { $0.repository == "stray" })
+        XCTAssertEqual(stray?.verdict, .unexpected(expected: work, agreeing: 8))
+    }
+
+    /// Two names with equal standing is a machine whose owner commits under
+    /// both, and naming either the right one would invent the answer.
+    func testATieExpectsNothing() {
+        let readings = [
+            reading("a", host: "forge", author: GitAuthor(name: "A", email: "a@x")),
+            reading("b", host: "forge", author: GitAuthor(name: "A", email: "a@x")),
+            reading("c", host: "forge", author: GitAuthor(name: "B", email: "b@x")),
+            reading("d", host: "forge", author: GitAuthor(name: "B", email: "b@x")),
+        ]
+        XCTAssertTrue(GitIdentityConsensus.judged(readings).allSatisfy { $0.verdict == .unjudged })
+    }
+
+    /// One reading is not an agreement, so the first repository on a forge
+    /// does not get to define it for every one after.
+    func testAForgeWithOneRepositoryExpectsNothing() {
+        let readings = [reading("only", host: "forge", author: GitAuthor(name: "A", email: "a@x"))]
+        XCTAssertEqual(GitIdentityConsensus.judged(readings).first?.verdict, .unjudged)
+    }
+
+    func testARepositoryWithNoRemoteIsNeverJudged() {
+        let author = GitAuthor(name: "A", email: "a@x")
+        let readings = [
+            reading("a", host: "forge", author: author),
+            reading("b", host: "forge", author: author),
+            reading("loose", host: nil, author: GitAuthor(name: "B", email: "b@x")),
+        ]
+        let judged = GitIdentityConsensus.judged(readings)
+        XCTAssertEqual(judged.first { $0.repository == "loose" }?.verdict, .unjudged)
+    }
+
+    /// A repository git resolves no identity for cannot vote either, or a
+    /// forge could be given an expectation by repositories that have none.
+    func testARepositoryWithNoIdentityDoesNotCountTowardsAgreement() {
+        let author = GitAuthor(name: "A", email: "a@x")
+        let readings = [
+            reading("a", host: "forge", author: author),
+            RepositoryIdentity(
+                repository: "b", reading: .unset, origin: nil,
+                remote: remote(host: "forge"), verdict: .unjudged),
+        ]
+        XCTAssertEqual(
+            GitIdentityConsensus.judged(readings).first { $0.repository == "a" }?.verdict,
+            .unjudged)
+    }
+
+    /// The false finding the account-level electorate exists to prevent: one
+    /// host, two organisations, the smaller one correctly scoped and simply
+    /// outnumbered.
+    func testTwoAccountsOnOneHostDoNotOutvoteEachOther() {
+        let personal = GitAuthor(name: "Personal", email: "me@home")
+        let work = GitAuthor(name: "Work", email: "me@corp")
+        let readings =
+            (0..<10).map {
+                reading("mine\($0)", host: "github.com", owner: "me", author: personal)
+            }
+            + (0..<3).map {
+                reading("theirs\($0)", host: "github.com", owner: "acme", author: work)
+            }
+        let judged = GitIdentityConsensus.judged(readings)
+        XCTAssertTrue(
+            judged.allSatisfy { $0.verdict == .agrees },
+            "an organisation is not wrong for having fewer repositories than another")
+    }
+
+    /// And the coverage the fallback buys back: the first repository seen
+    /// under an account has nobody of its own to be compared with, so a host
+    /// every other repository agrees on answers for it.
+    func testAHostEveryAccountAgreesOnJudgesAnAccountOfOne() {
+        let work = GitAuthor(name: "Work", email: "work@corp")
+        let personal = GitAuthor(name: "Personal", email: "me@home")
+        let readings =
+            (0..<4).map { reading("known\($0)", host: "gitlab.corp", owner: "team", author: work) }
+            + [reading("fresh", host: "gitlab.corp", owner: "newteam", author: personal)]
+        let judged = GitIdentityConsensus.judged(readings)
+        XCTAssertEqual(
+            judged.first { $0.repository == "fresh" }?.verdict,
+            .unexpected(expected: work, agreeing: 4))
+    }
+
+    /// The fallback is unanimity, not a majority — a host that merely leans
+    /// one way is the mixed host above.
+    func testAHostThatIsOnlyMostlyOneNameIsNoFallback() {
+        let personal = GitAuthor(name: "Personal", email: "me@home")
+        let work = GitAuthor(name: "Work", email: "me@corp")
+        let readings =
+            (0..<10).map {
+                reading("mine\($0)", host: "github.com", owner: "me", author: personal)
+            }
+            + (0..<3).map {
+                reading("theirs\($0)", host: "github.com", owner: "acme", author: work)
+            }
+            + [reading("lonely", host: "github.com", owner: "solo", author: work)]
+        XCTAssertEqual(
+            GitIdentityConsensus.judged(readings).first { $0.repository == "lonely" }?.verdict,
+            .unjudged)
+    }
+
+    /// A path `sh` quoting cannot make safe gets no command rather than an
+    /// unquoted one on the clipboard.
+    func testAnUnquotablePathIsOfferedNoCommand() {
+        XCTAssertNil(GitIdentityReader.unsetCommand(repository: "/repos/two\nlines"))
+        XCTAssertNotNil(GitIdentityReader.unsetCommand(repository: "/repos/it's fine"))
+    }
+
+    // MARK: Helpers
+
+    private func writeGlobal(_ contents: String) {
+        try? contents.write(
+            to: home.appendingPathComponent(".config/git/config"), atomically: true, encoding: .utf8)
+    }
+
+    private func makeRepository(_ name: String) throws -> String {
+        let url = root.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try run(["init", "-q", url.path])
+        return url.path
+    }
+
+    private func read(_ repository: String) -> RepositoryIdentity? {
+        scan(repository)?.identity
+    }
+
+    private func scan(_ repository: String) -> GitIdentityScan? {
+        GitIdentityReader.read(repository: repository, remote: nil, git: git, home: home)
+    }
+
+    private func reading(
+        _ name: String, host: String?, owner: String = "owner", author: GitAuthor
+    ) -> RepositoryIdentity {
+        RepositoryIdentity(
+            repository: name, reading: .author(author), origin: nil,
+            remote: host.map { remote(host: $0, owner: owner) }, verdict: .unjudged)
+    }
+
+    private func remote(host: String, owner: String = "owner") -> ProjectRemote {
+        ProjectRemote(host: host, owner: owner, repository: "repository", page: nil)
+    }
+
+    /// The path git will compare an `includeIf gitdir:` pattern against.
+    ///
+    /// `realpath(3)` rather than `resolvingSymlinksInPath()`: Foundation
+    /// deliberately answers `/var/folders/…` for the temporary directory where
+    /// the real path is `/private/var/folders/…`, and git matches the real
+    /// one — so a pattern built from Foundation's answer matches nothing.
+    private static func realPath(_ url: URL) -> URL {
+        guard let resolved = realpath(url.path, nil) else { return url }
+        defer { free(resolved) }
+        return URL(fileURLWithPath: String(cString: resolved))
+    }
+
+    private func run(_ arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = git
+        process.arguments = arguments
+        process.environment = ["HOME": home.path, "PATH": "/usr/bin:/bin"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, "git \(arguments.joined(separator: " "))")
+    }
+}
+
+/// What the panel makes of the readings: which rows carry a correction, what
+/// the Overview says, and in what order the page reads.
+final class GitIdentityPanelTests: XCTestCase {
+    private let work = GitAuthor(name: "Work", email: "work@corp")
+    private let personal = GitAuthor(name: "Personal", email: "me@home")
+
+    /// Unsetting a repository's own `user.email` only changes the answer where
+    /// the repository set one. Offering the command against a global rule
+    /// would be offering a no-op dressed as a fix.
+    func testTheCorrectionIsOfferedOnlyAgainstALocalOverride() {
+        let local = snapshot([
+            identity("/repos/local", author: personal, scope: "local"),
+            identity("/repos/a", author: work), identity("/repos/b", author: work),
+        ])
+        XCTAssertNotNil(local.identities.first { $0.id == "/repos/local" }?.fix)
+
+        let global = snapshot([
+            identity("/repos/global", author: personal, scope: "global"),
+            identity("/repos/a", author: work), identity("/repos/b", author: work),
+        ])
+        XCTAssertNil(global.identities.first { $0.id == "/repos/global" }?.fix)
+    }
+
+    /// The origin is shown on a row that needs correcting and nowhere else: on
+    /// a row that agrees it answers a question nobody asked.
+    func testTheOriginRidesOnlyOnAFinding() {
+        let rows = snapshot([
+            identity("/repos/stray", author: personal, scope: "local"),
+            identity("/repos/a", author: work, scope: "global"),
+            identity("/repos/b", author: work, scope: "global"),
+        ]).identities
+        XCTAssertNotNil(rows.first { $0.id == "/repos/stray" }?.origin)
+        XCTAssertNil(rows.first { $0.id == "/repos/a" }?.origin)
+    }
+
+    func testTheOverviewNamesOneRepositoryAndCountsSeveral() {
+        let one = snapshot([
+            identity("/repos/stray", author: personal),
+            identity("/repos/a", author: work), identity("/repos/b", author: work),
+        ]).identityAlert
+        XCTAssertEqual(one?.summary, "owner/stray commits under an unexpected name")
+        XCTAssertEqual(one?.repository, "/repos/stray")
+
+        let several = snapshot([
+            identity("/repos/x", author: personal), identity("/repos/y", author: personal),
+            identity("/repos/a", author: work), identity("/repos/b", author: work),
+            identity("/repos/c", author: work),
+        ]).identityAlert
+        XCTAssertEqual(several?.summary, "2 repositories commit under an unexpected name")
+        XCTAssertNil(
+            several?.repository, "a line that cannot name one repository opens the whole list")
+    }
+
+    /// The ordinary state is silent: a line saying every repository is fine
+    /// would be a row that never changes.
+    func testTheOverviewSaysNothingWhenEveryRepositoryAgrees() {
+        let clean = snapshot([identity("/repos/a", author: work), identity("/repos/b", author: work)])
+        XCTAssertNil(clean.identityAlert)
+        XCTAssertEqual(clean.identities.count, 2)
+    }
+
+    /// A page whose one wrong repository sorts to the middle has to be read
+    /// rather than glanced at.
+    func testFindingsSortAboveEverythingElse() {
+        let rows = snapshot([
+            identity("/repos/aaa", author: work), identity("/repos/bbb", author: work),
+            identity("/repos/zzz", author: personal),
+            RepositoryIdentity(
+                repository: "/repos/loose", reading: .author(personal), origin: nil,
+                remote: nil, verdict: .unjudged),
+        ]).identities
+        XCTAssertEqual(rows.map(\.mark), [.unexpected, .unjudged, .agrees, .agrees])
+    }
+
+    private func snapshot(_ identities: [RepositoryIdentity]) -> UsagePanelSnapshot {
+        UsagePanelSnapshot.make(
+            frame: FrameData(
+                tokens: 0, cost: 0, burn: nil, providers: [], keepAwake: .off,
+                identities: GitIdentityConsensus.judged(identities)))
+    }
+
+    private func identity(
+        _ path: String, author: GitAuthor, scope: String? = nil, host: String = "forge.example.com"
+    ) -> RepositoryIdentity {
+        RepositoryIdentity(
+            repository: path,
+            reading: .author(author),
+            origin: scope.map { GitConfigOrigin(scope: $0, file: path + "/.git/config") },
+            remote: ProjectRemote(
+                host: host, owner: "owner",
+                repository: (path as NSString).lastPathComponent, page: nil),
+            verdict: .unjudged)
+    }
+}
