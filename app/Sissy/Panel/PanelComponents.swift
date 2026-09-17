@@ -76,15 +76,37 @@ enum PanelMetrics {
 /// rewrite. Sissy has not been seen to hit it; carrying a bar that cannot is
 /// cheaper than finding out.
 struct ShareBar: View {
-    let share: Double
-    let tint: Color
-    var pace: UsagePanelSnapshot.Pace?
+    let segments: [BarSegment]
+    let pace: UsagePanelSnapshot.Pace?
+
+    init(share: Double, tint: Color, pace: UsagePanelSnapshot.Pace? = nil) {
+        self.init(segments: [BarSegment(share: share, tint: tint)], pace: pace)
+    }
+
+    init(segments: [BarSegment], pace: UsagePanelSnapshot.Pace? = nil) {
+        self.segments = segments
+        self.pace = pace
+    }
+
+    private var share: Double { segments.reduce(0) { $0 + $1.share } }
 
     var body: some View {
-        BarCanvas(share: share, tint: tint, pace: pace)
+        BarCanvas(share: share, segments: segments, pace: pace)
             .frame(height: PanelMetrics.barHeight)
             .animation(.default, value: share)
     }
+}
+
+/// One part of a bar that more than one thing contributed to.
+///
+/// Only the projects page draws more than one: a repository worked on through
+/// both CLIs is a single row by design — `FrameBuilder.combinedProjects` sums
+/// them — and the split is what says which of the two the money went to,
+/// without costing the row a line or a legend. Every other bar on the panel is
+/// one segment, which is what the share-and-tint initialiser makes.
+struct BarSegment: Equatable {
+    let share: Double
+    let tint: Color
 }
 
 /// The bar's geometry, apart from its drawing, so the two placements it has to
@@ -97,6 +119,33 @@ enum BarGeometry {
     /// stub, because a bar that rounds down to invisible reads as zero.
     static func fillWidth(_ share: Double, in width: CGFloat) -> CGFloat {
         min(max(width * share, share > 0 ? 3 : 0), width)
+    }
+
+    /// How wide each segment draws inside a fill `width` wide.
+    ///
+    /// Proportional to the shares rather than to the bar, so segments follow a
+    /// total that is still animating instead of overrunning it. The last one
+    /// takes whatever is left: three segments rounded independently leave a
+    /// hairline of track showing inside a fill that is meant to be solid.
+    ///
+    /// A share of nothing keeps its place in the answer — the caller zips
+    /// these against its own segments, so a dropped element would tint the
+    /// wrong one.
+    static func segmentWidths(_ shares: [Double], in width: CGFloat) -> [CGFloat] {
+        let total = shares.reduce(0, +)
+        guard total > 0, width > 0 else { return Array(repeating: 0, count: shares.count) }
+        var widths: [CGFloat] = []
+        var taken: CGFloat = 0
+        for (index, share) in shares.enumerated() {
+            guard index < shares.count - 1 else {
+                widths.append(max(width - taken, 0))
+                continue
+            }
+            let segment = max(width * CGFloat(share / total), 0)
+            widths.append(segment)
+            taken += segment
+        }
+        return widths
     }
 
     /// Where the mark's centre lands, kept a half-gap inside the bar so a
@@ -115,7 +164,7 @@ enum BarGeometry {
 /// is, so the view itself has to name the value SwiftUI should walk.
 private struct BarCanvas: View, Animatable {
     var share: Double
-    var tint: Color
+    var segments: [BarSegment]
     var pace: UsagePanelSnapshot.Pace?
 
     nonisolated var animatableData: Double {
@@ -133,9 +182,9 @@ private struct BarCanvas: View, Animatable {
 
             let fill = BarGeometry.fillWidth(share, in: size.width)
             if fill > 0 {
-                context.fill(
-                    Self.capsule(CGRect(x: 0, y: 0, width: fill, height: size.height)),
-                    with: .style(tint.gradient))
+                Self.drawFill(
+                    segments, in: CGRect(x: 0, y: 0, width: fill, height: size.height),
+                    into: &context)
             }
 
             guard let pace else { return }
@@ -154,6 +203,35 @@ private struct BarCanvas: View, Animatable {
                     Self.markRect(
                         centre: centre, width: BarGeometry.markWidth, height: size.height)),
                 with: .color(pace.isOverPace ? .red : .green))
+        }
+    }
+
+    /// The fill, in one colour or in several.
+    ///
+    /// One segment is drawn as the capsule itself, which is what every bar but
+    /// the projects page's is and what this drew before there were segments.
+    /// Several need the capsule as a clip instead, because the rounded right
+    /// end belongs to the fill rather than to the segment that happens to
+    /// reach it — and the clip goes in a layer of its own so it cannot reach
+    /// the pace mark, which is punched out of the whole bar afterwards.
+    private static func drawFill(
+        _ segments: [BarSegment], in rect: CGRect, into context: inout GraphicsContext
+    ) {
+        guard segments.count > 1 else {
+            context.fill(
+                Self.capsule(rect), with: .style((segments.first?.tint ?? .clear).gradient))
+            return
+        }
+        context.drawLayer { layer in
+            layer.clip(to: Self.capsule(rect))
+            var x = rect.minX
+            let widths = BarGeometry.segmentWidths(segments.map(\.share), in: rect.width)
+            for (segment, width) in zip(segments, widths) {
+                layer.fill(
+                    Path(CGRect(x: x, y: rect.minY, width: width, height: rect.height)),
+                    with: .style(segment.tint.gradient))
+                x += width
+            }
         }
     }
 
@@ -294,6 +372,32 @@ struct SectionLabel: View {
     }
 }
 
+/// A section label that is also the way into the page behind its list: how
+/// long the list is, and the chevron every other row that navigates carries.
+///
+/// The count is the whole affordance. A chevron alone says there is somewhere
+/// to go and not what is there, and the one thing a folded list cannot say
+/// about itself is how much of it is missing.
+struct ProjectsSectionLabel: View {
+    let text: String
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            SectionLabel(text: text)
+            Spacer(minLength: 8)
+            Text(UsageFormat.projectsCount(count))
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(.rect)
+    }
+}
+
 /// One project's share of a day: the repository's own name, what it cost, and
 /// a bar for its share. The path stays in the tooltip — a client's name is a
 /// directory's name — and the remainder row puts its reason there instead.
@@ -321,6 +425,14 @@ struct SectionLabel: View {
 /// repository's name is on the row and its path is on the hover.
 struct ProjectRowView: View {
     let row: UsagePanelSnapshot.ProjectRow
+    /// Whether the row says which CLIs its money went through.
+    ///
+    /// Only the projects page does, and only when it is about every provider:
+    /// a vendor's own page has the answer in its title, and the Overview's
+    /// list sits under a block of gauges whose bars are about rate-limit
+    /// pressure — a second set of provider tints on the same screen, measuring
+    /// money instead, is two readings in one colour.
+    var showsProviders: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -340,16 +452,49 @@ struct ProjectRowView: View {
                         .truncationMode(.middle)
                 }
                 forgeLink
+                providerMarks
                 Spacer(minLength: 0)
                 Text("\(row.tokens) · \(row.cost)")
                     .font(.system(size: 12))
                     .monospacedDigit()
             }
-            ShareBar(share: row.share, tint: .secondary)
+            ShareBar(segments: segments)
         }
         .contentShape(.rect)
         .help(row.tooltip ?? "")
         .contextMenu { actions }
+    }
+
+    /// The CLIs that spent on this row, after its name for the reason the
+    /// forge mark is: a glyph in front of the name would start every row's
+    /// name one step right of the gutter its bar starts at.
+    ///
+    /// At `PanelMetrics.markSize`, which is what the Overview labels a
+    /// provider's own row with — not at the forge mark's size beside it.
+    /// Sizing it to its neighbour was tried and shipped for a build, and it
+    /// read as too small to name: the two marks answer different questions,
+    /// and a vendor's is one a reader recognises rather than reads. A glyph
+    /// that has to be looked at twice has said nothing.
+    @ViewBuilder
+    private var providerMarks: some View {
+        if showsProviders {
+            ForEach(row.providers) { provider in
+                ProviderMark(id: provider.id)
+                    .help(UsageFormat.providerName(provider.id))
+            }
+        }
+    }
+
+    /// The bar, split by provider where the row says who spent. A row that
+    /// stands for no single repository — the fold, the remainder — names no
+    /// provider and keeps the one quiet bar it has always had.
+    private var segments: [BarSegment] {
+        guard showsProviders, !row.providers.isEmpty else {
+            return [BarSegment(share: row.share, tint: .secondary)]
+        }
+        return row.providers.map {
+            BarSegment(share: $0.share, tint: ProviderPalette.tint(for: $0.id))
+        }
     }
 
     /// The mark only where there is a page behind it: a remote that names a

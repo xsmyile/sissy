@@ -32,6 +32,7 @@ struct PanelProviderPage: View {
     /// a surface of this one's: the panel owns which page is on screen, so the
     /// row at the foot of this page asks for the move instead of making it.
     let openServices: () -> Void
+    let openProjects: () -> Void
     /// This provider's archived days, read once when the page opens. A closure
     /// rather than a value because the read walks the archive and the page is
     /// rebuilt on every frame the engine emits — a value would have to be
@@ -538,12 +539,19 @@ struct PanelProviderPage: View {
     /// the Overview's list is the two summed, and a page that repeated it
     /// would answer a question nobody asked here.
     ///
-    /// Every row at full height. The page's own ceiling is the panel's, taken
-    /// from the screen it opens on, so a section does not have to buy room
-    /// from the user by hiding what they worked on.
+    /// Folded past five rows exactly as the Overview's is, and for the same
+    /// reason: this page has a plan, an account, its windows, its week and its
+    /// vendor's status under it, and a repository per row would push all of
+    /// them below whatever the busiest day happened to be. The label is the
+    /// way to the unfolded list, so nothing is out of reach — which is what
+    /// the fold costs everywhere else on the panel too.
     private var projects: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionLabel(text: "By project")
+            Button(action: openProjects) {
+                ProjectsSectionLabel(text: "By project", count: row.projectCount)
+            }
+            .buttonStyle(.plain)
+            .help("Show every project")
             ForEach(row.projects) { project in
                 ProjectRowView(row: project)
             }

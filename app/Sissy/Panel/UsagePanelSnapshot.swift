@@ -37,6 +37,10 @@ struct UsagePanelSnapshot: Equatable {
     /// when nothing today names a project, and the panel then draws no section
     /// rather than a heading over nothing.
     let projects: [ProjectRow]
+    /// How many repositories the day names, which is what the section's own
+    /// row offers to open — the fold is a row about the rest of the list and
+    /// cannot say how long the list is without being read as a project.
+    let projectCount: Int
 
     /// One day of a provider's recent spend, as a bar on its page.
     ///
@@ -290,6 +294,9 @@ struct UsagePanelSnapshot: Equatable {
         /// way the combined list is. Empty for a provider whose format names
         /// no working directory.
         let projects: [ProjectRow]
+        /// How many repositories this provider's day names, for the row that
+        /// opens the unfolded list.
+        let projectCount: Int
         /// What the vendor has billed against a spend cap, worded. Nil for a
         /// provider that publishes none and for an account with nothing to
         /// say — no cap set and nothing spent, which is every account that
@@ -428,6 +435,26 @@ struct UsagePanelSnapshot: Equatable {
         let tokens: String
         let cost: String
         let share: Double
+        /// Which CLIs the money on this row went through, in the panel's own
+        /// provider order so the marks and the bar's segments read the same
+        /// way down the page.
+        ///
+        /// Empty on the two rows that stand for no single repository, and on
+        /// every row of a single provider's own list — there the answer is the
+        /// page's own name. The shares are of the same day `share` is of, so
+        /// they sum to it.
+        let providers: [ProviderShare]
+    }
+
+    /// What one provider spent on one project, as a share of the day.
+    ///
+    /// Derived rather than carried on `ProjectTotals`: the combined list sums
+    /// the CLIs into one row per repository by design, and the frame still
+    /// holds both halves on its own slices.
+    struct ProviderShare: Equatable, Identifiable {
+        /// The provider id, which is what the mark and the tint are keyed by.
+        let id: String
+        let share: Double
     }
 
     /// A repository on the forge it is pushed to.
@@ -536,8 +563,57 @@ struct UsagePanelSnapshot: Equatable {
             providers: rows,
             usedToday: frame.providers.count { $0.tokens > 0 },
             projects: makeProjects(
-                frame.projects, totalTokens: totalTokens, totalCost: totalCost)
+                frame.projects, totalTokens: totalTokens, totalCost: totalCost),
+            projectCount: frame.projects.count
         )
+    }
+
+    /// Every project a day names, unfolded, for the page behind the section's
+    /// own row.
+    ///
+    /// Built on demand rather than carried on the snapshot: the panel makes a
+    /// snapshot per frame while it is open, and the full list is wanted on one
+    /// page that is usually closed.
+    ///
+    /// **Today, and no period of its own.** The rows come from the day buckets
+    /// — `UsageHistoryRollup` carries a period's total and deliberately no
+    /// project split — so a control here would name a window the rows are not
+    /// of. What a project cost over a month is #81, closed: the export already
+    /// answers it from rows the archive holds.
+    ///
+    /// `provider` nil sums every CLI and gives each row its split; naming one
+    /// takes that provider's own day, where the split would repeat the page's
+    /// title on every row.
+    static func projectsPage(frame: FrameData, provider: String?) -> ProjectsPage {
+        let slice = provider.flatMap { id in frame.providers.first { $0.id == id } }
+        let projects = provider == nil ? frame.projects : slice?.projects ?? []
+        let tokens =
+            provider == nil
+            ? frame.providers.reduce(0) { $0 + $1.tokens } : slice?.tokens ?? 0
+        let cost =
+            provider == nil
+            ? frame.providers.reduce(Decimal(0)) { $0 + $1.cost } : slice?.cost ?? 0
+        return ProjectsPage(
+            provider: provider,
+            rows: makeProjects(
+                projects, totalTokens: tokens, totalCost: cost, limit: nil,
+                contributors: provider == nil ? contributors(frame.providers) : [:]),
+            subtitle: UsageFormat.projectsSubtitle(count: projects.count, cost: cost)
+        )
+    }
+
+    /// The projects page: every repository of the day, and the line that dates
+    /// and totals them.
+    struct ProjectsPage: Equatable {
+        /// Whose day this is, or nil for every provider summed.
+        let provider: String?
+        /// Unfolded, so the page is the one place the whole list exists. The
+        /// remainder keeps its row here too — the rows are read against the
+        /// total in the subtitle, and without it they would not reach it.
+        let rows: [ProjectRow]
+        /// When, how many, and how much — today's own total rather than the
+        /// headline's, which is over whatever period the user picked.
+        let subtitle: String
     }
 
     /// Which windows the headline may be put over: today, which needs no
@@ -608,6 +684,7 @@ struct UsagePanelSnapshot: Equatable {
                 account: makeAccount(slice.account),
                 projects: makeProjects(
                     slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
+                projectCount: slice.projects.count,
                 credits: makeCredits(slice.credits, now: now),
                 status: makeStatus(status[slice.id], provider: slice.id)
             )
@@ -799,7 +876,9 @@ struct UsagePanelSnapshot: Equatable {
     private static func makeProjects(
         _ unordered: [ProjectTotals],
         totalTokens: Int,
-        totalCost: Decimal
+        totalCost: Decimal,
+        limit: Int? = projectRowLimit,
+        contributors: [String: [String: Decimal]] = [:]
     ) -> [ProjectRow] {
         let projects = FrameBuilder.orderedProjects(unordered)
         guard !projects.isEmpty else { return [] }
@@ -808,9 +887,10 @@ struct UsagePanelSnapshot: Equatable {
             return NSDecimalNumber(decimal: cost).doubleValue
                 / NSDecimalNumber(decimal: totalCost).doubleValue
         }
-        let fits = projects.count <= projectRowLimit
-        let shown = fits ? projects : Array(projects.prefix(projectRowLimit - 1))
-        var rows = shown.map { project in
+        let kept =
+            limit.map { projects.count <= $0 ? projects.count : $0 - 1 }
+            ?? projects.count
+        var rows = projects.prefix(kept).map { project in
             ProjectRow(
                 id: project.path,
                 name: UsageFormat.projectName(project.path),
@@ -822,11 +902,12 @@ struct UsagePanelSnapshot: Equatable {
                 tooltip: project.path,
                 tokens: UsageFormat.tokens(project.tokens),
                 cost: UsageFormat.cost(project.cost),
-                share: share(project.cost)
+                share: share(project.cost),
+                providers: providerShares(contributors[project.path] ?? [:], share: share)
             )
         }
-        if !fits {
-            let rest = projects.dropFirst(projectRowLimit - 1)
+        if kept < projects.count {
+            let rest = projects.dropFirst(kept)
             let restCost = rest.reduce(Decimal(0)) { $0 + $1.cost }
             rows.append(
                 ProjectRow(
@@ -837,7 +918,8 @@ struct UsagePanelSnapshot: Equatable {
                     tooltip: nil,
                     tokens: UsageFormat.tokens(rest.reduce(0) { $0 + $1.tokens }),
                     cost: UsageFormat.cost(restCost),
-                    share: share(restCost)
+                    share: share(restCost),
+                    providers: []
                 ))
         }
         let namedTokens = projects.reduce(0) { $0 + $1.tokens }
@@ -860,9 +942,40 @@ struct UsagePanelSnapshot: Equatable {
                 tooltip: UsageFormat.projectsUnattributedReason,
                 tokens: UsageFormat.tokens(totalTokens - namedTokens),
                 cost: UsageFormat.cost(unnamedCost),
-                share: share(unnamedCost)
+                share: share(unnamedCost),
+                providers: []
             ))
         return rows
+    }
+
+    /// One row's split, in the order the panel draws providers in rather than
+    /// by what each spent.
+    ///
+    /// A fixed order is what lets the marks and the bar be read down a column:
+    /// ordering each row by its own dearest provider puts Claude's tint on the
+    /// left of one row and on the right of the next, and a reader comparing
+    /// two rows has to re-read the marks to know which way round they are.
+    private static func providerShares(
+        _ costs: [String: Decimal], share: (Decimal) -> Double
+    ) -> [ProviderShare] {
+        costs
+            .map { ProviderShare(id: $0.key, share: share($0.value)) }
+            .sorted {
+                (FrameBuilder.providerSortOrder($0.id), $0.id)
+                    < (FrameBuilder.providerSortOrder($1.id), $1.id)
+            }
+    }
+
+    /// What each provider spent on each path, which is the half
+    /// `FrameBuilder.combinedProjects` sums away.
+    private static func contributors(_ slices: [ProviderSlice]) -> [String: [String: Decimal]] {
+        var out: [String: [String: Decimal]] = [:]
+        for slice in slices {
+            for project in slice.projects {
+                out[project.path, default: [:]][slice.id, default: 0] += project.cost
+            }
+        }
+        return out
     }
 
     private static let foldedProjectRowID = "sissy.projects.rest"
