@@ -26,5 +26,6 @@ Sissy draws the Claude and OpenAI marks to identify which CLI a row is about,
 and the GitHub and GitLab marks to identify where a repository is pushed. They
 are the trademarks of Anthropic, OpenAI, GitHub and GitLab respectively, used
 nominatively; none of those companies is affiliated with Sissy, and none
-endorses it. The files the marks are drawn from are Simple Icons' (CC0); the
-trademarks are not, and CC0 does not travel to them.
+endorses it. The GitHub and GitLab files are Simple Icons' (CC0); the Claude
+and OpenAI ones are each vendor's own published mark. CC0 covers a drawing and
+never a trademark.

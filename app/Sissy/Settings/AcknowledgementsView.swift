@@ -45,8 +45,8 @@ struct AcknowledgementsView: View {
     /// a row is about and where a repository is pushed, which is nominative
     /// use; saying so out loud is cheaper than leaving a reader to wonder
     /// whether Sissy is something one of those vendors made. Simple Icons is
-    /// credited above for the files, which is a separate thing from the marks
-    /// they draw: CC0 covers the drawing and never the trademark.
+    /// credited above for two of the four drawings, which is a separate thing
+    /// from the marks they draw: CC0 covers a drawing and never a trademark.
     private static let trademarkNotice =
         "The Claude and OpenAI marks identify which CLI a row is about, and the GitHub and "
         + "GitLab marks where a repository is pushed. They are the trademarks of Anthropic, "
