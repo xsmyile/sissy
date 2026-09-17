@@ -826,6 +826,28 @@ enum UsageFormat {
         "\(count) more projects"
     }
 
+    /// How long the list behind a section's own row is. Singular at one,
+    /// because that row is a sentence rather than a figure.
+    static func projectsCount(_ count: Int) -> String {
+        count == 1 ? "1 project" : "\(count) projects"
+    }
+
+    /// What the projects page says under its title: the day it is of, how many
+    /// repositories it names, and what that day came to.
+    ///
+    /// The day's own total rather than the headline's. The headline is over
+    /// whatever period the control is set to and these rows are today's alone,
+    /// so repeating it here would put one window's money over another's rows.
+    static func projectsSubtitle(count: Int, cost: Decimal) -> String {
+        "today · \(projectsCount(count)) · \(self.cost(cost))"
+    }
+
+    /// The projects page with nothing on it, which is a day that has spent
+    /// nothing yet rather than a page that failed to load. Reachable only by
+    /// a day rolling over under an open page, since the row that opens it
+    /// belongs to a section that does not exist while the list is empty.
+    static let projectsEmpty = "Nothing today names a repository yet."
+
     /// What the rest of the day is called when no row can name it. Deliberately
     /// not a name: the money was counted, and the one thing Sissy will not do
     /// is invent a repository for it.

@@ -28,6 +28,7 @@ struct PanelOverview: View {
     /// and that is exactly the provider the recap is about.
     let meteringProviders: Int
     let openProvider: (String, String?) -> Void
+    let openProjects: () -> Void
     let selectPeriod: (UsagePeriod) -> Void
 
     var body: some View {
@@ -342,9 +343,22 @@ struct PanelOverview: View {
     /// dimension landed: the days before it name no repository at all, and a
     /// window reaching back across them would put an unattributed row above
     /// real ones.
+    ///
+    /// **The section's own label is the way to the whole list**, not the
+    /// folded row under it. The fold exists only past five repositories, so a
+    /// door on it would be a door that comes and goes with the day — and it
+    /// is not the last row either, since the remainder sits below it, which
+    /// puts a navigation in the middle of a list of readings. The label is
+    /// always there, always in the same place, and costs the block no row.
+    /// The fold keeps its figures for the reason it has them: the section is
+    /// read against the headline, and it only reaches it if every row counts.
     private var projects: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionLabel(text: "By project · today")
+            Button(action: openProjects) {
+                ProjectsSectionLabel(text: "By project · today", count: snapshot.projectCount)
+            }
+            .buttonStyle(.plain)
+            .help("Show every project")
             ForEach(snapshot.projects) { row in
                 ProjectRowView(row: row)
             }

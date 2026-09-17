@@ -76,6 +76,12 @@ struct UsagePanelView: View {
         /// popovers, in which one emerges from another"* — and the cost was
         /// measured: see `PanelProviderStatus`.
         case services(String, account: String?)
+        /// Every project of the day, unfolded: one level in from the Overview
+        /// when no provider is named, and from a vendor's own page when one
+        /// is. The account travels for the same reason it does above — the way
+        /// back has to land on the page that was left, not on that vendor's
+        /// first account.
+        case projects(String?, account: String?)
     }
 
     /// Cadence for both readouts the panel keeps on its own clock: the
@@ -85,6 +91,11 @@ struct UsagePanelView: View {
     /// the wrong minute for most of it.
     private static let clockTick: TimeInterval = 1
     private static let controlButtonSize: CGFloat = 26
+    /// The back chevron's target, smaller than the round controls opposite it:
+    /// it is a glyph on the text line rather than a button on glass, and a
+    /// 26 pt box around it would make the header's left edge read as heavier
+    /// than its right.
+    private static let backButtonSize: CGFloat = 20
     /// Larger than the legend's, because the header's title is 13 pt semibold
     /// against the legend's 12 pt medium and it sits between a back chevron
     /// and a 26 pt button. A mark sized for the quieter row reads as an
@@ -105,7 +116,9 @@ struct UsagePanelView: View {
     private var openAccount: String? {
         switch page {
         case .overview: nil
-        case .provider(_, let account), .services(_, let account): account
+        case .provider(_, let account), .services(_, let account),
+            .projects(_, let account):
+            account
         }
     }
 
@@ -118,6 +131,9 @@ struct UsagePanelView: View {
         switch page {
         case .overview: return nil
         case .provider(let id, _), .services(let id, _):
+            return providers.first { $0.id == id }
+        case .projects(let id, _):
+            guard let id else { return nil }
             return providers.first { $0.id == id }
         }
     }
@@ -148,6 +164,16 @@ struct UsagePanelView: View {
         return row?.status
     }
 
+    /// The projects page's own rows, built only while that page is open.
+    ///
+    /// The snapshot is remade on every frame the panel is open for, and the
+    /// unfolded list is wanted on one page that usually is not — so this hangs
+    /// off the page rather than off `UsagePanelSnapshot.make`.
+    private func projectsPage(of frame: FrameData?) -> UsagePanelSnapshot.ProjectsPage? {
+        guard case .projects(let provider, _) = page, let frame else { return nil }
+        return UsagePanelSnapshot.projectsPage(frame: frame, provider: provider)
+    }
+
     var body: some View {
         let live = model.liveFrame
         let snapshot = live.map {
@@ -159,9 +185,12 @@ struct UsagePanelView: View {
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
         let services = servicesReading(of: open)
+        let projects = projectsPage(of: live?.frame)
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                if let open {
+                if let projects {
+                    projectsHeader(projects)
+                } else if let open {
                     providerHeader(
                         open, live: live,
                         back: services == nil
@@ -180,7 +209,9 @@ struct UsagePanelView: View {
             ScrollView(.vertical) {
                 Group {
                     if let snapshot {
-                        if let open, let services {
+                        if let projects {
+                            PanelProjectsPage(page: projects)
+                        } else if let open, let services {
                             PanelProviderStatusPage(provider: open.id, row: services)
                         } else if let open {
                             let slice = live?.frame.providers.first { $0.id == open.id }
@@ -205,6 +236,9 @@ struct UsagePanelView: View {
                                 openServices: {
                                     page = .services(open.id, account: openAccount)
                                 },
+                                openProjects: {
+                                    page = .projects(open.id, account: openAccount)
+                                },
                                 loadHistory: {
                                     await model.engine.usageHistorySeries(provider: $0)
                                 },
@@ -218,6 +252,7 @@ struct UsagePanelView: View {
                                     $0.activation.isMetering
                                 },
                                 openProvider: { page = .provider($0, account: $1) },
+                                openProjects: { page = .projects(nil, account: nil) },
                                 selectPeriod: { model.setUsagePeriod($0) }
                             )
                         }
@@ -327,6 +362,65 @@ struct UsagePanelView: View {
         }
     }
 
+    /// The projects page's header: the way back, what the page is, and the
+    /// day it is of.
+    ///
+    /// No age and no refresh. Both belong to a reading a vendor answers for,
+    /// and this page is the frame's own arithmetic over logs that are already
+    /// on the disk — the page it was opened from dates that, one click away.
+    ///
+    /// The way back is the page that was left rather than always the Overview,
+    /// because both of them have a list that folds and therefore a row that
+    /// opens this one.
+    private func projectsHeader(_ projects: UsagePanelSnapshot.ProjectsPage) -> some View {
+        HStack(spacing: 8) {
+            backButton(
+                to: projects.provider.map { .provider($0, account: openAccount) } ?? .overview,
+                help: Self.projectsBackHelp(projects.provider))
+
+            if let provider = projects.provider {
+                ProviderMark(id: provider, size: Self.headerMarkSize, textSize: nil)
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Projects")
+                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
+                    .lineLimit(1)
+                Text(projects.subtitle)
+                    .font(.system(size: PanelMetrics.headlineMeta))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 12)
+    }
+
+    /// The way back, which every page one level in carries in the same corner
+    /// at the same size. One control rather than one per header: a page that
+    /// drew its own would be free to draw it a point off, and the chevron is
+    /// the only thing on these headers a user has to find without looking.
+    private func backButton(to destination: Page, help: String) -> some View {
+        Button {
+            page = destination
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: Self.backButtonSize, height: Self.backButtonSize)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(help)
+    }
+
+    private static func projectsBackHelp(_ provider: String?) -> String {
+        guard let provider else { return "Back to today" }
+        return "Back to \(UsageFormat.providerName(provider))"
+    }
+
     /// The header a provider page carries instead: the way back, whose page
     /// this is, and the refresh.
     ///
@@ -356,17 +450,9 @@ struct UsagePanelView: View {
         _ row: UsagePanelSnapshot.ProviderRow, live: SissyModel.LiveFrame?, back: Page
     ) -> some View {
         HStack(spacing: 8) {
-            Button {
-                page = back
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 20, height: 20)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help(back == .overview ? "Back to today" : "Back to \(row.name)")
+            backButton(
+                to: back,
+                help: back == .overview ? "Back to today" : "Back to \(row.name)")
 
             ProviderMark(id: row.id, size: Self.headerMarkSize, textSize: nil)
 
