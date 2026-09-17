@@ -31,6 +31,10 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// The network half, injectable for the same reason: a test of the refresh
     /// contract must not reach Anthropic to observe it.
     private let fetchSource: @Sendable (String) async throws -> Reading
+    /// Where a refusal is written down so the next run honours it. Nil is a
+    /// probe that forgets its block when the process ends, which is every
+    /// test that has no opinion about one.
+    private let backoff: LimitsBackoffSlot?
 
     /// One answer from the usage endpoint: the windows it drew and what it has
     /// billed against the spend cap.
@@ -74,10 +78,12 @@ actor ClaudeLimitsProbe: SourceSignals {
         },
         fetch: @escaping @Sendable (String) async throws -> Reading = {
             try await ClaudeLimitsProbe.fetch(token: $0)
-        }
+        },
+        backoff: LimitsBackoffSlot? = nil
     ) {
         credentialsSource = credentials
         fetchSource = fetch
+        self.backoff = backoff
     }
 
     /// Live windows, expired buckets dropped — a window past its reset
@@ -300,6 +306,45 @@ actor ClaudeLimitsProbe: SourceSignals {
         return .wait(Self.refreshInterval)
     }
 
+    /// The wait a refusal recorded on an earlier run still has left, and nil
+    /// when there is none.
+    ///
+    /// Consulted before the credential rather than once at launch: the block
+    /// belongs in front of every request that could meet it, and a reader
+    /// stopped and started inside one would otherwise spend a request on a
+    /// vendor that is still refusing. Everything after the first poll of a
+    /// block reads it as already expired, because the sleep this returns is
+    /// exactly as long as the deadline it names.
+    ///
+    /// Reading the record is a suspension, so it is `stamp` that decides
+    /// whether the answer may still be published — a `stop()` that landed in
+    /// it has already cleared the row, and a block restored over that is the
+    /// same defect as a reply arriving after the windows were dropped.
+    private func recordedBackoff(generation stamp: Int) async -> Duration? {
+        guard let until = await backoff?.deadline() else { return nil }
+        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+        let remaining = until.timeIntervalSinceNow
+        guard remaining > 0 else { return nil }
+        published.update { $0.limitsState = .rateLimited(until: until) }
+        report("still refused by the Claude usage endpoint until \(until); waiting rather than asking")
+        return .seconds(remaining)
+    }
+
+    /// Drops the block, on the row and in the record.
+    ///
+    /// For the account switch, which is the one event that makes a refusal
+    /// stop being this reader's: the endpoint authenticates a credential, the
+    /// block was earned by the one that has just been replaced, and the next
+    /// request spends a different token. Without it a switch made inside a
+    /// block met no limits at all until the deadline passed — and with the
+    /// record on disk, past the relaunch too.
+    func clearBackoff() async {
+        published.update {
+            if case .rateLimited = $0.limitsState { $0.limitsState = .quiet }
+        }
+        await backoff?.record(nil)
+    }
+
     /// One request against the usage endpoint, and the backoff its answer
     /// earns.
     ///
@@ -307,6 +352,7 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// arrived a moment too late would restore windows a `stop()` had just
     /// cleared.
     private func readAndFetch(generation stamp: Int) async -> Duration {
+        if let wait = await recordedBackoff(generation: stamp) { return wait }
         let credentials: ClaudeCredentials
         switch await currentCredentials(generation: stamp) {
         case .ready(let found): credentials = found
@@ -321,16 +367,18 @@ actor ClaudeLimitsProbe: SourceSignals {
                 $0.limitsState = .quiet
                 $0.limitsObservedAt = Date()
             }
+            await backoff?.record(nil)
             return Self.refreshInterval
         } catch {
             guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
             if case UsageRequestError.rateLimited(let retryAfter) = error {
-                let backoff = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
-                let until = Date().addingTimeInterval(backoff)
+                let seconds = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
+                let until = Date().addingTimeInterval(seconds)
                 published.update { $0.limitsState = .rateLimited(until: until) }
+                await backoff?.record(until)
                 report(
                     "the Claude usage endpoint answered 429; backing off until \(until)")
-                return .seconds(backoff)
+                return .seconds(seconds)
             }
             report("the Claude usage request failed: \(error.localizedDescription)")
             return Self.refreshInterval

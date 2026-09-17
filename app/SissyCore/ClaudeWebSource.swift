@@ -44,6 +44,9 @@ actor ClaudeWebSource: SourceSignals {
     /// The network half, injectable for the same reason: a test of the refresh
     /// contract must not reach claude.ai.
     private let fetchSource: @Sendable (String, String?) async throws -> Reading
+    /// Where a refusal is written down so the next run honours it, keyed by
+    /// this reader's own account.
+    private let backoff: LimitsBackoffSlot?
 
     private var retired = false
     /// What the link recorded, which a `stop()` must not drop: the derived one
@@ -80,11 +83,13 @@ actor ClaudeWebSource: SourceSignals {
         account: String,
         organization: String? = nil,
         sessionSource: (@Sendable (Bool) async -> ClaudeCredentialsLookup)? = nil,
-        fetchSource: @escaping @Sendable (String, String?) async throws -> Reading = fetch
+        fetchSource: @escaping @Sendable (String, String?) async throws -> Reading = fetch,
+        backoff: LimitsBackoffSlot? = nil
     ) {
         self.account = account
         self.linkedOrganization = organization
         self.organization = organization
+        self.backoff = backoff
         self.sessionSource =
             sessionSource
             ?? { allowingInteraction in
@@ -251,6 +256,7 @@ actor ClaudeWebSource: SourceSignals {
     }
 
     private func readAndFetch(generation stamp: Int) async -> Duration {
+        if let wait = await recordedBackoff(generation: stamp) { return wait }
         let session: String
         switch await currentSession(generation: stamp) {
         case .ready(let found): session = found
@@ -266,11 +272,24 @@ actor ClaudeWebSource: SourceSignals {
                 $0.limitsState = .quiet
                 $0.limitsObservedAt = Date()
             }
+            await backoff?.record(nil)
             return Self.refreshInterval
         } catch {
             guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-            return handle(error)
+            return await handle(error)
         }
+    }
+
+    /// The wait a refusal recorded on an earlier run still has left, guarded
+    /// by the generation on the reasoning the OAuth probe's twin carries.
+    private func recordedBackoff(generation stamp: Int) async -> Duration? {
+        guard let until = await backoff?.deadline() else { return nil }
+        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+        let remaining = until.timeIntervalSinceNow
+        guard remaining > 0 else { return nil }
+        published.update { $0.limitsState = .rateLimited(until: until) }
+        report("still refused by claude.ai until \(until); waiting rather than asking")
+        return .seconds(remaining)
     }
 
     /// What a failed request costs, and what it says.
@@ -280,13 +299,14 @@ actor ClaudeWebSource: SourceSignals {
     /// held copy is dropped so the next poll reads the item again instead of
     /// spending a session claude.ai has already closed. The organization goes
     /// with it — the next session may not be the same account's.
-    private func handle(_ error: Error) -> Duration {
+    private func handle(_ error: Error) async -> Duration {
         if case UsageRequestError.rateLimited(let retryAfter) = error {
-            let backoff = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
-            let until = Date().addingTimeInterval(backoff)
+            let seconds = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
+            let until = Date().addingTimeInterval(seconds)
             published.update { $0.limitsState = .rateLimited(until: until) }
+            await backoff?.record(until)
             report("claude.ai answered 429; backing off until \(until)")
-            return .seconds(backoff)
+            return .seconds(seconds)
         }
         if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
             cached = nil
