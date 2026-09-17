@@ -126,6 +126,47 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
         XCTAssertFalse(overlapWhileReading(iterations: 6) { $0.isMultiple(of: 2) })
     }
 
+    /// A reader that cannot get in gives up rather than running unsuppressed,
+    /// which would be the overlap this whole thing exists to prevent, on
+    /// purpose.
+    ///
+    /// The wedged holder is what matters here: `SecItemCopyMatching` can park
+    /// indefinitely where suppression did not take, and an unbounded lock
+    /// would hand that one reader every other linked account's poll loop.
+    func testAReaderThatCannotGetInGivesUpInsteadOfWaiting() {
+        let held = expectation(description: "the lock was taken")
+        let release = expectation(description: "the holder was told to let go")
+
+        DispatchQueue.global().async {
+            ClaudeCredentialsStore.suppressingInteraction(false, unavailable: ()) {
+                held.fulfill()
+                self.wait(for: [release], timeout: 5)
+            }
+        }
+        wait(for: [held], timeout: 5)
+
+        let answer = ClaudeCredentialsStore.suppressingInteraction(
+            false, unavailable: "gave up", timeout: 0.05
+        ) { "read" }
+
+        XCTAssertEqual(answer, "gave up", "a reader waited on a holder that was not letting go")
+        release.fulfill()
+    }
+
+    /// And what it gives up with is the one status `classify` reads the same
+    /// way for both callers: the item is there and this read could not have
+    /// it. `errSecAuthFailed` would tell an interactive caller a person had
+    /// clicked Deny.
+    func testGivingUpReadsAsInteractionRequiredForBothCallers() {
+        for allowingInteraction in [true, false] {
+            let outcome = ClaudeCredentialsStore.classify(
+                errSecInteractionNotAllowed, data: nil, allowingInteraction: allowingInteraction)
+            guard case .interactionRequired = outcome else {
+                return XCTFail("giving up read as something the caller would act on")
+            }
+        }
+    }
+
     /// Occupancy of the suppressed section, counted under its own lock so the
     /// observation is not the thing being tested.
     private struct Occupancy: Sendable {
@@ -144,7 +185,9 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
         done.expectedFulfillmentCount = iterations
 
         DispatchQueue.concurrentPerform(iterations: iterations) { index in
-            ClaudeCredentialsStore.suppressingInteraction(interactive(index)) {
+            ClaudeCredentialsStore.suppressingInteraction(
+                interactive(index), unavailable: ()
+            ) {
                 seen.update {
                     $0.inside += 1
                     if $0.inside > 1 { $0.overlapped = true }
