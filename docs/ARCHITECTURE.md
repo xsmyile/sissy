@@ -74,9 +74,9 @@ Each is identified by its `minutes` rather than by its position —
 vendors do not agree on an order, and Codex's own `primary` bucket is not always
 the session one. `usedPercent` is a percentage of the window's allowance. A
 bucket whose reset has passed keeps its row and loses its figure: the panel
-draws a dash where the percentage was and no bar at all, because a source whose
-readings ride the CLI's own turns cannot re-read on demand, and dropping the
-window took the row off the page between a reset and the next turn. Empty for a
+draws a dash where the percentage was and no bar at all, because every source
+is between two readings most of the time, and dropping the window took the row
+off the page between a reset and the next one. Empty for a
 provider that publishes no limits — an API-key user, or a CLI that has not
 surfaced a window yet — which is what puts the panel row back on its
 share-of-today bar.

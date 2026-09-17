@@ -113,6 +113,7 @@ final class CodexAdapter: SourceAdapter {
         codexDir: URL,
         id: String = ProviderID.codex,
         pricingOverride: [String: ModelPricing]?,
+        usageSources: LockedValue<[CodexUsageSource]> = LockedValue([]),
         ledger: ProjectLedger
     ) {
         self.projects = ProjectResolver(ledger: ledger)
@@ -122,7 +123,7 @@ final class CodexAdapter: SourceAdapter {
             id: id,
             root: codexDir,
             watcherLabel: "sissy.codex.fswatch",
-            signals: published
+            signals: CodexSignals(rollout: published, sources: usageSources)
         )
     }
 
@@ -669,12 +670,14 @@ extension LocalUsageProvider {
         persistenceURL: URL? = nil,
         historyRoot: URL? = nil,
         pricingOverride: [String: ModelPricing]? = nil,
+        usageSources: LockedValue<[CodexUsageSource]> = LockedValue([]),
         ledger: ProjectLedger = ProjectLedger(),
         backfill: Range<Date>? = nil
     ) -> LocalUsageProvider {
         LocalUsageProvider(
             adapter: CodexAdapter(
-                codexDir: codexDir, id: id, pricingOverride: pricingOverride, ledger: ledger),
+                codexDir: codexDir, id: id, pricingOverride: pricingOverride,
+                usageSources: usageSources, ledger: ledger),
             retainDays: retainDays,
             pollInterval: pollInterval,
             persistenceURL: persistenceURL,

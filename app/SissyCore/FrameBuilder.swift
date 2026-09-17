@@ -60,13 +60,14 @@ struct UsageWindow: Sendable, Equatable, Codable {
     /// reader could see. Which row the block *leads* on is not positional —
     /// `UsagePanelSnapshot.binding` decides that from the pace.
     ///
-    /// A bucket past its own reset is kept rather than dropped. Dropping it
-    /// was only ever safe for a source that can re-read on demand, and Codex
-    /// is not one: its buckets ride the CLI's own turns, so between a reset
+    /// A bucket past its own reset is kept rather than dropped. Every source
+    /// is between two readings most of the time, and Codex is where that
+    /// showed: its buckets rode the CLI's own turns alone, so between a reset
     /// and the next turn the whole session row left the page with nothing
     /// said — measured 2026-09-16, a 5 h window resetting at 12:30 UTC was
     /// gone at 12:55 while the weekly beside it kept a caption implying the
-    /// block was current. The reading it carries is stale in the one way that
+    /// block was current. A poll behind that row shortens the gap and does
+    /// not close it. The reading it carries is stale in the one way that
     /// matters, so the app words it as rolled over and prints no figure for
     /// it; what it must not do is state the period no longer exists, which is
     /// what an absent row says.
@@ -150,9 +151,9 @@ enum ProviderLimitsState: Sendable, Equatable {
     /// reading and their age is the point. Without it the panel had nothing
     /// to say at all — measured 2026-09-17, a reading taken at 01:14 whose
     /// three windows had all rolled over by 07:00 sat under "awaiting a
-    /// reading", which is Codex's sentence for a source that cannot be
-    /// re-read on demand. This source can; it was being refused, and the row
-    /// gave the user no way to know that.
+    /// reading", which is the sentence for a row whose source has not come
+    /// back yet. It had; it was being refused, and the row gave the user no
+    /// way to know that.
     ///
     /// It carries the moment rather than a flag because the vendor names one,
     /// and the row is the only place it can be read. The deadline is the

@@ -76,6 +76,14 @@ actor UsageEngine {
     /// holds its actor.
     private let claudeWebLinks = LockedValue<[String: ClaudeWebLink]>([:])
     private let claudeWebIndex: ClaudeWebSessionIndex
+    /// One usage reader per Codex credential, shared with the adapter's
+    /// signals so both see the same set the moment it changes.
+    ///
+    /// The first entry is the CLI's own credential, built whenever Codex is
+    /// metered: that file is there on every Mac that has signed into `codex`,
+    /// it needs no permission Sissy has to ask for, and without it the row's
+    /// gauges are only ever as fresh as the last turn.
+    private let codexSources = LockedValue<[CodexUsageSource]>([])
     /// A session waiting on the one question only the user can answer: which
     /// of its account's organisations it should be read for.
     ///
@@ -260,6 +268,15 @@ actor UsageEngine {
             let home = resolved.home
             switch home.id {
             case ProviderID.codex:
+                // Built with no account of its own: which account `codex` is
+                // signed in as is that file's to say, and it can change under
+                // Sissy between two polls.
+                let authURL = home.codexAuthURL
+                self.codexSources.store([
+                    CodexUsageSource(credentialSource: { _ in
+                        CodexAuthSource.credential(at: authURL)
+                    })
+                ])
                 providers.append(
                     LocalUsageProvider.codex(
                         codexDir: home.dataDir,
@@ -268,6 +285,7 @@ actor UsageEngine {
                         persistenceURL: Self.persistenceURL(for: home, in: stateDir),
                         historyRoot: historyRoot,
                         pricingOverride: config.pricingOverride,
+                        usageSources: self.codexSources,
                         ledger: projectLedger
                     ))
             default:
@@ -339,6 +357,7 @@ actor UsageEngine {
         if meteringClaudeCode {
             await startClaudeLimits(userInitiated: false)
         }
+        await startCodexLimits(userInitiated: false)
         if config.statusChecks {
             await startStatusChecks()
         }
@@ -574,6 +593,7 @@ actor UsageEngine {
         // the wanted state false.
         await applyKeepAwake()
         await stopClaudeLimits()
+        await stopCodexLimits()
         await statusMonitor.stop()
         await aggregator.stop()
         bootTask = nil
@@ -803,9 +823,10 @@ actor UsageEngine {
     /// action is not the same action: on Claude Code it re-reads the keychain
     /// with the dialog allowed and polls the usage endpoint at once, which is
     /// the second and last gesture permitted to ask for that permission. On
-    /// Codex it re-reads `auth.json` — the plan, the account — and nothing
-    /// else, because Codex's limits arrive only on the CLI's own events and
-    /// no button can make a turn happen.
+    /// Codex it re-reads `auth.json` and asks OpenAI for this account's
+    /// windows — which is a refresh that moves the numbers, where until the
+    /// usage endpoint was read it could only re-read the plan and wait for the
+    /// CLI's next turn.
     ///
     /// The probe is only reached when the setting is on: a refresh must not
     /// be a second way to switch a module on, or the permission would be
@@ -826,6 +847,11 @@ actor UsageEngine {
             // it offers.
             for source in claudeWebSources.load()
             where await source.currentSignals().limitsState != .sessionExpired {
+                await source.refresh { await me.reemit() }
+            }
+        }
+        if id == ProviderID.codex {
+            for source in codexSources.load() {
                 await source.refresh { await me.reemit() }
             }
         }
@@ -1124,6 +1150,27 @@ actor UsageEngine {
             await source.stop()
         }
         await claudeOwnLimits?.stop()
+    }
+
+    /// Starts every Codex usage reader.
+    ///
+    /// Unconditional where the Claude side is gated on a toggle, because there
+    /// is nothing to gate: the credential is a file the adapter already reads
+    /// for the plan, no dialog can be raised by reading it, and a provider
+    /// that is switched off has no reader in the set to start. The reply is
+    /// the same block the tail parses, so nothing new reaches the frame — only
+    /// sooner.
+    private func startCodexLimits(userInitiated: Bool) async {
+        let me = self
+        for source in codexSources.load() {
+            await source.start(userInitiated: userInitiated) { await me.reemit() }
+        }
+    }
+
+    private func stopCodexLimits() async {
+        for source in codexSources.load() {
+            await source.stop()
+        }
     }
 
     /// Starts the status poll. Every change it publishes rebuilds the frame,
