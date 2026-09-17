@@ -376,58 +376,6 @@ final class ProviderStatusTests: XCTestCase {
         XCTAssertEqual(status.components.first?.children.first?.status, "Partial outage")
         XCTAssertEqual(status.page?.host(), "status.claude.com")
     }
-
-    // MARK: The bound
-
-    /// The tree stops growing so that what sits below it stays reachable
-    /// without scrolling the page. Measured 2026-09-15: OpenAI publishes 34
-    /// services in 5 groups, so one open group is already taller than the rest
-    /// of the page.
-    func testTheTreeStopsGrowingThePanel() {
-        XCTAssertLessThanOrEqual(StatusTreeGeometry.height(rows: 34), StatusTreeGeometry.maxHeight)
-        XCTAssertFalse(StatusTreeGeometry.scrolls(rows: 5))
-        XCTAssertTrue(StatusTreeGeometry.scrolls(rows: 20))
-        XCTAssertEqual(StatusTreeGeometry.height(rows: 0), 0)
-    }
-
-    /// The tree draws no scroll indicator, so the row the bound cuts through
-    /// is the only thing left that says there is more below. A ceiling that
-    /// landed on a row boundary — or in the gap between two — would end the
-    /// tree on a whole row and read as the whole tree.
-    func testTheBoundCutsThroughARowRatherThanBetweenTwo() {
-        let pitch = StatusTreeGeometry.rowHeight + StatusTreeGeometry.rowSpacing
-        let intoTheRow = StatusTreeGeometry.maxHeight.truncatingRemainder(dividingBy: pitch)
-        XCTAssertGreaterThan(intoTheRow, 0)
-        XCTAssertLessThan(intoTheRow, StatusTreeGeometry.rowHeight)
-    }
-
-    func testOnlyOpenGroupsCountTowardsTheHeight() {
-        let tree = [
-            UsagePanelSnapshot.ComponentRow(
-                id: "g1", name: "APIs", indicator: .operational, status: "Operational",
-                children: [
-                    UsagePanelSnapshot.ComponentRow(
-                        id: "k1", name: "Responses", indicator: .operational,
-                        status: "Operational", children: [])
-                ]),
-            UsagePanelSnapshot.ComponentRow(
-                id: "g2", name: "ChatGPT", indicator: .operational, status: "Operational",
-                children: []),
-        ]
-        XCTAssertEqual(StatusTreeGeometry.visibleRows(tree, expanded: []), 2)
-        XCTAssertEqual(StatusTreeGeometry.visibleRows(tree, expanded: ["g1"]), 3)
-    }
-
-    // MARK: The card
-
-    /// The tree moved off the page into a card so the page would stop changing
-    /// height, and a row that came out narrower would be a second change
-    /// nobody asked for.
-    func testTheCardGivesTheTreeTheMeasureItHadOnThePage() {
-        XCTAssertEqual(
-            StatusTreeGeometry.cardWidth - 2 * StatusTreeGeometry.cardPadding,
-            PanelMetrics.width - 2 * PanelMetrics.gutter)
-    }
 }
 
 /// Counts callbacks from whichever isolation they arrive on.

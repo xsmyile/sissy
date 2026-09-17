@@ -68,6 +68,14 @@ struct UsagePanelView: View {
         /// The vendor's page, and which of its accounts to open on — the row
         /// that was clicked, so a gauge per account leads where it reads.
         case provider(String, account: String?)
+        /// That vendor's services, one level in from its page, carrying the
+        /// account with them so the way back lands where it was left.
+        ///
+        /// A page rather than the nested `.popover` it replaced. Apple's own
+        /// guidance rules that out — *"Never show a cascade or hierarchy of
+        /// popovers, in which one emerges from another"* — and the cost was
+        /// measured: see `PanelProviderStatus`.
+        case services(String, account: String?)
     }
 
     /// Cadence for both readouts the panel keeps on its own clock: the
@@ -95,8 +103,10 @@ struct UsagePanelView: View {
     /// Which account the open page was aimed at, or nil on the Overview and
     /// for a vendor whose Overview row is not per account.
     private var openAccount: String? {
-        guard case .provider(_, let account) = page else { return nil }
-        return account
+        switch page {
+        case .overview: nil
+        case .provider(_, let account), .services(_, let account): account
+        }
     }
 
     /// A provider can leave the frame while its page is open — the slices are
@@ -105,8 +115,11 @@ struct UsagePanelView: View {
     static func openRow(_ page: Page, in providers: [UsagePanelSnapshot.ProviderRow])
         -> UsagePanelSnapshot.ProviderRow?
     {
-        guard case .provider(let id, _) = page else { return nil }
-        return providers.first { $0.id == id }
+        switch page {
+        case .overview: return nil
+        case .provider(let id, _), .services(let id, _):
+            return providers.first { $0.id == id }
+        }
     }
 
     /// Switches the open page's vendor to another of its accounts, and moves
@@ -121,6 +134,20 @@ struct UsagePanelView: View {
         model.engine.activateClaudeAccount(uuid: uuid)
     }
 
+    /// The status reading the services page is about, when that is the page and
+    /// there is still a reading to show.
+    ///
+    /// The monitor can stop publishing one — a feed that has never answered, a
+    /// provider switched off mid-visit — and an empty services page is worse
+    /// than the page it was opened from, so the panel falls back to the
+    /// vendor's own page rather than drawing a heading over nothing.
+    private func servicesReading(of row: UsagePanelSnapshot.ProviderRow?)
+        -> UsagePanelSnapshot.StatusRow?
+    {
+        guard case .services = page else { return nil }
+        return row?.status
+    }
+
     var body: some View {
         let live = model.liveFrame
         let snapshot = live.map {
@@ -131,10 +158,14 @@ struct UsagePanelView: View {
                 limitsReading: model.preferences.limitsReading)
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
+        let services = servicesReading(of: open)
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 if let open {
-                    providerHeader(open, live: live)
+                    providerHeader(
+                        open, live: live,
+                        back: services == nil
+                            ? .overview : .provider(open.id, account: openAccount))
                 } else {
                     header(live)
                 }
@@ -149,7 +180,9 @@ struct UsagePanelView: View {
             ScrollView(.vertical) {
                 Group {
                     if let snapshot {
-                        if let open {
+                        if let open, let services {
+                            PanelProviderStatusPage(provider: open.id, row: services)
+                        } else if let open {
                             let slice = live?.frame.providers.first { $0.id == open.id }
                             PanelProviderPage(
                                 row: open,
@@ -159,6 +192,9 @@ struct UsagePanelView: View {
                                 switchFailure: model.engine.accountSwitchFailure,
                                 switchingAccount: model.engine.switchingClaudeAccount,
                                 refresh: { model.refreshProvider(open.id) },
+                                openServices: {
+                                    page = .services(open.id, account: openAccount)
+                                },
                                 loadHistory: {
                                     await model.engine.usageHistorySeries(provider: $0)
                                 },
@@ -292,7 +328,14 @@ struct UsagePanelView: View {
     ///
     /// The age goes under the name for the same reason it goes under Sissy's:
     /// it is a property of the reading on screen, so it belongs beside what it
-    /// dates. Here that puts it under the refresh button that resets it.
+    /// dates. Here that puts it under the refresh button that resets it — and
+    /// it is why only the vendor's own page carries it. A page one level in is
+    /// about a different reading and dates that one itself: the services page
+    /// prints when the vendor was last asked, and a usage age beside it would
+    /// be two clocks for two subjects with nothing saying which is which.
+    ///
+    /// `back` is what tells the two apart, because it already does: the page
+    /// that returns to the Overview is the vendor's own.
     ///
     /// The plan badge is not here. It is a fact about the account, not about
     /// the page, and it reads as a qualifier on the provider's name when it
@@ -300,11 +343,11 @@ struct UsagePanelView: View {
     /// the other half of the same sentence. The Overview's legend keeps its
     /// own badge: that row has no identity block to put one in.
     private func providerHeader(
-        _ row: UsagePanelSnapshot.ProviderRow, live: SissyModel.LiveFrame?
+        _ row: UsagePanelSnapshot.ProviderRow, live: SissyModel.LiveFrame?, back: Page
     ) -> some View {
         HStack(spacing: 8) {
             Button {
-                page = .overview
+                page = back
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .semibold))
@@ -313,7 +356,7 @@ struct UsagePanelView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Back to today")
+            .help(back == .overview ? "Back to today" : "Back to \(row.name)")
 
             ProviderMark(id: row.id, size: Self.headerMarkSize, textSize: nil)
 
@@ -322,7 +365,7 @@ struct UsagePanelView: View {
                     .font(.system(size: Self.headerTitleSize, weight: .semibold))
                     .lineLimit(1)
 
-                if let live {
+                if back == .overview, let live {
                     readingLine(
                         live, holding: nil,
                         refreshing: model.engine.refreshing.contains(row.id))
