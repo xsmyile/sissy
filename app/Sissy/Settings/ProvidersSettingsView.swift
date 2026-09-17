@@ -224,6 +224,11 @@ struct ProvidersSettingsView: View {
     /// credential the user cannot read back and never typed is not a click to
     /// get wrong.
     @State private var unlinkingCodex: CodexLinkedAccount?
+    /// The forge a trash was pressed for. Same reason as the two above: what
+    /// it deletes is a token the user cannot read back.
+    @State private var disconnecting: ForgeConnection?
+    /// Whether the paste-a-token sheet is up.
+    @State private var pastingForgeToken = false
 
     private static let markSize: CGFloat = 18
 
@@ -252,10 +257,16 @@ struct ProvidersSettingsView: View {
                 }
             }
             Section {
+                forges
+            }
+            Section {
                 statusChecks
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $pastingForgeToken) {
+            ForgeConnectSheet(model: model, isPresented: $pastingForgeToken)
+        }
         .confirmationDialog(
             unlinking.map { ClaudeAccountLinkCopy.unlinkTitle(Self.label(of: $0)) } ?? "",
             isPresented: Binding(get: { unlinking != nil }, set: { if !$0 { unlinking = nil } }),
@@ -280,6 +291,19 @@ struct ProvidersSettingsView: View {
             Button(ClaudeAccountLinkCopy.cancel, role: .cancel) {}
         } message: { _ in
             Text(CodexAccountLinkCopy.unlinkMessage)
+        }
+        .confirmationDialog(
+            disconnecting.map(ForgeConnectCopy.unlinkTitle) ?? "",
+            isPresented: Binding(
+                get: { disconnecting != nil }, set: { if !$0 { disconnecting = nil } }),
+            presenting: disconnecting
+        ) { connection in
+            Button(ForgeConnectCopy.unlinkConfirm, role: .destructive) {
+                model.engine.disconnectForge(id: connection.id)
+            }
+            Button(ClaudeAccountLinkCopy.cancel, role: .cancel) {}
+        } message: { _ in
+            Text(ForgeConnectCopy.unlinkMessage)
         }
         // The readiness poll stops once the scan is warm, so a window opened
         // afterwards would render whatever the last tick left behind.
@@ -487,6 +511,57 @@ struct ProvidersSettingsView: View {
     /// honest one, and a row under it is what makes it removable.
     private static func label(of account: CodexLinkedAccount) -> String {
         account.link?.identity.email ?? account.id
+    }
+
+    /// The forges the user has connected, and the control that adds one.
+    ///
+    /// A section of its own rather than a tab: it is one row plus a list, and a
+    /// tab is earned by a module that needs the height. It sits under the
+    /// metering providers because that is where every other credential in this
+    /// app is connected, and a forge is the same gesture — connect an account,
+    /// see what it answers, remove it.
+    ///
+    /// **There is no on/off switch, and that is the design.** A connection is
+    /// the switch: with none, nothing here makes a request, which is the rule a
+    /// module that is off must not exist as far as the system is concerned.
+    /// Asking the user to both connect a forge and then arm it would be the
+    /// same decision twice.
+    ///
+    /// One button rather than a menu of detected tokens, so that reading what
+    /// `gh` and `glab` hold happens on a press and demonstrably nowhere else: a
+    /// keychain call and a file read must not happen because a window was
+    /// shown, and `Menu` gives no promise about when it builds its contents.
+    /// The sheet behind the button carries both roads.
+    @ViewBuilder
+    private var forges: some View {
+        LabeledContent {
+            Button(ForgeConnectCopy.connect) { pastingForgeToken = true }
+                .disabled(model.engine.connectingForge != nil)
+        } label: {
+            Text(ForgeConnectCopy.label)
+            Text(ForgeConnectCopy.caption)
+        }
+        ForEach(model.engine.forgeConnections) { connection in
+            forge(connection)
+        }
+    }
+
+    private func forge(_ connection: ForgeConnection) -> some View {
+        LabeledContent {
+            Button(role: .destructive) {
+                disconnecting = connection
+            } label: {
+                Image(systemName: "trash").foregroundStyle(.red)
+            }
+            .buttonStyle(.borderless)
+            .help(ForgeConnectCopy.unlinkHelp)
+            .accessibilityLabel(ForgeConnectCopy.unlink(connection))
+        } label: {
+            Text(UsageFormat.forgeName(connection.kind))
+            Text(
+                model.engine.connectingForge == connection.id
+                    ? ForgeConnectCopy.connecting : connection.host)
+        }
     }
 
     private func codexAccount(_ account: CodexLinkedAccount) -> some View {
