@@ -9,8 +9,7 @@
 
 Sissy reads what is already on your Mac and keeps the answer one click away, so
 what you would otherwise open a browser or a terminal for sits behind one icon.
-No API key, no account of its own, no telemetry, and nothing to grant at first
-launch.
+No account of its own, no telemetry, and nothing to grant at first launch.
 
 What it answers for today is what your coding agents cost: Claude Code and
 Codex, priced as each turn lands, with the rate-limit pressure and the
@@ -64,10 +63,10 @@ A module left off does not exist as far as the system is concerned.
 
 ## What you see
 
-Sissy sits in the menu bar as herself. She blinks when usage lands and shuts
-her eye when nothing is reaching the app, and that is the whole of the
-peripheral signal: no number up there, nothing to read at a glance you did not
-ask for. Click for the panel, right-click for the short menu.
+Sissy sits in the menu bar as herself. She blinks when usage lands, shuts her
+eye when nothing is reaching the app, and lights it blue while the Mac is being
+held awake. There is no number up there and nothing to read at a glance you did
+not ask for. Click for the panel, right-click for the short menu.
 
 ### The Overview answers two questions
 
@@ -116,6 +115,10 @@ switched back. *Always* stops after eight hours rather than going quiet. Neither
 overrides closing the lid, and the hold lasts exactly as long as Sissy runs. Quit
 and the Mac sleeps normally again, with nothing left behind to undo.
 
+Sissy's eye glows blue while a hold is on, in the menu bar and in the panel
+header. It follows the hold rather than the switch, so under *While agents are
+working* it comes and goes with the turns.
+
 ### Settings
 
 **⌘,** or the gear in the panel. *General* is where start-at-login lives, along
@@ -132,8 +135,9 @@ diagnostics**, which is what an issue needs.
 | Claude Code | `~/.claude/projects/**/*.jsonl`, honoring `CLAUDE_CONFIG_DIR` | tokens, cost, per-repository split, every rate-limit window the account publishes, plan, credits |
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl`, honoring `CODEX_HOME` | tokens, cost, per-repository split, the windows the CLI reports, plan, credit balance |
 
-Claude Code is always on; Codex is picked up whenever its session directory
-exists. Either can be forced on or off from Settings ▸ Providers.
+Claude Code is on unless you switch it off; Codex is picked up whenever its
+session directory exists. Either can be forced on or off from
+Settings ▸ Providers.
 
 Two ceilings worth knowing about. Codex publishes its limits only on its own
 turn events, so those gauges are always one turn behind. That is the shape of
