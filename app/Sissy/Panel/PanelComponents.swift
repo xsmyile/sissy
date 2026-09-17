@@ -544,6 +544,67 @@ struct ProjectRowView: View {
     }
 }
 
+/// One connected forge's contribution count, with the account that answered.
+///
+/// The mark and the login rather than the mark alone, because the mark says
+/// which forge and only the login says whose figures these are — and that is
+/// not a detail a CLI's configuration can be trusted with: measured
+/// 2026-09-17, `gh` had one account's name in its own file against a token that
+/// answered as another. A row that printed 115 with no name could not have
+/// shown that.
+///
+/// **A reading that is missing gets a dash and a reason, never a zero.** It is
+/// the rule the provider gauges are on — an empty gauge is a measurement and
+/// this is the absence of one — and here it has a second, measured reason: this
+/// user's own GitLab is reached over a tunnel, so a laptop off the VPN would
+/// otherwise report a day with no work in it. A reading that arrived and has
+/// since gone stale keeps its figures and grows the caption instead, because
+/// figures that were true an hour ago plus their age is a better answer than an
+/// error where a number was.
+struct ForgeRowView: View {
+    let row: UsagePanelSnapshot.ForgeRow
+
+    private static let noticeSize: CGFloat = 11
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                ForgeMark(host: row.host)
+                    .foregroundStyle(.secondary)
+                Text(row.login ?? row.host)
+                    .font(.system(size: PanelMetrics.rowText, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                figures
+            }
+            if let notice = row.notice {
+                Text(notice)
+                    .font(.system(size: Self.noticeSize))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .contentShape(.rect)
+        .help(row.tooltip)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var figures: some View {
+        if let figures = row.figures {
+            Text(figures)
+                .font(.system(size: PanelMetrics.rowText))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+        } else {
+            Text("—")
+                .font(.system(size: PanelMetrics.rowText))
+                .foregroundStyle(.tertiary)
+        }
+    }
+}
+
 /// The forge's own mark, where Sissy ships one.
 ///
 /// Matched on the host *containing* the name rather than on an exact domain,

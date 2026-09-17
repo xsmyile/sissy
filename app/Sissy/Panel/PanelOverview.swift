@@ -44,6 +44,11 @@ struct PanelOverview: View {
                 Divider()
                 projects
             }
+
+            if !snapshot.forge.isEmpty {
+                Divider()
+                forge
+            }
         }
     }
 
@@ -361,6 +366,33 @@ struct PanelOverview: View {
             .help("Show every project")
             ForEach(snapshot.projects) { row in
                 ProjectRowView(row: row)
+            }
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: Forge
+
+    /// How much was pushed, per forge account, over the window the headline is
+    /// on.
+    ///
+    /// It sits at the foot, below the projects, and the reason is the question
+    /// rather than the height: the projects are what the app is for and nothing
+    /// may push them under the fold — which is what the provider gauges were
+    /// collapsed to one row each to stop — and a contribution count is the
+    /// least urgent reading on the page. It is also the only block here that is
+    /// not about this Mac at all, which is the second reason it is last.
+    ///
+    /// **The two rows are never summed.** Each vendor counts its own thing —
+    /// GitHub its contribution total, GitLab the events it recorded — so a
+    /// total across them would be a third number belonging to neither, which is
+    /// the rule the credits rows are already under.
+    private var forge: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(text: UsageFormat.forgeSectionLabel(snapshot.period))
+            ForEach(snapshot.forge) { row in
+                ForgeRowView(row: row)
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)
