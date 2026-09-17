@@ -8,7 +8,7 @@ on:
 
 jobs:
   lint:
-    name: lint (shellcheck + actionlint)
+    name: lint (shellcheck + actionlint + doc refs)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
