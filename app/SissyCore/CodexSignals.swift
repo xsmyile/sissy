@@ -50,29 +50,36 @@ struct CodexSignals: SourceSignals {
     func currentSignals() -> ProviderSignals {
         let readers = sources.load()
         let signedIn = readers.first { $0.account == nil }
-        var reading = Self.merge(
-            rollout: rollout.load(),
-            live: Self.rowReading(signedIn: signedIn, linked: readers.filter { $0.account != nil }))
+        // The signed-in account's own reading: the turns, with its own poll
+        // laid over them. Resolved once and used twice — for the row and for
+        // that account's entry — because the two must not be able to disagree
+        // about what the account the CLI is on is doing.
+        let own = Self.merge(rollout: rollout.load(), live: signedIn?.currentSignals())
+        var reading = Self.row(
+            own: own, linked: readers.filter { $0.account != nil }.map { $0.currentSignals() })
         reading.accounts = Self.perAccount(
-            reading, signedIn: signedIn, readers: readers, links: links.load())
+            own: own, signedIn: signedIn, readers: readers, links: links.load())
         return reading
     }
 
     /// Which reading the provider's own row shows.
     ///
-    /// The CLI's, whenever it has one — that is the account whose future spend
-    /// lands in the day beside it. Failing that, a lone linked account, which
-    /// is the only answer there is on a Mac whose `codex` is signed out or has
-    /// never run. More than one and there is a choice to get wrong, so the row
-    /// keeps the CLI's own answer, empty as it is, and the accounts below it
-    /// say the rest.
-    static func rowReading(
-        signedIn: CodexUsageSource?, linked: [CodexUsageSource]
-    ) -> ProviderSignals? {
-        let own = signedIn?.currentSignals()
-        if let own, own.limitsObservedAt != nil { return own }
-        guard linked.count == 1 else { return own }
-        return linked[0].currentSignals()
+    /// The signed-in account's, whenever it has one — that is the account
+    /// whose future spend lands in the day beside it. Failing that, a lone
+    /// linked account, which is the only answer there is on a Mac whose
+    /// `codex` is signed out or has never run. More than one and there is a
+    /// choice to get wrong, so the row keeps its own empty answer and the
+    /// accounts below it say the rest.
+    ///
+    /// What the fallback must never do is reach the signed-in account's own
+    /// entry: a linked account's windows under the CLI account's name is two
+    /// accounts on one row, which is the failure `ProviderSignals` exists to
+    /// prevent.
+    static func row(own: ProviderSignals, linked: [ProviderSignals]) -> ProviderSignals {
+        guard own.windows.isEmpty, own.limitsObservedAt == nil, linked.count == 1 else {
+            return own
+        }
+        return linked[0]
     }
 
     /// The tail's reading with the live one laid over it, or not, by stamp.
@@ -94,7 +101,11 @@ struct CodexSignals: SourceSignals {
         reading.limitsObservedAt = observedAt
         reading.credits = live.credits ?? rollout.credits
         reading.plan = live.plan ?? rollout.plan
-        reading.account = live.account ?? rollout.account
+        // The identity stays the tail's, which reads `auth.json` and therefore
+        // knows the organisation the usage reply does not carry. Taking the
+        // reply's instead cost the row its organisation on every poll — the
+        // same account, named by the half that knows less about it.
+        reading.account = rollout.account ?? live.account
         return reading
     }
 
@@ -106,11 +117,12 @@ struct CodexSignals: SourceSignals {
     /// account has just been linked and the first has nothing to compare
     /// against.
     ///
-    /// The signed-in entry carries the row's own reading rather than the
-    /// reader's, so the two cannot disagree: what the row shows is what that
-    /// account's gauge shows, whichever of the tail and the poll produced it.
+    /// The signed-in entry carries that account's *own* reading — the turns
+    /// with its own poll over them — rather than whatever the row settled on.
+    /// Where the row falls back to a lone linked account, those are different
+    /// readings and belonging to different accounts is the whole point.
     static func perAccount(
-        _ reading: ProviderSignals,
+        own: ProviderSignals,
         signedIn: CodexUsageSource?,
         readers: [CodexUsageSource],
         links: [String: CodexAccountLink]
@@ -121,13 +133,13 @@ struct CodexSignals: SourceSignals {
             entries.append(
                 AccountSignals(
                     id: signedInID,
-                    account: reading.account,
-                    plan: reading.plan,
-                    planTier: reading.planTier,
-                    windows: reading.windows,
-                    credits: reading.credits,
-                    limitsState: reading.limitsState,
-                    limitsObservedAt: reading.limitsObservedAt,
+                    account: own.account,
+                    plan: own.plan,
+                    planTier: own.planTier,
+                    windows: own.windows,
+                    credits: own.credits,
+                    limitsState: own.limitsState,
+                    limitsObservedAt: own.limitsObservedAt,
                     isSignedIn: true))
         }
         for reader in readers {

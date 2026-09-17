@@ -222,6 +222,29 @@ final class CodexUsageSourceTests: XCTestCase {
         await source.retire()
     }
 
+    /// `codex login` as another account rewrites `auth.json`, and its tokens
+    /// live ten days. A reader that held the first credential it saw would go
+    /// on asking OpenAI about the account the user left, under the name the
+    /// tail had already moved on to, for the rest of that token's life.
+    func testACredentialSwappedUnderTheReaderIsNoticedOnTheNextPoll() async {
+        let account = LockedValue("user-one")
+        let source = Self.source(
+            credential: { _ in
+                .found(
+                    CodexCredential(
+                        accessToken: "token", refreshToken: nil, idToken: nil,
+                        accountId: "7c31482a", userId: account.load(), email: nil,
+                        plan: nil, expiresAt: nil))
+            },
+            fetch: { _ in CodexUsagePayload.reading(Self.reply(), observedAt: Date()) })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.observedAccount, "user-one")
+
+        account.store("user-two")
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.observedAccount, "user-two")
+    }
+
     /// Codex signed out, or driving the API with a key, is an account with no
     /// limits rather than a reading Sissy failed to take.
     func testASignedOutCodexTakesTheGaugesDown() async {

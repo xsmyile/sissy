@@ -75,6 +75,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         UsagePanelSnapshot.accountEntries(
             readings: readings,
             known: ClaudeAccountRegistry.Snapshot(accounts: known, activeUUID: signedInUUID),
+            provider: ProviderID.claudeCode,
             reading: .used,
             now: now)
     }

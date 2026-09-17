@@ -48,6 +48,19 @@ import WebKit
 /// floats above other apps, which is also what lets a code be copied from a
 /// mail window into it, and the activation policy goes to `.regular` while it
 /// is up so the Dock and ⌘-Tab can bring it back.
+/// The one question a link cannot answer for itself, in the vendor's own
+/// vocabulary: an organisation for Claude, a workspace for Codex.
+struct VendorLoginQuestion {
+    let title: String
+    let caption: String
+    let options: [Option]
+
+    struct Option: Identifiable {
+        let id: String
+        let label: String
+    }
+}
+
 @MainActor
 final class VendorLoginWindow: NSObject {
     /// What this window signs into, and how it recognises that it has.
@@ -67,19 +80,6 @@ final class VendorLoginWindow: NSObject {
         /// The credential a navigation carries, if this vendor ends its
         /// sign-in with a redirect.
         let code: (@Sendable (URL) -> String?)?
-    }
-
-    /// The one question a link cannot answer for itself, in the vendor's own
-    /// vocabulary: an organisation for Claude, a workspace for Codex.
-    struct Question {
-        let title: String
-        let caption: String
-        let options: [Option]
-
-        struct Option: Identifiable {
-            let id: String
-            let label: String
-        }
     }
 
     private static let contentSize = NSSize(width: 520, height: 680)
@@ -145,7 +145,7 @@ final class VendorLoginWindow: NSObject {
 
     /// Asks the question the link could not answer, in the window the
     /// credential was just obtained in.
-    func ask(_ question: Question, onPick: @escaping (String) -> Void) {
+    func ask(_ question: VendorLoginQuestion, onPick: @escaping (String) -> Void) {
         swap(
             to: VendorLinkQuestionView(
                 question: question,
@@ -249,8 +249,13 @@ extension VendorLoginWindow: WKNavigationDelegate {
         // nothing is listening on the loopback port it names, and the code is
         // already in the URL. That is what keeps Sissy from binding a port for
         // the length of a login.
+        //
+        // Handed over on the next turn rather than here, because taking the
+        // credential swaps the window's content and drops the web view — and
+        // this is that web view's own delegate callback, which has still to
+        // return a policy to it.
         if let code = vendor.code?(url) {
-            deliver(code)
+            Task { @MainActor [weak self] in self?.deliver(code) }
             return .cancel
         }
         guard navigationAction.navigationType == .linkActivated,
@@ -320,7 +325,7 @@ extension VendorLoginWindow.Vendor {
 /// The one question a link cannot answer for itself, asked in the window the
 /// credential was obtained in.
 private struct VendorLinkQuestionView: View {
-    let question: VendorLoginWindow.Question
+    let question: VendorLoginQuestion
     let onPick: (String) -> Void
     let onCancel: () -> Void
 

@@ -187,10 +187,10 @@ final class CodexAccountLinkTests: XCTestCase {
         _ = await cli.refreshOnce {}
         _ = await linked.refreshOnce {}
 
-        var reading = ProviderSignals()
-        reading.windows = [UsageWindow(minutes: 300, usedPercent: 32, resetsAt: nil)!]
+        var own = ProviderSignals()
+        own.windows = [UsageWindow(minutes: 300, usedPercent: 32, resetsAt: nil)!]
         let accounts = CodexSignals.perAccount(
-            reading, signedIn: cli, readers: [cli, linked], links: [:])
+            own: own, signedIn: cli, readers: [cli, linked], links: [:])
 
         XCTAssertEqual(accounts.map(\.id), ["user-cli", "user-2"])
         XCTAssertEqual(accounts.first?.isSignedIn, true)
@@ -207,7 +207,7 @@ final class CodexAccountLinkTests: XCTestCase {
         _ = await linked.refreshOnce {}
 
         let accounts = CodexSignals.perAccount(
-            ProviderSignals(), signedIn: cli, readers: [cli, linked], links: [:])
+            own: ProviderSignals(), signedIn: cli, readers: [cli, linked], links: [:])
         XCTAssertEqual(accounts.map(\.id), ["user-cli"])
     }
 
@@ -217,12 +217,54 @@ final class CodexAccountLinkTests: XCTestCase {
     func testALoneLinkedAccountAnswersForTheRow() async {
         let linked = source(account: "user-2", percent: 8)
         _ = await linked.refreshOnce {}
-        let reading = CodexSignals.rowReading(signedIn: nil, linked: [linked])
-        XCTAssertEqual(reading?.windows.first?.usedPercent, 8)
+        let reading = CodexSignals.row(
+            own: ProviderSignals(), linked: [linked.currentSignals()])
+        XCTAssertEqual(reading.windows.first?.usedPercent, 8)
 
         let second = source(account: "user-3", percent: 20)
         _ = await second.refreshOnce {}
-        XCTAssertNil(CodexSignals.rowReading(signedIn: nil, linked: [linked, second]))
+        let ambiguous = CodexSignals.row(
+            own: ProviderSignals(), linked: [linked.currentSignals(), second.currentSignals()])
+        XCTAssertTrue(ambiguous.windows.isEmpty)
+    }
+
+    /// The row may fall back to a lone linked account; the signed-in account's
+    /// own entry may not. One account's windows under another's name is the
+    /// pairing the whole per-account shape exists to prevent.
+    func testTheRowsFallbackDoesNotReachTheSignedInAccount() async {
+        let cli = source(account: nil, percent: 0)
+        let linked = source(account: "user-2", percent: 8)
+        _ = await cli.refreshOnce {}
+        _ = await linked.refreshOnce {}
+        // The CLI's own reader answered for the credential and not for the
+        // windows, which is a token OpenAI refused.
+        await cli.stop(clearingState: false)
+
+        let own = ProviderSignals()
+        let row = CodexSignals.row(own: own, linked: [linked.currentSignals()])
+        XCTAssertEqual(row.windows.first?.usedPercent, 8)
+
+        let accounts = CodexSignals.perAccount(
+            own: own, signedIn: cli, readers: [cli, linked], links: [:])
+        XCTAssertEqual(accounts.filter(\.isSignedIn).flatMap(\.windows).count, 0)
+    }
+
+    /// The usage reply names the account by id and the organisation nowhere,
+    /// so the identity stays the tail's — which read `auth.json` for it.
+    func testALiveReadingDoesNotCostTheRowItsOrganisation() {
+        var rollout = ProviderSignals()
+        rollout.account = ProviderAccount(email: "someone@example.com", organization: "Master Soft")
+        rollout.windows = [UsageWindow(minutes: 300, usedPercent: 30, resetsAt: nil)!]
+        rollout.limitsObservedAt = Date(timeIntervalSince1970: 1000)
+
+        var live = ProviderSignals()
+        live.account = ProviderAccount(email: "someone@example.com")
+        live.windows = [UsageWindow(minutes: 300, usedPercent: 32, resetsAt: nil)!]
+        live.limitsObservedAt = Date(timeIntervalSince1970: 2000)
+
+        let merged = CodexSignals.merge(rollout: rollout, live: live)
+        XCTAssertEqual(merged.windows.first?.usedPercent, 32)
+        XCTAssertEqual(merged.account?.organization, "Master Soft")
     }
 
     // MARK: - Secrecy
@@ -256,7 +298,7 @@ final class CodexAccountLinkTests: XCTestCase {
         _ = await linked.refreshOnce {}
 
         let accounts = CodexSignals.perAccount(
-            ProviderSignals(), signedIn: cli, readers: [cli, linked], links: [:])
+            own: ProviderSignals(), signedIn: cli, readers: [cli, linked], links: [:])
         // The sweep has to be able to fail: a walk that reached nothing would
         // report no leak for ever.
         XCTAssertTrue(strings(in: accounts).contains("someone@example.com"))

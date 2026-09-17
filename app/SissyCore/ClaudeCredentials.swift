@@ -23,16 +23,17 @@ struct ClaudeCredentials: Sendable, Equatable {
 
 }
 
+/// What a lookup of Claude Code's own credential found.
+typealias ClaudeCredentialsLookup = CredentialLookup<ClaudeCredentials>
+
 /// Outcome of a keychain lookup. Absence and refusal are different states:
-/// the first is a user who has not signed into Claude Code, the second is a
-/// user who said no, and re-asking them on a timer would be harassment.
+/// the first is a user who has not signed in, the second is a user who said
+/// no, and re-asking them on a timer would be harassment.
 ///
 /// Generic in what was found because the outcomes are the keychain's rather
 /// than a vendor's: a second item, holding something else, meets the same six
 /// answers and must read them the same way — which is the whole point of
 /// `classify` being one table.
-typealias ClaudeCredentialsLookup = CredentialLookup<ClaudeCredentials>
-
 enum CredentialLookup<Value: Sendable>: Sendable {
     case found(Value)
     case absent
