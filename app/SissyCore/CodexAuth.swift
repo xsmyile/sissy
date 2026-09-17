@@ -10,9 +10,13 @@ import Foundation
 /// then. This file answers at boot, before any turn, and the rollout
 /// overwrites it the moment one lands.
 ///
-/// The same file holds Codex's access and refresh tokens. They are never
-/// logged, never persisted and never sent anywhere: the claims named below are
-/// the only things that leave this type.
+/// The same file holds Codex's access and refresh tokens, and `credential` is
+/// the one thing that may take them out of here. They are never logged, never
+/// persisted and never put on a frame, an export or a diagnostic; the access
+/// token goes to OpenAI's own usage endpoint and nowhere else, which is the
+/// reading the user opened Sissy for. The refresh token is deliberately left
+/// behind: it is the CLI's, it is one-time, and redeeming it would strand the
+/// terminal with a token OpenAI has already retired.
 enum CodexAuthSource {
     private static let fileName = "auth.json"
 
@@ -20,6 +24,12 @@ enum CodexAuthSource {
     /// a JWT claim key that happens to be spelled as one.
     private static let claimNamespace = "https://api.openai.com/auth"
     private static let planClaimKey = "chatgpt_plan_type"
+    /// The workspace a usage question is asked for, and the login it belongs
+    /// to. Both are claims rather than derived: measured 2026-09-17,
+    /// `tokens.account_id`, the id_token's `chatgpt_account_id` and the
+    /// account the usage endpoint answers for are one id.
+    private static let accountClaimKey = "chatgpt_account_id"
+    private static let userClaimKey = "chatgpt_user_id"
     private static let organizationsClaimKey = "organizations"
     private static let organizationTitleKey = "title"
     private static let organizationDefaultKey = "is_default"
@@ -77,6 +87,73 @@ enum CodexAuthSource {
     /// at the same install.
     static func defaultURL(sessionsDir: URL) -> URL {
         sessionsDir.deletingLastPathComponent().appendingPathComponent(fileName)
+    }
+
+    /// The CLI's own credential, for the source that asks OpenAI what this
+    /// account's limits are right now.
+    ///
+    /// The same file and the same parse as `read`, asked a second question,
+    /// rather than a second reader of one vendor's file: the claims that name
+    /// the account are the claims that key the credential, and two parsers
+    /// would be free to disagree about whose it is.
+    ///
+    /// The refresh token is dropped on the way out. A Codex Sissy did not
+    /// sign in is one Sissy may not renew — the token is one-time, and the
+    /// copy the CLI keeps stops working the moment Sissy spends it.
+    static func credential(at url: URL) -> CodexCredentialReading {
+        do {
+            let data = try Data(contentsOf: url)
+            guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .unreadable("auth.json is not JSON")
+            }
+            let tokens = root["tokens"]
+            if root["auth_mode"] as? String == "apikey" || tokens == nil || tokens is NSNull {
+                return .signedOut
+            }
+            guard let credential = credential(data, renewable: false) else {
+                return .unreadable("auth.json holds no access token")
+            }
+            return .found(credential)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return .missing
+        } catch {
+            return .unreadable("auth.json could not be read")
+        }
+    }
+
+    /// A credential out of an `auth.json`-shaped bundle, whoever wrote it:
+    /// the CLI's file and the item Sissy files a linked account in hold the
+    /// same object, so they are read by the same function.
+    ///
+    /// `renewable` is the caller saying whether it owns what it is reading.
+    /// Only an owner carries the refresh token forward, which is what makes
+    /// "Sissy never renews the CLI's credential" a property of the value
+    /// rather than a rule every caller has to remember.
+    static func credential(_ data: Data, renewable: Bool) -> CodexCredential? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let tokens = root["tokens"] as? [String: Any],
+            let accessToken = tokens["access_token"] as? String, !accessToken.isEmpty
+        else { return nil }
+        let idToken = tokens["id_token"] as? String
+        let identity = idToken.flatMap(claims(inJWT:)) ?? [:]
+        let access = claims(inJWT: accessToken) ?? [:]
+        let identityAuth = identity[claimNamespace] as? [String: Any] ?? [:]
+        let accessAuth = access[claimNamespace] as? [String: Any] ?? [:]
+        return CodexCredential(
+            accessToken: accessToken,
+            refreshToken: renewable ? tokens["refresh_token"] as? String : nil,
+            idToken: idToken,
+            accountId: UsageReaderShared.sanitizedDisplayText(
+                tokens["account_id"] as? String
+                    ?? identityAuth[accountClaimKey] as? String
+                    ?? accessAuth[accountClaimKey] as? String),
+            userId: UsageReaderShared.sanitizedDisplayText(
+                identityAuth[userClaimKey] as? String ?? accessAuth[userClaimKey] as? String),
+            email: UsageReaderShared.sanitizedDisplayText(identity[emailClaimKey] as? String),
+            plan: UsageReaderShared.sanitizedPlanToken(
+                identityAuth[planClaimKey] as? String ?? accessAuth[planClaimKey] as? String),
+            expiresAt: (access["exp"] as? Double).map { Date(timeIntervalSince1970: $0) }
+        )
     }
 
     static func parse(_ data: Data) -> Identity? {
