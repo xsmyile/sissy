@@ -28,7 +28,7 @@ final class DiagnosticsReportTests: XCTestCase {
                         cost: 1,
                         plan: "team",
                         projects: [
-                            ProjectTotals(path: "/Users/someone/clients/acme", tokens: 1000, cost: 1)
+                            ProjectTotals(path: "/Users/smyile/clients/acme", tokens: 1000, cost: 1)
                         ],
                         account: account
                     )

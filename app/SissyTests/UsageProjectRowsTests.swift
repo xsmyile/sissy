@@ -15,14 +15,14 @@ final class UsageProjectRowsTests: XCTestCase {
 
     func testARowIsNamedAfterTheRepositoryAndKeepsThePathForTheTooltip() {
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(projects: [project("/Users/d/mdev/legion", 900, "6.00")]))
+            frame: frame(projects: [project("/Users/smyile/mdev/legion", 900, "6.00")]))
 
         XCTAssertEqual(snapshot.projects.map(\.name), ["legion"])
-        XCTAssertEqual(snapshot.projects.map(\.tooltip), ["/Users/d/mdev/legion"])
+        XCTAssertEqual(snapshot.projects.map(\.tooltip), ["/Users/smyile/mdev/legion"])
     }
 
     func testTheTailOfALongListIsFoldedIntoOneRowThatStillCounts() {
-        let many = (1...9).map { project("/Users/d/repo\($0)", 100, "1.00") }
+        let many = (1...9).map { project("/Users/smyile/repo\($0)", 100, "1.00") }
         let snapshot = UsagePanelSnapshot.make(frame: frame(projects: many))
 
         XCTAssertEqual(snapshot.projects.count, 5, "the popover grew a row per repository")
@@ -37,7 +37,7 @@ final class UsageProjectRowsTests: XCTestCase {
     /// One project past the limit still folds two, because folding one would
     /// cost the same row it saves.
     func testTheSmallestFoldStandsForTwoProjects() {
-        let many = (1...6).map { project("/Users/d/repo\($0)", 100, "1.00") }
+        let many = (1...6).map { project("/Users/smyile/repo\($0)", 100, "1.00") }
         let snapshot = UsagePanelSnapshot.make(frame: frame(projects: many))
 
         XCTAssertEqual(snapshot.projects.count, 5)
@@ -50,8 +50,8 @@ final class UsageProjectRowsTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(
                 projects: [
-                    project("/Users/d/a", 750, "7.50"),
-                    project("/Users/d/b", 250, "2.50"),
+                    project("/Users/smyile/a", 750, "7.50"),
+                    project("/Users/smyile/b", 250, "2.50"),
                 ],
                 providerCost: "10.00"))
 
@@ -64,7 +64,7 @@ final class UsageProjectRowsTests: XCTestCase {
     func testWhatNamedNoRepositoryGetsTheRestOfTheDayRatherThanSilence() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(
-                projects: [project("/Users/d/sissy", 750, "7.50")],
+                projects: [project("/Users/smyile/sissy", 750, "7.50")],
                 providerTokens: 1_000,
                 providerCost: "10.00"))
 
@@ -81,7 +81,7 @@ final class UsageProjectRowsTests: XCTestCase {
     func testARemainderThatCameOutNegativeIsNotDrawn() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(
-                projects: [project("/Users/d/sissy", 250, "9.00")],
+                projects: [project("/Users/smyile/sissy", 250, "9.00")],
                 providerTokens: 1_000,
                 providerCost: "6.00"))
 
@@ -93,7 +93,7 @@ final class UsageProjectRowsTests: XCTestCase {
     func testTheRemainderHoversTheReasonRatherThanAPath() throws {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(
-                projects: [project("/Users/d/sissy", 750, "7.50")],
+                projects: [project("/Users/smyile/sissy", 750, "7.50")],
                 providerTokens: 1_000,
                 providerCost: "10.00"))
 
@@ -106,8 +106,8 @@ final class UsageProjectRowsTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(
                 projects: [
-                    project("/Users/d/sissy", 750, "7.50"),
-                    project("/Users/d/legion", 250, "2.50"),
+                    project("/Users/smyile/sissy", 750, "7.50"),
+                    project("/Users/smyile/legion", 250, "2.50"),
                 ]))
 
         XCTAssertEqual(snapshot.projects.map(\.name), ["sissy", "legion"])
@@ -117,7 +117,7 @@ final class UsageProjectRowsTests: XCTestCase {
     /// day, not a repository competing for a slot, so folding never swallows
     /// it and it never costs a project its row.
     func testTheRemainderDoesNotSpendAProjectsRow() {
-        let many = (1...9).map { project("/Users/d/repo\($0)", 100, "1.00") }
+        let many = (1...9).map { project("/Users/smyile/repo\($0)", 100, "1.00") }
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(projects: many, providerTokens: 1_000, providerCost: "10.00"))
 
@@ -142,10 +142,10 @@ final class UsageProjectRowsTests: XCTestCase {
         let combined = FrameBuilder.combinedProjects([
             ProviderSlice(
                 id: ProviderID.claudeCode, tokens: 100, cost: 4,
-                projects: [ProjectTotals(path: "/Users/d/legion", tokens: 100, cost: 4)]),
+                projects: [ProjectTotals(path: "/Users/smyile/legion", tokens: 100, cost: 4)]),
             ProviderSlice(
                 id: ProviderID.codex, tokens: 50, cost: 1,
-                projects: [ProjectTotals(path: "/Users/d/legion", tokens: 50, cost: 1)]),
+                projects: [ProjectTotals(path: "/Users/smyile/legion", tokens: 50, cost: 1)]),
         ])
 
         XCTAssertEqual(combined.count, 1)
@@ -158,12 +158,12 @@ final class UsageProjectRowsTests: XCTestCase {
             ProviderSlice(
                 id: ProviderID.claudeCode, tokens: 300, cost: 6,
                 projects: [
-                    ProjectTotals(path: "/Users/d/cheap", tokens: 200, cost: 1),
-                    ProjectTotals(path: "/Users/d/dear", tokens: 100, cost: 5),
+                    ProjectTotals(path: "/Users/smyile/cheap", tokens: 200, cost: 1),
+                    ProjectTotals(path: "/Users/smyile/dear", tokens: 100, cost: 5),
                 ])
         ])
 
-        XCTAssertEqual(combined.map(\.path), ["/Users/d/dear", "/Users/d/cheap"])
+        XCTAssertEqual(combined.map(\.path), ["/Users/smyile/dear", "/Users/smyile/cheap"])
     }
 
     private func project(_ path: String, _ tokens: Int, _ cost: String) -> ProjectTotals {

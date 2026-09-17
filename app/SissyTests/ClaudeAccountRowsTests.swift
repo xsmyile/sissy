@@ -8,8 +8,8 @@ import XCTest
 /// second archived account put "no live source" under the account the CLI was
 /// signed into and reading fine — measured on the dev build, 2026-09-16.
 final class ClaudeAccountRowsTests: XCTestCase {
-    private let signedInUUID = "c805523f"
-    private let archivedUUID = "dbab20e1"
+    private let signedInUUID = "a1b2c3d4"
+    private let archivedUUID = "e5f6a7b8"
 
     private func window(_ percent: Double) -> UsageWindow {
         UsageWindow(minutes: 300, usedPercent: percent, resetsAt: .distantFuture)!
@@ -18,7 +18,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
     private func identity(_ uuid: String, organization: String) -> ClaudeAccountIdentity {
         ClaudeAccountIdentity(
             uuid: uuid,
-            email: "\(organization.lowercased())@example.com",
+            email: "\(uuid)@example.com",
             organization: organization,
             organizationType: "claude_team",
             rateLimitTier: nil)
@@ -28,7 +28,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         var signals = ProviderSignals(
             windows: [window(18)], limitsState: .quiet, limitsObservedAt: observedAt)
         signals.account = ProviderAccount(
-            email: "master@example.com", organization: "Master Soft Srl", seat: nil)
+            email: "someone@example.com", organization: "Acme Srl", seat: nil)
         signals.plan = "team"
         return signals
     }
@@ -45,7 +45,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
             sources: [],
             known: ClaudeAccountRegistry.Snapshot(
                 accounts: [
-                    identity(signedInUUID, organization: "Master Soft Srl"),
+                    identity(signedInUUID, organization: "Acme Srl"),
                     identity(archivedUUID, organization: "Radon Forge"),
                 ],
                 activeUUID: signedInUUID))
@@ -91,7 +91,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
                 known: ClaudeAccountRegistry.Snapshot(
                     accounts: [], activeUUID: signedInUUID)),
             known: [
-                identity(signedInUUID, organization: "Master Soft Srl"),
+                identity(signedInUUID, organization: "Acme Srl"),
                 identity(archivedUUID, organization: "Radon Forge"),
             ],
             now: now)
@@ -110,7 +110,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         let rows = entries(
             readings: [],
             known: [
-                identity(signedInUUID, organization: "Master Soft Srl"),
+                identity(signedInUUID, organization: "Acme Srl"),
                 identity(archivedUUID, organization: "Radon Forge"),
             ],
             now: now)
@@ -129,7 +129,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
     /// case the moment sessions can be linked rather than imported.
     func testALinkNamesAnAccountTheAccountIndexDoesNot() {
         let sessionOnly = ClaudeAccountIdentity(
-            uuid: archivedUUID, email: "davide@radonforge.com", organization: "Radon Forge",
+            uuid: archivedUUID, email: "davide@example.com", organization: "Radon Forge",
             organizationType: "claude_team", rateLimitTier: nil)
         let source = ClaudeWebSource(
             account: archivedUUID,
@@ -143,7 +143,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
             links: [archivedUUID: ClaudeWebLink(identity: sessionOnly, organization: "org-2")])
 
         let linked = accounts.first { $0.id == archivedUUID }
-        XCTAssertEqual(linked?.account?.email, "davide@radonforge.com")
+        XCTAssertEqual(linked?.account?.email, "davide@example.com")
         XCTAssertEqual(linked?.account?.organization, "Radon Forge")
         XCTAssertEqual(linked?.plan, "team")
     }
@@ -189,7 +189,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
             sessionSource: { _ in .absent },
             fetchSource: { _, _ in throw UsageRequestError.malformedPayload })
         let linked = ClaudeAccountIdentity(
-            uuid: archivedUUID, email: "davide@radonforge.com", organization: "Radon Forge",
+            uuid: archivedUUID, email: "davide@example.com", organization: "Radon Forge",
             organizationType: "claude_team", rateLimitTier: nil, seat: "team_tier_1")
 
         let accounts = ClaudeCodeSignals.perAccount(
@@ -209,7 +209,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         let now = Date()
         var reading = ProviderSignals()
         reading.account = ProviderAccount(
-            email: "davide@radonforge.com", organization: "Radon Forge", seat: "team_tier_1")
+            email: "davide@example.com", organization: "Radon Forge", seat: "team_tier_1")
 
         let rows = entries(
             readings: ClaudeCodeSignals.perAccount(
@@ -218,14 +218,14 @@ final class ClaudeAccountRowsTests: XCTestCase {
                 known: ClaudeAccountRegistry.Snapshot(
                     accounts: [], activeUUID: signedInUUID)),
             known: [
-                identity(signedInUUID, organization: "Master Soft Srl"),
+                identity(signedInUUID, organization: "Acme Srl"),
                 identity(archivedUUID, organization: "Radon Forge"),
             ],
             now: now)
 
         let signedIn = rows.first { $0.id == signedInUUID }
-        XCTAssertEqual(signedIn?.label, "davide@radonforge.com")
-        XCTAssertEqual(signedIn?.email, "davide@radonforge.com")
+        XCTAssertEqual(signedIn?.label, "davide@example.com")
+        XCTAssertEqual(signedIn?.email, "davide@example.com")
         XCTAssertEqual(signedIn?.organization, "Radon Forge")
     }
 
@@ -236,7 +236,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         let rows = entries(
             readings: [],
             known: [
-                identity(signedInUUID, organization: "Master Soft Srl"),
+                identity(signedInUUID, organization: "Acme Srl"),
                 identity(archivedUUID, organization: "Radon Forge"),
             ],
             now: now)
@@ -259,7 +259,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
                     sources: [],
                     known: ClaudeAccountRegistry.Snapshot(
                         accounts: [], activeUUID: signedInUUID)),
-                known: [identity(signedInUUID, organization: "Master Soft Srl")],
+                known: [identity(signedInUUID, organization: "Acme Srl")],
                 now: now
             ).isEmpty)
     }

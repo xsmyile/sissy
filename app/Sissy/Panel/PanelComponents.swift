@@ -403,7 +403,7 @@ struct ProjectRowView: View {
 ///
 /// Matched on the host *containing* the name rather than on an exact domain,
 /// because a self-hosted GitLab is the ordinary case at work and
-/// `gitlab.sermix.com` is as much GitLab as `gitlab.com` is. A forge that says
+/// `gitlab.example.com` is as much GitLab as `gitlab.com` is. A forge that says
 /// neither — a GitHub Enterprise on a company domain, a Gitea — gets the
 /// generic branch glyph rather than a guess between the two, which is the same
 /// answer `ProviderMark` gives a provider it ships no asset for.

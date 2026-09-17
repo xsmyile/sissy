@@ -502,7 +502,7 @@ private func runPersistenceTests() {
             .init(key: "rid:abc", day: "2026-05-19")
         ],
         projectCheckouts: [
-            .init(directory: "/Users/d/work/grampus", project: "/Users/d/dev/sissy")
+            .init(directory: "/Users/smyile/work/grampus", project: "/Users/smyile/dev/sissy")
         ]
     )
 

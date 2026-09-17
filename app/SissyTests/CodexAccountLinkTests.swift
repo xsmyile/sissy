@@ -26,12 +26,12 @@ final class CodexAccountLinkTests: XCTestCase {
             """
             {"items": [
               {"id": "7c31482a", "name": "Personal", "structure": "personal"},
-              {"id": "a1b2", "name": "Master Soft", "structure": "workspace"}
+              {"id": "a1b2", "name": "Acme", "structure": "workspace"}
             ]}
             """)
         let found = CodexAccountLinking.workspaces(in: body)
         XCTAssertEqual(found.map(\.id), ["7c31482a", "a1b2"])
-        XCTAssertEqual(found.map(\.name), ["Personal", "Master Soft"])
+        XCTAssertEqual(found.map(\.name), ["Personal", "Acme"])
         XCTAssertEqual(found.first?.structure, "personal")
     }
 
@@ -69,7 +69,7 @@ final class CodexAccountLinkTests: XCTestCase {
             workspaces: { _ in
                 [
                     CodexWorkspace(id: "7c31482a", name: "Personal", structure: "personal"),
-                    CodexWorkspace(id: "a1b2", name: "Master Soft", structure: "workspace"),
+                    CodexWorkspace(id: "a1b2", name: "Acme", structure: "workspace"),
                 ]
             })
         guard case .choice(let choice) = outcome else {
@@ -169,7 +169,7 @@ final class CodexAccountLinkTests: XCTestCase {
     private func source(account: String?, percent: Double) -> CodexUsageSource {
         CodexUsageSource(
             account: account,
-            workspace: "Master Soft",
+            workspace: "Acme",
             credentialSource: { _ in .found(Self.credential(user: account ?? "user-cli")) },
             fetchSource: { _ in
                 CodexUsagePayload.Reading(
@@ -253,7 +253,7 @@ final class CodexAccountLinkTests: XCTestCase {
     /// so the identity stays the tail's — which read `auth.json` for it.
     func testALiveReadingDoesNotCostTheRowItsOrganisation() {
         var rollout = ProviderSignals()
-        rollout.account = ProviderAccount(email: "someone@example.com", organization: "Master Soft")
+        rollout.account = ProviderAccount(email: "someone@example.com", organization: "Acme")
         rollout.windows = [UsageWindow(minutes: 300, usedPercent: 30, resetsAt: nil)!]
         rollout.limitsObservedAt = Date(timeIntervalSince1970: 1000)
 
@@ -264,7 +264,7 @@ final class CodexAccountLinkTests: XCTestCase {
 
         let merged = CodexSignals.merge(rollout: rollout, live: live)
         XCTAssertEqual(merged.windows.first?.usedPercent, 32)
-        XCTAssertEqual(merged.account?.organization, "Master Soft")
+        XCTAssertEqual(merged.account?.organization, "Acme")
     }
 
     // MARK: - Secrecy
@@ -316,11 +316,11 @@ final class CodexAccountLinkTests: XCTestCase {
             workspaces: { _ in
                 [
                     CodexWorkspace(id: "7c31482a", name: "Personal", structure: "personal"),
-                    CodexWorkspace(id: "a1b2", name: "Master Soft", structure: "workspace"),
+                    CodexWorkspace(id: "a1b2", name: "Acme", structure: "workspace"),
                 ]
             })
         guard case .choice(let choice) = outcome else { return XCTFail("expected a question") }
-        XCTAssertTrue(strings(in: choice).contains("Master Soft"))
+        XCTAssertTrue(strings(in: choice).contains("Acme"))
         assertNoToken(in: choice, "the choice handed to the app")
     }
 

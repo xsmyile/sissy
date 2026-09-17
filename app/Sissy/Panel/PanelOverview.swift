@@ -229,9 +229,9 @@ struct PanelOverview: View {
     /// **Two lines, and the bar has one to itself.** Everything used to sit on
     /// one, behind floors that were meant to start every track at the same x —
     /// and at 340 pt fixed they could not. Measured 2026-09-16 on an account
-    /// with two organisations: `Claude · Master Soft Srl` wants 137.5 pt, its
-    /// column yielded 85, so the name truncated to `Claude · Mas…` *and* took
-    /// 23 pt off its own track, which then started at x=216 against Codex's
+    /// with two organisations: the Claude row's name wants 137.5 pt, its column
+    /// yielded 85, so the name truncated mid-word *and* took 23 pt off its own
+    /// track, which then started at x=216 against Codex's
     /// x=194 and ran 93 pt against its 115. Both halves of the rule the floors
     /// existed for — same start, same length — broke on the same row, and the
     /// percentage went with them: `100%` is 33.8 pt in a 32 pt column, so the

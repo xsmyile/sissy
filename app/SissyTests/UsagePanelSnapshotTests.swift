@@ -261,10 +261,10 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [
                 slice(
                     "claude-code", 1000, "1.00",
-                    account: ProviderAccount(email: "someone@example.com", organization: "Radonforge"))
+                    account: ProviderAccount(email: "someone@example.com", organization: "Radon Forge"))
             ])
         )
-        XCTAssertEqual(snapshot.providers.first?.account?.organization, "Radonforge")
+        XCTAssertEqual(snapshot.providers.first?.account?.organization, "Radon Forge")
     }
 
     /// The badge above the line already says the seat, so an account that

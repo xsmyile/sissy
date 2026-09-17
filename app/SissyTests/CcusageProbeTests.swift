@@ -33,7 +33,7 @@ final class CcusageProbeTests: XCTestCase {
     }
 
     func testAnExecutableInNeitherLayoutIsAnUnknownBuild() {
-        let path = "/Users/someone/.cargo/bin/ccusage"
+        let path = "/Users/smyile/.cargo/bin/ccusage"
 
         XCTAssertEqual(CcusageProbe.kind(resolvedPath: path), .other)
     }
