@@ -15,12 +15,24 @@ import Foundation
 /// path is a repository at all: measured, `git config` and `git var` both
 /// answer out of the global configuration with no repository in sight, so
 /// without it a checkout that has been deleted reports the machine's default
-/// identity as though it were its own. `config --get-regexp` is what names the
-/// file a correction has to be made in, which `var` does not carry. And `var`
-/// is the authority on the identity itself, and the only one of the three that
-/// refuses git's gecos guess — measured, it exits 128 with `unable to
-/// auto-detect email address` where `config --get user.email` simply answers
-/// nothing.
+/// identity as though it were its own. `config --get-regexp` names the file a
+/// correction has to be made in, which `var` does not carry, **and it is what
+/// decides whether there is an identity here at all**. And `var` is the
+/// authority on what that identity resolves to, through every `include` and
+/// `includeIf` in the chain.
+///
+/// **`var` is not asked whether an identity exists, because it invents one.**
+/// With no `user.email` set anywhere git falls back to the gecos field and the
+/// machine's hostname, and whether it then refuses that guess depends on the
+/// hostname: measured 2026-09-17, a Mac whose hostname yields no domain exits
+/// 128 with `unable to auto-detect email address (got 'davide@blackbird.
+/// (none)')`, while a CI runner whose hostname ends `.local` was served
+/// `Anka <runner@…-F66C054AC5DC.local>` with status 0. A reading taken from
+/// that is an address nobody owns, and it would join its forge's electorate
+/// and could become what that forge expects. So the configuration is asked
+/// first: no `user.email` in the chain is `.unset`, whatever `var` would have
+/// answered, and `var` is spent only where there is something for it to
+/// resolve.
 ///
 /// **Nothing here runs repository content.** `rev-parse`, `config` and `var`
 /// execute no hooks, take no locks and write nothing, which is what lets this
@@ -104,14 +116,17 @@ enum GitIdentityReader {
         ])
         let settings = origins.status == 0 ? entries(in: origins.output, repository: repository) : []
         let sources = ambient + settings.map(\.origin.file).filter { !ambient.contains($0) }
-        let ident = invoke(["var", "GIT_AUTHOR_IDENT"])
         let origin = winningOrigin(in: settings)
-        guard ident.status == 0, let author = author(of: ident.output) else {
-            let reading: GitIdentityReading =
-                settings.contains { $0.key == emailKey }
-                ? .unreadable(ident.failure) : .unset
+        guard settings.contains(where: { $0.key == emailKey }) else {
             return GitIdentityScan(
-                identity: identity(repository, remote: remote, reading: reading, origin: origin),
+                identity: identity(repository, remote: remote, reading: .unset, origin: origin),
+                sources: sources)
+        }
+        let ident = invoke(["var", "GIT_AUTHOR_IDENT"])
+        guard ident.status == 0, let author = author(of: ident.output) else {
+            return GitIdentityScan(
+                identity: identity(
+                    repository, remote: remote, reading: .unreadable(ident.failure), origin: origin),
                 sources: sources)
         }
         return GitIdentityScan(

@@ -12,10 +12,9 @@ import XCTest
 /// `XDG_CONFIG_HOME` of its own, so nothing here can read or write the
 /// developer's configuration.
 ///
-/// One ambient precondition the isolation cannot reach: a `user.email` in
-/// git's **system** scope would give every repository an identity, and
-/// `testReadsNothingWhereGitResolvesNoIdentity` asserts there is none. No system
-/// config on this Mac or on the CI image sets one.
+/// The isolation cannot reach git's **system** scope, so these tests assert on
+/// values they set themselves rather than on the absence of a configuration
+/// they cannot control.
 final class GitIdentityTests: XCTestCase {
     private var root: URL!
     private var home: URL!
@@ -93,13 +92,27 @@ final class GitIdentityTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(read(outside)).author?.email, "personal@example.com")
     }
 
-    /// Git refuses its own gecos guess, and so does the reading: a name
-    /// invented from the hostname is not an identity anyone commits under.
-    func testReadsNothingWhereGitResolvesNoIdentity() throws {
+    /// A name invented from the gecos field and the hostname is not an
+    /// identity anyone commits under, and whether git refuses it is a property
+    /// of the machine rather than of the repository: measured 2026-09-17, a
+    /// Mac whose hostname yields no domain gets `unable to auto-detect email
+    /// address` where a CI runner whose hostname ends `.local` was served
+    /// `Anka <runner@…-F66C054AC5DC.local>` with status 0. So the reading is
+    /// taken from the configuration, and answers the same on both.
+    func testTheGuessGitMakesFromTheHostnameIsNeverAnIdentity() throws {
         writeGlobal("[core]\n\tautocrlf = input\n")
         let repository = try makeRepository("nameless")
         let reading = try XCTUnwrap(read(repository))
         XCTAssertEqual(reading.reading, .unset)
+        XCTAssertNil(reading.author, "a guessed address must never reach a forge's electorate")
+    }
+
+    /// A name git guesses is still no identity: `user.name` alone leaves the
+    /// address to the hostname, which is the half that has to be configured.
+    func testANameWithNoAddressIsStillNothing() throws {
+        writeGlobal("[user]\n\tname = Personal\n")
+        let repository = try makeRepository("half-named")
+        XCTAssertEqual(try XCTUnwrap(read(repository)).reading, .unset)
     }
 
     /// The reader's environment is built, not inherited: `GIT_AUTHOR_EMAIL`
