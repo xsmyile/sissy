@@ -177,12 +177,45 @@ enum ClaudeCredentialsStore {
         _ query: [String: Any],
         allowingInteraction: Bool
     ) -> (status: OSStatus, data: Data?) {
+        suppressingInteraction(allowingInteraction) {
+            var item: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &item)
+            return (status, item as? Data)
+        }
+    }
+
+    /// Runs `read` with the panel switched off, and lets no second reader in
+    /// while it does.
+    ///
+    /// The lock is the whole point. `SecKeychainSetUserInteractionAllowed` is
+    /// process-wide and the restore is unconditional — the API has no getter,
+    /// so it goes back to `true`, which is right for one reader and wrong for
+    /// two. Without this, A suppressing, B suppressing, A returning and
+    /// restoring, then B reading, is a scheduled background read running with
+    /// the panel allowed: the single outcome the three suppressors exist to
+    /// prevent. Two readers is the ordinary case rather than a corner — there
+    /// is a `ClaudeWebSource` per linked claude.ai session and a
+    /// `CodexUsageSource` per linked OpenAI account, each polling on its own.
+    ///
+    /// Holding a lock across the read costs nothing worth having: a suppressed
+    /// read cannot wait on a dialog, which is what it is suppressed for, and
+    /// the caller's thread is already blocked in `SecItemCopyMatching`.
+    ///
+    /// Not `loadOffPool`'s gate, which serves every waiter the one lookup's
+    /// answer. These readers ask for different items, so the answer to one is
+    /// not the answer to another.
+    static func suppressingInteraction<Value>(
+        _ allowingInteraction: Bool,
+        _ read: () -> Value
+    ) -> Value {
+        interactionLock.lock()
+        defer { interactionLock.unlock() }
         let suppressed = allowingInteraction ? false : setUserInteractionAllowed(false)
         defer { if suppressed { _ = setUserInteractionAllowed(true) } }
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        return (status, item as? Data)
+        return read()
     }
+
+    private static let interactionLock = NSLock()
 
     /// What one `SecItemCopyMatching` outcome means. Pure, because this is the
     /// mapping that decides whether the probe keeps polling or stops for good,

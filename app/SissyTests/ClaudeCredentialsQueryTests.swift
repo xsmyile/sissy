@@ -105,4 +105,57 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
         guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) else { return nil }
         return symbol.assumingMemoryBound(to: CFString?.self).pointee as String?
     }
+
+    /// The suppressor is process-wide and its restore is unconditional, so two
+    /// readers overlapping would have the first one's restore re-open the
+    /// panel for the second — a scheduled read putting Allow/Deny on screen,
+    /// which is what the suppressors exist to prevent.
+    ///
+    /// Asserted on overlap rather than on the flag: the flag has no getter,
+    /// and what has to be true is that no second reader is inside while one
+    /// is. Each read holds long enough that an unlocked build overlaps on
+    /// essentially every run.
+    func testTwoSuppressedReadsNeverOverlap() {
+        XCTAssertFalse(overlapWhileReading(iterations: 8) { _ in false })
+    }
+
+    /// And a read that is allowed to ask goes through the same gate: it
+    /// suppresses nothing, but overlapping a silent read would leave that one
+    /// running with the panel this caller deliberately left on.
+    func testAnInteractiveReadIsSerialisedWithTheSilentOnes() {
+        XCTAssertFalse(overlapWhileReading(iterations: 6) { $0.isMultiple(of: 2) })
+    }
+
+    /// Occupancy of the suppressed section, counted under its own lock so the
+    /// observation is not the thing being tested.
+    private struct Occupancy: Sendable {
+        var inside = 0
+        var overlapped = false
+    }
+
+    /// Whether any two of `iterations` concurrent reads were ever inside at
+    /// once. `interactive` decides what each one passes.
+    private func overlapWhileReading(
+        iterations: Int,
+        interactive: @escaping @Sendable (Int) -> Bool
+    ) -> Bool {
+        let seen = LockedValue(Occupancy())
+        let done = expectation(description: "every read finished")
+        done.expectedFulfillmentCount = iterations
+
+        DispatchQueue.concurrentPerform(iterations: iterations) { index in
+            ClaudeCredentialsStore.suppressingInteraction(interactive(index)) {
+                seen.update {
+                    $0.inside += 1
+                    if $0.inside > 1 { $0.overlapped = true }
+                }
+                Thread.sleep(forTimeInterval: 0.01)
+                seen.update { $0.inside -= 1 }
+            }
+            done.fulfill()
+        }
+
+        wait(for: [done], timeout: 5)
+        return seen.load().overlapped
+    }
 }
