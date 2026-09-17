@@ -303,7 +303,7 @@ actor CodexUsageSource: SourceSignals {
             report("the Codex credential was refused (status \(code)); sign in again")
             return Self.refreshInterval
         }
-        report("the Codex usage request failed: \(error.localizedDescription)")
+        report("the Codex usage request failed: \(error)")
         return Self.refreshInterval
     }
 

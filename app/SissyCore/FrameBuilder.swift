@@ -134,6 +134,17 @@ enum ProviderLimitsState: Sendable, Equatable {
     /// to import again, and only saying which of the two happened tells them
     /// which button to press.
     case sessionExpired
+    /// The credential is readable and the vendor will not accept it.
+    ///
+    /// Distinct from every state above it, which are all about *getting* a
+    /// credential: here there is one, it reached the endpoint, and the
+    /// endpoint answered 401 or 403. Distinct from `sessionExpired` too,
+    /// which is the same refusal for a credential the user supplied by hand
+    /// and can supply again — this one is Claude Code's own, the CLI rotates
+    /// it on its own schedule, and there is no button that would help. So the
+    /// notice carries no action: the honest instruction is to use the CLI, or
+    /// wait for it to renew.
+    case credentialRefused
     /// The account is signed in and Sissy cannot reach its credential.
     ///
     /// Measured 2026-09-15: a second Claude Code config home keeps its token
@@ -175,6 +186,12 @@ enum ProviderLimitsState: Sendable, Equatable {
     /// something else is emitting into throughout.
     var isAnsweredByACredentialRead: Bool {
         if case .rateLimited = self { return false }
+        // For the same reason as a block: the credential reading fine is not
+        // evidence the vendor has started accepting it. Only a request that
+        // came back can lift this, and clearing it on the read would put the
+        // row back to quiet for the length of the request about to be refused
+        // again.
+        if case .credentialRefused = self { return false }
         return true
     }
 

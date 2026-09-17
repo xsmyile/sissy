@@ -278,6 +278,81 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         await probe.stop()
     }
 
+    /// A refused credential is the one failure that says the reading on screen
+    /// is wrong rather than old, so it publishes and takes the windows down.
+    ///
+    /// The windows are known to be another account's at that point: a token
+    /// the endpoint will not accept is the case #168 fixed the cause of, and
+    /// they would otherwise have stood until each outlived its own reset — up
+    /// to a week for the weekly bucket.
+    func testARefusedCredentialTakesItsWindowsDown() async {
+        for code in [401, 403] {
+            let attempts = LockedValue(0)
+            let probe = ClaudeLimitsProbe(
+                credentials: { _ in
+                    .found(ClaudeCredentials(accessToken: "token", expiresAt: .distantFuture))
+                },
+                fetch: { _ in
+                    var attempt = 0
+                    attempts.update {
+                        $0 += 1
+                        attempt = $0
+                    }
+                    guard attempt > 1 else {
+                        return ClaudeLimitsProbe.Reading(
+                            windows: [
+                                UsageWindow(
+                                    minutes: 300, usedPercent: 10, resetsAt: .distantFuture)!
+                            ],
+                            credits: nil)
+                    }
+                    throw UsageRequestError.badStatus(code)
+                })
+
+            _ = await probe.refreshOnce {}
+            XCTAssertEqual(probe.currentSignals().windows.map(\.usedPercent), [10])
+
+            _ = await probe.refreshOnce {}
+
+            XCTAssertEqual(probe.currentSignals().limitsState, .credentialRefused)
+            XCTAssertTrue(
+                probe.currentSignals().windows.isEmpty,
+                "a \(code) left another account's windows on the row")
+            XCTAssertNil(
+                probe.currentSignals().limitsObservedAt,
+                "a withdrawn reading kept the stamp it would outrank a live reader with")
+            await probe.stop()
+        }
+    }
+
+    /// And the next poll's credential read does not lift it. Reading the
+    /// credential says nothing about whether the vendor has started accepting
+    /// it, so only a request that comes back can — the same rule a block gets,
+    /// for the same reason.
+    func testACredentialReadDoesNotLiftARefusal() async {
+        let probe = ClaudeLimitsProbe(
+            credentials: { _ in
+                .found(ClaudeCredentials(accessToken: "token", expiresAt: .distantFuture))
+            },
+            fetch: { _ in throw UsageRequestError.badStatus(401) })
+
+        _ = await probe.refreshOnce {}
+        _ = await probe.refreshOnce {}
+
+        XCTAssertEqual(probe.currentSignals().limitsState, .credentialRefused)
+        await probe.stop()
+    }
+
+    /// A status code nobody can act on is still a status code somebody has to
+    /// read: the log used to print `error 1`, which named neither.
+    func testTheLogNamesWhatTheVendorAnswered() {
+        XCTAssertEqual("\(UsageRequestError.badStatus(503))", "HTTP 503")
+        XCTAssertEqual(
+            "\(UsageRequestError.rateLimited(retryAfter: 1684))", "429, Retry-After 1684s")
+        XCTAssertEqual(
+            "\(UsageRequestError.rateLimited(retryAfter: nil))", "429 with no Retry-After")
+    }
+
     /// The vendor's own `Retry-After` is what the panel promises and what the
     /// loop sleeps, so the two cannot disagree.
     func testTheBackoffTakesTheVendorsOwnFigure() async {

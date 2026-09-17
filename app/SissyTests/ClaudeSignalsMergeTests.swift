@@ -189,6 +189,34 @@ final class ClaudeSignalsMergeTests: XCTestCase {
         XCTAssertEqual(merged.limitsState, blocked)
     }
 
+    /// A reader that has withdrawn its reading is out of the comparison, so
+    /// the session answers even though its own reading is the older one.
+    ///
+    /// This is the case a wider state test does not reach: rank puts the
+    /// probe first and its stale stamp is the later one, so comparing stamps
+    /// still hands it the row — with no windows on it. `publishFailure`
+    /// clearing the stamp is what takes it out of the running.
+    func testARefusedCredentialGivesTheRowToAnOlderSession() {
+        let now = Date()
+        let merged = ClaudeCodeSignals.merge(
+            profile: signals(),
+            web: signals(windows: [window(21)], observedAt: now.addingTimeInterval(-600)),
+            probe: signals(state: .credentialRefused))
+
+        XCTAssertEqual(merged.windows.map(\.usedPercent), [21])
+        XCTAssertEqual(merged.limitsState, .quiet)
+    }
+
+    /// And keeps the row where it is the only thing that has read, so the
+    /// notice naming the refusal is what the row carries.
+    func testARefusedCredentialKeepsTheRowWhenNothingElseHasRead() {
+        let merged = ClaudeCodeSignals.merge(
+            profile: signals(), web: signals(), probe: signals(state: .credentialRefused))
+
+        XCTAssertTrue(merged.windows.isEmpty)
+        XCTAssertEqual(merged.limitsState, .credentialRefused)
+    }
+
     /// Neither reader running leaves the row on the config file alone, with
     /// no windows and nothing to explain.
     func testNeitherReaderRunningLeavesTheProfileUntouched() {

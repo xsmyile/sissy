@@ -145,7 +145,6 @@ actor ClaudeLimitsProbe: SourceSignals {
         published.update {
             $0.windows = []
             $0.credits = nil
-            $0.limitsObservedAt = nil
             if clearingState { $0.limitsState = .quiet }
         }
         lastReported = nil
@@ -332,6 +331,15 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// One request against the usage endpoint, and the backoff its answer
     /// earns.
     ///
+    /// A 401 or 403 is published rather than merely logged, and it takes the
+    /// windows with it. It is the one failure here that says the reading on
+    /// screen is *wrong* rather than old: a refused token is precisely the
+    /// case where those windows are known to be another account's, and they
+    /// would otherwise have stood until each outlived its own reset — up to a
+    /// week for the weekly bucket. The two readers that ask a vendor for the
+    /// same thing already answer this way; this one was the last that did
+    /// not.
+    ///
     /// The request is the other suspension `stamp` guards: a reply that
     /// arrived a moment too late would restore windows a `stop()` had just
     /// cleared.
@@ -364,7 +372,14 @@ actor ClaudeLimitsProbe: SourceSignals {
                     "the Claude usage endpoint answered 429; backing off until \(until)")
                 return .seconds(seconds)
             }
-            report("the Claude usage request failed: \(error.localizedDescription)")
+            if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
+                publishFailure(.credentialRefused)
+                report(
+                    "the Claude Code credential was refused (status \(code)); its limits stay "
+                        + "hidden until the CLI renews it")
+                return Self.refreshInterval
+            }
+            report("the Claude usage request failed: \(error)")
             return Self.refreshInterval
         }
     }
@@ -372,11 +387,26 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// Publishes why the windows are missing, and takes them down with it: a
     /// gauge left standing under a sentence explaining that there is no
     /// reading behind it is worse than no gauge.
+    ///
+    /// The observation stamp goes with them, because it is the moment *this
+    /// reading* was taken and there is no longer a reading. Keeping it left a
+    /// reader competing on the freshness of an answer it had already
+    /// withdrawn: `ClaudeCodeSignals.answering` ranks the CLI's credential
+    /// over the claude.ai session and only compares stamps once the ranked
+    /// reader has something to explain, so a probe refused at 15:20 whose
+    /// last good reading was 15:12 outranked a session that had read at
+    /// 15:10 — and won the row with no windows on it at all, discarding the
+    /// session's. A reader with nothing to show is not in that comparison,
+    /// which is the same rule that keeps one who has never read out of it.
+    ///
+    /// A 429 deliberately does not come through here: that reading is still
+    /// the last true one and its age is the point.
     private func publishFailure(_ state: ProviderLimitsState) {
         published.update {
             $0.limitsState = state
             $0.windows = []
             $0.credits = nil
+            $0.limitsObservedAt = nil
         }
     }
 
