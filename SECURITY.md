@@ -28,24 +28,31 @@ outside your home directory it reads is Homebrew's `bin`, and only when you
 press **Copy diagnostics**, to say which `ccusage` builds are installed.
 
 **Credentials it reads, never mints.** To show rate-limit windows, Sissy reads
-Claude Code's own OAuth token. It comes from `<config home>/.credentials.json`
-where the CLI keeps one, otherwise from the login keychain through
-`/usr/bin/security`, which is on that item's ACL because the CLI filed it by
-shelling out to the same tool. Sissy never refreshes that token (Anthropic's refresh tokens rotate, and
-spending one would sign you out of your own terminal) and never writes it back,
-except on an explicit account switch you asked for.
+each CLI's own OAuth token. Claude Code's comes from
+`<config home>/.credentials.json` where the CLI keeps one, otherwise from the
+login keychain through `/usr/bin/security`, which is on that item's ACL because
+the CLI filed it by shelling out to the same tool; Codex's comes from
+`~/.codex/auth.json`. Sissy never refreshes either (both vendors' refresh tokens
+rotate, and spending one would sign you out of your own terminal) and never
+writes one back, except on an explicit Claude account switch you asked for.
+Codex's file is never written at all.
 
-**Credentials it holds.** Two keychain items are Sissy's own: an archived copy
+**Credentials it holds.** Three keychain items are Sissy's own: an archived copy
 of each Claude account credential it has seen, so `Use in CLI` can switch
-between them, and the claude.ai session created by the in-app login window.
-Neither ever reaches the frame, the logs, the diagnostics report or the CSV
-export, and there is a test suite whose only job is holding that line.
+between them; the claude.ai session created by the in-app login window; and the
+OpenAI credential for each Codex account signed in through that same window,
+which is the only one Sissy ever renews — it is Sissy's own copy, and the CLI
+never sees it. None ever reaches the frame, the logs, the diagnostics report or
+the CSV export, and there is a test suite whose only job is holding that line.
 
-**The one window that loads someone else's HTML.** `ClaudeWebLoginWindow` is a
-`WKWebView` pointed at claude.ai's own login, with a non-persistent cookie jar
-that dies with the window, no address bar, no tabs, and link clicks that leave
-claude.ai handed to the default browser instead of followed. It opens only from
-the button in Settings, never from a poll or at launch.
+**The one window that loads someone else's HTML.** `VendorLoginWindow` is a
+`WKWebView` pointed at a vendor's own login — claude.ai's, or OpenAI's when you
+link a Codex account — with a non-persistent cookie jar that dies with the
+window, no address bar, no tabs, and link clicks that leave the vendor's hosts
+handed to the default browser instead of followed. It opens only from the button
+in Settings or the panel, never from a poll or at launch. The Codex sign-in is a
+PKCE flow whose redirect is cancelled and read in the window: nothing listens on
+the loopback port it names.
 
 **Files it writes outside its own folder.** Nothing does so unless you switch
 it on. Today one switch can, `Name projects even when Sissy is off`, and it
