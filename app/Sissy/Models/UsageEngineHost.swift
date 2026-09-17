@@ -259,22 +259,6 @@ final class UsageEngineHost {
         }
     }
 
-    /// Forgets one archived account, for the user who wants a stored secret
-    /// gone. A keychain that refused is said out loud rather than reported as
-    /// a deletion that did not happen.
-    func forgetClaudeAccount(uuid: String) {
-        guard let engine else { return }
-        accountSwitchFailure = nil
-        Task { [weak self] in
-            do {
-                try await engine.forgetClaudeAccount(uuid: uuid)
-            } catch {
-                self?.accountSwitchFailure = ClaudeAccountSwitchCopy.forgetFailure
-            }
-            self?.claudeAccounts = engine.claudeAccountSnapshot
-        }
-    }
-
     /// Whether a claude.ai session is filed, so Settings can offer the right
     /// button. Asked without decrypting one, so it is answerable on a build
     /// whose keychain grant has lapsed.
@@ -669,9 +653,8 @@ final class UsageEngineHost {
     /// graph on every emit.
     ///
     /// Without it the switcher could not appear at all: the property was
-    /// written only by `activateClaudeAccount` and `forgetClaudeAccount`,
-    /// which are reachable only from the control that the list it populates is
-    /// what draws.
+    /// written only by `activateClaudeAccount`, which is reachable only from
+    /// the control that the list it populates is what draws.
     private func syncClaudeAccounts() {
         guard let engine else { return }
         let snapshot = engine.claudeAccountSnapshot

@@ -992,9 +992,6 @@ enum ClaudeAccountSwitchCopy {
         "Switching to \(label)…"
     }
 
-    static let forgetFailure =
-        "The keychain would not let Sissy delete that saved sign-in, so it is still there"
-
     static func failure(_ why: ClaudeAccountRegistry.Failure) -> String {
         switch why {
         case .notArchived:

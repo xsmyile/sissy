@@ -134,8 +134,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         func secrets() -> ClaudeAccountStore.Secrets {
             ClaudeAccountStore.Secrets(
                 read: { [self] uuid in lock.withLock { items[uuid] } },
-                write: { [self] uuid, data in lock.withLock { items[uuid] = data } },
-                delete: { [self] uuid in lock.withLock { _ = items.removeValue(forKey: uuid) } })
+                write: { [self] uuid, data in lock.withLock { items[uuid] = data } })
         }
 
         func slot() -> ClaudeAccountRegistry.ActiveSlot {
@@ -246,30 +245,6 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-a")
     }
 
-    /// A keychain that refuses the delete must reach the caller: a user told
-    /// a stored secret is gone while it is still filed was lied to.
-    func testARefusedDeleteIsReportedRatherThanSwallowed() async {
-        let vault = Vault()
-        vault.active = credential("tok-a")
-        var store = ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: tempDir))
-        store.secrets = ClaudeAccountStore.Secrets(
-            read: { _ in nil },
-            write: { _, _ in },
-            delete: { _ in throw ClaudeKeychainCLI.Failure.tool(51) })
-        let registry = ClaudeAccountRegistry(store: store, slot: vault.slot()) { _ in
-            ClaudeAccountIdentity(
-                uuid: "u-a", email: nil, organization: nil, organizationType: nil,
-                rateLimitTier: nil)
-        }
-        await registry.captureActive()
-
-        do {
-            try await registry.forget(uuid: "u-a")
-            XCTFail("a refused delete was reported as a deletion")
-        } catch {}
-        XCTAssertEqual(registry.currentSnapshot().accounts.map(\.uuid), ["u-a"])
-    }
-
     func testSwitchingToAnUnknownAccountSaysSoAndWritesNothing() async {
         let vault = Vault()
         let registry = makeRegistry(vault) { _ in
@@ -293,21 +268,5 @@ final class ClaudeAccountRegistryTests: XCTestCase {
 
         XCTAssertTrue(registry.currentSnapshot().accounts.isEmpty)
         XCTAssertNil(registry.currentSnapshot().activeUUID)
-    }
-
-    func testForgettingDropsTheCredentialAndTheEntry() async throws {
-        let vault = Vault()
-        vault.active = credential("tok-a")
-        let registry = makeRegistry(vault) { _ in
-            ClaudeAccountIdentity(
-                uuid: "u-a", email: nil, organization: nil, organizationType: nil,
-                rateLimitTier: nil)
-        }
-        await registry.captureActive()
-        try await registry.forget(uuid: "u-a")
-
-        XCTAssertTrue(registry.currentSnapshot().accounts.isEmpty)
-        let outcome = await registry.activate(uuid: "u-a")
-        guard case .failure(.notArchived) = outcome else { return XCTFail("expected notArchived") }
     }
 }

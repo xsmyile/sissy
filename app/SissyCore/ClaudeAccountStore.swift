@@ -211,7 +211,6 @@ struct ClaudeAccountStore: Sendable {
     struct Secrets: Sendable {
         var read: @Sendable (String) -> Data?
         var write: @Sendable (String, Data) throws -> Void
-        var delete: @Sendable (String) throws -> Void
 
         static let keychain = Self(
             read: { uuid in
@@ -221,10 +220,6 @@ struct ClaudeAccountStore: Sendable {
             write: { uuid, data in
                 try ClaudeKeychainCLI.write(
                     data, service: ClaudeKeychainCLI.sissyAccountService, account: uuid)
-            },
-            delete: { uuid in
-                try ClaudeKeychainCLI.delete(
-                    service: ClaudeKeychainCLI.sissyAccountService, account: uuid)
             })
     }
 
@@ -275,16 +270,6 @@ struct ClaudeAccountStore: Sendable {
         } else {
             index.accounts.append(identity)
         }
-        try saveIndex(index)
-    }
-
-    /// Drops an account's credential and its entry. The user asking for a
-    /// stored secret to be gone is the only caller.
-    func forget(uuid: String) throws {
-        try secrets.delete(uuid)
-        var index = loadIndex()
-        index.accounts.removeAll { $0.uuid == uuid }
-        if index.activeUUID == uuid { index.activeUUID = nil }
         try saveIndex(index)
     }
 }

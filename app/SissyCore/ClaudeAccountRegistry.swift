@@ -95,7 +95,7 @@ actor ClaudeAccountRegistry {
     static func inert() -> ClaudeAccountRegistry {
         var store = ClaudeAccountStore(indexURL: URL(fileURLWithPath: "/dev/null"))
         store.secrets = ClaudeAccountStore.Secrets(
-            read: { _ in nil }, write: { _, _ in }, delete: { _ in })
+            read: { _ in nil }, write: { _, _ in })
         return ClaudeAccountRegistry(store: store, slot: .inert) { _ in
             throw ClaudeAccountProfile.Failure.malformedPayload
         }
@@ -155,17 +155,6 @@ actor ClaudeAccountRegistry {
         lastSeenToken = ClaudeCredentialsStore.parse(credential)?.accessToken
         setActive(uuid)
         return .success(())
-    }
-
-    /// Forgets one archived account, for the user who wants a stored secret
-    /// gone. The CLI's own copy is untouched: it is the CLI's.
-    ///
-    /// Throws rather than reporting success on a keychain that refused: a
-    /// caller told the secret is gone when it is still filed would say so to
-    /// the user, which is the one thing a delete must never get wrong.
-    func forget(uuid: String) throws {
-        defer { publishIndex() }
-        try store.forget(uuid: uuid)
     }
 
     /// Identifies a credential and archives it. A token the vendor will not
