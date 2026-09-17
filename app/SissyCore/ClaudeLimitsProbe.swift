@@ -264,11 +264,6 @@ actor ClaudeLimitsProbe: SourceSignals {
                 "no Claude Code credentials in the keychain under "
                     + "\(ClaudeCredentialsStore.keychainService); limits stay hidden until "
                     + "you sign into the CLI")
-        case .unreachable:
-            publishFailure(.credentialUnreachable)
-            report(
-                "this account's Claude Code credential is not readable from here; "
-                    + "its limits stay hidden rather than showing another account's")
         // Neither can arise here, and saying so is the point. Both are answers
         // macOS gives an in-process `SecItemCopyMatching`; this probe reads the
         // CLI's own file and falls back to `/usr/bin/security`, neither of

@@ -613,10 +613,6 @@ enum UsageFormat {
                 message: "\(vendor) refused \(cli)'s sign-in, so the limits stay hidden "
                     + "until the CLI renews it",
                 action: nil, kind: .refresh)
-        case .credentialUnreachable:
-            return .init(
-                message: "Sissy cannot read this account's sign-in, so its limits stay hidden",
-                action: nil, kind: .refresh)
         case .rateLimited(let until):
             return .init(
                 message: "\(vendor) is not answering for limits until "

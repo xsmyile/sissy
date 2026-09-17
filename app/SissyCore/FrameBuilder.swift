@@ -145,17 +145,6 @@ enum ProviderLimitsState: Sendable, Equatable {
     /// notice carries no action: the honest instruction is to use the CLI, or
     /// wait for it to renew.
     case credentialRefused
-    /// The account is signed in and Sissy cannot reach its credential.
-    ///
-    /// Measured 2026-09-15: a second Claude Code config home keeps its token
-    /// in a keychain item whose service name carries a hash of that home
-    /// (`Claude Code-credentials-<hash>`), written at the moment that home
-    /// first signed in, and it writes no `.credentials.json` beside it. So
-    /// there is a credential and Sissy has no way to address it. Emphatically
-    /// not `signedOut`, which would send the user to log in an account that is
-    /// already logged in, and not `needsAuthorization`, which promises a
-    /// dialog that would grant the wrong account's token.
-    case credentialUnreachable
     /// The vendor answered 429 and named when it will answer again.
     ///
     /// The one state here that keeps its windows: they are the last true
