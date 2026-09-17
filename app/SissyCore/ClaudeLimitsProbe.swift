@@ -371,9 +371,3 @@ actor ClaudeLimitsProbe: SourceSignals {
         )
     }
 }
-
-enum ClaudeLimitsError: Error {
-    case rateLimited
-    case badStatus(Int)
-    case malformedPayload
-}
