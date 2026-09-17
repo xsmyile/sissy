@@ -151,14 +151,27 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertEqual(count, 2)
     }
 
-    /// A private endpoint punishes hammering, so a 429 costs the long wait
-    /// rather than the ordinary one.
+    /// A private endpoint punishes hammering, so a 429 with no figure of its
+    /// own costs the long wait rather than the ordinary one.
     func testRateLimitingEarnsTheLongBackoff() async {
         let source = source(
             lookup: { _ in Self.found(Self.session) },
-            fetch: { _, _ in throw ClaudeLimitsError.rateLimited })
+            fetch: { _, _ in throw ClaudeLimitsError.rateLimited(retryAfter: nil) })
         let delay = await source.refreshOnce {}
         XCTAssertEqual(delay, .seconds(1800))
+    }
+
+    /// And it says so on the row: a block the vendor imposed is not a gap in
+    /// the reading, and nothing else on the page can tell them apart.
+    func testRateLimitingIsPublished() async {
+        let source = source(
+            lookup: { _ in Self.found(Self.session) },
+            fetch: { _, _ in throw ClaudeLimitsError.rateLimited(retryAfter: nil) })
+        _ = await source.refreshOnce {}
+        guard case .rateLimited(let until) = source.currentSignals().limitsState else {
+            return XCTFail("a 429 left the row with nothing to say")
+        }
+        XCTAssertEqual(until.timeIntervalSinceNow, 1800, accuracy: 5)
     }
 
     /// Nobody was asked, so nobody refused: the source stays alive and the

@@ -23,7 +23,6 @@ actor ClaudeWebSource: SourceSignals {
     private static let prepaidPath = "prepaid/credits"
     private static let requestTimeout: TimeInterval = 15
     private static let refreshInterval: Duration = .seconds(300)
-    private static let rateLimitedBackoff: Duration = .seconds(1800)
 
     /// Capability that names the organization a subscription meters against.
     /// An account can hold several — the measured one also had an
@@ -177,8 +176,9 @@ actor ClaudeWebSource: SourceSignals {
     /// a refresh that blanks the gauges it is trying to restore reads as a
     /// failure for as long as the request takes.
     func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
-        cancelRequests()
         cached = nil
+        if case .rateLimited(let until) = published.load().limitsState, until > Date() { return }
+        cancelRequests()
         lastReported = nil
         let request = begin(userInitiated: true, onRefresh: onRefresh)
         await withTaskCancellationHandler {
@@ -216,7 +216,9 @@ actor ClaudeWebSource: SourceSignals {
         switch outcome {
         case .found(let found):
             cached = found.accessToken
-            published.update { $0.limitsState = .quiet }
+            published.update {
+                if $0.limitsState.isAnsweredByACredentialRead { $0.limitsState = .quiet }
+            }
             return .ready(found.accessToken)
         case .absent:
             publishFailure(.signedOut)
@@ -279,9 +281,12 @@ actor ClaudeWebSource: SourceSignals {
     /// spending a session claude.ai has already closed. The organization goes
     /// with it — the next session may not be the same account's.
     private func handle(_ error: Error) -> Duration {
-        if case ClaudeLimitsError.rateLimited = error {
-            report("claude.ai answered 429; backing off for \(Self.rateLimitedBackoff)")
-            return Self.rateLimitedBackoff
+        if case ClaudeLimitsError.rateLimited(let retryAfter) = error {
+            let backoff = ClaudeLimitsError.backoffSeconds(retryAfter: retryAfter)
+            let until = Date().addingTimeInterval(backoff)
+            published.update { $0.limitsState = .rateLimited(until: until) }
+            report("claude.ai answered 429; backing off until \(until)")
+            return .seconds(backoff)
         }
         if case ClaudeLimitsError.badStatus(let code) = error, code == 401 || code == 403 {
             cached = nil
@@ -461,7 +466,9 @@ actor ClaudeWebSource: SourceSignals {
         guard let http = response as? HTTPURLResponse else {
             throw ClaudeLimitsError.malformedPayload
         }
-        if http.statusCode == 429 { throw ClaudeLimitsError.rateLimited }
+        if http.statusCode == 429 {
+            throw ClaudeLimitsError.rateLimited(retryAfter: ClaudeLimitsError.retryAfter(http))
+        }
         guard http.statusCode == 200 else {
             throw ClaudeLimitsError.badStatus(http.statusCode)
         }

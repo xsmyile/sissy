@@ -246,6 +246,20 @@ final class PanelPagesTests: XCTestCase {
         XCTAssertNotNil(try XCTUnwrap(snapshot.providers.first).notice)
     }
 
+    /// A vendor refusing to answer is the one limits problem whose windows
+    /// stay on screen, so the notice is the only thing that separates it from
+    /// a reading that is merely a few minutes old.
+    func testAVendorRefusingToAnswerSaysSoOnTheRow() throws {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame([
+                slice("claude-code", limitsState: .rateLimited(until: Date().addingTimeInterval(600)))
+            ]))
+
+        let notice = try XCTUnwrap(try XCTUnwrap(snapshot.providers.first).notice)
+        XCTAssertTrue(notice.message.hasPrefix("Anthropic is not answering"), notice.message)
+        XCTAssertNil(notice.action)
+    }
+
     func testAProviderWithNothingWrongCarriesNoMark() throws {
         let snapshot = UsagePanelSnapshot.make(frame: frame([slice("codex")]))
 

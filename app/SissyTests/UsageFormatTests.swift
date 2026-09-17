@@ -342,6 +342,24 @@ final class UsageFormatTests: XCTestCase {
         )
     }
 
+    /// The notice's deadline is an hour away at most, so it is always a time
+    /// of day. Worded through `resetLabel` it inherited that rule's weekday
+    /// form — measured, a 1800 s block beginning at 23:50 read "until Fri",
+    /// which is the same half-hour described as two days.
+    func testARateLimitNoticeNamesATimeRatherThanADay() throws {
+        let clock = try fixedClock(hour: 23)
+        let until = try XCTUnwrap(
+            clock.calendar.date(byAdding: .minute, value: 70, to: clock.now))
+
+        let notice = try XCTUnwrap(UsageFormat.limitsNotice(.rateLimited(until: until)))
+
+        XCTAssertEqual(
+            notice.message,
+            "Anthropic is not answering for limits until "
+                + until.formatted(.dateTime.hour().minute())
+        )
+    }
+
     func testResetLabelUsesAWeekdayDaysOut() throws {
         let clock = try fixedClock()
         let reset = try XCTUnwrap(clock.calendar.date(byAdding: .day, value: 3, to: clock.now))

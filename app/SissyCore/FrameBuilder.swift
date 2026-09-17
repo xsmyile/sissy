@@ -109,9 +109,11 @@ struct ProjectTotals: Sendable, Equatable, Identifiable {
 /// acted on. Until now the probe wrote these to the log — "switch them off and
 /// on again", in a file nobody reads, on a Mac whose gauges had silently gone.
 ///
-/// Only the states a user can do something about. A request that failed and a
-/// keychain that did not answer in time are both transient and both leave the
-/// last reading on screen with its age, which is already the honest answer.
+/// Only the states that change what the row means. A request that failed and
+/// a keychain that did not answer in time are both transient and both leave
+/// the last reading on screen with its age, which is already the honest
+/// answer — but a vendor that has *refused* to answer is not transient, and
+/// the age alone cannot say so.
 enum ProviderLimitsState: Sendable, Equatable {
     /// Working, or switched off. Either way the row has nothing to say.
     case quiet
@@ -142,6 +144,58 @@ enum ProviderLimitsState: Sendable, Equatable {
     /// already logged in, and not `needsAuthorization`, which promises a
     /// dialog that would grant the wrong account's token.
     case credentialUnreachable
+    /// The vendor answered 429 and named when it will answer again.
+    ///
+    /// The one state here that keeps its windows: they are the last true
+    /// reading and their age is the point. Without it the panel had nothing
+    /// to say at all — measured 2026-09-17, a reading taken at 01:14 whose
+    /// three windows had all rolled over by 07:00 sat under "awaiting a
+    /// reading", which is Codex's sentence for a source that cannot be
+    /// re-read on demand. This source can; it was being refused, and the row
+    /// gave the user no way to know that.
+    ///
+    /// It carries the moment rather than a flag because the vendor names one,
+    /// and the row is the only place it can be read. The deadline is the
+    /// vendor's own and it moves: measured the same day, three requests
+    /// within 77 s were all refused against the same instant, and 24 minutes
+    /// later that instant had advanced by 142 s. So a request during a block
+    /// neither resets the wait to a full window nor is free of it — which is
+    /// two reasons the refresh button does not make one, and why the date the
+    /// row prints is re-read from each refusal rather than counted down.
+    case rateLimited(until: Date)
+
+    /// Whether reading the credential is an answer to this state.
+    ///
+    /// Every state here is about the credential except one, so a read that
+    /// found it clears them. A vendor refusing to serve that credential is
+    /// not among them: the read said nothing about the block, and clearing it
+    /// takes the notice off the row for the length of the request that is
+    /// about to be refused again — up to 15 s, every backoff, on a panel
+    /// something else is emitting into throughout.
+    var isAnsweredByACredentialRead: Bool {
+        if case .rateLimited = self { return false }
+        return true
+    }
+
+    /// This state as it reads at `now`, which is itself for all but one of
+    /// them.
+    ///
+    /// A block *is* the deadline it names, so once that has passed there is
+    /// nothing left to report — and nothing is lost by dropping it, unlike
+    /// the windows, because the reading and its age stay on the row and that
+    /// is the honest answer when Sissy cannot say whether the vendor would
+    /// serve it today.
+    ///
+    /// Published states normally end when the condition behind them is
+    /// re-tested, and this is the one that can outlive its own test: a poll
+    /// that reaches the deadline and then cannot spend a request at all — an
+    /// access token the CLI has not renewed, a keychain that did not answer —
+    /// returns without reaching the endpoint, leaving the block standing with
+    /// no refusal behind it and a time in the past on the row.
+    func live(at now: Date) -> Self {
+        if case .rateLimited(let until) = self, until <= now { return .quiet }
+        return self
+    }
 }
 
 /// Who a provider is signed in as.
