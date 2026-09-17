@@ -169,12 +169,22 @@ enum ClaudeCredentialsStore {
         _ query: [String: Any],
         allowingInteraction: Bool
     ) -> (status: OSStatus, data: Data?) {
-        suppressingInteraction(allowingInteraction) {
+        suppressingInteraction(
+            allowingInteraction, unavailable: (errSecInteractionNotAllowed, nil)
+        ) {
             var item: CFTypeRef?
             let status = SecItemCopyMatching(query as CFDictionary, &item)
             return (status, item as? Data)
         }
     }
+
+    /// How long a reader waits for the one in front of it.
+    ///
+    /// Generous by orders of magnitude — a read of a local item answers in
+    /// milliseconds — because what this bounds is a reader that has wedged,
+    /// not one that is merely busy. Same figure and same reasoning as
+    /// `ClaudeKeychainCLI`'s own budget.
+    static let suppressorTimeout: TimeInterval = 5
 
     /// Runs `read` with the panel switched off, and lets no second reader in
     /// while it does.
@@ -189,18 +199,39 @@ enum ClaudeCredentialsStore {
     /// is a `ClaudeWebSource` per linked claude.ai session and a
     /// `CodexUsageSource` per linked OpenAI account, each polling on its own.
     ///
-    /// Holding a lock across the read costs nothing worth having: a suppressed
-    /// read cannot wait on a dialog, which is what it is suppressed for, and
-    /// the caller's thread is already blocked in `SecItemCopyMatching`.
+    /// **The wait is bounded, and that is not a detail.** `loadOffPool` above
+    /// exists because `SecItemCopyMatching` blocks for as long as macOS takes
+    /// to authorize, which is unbounded — it can sit behind a dialog nobody
+    /// answers. Suppression is what should stop that, and it is not
+    /// guaranteed: `setUserInteractionAllowed` answers false where `dlsym`
+    /// cannot resolve a deprecated symbol, and the read then runs with nothing
+    /// suppressing it at all. Held without a budget, one reader parked that
+    /// way would take every other linked account's reader down with it, for
+    /// good — neither `ClaudeWebSessionStore` nor `CodexAccountStore` goes
+    /// through `loadOffPool`, so neither has a timeout of its own. That is a
+    /// worse failure than the overlap this exists to prevent.
+    ///
+    /// A reader that cannot get in answers `unavailable` rather than running
+    /// unsuppressed, which would be the original bug on purpose.
+    /// `copyMatching` supplies `errSecInteractionNotAllowed` for it, because
+    /// `classify` reads that as `.interactionRequired` whether or not the
+    /// caller was allowed to ask — the item is there, this read could not have
+    /// it, the reader stays alive and the next poll tries again. Deliberately
+    /// not `errSecAuthFailed`, which an interactive caller would be told is a
+    /// person clicking Deny.
     ///
     /// Not `loadOffPool`'s gate, which serves every waiter the one lookup's
     /// answer. These readers ask for different items, so the answer to one is
     /// not the answer to another.
     static func suppressingInteraction<Value>(
         _ allowingInteraction: Bool,
+        unavailable: @autoclosure () -> Value,
+        timeout: TimeInterval = suppressorTimeout,
         _ read: () -> Value
     ) -> Value {
-        interactionLock.lock()
+        guard interactionLock.lock(before: Date().addingTimeInterval(timeout)) else {
+            return unavailable()
+        }
         defer { interactionLock.unlock() }
         let suppressed = allowingInteraction ? false : setUserInteractionAllowed(false)
         defer { if suppressed { _ = setUserInteractionAllowed(true) } }
