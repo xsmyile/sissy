@@ -48,22 +48,19 @@ final class ClaudeLimitsProbeTests: XCTestCase {
 
     /// The state is what the panel acts on, so it has to name the outcome the
     /// probe actually met rather than collapsing every failure into "no
-    /// limits". Driven through one poll rather than through the loop: the
-    /// read is recorded before the outcome is classified, so an assertion
-    /// hung off the read count passes or fails by luck — which is exactly how
-    /// this shipped green locally and failed on CI.
-    func testEachOutcomeTheUserCanActOnReachesTheFrame() async {
-        let cases: [(ClaudeCredentialsLookup, ProviderLimitsState)] = [
-            (.absent, .signedOut),
-            (.unreachable, .credentialUnreachable),
-        ]
-        for (lookup, expected) in cases {
-            let probe = ClaudeLimitsProbe { _ in lookup }
+    /// limits". A missing credential is the only one of them the user can act
+    /// on that this reader can still meet.
+    ///
+    /// Driven through one poll rather than through the loop: the read is
+    /// recorded before the outcome is classified, so an assertion hung off the
+    /// read count passes or fails by luck — which is exactly how this shipped
+    /// green locally and failed on CI.
+    func testAMissingCredentialReachesTheFrame() async {
+        let probe = ClaudeLimitsProbe { _ in .absent }
 
-            _ = await probe.refreshOnce {}
+        _ = await probe.refreshOnce {}
 
-            XCTAssertEqual(probe.currentSignals().limitsState, expected)
-        }
+        XCTAssertEqual(probe.currentSignals().limitsState, .signedOut)
     }
 
     /// A transient failure is not something to put on a row: the last reading

@@ -71,11 +71,9 @@ enum CodexAccountStore {
 
     /// The keychain's own outcomes in this reader's vocabulary.
     ///
-    /// `unreachable` and `timedOut` cannot arise here — the first is a Claude
-    /// config home's hashed service name and the second is the blocking
-    /// lookup's budget, which this read does not take — and they are answered
-    /// exhaustively rather than defaulted so a case added later has to be
-    /// decided here.
+    /// `timedOut` cannot arise here — it is the blocking lookup's budget, and
+    /// this read does not take one — and it is answered exhaustively rather
+    /// than defaulted so a case added later has to be decided here.
     static func reading(_ outcome: CredentialLookup<CodexCredential>) -> CodexCredentialReading {
         switch outcome {
         case .found(let credential): return .found(credential)
@@ -83,7 +81,7 @@ enum CodexAccountStore {
         case .denied: return .refused
         case .interactionRequired: return .needsAuthorization
         case .unreadable(let status): return .unreadable("keychain status \(status)")
-        case .unreachable, .timedOut: return .unreadable("the keychain did not answer")
+        case .timedOut: return .unreadable("the keychain did not answer")
         }
     }
 

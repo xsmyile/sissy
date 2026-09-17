@@ -89,7 +89,7 @@ enum ClaudeWebSessionAdoption {
             session = held.accessToken
         case .absent:
             return .nothingToAdopt
-        case .interactionRequired, .denied, .unreachable, .unreadable, .timedOut:
+        case .interactionRequired, .denied, .unreadable, .timedOut:
             // Not `.nothingToAdopt`: the item is there and this read could not
             // have it. Silently reporting nothing to do would leave a session
             // unkeyed forever on a re-signed build with no line saying why.
