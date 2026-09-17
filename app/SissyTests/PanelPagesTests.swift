@@ -233,6 +233,22 @@ final class PanelPagesTests: XCTestCase {
         XCTAssertNil(UsagePanelView.openRow(.overview, in: [row("codex")]))
     }
 
+    /// The services are a page of the panel rather than a popover over one, so
+    /// they resolve to the same row their vendor's own page does — the header
+    /// names the vendor either way, and the back chevron has a page to return
+    /// to instead of a window to close.
+    func testTheServicesPageResolvesToItsOwnProvider() {
+        let open = UsagePanelView.openRow(
+            .services("codex", account: nil), in: [row("claude-code"), row("codex")])
+
+        XCTAssertEqual(open?.id, "codex")
+    }
+
+    func testTheServicesOfAProviderThatLeftTheFrameFallBackHome() {
+        XCTAssertNil(
+            UsagePanelView.openRow(.services("codex", account: nil), in: [row("claude-code")]))
+    }
+
     // MARK: Attention on the Overview
 
     /// The split must not hide what the notice exists to show. The grant
@@ -348,11 +364,11 @@ final class PanelPagesTests: XCTestCase {
         XCTAssertEqual(page.map(\.owner), ["radonforge", nil])
     }
 
-    /// The row that names a repository carries the card's whole content, so a
-    /// click has something to open; the one that names none carries nothing,
-    /// which is what makes the click do nothing rather than open an empty
-    /// card.
-    func testOnlyARowWithAForgeCarriesARepositoryCard() throws {
+    /// The row that names a repository carries everything its menu offers, so
+    /// a click has something to act on; the one that names none carries
+    /// nothing, which is what leaves that row with no menu at all rather than
+    /// an empty one.
+    func testOnlyARowWithAForgeCarriesItsRepository() throws {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame([
                 slice(

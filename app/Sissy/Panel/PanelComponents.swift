@@ -298,18 +298,54 @@ struct SectionLabel: View {
 /// a bar for its share. The path stays in the tooltip — a client's name is a
 /// directory's name — and the remainder row puts its reason there instead.
 ///
-/// A row that names a repository opens a card on a click. **A click rather
-/// than a hover**: the tooltip already belongs to the hover and is the only
-/// place the path is readable, and a list a pointer crosses on its way
-/// somewhere else is no place to open a window. The card is a second window —
-/// measured on macOS 27, it does not dismiss the panel it opens from, and the
-/// panel's own outside-click monitor stays silent for a click inside it.
+/// **A row that names a repository answers for itself in a menu.** What it has
+/// to offer is two actions — the page the work is pushed to, and the path on
+/// this Mac — and Apple's guidance puts exactly that in a menu: *"a context
+/// menu lets people access a small number of frequently used actions relevant
+/// to their current view or task"* (Human Interface Guidelines, Menus). It was
+/// a `.popover` card until 0.1.10, which is the one thing the same guidance
+/// rules out here — *"Never show a cascade or hierarchy of popovers, in which
+/// one emerges from another"* — and `PanelProviderStatus` records what that
+/// cost the panel when it was measured.
+///
+/// A menu gives up nothing a card was buying. It is the system's own mechanism
+/// rather than a window of Sissy's, so it cannot resize the panel, it does not
+/// dismiss the popover it opens over — measured on macOS 27 — and it may reach
+/// past the panel's edge, which is the only thing the 240 pt card did that the
+/// panel's own 340 pt could not hold.
+///
+/// What it does give up is a path the pointer can select, so the path stays
+/// where it already was — on the hover — and goes where it was being selected
+/// to reach: the clipboard.
+///
+/// **A click rather than a hover**: the tooltip already belongs to the hover
+/// and is the only place the path is readable, and a list a pointer crosses on
+/// its way somewhere else is no place to open anything. The right-click
+/// carries the same items, the way the keep-awake switch carries its modes.
 struct ProjectRowView: View {
     let row: UsagePanelSnapshot.ProjectRow
 
-    @State private var showingCard = false
-
     var body: some View {
+        Group {
+            if hasActions {
+                Menu {
+                    actions
+                } label: {
+                    line
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .pointerStyle(.link)
+            } else {
+                line
+            }
+        }
+        .help(help)
+        .contextMenu { actions }
+    }
+
+    private var line: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 HStack(spacing: 0) {
@@ -334,84 +370,48 @@ struct ProjectRowView: View {
             ShareBar(share: row.share, tint: .secondary)
         }
         .contentShape(.rect)
-        .onTapGesture { showingCard = row.repository != nil }
-        .pointerStyle(row.repository == nil ? nil : .link)
-        .help(help)
-        .popover(isPresented: $showingCard, arrowEdge: .trailing) {
-            if let repository = row.repository {
-                ProjectCardView(repository: repository, path: row.tooltip)
+    }
+
+    /// The repository's page and its path — and nothing at all for a row that
+    /// names no repository, whose tooltip is a reason rather than a path, so a
+    /// menu offering to copy it would be offering the wrong thing. Returning
+    /// nothing is also what deactivates the right-click.
+    @ViewBuilder
+    private var actions: some View {
+        if let repository = row.repository {
+            if let page = repository.page {
+                Link(destination: page) {
+                    Label {
+                        Text("Open on \(repository.host)")
+                    } icon: {
+                        ForgeMark(host: repository.host)
+                    }
+                }
+            }
+            if let path = row.tooltip {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(path, forType: .string)
+                } label: {
+                    Label("Copy Path", systemImage: Self.copySymbol)
+                }
             }
         }
+    }
+
+    private var hasActions: Bool {
+        guard let repository = row.repository else { return false }
+        return repository.page != nil || row.tooltip != nil
     }
 
     private var help: String {
         guard let tooltip = row.tooltip else { return "" }
-        guard row.repository != nil else { return tooltip }
-        return tooltip + "\n" + Self.cardHint
+        guard hasActions else { return tooltip }
+        return tooltip + "\n" + Self.menuHint
     }
 
-    private static let cardHint = "Click for the repository"
-}
-
-/// What a project row knows about its repository beyond its own name: where
-/// it is pushed, where it sits on this Mac, and the way to its page.
-///
-/// The path is written with a `~` for the home directory and left selectable,
-/// because the two things anyone does with a path are read it and paste it.
-/// It is the same path the row hovers — a card that opened on a click has to
-/// answer without one, for anyone who got here without the tooltip.
-struct ProjectCardView: View {
-    let repository: UsagePanelSnapshot.RepositoryLink
-    let path: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(repository.label)
-                .font(.system(size: 12, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            forge
-            if let path {
-                Divider()
-                Text((path as NSString).abbreviatingWithTildeInPath)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-            }
-        }
-        .padding(12)
-        .frame(width: Self.width, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private var forge: some View {
-        if let page = repository.page {
-            Link(destination: page) {
-                forgeLine
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Open \(repository.label) on \(repository.host)")
-        } else {
-            forgeLine
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var forgeLine: some View {
-        HStack(spacing: 4) {
-            ForgeMark(host: repository.host)
-            Text(repository.host)
-            if repository.page != nil {
-                Image(systemName: "arrow.up.forward")
-            }
-        }
-        .font(.system(size: 10))
-    }
-
-    private static let width: CGFloat = 240
+    private static let menuHint = "Click for its page and its path"
+    private static let copySymbol = "doc.on.clipboard"
 }
 
 /// The forge's own mark, where Sissy ships one.

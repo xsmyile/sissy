@@ -28,6 +28,10 @@ struct PanelProviderPage: View {
     /// than a flag so the page can say which account it is moving to.
     let switchingAccount: String?
     let refresh: () -> Void
+    /// Opens the vendor's services, which are a page of the panel rather than
+    /// a surface of this one's: the panel owns which page is on screen, so the
+    /// row at the foot of this page asks for the move instead of making it.
+    let openServices: () -> Void
     /// This provider's archived days, read once when the page opens. A closure
     /// rather than a value because the read walks the archive and the page is
     /// rebuilt on every frame the engine emits — a value would have to be
@@ -130,7 +134,8 @@ struct PanelProviderPage: View {
 
             if let status = row.status {
                 Divider()
-                PanelProviderStatus(provider: row.id, row: status)
+                PanelProviderStatus(
+                    provider: row.id, row: status, openServices: openServices)
             }
         }
         .task(id: row.id) {
