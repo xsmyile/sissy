@@ -41,6 +41,13 @@ the state of a Sissy you have installed. `Start at login` and the legacy-agent
 retirement both go through `SMAppService`, which needs a normally signed bundle:
 `CODE_SIGNING_ALLOWED=NO` is fine for CI, not for testing those.
 
+Signing is the one thing the script cannot guess. It defaults to this project's
+own Development Team, so on any other machine set yours:
+`DEVELOPMENT_TEAM=XXXXXXXXXX scripts/dev-build-app.sh`. Nothing else in the
+repository needs an Apple Developer account — the plain `xcodebuild` above
+builds without one, and everything but that one switch can be exercised from
+its product.
+
 ## Before you push
 
 ```bash
