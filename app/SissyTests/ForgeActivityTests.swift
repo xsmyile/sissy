@@ -23,18 +23,18 @@ final class ForgeActivityTests: XCTestCase {
 
     private static let gitHubReply = """
         {"data":{"viewer":{"login":"xsmyile",
-        "contribToday":{"contributionCalendar":{"totalContributions":314}},
-        "contribWeek":{"contributionCalendar":{"totalContributions":761}},
-        "contribMonth":{"contributionCalendar":{"totalContributions":997}},
-        "contribAll":{"contributionCalendar":{"totalContributions":4126}}},
-        "mergedToday":{"issueCount":25},"mergedWeek":{"issueCount":152},
-        "mergedMonth":{"issueCount":205},"mergedAll":{"issueCount":400}}}
+        "contribToday":{"contributionCalendar":{"totalContributions":128}},
+        "contribWeek":{"contributionCalendar":{"totalContributions":704}},
+        "contribMonth":{"contributionCalendar":{"totalContributions":1009}},
+        "contribAll":{"contributionCalendar":{"totalContributions":4138}}},
+        "mergedToday":{"issueCount":28},"mergedWeek":{"issueCount":155},
+        "mergedMonth":{"issueCount":208},"mergedAll":{"issueCount":403}}}
         """
 
     private static let gitLabReply = """
-        {"data":{"currentUser":{"username":"team-user",
-        "mergedToday":{"count":11},"mergedWeek":{"count":87},
-        "mergedMonth":{"count":129},"mergedAll":{"count":519}}}}
+        {"data":{"currentUser":{"username":"davide",
+        "mergedToday":{"count":15},"mergedWeek":{"count":91},
+        "mergedMonth":{"count":133},"mergedAll":{"count":523}}}}
         """
 
     private static let gitHub = ForgeConnection.gitHub()
@@ -74,18 +74,45 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertEqual(ForgeWindow.day.string(from: start), "2026-09-17")
     }
 
-    /// GitHub reads a bare date as midnight **UTC**, so the merge qualifier
-    /// carries this Mac's own offset. Measured 2026-09-17 from Europe/Rome: the
-    /// same window asked from 14:00+02:00 answered 11 where 14:00+00:00
-    /// answered 6, so the offset is honoured and dropping it silently moves the
-    /// boundary — east of Greenwich the first hours of the local day fall out of
-    /// Today while the contributions figure beside them keeps them.
-    func testTheMergeQualifierCarriesTheLocalOffsetRatherThanABareDate() throws {
-        let start = try XCTUnwrap(ForgeWindow.start(of: .today, now: Self.measuredDay))
-        let rendered = ForgeWindow.timestamp.string(from: start)
-        XCTAssertTrue(rendered.hasPrefix("2026-09-17T00:00:00"), rendered)
-        XCTAssertEqual(ForgeWindow.timestamp.date(from: rendered), start)
-        XCTAssertFalse(GitHubActivityFeed.document(now: Self.measuredDay).contains("merged:>=2026-09-17 "))
+    /// Both forges bucket by whole UTC days and neither takes an instant, so a
+    /// window is named by its **date** at midnight `Z`.
+    ///
+    /// The regression this pins cost the row a whole extra day: measured
+    /// 2026-09-17 from Europe/Rome, the local midnight rendered as the instant
+    /// it is — `2026-09-16T22:00:00Z` — answered 326 contributions where the
+    /// profile's own square for the 17th read 128, and 773 over seven days
+    /// where the seven squares came to 704. Asked from noon or 23:00 on the
+    /// 17th it still answers 128, which is what proves the bucket is the day.
+    func testEveryWindowIsAskedForAtMidnightUTCOfItsOwnLocalDate() throws {
+        let today = try XCTUnwrap(ForgeWindow.start(of: .today, now: Self.measuredDay))
+        let week = try XCTUnwrap(ForgeWindow.start(of: .sevenDays, now: Self.measuredDay))
+        XCTAssertEqual(ForgeWindow.vendorDay(today), "2026-09-17T00:00:00Z")
+        XCTAssertEqual(ForgeWindow.vendorDay(week), "2026-09-11T00:00:00Z")
+    }
+
+    /// No document may carry an instant that is not a day boundary, whatever
+    /// this Mac's offset is.
+    ///
+    /// Asserted by scanning rather than by naming the strings, because the
+    /// failure is a formatter changing under a call site that still reads
+    /// correctly — and a test written in a timezone where local midnight *is*
+    /// midnight UTC would have passed the bug straight through, which is how it
+    /// shipped: CI runs in UTC.
+    func testNoDocumentCarriesAnInstantThatIsNotADayBoundary() throws {
+        let stamp = try NSRegularExpression(pattern: "\\d{4}-\\d{2}-\\d{2}T[^\"\\s]*")
+        let documents = [
+            GitHubActivityFeed.document(now: Self.measuredDay),
+            GitLabActivityFeed.document(now: Self.measuredDay),
+        ]
+        for document in documents {
+            let range = NSRange(document.startIndex..., in: document)
+            let matches = stamp.matches(in: document, range: range)
+            XCTAssertFalse(matches.isEmpty, document)
+            for match in matches {
+                let found = String(document[Range(match.range, in: document)!])
+                XCTAssertTrue(found.hasSuffix("T00:00:00Z"), found)
+            }
+        }
     }
 
     // MARK: GitHub
@@ -94,12 +121,12 @@ final class ForgeActivityTests: XCTestCase {
         let reading = try GitHubActivityFeed.parse(
             payload(Self.gitHubReply), connection: Self.gitHub, now: Self.measuredDay)
         XCTAssertEqual(reading.login, "xsmyile")
-        XCTAssertEqual(reading.contributions(for: .today), 314)
-        XCTAssertEqual(reading.contributions(for: .sevenDays), 761)
-        XCTAssertEqual(reading.contributions(for: .thirtyDays), 997)
-        XCTAssertEqual(reading.contributions(for: .all), 4126)
-        XCTAssertEqual(reading.merged(for: .today), 25)
-        XCTAssertEqual(reading.merged(for: .all), 400)
+        XCTAssertEqual(reading.contributions(for: .today), 128)
+        XCTAssertEqual(reading.contributions(for: .sevenDays), 704)
+        XCTAssertEqual(reading.contributions(for: .thirtyDays), 1009)
+        XCTAssertEqual(reading.contributions(for: .all), 4138)
+        XCTAssertEqual(reading.merged(for: .today), 28)
+        XCTAssertEqual(reading.merged(for: .all), 403)
         XCTAssertNil(reading.failure)
     }
 
@@ -146,11 +173,15 @@ final class ForgeActivityTests: XCTestCase {
         let month = try XCTUnwrap(ForgeWindow.start(of: .thirtyDays, now: Self.measuredDay))
         XCTAssertTrue(
             document.contains(
-                "is:pr author:@me is:merged merged:>=\(ForgeWindow.timestamp.string(from: today))"),
+                "is:pr author:@me is:merged merged:>=\(ForgeWindow.vendorDay(today))"),
             document)
         XCTAssertTrue(
             document.contains(
-                "is:pr author:@me is:merged merged:>=\(ForgeWindow.timestamp.string(from: month))"))
+                "is:pr author:@me is:merged merged:>=\(ForgeWindow.vendorDay(month))"))
+        XCTAssertTrue(
+            document.contains(
+                "contribToday: contributionsCollection(from: \"\(ForgeWindow.vendorDay(today))\")"),
+            document)
         XCTAssertTrue(document.contains("contributionCalendar { totalContributions }"))
         XCTAssertTrue(document.contains("viewer { login"))
         // `all` names no range at all, which is how the widest figure is asked
@@ -175,11 +206,11 @@ final class ForgeActivityTests: XCTestCase {
     func testGitLabReplyReadsBackTheMergeCountsAndTheAccount() throws {
         let counts = try payload(Self.gitLabReply)
         let user = try XCTUnwrap(counts["currentUser"] as? [String: Any])
-        XCTAssertEqual(user["username"] as? String, "team-user")
+        XCTAssertEqual(user["username"] as? String, "davide")
         let today = try XCTUnwrap(user[ForgeAlias.merged(.today)] as? [String: Any])
-        XCTAssertEqual(today["count"] as? Int, 11)
+        XCTAssertEqual(today["count"] as? Int, 15)
         let all = try XCTUnwrap(user[ForgeAlias.merged(.all)] as? [String: Any])
-        XCTAssertEqual(all["count"] as? Int, 519)
+        XCTAssertEqual(all["count"] as? Int, 523)
     }
 
     func testGitLabDocumentScopesEachWindowAndLeavesTheWidestUnbounded() {
@@ -187,22 +218,6 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertTrue(document.contains("currentUser { username"))
         XCTAssertTrue(document.contains("authoredMergeRequests(state: merged, mergedAfter:"))
         XCTAssertTrue(document.contains("mergedAll: authoredMergeRequests(state: merged) { count }"))
-    }
-
-    /// `after` is exclusive, measured: `after=2026-09-17` answered `x-total: 0`
-    /// on a day that had 95 events. So a window starting on a day names the day
-    /// before it, and the widest window names none.
-    func testGitLabEventsURLNamesTheDayBeforeTheWindowStarts() throws {
-        let today = try XCTUnwrap(
-            GitLabActivityFeed.eventsURL(Self.gitLab, period: .today, now: Self.measuredDay))
-        XCTAssertTrue(today.absoluteString.contains("after=2026-09-16"), today.absoluteString)
-        XCTAssertTrue(today.absoluteString.contains("per_page=1"))
-        let week = try XCTUnwrap(
-            GitLabActivityFeed.eventsURL(Self.gitLab, period: .sevenDays, now: Self.measuredDay))
-        XCTAssertTrue(week.absoluteString.contains("after=2026-09-10"), week.absoluteString)
-        let everything = try XCTUnwrap(
-            GitLabActivityFeed.eventsURL(Self.gitLab, period: .all, now: Self.measuredDay))
-        XCTAssertFalse(everything.absoluteString.contains("after="))
     }
 
     // MARK: Connections

@@ -100,17 +100,34 @@ a connection exists on a Mac where neither CLI has ever run. Empty until the use
 connects one, which is also the module's only switch.
 
 **The two counters are never summed across forges.** GitHub answers with its own
-contribution-graph total — measured 2026-09-17, 314 on a day whose commit, pull
-request and issue counts came to far less, because the calendar includes private
-contributions the breakdown does not itemise — and GitLab publishes no equivalent
-Sissy can read: `users/<name>/calendar.json` answered 200 with `{}` on a
-self-hosted 19.3 instance with a valid token, so the figure there is the count of
-events GitLab recorded, taken from the `x-total` header of `/api/v4/events` with
-one row requested. Two vendors counting two things is two readings; adding them
-would invent a third belonging to neither, which is the rule `ProviderCredits`
-already holds for money in two currencies. On the widest window GitHub's
-contributions reach back a year where its merge count reaches back for ever,
-which the row says on the hover rather than quietly averaging away.
+contribution-graph total — measured 2026-09-17, 128 on a day whose itemised
+commits, issues and pull requests came to 56, the rest being the private work the
+breakdown will not name — and GitLab publishes no equivalent Sissy can read: `users/<name>/calendar.json`
+answered 200 with `{}` on a self-hosted 19.3 instance with a valid token, so the
+figure there is the count of events GitLab recorded, taken from the `x-total`
+header of `/api/v4/events` with one row requested. Two vendors counting two
+things is two readings; adding them would invent a third belonging to neither,
+which is the rule `ProviderCredits` already holds for money in two currencies. On
+the widest window GitHub's contributions reach back a year where its merge count
+reaches back for ever, which the row says on the hover rather than
+quietly averaging away.
+
+**Every window is a whole day in the forge's own calendar, never an instant.**
+Both vendors bucket by UTC days and neither takes a finer filter: measured
+2026-09-17 from Europe/Rome, a local midnight rendered as the instant it is
+(`2026-09-16T22:00:00Z`) made GitHub's calendar snap down to the start of that
+UTC day and answer 326 where the profile's own square for the 17th read 128, and
+773 over seven days where the seven squares came to 704 — the error being worth
+whatever the extra day held, which is why it was invisible at 30 days (0 on
+2026-08-18) and not at 7 (69 on 2026-09-10). So a window is named by its date at
+midnight `Z`, and the two filters that *are* instants — GitHub's `merged:>=`
+qualifier and GitLab's `mergedAfter` — take the same form rather than sitting on
+a window two hours wider than the contributions beside them: measured the same
+day, 156 merges against the 155 inside the seven UTC days the contribution figure
+is over. The row therefore answers the same squares the user is reading on the
+heatmap, and the residual nothing can close is a GitLab whose instance timezone
+differs from the profile's, since `after` on the events endpoint takes a date and
+applies it in the instance's.
 
 `providers[].plan` is the account's subscription plan as the vendor's own
 lowercase token — `max`, `team`, `plus` — never a display label: the app words it
@@ -234,7 +251,7 @@ compiled into the app too.
 | `ForgeActivity.swift`           | `ForgeKind`, `ForgeActivity` (the two counters per period), `ForgeActivityReading` and `ForgeReadFailure`. The login is on the *reading* and never on the connection: measured 2026-09-17, `gh`'s own configuration named one account while the token in its keychain item answered as another, so a username taken from a CLI's config is a guess about whose numbers these are. A period that could not be read is absent rather than zero |
 | `ForgeConnections.swift`        | `ForgeConnection` (kind plus host — the id, so one host serving two forges is two rows), `ForgeConnectionIndex` (`forge-connections.json`, holding no secret so a lapsed grant still lists what is connected) and `ForgeTokenStore` (`com.radonforge.sissy.forge-token`). No enabled flag: a connection is the switch, and removing it is the off |
 | `ForgeTokenImport.swift`        | Reads the tokens `gh` and `glab` already hold, on the press that offers them and nowhere else. `gh`'s is in the login keychain as `go-keyring-base64:<base64>` and is read through `/usr/bin/security` because that tool is on the item's ACL and this process is not — measured 2026-09-17, no dialog. `glab`'s is plaintext in its own config. Neither CLI's storage is ever written |
-| `ForgeActivityFeed.swift`       | `ForgeWindow` (the archive's own window arithmetic, so the rows count the days the money above them does) and one reader per forge. GitHub answers every period's contributions *and* every period's merged count in one GraphQL document costing 1 point of 5000/h; GitLab takes one GraphQL query plus one header read per period. `after` on GitLab's events is **exclusive**, measured, so a window names the day before it starts |
+| `ForgeActivityFeed.swift`       | `ForgeWindow` (the archive's own window arithmetic, plus `vendorDay`, which renders a window start as its own local date at midnight UTC — both forges bucket by whole UTC days and an instant made the calendar snap down and buy a whole extra day) and one reader per forge. GitHub answers every period's contributions *and* every period's merged count in one GraphQL document costing 1 point of 5000/h; GitLab takes one GraphQL query plus one header read per period. `after` on GitLab's events is **exclusive**, measured, so a window names the day before it starts |
 | `ForgeActivityMonitor.swift`    | The poll: 5 min while agents are working, 30 min once nothing has, jittered, one value published for every connection. A failure keeps the last figures **and their age** — republishing would date a reading nobody took — and a refused or missing token parks the connection until the user acts, which is what separates this loop from `ProviderStatusMonitor`'s |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow` / `ProviderAccount` / `ProviderCredits`, the burn rate, and the slice and project ordering. No formatters: the frame carries raw numbers and the app words them. `history` is one rollup per `UsagePeriod` the archive answers for, never keyed by `today` — the headline reads that off the live totals beside it |
