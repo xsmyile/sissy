@@ -331,7 +331,7 @@ actor UsageEngine {
                 let probe =
                     limitsProbe
                     ?? ClaudeLimitsProbe(
-                        credentials: { _, _ in
+                        credentials: { _ in
                             ClaudeCodeCredentials.load(home: home)
                         },
                         backoff: limitsBackoff.slot(for: LimitsBackoffLedger.claudeCLIKey))
@@ -1125,12 +1125,13 @@ actor UsageEngine {
         // either here is how a second account's windows land under the first
         // account's name.
         // The CLI's own credential raises no dialog and has no grant to go
-        // stale, so `userInitiated` means nothing to it: it polls from the
-        // moment there is something to read. Whether it found one is its own
-        // first reading rather than a second lookup — asking separately would
-        // spawn `security` for an answer the probe is about to publish.
+        // stale, which is why its probe takes no `userInitiated` at all: it
+        // polls from the moment there is something to read. Whether it found
+        // one is its own first reading rather than a second lookup — asking
+        // separately would spawn `security` for an answer the probe is about
+        // to publish.
         if let own = claudeOwnLimits {
-            await own.start(userInitiated: false) {
+            await own.start {
                 await me.noteOwnCredential(own.currentSignals().limitsState)
                 await me.reemit()
             }

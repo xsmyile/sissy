@@ -100,19 +100,22 @@ enum ClaudeCredentialsStore {
     /// slot, because only that proves the query is no longer parked in the
     /// Security framework.
     ///
-    /// `lookup` exists so the abandonment can be tested without a keychain:
-    /// the blocking call is the one piece of external I/O here, and nothing
-    /// else in this path can stand in for a dialog nobody answers.
+    /// `lookup` is the read itself, and it is required rather than defaulted.
+    /// The default this had was an in-process `SecItemCopyMatching`, which is
+    /// the one read on this path that can raise the legacy keychain's own
+    /// panel — and nothing in the app took it, so it was a dialog waiting for
+    /// the first caller that forgot to pass something. Naming the read at the
+    /// call site is also what makes the abandonment testable without a
+    /// keychain.
     ///
-    /// `allowingInteraction` is the caller saying whether it is a user action.
-    /// It is the only thing that decides whether macOS may put a dialog on
-    /// screen, and every scheduled read passes `false`.
+    /// One lookup at a time is a process-wide gate, so every caller must be
+    /// asking the same question. That holds because there is one Claude config
+    /// home and therefore one reader: a second home would need a gate per
+    /// service, not this one.
     static func loadOffPool(
         timeout: Duration,
-        allowingInteraction: Bool,
-        lookup: (@Sendable (Bool) -> ClaudeCredentialsLookup)? = nil
+        lookup: @escaping @Sendable () -> ClaudeCredentialsLookup
     ) async -> ClaudeCredentialsLookup {
-        let run = lookup ?? { load(allowingInteraction: $0) }
         let id = UUID()
         var deadline: Task<Void, Never>?
         let outcome = await withCheckedContinuation { continuation in
@@ -130,7 +133,7 @@ enum ClaudeCredentialsStore {
             }
             if mine {
                 DispatchQueue.global(qos: .utility).async {
-                    gate.finish(run(allowingInteraction))
+                    gate.finish(lookup())
                 }
             }
         }
@@ -140,8 +143,8 @@ enum ClaudeCredentialsStore {
 
     private static let gate = KeychainLookupGate()
 
-    /// The lookup, with the legacy keychain's own Allow/Deny panel switched
-    /// off for the duration of a silent read.
+    /// One `SecItemCopyMatching`, with the legacy keychain's own Allow/Deny
+    /// panel switched off for the duration of a silent read.
     ///
     /// `makeQuery`'s two suppressors are not enough on their own. Measured on
     /// macOS 27 against the item Claude Code writes: a read carrying both an
@@ -153,27 +156,23 @@ enum ClaudeCredentialsStore {
     /// deprecated with no replacement, so it is resolved by name for the same
     /// reason the constants are, thrown only around the call, and put back
     /// before returning — the interactive read a user action makes needs the
-    /// panel. Process-wide is safe here because `loadOffPool`'s gate runs one
-    /// lookup at a time and nothing else in Sissy touches a keychain.
+    /// panel.
     ///
     /// The restore is to `true` rather than to whatever was there before: the
     /// API has no getter, and `true` is the state every process starts in and
-    /// the only one anything else in Sissy would want.
-    static func load(allowingInteraction: Bool) -> ClaudeCredentialsLookup {
-        let result = copyMatching(
-            makeQuery(allowingInteraction: allowingInteraction),
-            allowingInteraction: allowingInteraction)
-        return classify(
-            result.status, data: result.data, allowingInteraction: allowingInteraction)
-    }
-
-    /// One `SecItemCopyMatching` under the suppression above.
+    /// the only one anything else in Sissy would want. Which is also the bound
+    /// on it: the suppression covers one synchronous call, so two readers
+    /// overlapping here would have the first one's restore re-open the panel
+    /// for the second. Nothing serialises them today — there is a reader per
+    /// linked session — and the gate above does not reach this, because the
+    /// session store calls it directly.
     ///
-    /// Separate from `load` because `ClaudeWebSessionStore` reads an item
-    /// Sissy owns and parses something else out of it, while needing this
-    /// exact handling of the panel: an item Sissy wrote is on its own ACL and
-    /// reads silently, right up until Sissy is re-signed, and at that point a
-    /// background read has to fail rather than interrupt.
+    /// Its one caller is `ClaudeWebSessionStore`, which reads an item Sissy
+    /// owns: that item is on Sissy's own ACL and reads silently right up until
+    /// Sissy is re-signed, and at that point a background read has to fail
+    /// rather than interrupt. Claude Code's own item is no longer read this
+    /// way at all — `ClaudeCodeCredentials` reaches it through
+    /// `/usr/bin/security`, which is on that item's ACL where Sissy is not.
     static func copyMatching(
         _ query: [String: Any],
         allowingInteraction: Bool

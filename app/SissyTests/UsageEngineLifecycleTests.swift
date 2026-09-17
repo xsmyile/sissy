@@ -23,7 +23,7 @@ final class UsageEngineLifecycleTests: XCTestCase {
     /// Points every path at the temp tree and pins pricing to the embedded
     /// seed, so a test neither reads the real log trees nor reaches the network.
     private func makeEngine(
-        limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe { _, _ in .absent },
+        limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe { _ in .absent },
         statusMonitor: ProviderStatusMonitor? = nil
     ) -> UsageEngine {
         var config = ServerConfig.defaults
@@ -66,7 +66,7 @@ final class UsageEngineLifecycleTests: XCTestCase {
     func testAStoppedEngineRunsNoLimitsPoll() async {
         let reads = LockedValue(0)
         let engine = makeEngine(
-            limitsProbe: ClaudeLimitsProbe { _, _ in
+            limitsProbe: ClaudeLimitsProbe { _ in
                 reads.update { $0 += 1 }
                 return .absent
             })
@@ -100,7 +100,7 @@ final class UsageEngineLifecycleTests: XCTestCase {
     func testAStopWinsOverAConcurrentStart() async {
         let reads = LockedValue(0)
         let engine = makeEngine(
-            limitsProbe: ClaudeLimitsProbe { _, _ in
+            limitsProbe: ClaudeLimitsProbe { _ in
                 reads.update { $0 += 1 }
                 return .absent
             })

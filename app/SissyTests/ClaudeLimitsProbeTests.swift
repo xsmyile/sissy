@@ -2,21 +2,20 @@ import XCTest
 
 @testable import Sissy
 
-/// Who is allowed to make macOS ask, and what a read that was not allowed to
-/// does to the probe.
+/// What each credential outcome does to the probe, and what the row is told.
 final class ClaudeLimitsProbeTests: XCTestCase {
-    /// Records what each credential read was allowed to do, and lets a test
-    /// wait for the nth read rather than for a duration.
+    /// Counts credential reads and lets a test wait for the nth rather than
+    /// for a duration.
     private final class Reads: @unchecked Sendable {
         private let lock = NSLock()
-        private var interactive: [Bool] = []
+        private var reads = 0
         private var pending: [(count: Int, expectation: XCTestExpectation)] = []
 
-        func record(_ allowingInteraction: Bool) {
+        func record() {
             lock.lock()
-            interactive.append(allowingInteraction)
-            let ready = pending.filter { $0.count <= interactive.count }
-            pending.removeAll { $0.count <= interactive.count }
+            reads += 1
+            let ready = pending.filter { $0.count <= reads }
+            pending.removeAll { $0.count <= reads }
             lock.unlock()
             ready.forEach { $0.expectation.fulfill() }
         }
@@ -24,7 +23,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         func expectation(forReadCount count: Int) -> XCTestExpectation {
             let waiting = XCTestExpectation(description: "read \(count)")
             lock.lock()
-            if interactive.count >= count {
+            if reads >= count {
                 lock.unlock()
                 waiting.fulfill()
                 return waiting
@@ -34,83 +33,17 @@ final class ClaudeLimitsProbeTests: XCTestCase {
             return waiting
         }
 
-        var all: [Bool] { lock.withLock { interactive } }
-        var count: Int { lock.withLock { interactive.count } }
+        var count: Int { lock.withLock { reads } }
     }
 
     private func makeProbe(
         _ reads: Reads,
         answering outcome: @escaping @Sendable () -> ClaudeCredentialsLookup
     ) -> ClaudeLimitsProbe {
-        ClaudeLimitsProbe { _, allowingInteraction in
-            reads.record(allowingInteraction)
+        ClaudeLimitsProbe { _ in
+            reads.record()
             return outcome()
         }
-    }
-
-    /// The rule the whole issue is about: a launch that merely finds the
-    /// setting already on must not put a dialog in front of someone who did
-    /// not just ask for one.
-    func testALaunchThatFindsTheSwitchOnNeverAsks() async {
-        let reads = Reads()
-        let probe = makeProbe(reads) { .interactionRequired }
-        let first = reads.expectation(forReadCount: 1)
-
-        await probe.start(userInitiated: false) {}
-        await fulfillment(of: [first], timeout: 5)
-        await probe.stop()
-
-        XCTAssertEqual(reads.all, [false], "a launch asked macOS for permission")
-    }
-
-    /// And its other half: flipping the switch is a user action, and the one
-    /// moment Sissy is allowed to ask.
-    func testFlippingTheSwitchIsAllowedToAsk() async {
-        let reads = Reads()
-        let probe = makeProbe(reads) { .absent }
-        let first = reads.expectation(forReadCount: 1)
-
-        await probe.start(userInitiated: true) {}
-        await fulfillment(of: [first], timeout: 5)
-        await probe.stop()
-
-        XCTAssertEqual(reads.all, [true], "the switch was not allowed to ask")
-    }
-
-    /// A silent miss is not a refusal, so the poll loop survives it: the grant
-    /// can come back on its own — the CLI rewrites the item, the user allows
-    /// it in Keychain Access — and a probe that stopped would need a relaunch
-    /// to find out. Aliveness is read through `start` being idempotent: a
-    /// second start finds the loop still holding the slot and does nothing.
-    func testASilentMissLeavesTheProbeAlive() async {
-        let reads = Reads()
-        let probe = makeProbe(reads) { .interactionRequired }
-        let first = reads.expectation(forReadCount: 1)
-        await probe.start(userInitiated: false) {}
-        await fulfillment(of: [first], timeout: 5)
-
-        await probe.start(userInitiated: false) {}
-        await probe.stop()
-
-        XCTAssertEqual(reads.count, 1, "the probe had stopped and a second start restarted it")
-    }
-
-    /// A refusal is a person saying no, and re-asking them on a timer would be
-    /// harassment — so that one does stop the loop, and a later start is what
-    /// begins again.
-    func testARefusalStopsTheProbe() async {
-        let reads = Reads()
-        let probe = makeProbe(reads) { .denied }
-        let first = reads.expectation(forReadCount: 1)
-        await probe.start(userInitiated: true) {}
-        await fulfillment(of: [first], timeout: 5)
-
-        let second = reads.expectation(forReadCount: 2)
-        await probe.start(userInitiated: true) {}
-        await fulfillment(of: [second], timeout: 5)
-        await probe.stop()
-
-        XCTAssertEqual(reads.all, [true, true], "a refusal left the poll loop running")
     }
 
     /// The state is what the panel acts on, so it has to name the outcome the
@@ -121,12 +54,11 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     /// this shipped green locally and failed on CI.
     func testEachOutcomeTheUserCanActOnReachesTheFrame() async {
         let cases: [(ClaudeCredentialsLookup, ProviderLimitsState)] = [
-            (.interactionRequired, .needsAuthorization),
-            (.denied, .refused),
             (.absent, .signedOut),
+            (.unreachable, .credentialUnreachable),
         ]
         for (lookup, expected) in cases {
-            let probe = ClaudeLimitsProbe { _, _ in lookup }
+            let probe = ClaudeLimitsProbe { _ in lookup }
 
             _ = await probe.refreshOnce {}
 
@@ -136,34 +68,40 @@ final class ClaudeLimitsProbeTests: XCTestCase {
 
     /// A transient failure is not something to put on a row: the last reading
     /// stays up with its age, which is what the panel already does.
+    ///
+    /// `.denied` is here for a different reason. This reader cannot be denied
+    /// — nothing it reads asks the user anything — so the outcome is reported
+    /// and nothing is published, where it used to publish `.refused` and stop
+    /// the loop for good.
     func testAFailureNobodyCanActOnLeavesTheStateAlone() async {
-        let probe = ClaudeLimitsProbe { _, _ in .denied }
+        let probe = ClaudeLimitsProbe { _ in .denied }
         _ = await probe.refreshOnce {}
-        XCTAssertEqual(probe.currentSignals().limitsState, .refused)
+        XCTAssertEqual(probe.currentSignals().limitsState, .quiet)
 
-        let transient = ClaudeLimitsProbe { _, _ in .timedOut }
+        let transient = ClaudeLimitsProbe { _ in .timedOut }
         _ = await transient.refreshOnce {}
         XCTAssertEqual(transient.currentSignals().limitsState, .quiet)
     }
 
-    /// The bug this caught: a refusal stops the probe, and the stop used to
-    /// clear the state it had just published — so the one thing offering a
-    /// way back erased itself. The two stops are told apart by a parameter
-    /// rather than by statement order, because they can interleave.
-    func testARefusalSurvivesTheStopItTriggers() async {
-        let probe = ClaudeLimitsProbe { _, _ in .denied }
+    /// An outcome this reader cannot meet does not stop it either: the poll
+    /// that met it is one poll, and the next one reads again.
+    func testAnImpossibleOutcomeLeavesTheProbeAlive() async {
+        let reads = Reads()
+        let probe = makeProbe(reads) { .denied }
 
         _ = await probe.refreshOnce {}
+        _ = await probe.refreshOnce {}
 
-        XCTAssertEqual(probe.currentSignals().limitsState, .refused)
+        XCTAssertEqual(reads.count, 2, "an outcome it cannot meet stopped the reader")
+        await probe.stop()
     }
 
-    /// The other stop. A row explaining why the limits are missing, under a
-    /// switch the user has just turned off, blames Sissy for obeying.
+    /// A row explaining why the limits are missing, under a switch the user
+    /// has just turned off, blames Sissy for obeying.
     func testSwitchingTheModuleOffClearsTheState() async {
-        let probe = ClaudeLimitsProbe { _, _ in .interactionRequired }
+        let probe = ClaudeLimitsProbe { _ in .absent }
         _ = await probe.refreshOnce {}
-        XCTAssertEqual(probe.currentSignals().limitsState, .needsAuthorization)
+        XCTAssertEqual(probe.currentSignals().limitsState, .signedOut)
 
         await probe.stop()
 
@@ -177,7 +115,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     /// probe that could no longer read the keychain sat silent until the next
     /// turn landed.
     func testAStateChangeIsPublishedWithoutAnyTokenEvent() async {
-        let probe = ClaudeLimitsProbe { _, _ in .interactionRequired }
+        let probe = ClaudeLimitsProbe { _ in .absent }
         let notified = expectation(description: "the authorization state reached the frame")
 
         _ = await probe.refreshOnce { notified.fulfill() }
@@ -189,7 +127,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     /// And its other half: a poll that met the same condition again publishes
     /// nothing, so a steady state costs no frames.
     func testTheSameStateTwiceIsNotPublishedTwice() async {
-        let probe = ClaudeLimitsProbe { _, _ in .interactionRequired }
+        let probe = ClaudeLimitsProbe { _ in .absent }
         let repeated = expectation(description: "the unchanged state was published again")
         repeated.isInverted = true
         _ = await probe.refreshOnce {}
@@ -209,7 +147,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         let gate = Gate()
         let order = Order()
         let started = expectation(description: "the request began")
-        let probe = ClaudeLimitsProbe { _, _ in
+        let probe = ClaudeLimitsProbe { _ in
             .found(ClaudeCredentials(accessToken: "t", expiresAt: .distantFuture))
         } fetch: { _ in
             started.fulfill()
@@ -262,22 +200,21 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         func refreshReturned() { refreshOutranTheRequest = !requestDone }
     }
 
-    /// The refresh exists because none of this was reachable from a running
-    /// probe: `start` returns early while the poll task lives, so without its
-    /// own entry point the second read never happened at all — let alone with
-    /// the dialog allowed.
-    func testARefreshReadsAgainAndIsAllowedToAsk() async {
+    /// The refresh exists because a second read was not reachable from a
+    /// running probe at all: `start` returns early while the poll task lives,
+    /// so without its own entry point the button read nothing.
+    func testARefreshReadsTheCredentialAgain() async {
         let reads = Reads()
-        let probe = makeProbe(reads) { .interactionRequired }
+        let probe = makeProbe(reads) { .absent }
         let first = reads.expectation(forReadCount: 1)
-        await probe.start(userInitiated: false) {}
+        await probe.start {}
         await fulfillment(of: [first], timeout: 5)
 
         let second = reads.expectation(forReadCount: 2)
         await probe.refresh {}
         await fulfillment(of: [second], timeout: 5)
 
-        XCTAssertEqual(Array(reads.all.prefix(2)), [false, true])
+        XCTAssertEqual(reads.count, 2)
         await probe.stop()
     }
 
@@ -294,7 +231,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
     func testANewCredentialReplacesTheWindowsTheOldOneDrew() async {
         let token = LockedValue("first")
         let probe = ClaudeLimitsProbe(
-            credentials: { _, _ in
+            credentials: { _ in
                 .found(ClaudeCredentials(accessToken: token.load(), expiresAt: .distantFuture))
             },
             fetch: { accessToken in
@@ -393,7 +330,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         let probe = LockedValue<ClaudeLimitsProbe?>(nil)
         let duringRequest = LockedValue<ProviderLimitsState?>(nil)
         let built = ClaudeLimitsProbe(
-            credentials: { _, _ in
+            credentials: { _ in
                 .found(ClaudeCredentials(accessToken: "token", expiresAt: .distantFuture))
             },
             fetch: { _ in
@@ -419,7 +356,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         backoff: LimitsBackoffSlot? = nil
     ) -> ClaudeLimitsProbe {
         ClaudeLimitsProbe(
-            credentials: { _, _ in
+            credentials: { _ in
                 .found(ClaudeCredentials(accessToken: "token", expiresAt: .distantFuture))
             },
             fetch: { _ in
@@ -547,7 +484,7 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         counting fetches: LockedValue<Int> = LockedValue(0)
     ) -> ClaudeLimitsProbe {
         ClaudeLimitsProbe(
-            credentials: { _, _ in
+            credentials: { _ in
                 .found(ClaudeCredentials(accessToken: "token", expiresAt: .distantFuture))
             },
             fetch: { _ in

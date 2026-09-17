@@ -1268,8 +1268,8 @@ func runKeychainTimeoutTests() {
     let answered = TestBox<Bool>(false)
     Task {
         let result = await ClaudeCredentialsStore.loadOffPool(
-            timeout: .seconds(5), allowingInteraction: false
-        ) { _ in .absent }
+            timeout: .seconds(5)
+        ) { .absent }
         if case .absent = result { answered.value = true }
         delivered.signal()
     }
@@ -1282,8 +1282,8 @@ func runKeychainTimeoutTests() {
     Task {
         let started = Date()
         let result = await ClaudeCredentialsStore.loadOffPool(
-            timeout: .milliseconds(200), allowingInteraction: false
-        ) { _ in
+            timeout: .milliseconds(200)
+        ) {
             Thread.sleep(forTimeInterval: 1.5)
             return .absent
         }

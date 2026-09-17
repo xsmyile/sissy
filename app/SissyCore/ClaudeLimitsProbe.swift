@@ -22,12 +22,16 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// successful reading landed — published together so the row that draws
     /// the gauges and the row that explains their absence come off one value.
     nonisolated private let published = LockedValue(ProviderSignals())
-    /// Where the CLI's token comes from. Injectable for the same reason
-    /// `ClaudeCredentialsStore.loadOffPool` takes a `lookup`: reading the
-    /// keychain is what can raise a system dialog, and a test of the switch
-    /// that starts this probe has to be able to answer for one without
-    /// putting it on a screen.
-    private let credentialsSource: @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup
+    /// Where the CLI's token comes from, under the budget the caller sets.
+    ///
+    /// Injectable for the same reason `ClaudeCredentialsStore.loadOffPool`
+    /// takes a `lookup`: the read is the one piece of external I/O here, and a
+    /// test of the loop this probe runs has to answer for it without a
+    /// keychain. It takes no interaction flag, because nothing this probe
+    /// reads can ask the user anything — `ClaudeCodeCredentials` reads the
+    /// CLI's own file and falls back to `/usr/bin/security`, and neither
+    /// raises a dialog.
+    private let credentialsSource: @Sendable (Duration) async -> ClaudeCredentialsLookup
     /// The network half, injectable for the same reason: a test of the refresh
     /// contract must not reach Anthropic to observe it.
     private let fetchSource: @Sendable (String) async throws -> Reading
@@ -49,14 +53,6 @@ actor ClaudeLimitsProbe: SourceSignals {
         let windows: [UsageWindow]
         let credits: ProviderCredits?
     }
-    /// Whether the next credential read may put a dialog on screen.
-    ///
-    /// Set only by a `start` the user asked for, and spent on the first read
-    /// that needs it. Everything after that — every poll, and every launch
-    /// that merely finds the setting already on — reads silently, which is the
-    /// difference between a permission asked for when a switch is flipped and
-    /// a stack of dialogs waiting on a Mac nobody was sitting at.
-    private var mayInteract = false
     private var pollTask: Task<Void, Never>?
     /// The request a refresh awaits, so "refreshing" ends when Claude has
     /// answered rather than when the task was handed off.
@@ -69,13 +65,16 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// still gets through.
     private var lastReported: String?
 
-    /// `credentials` leads so a trailing closure still names the keychain: it
-    /// is the half nearly every test answers for, and the half that decides
-    /// whether macOS is asked anything at all.
+    /// `credentials` leads so a trailing closure still names the read: it is
+    /// the half nearly every test answers for.
+    ///
+    /// It carries no default. The one this had resolved to an in-process
+    /// `SecItemCopyMatching`, which every caller in the app overrode and which
+    /// is the only read on this path that could ever raise the legacy
+    /// keychain's Allow/Deny panel — a default nothing takes is a dialog
+    /// waiting for the first caller that forgets to.
     init(
-        credentials: @escaping @Sendable (Duration, Bool) async -> ClaudeCredentialsLookup = {
-            await ClaudeCredentialsStore.loadOffPool(timeout: $0, allowingInteraction: $1)
-        },
+        credentials: @escaping @Sendable (Duration) async -> ClaudeCredentialsLookup,
         fetch: @escaping @Sendable (String) async throws -> Reading = {
             try await ClaudeLimitsProbe.fetch(token: $0)
         },
@@ -95,22 +94,20 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// changes — a new set of windows, or a new reason they are missing — so a
     /// steady state costs no emits. Idempotent.
     ///
-    /// `userInitiated` says whether someone just flipped the switch. Only that
-    /// start is allowed to raise the keychain dialog; the one a launch makes
-    /// because the setting was already on reads silently and shows no limits
-    /// if the grant has gone stale.
-    func start(userInitiated: Bool, onRefresh: @Sendable @escaping () async -> Void) {
+    /// It takes no `userInitiated`: the reads this probe makes cannot ask the
+    /// user for anything, so a start the user asked for and a start a launch
+    /// made do exactly the same thing.
+    func start(onRefresh: @Sendable @escaping () async -> Void) {
         guard pollTask == nil else { return }
-        _ = begin(userInitiated: userInitiated, onRefresh: onRefresh)
+        _ = begin(onRefresh: onRefresh)
     }
 
     /// Starts the loop and hands back the first request, so an explicit
     /// refresh stays pending until credentials, network and publication have
     /// all completed rather than ending on the hand-off.
-    private func begin(userInitiated: Bool, onRefresh: @Sendable @escaping () async -> Void) -> Task<
+    private func begin(onRefresh: @Sendable @escaping () async -> Void) -> Task<
         Duration, Never
     > {
-        mayInteract = userInitiated
         let request = Task { await refreshOnce(onRefresh: onRefresh) }
         firstRequest = request
         pollTask = Task { [weak self] in
@@ -180,7 +177,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         if case .rateLimited(let until) = published.load().limitsState, until > Date() { return }
         cancelRequests()
         lastReported = nil
-        let request = begin(userInitiated: true, onRefresh: onRefresh)
+        let request = begin(onRefresh: onRefresh)
         await withTaskCancellationHandler {
             _ = await request.value
         } onCancel: {
@@ -248,9 +245,7 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// task in that property while this continuation still belongs to the
     /// cancelled one.
     private func currentCredentials(generation stamp: Int) async -> Credentials {
-        let interactive = mayInteract
-        mayInteract = false
-        let outcome = await credentialsSource(Self.keychainTimeout, interactive)
+        let outcome = await credentialsSource(Self.keychainTimeout)
         guard stamp == generation, !Task.isCancelled else { return .wait(Self.refreshInterval) }
         switch outcome {
         case .found(let found):
@@ -275,33 +270,22 @@ actor ClaudeLimitsProbe: SourceSignals {
             report(
                 "this account's Claude Code credential is not readable from here; "
                     + "its limits stay hidden rather than showing another account's")
-        case .denied:
-            publishFailure(.refused)
-            report(
-                "keychain access to \(ClaudeCredentialsStore.keychainService) was refused; "
-                    + "Claude Code limits stay hidden. Grant it in Keychain Access, or turn "
-                    + "the setting off")
-            // Alone among the failures, this one stops the loop: the user said
-            // no, and re-asking them every five minutes is harassment.
-            pollTask?.cancel()
-            pollTask = nil
-        // Alive, deliberately. Nobody refused anything — this read was simply
-        // not allowed to ask, and the grant it wants back can return without
-        // Sissy doing a thing: the CLI rewrites the item, or the user allows it
-        // in Keychain Access. Stopping here would make a stale grant
-        // indistinguishable from a refusal, and both would then need a relaunch.
-        case .interactionRequired:
-            publishFailure(.needsAuthorization)
-            report(
-                "the keychain will not release \(ClaudeCredentialsStore.keychainService) "
-                    + "without asking, and this read did not ask; Claude limits stay hidden "
-                    + "until you switch them off and on again")
+        // Neither can arise here, and saying so is the point. Both are answers
+        // macOS gives an in-process `SecItemCopyMatching`; this probe reads the
+        // CLI's own file and falls back to `/usr/bin/security`, neither of
+        // which asks the user anything, so there is nobody to refuse and no
+        // grant to go stale. They report rather than publish a state, because
+        // a notice telling someone to grant access names a dialog that cannot
+        // happen — and `.denied` no longer stops the loop, which it did only
+        // to avoid re-asking a question this reader never puts.
+        case .denied, .interactionRequired:
+            report("the Claude Code credential read answered an outcome it cannot produce")
         case .unreadable(let status):
             report("could not read Claude credentials (OSStatus \(status))")
         case .timedOut:
             report(
-                "the keychain did not answer within \(Self.keychainTimeout); Claude limits "
-                    + "are waiting on an authorization prompt")
+                "the Claude Code credential did not come back within "
+                    + "\(Self.keychainTimeout); its limits keep their last reading")
         }
         return .wait(Self.refreshInterval)
     }
