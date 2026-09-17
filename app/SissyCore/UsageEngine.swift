@@ -328,11 +328,19 @@ actor UsageEngine {
                 // question off it. The imported claude.ai session stays beside
                 // it as the fallback for a Mac that has neither, which is a
                 // CLI nobody has signed into.
+                // The read goes through `loadOffPool` because it is blocking:
+                // where there is no file it forks `/usr/bin/security`, and
+                // called straight from the probe that runs on the actor's own
+                // executor, parking a cooperative thread once every five
+                // minutes per home. Off-pool is also what gives the timeout
+                // the probe already passes something to bound.
                 let probe =
                     limitsProbe
                     ?? ClaudeLimitsProbe(
-                        credentials: { _ in
-                            ClaudeCodeCredentials.load(home: home)
+                        credentials: { timeout in
+                            await ClaudeCredentialsStore.loadOffPool(timeout: timeout) {
+                                ClaudeCodeCredentials.load(home: home)
+                            }
                         },
                         backoff: limitsBackoff.slot(for: LimitsBackoffLedger.claudeCLIKey))
                 ownLimits = probe
