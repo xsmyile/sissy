@@ -109,6 +109,14 @@ actor UsageEngine {
     /// was told to leave alone makes no request, which is the same rule its
     /// reader is built under.
     private let statusMonitor: ProviderStatusMonitor
+    /// The forges the user has connected, and the poll over them.
+    ///
+    /// The list is the index's and the monitor's copy of it is immutable, so a
+    /// connection added or removed is a new monitor rather than a mutated one —
+    /// the same trade the provider list takes, and cheaper here because nothing
+    /// a forge reader holds resumes from an offset. What it costs is one poll.
+    private let forgeIndex: ForgeConnectionIndex
+    private var forgeMonitor: ForgeActivityMonitor
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
@@ -242,6 +250,9 @@ actor UsageEngine {
         let limitsBackoff = LimitsBackoffStore(
             url: LimitsBackoffLedger.defaultURL(in: stateDir))
         self.limitsBackoff = limitsBackoff
+        let forgeIndex = ForgeConnectionIndex(url: ForgeConnectionIndex.defaultURL(in: stateDir))
+        self.forgeIndex = forgeIndex
+        self.forgeMonitor = ForgeActivityMonitor(connections: forgeIndex.load())
         let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
         let claudeHome = config.providerHome(vendor: ProviderID.claudeCode)
@@ -401,6 +412,7 @@ actor UsageEngine {
         if config.statusChecks {
             await startStatusChecks()
         }
+        await startForgeActivity()
         await applyKeepAwake()
         guard lifecycle == .running else { return }
         let me = self
@@ -635,6 +647,7 @@ actor UsageEngine {
         await stopClaudeLimits()
         await stopCodexLimits()
         await statusMonitor.stop()
+        await forgeMonitor.stop()
         await aggregator.stop()
         bootTask = nil
         backfillTask = nil
@@ -1092,6 +1105,7 @@ actor UsageEngine {
         lastObservedActivityAt = latest
         lastAgentActivityAt = Date()
         statusMonitor.noteActivity()
+        forgeMonitor.noteActivity()
     }
 
     /// Takes or releases the automatic hold when the agents change the answer.
@@ -1425,6 +1439,96 @@ actor UsageEngine {
         }
     }
 
+    /// Starts the forge poll. A build with nothing connected starts nothing,
+    /// which is the whole of how this module stays off until it is asked for:
+    /// there is no switch to read because a connection *is* the switch.
+    ///
+    /// The lifecycle is checked on both sides of the hop for the reason
+    /// `startStatusChecks` is: this is reachable across a suspension a `stop()`
+    /// can land in — from `start`, and from a connection made while the app is
+    /// quitting — and the monitor itself only knows whether *it* is running.
+    private func startForgeActivity() async {
+        guard lifecycle == .running else { return }
+        let me = self
+        await forgeMonitor.start { await me.reemit() }
+        guard lifecycle == .running else {
+            await forgeMonitor.stop()
+            return
+        }
+    }
+
+    /// Every forge the user has connected, for the Settings list.
+    ///
+    /// Read from the index rather than from the monitor, so a build whose
+    /// keychain grant has lapsed still lists what is connected and offers the
+    /// way to remove it — the rule `linkedCodexAccounts` next door is under.
+    /// Nonisolated because Settings reads it while the engine is mid-poll, and
+    /// the index is an immutable value holding no secret.
+    nonisolated var forgeConnections: [ForgeConnection] {
+        forgeIndex.load()
+    }
+
+    /// The tokens `gh` and `glab` already hold on this Mac.
+    ///
+    /// Read on demand from the control that offers them and never at launch or
+    /// from a poll — the rule the vendor login window is under. It is also why
+    /// this answers candidates rather than connecting them: the user is shown
+    /// which CLI and which host the token comes from before anything is filed.
+    nonisolated func forgeTokenCandidates() -> [ForgeTokenCandidate] {
+        ForgeTokenImport.candidates()
+    }
+
+    /// Files a token for a forge and starts reading it.
+    ///
+    /// The token is written before the connection is recorded, so a failure
+    /// leaves no row promising a reading there is no credential for. Answers
+    /// whether it is now connected, and the caller has to say so: a write that
+    /// failed with the sheet already dismissed would take the pasted token with
+    /// it and leave nothing on screen to explain the missing row.
+    ///
+    /// **Connecting the same host again is how a refused or missing token is
+    /// replaced.** The index keys on the host, the monitor is rebuilt from it,
+    /// and a fresh monitor has nothing parked — so this is the way back from
+    /// both states the poll stops asking about.
+    func connectForge(_ connection: ForgeConnection, token: String) async -> Bool {
+        do {
+            try ForgeTokenStore.save(token, connection: connection.id)
+            try forgeIndex.remember(connection)
+        } catch {
+            sissyLog("sissy: could not connect \(connection.id) (\(error))")
+            return false
+        }
+        await rebuildForgeMonitor()
+        await reemit()
+        return true
+    }
+
+    /// Forgets a forge: the connection, its token, and the reading on the row.
+    ///
+    /// The record goes first and the token second, so an interrupted removal
+    /// leaves a token nothing reads rather than a row nothing can answer for.
+    func disconnectForge(id: String) async {
+        do {
+            try forgeIndex.forget(id: id)
+        } catch {
+            sissyLog("sissy: could not forget the forge connection \(id) (\(error))")
+            return
+        }
+        do {
+            try ForgeTokenStore.delete(connection: id)
+        } catch {
+            sissyLog("sissy: the forge token for \(id) outlived its connection (\(error))")
+        }
+        await rebuildForgeMonitor()
+        await reemit()
+    }
+
+    private func rebuildForgeMonitor() async {
+        await forgeMonitor.stop()
+        forgeMonitor = ForgeActivityMonitor(connections: forgeIndex.load())
+        await startForgeActivity()
+    }
+
     /// Switches the status readings on or off at runtime, and persists it.
     ///
     /// Stopping drops the readings with the loop, so the rows go when the
@@ -1542,7 +1646,8 @@ actor UsageEngine {
                 since: keepAwakeSince,
                 coversScreen: keepAwakeCoversScreen),
             history: currentHistory(now: now),
-            providerStatus: statusMonitor.currentStatus()
+            providerStatus: statusMonitor.currentStatus(),
+            forge: forgeMonitor.currentReadings()
         )
         await onFrame?(frame)
     }

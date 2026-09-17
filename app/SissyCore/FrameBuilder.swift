@@ -441,6 +441,15 @@ struct FrameData: Sendable, Equatable {
     /// whose cold scan has not finished. Empty for a provider with no feed to
     /// poll, and for every provider while the switch is off.
     let providerStatus: [String: ProviderStatusReading]
+    /// What each connected forge last answered, in the connection order the
+    /// index keeps.
+    ///
+    /// Beside the slices rather than on one, because a forge is not a metering
+    /// provider: nothing here is a token or a cost, the two counts are the
+    /// vendor's own arithmetic over a window the panel picks, and a connection
+    /// exists on a Mac where neither CLI has run. Empty while nothing is
+    /// connected, which is every install until the user connects one.
+    let forge: [ForgeActivityReading]
 
     /// Defaulted so a frame can be built without naming the split: a caller
     /// that has none is saying there is none, and every test and future field
@@ -453,7 +462,8 @@ struct FrameData: Sendable, Equatable {
         keepAwake: KeepAwakeState,
         history: [UsagePeriod: UsageHistoryRollup] = [:],
         projects: [ProjectTotals] = [],
-        providerStatus: [String: ProviderStatusReading] = [:]
+        providerStatus: [String: ProviderStatusReading] = [:],
+        forge: [ForgeActivityReading] = []
     ) {
         self.tokens = tokens
         self.cost = cost
@@ -463,6 +473,7 @@ struct FrameData: Sendable, Equatable {
         self.history = history
         self.projects = projects
         self.providerStatus = providerStatus
+        self.forge = forge
     }
 }
 
@@ -478,7 +489,8 @@ enum FrameBuilder {
         providers: [ProviderSlice] = [],
         keepAwake: KeepAwakeState = .off,
         history: [UsagePeriod: UsageHistoryRollup] = [:],
-        providerStatus: [String: ProviderStatusReading] = [:]
+        providerStatus: [String: ProviderStatusReading] = [:],
+        forge: [ForgeActivityReading] = []
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
         return FrameData(
@@ -489,7 +501,8 @@ enum FrameBuilder {
             keepAwake: keepAwake,
             history: history,
             projects: combinedProjects(providers),
-            providerStatus: providerStatus
+            providerStatus: providerStatus,
+            forge: forge
         )
     }
 
