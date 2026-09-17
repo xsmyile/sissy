@@ -1169,18 +1169,27 @@ extension UsageFormat {
         return formatter
     }()
 
-    /// The figures as the row prints them, nil when there are none for the
-    /// window on screen.
+    /// What the mark beside the merge count means, in the vendor's own noun.
     ///
-    /// Either half may be missing on its own and the row says what it has: a
-    /// vendor that answered one query and refused the other is not a quiet day
-    /// in either of them. Both missing is no reading, which the caller answers
-    /// with the reason instead.
-    static func forgeFigures(contributions: Int?, merged: Int?) -> String? {
-        var parts: [String] = []
-        if let contributions { parts.append(forgeCount(contributions)) }
-        if let merged { parts.append("\(forgeCount(merged)) merged") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    /// The word left the row when the mark arrived: `merged` cost the line
+    /// seven characters to say what a git-merge glyph in purple says without
+    /// any, and purple is the one colour neither forge paints an open request
+    /// — green is open on both and red is closed on both. What a glyph cannot
+    /// do is introduce itself, which is what this is for.
+    static func forgeMergedHelp(_ kind: ForgeKind) -> String {
+        switch kind {
+        case .gitHub: "Pull requests you opened and had merged"
+        case .gitLab: "Merge requests you opened and had merged"
+        }
+    }
+
+    /// What the mark beside the issue count means.
+    ///
+    /// Opened, not open: it is a count of what happened inside the window the
+    /// control names, like the two figures beside it, and the hover is where a
+    /// row this narrow can say which of the two it is.
+    static func forgeIssuesHelp(_ kind: ForgeKind) -> String {
+        "Issues you opened on " + forgeName(kind)
     }
 
     /// What a row says instead of, or beside, its figures.
@@ -1224,12 +1233,12 @@ extension UsageFormat {
         if let login { lines.append("Read as \(login)") }
         switch kind {
         case .gitHub:
-            lines.append("Contributions as GitHub counts them, plus pull requests you had merged")
+            lines.append("Contributions as GitHub counts them, in its own whole days")
         case .gitLab:
-            lines.append("Events GitLab recorded for you, plus merge requests you had merged")
+            lines.append("Events GitLab recorded for you, in its own whole days")
         }
         if period == .all, boundedToOneYear {
-            lines.append("Contributions reach back one year; the merge count is every one")
+            lines.append("Contributions reach back one year; the counts beside them are every one")
         }
         return lines.joined(separator: "\n")
     }

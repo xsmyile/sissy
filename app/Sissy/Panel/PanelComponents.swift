@@ -576,6 +576,36 @@ struct ForgeRowView: View {
     let row: UsagePanelSnapshot.ForgeRow
 
     private static let noticeSize: CGFloat = 11
+    /// Smaller than `PanelMetrics.markSize`, which labels a whole provider: a
+    /// mark that qualifies one number on a line has to read as part of that
+    /// number rather than as the row's own badge.
+    private static let markSize: CGFloat = 10
+    /// Semibold rather than the body weight, and chosen per glyph rather than
+    /// once for the row.
+    ///
+    /// The target is the ink the marks beside it already lay down: measured
+    /// 2026-09-17, `ForgeMark` at 11 pt covers 11.00 × 10.75 and `ProviderMark`
+    /// at 14 pt covers 11.12 × 11.25, which `smallcircle.filled.circle` at
+    /// 10 pt semibold hits exactly at 11.00 × 11.00 — three nominal sizes for
+    /// one optical one, because a template asset and an SF Symbol do not
+    /// measure the same at the same point size. A single weight for every mark
+    /// would be wrong in the other direction: the same circle in bold measures
+    /// 10.38, since SF redraws it rather than thickening it.
+    private static let markWeight: Font.Weight = .semibold
+    private static let markGap: CGFloat = 3
+    private static let figureGap: CGFloat = 9
+    /// The Y both forges draw a *merged* request with — SF's own name for
+    /// GitHub's `git-merge` octicon.
+    ///
+    /// Deliberately not `arrow.trianglehead.pull`, which is the `git-pull-request`
+    /// octicon and the state *before* this one: GitHub paints that glyph green
+    /// for an open request and this one purple for a merged one, so the pull
+    /// glyph in merged purple is a pairing neither forge has. The count is of
+    /// requests that were merged, so the mark is the merge.
+    private static let mergeSymbol = "arrow.trianglehead.merge"
+    /// The circle-with-a-dot both forges draw an open issue with, SF's own
+    /// name for GitHub's `issue-opened` octicon.
+    private static let issueSymbol = "smallcircle.filled.circle"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -601,18 +631,64 @@ struct ForgeRowView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// The contributions bare, the other two behind their own mark.
+    ///
+    /// Bare because the contribution total is what the section label already
+    /// names, so a mark on it would qualify nothing; the two beside it are
+    /// different readings on the same line and a glyph is what tells them
+    /// apart without spending the row a word each — `merged` alone was seven
+    /// characters of a line 340 pt wide has to fit a login into as well.
+    ///
+    /// Three figures still leave the name most of the row: measured
+    /// 2026-09-17 against the 312 pt inside the gutters, the widest real
+    /// reading on this machine wants 193.6 pt and a 24-character login with it
+    /// wants 299.6. Past that the login truncates and the figures do not,
+    /// which is the right way round — `Spacer(minLength:)` and the name's own
+    /// `lineLimit(1)` make the label yield before the reading does.
     @ViewBuilder
     private var figures: some View {
-        if let figures = row.figures {
-            Text(figures)
-                .font(.system(size: PanelMetrics.rowText))
-                .monospacedDigit()
-                .contentTransition(.numericText())
+        if row.hasFigures {
+            HStack(spacing: Self.figureGap) {
+                if let contributions = row.contributions { count(contributions) }
+                if let merged = row.merged {
+                    marked(
+                        merged, symbol: Self.mergeSymbol, tint: ProviderPalette.forgeMerged,
+                        help: row.mergedHelp)
+                }
+                if let issues = row.issues {
+                    marked(
+                        issues, symbol: Self.issueSymbol, tint: ProviderPalette.forgeIssue,
+                        help: row.issuesHelp)
+                }
+            }
         } else {
             Text("—")
                 .font(.system(size: PanelMetrics.rowText))
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    private func count(_ value: String) -> some View {
+        Text(value)
+            .font(.system(size: PanelMetrics.rowText))
+            .monospacedDigit()
+            .contentTransition(.numericText())
+    }
+
+    /// One figure and the mark that says what it counts, with the meaning on
+    /// the hover: a glyph is recognised before it is read and read by nobody
+    /// who has not met it, and this row is where someone meets it.
+    private func marked(
+        _ value: String, symbol: String, tint: Color, help: String
+    ) -> some View {
+        HStack(spacing: Self.markGap) {
+            Image(systemName: symbol)
+                .font(.system(size: Self.markSize, weight: Self.markWeight))
+                .foregroundStyle(tint)
+                .accessibilityLabel(help)
+            count(value)
+        }
+        .help(help)
     }
 }
 

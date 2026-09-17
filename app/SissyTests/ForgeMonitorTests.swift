@@ -20,7 +20,7 @@ final class ForgeMonitorTests: XCTestCase {
         ForgeActivityReading(
             id: connection.id, kind: connection.kind, host: connection.host, login: login,
             activity: ForgeActivity(
-                contributions: [.today: contributions], merged: [.today: merged],
+                contributions: [.today: contributions], merged: [.today: merged], issues: [:],
                 contributionsBoundedToOneYear: connection.kind == .gitHub),
             readAt: when, failure: nil)
     }

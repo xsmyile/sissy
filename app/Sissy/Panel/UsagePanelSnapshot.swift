@@ -64,11 +64,24 @@ struct UsagePanelSnapshot: Equatable {
         let kind: ForgeKind
         let host: String
         let login: String?
-        /// `115 · 25 merged`, nil when the window has no reading at all.
-        let figures: String?
+        /// The three counters, already grouped, each nil where the vendor
+        /// answered nothing for this window.
+        ///
+        /// Three values rather than one sentence, because two of them are drawn
+        /// behind a mark rather than a word and a view cannot put a glyph
+        /// inside a string the formatter has already joined. A row with all
+        /// three nil is no reading, which the caller draws as a dash.
+        let contributions: String?
+        let merged: String?
+        let issues: String?
         /// Why there is no figure, or how old the one beside it is.
         let notice: String?
         let tooltip: String
+        /// What each mark means, since a glyph cannot introduce itself.
+        let mergedHelp: String
+        let issuesHelp: String
+
+        var hasFigures: Bool { contributions != nil || merged != nil || issues != nil }
     }
 
     /// Every repository Sissy could read a commit identity for, the ones that
@@ -717,20 +730,25 @@ struct UsagePanelSnapshot: Equatable {
         _ readings: [ForgeActivityReading], period: UsagePeriod, now: Date
     ) -> [ForgeRow] {
         readings.map { reading in
-            let figures = UsageFormat.forgeFigures(
-                contributions: reading.contributions(for: period),
-                merged: reading.merged(for: period))
+            let contributions = reading.contributions(for: period).map(UsageFormat.forgeCount)
+            let merged = reading.merged(for: period).map(UsageFormat.forgeCount)
+            let issues = reading.issues(for: period).map(UsageFormat.forgeCount)
+            let hasFigures = contributions != nil || merged != nil || issues != nil
             return ForgeRow(
                 id: reading.id,
                 kind: reading.kind,
                 host: reading.host,
                 login: reading.login,
-                figures: figures,
+                contributions: contributions,
+                merged: merged,
+                issues: issues,
                 notice: UsageFormat.forgeNotice(
-                    reading.failure, readAt: reading.readAt, hasFigures: figures != nil, now: now),
+                    reading.failure, readAt: reading.readAt, hasFigures: hasFigures, now: now),
                 tooltip: UsageFormat.forgeTooltip(
                     reading.kind, host: reading.host, login: reading.login, period: period,
-                    boundedToOneYear: reading.activity.contributionsBoundedToOneYear))
+                    boundedToOneYear: reading.activity.contributionsBoundedToOneYear),
+                mergedHelp: UsageFormat.forgeMergedHelp(reading.kind),
+                issuesHelp: UsageFormat.forgeIssuesHelp(reading.kind))
         }
     }
     /// The identities page's rows, the findings first.

@@ -3,6 +3,7 @@
 AGENTS.md
 CFFIXED_USER_HOME
 Conversations
+CurrentUser
 FSEventStreamScheduleWithRunLoop
 GPTs
 IgnoreSelf
@@ -19,12 +20,15 @@ RunAtLoad
 SIGTERM
 _NSPopoverWindow
 argv
+arrow.trianglehead.pull
 caffeinate
 getcwd
 json.dumps
 notclaude.ai
 objectWillChange
 project.yml
+restrictedContributionsCount
 sizeThatFits
 systemRed
+totalIssueContributions
 willSet
