@@ -128,7 +128,10 @@ struct GeneralSettingsView: View {
         "One CSV per provider plus a combined one, at the archive's own grain: a row per day, "
         + "model and project, with the tokens and the cost as recorded rather than as the panel "
         + "rounds them. A month or a quarter is a pivot table away. The rows carry the full path "
-        + "of every repository the work was in, so choose where the folder goes accordingly."
+        + "of every repository the work was in, so choose where the folder goes accordingly. "
+        + "A further file, sissy-activity.csv, carries one row a day per provider: how many "
+        + "minutes were worked, how many of those were sub-agents, and in how many sittings. It "
+        + "names no repository."
 
     private static let exportDetailButtonLabel = "What the export carries"
 

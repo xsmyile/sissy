@@ -28,6 +28,22 @@ enum UsageHistoryExport {
         "cost",
     ]
 
+    /// The activity file's own columns, one row per day and provider.
+    ///
+    /// **A second file rather than columns on the rows above**, and that is
+    /// not tidiness. Those rows are per day *per model per project*, and a
+    /// day's worked minutes belong to none of those grains — repeated across
+    /// them, the first pivot table that sums the column multiplies the day by
+    /// however many models answered in it. The same trap the `project_path`
+    /// column exists to close, one grain up.
+    ///
+    /// `blocks` is here because the two durations cannot imply it: eight hours
+    /// in one sitting and eight across eleven are the same figure and not the
+    /// same day.
+    static let activityColumns = [
+        "day", "provider", "active_minutes", "delegated_minutes", "blocks",
+    ]
+
     /// Basename of the file holding every provider's rows, and the one
     /// provider id that cannot name its own file — a provider called `all`
     /// would write into this one. Nothing enforces that, because provider ids
@@ -93,6 +109,39 @@ enum UsageHistoryExport {
         return lines.joined(separator: "\n") + "\n"
     }
 
+    /// The worked days as one CSV document, header included.
+    ///
+    /// A day the archive holds no shape for contributes no row, on the rule
+    /// the panel draws it by: a day written before Sissy measured this, or one
+    /// it was not running for, is unmeasured rather than a day of no work, and
+    /// a zero in a spreadsheet is the second claim.
+    ///
+    /// Per provider and never unioned, unlike the panel's own figure: a
+    /// spreadsheet can sum a column and cannot union two bitmaps, so the file
+    /// carries the grain the archive holds and says so in the column name.
+    /// Summing two providers' minutes for one day therefore over-counts a day
+    /// they both worked, which is the honest cost of a format with no rows to
+    /// intersect.
+    static func activityCSV(_ days: [UsageHistoryDay]) -> String {
+        var lines = [activityColumns.joined(separator: ",")]
+        for day in days {
+            guard let activity = day.activity, !activity.isEmpty else { continue }
+            let row: [String] = [
+                day.day,
+                day.provider,
+                String(activity.activeMinutes),
+                String(activity.delegatedMinutes),
+                String(activity.blocks.count),
+            ]
+            lines.append(row.map(field).joined(separator: ","))
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// `sissy-activity.csv`, one file for every provider: it is one row a day
+    /// each, where the usage rows are thousands.
+    static let activityFileName = "sissy-activity.csv"
+
     /// `sissy-usage-<provider>.csv`, and `sissy-usage-all.csv` for the
     /// combined one. The provider is the id the archive filed the day under,
     /// so a provider added later names its own file without a release.
@@ -119,6 +168,11 @@ enum UsageHistoryExport {
         }
         try csv(days).write(
             to: directory.appendingPathComponent(fileName(provider: combinedName)),
+            atomically: true,
+            encoding: .utf8
+        )
+        try activityCSV(days).write(
+            to: directory.appendingPathComponent(activityFileName),
             atomically: true,
             encoding: .utf8
         )
