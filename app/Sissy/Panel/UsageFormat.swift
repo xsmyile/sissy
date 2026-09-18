@@ -1402,14 +1402,31 @@ extension UsageFormat {
     /// `readAt` is nil for a connection that has never once answered. There is
     /// no reading to date — `ForgeActivityReading.unavailable` stamps the
     /// attempt, not a read — so that row gets the reason by itself.
+    ///
+    /// **A window the vendor has not started counting says so instead of its
+    /// age**, which is `ForgeWindow.opens` and only ever `today`. Both forges
+    /// bucket in whole UTC days named by the local date, so east of Greenwich
+    /// the row spends the length of the offset over a day the vendor has not
+    /// opened: measured 2026-09-19 at 01:01+02:00, GitLab answered `x-total: 0`
+    /// for it against 8 events it had already recorded since local midnight,
+    /// all of them filed under the previous UTC day. The figures are absent
+    /// there rather than zero, so without this the row is a bare dash under an
+    /// account that is working — the one state on this line a user reads as a
+    /// fault. It is worded before the age and after the failure: an age dates a
+    /// reading this window has none of, and a token the vendor is refusing is
+    /// the more actionable of the two.
     static func forgeNotice(
-        _ failure: ForgeReadFailure?, readAt: Date?, refreshing: Bool, now: Date = Date()
+        _ failure: ForgeReadFailure?, readAt: Date?, opensAt: Date? = nil, refreshing: Bool,
+        now: Date = Date()
     ) -> String? {
         if refreshing { return "refreshing…" }
         guard let readAt else { return failure.map(forgeFailure) }
         let read = age(now.timeIntervalSince(readAt))
-        guard let failure else { return "read " + read }
-        return forgeFailure(failure) + " · last read " + read
+        if let failure { return forgeFailure(failure) + " · last read " + read }
+        if let opensAt, let label = resetLabel(opensAt, now: now) {
+            return "counted in UTC days · today opens " + label
+        }
+        return "read " + read
     }
 
     /// The hover for a forge row: what each figure counts, in the vendor's own
@@ -1434,9 +1451,9 @@ extension UsageFormat {
         if let login { lines.append("Read as \(login)") }
         switch kind {
         case .gitHub:
-            lines.append("Contributions as GitHub counts them, in its own whole days")
+            lines.append("Contributions as GitHub counts them, in its own whole UTC days")
         case .gitLab:
-            lines.append("Events GitLab recorded for you, in its own whole days")
+            lines.append("Events GitLab recorded for you, in its own whole UTC days")
         }
         if period == .all, boundedToOneYear {
             lines.append("Contributions reach back one year; the counts beside them are every one")

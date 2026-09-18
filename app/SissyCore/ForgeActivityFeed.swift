@@ -82,6 +82,71 @@ enum ForgeWindow {
     /// reason and this now inherits that rather than restating it.
     static func vendorInstant(_ start: Date) -> Date? { utcDay.date(from: day.string(from: start)) }
 
+    /// When the vendor day a window starts on begins, nil for one already
+    /// begun.
+    ///
+    /// **A window can name a day that does not exist yet.** Every figure on
+    /// this row is bucketed by the vendor in whole UTC days and named by the
+    /// local date, so east of Greenwich the local day opens before the UTC day
+    /// of the same name does, by the length of the offset. Measured
+    /// 2026-09-19 at 01:01+02:00, which is 23:01 UTC on the 18th: the day's
+    /// query answered `x-total: 0` against the 8 events GitLab had already
+    /// recorded since local midnight, every one of them filed under the 18th in
+    /// UTC. The endpoint cannot be narrowed to recover them either — measured
+    /// the same minute, naming an instant inside the 18th answered 0 exactly as
+    /// naming the date did, so the filter is a whole UTC day whatever time is
+    /// put on it.
+    ///
+    /// So a window this answers for has no reading rather than a reading of
+    /// zero, which is the rule the whole panel is on, and the periods it names
+    /// are not asked for at all — a request saved on the one window whose
+    /// answer could only have been 0.
+    ///
+    /// The instant is the window's own local date read at midnight UTC, which
+    /// is what `vendorInstant` reads back out of `vendorDay` — rebuilt here
+    /// rather than borrowed because those formatters are pinned to the
+    /// machine's zone, so a test holding a zone the machine is not in would be
+    /// measuring the machine.
+    ///
+    /// **The date, never the offset.** Shifting `start` by its own day's offset
+    /// is the same instant on every ordinary day and an hour out on the zones
+    /// whose clocks go forward *at* midnight — `Calendar.startOfDay` answers
+    /// 01:00 there, midnight not having existed. Measured across the whole 2026
+    /// database, eight identifiers and five distinct zones do it:
+    /// `Africa/Cairo` on 2026-04-24, `Asia/Beirut` on 2026-03-29,
+    /// `America/Santiago` on 2026-09-06, `America/Havana` on 2026-03-08 and
+    /// `Atlantic/Azores` on 2026-03-29, each of which would hold the row's dash
+    /// an hour past the moment the vendor began counting.
+    ///
+    /// Gregorian on both sides, which is the trap `vendorInstant` documents
+    /// from the other end: the components come off a Gregorian calendar in the
+    /// window's own zone rather than off `Calendar.current`, so a Mac set to a
+    /// Buddhist calendar cannot hand a year of 2569 to a boundary every reading
+    /// then falls before.
+    static func opens(_ period: UsagePeriod, now: Date, calendar: Calendar = .current) -> Date? {
+        guard let start = start(of: period, now: now, calendar: calendar),
+            let utc = TimeZone(secondsFromGMT: 0)
+        else { return nil }
+        var local = Calendar(identifier: .gregorian)
+        local.timeZone = calendar.timeZone
+        var vendor = Calendar(identifier: .gregorian)
+        vendor.timeZone = utc
+        let date = local.dateComponents([.year, .month, .day], from: start)
+        guard let opens = vendor.date(from: date) else { return nil }
+        return opens > now ? opens : nil
+    }
+
+    /// Whether the vendor has begun counting the window at all.
+    static func hasOpened(_ period: UsagePeriod, now: Date, calendar: Calendar = .current) -> Bool {
+        opens(period, now: now, calendar: calendar) == nil
+    }
+
+    /// Every period the vendor has begun counting, which is every one but a
+    /// `today` whose own day has not opened yet.
+    static func openPeriods(now: Date, calendar: Calendar = .current) -> [UsagePeriod] {
+        UsagePeriod.allCases.filter { hasOpened($0, now: now, calendar: calendar) }
+    }
+
     /// `day`'s format read in UTC, which is what turns its local date into the
     /// midnight `Z` the query strings name.
     private static let utcDay: DateFormatter = {
@@ -315,16 +380,19 @@ enum GitHubActivityFeed {
     /// a `search` asked for `first: 1` is one request node whatever it counts.
     /// Re-measured 2026-09-18 with a hundred-comment page added to the same
     /// `viewer`: still 1 point.
-    static func document(now: Date, counters: Set<ForgeCounter> = ForgeCounter.all) -> String {
+    static func document(
+        now: Date, counters: Set<ForgeCounter> = ForgeCounter.all, calendar: Calendar = .current
+    ) -> String {
+        let periods = ForgeWindow.openPeriods(now: now, calendar: calendar)
         let contributions =
-            UsagePeriod.allCases.map { period in
+            periods.map { period in
                 let range =
                     ForgeWindow.start(of: period, now: now)
                     .map { "(from: \"\(ForgeWindow.vendorDay($0))\")" } ?? ""
                 let alias = ForgeAlias.contributions(period)
                 return "\(alias): contributionsCollection\(range) { \(calendarField) }"
             } + (counters.contains(.comments) ? [commentField] : [])
-        let searches = UsagePeriod.allCases.flatMap { period -> [String] in
+        let searches = periods.flatMap { period -> [String] in
             let since =
                 ForgeWindow.start(of: period, now: now)
                 .map(ForgeWindow.vendorDay) ?? ""
@@ -428,7 +496,9 @@ enum GitHubActivityFeed {
     /// never edited exactly on it would sit outside a page that reached only as
     /// far as that instant. Only the widest window survives all three, because
     /// `totalCount` is the connection's own and owes the page nothing.
-    static func commentCounts(_ viewer: [String: Any], now: Date) -> [UsagePeriod: Int] {
+    static func commentCounts(
+        _ viewer: [String: Any], now: Date, calendar: Calendar = .current
+    ) -> [UsagePeriod: Int] {
         guard let block = viewer[commentsAlias] as? [String: Any] else { return [:] }
         let nodes = block["nodes"] as? [[String: Any]]
         let stamps = (nodes ?? []).compactMap { node -> (created: Date, updated: Date)? in
@@ -445,7 +515,7 @@ enum GitHubActivityFeed {
         let everyNodeRead = nodes.map { stamps.count == $0.count } ?? false
         let oldestRead = stamps.map(\.updated).min()
         var counts: [UsagePeriod: Int] = [:]
-        for period in UsagePeriod.allCases {
+        for period in ForgeWindow.openPeriods(now: now, calendar: calendar) {
             guard let start = ForgeWindow.start(of: period, now: now) else {
                 counts[period] = total
                 continue
@@ -543,7 +613,7 @@ enum GitLabActivityFeed {
         // instance that is reached over a tunnel and is the slow half of this
         // reader already. A period is still awaited before the next starts, so
         // the instance sees two requests at a time rather than eight.
-        for period in UsagePeriod.allCases {
+        for period in UsagePeriod.allCases where ForgeWindow.hasOpened(period, now: now) {
             async let total = events(connection, token: token, period: period, now: now)
             async let commented =
                 counters.contains(.comments)
@@ -580,10 +650,12 @@ enum GitLabActivityFeed {
         return (username, counts)
     }
 
-    static func document(now: Date, counters: Set<ForgeCounter> = ForgeCounter.all) -> String {
+    static func document(
+        now: Date, counters: Set<ForgeCounter> = ForgeCounter.all, calendar: Calendar = .current
+    ) -> String {
         let fields =
             counters.contains(.merged)
-            ? UsagePeriod.allCases.map { period -> String in
+            ? ForgeWindow.openPeriods(now: now, calendar: calendar).map { period -> String in
                 let scope =
                     ForgeWindow.start(of: period, now: now)
                     .map { ", mergedAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
@@ -606,13 +678,14 @@ enum GitLabActivityFeed {
     /// needs the login the first document just returned. A GraphQL argument
     /// cannot be fed from another field in the same document, so this is one
     /// more request and not a rearrangement of the one before it.
-    static func issuesDocument(now: Date) -> String {
-        let fields = UsagePeriod.allCases.map { period -> String in
-            let scope =
-                ForgeWindow.start(of: period, now: now)
-                .map { ", createdAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
-            return "\(ForgeAlias.issues(period)): issues(authorUsername: $author\(scope)) { count }"
-        }
+    static func issuesDocument(now: Date, calendar: Calendar = .current) -> String {
+        let fields = ForgeWindow.openPeriods(now: now, calendar: calendar)
+            .map { period -> String in
+                let scope =
+                    ForgeWindow.start(of: period, now: now)
+                    .map { ", createdAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
+                return "\(ForgeAlias.issues(period)): issues(authorUsername: $author\(scope)) { count }"
+            }
         return """
             query($author: String!) {
               \(fields.joined(separator: "\n  "))
