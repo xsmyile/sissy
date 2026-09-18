@@ -132,7 +132,13 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// `isCoveredBy` still refuses a day whose tokens came back short, and
     /// `UsageHistoryDay.merging(counts:)` keeps whichever reading counted
     /// more, so a second pass can only fill the counts in.
-    static let currentSchemaVersion = 2
+    ///
+    /// `3` is `AgentActivityDay`, on identical grounds: the archive's own days
+    /// are where every window wider than today reads its worked time, so
+    /// without a re-run the page would answer for the day it shipped and say
+    /// nothing about the month behind it. The merge is a union of minute
+    /// bitmaps, which like the counts can only ever fill in.
+    static let currentSchemaVersion = 3
     static let fileName = "history-backfill.json"
 
     /// The span one provider's last pass covered, as `YYYY-MM-DD` in the local
