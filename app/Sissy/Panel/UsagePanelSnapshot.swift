@@ -682,7 +682,7 @@ struct UsagePanelSnapshot: Equatable {
             forge: makeForge(frame.forge, period: resolved, now: now),
             identities: makeIdentities(frame.identities),
             identityAlert: makeIdentityAlert(frame.identities),
-            agents: makeAgents(frame, period: resolved, rollup: rollup)
+            agents: makeAgents(frame, now: now)
         )
     }
 
@@ -698,11 +698,26 @@ struct UsagePanelSnapshot: Equatable {
         /// surfaces draw as a dash, because not having measured is not a
         /// measurement of none.
         let live: Live?
-        /// Sessions and agents across the window the headline names.
-        let counted: AgentCounts
-        /// One row per provider that answered for the window, so the page can
-        /// say which CLI the work went through.
-        let byProvider: [ProviderCount]
+        /// Every window at once, keyed by period.
+        ///
+        /// Every one rather than the selected one, for the reason
+        /// `FrameData.history` carries them all: the choice is the page's own
+        /// and changing it must not cost a round trip to the engine and a
+        /// frame's wait. It is also what lets the page pick locally, which is
+        /// the whole point — the Overview shows none of this, so a shared
+        /// selection would have moved the money headline behind the user's
+        /// back.
+        let counted: [UsagePeriod: Window]
+        let periods: [UsagePeriod]
+
+        /// One window's counts, whole and split by provider.
+        struct Window: Equatable {
+            let counts: AgentCounts
+            let byProvider: [ProviderCount]
+            /// How far back the archive actually reaches inside this window,
+            /// or nil where it covers the whole of it.
+            let coverage: String?
+        }
 
         struct Live: Equatable {
             let running: Int
@@ -713,6 +728,31 @@ struct UsagePanelSnapshot: Equatable {
             /// second sample lands — one point is not a line.
             let samples: [UInt64]
             let since: Date
+            /// One row per running process, dearest first, which is what
+            /// answers "two gigabytes of what".
+            let processes: [Process]
+        }
+
+        /// One running agent, as a row.
+        struct Process: Equatable, Identifiable {
+            let id: pid_t
+            let provider: String
+            /// The repository it is working in, rendered as its last component
+            /// exactly as a project row is — a path is a client's name as
+            /// often as not, so the whole of it stays on the hover.
+            let project: String?
+            let directory: String?
+            let footprint: UInt64
+            let startedAt: Date
+        }
+
+        /// What the Overview's one line says. A Mac that has never measured
+        /// and one that measured nothing both get the row, because it is the
+        /// only way to the page and a door that comes and goes is not one.
+        var summary: String {
+            guard let live else { return "no reading yet" }
+            guard live.running > 0 else { return "no agents running" }
+            return UsageFormat.agentsRunning(live.running, footprint: live.footprint)
         }
 
         struct ProviderCount: Equatable, Identifiable {
@@ -724,14 +764,13 @@ struct UsagePanelSnapshot: Equatable {
             let running: Int
         }
 
-        /// Whether the Overview has anything to show. A Mac that has never
-        /// measured and has counted nothing gets the row anyway — it is the
-        /// only way to the page, and a door that comes and goes is not one.
-        var summary: String {
-            guard let live else { return "no reading yet" }
-            guard live.running > 0 else { return "no agents running" }
-            return UsageFormat.agentsRunning(live.running, footprint: live.footprint)
-        }
+        /// The window a page opens on when nothing has been chosen.
+        ///
+        /// Today rather than the widest, because the block above it is what is
+        /// running *now* and a page whose two halves answer for two different
+        /// spans reads as one reading. Widening is one click and resets on the
+        /// way out, exactly as the identities page's own fold does.
+        static let defaultPeriod: UsagePeriod = .today
     }
 
     /// Builds the block from a frame.
@@ -739,18 +778,32 @@ struct UsagePanelSnapshot: Equatable {
     /// Today's counts come off the slices rather than out of the archive, for
     /// the reason the headline's own figure does: the archive's copy of today
     /// is written behind the tail's flush, so a count read from it would lag
-    /// the one beside it. Every other window is the archive's.
-    static func makeAgents(
-        _ frame: FrameData, period: UsagePeriod, rollup: UsageHistoryRollup?
-    ) -> AgentsBlock {
-        let today = frame.providers.reduce(into: AgentCounts.none) { $0.add($1.agents) }
+    /// the one beside it. Every other window is the archive's, **including its
+    /// per-provider split** — a row taken from the slices under a thirty-day
+    /// heading would be today's figure wearing another window's label.
+    static func makeAgents(_ frame: FrameData, now: Date) -> AgentsBlock {
         let running = frame.agentMemory?.current.agents ?? []
-        let byProvider = frame.providers.map { slice in
-            AgentsBlock.ProviderCount(
-                id: slice.id,
-                name: UsageFormat.providerName(slice.id),
-                counts: slice.agents,
-                running: running.count { $0.provider == slice.id })
+        let today = AgentsBlock.Window(
+            counts: frame.providers.reduce(into: AgentCounts.none) { $0.add($1.agents) },
+            byProvider: frame.providers.map { slice in
+                AgentsBlock.ProviderCount(
+                    id: slice.id, name: UsageFormat.providerName(slice.id),
+                    counts: slice.agents,
+                    running: running.count { $0.provider == slice.id })
+            },
+            coverage: nil)
+        var counted: [UsagePeriod: AgentsBlock.Window] = [.today: today]
+        for (period, rollup) in frame.history {
+            counted[period] = AgentsBlock.Window(
+                counts: rollup.agents,
+                byProvider: rollup.agentsByProvider
+                    .map { id, counts in
+                        AgentsBlock.ProviderCount(
+                            id: id, name: UsageFormat.providerName(id), counts: counts,
+                            running: running.count { $0.provider == id })
+                    }
+                    .sorted { $0.name < $1.name },
+                coverage: UsageFormat.periodCoverage(rollup, now: now))
         }
         return AgentsBlock(
             live: frame.agentMemory.map { memory in
@@ -760,10 +813,16 @@ struct UsagePanelSnapshot: Equatable {
                     treeFootprint: memory.current.treeFootprint,
                     peak: memory.peak,
                     samples: memory.samples.count > 1 ? memory.samples : [],
-                    since: memory.since)
+                    since: memory.since,
+                    processes: memory.current.agents.map {
+                        AgentsBlock.Process(
+                            id: $0.pid, provider: $0.provider, project: $0.project,
+                            directory: $0.directory, footprint: $0.footprint,
+                            startedAt: $0.startedAt)
+                    })
             },
-            counted: period == .today ? today : (rollup?.agents ?? .none),
-            byProvider: byProvider)
+            counted: counted,
+            periods: [.today] + UsagePeriod.archived.filter { counted[$0] != nil })
     }
 
     /// Every project a day names, unfolded, for the page behind the section's

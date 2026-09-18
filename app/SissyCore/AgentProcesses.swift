@@ -20,6 +20,18 @@ struct AgentProcess: Sendable, Equatable, Identifiable {
     /// The CLI's version where the install shape names it, which for Claude
     /// Code's native build is the executable's own name.
     let version: String?
+    /// The directory the process is working in, which is what answers "2 GB of
+    /// what". Nil where the kernel would not say.
+    ///
+    /// The raw directory rather than a repository: resolving one is the
+    /// `ProjectResolver`'s job and this type is a reading of the kernel. The
+    /// monitor resolves it before the frame carries it, so a worktree counts
+    /// against the checkout it was cut from exactly as a project row does.
+    let directory: String?
+    /// The repository that directory belongs to, once resolved. Nil for a
+    /// directory no `.git` was ever read from — a CLI's own scratch area is
+    /// not a project, and naming it after its path would be inventing one.
+    var project: String?
 }
 
 /// What the agents on this Mac are holding right now.
@@ -33,7 +45,7 @@ struct AgentProcessReading: Sendable, Equatable {
     /// Sissy's own clock, never a stamp read off a process: this is the moment
     /// the sweep ran, and it is what the panel ages the reading from.
     let observedAt: Date
-    let agents: [AgentProcess]
+    var agents: [AgentProcess]
 
     var footprint: UInt64 { agents.reduce(0) { $0 + $1.footprint } }
     var treeFootprint: UInt64 { agents.reduce(0) { $0 + $1.treeFootprint } }
@@ -42,6 +54,17 @@ struct AgentProcessReading: Sendable, Equatable {
     /// and found no agent. The absence is having no reading at all, which the
     /// frame carries as `nil`.
     static let idle = Self(observedAt: .distantPast, agents: [])
+
+    /// Names each agent's repository, leaving the directory where it was.
+    ///
+    /// Two agents in two worktrees of one repository resolve to the same name,
+    /// which is the point: that is one project, exactly as it is one row on
+    /// the Overview.
+    mutating func attributeProjects(by resolve: (String) -> String?) {
+        for index in agents.indices {
+            agents[index].project = agents[index].directory.flatMap(resolve)
+        }
+    }
 }
 
 /// Reads the agent processes belonging to this user out of the kernel.
@@ -93,7 +116,8 @@ enum AgentProcessReader {
                     treeFootprint: treeFootprint(
                         of: process.pid, childrenOf: childrenOf, cache: &footprints),
                     startedAt: process.startedAt,
-                    version: version(of: process)))
+                    version: version(of: process),
+                    directory: workingDirectory(of: process.pid)))
         }
         return AgentProcessReading(
             observedAt: now, agents: agents.sorted { $0.footprint > $1.footprint })
@@ -109,6 +133,28 @@ enum AgentProcessReader {
             return nil
         }
         return executableNames[(argv0 as NSString).lastPathComponent]
+    }
+
+    /// Where a process is working.
+    ///
+    /// `PROC_PIDVNODEPATHINFO` answers for a process of this user with no
+    /// permission and no prompt, exactly as the rest of this reader does —
+    /// measured 2026-09-18, seven agents, zero refusals. Asked only for a
+    /// process already classified as an agent: it is a syscall each, where
+    /// everything above is one `sysctl` for the whole table.
+    static func workingDirectory(of pid: pid_t) -> String? {
+        var info = proc_vnodepathinfo()
+        let size = MemoryLayout<proc_vnodepathinfo>.size
+        let read = withUnsafeMutablePointer(to: &info) {
+            proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, $0, Int32(size))
+        }
+        guard read == Int32(size) else { return nil }
+        let path = withUnsafePointer(to: &info.pvi_cdir.vip_path) {
+            $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) {
+                String(cString: $0)
+            }
+        }
+        return path.isEmpty ? nil : path
     }
 
     /// The version an install shape happens to name, which is Claude Code's

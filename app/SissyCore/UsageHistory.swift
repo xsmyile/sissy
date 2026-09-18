@@ -333,16 +333,25 @@ struct UsageHistoryRollup: Sendable, Equatable {
     /// misreporting it: the reading is "what Sissy has counted", and the
     /// coverage line under the figure already says how far back that is.
     let agents: AgentCounts
+    /// The same counts kept apart by provider, which is the split the page
+    /// draws a row from.
+    ///
+    /// Carried here rather than derived from the slices, because the slices
+    /// answer for *today* — a row taken from them under a thirty-day heading
+    /// is a figure from one window under the label of another, which is the
+    /// pairing this whole panel exists to prevent.
+    let agentsByProvider: [String: AgentCounts]
 
     init(
         period: UsagePeriod, earliestDay: Date?, tokens: Int, cost: Decimal,
-        agents: AgentCounts = .none
+        agents: AgentCounts = .none, agentsByProvider: [String: AgentCounts] = [:]
     ) {
         self.period = period
         self.earliestDay = earliestDay
         self.tokens = tokens
         self.cost = cost
         self.agents = agents
+        self.agentsByProvider = agentsByProvider
     }
 }
 
@@ -467,6 +476,7 @@ enum UsageHistoryStore {
         var tokens: [UsagePeriod: Int] = [:]
         var cost: [UsagePeriod: Decimal] = [:]
         var agents: [UsagePeriod: AgentCounts] = [:]
+        var byProvider: [UsagePeriod: [String: AgentCounts]] = [:]
         var earliest: [UsagePeriod: Date] = [:]
         for provider in providers(in: parent) {
             for (dayKey, url) in dayFiles(provider: provider, in: parent) {
@@ -481,6 +491,8 @@ enum UsageHistoryStore {
                     tokens[period, default: 0] += dayTokens
                     cost[period, default: 0] += dayCost
                     agents[period, default: .none].add(decoded.agents ?? .none)
+                    byProvider[period, default: [:]][provider, default: .none]
+                        .add(decoded.agents ?? .none)
                     earliest[period] = earliest[period].map { min($0, dayKey) } ?? dayKey
                 }
             }
@@ -492,7 +504,8 @@ enum UsageHistoryStore {
                 earliestDay: earliest[period],
                 tokens: tokens[period] ?? 0,
                 cost: cost[period] ?? 0,
-                agents: agents[period] ?? .none)
+                agents: agents[period] ?? .none,
+                agentsByProvider: byProvider[period] ?? [:])
         }
         return out
     }

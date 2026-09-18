@@ -591,6 +591,22 @@ final class UsageEngineHost {
 
     private var identityRefresh: Task<Void, Never>?
 
+    /// Counts the running agents again, for the agents page's own button.
+    ///
+    /// One task at a time for the reason above, though the sweep is 1.2 ms
+    /// rather than a process per repository: two in flight would publish two
+    /// readings a millisecond apart and the page would keep whichever landed
+    /// last rather than whichever was asked for last.
+    func refreshAgentProcesses() {
+        guard let engine, agentRefresh == nil else { return }
+        agentRefresh = Task {
+            await engine.refreshAgentProcesses()
+            agentRefresh = nil
+        }
+    }
+
+    private var agentRefresh: Task<Void, Never>?
+
     /// What is left of the floor once the work has taken its time, and nil
     /// once there is nothing left to wait for.
     static func remainingFloor(elapsed: Duration) -> Duration? {

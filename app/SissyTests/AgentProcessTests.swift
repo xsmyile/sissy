@@ -44,6 +44,28 @@ final class AgentProcessClassificationTests: XCTestCase {
     /// its contents: whatever is running, a tree cannot hold less than the
     /// process at its root and every row has to name a provider the panel can
     /// draw.
+    /// Two worktrees of one checkout are one project, exactly as they are one
+    /// project row, and a directory no `.git` was ever read from is named by
+    /// nothing rather than by its path.
+    func testAttributionNamesTheRepositoryAndRefusesToInventOne() {
+        var reading = AgentProcessReading(
+            observedAt: Date(),
+            agents: [
+                AgentProcess(
+                    pid: 1, provider: ProviderID.claudeCode, footprint: 1, treeFootprint: 1,
+                    startedAt: Date(), version: nil, directory: "/w/sissy/dace", project: nil),
+                AgentProcess(
+                    pid: 2, provider: ProviderID.claudeCode, footprint: 1, treeFootprint: 1,
+                    startedAt: Date(), version: nil, directory: "/w/sissy/pickerel",
+                    project: nil),
+                AgentProcess(
+                    pid: 3, provider: ProviderID.codex, footprint: 1, treeFootprint: 1,
+                    startedAt: Date(), version: nil, directory: "/tmp/scratch", project: nil),
+            ])
+        reading.attributeProjects { $0.hasPrefix("/w/sissy") ? "/repos/sissy" : nil }
+        XCTAssertEqual(reading.agents.map(\.project), ["/repos/sissy", "/repos/sissy", nil])
+    }
+
     func testTheRealReadingIsInternallyConsistent() {
         let reading = AgentProcessReader.read()
         for agent in reading.agents {
@@ -53,6 +75,11 @@ final class AgentProcessClassificationTests: XCTestCase {
             XCTAssertTrue(
                 [ProviderID.claudeCode, ProviderID.codex].contains(agent.provider),
                 "an agent was classified as \(agent.provider), which no row draws")
+            if let directory = agent.directory {
+                XCTAssertTrue(
+                    directory.hasPrefix("/"),
+                    "a working directory came back as something other than a path")
+            }
         }
         XCTAssertEqual(reading.footprint, reading.agents.reduce(0) { $0 + $1.footprint })
     }
@@ -67,7 +94,8 @@ private func reading(_ bytes: UInt64, at when: Date = Date()) -> AgentProcessRea
             : [
                 AgentProcess(
                     pid: 1, provider: ProviderID.claudeCode, footprint: bytes,
-                    treeFootprint: bytes * 2, startedAt: when, version: nil)
+                    treeFootprint: bytes * 2, startedAt: when, version: nil,
+                    directory: nil, project: nil)
             ])
 }
 
