@@ -622,4 +622,32 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertEqual(Self.gitHub.id, "github:github.com")
         XCTAssertEqual(Self.gitLab.id, "gitlab:gitlab.example.com")
     }
+
+    // MARK: What a 403 means
+
+    private func reply(_ headers: [String: String]) throws -> HTTPURLResponse {
+        try XCTUnwrap(
+            HTTPURLResponse(
+                url: XCTUnwrap(URL(string: "https://api.github.com/graphql")), statusCode: 403,
+                httpVersion: nil, headerFields: headers))
+    }
+
+    /// GitHub answers `403` to a refused token and to a throttled one alike,
+    /// and only the headers tell them apart. A secondary limit leaves the
+    /// hourly quota untouched and sends a retry deadline instead, so reading
+    /// the remaining count alone filed it as a refusal — which parks the
+    /// connection and stops the cadence asking again at all.
+    func testASecondaryRateLimitIsNotARefusedToken() throws {
+        XCTAssertTrue(ForgeActivityFeed.askedToSlowDown(try reply(["Retry-After": "60"])))
+        XCTAssertTrue(
+            ForgeActivityFeed.askedToSlowDown(try reply(["X-RateLimit-Remaining": "0"])))
+    }
+
+    /// A refusal with quota to spare and no deadline on it is the token, which
+    /// is the one of these the user has to act on.
+    func testARefusalWithQuotaLeftIsTheToken() throws {
+        XCTAssertFalse(
+            ForgeActivityFeed.askedToSlowDown(try reply(["X-RateLimit-Remaining": "4987"])))
+        XCTAssertFalse(ForgeActivityFeed.askedToSlowDown(try reply([:])))
+    }
 }
