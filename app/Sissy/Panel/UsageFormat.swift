@@ -1087,6 +1087,61 @@ extension UsageFormat {
     static func identityFooter(checked: Int) -> String {
         "\(checked) \(checked == 1 ? "repository" : "repositories") checked"
     }
+
+    // MARK: Agents
+
+    /// Bytes at the grain a person reads them at, which is one decimal up to
+    /// a gigabyte and one above it.
+    ///
+    /// Base ten rather than base two, because this is the figure sitting
+    /// beside Activity Monitor's and macOS has counted in base ten since
+    /// 10.6. A reading that said `1.81 GB` where the system says `1.94 GB`
+    /// would look like Sissy measuring something else.
+    static func bytes(_ bytes: UInt64) -> String {
+        let value = Double(bytes)
+        if value >= 1_000_000_000 {
+            return String(format: "%.2f GB", value / 1_000_000_000)
+        }
+        if value >= 1_000_000 {
+            return String(format: "%.0f MB", value / 1_000_000)
+        }
+        return String(format: "%.0f KB", value / 1_000)
+    }
+
+    /// The Overview's one line about agents, and the Stats page's headline.
+    ///
+    /// Names what is running rather than what it costs: the row exists to
+    /// answer whether there is room to keep working, which is the same
+    /// question the gauges above it answer on a different axis.
+    static func agentsRunning(_ count: Int, footprint: UInt64) -> String {
+        "\(count) \(count == 1 ? "agent" : "agents") · \(bytes(footprint))"
+    }
+
+    /// What the agents have started alongside themselves — a build, a dev
+    /// server, a language server.
+    ///
+    /// Measured 2026-09-18, eight agents held 1.94 GB and the trees under them
+    /// 4.88 GB, so this is not a rounding on the figure above it but the other
+    /// half of the answer to why a Mac is struggling.
+    static func agentsWithChildren(_ tree: UInt64) -> String {
+        "\(bytes(tree)) with what they started"
+    }
+
+    /// One count, worded so a reading of none is not mistaken for a reading
+    /// that has not happened. The dash is the caller's.
+    static func agentCount(_ count: Int, singular: String, plural: String) -> String {
+        "\(count) \(count == 1 ? singular : plural)"
+    }
+
+    /// The window a series of memory samples covers, which begins when Sissy
+    /// did: a reading from a Mac that was asleep is not a low reading, it is
+    /// no reading.
+    static func samplesSince(_ since: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("jm")
+        return "since \(formatter.string(from: since))"
+    }
 }
 
 /// What a failed account switch says.

@@ -88,6 +88,10 @@ struct UsagePanelView: View {
         /// repository the Overview's line names — and nil where it was opened
         /// to read the whole list.
         case identities(focus: String?)
+        /// How many agents have run and what the ones running now hold, one
+        /// level in from the Overview's live line — which is the only door to
+        /// it, and is therefore drawn whether or not anything is running.
+        case stats
     }
 
     /// Cadence for both readouts the panel keeps on its own clock: the
@@ -121,7 +125,7 @@ struct UsagePanelView: View {
     /// for a vendor whose Overview row is not per account.
     private var openAccount: String? {
         switch page {
-        case .overview, .identities: nil
+        case .overview, .identities, .stats: nil
         case .provider(_, let account), .services(_, let account),
             .projects(_, let account):
             account
@@ -135,7 +139,7 @@ struct UsagePanelView: View {
         -> UsagePanelSnapshot.ProviderRow?
     {
         switch page {
-        case .overview, .identities: return nil
+        case .overview, .identities, .stats: return nil
         case .provider(let id, _), .services(let id, _):
             return providers.first { $0.id == id }
         case .projects(let id, _):
@@ -204,6 +208,8 @@ struct UsagePanelView: View {
                             ? .overview : .provider(open.id, account: openAccount))
                 } else if case .identities = page {
                     identitiesHeader
+                } else if case .stats = page {
+                    statsHeader
                 } else {
                     header(live)
                 }
@@ -224,6 +230,13 @@ struct UsagePanelView: View {
                                 openIdentities: { page = .identities(focus: $0) })
                         } else if case .identities = page {
                             PanelIdentities(rows: snapshot.identities, focus: identityFocus)
+                        } else if case .stats = page {
+                            PanelStats(
+                                block: snapshot.agents,
+                                period: snapshot.period,
+                                periods: snapshot.periods,
+                                coverage: snapshot.coverage,
+                                selectPeriod: { model.setUsagePeriod($0) })
                         } else if let open, let services {
                             PanelProviderStatusPage(provider: open.id, row: services)
                         } else if let open {
@@ -270,7 +283,8 @@ struct UsagePanelView: View {
                                 openIdentities: { page = .identities(focus: $0) },
                                 selectPeriod: { model.setUsagePeriod($0) },
                                 refreshingForge: model.engine.refreshingForge,
-                                refreshForge: { model.refreshForge($0) }
+                                refreshForge: { model.refreshForge($0) },
+                                openStats: { page = .stats }
                             )
                         }
                     } else {
@@ -311,6 +325,34 @@ struct UsagePanelView: View {
     /// The refresh is not a nicety here. A user on this page has usually just
     /// corrected a repository in a terminal, and waiting out a sweep interval
     /// to watch the row clear reads as the correction not having worked.
+    /// The stats page's own header: the way back and the title. No refresh
+    /// beside it, unlike the identities page — the sweep behind this one runs
+    /// on its own clock and the counts come off the tail, so there is nothing
+    /// a press could make happen sooner.
+    private var statsHeader: some View {
+        HStack(spacing: 8) {
+            Button {
+                page = .overview
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: Self.backButtonSize, height: Self.backButtonSize)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Back to today")
+
+            Text("Agents")
+                .font(.system(size: Self.headerTitleSize, weight: .semibold))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 12)
+    }
+
     private var identitiesHeader: some View {
         HStack(spacing: 8) {
             Button {

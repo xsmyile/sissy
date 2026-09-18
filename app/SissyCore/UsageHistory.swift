@@ -325,6 +325,25 @@ struct UsageHistoryRollup: Sendable, Equatable {
     let earliestDay: Date?
     let tokens: Int
     let cost: Decimal
+    /// Sessions and agents across the window, summed over every provider the
+    /// archive holds a day for.
+    ///
+    /// A day written before the archive counted them contributes nothing,
+    /// which under-reports a window that spans the change rather than
+    /// misreporting it: the reading is "what Sissy has counted", and the
+    /// coverage line under the figure already says how far back that is.
+    let agents: AgentCounts
+
+    init(
+        period: UsagePeriod, earliestDay: Date?, tokens: Int, cost: Decimal,
+        agents: AgentCounts = .none
+    ) {
+        self.period = period
+        self.earliestDay = earliestDay
+        self.tokens = tokens
+        self.cost = cost
+        self.agents = agents
+    }
 }
 
 /// What one archived day came to for one provider, which is the grain a
@@ -447,6 +466,7 @@ enum UsageHistoryStore {
         }
         var tokens: [UsagePeriod: Int] = [:]
         var cost: [UsagePeriod: Decimal] = [:]
+        var agents: [UsagePeriod: AgentCounts] = [:]
         var earliest: [UsagePeriod: Date] = [:]
         for provider in providers(in: parent) {
             for (dayKey, url) in dayFiles(provider: provider, in: parent) {
@@ -460,6 +480,7 @@ enum UsageHistoryStore {
                 for (period, cutoff) in cutoffs where cutoff.map({ dayKey >= $0 }) ?? true {
                     tokens[period, default: 0] += dayTokens
                     cost[period, default: 0] += dayCost
+                    agents[period, default: .none].add(decoded.agents ?? .none)
                     earliest[period] = earliest[period].map { min($0, dayKey) } ?? dayKey
                 }
             }
@@ -470,7 +491,8 @@ enum UsageHistoryStore {
                 period: period,
                 earliestDay: earliest[period],
                 tokens: tokens[period] ?? 0,
-                cost: cost[period] ?? 0)
+                cost: cost[period] ?? 0,
+                agents: agents[period] ?? .none)
         }
         return out
     }

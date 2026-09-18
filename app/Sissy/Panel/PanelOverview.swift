@@ -38,6 +38,9 @@ struct PanelOverview: View {
     /// where they otherwise print an age about to change.
     let refreshingForge: Set<String>
     let refreshForge: (String) -> Void
+    /// Opens the stats page. The line it hangs off is the only way there, so
+    /// it is drawn on every frame rather than only when something is running.
+    let openStats: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -47,6 +50,9 @@ struct PanelOverview: View {
                 Divider()
                 providers
             }
+
+            Divider()
+            agents
 
             if !snapshot.projects.isEmpty {
                 Divider()
@@ -63,6 +69,46 @@ struct PanelOverview: View {
                 identityAlert(alert)
             }
         }
+    }
+
+    // MARK: Agents
+
+    /// What the CLIs on this Mac are holding, and the way to the page behind
+    /// it.
+    ///
+    /// **Under the providers rather than under the projects**, which is where
+    /// the identity alert sits and for the opposite reason. That one is silent
+    /// on an ordinary day, so it does not get to push the day's spend down;
+    /// this is never silent, and it answers the same question the gauges above
+    /// it do — whether there is room to keep working — on the other axis that
+    /// stops work now. The two readings belong together. It costs the projects
+    /// one row's height.
+    ///
+    /// Drawn before the first sweep lands and on a Mac with nothing running,
+    /// because it is the only door to the page and a door that comes and goes
+    /// with the day is not one.
+    private var agents: some View {
+        Button(action: openStats) {
+            HStack(spacing: 6) {
+                Text(snapshot.agents.summary)
+                    .font(.system(size: PanelMetrics.rowText))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .foregroundStyle(
+                        snapshot.agents.live?.running ?? 0 > 0 ? .primary : Color.secondary
+                    )
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help("How many sessions and agents have run, and what they are holding now")
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 10)
     }
 
     // MARK: Identities
