@@ -75,6 +75,39 @@ enum ForgeConnectCopy {
     }
 }
 
+/// What each of a forge row's counters is called where it has a switch.
+///
+/// The words are neutral between the two forges, which the panel's own hover
+/// text is not: there it says "pull requests" to GitHub and "merge requests"
+/// to GitLab, because it is on a row that belongs to one of them. A switch
+/// governs every row at once, so it has to name the thing both vendors have.
+///
+/// There is no entry for the contribution total. It is what the section on the
+/// panel is called, so a row with it switched off would be a heading with
+/// nothing under it — and the switch would be asking the user to keep a block
+/// they had just emptied.
+enum ForgeCounterCopy {
+    static let section = "Shown on each row"
+
+    static func title(_ counter: ForgeCounter) -> String {
+        switch counter {
+        case .merged: "Merged requests"
+        case .issues: "Opened issues"
+        case .comments: "Comments"
+        }
+    }
+
+    /// What the figure counts, and — where it is not free — that switching it
+    /// off is also a decision about what Sissy asks the vendor for.
+    static func caption(_ counter: ForgeCounter) -> String {
+        switch counter {
+        case .merged: "Pull and merge requests you opened and had merged"
+        case .issues: "Issues you opened"
+        case .comments: "Comments you wrote on issues and requests"
+        }
+    }
+}
+
 /// The forges the user has connected, and the control that adds one.
 ///
 /// **A tab rather than a section under the metering providers**, which is
@@ -121,6 +154,11 @@ struct ForgeSettingsView: View {
                 }
                 CredentialAddRow(ForgeConnectCopy.connect) { adding = true }
                     .disabled(model.engine.connectingForge != nil)
+            }
+            Section(ForgeCounterCopy.section) {
+                ForEach(ForgeCounter.allCases, id: \.self) { counter in
+                    counterRow(counter)
+                }
             }
         }
         .formStyle(.grouped)
@@ -216,6 +254,41 @@ struct ForgeSettingsView: View {
                 hasFigures: reading.hasFigures(for: .all))
         else { return .ok }
         return .attention(notice)
+    }
+
+    /// One counter's switch, wearing the mark the panel draws it with.
+    ///
+    /// The mark is on the label rather than only the words, because the row it
+    /// governs has no words at all — the panel spends a glyph where it cannot
+    /// spend seven characters, so the switch that turns that glyph off is the
+    /// one place the two can be seen to be the same thing.
+    ///
+    /// A switch rather than the checkbox a `Toggle` renders as by default in a
+    /// grouped `Form`, which is what every other control in this window is:
+    /// these rows say whether something is on, and a window that answered that
+    /// question two ways would be asking the reader which one meant what. The
+    /// title goes to the `Toggle` and is then hidden, so the control the
+    /// pointer lands on is still named for the reader who cannot see the label
+    /// beside it.
+    private func counterRow(_ counter: ForgeCounter) -> some View {
+        LabeledContent {
+            Toggle(
+                ForgeCounterCopy.title(counter),
+                isOn: Binding(
+                    get: { model.engine.forgeCounters[counter] ?? true },
+                    set: { model.engine.setForgeCounter(counter, $0) })
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
+        } label: {
+            Label {
+                Text(ForgeCounterCopy.title(counter))
+            } icon: {
+                Image(systemName: ProviderPalette.forgeSymbol(counter))
+                    .foregroundStyle(ProviderPalette.forgeTint(counter))
+            }
+            Text(ForgeCounterCopy.caption(counter))
+        }
     }
 }
 

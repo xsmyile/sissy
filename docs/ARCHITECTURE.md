@@ -153,6 +153,20 @@ heatmap, and the residual nothing can close is a GitLab whose instance timezone
 differs from the profile's, since `after` on the events endpoint takes a date and
 applies it in the instance's.
 
+**Three of the four counters have a switch, and it decides what is read rather
+than only what is drawn.** `ForgeCounters` in `server.json` carries one optional
+flag each for the merged, issue and comment counts — `nil` meaning on, as
+`ProviderToggles` means it — and the monitor is *built* with the enabled set, so
+switching one off takes its fields out of the document GitHub is sent and its
+four header reads off GitLab's poll, taking that from ten requests to six. The
+contribution total has none: it is what the section is called, so a row with it
+off would be a heading with nothing under it. A counter switched off therefore
+reaches the panel as an absent period, which is the same shape a counter the
+vendor would not answer arrives in — the row already draws that by leaving the
+figure out. Changing one rebuilds the poll the way connecting a forge does,
+which costs a round rather than a wait: a fresh monitor asks at once, so a
+counter switched back on is a request away rather than an interval away.
+
 `providers[].plan` is the account's subscription plan as the vendor's own
 lowercase token — `max`, `team`, `plus` — never a display label: the app words it
 in `UsageFormat`, so a tier a vendor ships after this release still reaches the
@@ -275,7 +289,7 @@ compiled into the app too.
 | `ForgeActivity.swift`           | `ForgeKind`, `ForgeActivity` (the four counters per period), `ForgeActivityReading` and `ForgeReadFailure`. The login is on the *reading* and never on the connection: measured 2026-09-17, `gh`'s own configuration named one account while the token in its keychain item answered as another, so a username taken from a CLI's config is a guess about whose numbers these are. A period that could not be read is absent rather than zero |
 | `ForgeConnections.swift`        | `ForgeConnection` (kind plus host — the id, so one host serving two forges is two rows), `ForgeConnectionIndex` (`forge-connections.json`, holding no secret so a lapsed grant still lists what is connected) and `ForgeTokenStore` (`com.radonforge.sissy.forge-token`). No enabled flag: a connection is the switch, and removing it is the off |
 | `ForgeTokenImport.swift`        | Reads the tokens `gh` and `glab` already hold, on the press that offers them and nowhere else. `gh`'s is in the login keychain as `go-keyring-base64:<base64>` and is read through `/usr/bin/security` because that tool is on the item's ACL and this process is not — measured 2026-09-17, no dialog. `glab`'s is plaintext in its own config. Neither CLI's storage is ever written |
-| `ForgeActivityFeed.swift`       | `ForgeWindow` (the archive's own window arithmetic, plus `vendorDay`, which renders a window start as its own local date at midnight UTC — both forges bucket by whole UTC days and an instant made the calendar snap down and buy a whole extra day) and one reader per forge. GitHub answers every period's contributions, merges, opened issues **and comments** in one GraphQL document costing 1 point of 5000/h — the comments as a page of the account's own, counted here rather than at the vendor, which totals no such thing; the page proves its own coverage through `vendorInstant`, and a window it cannot prove is absent rather than a lower bound. GitLab takes two documents — the second only because the root `issues` field filters on the login the first returns, and that login travels as a GraphQL **variable** rather than spliced into a query — plus two header reads per period, the activity total and the same filtered to `commented`. `after` on GitLab's events is **exclusive**, measured, so a window names the day before it starts |
+| `ForgeActivityFeed.swift`       | `ForgeWindow` (the archive's own window arithmetic, plus `vendorDay`, which renders a window start as its own local date at midnight UTC — both forges bucket by whole UTC days and an instant made the calendar snap down and buy a whole extra day) and one reader per forge. GitHub answers every period's contributions, merges, opened issues **and comments** in one GraphQL document costing 1 point of 5000/h — the comments as a page of the account's own, counted here rather than at the vendor, which totals no such thing; the page proves its own coverage through `vendorInstant`, and a window it cannot prove is absent rather than a lower bound. GitLab takes two documents — the second only because the root `issues` field filters on the login the first returns, and that login travels as a GraphQL **variable** rather than spliced into a query — plus two header reads per period, the activity total and the same filtered to `commented`. Each of the three optional counters is asked for only while its switch is on, keyed by `ForgeCounter`. `after` on GitLab's events is **exclusive**, measured, so a window names the day before it starts |
 | `ForgeActivityMonitor.swift`    | The poll: 5 min while agents are working, 30 min once nothing has, jittered, one value published for every connection. A failure keeps the last figures **and their age** — republishing would date a reading nobody took — and a refused or missing token parks the connection until the user acts, which is what separates this loop from `ProviderStatusMonitor`'s |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow` / `ProviderAccount` / `ProviderCredits`, the burn rate, and the slice and project ordering. No formatters: the frame carries raw numbers and the app words them. `history` is one rollup per `UsagePeriod` the archive answers for, never keyed by `today` — the headline reads that off the live totals beside it |

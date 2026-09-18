@@ -42,6 +42,10 @@ final class UsageEngineHost {
     /// file and owns the poll, and a copy kept in the app could say the
     /// readings are on while nothing is fetching them.
     private(set) var statusChecks: Bool = true
+    /// Which counters each forge row carries, for the Forge tab's switches.
+    /// Held here the way `statusChecks` is: the engine owns the file, this owns
+    /// what the window draws while a write is in flight.
+    private(set) var forgeCounters: ForgeCounters = .defaults
     private(set) var agentHooks: Bool = false
     /// Set when the switch is on but a configuration file could not be
     /// rewritten — the name of the CLI whose file was left alone, so Settings
@@ -124,6 +128,7 @@ final class UsageEngineHost {
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
         statusChecks = config.statusChecks
+        forgeCounters = config.forgeCounters ?? .defaults
         keepAwakeMode = config.keepAwake
         agentHooks = config.agentHooks
         // Re-affirmed at every launch rather than written once: the CLIs
@@ -729,6 +734,15 @@ final class UsageEngineHost {
         guard let engine, enabled != statusChecks else { return }
         statusChecks = enabled
         Task { await engine.setStatusChecks(enabled: enabled) }
+    }
+
+    /// Switches one of a forge row's counters. Off also stops it being read,
+    /// which is the engine's call to make and the reason this is not a view's
+    /// own state.
+    func setForgeCounter(_ counter: ForgeCounter, _ enabled: Bool) {
+        guard let engine, forgeCounters[counter] ?? true != enabled else { return }
+        forgeCounters[counter] = enabled
+        Task { await engine.setForgeCounter(counter, enabled: enabled) }
     }
 
     /// Whether anything is being metered at all.

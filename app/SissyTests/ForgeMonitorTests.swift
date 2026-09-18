@@ -31,7 +31,7 @@ final class ForgeMonitorTests: XCTestCase {
     func testAGoodRoundPublishesOneRowPerConnectionInOrder() async {
         let monitor = ForgeActivityMonitor(
             connections: [Self.gitHub, Self.gitLab],
-            fetch: { connection, _, _ in
+            fetch: { connection, _, _, _ in
                 Self.reading(
                     connection, login: connection.kind == .gitHub ? "gh" : "gl",
                     contributions: 10, merged: 2)
@@ -49,7 +49,8 @@ final class ForgeMonitorTests: XCTestCase {
     func testAConnectionWithNoTokenGetsARowWithAReason() async {
         let monitor = ForgeActivityMonitor(
             connections: [Self.gitHub],
-            fetch: { connection, _, _ in Self.reading(connection, login: "gh", contributions: 1, merged: 0) },
+            fetch: { connection, _, _, _ in Self.reading(connection, login: "gh", contributions: 1, merged: 0)
+            },
             token: { _ in .absent })
         _ = await monitor.refreshOnce {}
         let row = monitor.currentReadings().first
@@ -68,7 +69,7 @@ final class ForgeMonitorTests: XCTestCase {
         let attempts = LockedValue(0)
         let monitor = ForgeActivityMonitor(
             connections: [Self.gitHub],
-            fetch: { connection, _, _ in
+            fetch: { connection, _, _, _ in
                 attempts.update { $0 += 1 }
                 return Self.reading(connection, login: "gh", contributions: 1, merged: 0)
             },
@@ -86,7 +87,7 @@ final class ForgeMonitorTests: XCTestCase {
         let attempts = LockedValue(0)
         let monitor = ForgeActivityMonitor(
             connections: [Self.gitHub],
-            fetch: { connection, _, _ in
+            fetch: { connection, _, _, _ in
                 attempts.update { $0 += 1 }
                 return Self.reading(connection, login: "gh", contributions: 1, merged: 0)
             },
@@ -105,7 +106,7 @@ final class ForgeMonitorTests: XCTestCase {
         let outcome = LockedValue<Bool>(true)
         let monitor = ForgeActivityMonitor(
             connections: [Self.gitHub],
-            fetch: { connection, _, _ in
+            fetch: { connection, _, _, _ in
                 guard outcome.load() else { throw ForgeReadFailure.unreachable }
                 return Self.reading(connection, login: "gh", contributions: 42, merged: 7)
             },
@@ -126,7 +127,7 @@ final class ForgeMonitorTests: XCTestCase {
         let attempts = LockedValue(0)
         let monitor = ForgeActivityMonitor(
             connections: [Self.gitHub],
-            fetch: { _, _, _ in
+            fetch: { _, _, _, _ in
                 attempts.update { $0 += 1 }
                 throw ForgeReadFailure.unauthorized
             },
@@ -146,7 +147,7 @@ final class ForgeMonitorTests: XCTestCase {
         let attempts = LockedValue(0)
         let refused = ForgeActivityMonitor(
             connections: [Self.gitHub],
-            fetch: { _, _, _ in
+            fetch: { _, _, _, _ in
                 attempts.update { $0 += 1 }
                 throw ForgeReadFailure.unauthorized
             },
@@ -156,7 +157,7 @@ final class ForgeMonitorTests: XCTestCase {
         XCTAssertEqual(attempts.load(), 1)
         let replaced = ForgeActivityMonitor(
             connections: [Self.gitHub],
-            fetch: { connection, _, _ in
+            fetch: { connection, _, _, _ in
                 Self.reading(connection, login: "gh", contributions: 5, merged: 1)
             },
             token: { _ in .found("token") })
@@ -171,7 +172,8 @@ final class ForgeMonitorTests: XCTestCase {
     func testStoppingDropsTheReadings() async {
         let monitor = ForgeActivityMonitor(
             connections: [Self.gitHub],
-            fetch: { connection, _, _ in Self.reading(connection, login: "gh", contributions: 3, merged: 0) },
+            fetch: { connection, _, _, _ in Self.reading(connection, login: "gh", contributions: 3, merged: 0)
+            },
             token: { _ in .found("token") })
         _ = await monitor.refreshOnce {}
         XCTAssertFalse(monitor.currentReadings().isEmpty)
@@ -184,7 +186,8 @@ final class ForgeMonitorTests: XCTestCase {
         let frames = LockedValue(0)
         let monitor = ForgeActivityMonitor(
             connections: [Self.gitHub],
-            fetch: { connection, _, _ in Self.reading(connection, login: "gh", contributions: 9, merged: 4) },
+            fetch: { connection, _, _, _ in Self.reading(connection, login: "gh", contributions: 9, merged: 4)
+            },
             token: { _ in .found("token") })
         _ = await monitor.refreshOnce { frames.update { $0 += 1 } }
         _ = await monitor.refreshOnce { frames.update { $0 += 1 } }

@@ -38,6 +38,50 @@ struct ProviderToggles: Sendable, Codable {
     }
 }
 
+/// Which of a forge row's counters the panel carries.
+///
+/// `nil` means on, which is what `ProviderToggles` means by it and for the
+/// same reason: a `server.json` written before a counter existed must not read
+/// as that counter being switched off. There is no entry for the contribution
+/// total, because it is what the section is called.
+///
+/// **A counter switched off is not fetched**, so this is not only a rendering
+/// choice — which is why it lives here rather than in a view's own state, and
+/// why changing one rebuilds the poll the way connecting a forge does.
+struct ForgeCounters: Sendable, Codable, Equatable {
+    var merged: Bool?
+    var issues: Bool?
+    var comments: Bool?
+
+    static let defaults = Self(merged: nil, issues: nil, comments: nil)
+
+    /// One counter's switch, by the name a Settings row carries, so a surface
+    /// listing them needs to know no stored property. The same shape
+    /// `ProviderToggles` is on.
+    subscript(counter: ForgeCounter) -> Bool? {
+        get {
+            switch counter {
+            case .merged: return merged
+            case .issues: return issues
+            case .comments: return comments
+            }
+        }
+        set {
+            switch counter {
+            case .merged: merged = newValue
+            case .issues: issues = newValue
+            case .comments: comments = newValue
+            }
+        }
+    }
+
+    /// The counters that are on, which is what the reader is built with. An
+    /// absent switch is an on one.
+    var enabled: Set<ForgeCounter> {
+        Set(ForgeCounter.allCases.filter { self[$0] ?? true })
+    }
+}
+
 struct ServerConfig: Sendable, Codable {
     var claudeDataDir: String
     var codexDataDir: String
@@ -101,6 +145,11 @@ struct ServerConfig: Sendable, Codable {
     /// partial-config path below and lands on the default.
     var agentHooksRemovalPending: Bool
 
+    /// Which counters each forge row carries, and therefore which ones are
+    /// read at all. Optional so a `server.json` predating it decodes straight
+    /// through with every counter on.
+    var forgeCounters: ForgeCounters?
+
     static let defaults = ServerConfig(
         claudeDataDir: "~/.claude/projects",
         codexDataDir: "~/.codex/sessions",
@@ -113,7 +162,8 @@ struct ServerConfig: Sendable, Codable {
         keepAwake: .off,
         keepScreenAwake: true,
         agentHooks: false,
-        agentHooksRemovalPending: false
+        agentHooksRemovalPending: false,
+        forgeCounters: nil
     )
 
     static var defaultURL: URL {
@@ -133,6 +183,23 @@ struct ServerConfig: Sendable, Codable {
             let merged = try mergeWithDefaults(data: data) ?? .defaults
             return merged
         }
+    }
+
+    /// The counter switches out of a partly-readable file, key by key.
+    ///
+    /// This path is what a file with one unreadable field falls through, so a
+    /// counter left out of it would come back **on** — and on, for this
+    /// setting, means asking the vendor for it again on the next poll. A
+    /// switch a neighbouring key's typo silently undoes is worse than no
+    /// switch. Its own function because the overlay above is already at the
+    /// complexity the linter allows, and this reads as one question anyway.
+    private static func forgeCounters(in obj: [String: Any]) -> ForgeCounters? {
+        guard let counters = obj["forgeCounters"] as? [String: Any] else { return nil }
+        var switches = ForgeCounters.defaults
+        for counter in ForgeCounter.allCases {
+            switches[counter] = counters[counter.rawValue] as? Bool
+        }
+        return switches
     }
 
     private static func mergeWithDefaults(data: Data) throws -> ServerConfig? {
@@ -159,6 +226,7 @@ struct ServerConfig: Sendable, Codable {
             toggles.codex = prov["codex"] as? Bool
             merged.providers = toggles
         }
+        merged.forgeCounters = forgeCounters(in: obj) ?? merged.forgeCounters
         if let raw = obj["pricingOverride"],
             let nested = try? JSONSerialization.data(withJSONObject: raw),
             let decoded = try? JSONDecoder().decode([String: ModelPricing].self, from: nested)

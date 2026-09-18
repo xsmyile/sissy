@@ -40,9 +40,15 @@ actor ForgeActivityMonitor {
     /// frame path, which cannot afford to await this actor.
     nonisolated private let lastActivity = LockedValue<Date?>(nil)
     private let connections: [ForgeConnection]
+    /// Which counters to ask for. Held here rather than read per round because
+    /// a change to it rebuilds the monitor, exactly as a change to the
+    /// connections does — the poll has no mutable configuration.
+    private let counters: Set<ForgeCounter>
     /// The network half, injectable for the reason every other reader's is: a
     /// test of the poll contract must not reach a forge to observe it.
-    private let fetchSource: @Sendable (ForgeConnection, String, Date) async throws -> ForgeActivityReading
+    private let fetchSource:
+        @Sendable (ForgeConnection, String, Set<ForgeCounter>, Date) async throws ->
+            ForgeActivityReading
     /// The token lookup, injectable for the same reason — a test must not need
     /// a keychain item to assert what a missing token does to a row. It hands
     /// back the keychain's own outcome rather than an optional, because "never
@@ -58,14 +64,18 @@ actor ForgeActivityMonitor {
 
     init(
         connections: [ForgeConnection],
+        counters: Set<ForgeCounter> = ForgeCounter.all,
         fetch:
-            @escaping @Sendable (ForgeConnection, String, Date) async throws ->
-            ForgeActivityReading = { try await ForgeActivityFeed.read($0, token: $1, now: $2) },
+            @escaping @Sendable (ForgeConnection, String, Set<ForgeCounter>, Date) async throws ->
+            ForgeActivityReading = {
+                try await ForgeActivityFeed.read($0, token: $1, counters: $2, now: $3)
+            },
         token: @escaping @Sendable (String) -> CredentialLookup<String> = {
             ForgeTokenStore.load(connection: $0)
         }
     ) {
         self.connections = connections
+        self.counters = counters
         fetchSource = fetch
         tokenSource = token
     }
@@ -129,12 +139,16 @@ actor ForgeActivityMonitor {
             for connection in due {
                 let fetch = fetchSource
                 let token = tokenSource
+                let counters = counters
                 group.addTask {
                     guard case .found(let secret) = token(connection.id) else {
                         return (connection, .failure(Self.credentialFailure(token(connection.id))))
                     }
                     do {
-                        return (connection, .success(try await fetch(connection, secret, Date())))
+                        return (
+                            connection,
+                            .success(try await fetch(connection, secret, counters, Date()))
+                        )
                     } catch {
                         return (connection, .failure(error))
                     }
