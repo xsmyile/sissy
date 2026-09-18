@@ -727,7 +727,8 @@ struct ForgeRowView: View {
     private var notice: some View {
         TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
             if let notice = UsageFormat.forgeNotice(
-                row.failure, readAt: row.readAt, refreshing: refreshing, now: context.date)
+                row.failure, readAt: row.readAt, opensAt: row.opensAt, refreshing: refreshing,
+                now: context.date)
             {
                 Text(notice)
                     .font(.system(size: Self.noticeSize))
