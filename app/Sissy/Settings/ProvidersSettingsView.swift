@@ -66,10 +66,10 @@ struct ProviderRowSnapshot: Equatable {
 /// different — there is no archived credential left behind, because Sissy
 /// never took one.
 enum CodexAccountLinkCopy {
-    static let label = "Linked accounts"
     static let addTitle = "Add account…"
+    static let infoTitle = "How Sissy reads Codex accounts"
 
-    static let caption =
+    static let detail =
         "Sissy reads the account Codex is signed into for free. Linking another signs in "
         + "to OpenAI once, in a window, and reads its limits beside it. Your terminal stays "
         + "on the account it is on."
@@ -83,6 +83,8 @@ enum CodexAccountLinkCopy {
 
     static let unlinkHelp =
         "Forget this account's OpenAI sign-in. Codex itself is untouched."
+
+    static let unlinkItem = "Unlink…"
 
     static func unlink(_ account: String) -> String { "Unlink \(account)" }
 
@@ -112,13 +114,25 @@ enum CodexAccountLinkCopy {
 }
 
 enum ClaudeAccountLinkCopy {
-    static let label = "Linked accounts"
     static let addTitle = "Add account…"
+    static let infoTitle = "How Sissy reads Claude accounts"
 
-    static let caption =
+    static let detail =
         "Sissy reads the account Claude Code is signed into for free. Linking another "
         + "signs in to claude.ai once, in a window that closes itself, and reads its "
         + "limits and credits beside it."
+
+    /// Why the account Sissy reads for free is whichever one the CLI is on,
+    /// which is the half of the answer that only applies where Claude Code
+    /// keeps a credential this Mac can read.
+    ///
+    /// It was a row of its own, titled `Limits source`, until 0.1.10: a
+    /// statement of mechanism with no control on it, in a window where every
+    /// other row is a control, costing 64 pt of a budget the tab was over.
+    static let ownCredentialDetail =
+        "Claude Code keeps its OAuth token in its own config directory, and it belongs to "
+        + "whichever account is signed in there, so that is the account Sissy reads limits "
+        + "for."
 
     static let chooseLabel = "Which organisation?"
 
@@ -130,6 +144,8 @@ enum ClaudeAccountLinkCopy {
     static let unlinkHelp =
         "Forget this account's claude.ai session. The Claude Code sign-in Sissy archived "
         + "for it stays, so you can still switch to it."
+
+    static let unlinkItem = "Unlink…"
 
     static func unlink(_ account: String) -> String { "Unlink \(account)" }
 
@@ -202,13 +218,15 @@ struct LinkedAccountRowSnapshot: Equatable {
     }
 }
 
-enum ClaudeLimitsSourceCopy {
-    static let ownCredentialLabel = "Limits source"
-    static let ownCredentialState = "This account's own sign-in"
-    static let ownCredentialCaption =
-        "Claude Code keeps its OAuth token in its own config directory, and it belongs to "
-        + "whichever account is signed in there, so that is the account Sissy reads limits "
-        + "for."
+/// What the status switch says, and the part of it that moved into its ⓘ.
+enum ProviderStatusCopy {
+    static let label = "Provider status"
+    static let caption = "Reads status.claude.com and status.openai.com."
+    static let infoTitle = "What the status check reads"
+    static let detail =
+        "Sissy polls each vendor's own status page so the panel can say whether a provider "
+        + "that has gone quiet is you or them. It carries no account, no sign-in and "
+        + "nothing about your usage."
 }
 
 /// Where each provider's numbers come from, and what it is doing about them.
@@ -237,9 +255,6 @@ struct ProvidersSettingsView: View {
                     // windows to ride on, so a session linked here would read
                     // for a provider the user has told Sissy to leave alone.
                     if readiness.id == ProviderID.claudeCode, readiness.activation.isMetering {
-                        if model.engine.claudeUsesOwnCredential {
-                            ownCredentialRow
-                        }
                         linkedAccounts
                     }
                     // Only under a Codex that is being metered, for the reason
@@ -295,15 +310,16 @@ struct ProvidersSettingsView: View {
     /// why it can be on without being asked for.
     private var statusChecks: some View {
         LabeledContent {
-            Toggle("Provider status", isOn: statusChecksBinding)
+            Toggle(ProviderStatusCopy.label, isOn: statusChecksBinding)
                 .labelsHidden()
                 .toggleStyle(.switch)
         } label: {
-            Text("Provider status")
-            Text(
-                "Reads status.claude.com and status.openai.com so the panel can say "
-                    + "whether it is you or them. No account, no sign-in."
-            )
+            HStack(spacing: 4) {
+                Text(ProviderStatusCopy.label)
+                SettingsInfoButton(
+                    title: ProviderStatusCopy.infoTitle, detail: ProviderStatusCopy.detail)
+            }
+            Text(ProviderStatusCopy.caption)
         }
     }
 
@@ -314,19 +330,13 @@ struct ProvidersSettingsView: View {
         )
     }
 
-    /// What is read when the CLI keeps its own credential: no keychain
-    /// dialog, no cookie, and no grant that a re-signed build invalidates.
-    private var ownCredentialRow: some View {
-        LabeledContent {
-            Text(ClaudeLimitsSourceCopy.ownCredentialState).foregroundStyle(.secondary)
-        } label: {
-            Text(ClaudeLimitsSourceCopy.ownCredentialLabel)
-            Text(ClaudeLimitsSourceCopy.ownCredentialCaption)
-        }
-    }
-
     /// The vendor's line, the switch that decides whether Sissy reads it, and
     /// under both where it is reading and what it has found there.
+    ///
+    /// It heads its own section rather than sitting level with the rows under
+    /// it: a provider and one of its accounts were the same shape and the same
+    /// weight, so a list of three rows read as three settings rather than as
+    /// one provider with two accounts.
     ///
     /// The switch carries the resolved state as its accessibility value rather
     /// than printing it beside itself: "On" next to a control already showing
@@ -342,13 +352,72 @@ struct ProvidersSettingsView: View {
                 .accessibilityValue(snapshot.state)
                 .disabled(model.engine.switchingProvider)
         } label: {
-            Label {
-                Text(snapshot.name)
-            } icon: {
-                ProviderMark(id: readiness.id, size: Self.markSize, textSize: NSFont.systemFontSize)
+            HStack(spacing: 4) {
+                Label {
+                    Text(snapshot.name).font(.headline)
+                } icon: {
+                    ProviderMark(
+                        id: readiness.id, size: Self.markSize, textSize: NSFont.systemFontSize)
+                }
+                info(for: readiness.id)
             }
             Text(snapshot.detail)
         }
+    }
+
+    /// What each provider's ⓘ has to say, which is everything the rows under
+    /// it no longer print. A provider Sissy ships no account list for has
+    /// nothing to explain and gets no button.
+    @ViewBuilder
+    private func info(for provider: String) -> some View {
+        switch provider {
+        case ProviderID.claudeCode:
+            SettingsInfoButton(title: ClaudeAccountLinkCopy.infoTitle, detail: claudeDetail)
+        case ProviderID.codex:
+            SettingsInfoButton(
+                title: CodexAccountLinkCopy.infoTitle, detail: CodexAccountLinkCopy.detail)
+        default:
+            EmptyView()
+        }
+    }
+
+    /// The Claude ⓘ, which carries the free account's own paragraph only where
+    /// there is one: a Mac whose CLI keeps no credential Sissy can read has no
+    /// such account, and the sentence would be describing a row that is not
+    /// there.
+    private var claudeDetail: String {
+        guard model.engine.claudeUsesOwnCredential else { return ClaudeAccountLinkCopy.detail }
+        return ClaudeAccountLinkCopy.ownCredentialDetail + "\n\n" + ClaudeAccountLinkCopy.detail
+    }
+
+    /// This account's own reading off the last frame.
+    ///
+    /// The frame is where a per-account reading is: `ProviderSignals.accounts`
+    /// carries one entry per credential the engine is polling, and the panel
+    /// draws its own rows from the same list. Settings held none of it, which
+    /// is why a row could not say whether the session beside its trash was
+    /// still working.
+    ///
+    /// Nil is an account the engine has not answered for yet, which is the
+    /// ordinary state in the moment after a link and never a fault.
+    private func signals(of account: String, provider: String) -> AccountSignals? {
+        model.liveFrame?.frame.providers
+            .first { $0.id == provider }?
+            .signals.accounts
+            .first { $0.id == account }
+    }
+
+    /// What the row has to report, in the reader's own words.
+    ///
+    /// `UsageFormat.limitsNotice` is the panel's wording for the same states,
+    /// taken rather than paraphrased: a state either vendor learns to answer
+    /// with is then worded in one place, and the row cannot drift from the
+    /// notice the panel prints for the same account.
+    private func health(of signals: AccountSignals?, provider: String) -> CredentialHealth {
+        guard let signals,
+            let notice = UsageFormat.limitsNotice(signals.limitsState, provider: provider)
+        else { return .ok }
+        return .attention(notice.message)
     }
 
     /// Reads the resolution rather than the stored toggle, so a provider Sissy
@@ -371,19 +440,23 @@ struct ProvidersSettingsView: View {
     /// carries only the way in and whatever the last attempt failed with.
     @ViewBuilder
     private var linkedAccounts: some View {
-        LabeledContent {
-            Button(ClaudeAccountLinkCopy.addTitle) { model.engine.addClaudeAccount() }
-        } label: {
-            Text(ClaudeAccountLinkCopy.label)
+        Group {
             if let why = model.engine.claudeWebLinkFailure {
-                Text(ClaudeAccountLinkCopy.failure(why))
-            } else {
-                Text(ClaudeAccountLinkCopy.caption)
+                failure(ClaudeAccountLinkCopy.failure(why))
             }
+            ForEach(sortedAccounts) { account in
+                linkedAccount(account)
+            }
+            CredentialAddRow(ClaudeAccountLinkCopy.addTitle) { model.engine.addClaudeAccount() }
         }
-        ForEach(sortedAccounts) { account in
-            linkedAccount(account)
-        }
+    }
+
+    /// What the last attempt to link failed with, on a row of its own now that
+    /// the caption it used to replace lives in the ⓘ.
+    private func failure(_ message: String) -> some View {
+        Label(message, systemImage: "exclamationmark.triangle")
+            .foregroundStyle(.red)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Ordered by the name they are drawn under rather than by the uuid they
@@ -415,45 +488,54 @@ struct ProvidersSettingsView: View {
         account.identity.map(UsageFormat.accountLabel) ?? account.id
     }
 
-    /// One linked account, with the control that unlinks it.
+    /// One linked account: who it is, what it is on, and whatever its reader
+    /// has to report about it.
     ///
-    /// A trash rather than a labelled button because the row already names
-    /// what it acts on, and the whole list is one gesture repeated. What it
-    /// deletes is the session and nothing else — the archived Claude Code
-    /// sign-in beside it is not something the user linked, and Sissy cannot
-    /// make another — which the help text says before the click rather than
-    /// after it.
+    /// The address and the organisation share the caption line rather than
+    /// taking one each — they are one answer to "which seat is this" — and the
+    /// plan rides at the end of the title line, where the panel already puts
+    /// it.
+    ///
+    /// What unlinks it is a menu item rather than a bare trash. The trash was
+    /// the only control the row carried, so the one thing a reader could see
+    /// to do with an account was delete it, and what it deletes is a session
+    /// the user cannot read back.
     private func linkedAccount(_ account: ClaudeWebAccount) -> some View {
         let row = LinkedAccountRowSnapshot.make(account)
-        return LabeledContent {
-            Button(role: .destructive) {
-                unlinking = account
-            } label: {
-                Image(systemName: "trash").foregroundStyle(.red)
-            }
-            .buttonStyle(.borderless)
-            .help(ClaudeAccountLinkCopy.unlinkHelp)
-            .accessibilityLabel(ClaudeAccountLinkCopy.unlink(Self.label(of: account)))
-        } label: {
-            Self.title(row)
-            if let organization = row.organization {
-                Text(organization)
+        let signals = self.signals(of: account.id, provider: ProviderID.claudeCode)
+        let plan = UsageFormat.plan(
+            signals?.plan, tier: signals?.planTier, seat: signals?.account?.seat)
+        return CredentialRow(
+            title: row.title,
+            badge: plan?.label,
+            badgeTier: plan?.tier,
+            subtitle: Self.subtitle(row),
+            health: health(of: signals, provider: ProviderID.claudeCode)
+        ) {
+            CredentialMonogram(
+                name: row.organization ?? row.title,
+                tint: ProviderPalette.tint(for: ProviderID.claudeCode),
+                health: health(of: signals, provider: ProviderID.claudeCode))
+        } actions: {
+            CredentialRowMenu(
+                label: ClaudeAccountLinkCopy.unlink(Self.label(of: account)),
+                help: ClaudeAccountLinkCopy.unlinkHelp
+            ) {
+                CredentialCopyButton(CredentialRowCopy.copyAddress, of: Self.label(of: account))
+                Divider()
+                Button(ClaudeAccountLinkCopy.unlinkItem, role: .destructive) {
+                    unlinking = account
+                }
             }
         }
     }
 
-    /// The title with the address trailing it, as one `Text` rather than a
-    /// stack: `LabeledContent` styles the first view of its label as the title
-    /// and everything after it as a caption, so a second view here would put
-    /// the address on a line of its own under a name it belongs beside.
-    ///
-    /// Interpolated rather than concatenated — `Text.+` is deprecated as of
-    /// macOS 26 — which is also what keeps the address in secondary text
-    /// inside a title the form styles as a whole.
-    private static func title(_ row: LinkedAccountRowSnapshot) -> Text {
-        guard let address = row.address else { return Text(row.title) }
-        let trailing = Text(address).foregroundStyle(.secondary)
-        return Text("\(row.title)   \(trailing)")
+    /// The address and the organisation on one line, either of which can be
+    /// the only one there — and neither, for a session filed before anything
+    /// could name it.
+    private static func subtitle(_ row: LinkedAccountRowSnapshot) -> String? {
+        let parts = [row.address, row.organization].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// Links another Codex account, which is the only way to read one the CLI
@@ -462,14 +544,11 @@ struct ProvidersSettingsView: View {
     /// window that went behind.
     @ViewBuilder
     private var codexAccounts: some View {
-        LabeledContent {
-            Button(CodexAccountLinkCopy.addTitle) { model.engine.addCodexAccount() }
-        } label: {
-            Text(CodexAccountLinkCopy.label)
-            Text(CodexAccountLinkCopy.caption)
-        }
-        ForEach(sortedCodexAccounts) { account in
-            codexAccount(account)
+        Group {
+            ForEach(sortedCodexAccounts) { account in
+                codexAccount(account)
+            }
+            CredentialAddRow(CodexAccountLinkCopy.addTitle) { model.engine.addCodexAccount() }
         }
     }
 
@@ -489,20 +568,36 @@ struct ProvidersSettingsView: View {
         account.link?.identity.email ?? account.id
     }
 
+    /// One linked Codex account, in the shape the Claude rows take: a linked
+    /// credential is the same kind of thing whichever vendor issued it, and
+    /// two row shapes for it would be two places for the same reading to be
+    /// drawn differently.
     private func codexAccount(_ account: CodexLinkedAccount) -> some View {
-        LabeledContent {
-            Button(role: .destructive) {
-                unlinkingCodex = account
-            } label: {
-                Image(systemName: "trash").foregroundStyle(.red)
-            }
-            .buttonStyle(.borderless)
-            .help(CodexAccountLinkCopy.unlinkHelp)
-            .accessibilityLabel(CodexAccountLinkCopy.unlink(Self.label(of: account)))
-        } label: {
-            Text(Self.label(of: account))
-            if let workspace = account.link?.workspace {
-                Text(UsageFormat.workspaceLabel(workspace))
+        let title = Self.label(of: account)
+        let workspace = account.link?.workspace.map(UsageFormat.workspaceLabel)
+        let signals = self.signals(of: account.id, provider: ProviderID.codex)
+        let plan = UsageFormat.plan(signals?.plan, tier: signals?.planTier)
+        return CredentialRow(
+            title: title,
+            badge: plan?.label,
+            badgeTier: plan?.tier,
+            subtitle: workspace,
+            health: health(of: signals, provider: ProviderID.codex)
+        ) {
+            CredentialMonogram(
+                name: workspace ?? title,
+                tint: ProviderPalette.tint(for: ProviderID.codex),
+                health: health(of: signals, provider: ProviderID.codex))
+        } actions: {
+            CredentialRowMenu(
+                label: CodexAccountLinkCopy.unlink(title),
+                help: CodexAccountLinkCopy.unlinkHelp
+            ) {
+                CredentialCopyButton(CredentialRowCopy.copyAddress, of: title)
+                Divider()
+                Button(CodexAccountLinkCopy.unlinkItem, role: .destructive) {
+                    unlinkingCodex = account
+                }
             }
         }
     }

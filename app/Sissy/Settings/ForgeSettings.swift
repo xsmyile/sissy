@@ -8,7 +8,20 @@ import SwiftUI
 enum ForgeConnectCopy {
     static let label = "Contributions"
     static let caption = "Read your own activity counts from GitHub and GitLab"
+    static let infoTitle = "What a connected forge is read for"
+    static let detail =
+        "Sissy reads two counters from each forge you connect — what you contributed and "
+        + "what you had merged — with a token it keeps in a keychain item of its own. It "
+        + "never writes to a repository and never changes what gh or glab hold."
     static let connect = "Connect…"
+    static let disconnectItem = "Disconnect…"
+
+    /// When this connection last answered, which with the login beside it is
+    /// what says a connection is alive. Sissy's own fetch time rather than
+    /// anything off the payload, the rule `ProviderStatusMonitor` follows.
+    static func lastRead(_ readAt: Date, now: Date = Date()) -> String {
+        "read " + UsageFormat.age(now.timeIntervalSince(readAt))
+    }
     static let sheetTitle = "Connect a forge"
     static let detected = "Tokens already on this Mac"
     static let orPaste = "Or paste one"
@@ -102,10 +115,12 @@ struct ForgeSettingsView: View {
     var body: some View {
         Form {
             Section {
-                connect
+                heading
                 ForEach(model.engine.forgeConnections) { connection in
                     row(connection)
                 }
+                CredentialAddRow(ForgeConnectCopy.connect) { adding = true }
+                    .disabled(model.engine.connectingForge != nil)
             }
         }
         .formStyle(.grouped)
@@ -127,32 +142,80 @@ struct ForgeSettingsView: View {
         }
     }
 
-    private var connect: some View {
-        LabeledContent {
-            Button(ForgeConnectCopy.connect) { adding = true }
-                .disabled(model.engine.connectingForge != nil)
-        } label: {
-            Text(ForgeConnectCopy.label)
+    /// What this tab is for, over the list rather than beside a button: with no
+    /// switch to explain, there is no control for a caption to sit next to.
+    /// The paragraph it used to carry is in the ⓘ.
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(ForgeConnectCopy.label).font(.headline)
+                SettingsInfoButton(
+                    title: ForgeConnectCopy.infoTitle, detail: ForgeConnectCopy.detail)
+            }
             Text(ForgeConnectCopy.caption)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One connected forge, in the row shape a linked account takes: both are
+    /// a credential the user added, and two shapes for them would be two
+    /// places for the same reading to be drawn differently.
+    ///
+    /// It leads on the host rather than on the vendor's name: two GitLabs are
+    /// told apart by their host and never by "GitLab", and the mark in the
+    /// disc already says which vendor it is. Under it goes the login the
+    /// **API** answered with — not the one `gh` has written down — which is
+    /// the only thing on the row that says whose counts these are.
+    private func row(_ connection: ForgeConnection) -> some View {
+        let reading = model.liveFrame?.frame.forge.first { $0.id == connection.id }
+        return CredentialRow(
+            title: connection.host,
+            subtitle: subtitle(connection, reading: reading),
+            health: Self.health(of: reading)
+        ) {
+            CredentialDisc(tint: .secondary, health: Self.health(of: reading)) {
+                ForgeMark(host: connection.host)
+            }
+        } actions: {
+            CredentialRowMenu(
+                label: ForgeConnectCopy.unlink(connection),
+                help: ForgeConnectCopy.unlinkHelp
+            ) {
+                CredentialCopyButton(CredentialRowCopy.copyHost, of: connection.host)
+                Divider()
+                Button(ForgeConnectCopy.disconnectItem, role: .destructive) {
+                    disconnecting = connection
+                }
+            }
         }
     }
 
-    private func row(_ connection: ForgeConnection) -> some View {
-        LabeledContent {
-            Button(role: .destructive) {
-                disconnecting = connection
-            } label: {
-                Image(systemName: "trash").foregroundStyle(.red)
-            }
-            .buttonStyle(.borderless)
-            .help(ForgeConnectCopy.unlinkHelp)
-            .accessibilityLabel(ForgeConnectCopy.unlink(connection))
-        } label: {
-            Text(UsageFormat.forgeName(connection.kind))
-            Text(
-                model.engine.connectingForge == connection.id
-                    ? ForgeConnectCopy.connecting : connection.host)
-        }
+    /// Who the token turned out to belong to, and when it last answered — the
+    /// two facts that say a connection is alive, where the row used to print
+    /// the host it is already titled by.
+    private func subtitle(
+        _ connection: ForgeConnection, reading: ForgeActivityReading?
+    ) -> String? {
+        if model.engine.connectingForge == connection.id { return ForgeConnectCopy.connecting }
+        guard let reading else { return nil }
+        let read = ForgeConnectCopy.lastRead(reading.readAt)
+        guard let login = reading.login else { return read }
+        return "\(login) · \(read)"
+    }
+
+    /// Whether the last poll worked, in `UsageFormat.forgeNotice`'s own words.
+    /// The widest window decides whether there are figures behind a failure:
+    /// a connection that has ever answered has them, and a quiet day is not
+    /// evidence that a token has stopped working.
+    private static func health(of reading: ForgeActivityReading?) -> CredentialHealth {
+        guard let reading,
+            let notice = UsageFormat.forgeNotice(
+                reading.failure, readAt: reading.readAt,
+                hasFigures: reading.hasFigures(for: .all))
+        else { return .ok }
+        return .attention(notice)
     }
 }
 
