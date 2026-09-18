@@ -219,6 +219,45 @@ final class ForgeMonitorTests: XCTestCase {
         XCTAssertEqual(frames.load(), 2)
     }
 
+    // MARK: When the next round is due
+
+    private func idleMonitor() -> ForgeActivityMonitor {
+        ForgeActivityMonitor(
+            connections: [Self.gitHub],
+            fetch: { connection, _, _, _ in
+                Self.reading(connection, login: "gh", contributions: 1, merged: 0)
+            },
+            token: { _ in .found("token") })
+    }
+
+    private func at(hour: Int, _ calendar: Calendar = .current) -> Date {
+        calendar.date(bySettingHour: hour, minute: 50, second: 0, of: Self.readAt) ?? Self.readAt
+    }
+
+    /// **A wait never crosses local midnight.** Every window a reading carries
+    /// is worked out from the instant it was asked for, so a round at 23:50
+    /// answers `Today` for the day that is ending — and on the idle cadence
+    /// that figure would stand under a heading naming the new day for the next
+    /// half hour.
+    func testAWaitNeverCrossesLocalMidnight() async {
+        let calendar = Calendar.current
+        let late = at(hour: 23, calendar)
+        let midnight = calendar.date(
+            byAdding: .day, value: 1, to: calendar.startOfDay(for: late))
+        let remaining = Duration.seconds((midnight ?? late).timeIntervalSince(late))
+        let delay = await idleMonitor().nextDelay(from: late, calendar: calendar)
+        XCTAssertLessThanOrEqual(delay, remaining)
+        XCTAssertLessThan(delay, ForgeActivityMonitor.idleRefreshInterval)
+        XCTAssertGreaterThanOrEqual(delay, ForgeActivityMonitor.shortestWait)
+    }
+
+    /// Away from the boundary the cap changes nothing, so the ordinary cadence
+    /// is what it has always been.
+    func testAWaitAwayFromMidnightIsTheOrdinaryInterval() async {
+        let delay = await idleMonitor().nextDelay(from: at(hour: 12))
+        XCTAssertGreaterThanOrEqual(delay, ForgeActivityMonitor.idleRefreshInterval)
+    }
+
     // MARK: The refresh on a row
 
     /// How many times the pool is handed back before a blocked fetch is

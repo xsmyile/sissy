@@ -676,7 +676,7 @@ struct UsagePanelSnapshot: Equatable {
             projects: makeProjects(
                 frame.projects, totalTokens: totalTokens, totalCost: totalCost),
             projectCount: frame.projects.count,
-            forge: makeForge(frame.forge, period: resolved),
+            forge: makeForge(frame.forge, period: resolved, now: now),
             identities: makeIdentities(frame.identities),
             identityAlert: makeIdentityAlert(frame.identities)
         )
@@ -739,14 +739,29 @@ struct UsagePanelSnapshot: Equatable {
     /// way round: the block sits under a period the user picked for the money,
     /// and two windows under one control would be worse than one window that
     /// starts narrow.
+    ///
+    /// **A reading taken on an earlier day answers no window on this one.**
+    /// Each figure is over a window the *vendor* worked out from the instant
+    /// it was asked, so a reading from before midnight covers a different set
+    /// of days than the same labels name now — `Today` most visibly, where it
+    /// is the whole of the previous day under a heading claiming this one. It
+    /// therefore keeps its row and loses its figures, which is the roll-over
+    /// rule the rate-limit windows are already on: the row draws the dash it
+    /// draws for a reading that never arrived, and the caption beside it
+    /// already says how long ago the last one was. The poll caps its own wait
+    /// at midnight so this lasts seconds; what it is really for is the Mac
+    /// that was asleep or offline across the boundary.
     private static func makeForge(
-        _ readings: [ForgeActivityReading], period: UsagePeriod
+        _ readings: [ForgeActivityReading], period: UsagePeriod, now: Date,
+        calendar: Calendar = .current
     ) -> [ForgeRow] {
         readings.map { reading in
-            let contributions = reading.contributions(for: period).map(UsageFormat.forgeCount)
-            let merged = reading.merged(for: period).map(UsageFormat.forgeCount)
-            let issues = reading.issues(for: period).map(UsageFormat.forgeCount)
-            let comments = reading.comments(for: period).map(UsageFormat.forgeCount)
+            let current = calendar.isDate(reading.readAt, inSameDayAs: now) ? reading : nil
+            let contributions = current.flatMap { $0.contributions(for: period) }
+                .map(UsageFormat.forgeCount)
+            let merged = current.flatMap { $0.merged(for: period) }.map(UsageFormat.forgeCount)
+            let issues = current.flatMap { $0.issues(for: period) }.map(UsageFormat.forgeCount)
+            let comments = current.flatMap { $0.comments(for: period) }.map(UsageFormat.forgeCount)
             return ForgeRow(
                 id: reading.id,
                 kind: reading.kind,
