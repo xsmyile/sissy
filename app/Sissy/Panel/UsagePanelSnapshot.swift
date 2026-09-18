@@ -106,6 +106,9 @@ struct UsagePanelSnapshot: Equatable {
     /// agrees with its forge — which is the ordinary state, and a line that
     /// said so would be a row that never changes.
     let identityAlert: IdentityAlert?
+    /// What is running on this Mac right now, and what the archive has
+    /// counted over the window the headline is showing.
+    let agents: AgentsBlock
 
     /// What a repository's commit identity is, as one row of the identities
     /// page.
@@ -678,8 +681,89 @@ struct UsagePanelSnapshot: Equatable {
             projectCount: frame.projects.count,
             forge: makeForge(frame.forge, period: resolved, now: now),
             identities: makeIdentities(frame.identities),
-            identityAlert: makeIdentityAlert(frame.identities)
+            identityAlert: makeIdentityAlert(frame.identities),
+            agents: makeAgents(frame, period: resolved, rollup: rollup)
         )
+    }
+
+    /// What the CLIs on this Mac are doing, on the two axes a person asks
+    /// about: how many of them there are right now, and how many there have
+    /// been over a window.
+    ///
+    /// The two are separate readings and neither substitutes for the other. A
+    /// count of running processes says nothing about the day, and a day's
+    /// count says nothing about whether the Mac has room to keep working.
+    struct AgentsBlock: Equatable {
+        /// The live half, absent until the first sweep lands — which the
+        /// surfaces draw as a dash, because not having measured is not a
+        /// measurement of none.
+        let live: Live?
+        /// Sessions and agents across the window the headline names.
+        let counted: AgentCounts
+        /// One row per provider that answered for the window, so the page can
+        /// say which CLI the work went through.
+        let byProvider: [ProviderCount]
+
+        struct Live: Equatable {
+            let running: Int
+            let footprint: UInt64
+            let treeFootprint: UInt64
+            let peak: UInt64
+            /// Footprints oldest first, for the sparkline. Empty until a
+            /// second sample lands — one point is not a line.
+            let samples: [UInt64]
+            let since: Date
+        }
+
+        struct ProviderCount: Equatable, Identifiable {
+            let id: String
+            let name: String
+            let counts: AgentCounts
+            /// How many of this vendor's processes are running now, which is
+            /// the live half of the same row.
+            let running: Int
+        }
+
+        /// Whether the Overview has anything to show. A Mac that has never
+        /// measured and has counted nothing gets the row anyway — it is the
+        /// only way to the page, and a door that comes and goes is not one.
+        var summary: String {
+            guard let live else { return "no reading yet" }
+            guard live.running > 0 else { return "no agents running" }
+            return UsageFormat.agentsRunning(live.running, footprint: live.footprint)
+        }
+    }
+
+    /// Builds the block from a frame.
+    ///
+    /// Today's counts come off the slices rather than out of the archive, for
+    /// the reason the headline's own figure does: the archive's copy of today
+    /// is written behind the tail's flush, so a count read from it would lag
+    /// the one beside it. Every other window is the archive's.
+    static func makeAgents(
+        _ frame: FrameData, period: UsagePeriod, rollup: UsageHistoryRollup?
+    ) -> AgentsBlock {
+        let today = frame.providers.reduce(into: AgentCounts.none) { $0.add($1.agents) }
+        let running = frame.agentMemory?.current.agents ?? []
+        let byProvider = frame.providers.map { slice in
+            AgentsBlock.ProviderCount(
+                id: slice.id,
+                name: UsageFormat.providerName(slice.id),
+                counts: slice.agents,
+                running: running.count { $0.provider == slice.id })
+        }
+        return AgentsBlock(
+            live: frame.agentMemory.map { memory in
+                AgentsBlock.Live(
+                    running: memory.current.agents.count,
+                    footprint: memory.current.footprint,
+                    treeFootprint: memory.current.treeFootprint,
+                    peak: memory.peak,
+                    samples: memory.samples.count > 1 ? memory.samples : [],
+                    since: memory.since)
+            },
+            counted: period == .today ? today : (rollup?.agents ?? .none),
+            byProvider: byProvider)
     }
 
     /// Every project a day names, unfolded, for the page behind the section's
