@@ -30,6 +30,20 @@ import SwiftUI
 /// only a keyboard monitor would, and that would cost the first-run prompt
 /// this app is built not to have.
 ///
+/// **A window of Sissy's own takes the panel down, and that is not AppKit's to
+/// do either.** Clicking the gear closes the panel because the `Settings`
+/// window becoming key is what AppKit reads as an interaction outside a
+/// transient popover — until a menu has been opened inside the panel, after
+/// which the same click leaves it up. Measured 2026-09-18 on macOS 27 against
+/// the Overview's period picker: Escape still closes the panel afterwards, so
+/// the popover window is still key and what the menu's tracking took out is
+/// whatever AppKit was closing on. `NSPopover.h` calls the interactions that
+/// close a transient popover "not specified", which is the whole reason this
+/// cannot be the only way out — the same rule the outside click already
+/// answers to. `ownWindowObserver` is the unconditional half, and it covers
+/// `VendorLoginWindow` as well: that one opens from inside the account menu,
+/// which is the exact sequence that breaks the built-in dismissal.
+///
 /// Activating on open would also fix it and is what most menubar apps do, but
 /// taking key here costs the app in front no menu bar (`_NSPopoverWindow` is an
 /// `NSPanel` carrying `.nonactivatingPanel`, which is what the system's own
@@ -58,6 +72,14 @@ final class UsagePanelController: NSObject {
     private let popover = NSPopover()
     private let model: SissyModel
     private var outsideClickMonitor: Any?
+    /// Closes the panel when a window this app owns becomes key.
+    ///
+    /// `canBecomeMain` is the discriminator, the one `AppDelegate` already
+    /// uses to tell a real window from this app's others: the popover, the
+    /// status item and every menu they open are borderless and answer false,
+    /// so a menu opened inside the panel cannot dismiss the panel it belongs
+    /// to.
+    private var ownWindowObserver: (any NSObjectProtocol)?
 
     init(model: SissyModel) {
         self.model = model
@@ -81,7 +103,7 @@ final class UsagePanelController: NSObject {
         popover.contentViewController = host
         host.view.layoutSubtreeIfNeeded()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        startWatchingForOutsideClicks()
+        startWatchingForDismissal()
     }
 
     func close() {
@@ -90,25 +112,48 @@ final class UsagePanelController: NSObject {
     }
 
     /// Idempotent because a showing that replaces one still closing inherits
-    /// the monitor rather than adding a second: both describe the same panel,
-    /// and the one that is already installed is watching for the same click.
+    /// what is already watching rather than adding a second of each: both
+    /// describe the same panel, and what is installed is watching for the same
+    /// gesture.
     ///
-    /// The handler asserts its isolation rather than hopping onto the actor:
-    /// the monitor is registered from the main run loop and fires on it, so
-    /// the dismissal lands on the click's own turn instead of the one after.
-    private func startWatchingForOutsideClicks() {
-        guard outsideClickMonitor == nil else { return }
-        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
+    /// Both handlers assert their isolation rather than hopping onto the
+    /// actor: they are registered from the main run loop and fire on it, so
+    /// the dismissal lands on the gesture's own turn instead of the one after.
+    private func startWatchingForDismissal() {
+        if outsideClickMonitor == nil {
+            outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.close() }
+            }
+        }
+        if ownWindowObserver == nil {
+            ownWindowObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.closeForOwnWindow() }
+            }
         }
     }
 
-    private func stopWatchingForOutsideClicks() {
-        guard let outsideClickMonitor else { return }
-        NSEvent.removeMonitor(outsideClickMonitor)
-        self.outsideClickMonitor = nil
+    /// The window that has just become key is `NSApp.keyWindow`, read on the
+    /// actor rather than taken off the notification: a `Notification` carries
+    /// an unchecked `object` and cannot be sent into an isolated block, which
+    /// is why `AppDelegate` reads the window list the same way.
+    private func closeForOwnWindow() {
+        guard NSApp.keyWindow?.canBecomeMain == true else { return }
+        close()
+    }
+
+    private func stopWatchingForDismissal() {
+        if let outsideClickMonitor {
+            NSEvent.removeMonitor(outsideClickMonitor)
+            self.outsideClickMonitor = nil
+        }
+        if let ownWindowObserver {
+            NotificationCenter.default.removeObserver(ownWindowObserver)
+            self.ownWindowObserver = nil
+        }
     }
 
     /// Whether a SwiftUI host is attached to the popover right now.
@@ -135,7 +180,7 @@ extension UsagePanelController: NSPopoverDelegate {
     /// drop.
     func popoverDidClose(_ notification: Notification) {
         guard !popover.isShown else { return }
-        stopWatchingForOutsideClicks()
+        stopWatchingForDismissal()
         popover.contentViewController = nil
     }
 }
