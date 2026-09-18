@@ -133,7 +133,10 @@ struct CredentialMonogram: View {
 /// The actions sit in a menu rather than as bare glyphs. One naked trash is
 /// the only thing the row used to offer, so the single visible action was the
 /// destructive one; a menu names what it does before it is opened and leaves
-/// room for the actions a row grows later.
+/// room for the actions a row grows later. The forge row is what that room was
+/// for: `Reconnect…` is a verb no glyph can carry — the circular arrow already
+/// means `Refresh now` on the panel's own forge row — and macOS draws no icon
+/// inside a SwiftUI menu item, so the menu's items are words by construction.
 struct CredentialRow<Leading: View, Actions: View>: View {
     let title: String
     let badge: String?
@@ -253,9 +256,10 @@ struct CredentialCopyButton: View {
 /// reach, and this one carries the only way to remove the credential.
 struct CredentialRowMenu<Content: View>: View {
     let label: String
-    /// What removing this credential costs, which is the sentence the trash
-    /// this menu replaced carried. It stays on the hover rather than moving
-    /// into the confirmation: by then the user has already decided.
+    /// What this row's menu is for, on the hover. Where removing is all it
+    /// does, that is what removing costs — the sentence the trash this menu
+    /// replaced carried, which stays here rather than moving into the
+    /// confirmation, since by then the user has already decided.
     let help: String
     @ViewBuilder let content: Content
 

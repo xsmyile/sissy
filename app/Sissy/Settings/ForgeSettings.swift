@@ -15,6 +15,7 @@ enum ForgeConnectCopy {
         + "never writes to a repository and never changes what gh or glab hold."
     static let connect = "Connect…"
     static let disconnectItem = "Disconnect…"
+    static let reconnectItem = "Reconnect…"
 
     /// When this connection last answered, which with the login beside it is
     /// what says a connection is alive. Sissy's own fetch time rather than
@@ -24,11 +25,26 @@ enum ForgeConnectCopy {
     }
     static let sheetTitle = "Connect a forge"
     static let detected = "Tokens already on this Mac"
+
+    /// What the sheet is called when it was opened to replace one connection's
+    /// token rather than to add a connection.
+    static func reconnectTitle(_ connection: ForgeConnection) -> String {
+        "Reconnect \(connection.host)"
+    }
+
+    /// The heading over the one candidate a reconnection may offer.
+    ///
+    /// It names both CLIs and the *now*, because that is the whole reason this
+    /// road exists: what `gh` holds today is not what Sissy copied out of it,
+    /// and a token re-minted since the connection was made is the case a
+    /// reconnection answers.
+    static let detectedForHost = "What gh or glab holds for this host now"
     static let orPaste = "Or paste one"
     static let hostPrompt = "Host"
     static let tokenPrompt = "Token"
     static let cancel = "Cancel"
     static let confirm = "Connect"
+    static let reconnectConfirm = "Reconnect"
     static let connecting = "Connecting…"
     /// Named for what failed rather than for the status behind it: both halves
     /// of a connect are local writes, so there is nothing about a forge to
@@ -68,11 +84,15 @@ enum ForgeConnectCopy {
     static let unlinkMessage =
         "Sissy deletes the token it holds and stops reading the counts. Nothing about gh, glab or the forge itself changes."
     static let unlinkConfirm = "Disconnect"
-    static let unlinkHelp = "Delete the token Sissy holds and stop reading this forge"
 
-    static func unlink(_ connection: ForgeConnection) -> String {
-        "Disconnect \(UsageFormat.forgeName(connection.kind)) on \(connection.host)"
+    /// What the row's menu is called, which is no longer what one of its items
+    /// does. It named the disconnect while that was the only verb in it; a
+    /// menu that also reconnects and copies cannot be called by one of three.
+    static func rowMenu(_ connection: ForgeConnection) -> String {
+        "Actions for \(UsageFormat.forgeName(connection.kind)) on \(connection.host)"
     }
+
+    static let rowMenuHelp = "Reconnect, copy the host, or disconnect this forge"
 }
 
 /// What each of a forge row's counters is called where it has a switch.
@@ -108,6 +128,25 @@ enum ForgeCounterCopy {
     }
 }
 
+/// What the connect sheet was opened for: a connection to add, or one whose
+/// token is being replaced.
+///
+/// One sheet for both rather than two, because a replacement asks the same two
+/// questions an addition does — which host, and which token — and the only
+/// difference is that it has already answered the first.
+struct ForgeConnectRequest: Identifiable, Equatable {
+    /// The connection whose token is being replaced. Nil is a new connection.
+    let replacing: ForgeConnection?
+
+    static let new = Self(replacing: nil)
+
+    /// The connection's own id, so a sheet opened from a row is keyed by that
+    /// row. The addition has no connection to be named by and takes a key no
+    /// host can spell, rather than the empty string a second nil-keyed sheet
+    /// would collide on.
+    var id: String { replacing?.id ?? "+" }
+}
+
 /// The forges the user has connected, and the control that adds one.
 ///
 /// **A tab rather than a section under the metering providers**, which is
@@ -139,11 +178,12 @@ enum ForgeCounterCopy {
 struct ForgeSettingsView: View {
     let model: SissyModel
 
-    /// The forge a trash was pressed for. What it deletes is a token the user
-    /// cannot read back and never typed, so the click is asked about first.
+    /// The forge `Disconnect…` was chosen for. What it deletes is a token the
+    /// user cannot read back and never typed, so the click is asked about
+    /// first.
     @State private var disconnecting: ForgeConnection?
-    /// Whether the connect sheet is up.
-    @State private var adding = false
+    /// What the connect sheet is up for, and nil while it is not.
+    @State private var connecting: ForgeConnectRequest?
 
     var body: some View {
         Form {
@@ -152,7 +192,7 @@ struct ForgeSettingsView: View {
                 ForEach(model.engine.forgeConnections) { connection in
                     row(connection)
                 }
-                CredentialAddRow(ForgeConnectCopy.connect) { adding = true }
+                CredentialAddRow(ForgeConnectCopy.connect) { open(.new) }
                     .disabled(model.engine.connectingForge != nil)
             }
             Section(ForgeCounterCopy.section) {
@@ -162,8 +202,8 @@ struct ForgeSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .sheet(isPresented: $adding) {
-            ForgeConnectSheet(model: model, isPresented: $adding)
+        .sheet(item: $connecting) { request in
+            ForgeConnectSheet(model: model, request: request)
         }
         .confirmationDialog(
             disconnecting.map(ForgeConnectCopy.unlinkTitle) ?? "",
@@ -178,6 +218,16 @@ struct ForgeSettingsView: View {
         } message: { _ in
             Text(ForgeConnectCopy.unlinkMessage)
         }
+    }
+
+    /// Raises the connect sheet, clearing what the last attempt failed with on
+    /// the way. That message outlives the window that reported it, and both
+    /// doors to this one lead to the same sheet, so it is dropped where the
+    /// sheet is asked for rather than once it is on screen — a `task` runs
+    /// after the first render and would show it for a frame.
+    private func open(_ request: ForgeConnectRequest) {
+        model.engine.clearForgeConnectFailure()
+        connecting = request
     }
 
     /// What this tab is for, over the list rather than beside a button: with no
@@ -206,6 +256,15 @@ struct ForgeSettingsView: View {
     /// disc already says which vendor it is. Under it goes the login the
     /// **API** answered with — not the one `gh` has written down — which is
     /// the only thing on the row that says whose counts these are.
+    ///
+    /// **`Reconnect…` is a named item and not a glyph**, for two reasons that
+    /// both rule out the circular arrow it looks like. It cannot act on the
+    /// press: reading what `gh` holds is a keychain call and a subprocess that
+    /// has to *show* what came back before anything is filed, which is the
+    /// rule `ForgeTokenImport` is under and the mistake #167 removed. And the
+    /// arrow is already spoken for — `Refresh now` on the panel's own forge
+    /// row re-reads the counters — so the same sign would mean two things one
+    /// tooltip apart. macOS draws no icon inside a SwiftUI menu item anyway.
     private func row(_ connection: ForgeConnection) -> some View {
         let reading = model.liveFrame?.frame.forge.first { $0.id == connection.id }
         return CredentialRow(
@@ -218,9 +277,12 @@ struct ForgeSettingsView: View {
             }
         } actions: {
             CredentialRowMenu(
-                label: ForgeConnectCopy.unlink(connection),
-                help: ForgeConnectCopy.unlinkHelp
+                label: ForgeConnectCopy.rowMenu(connection),
+                help: ForgeConnectCopy.rowMenuHelp
             ) {
+                Button(ForgeConnectCopy.reconnectItem) {
+                    open(ForgeConnectRequest(replacing: connection))
+                }
                 CredentialCopyButton(CredentialRowCopy.copyHost, of: connection.host)
                 Divider()
                 Button(ForgeConnectCopy.disconnectItem, role: .destructive) {
@@ -306,23 +368,41 @@ struct ForgeSettingsView: View {
 /// self-hosted GitLab cannot be reached by an OAuth app Sissy ships — there is
 /// no application to register on someone else's instance — and a user who wants
 /// a read-only fine-grained token has nowhere else to put one.
+///
+/// **A host already connected is not offered.** It used to be, and pressing it
+/// replaced that row's token and dismissed the sheet, so the only visible
+/// outcome was a list that had not changed — and a reader who takes the entry
+/// for "already connected, nothing to do here" is reading it correctly.
+/// Replacing a token is still how a refused or missing one is repaired, which
+/// is what `Reconnect…` on the row itself is for; this sheet is the other half
+/// of it, and opened that way it offers that one host and locks the two fields
+/// that would make it a different connection.
 struct ForgeConnectSheet: View {
     let model: SissyModel
-    @Binding var isPresented: Bool
+    let request: ForgeConnectRequest
+
+    @Environment(\.dismiss) private var dismiss
 
     @State private var candidates: [ForgeTokenCandidate] = []
-    @State private var kind: ForgeKind = .gitHub
-    @State private var host: String = GitHubActivityFeed.dotComHost
+    @State private var kind: ForgeKind
+    @State private var host: String
     @State private var token: String = ""
 
     private static let fieldWidth: CGFloat = 260
     private static let sheetWidth: CGFloat = 420
 
+    init(model: SissyModel, request: ForgeConnectRequest) {
+        self.model = model
+        self.request = request
+        _kind = State(initialValue: request.replacing?.kind ?? .gitHub)
+        _host = State(initialValue: request.replacing?.host ?? GitHubActivityFeed.dotComHost)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(ForgeConnectCopy.sheetTitle).font(.headline)
+            Text(title).font(.headline)
             if !candidates.isEmpty {
-                Text(ForgeConnectCopy.detected)
+                Text(replacing == nil ? ForgeConnectCopy.detected : ForgeConnectCopy.detectedForHost)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 ForEach(candidates) { candidate in
@@ -342,12 +422,14 @@ struct ForgeConnectSheet: View {
                 }
             }
             .pickerStyle(.segmented)
+            .disabled(replacing != nil)
             .onChange(of: kind) { _, new in
                 guard new == .gitHub else { return }
                 host = GitHubActivityFeed.dotComHost
             }
             TextField(ForgeConnectCopy.hostPrompt, text: $host)
                 .frame(width: Self.fieldWidth)
+                .disabled(replacing != nil)
             SecureField(ForgeConnectCopy.tokenPrompt, text: $token)
                 .frame(width: Self.fieldWidth)
             Text(ForgeConnectCopy.scopeWarning)
@@ -362,9 +444,9 @@ struct ForgeConnectSheet: View {
             }
             HStack {
                 Spacer()
-                Button(ForgeConnectCopy.cancel) { isPresented = false }
+                Button(ForgeConnectCopy.cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(busy ? ForgeConnectCopy.connecting : ForgeConnectCopy.confirm) {
+                Button(busy ? ForgeConnectCopy.connecting : confirmTitle) {
                     model.engine.connectForge(
                         ForgeConnection(kind: kind, host: trimmedHost), token: token)
                 }
@@ -374,7 +456,11 @@ struct ForgeConnectSheet: View {
         }
         .padding(20)
         .frame(width: Self.sheetWidth)
-        .task { candidates = await model.engine.forgeTokenCandidates() }
+        .task {
+            candidates = Self.offered(
+                await model.engine.forgeTokenCandidates(), for: request,
+                connected: model.engine.forgeConnections)
+        }
         // Dismiss on the attempt *finishing well*, never on the press: the
         // token is only in this window, so a failed write has to leave the
         // window standing with the field still in it.
@@ -382,8 +468,41 @@ struct ForgeConnectSheet: View {
             guard previous != nil, current == nil,
                 model.engine.forgeConnectFailure == nil
             else { return }
-            isPresented = false
+            dismiss()
         }
+    }
+
+    /// Which candidates this sheet may offer, out of everything both CLIs hold.
+    ///
+    /// A replacement offers its own host alone — every other candidate would be
+    /// a different connection, and the fields that could make it one are locked
+    /// — and an addition offers what is not connected yet. The two filters are
+    /// the same rule read from either end: a candidate is offered where
+    /// pressing it would visibly change the list behind this sheet.
+    ///
+    /// Keyed on the ids rather than on the host, because `ForgeTokenCandidate`
+    /// and `ForgeConnection` spell theirs identically — kind and host — so a
+    /// `gh` token for `example.com` is not matched against a `glab` connection
+    /// on the same machine.
+    static func offered(
+        _ candidates: [ForgeTokenCandidate], for request: ForgeConnectRequest,
+        connected: [ForgeConnection]
+    ) -> [ForgeTokenCandidate] {
+        guard let replacing = request.replacing else {
+            let taken = Set(connected.map(\.id))
+            return candidates.filter { !taken.contains($0.id) }
+        }
+        return candidates.filter { $0.id == replacing.id }
+    }
+
+    private var replacing: ForgeConnection? { request.replacing }
+
+    private var title: String {
+        replacing.map(ForgeConnectCopy.reconnectTitle) ?? ForgeConnectCopy.sheetTitle
+    }
+
+    private var confirmTitle: String {
+        replacing == nil ? ForgeConnectCopy.confirm : ForgeConnectCopy.reconnectConfirm
     }
 
     private var busy: Bool { model.engine.connectingForge != nil }

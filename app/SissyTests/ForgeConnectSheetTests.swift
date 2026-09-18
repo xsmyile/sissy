@@ -1,0 +1,81 @@
+import XCTest
+
+@testable import Sissy
+
+/// Which of the tokens `gh` and `glab` hold the connect sheet puts on screen.
+///
+/// Pure: candidates and connections in, candidates out — no keychain, no
+/// subprocess and no window, which is the division the rest of the forge tests
+/// are on.
+final class ForgeConnectSheetTests: XCTestCase {
+    private static let gitHub = ForgeConnection.gitHub()
+    private static let gitLab = ForgeConnection(kind: .gitLab, host: "gitlab.example.com")
+
+    private static func candidate(_ connection: ForgeConnection) -> ForgeTokenCandidate {
+        ForgeTokenCandidate(
+            kind: connection.kind, host: connection.host, configuredAccount: nil,
+            token: "token-for-\(connection.id)")
+    }
+
+    private func offered(
+        _ candidates: [ForgeConnection], for request: ForgeConnectRequest,
+        connected: [ForgeConnection]
+    ) -> [String] {
+        ForgeConnectSheet.offered(
+            candidates.map(Self.candidate), for: request, connected: connected
+        ).map(\.id)
+    }
+
+    /// The whole point: a host the user has already connected is not offered a
+    /// second time. Pressing it replaced that row's token and closed the sheet,
+    /// so the only visible outcome was a list that had not changed.
+    func testAConnectedHostIsNotOfferedAgain() {
+        XCTAssertEqual(
+            offered([Self.gitHub, Self.gitLab], for: .new, connected: [Self.gitHub]),
+            [Self.gitLab.id])
+    }
+
+    func testEveryCandidateIsOfferedWhenNothingIsConnected() {
+        XCTAssertEqual(
+            offered([Self.gitHub, Self.gitLab], for: .new, connected: []),
+            [Self.gitHub.id, Self.gitLab.id])
+    }
+
+    /// One CLI's host is not the other's. Matching on the bare host would hide
+    /// a `glab` token behind a GitHub connection on a machine where a company
+    /// runs both under one name.
+    func testAHostConnectedForOneForgeDoesNotHideTheOther() {
+        let gitLabOnTheSameHost = ForgeConnection(kind: .gitLab, host: Self.gitHub.host)
+        XCTAssertEqual(
+            offered([gitLabOnTheSameHost], for: .new, connected: [Self.gitHub]),
+            [gitLabOnTheSameHost.id])
+    }
+
+    /// A sheet opened to replace one connection's token offers that host and
+    /// nothing else: every other candidate would be a different connection,
+    /// which is not what `Reconnect…` was pressed for.
+    func testAReplacementOffersItsOwnHostAlone() {
+        XCTAssertEqual(
+            offered(
+                [Self.gitHub, Self.gitLab], for: ForgeConnectRequest(replacing: Self.gitLab),
+                connected: [Self.gitHub, Self.gitLab]),
+            [Self.gitLab.id])
+    }
+
+    /// A replacement for a host neither CLI holds a token for offers nothing,
+    /// and the sheet is then the paste field alone — which is the only road
+    /// left for a token minted in a browser.
+    func testAReplacementWithNoCandidateOffersNothing() {
+        XCTAssertEqual(
+            offered(
+                [Self.gitHub], for: ForgeConnectRequest(replacing: Self.gitLab),
+                connected: [Self.gitHub, Self.gitLab]),
+            [])
+    }
+
+    /// The two sheets are keyed apart, or opening the addition after a
+    /// replacement would present the one SwiftUI already had.
+    func testTheAdditionAndAReplacementAreDifferentSheets() {
+        XCTAssertNotEqual(ForgeConnectRequest.new.id, ForgeConnectRequest(replacing: Self.gitHub).id)
+    }
+}
