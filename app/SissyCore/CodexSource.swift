@@ -314,7 +314,8 @@ final class CodexAdapter: SourceAdapter {
     }
 
     /// Records what a rollout's `session_meta` line says about itself: the
-    /// project it runs in, and whether it opens by replaying a parent's turns.
+    /// project it runs in, whether git could name that project at all, and
+    /// whether the session opens by replaying a parent's turns.
     private func applySessionMeta(_ obj: [String: Any], url: URL) {
         guard let payload = obj["payload"] as? [String: Any] else { return }
         if Self.namesAParentSession(payload),
@@ -323,9 +324,43 @@ final class CodexAdapter: SourceAdapter {
             fileReplay[url] = .copying(through: start)
         }
         guard let cwd = payload["cwd"] as? String, !cwd.isEmpty,
+            !Self.runsWhereGitNamesNothing(payload),
             let project = projects.project(for: cwd)
         else { return }
         fileProjects[url] = project
+    }
+
+    /// Whether the session ran in a directory git answered for and could say
+    /// nothing about.
+    ///
+    /// Codex writes a git block on the rollout's first line, and the walk
+    /// behind it is the same one `ProjectResolver` does: no `.git` entry above
+    /// the working directory and the block is absent entirely, which is the
+    /// case the resolver already answers nothing for. Where there is one, the
+    /// block carries the commit, the branch and the origin url git could read,
+    /// each left out when git refused it — so an empty block is a directory
+    /// that is a repository and about which git could name neither a commit,
+    /// nor a branch, nor a remote. That is a `git init` nobody has committed
+    /// to: an agent's sandbox root rather than a project. Measured 2026-09-18
+    /// across 450 rollouts, exactly one, and it had taken a $1.26 row named
+    /// after a scratch directory inside another CLI's own working area.
+    ///
+    /// The gate sits in front of the resolver rather than after it because
+    /// that call is also what writes the directory into `ProjectLedger`: a row
+    /// remembered there outlives the sandbox it was read from, which is the
+    /// whole point of remembering one and exactly wrong here.
+    ///
+    /// The spend is counted and only the row is denied, which is what a
+    /// working directory in no repository already gets. What it costs is the
+    /// first session of a genuinely new project, unattributed until its first
+    /// commit — the block is written once at startup and never refreshed,
+    /// measured 2026-09-18 on a session that committed and then resumed. An
+    /// orphan branch on a repository with no remote reads the same way, and so
+    /// does a repository slow enough that every one of Codex's git calls
+    /// reaches its own five-second timeout.
+    private static func runsWhereGitNamesNothing(_ payload: [String: Any]) -> Bool {
+        guard let git = payload["git"] as? [String: Any] else { return false }
+        return git.isEmpty
     }
 
     /// Whether this session was opened from another one, and therefore starts
