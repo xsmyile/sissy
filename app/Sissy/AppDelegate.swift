@@ -102,18 +102,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.reply(toApplicationShouldTerminate: true)
     }
 
-    /// Closing the settings window must not take the menubar app with it, and
-    /// an accessory app that keeps activation after its last window closes
-    /// leaves the previous app without focus.
+    /// Closing the settings window must not take the menubar app with it, which
+    /// is the whole of what this answers: handing activation back is
+    /// `syncActivationPolicy`'s, and it needs no help.
+    ///
+    /// It used to yield activation to the first regular app in
+    /// `NSWorkspace.runningApplications`, which cannot do either half of what
+    /// it was there for. `yieldActivation` "will not deactivate the current
+    /// app, nor will it activate the other app" — the target has to claim it by
+    /// calling `activate`, which an app that was never told will never do — and
+    /// the order of that array is documented as unspecified, so the app it
+    /// named was not the one the user came from. Both quoted from the
+    /// MacOSX27.0 SDK headers. Measured 2026-09-18 on macOS 27 against a
+    /// harness of this shape, with Orca active before the window opened: the
+    /// yield named Finder, and focus went back to Orca regardless, by the next
+    /// sample 300 ms after the drop to `.accessory`. Deactivating explicitly
+    /// measured the same, and so did doing nothing at all — AppKit gives up
+    /// activation on its own for an app left with no window, a second or so
+    /// later.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        let nextApp = NSWorkspace.shared.runningApplications.first { app in
-            app != .current && app.activationPolicy == .regular && !app.isTerminated
-        }
-        if let nextApp {
-            NSApp.yieldActivation(to: nextApp)
-        } else {
-            NSApp.deactivate()
-        }
-        return false
+        false
     }
 }
