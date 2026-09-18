@@ -467,6 +467,16 @@ struct FrameData: Sendable, Equatable {
     /// the set the question is about. Empty where there is no git to read
     /// with, and while the sweep has not run.
     let identities: [RepositoryIdentity]
+    /// What the CLIs on this Mac are holding right now, and the series of
+    /// readings behind it.
+    ///
+    /// Beside the slices rather than on one, for the reason the identities
+    /// are: a process belongs to the Mac rather than to a log tail, it exists
+    /// for a provider that has spent nothing today, and the series is one
+    /// series whatever is running in it. `nil` until the first sweep lands,
+    /// which the panel draws as a dash — a reading of no agents is a
+    /// measurement, and not having measured yet is not.
+    let agentMemory: AgentMemoryReading?
 
     /// Defaulted so a frame can be built without naming the split: a caller
     /// that has none is saying there is none, and every test and future field
@@ -481,7 +491,8 @@ struct FrameData: Sendable, Equatable {
         projects: [ProjectTotals] = [],
         providerStatus: [String: ProviderStatusReading] = [:],
         forge: [ForgeActivityReading] = [],
-        identities: [RepositoryIdentity] = []
+        identities: [RepositoryIdentity] = [],
+        agentMemory: AgentMemoryReading? = nil
     ) {
         self.tokens = tokens
         self.cost = cost
@@ -493,6 +504,7 @@ struct FrameData: Sendable, Equatable {
         self.providerStatus = providerStatus
         self.forge = forge
         self.identities = identities
+        self.agentMemory = agentMemory
     }
 }
 
@@ -510,7 +522,8 @@ enum FrameBuilder {
         history: [UsagePeriod: UsageHistoryRollup] = [:],
         providerStatus: [String: ProviderStatusReading] = [:],
         forge: [ForgeActivityReading] = [],
-        identities: [RepositoryIdentity] = []
+        identities: [RepositoryIdentity] = [],
+        agentMemory: AgentMemoryReading? = nil
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
         return FrameData(
@@ -523,7 +536,8 @@ enum FrameBuilder {
             projects: combinedProjects(providers),
             providerStatus: providerStatus,
             forge: forge,
-            identities: identities
+            identities: identities,
+            agentMemory: agentMemory
         )
     }
 

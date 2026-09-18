@@ -24,12 +24,14 @@ SIGTERM
 SuspendingClock
 _NSPopoverWindow
 agentId
+argc
 argv
 caffeinate
 commitComments
 getcwd
 gistComments
 json.dumps
+launchd
 notclaude.ai
 objectWillChange
 repositoryDiscussionComments
