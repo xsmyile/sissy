@@ -16,10 +16,17 @@ enum SettingsTab: Hashable {
         }
     }
 
+    /// Each tab's own glyph, which the `Settings` scene draws above the title.
+    ///
+    /// Providers is a spark rather than a stack of cards: what the tab holds
+    /// is the AI CLIs Sissy meters, and a stack said nothing about them. There
+    /// is no robot to reach for — measured 2026-09-18, the 8526 symbols this
+    /// SDK ships name exactly one, a robotic vacuum, and the Apple
+    /// Intelligence glyph is restricted by the catalogue to referring to it.
     var symbol: String {
         switch self {
         case .general: return "gearshape"
-        case .providers: return "rectangle.stack"
+        case .providers: return "sparkles"
         case .about: return "info.circle"
         }
     }
