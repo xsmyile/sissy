@@ -193,6 +193,58 @@ final class UsageProjectSplitTests: XCTestCase {
         XCTAssertEqual(day.models.map(\.project), [nil], "a scratch directory came back as a project")
     }
 
+    /// A `git init` with nothing committed to it is an agent's sandbox root,
+    /// and Codex says so: the rollout carries a git block that names neither a
+    /// commit, nor a branch, nor a remote. Measured 2026-09-18, one such
+    /// directory had taken a row of its own worth $1.26.
+    func testCodexNamesNoProjectForARepositoryGitCanSayNothingAbout() async throws {
+        let sandbox = try makeRepository("codex-check")
+        try writeRollout("rollout-a.jsonl", cwd: sandbox.path, turns: 1, git: "{}")
+        try await runCodexTail()
+
+        let day = try archivedToday(ProviderID.codex)
+        XCTAssertEqual(
+            day.models.map(\.project), [nil], "a sandbox root was given a project row")
+        XCTAssertEqual(
+            day.models.first?.inputTokens, Self.tokensPerTurn,
+            "the spend went missing along with the row it was denied")
+    }
+
+    /// The other half: a block that names anything at all is a repository
+    /// somebody works in, and an absent block is a directory in no repository,
+    /// which the resolver already answers for. Neither may be read as the
+    /// sandbox case.
+    func testCodexNamesTheRepositoryWhenGitAnswersForIt() async throws {
+        let repo = try makeRepository("named")
+        try writeRollout(
+            "rollout-a.jsonl", cwd: repo.path, turns: 1,
+            git: #"{"branch":"master","commit_hash":"d62716a"}"#)
+        try await runCodexTail()
+
+        XCTAssertEqual(try archivedToday(ProviderID.codex).models.map(\.project), [repo.path])
+    }
+
+    /// The durable half, and the reason the gate sits in front of the resolver
+    /// rather than after it: the resolver is what writes a directory into the
+    /// ledger, and a sandbox remembered there would keep its row long after
+    /// the sandbox itself was gone.
+    func testASandboxRootIsNotRememberedOnceItIsDeleted() async throws {
+        let sandbox = try makeRepository("codex-check")
+        try writeRollout("rollout-a.jsonl", cwd: sandbox.path, turns: 1, git: "{}")
+        try await runCodexTail()
+
+        try FileManager.default.removeItem(at: sandbox)
+        try appendTurn(to: "rollout-a.jsonl")
+        try await runCodexTail()
+
+        let day = try archivedToday(ProviderID.codex)
+        XCTAssertEqual(
+            day.models.map(\.project), [nil], "a deleted sandbox came back as a project")
+        XCTAssertEqual(
+            day.models.first?.inputTokens, Self.tokensPerTurn * 2,
+            "the resumed turn went missing")
+    }
+
     func testCodexKeepsTheProjectAcrossARelaunch() async throws {
         let repo = try makeRepository("norace")
         try writeRollout("rollout-a.jsonl", cwd: repo.path, turns: 1)
@@ -291,14 +343,15 @@ final class UsageProjectSplitTests: XCTestCase {
             to: logDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
     }
 
-    private func writeRollout(_ name: String, cwd: String, turns: Int) throws {
+    private func writeRollout(_ name: String, cwd: String, turns: Int, git: String? = nil) throws {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         let stamp = iso.string(from: Date())
+        let gitField = git.map { ",\"git\":\($0)" } ?? ""
         var lines = [
             """
             {"type":"session_meta","timestamp":"\(stamp)",\
-            "payload":{"id":"s","cwd":"\(cwd)","model_provider":"openai"}}
+            "payload":{"id":"s","cwd":"\(cwd)","model_provider":"openai"\(gitField)}}
             """,
             """
             {"type":"turn_context","timestamp":"\(stamp)",\
