@@ -86,6 +86,17 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// No version bump: the field is additive and an older build reading a
     /// newer file simply ignores it, exactly as the project dimension landed.
     var agents: AgentCounts?
+    /// Which minutes of the day carried a turn, and which of those a
+    /// sub-agent's — the shape of the working day rather than its size.
+    ///
+    /// Beside the rows for the reason the counts are: it belongs to the
+    /// provider's day and to no model or project. Optional on the same terms,
+    /// so a day written before the field decodes without one and reads as
+    /// "not measured" rather than as a day nothing happened in.
+    ///
+    /// No version bump: additive, and an older build reading a newer file
+    /// ignores it.
+    var activity: AgentActivityDay?
 
     struct Entry: Codable, Equatable, Sendable {
         var model: String
@@ -123,13 +134,15 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     init(
         day: String, provider: String, updatedAt: Date,
         totals: [UsageHistoryRow: UsageHistoryTotals],
-        agents: AgentCounts? = nil
+        agents: AgentCounts? = nil,
+        activity: AgentActivityDay? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.day = day
         self.provider = provider
         self.updatedAt = updatedAt
         self.agents = agents.flatMap { $0.isEmpty ? nil : $0 }
+        self.activity = activity.flatMap { $0.isEmpty ? nil : $0 }
         self.models =
             totals
             .filter { $0.value.totalTokens > 0 || $0.value.cost > 0 }
@@ -195,7 +208,8 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
             totals[row, default: .init()].add(entry.totals)
         }
         return Self(
-            day: day, provider: provider, updatedAt: updatedAt, totals: totals, agents: agents)
+            day: day, provider: provider, updatedAt: updatedAt, totals: totals, agents: agents,
+            activity: activity)
     }
 
     /// This day with `counts` folded in, keeping whichever reading saw more.
@@ -212,14 +226,19 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// whether a *day* may be written, and refusing the whole write over a
     /// count would freeze the day's tokens — which are the reading the archive
     /// exists for — on every upgrade from a build that counted nothing.
-    func merging(counts: AgentCounts?) -> Self {
-        guard let counts else { return self }
+    func merging(counts: AgentCounts?, activity other: AgentActivityDay? = nil) -> Self {
         var merged = self
-        let mine = agents ?? .none
-        let folded = AgentCounts(
-            sessions: max(mine.sessions, counts.sessions),
-            agents: max(mine.agents, counts.agents))
-        merged.agents = folded.isEmpty ? nil : folded
+        if let counts {
+            let mine = agents ?? .none
+            let folded = AgentCounts(
+                sessions: max(mine.sessions, counts.sessions),
+                agents: max(mine.agents, counts.agents))
+            merged.agents = folded.isEmpty ? nil : folded
+        }
+        if let other {
+            let folded = (activity ?? .none).union(other)
+            merged.activity = folded.isEmpty ? nil : folded
+        }
         return merged
     }
 
@@ -341,10 +360,25 @@ struct UsageHistoryRollup: Sendable, Equatable {
     /// is a figure from one window under the label of another, which is the
     /// pairing this whole panel exists to prevent.
     let agentsByProvider: [String: AgentCounts]
+    /// How long the window was worked, and how much of that its sub-agents
+    /// were.
+    ///
+    /// **Each day's providers are unioned before the days are summed**, and
+    /// that is not a refinement: measured 2026-09-19, Codex runs almost
+    /// entirely inside the minutes Claude Code is already working in, so a
+    /// window that added the two rows together said 12h40 on a day worth
+    /// 11h15.
+    let activity: ActivityTotals
+    /// The same kept apart by provider, which is what a row on the page reads.
+    /// These do sum across days — a day belongs to one date — and they
+    /// legitimately add up to more than `activity`, because two CLIs working
+    /// in the same minute are one minute of the day and two of each other's.
+    let activityByProvider: [String: ActivityTotals]
 
     init(
         period: UsagePeriod, earliestDay: Date?, tokens: Int, cost: Decimal,
-        agents: AgentCounts = .none, agentsByProvider: [String: AgentCounts] = [:]
+        agents: AgentCounts = .none, agentsByProvider: [String: AgentCounts] = [:],
+        activity: ActivityTotals = .none, activityByProvider: [String: ActivityTotals] = [:]
     ) {
         self.period = period
         self.earliestDay = earliestDay
@@ -352,6 +386,8 @@ struct UsageHistoryRollup: Sendable, Equatable {
         self.cost = cost
         self.agents = agents
         self.agentsByProvider = agentsByProvider
+        self.activity = activity
+        self.activityByProvider = activityByProvider
     }
 }
 
@@ -478,6 +514,10 @@ enum UsageHistoryStore {
         var agents: [UsagePeriod: AgentCounts] = [:]
         var byProvider: [UsagePeriod: [String: AgentCounts]] = [:]
         var earliest: [UsagePeriod: Date] = [:]
+        // Held per day across providers, because a window's own figure is the
+        // union of the day's readers and only the sum of the days.
+        var unionByDay: [Date: AgentActivityDay] = [:]
+        var activityByProvider: [UsagePeriod: [String: ActivityTotals]] = [:]
         for provider in providers(in: parent) {
             for (dayKey, url) in dayFiles(provider: provider, in: parent) {
                 guard dayKey <= today, let decoded = decode(at: url) else { continue }
@@ -487,14 +527,26 @@ enum UsageHistoryStore {
                     dayTokens += entry.totalTokens
                     dayCost += Decimal(string: entry.cost) ?? 0
                 }
+                if let shape = decoded.activity {
+                    unionByDay[dayKey, default: .none].formUnion(shape)
+                }
+                let mine = decoded.activity.map(ActivityTotals.init) ?? .none
                 for (period, cutoff) in cutoffs where cutoff.map({ dayKey >= $0 }) ?? true {
                     tokens[period, default: 0] += dayTokens
                     cost[period, default: 0] += dayCost
                     agents[period, default: .none].add(decoded.agents ?? .none)
                     byProvider[period, default: [:]][provider, default: .none]
                         .add(decoded.agents ?? .none)
+                    activityByProvider[period, default: [:]][provider, default: .none].add(mine)
                     earliest[period] = earliest[period].map { min($0, dayKey) } ?? dayKey
                 }
+            }
+        }
+        var activity: [UsagePeriod: ActivityTotals] = [:]
+        for (dayKey, shape) in unionByDay {
+            let totals = ActivityTotals(shape)
+            for (period, cutoff) in cutoffs where cutoff.map({ dayKey >= $0 }) ?? true {
+                activity[period, default: .none].add(totals)
             }
         }
         var out: [UsagePeriod: UsageHistoryRollup] = [:]
@@ -505,7 +557,9 @@ enum UsageHistoryStore {
                 tokens: tokens[period] ?? 0,
                 cost: cost[period] ?? 0,
                 agents: agents[period] ?? .none,
-                agentsByProvider: byProvider[period] ?? [:])
+                agentsByProvider: byProvider[period] ?? [:],
+                activity: activity[period] ?? .none,
+                activityByProvider: activityByProvider[period] ?? [:])
         }
         return out
     }

@@ -364,6 +364,11 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     /// Sessions started and agents spawned today, as this provider counted
     /// them. `.none` where the format names neither.
     let agents: AgentCounts
+    /// Which minutes of today carried a turn, and which of those a
+    /// sub-agent's. Raw for the reason the counts are: the panel unions the
+    /// slices to draw the day, and a slice that carried a pre-summed duration
+    /// could not be unioned with another's.
+    let activity: AgentActivityDay
 
     var windows: [UsageWindow] { signals.windows }
     var plan: String? { signals.plan }
@@ -375,12 +380,14 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
 
     init(
         id: String, tokens: Int, cost: Decimal, signals: ProviderSignals,
-        projects: [ProjectTotals] = [], agents: AgentCounts = .none
+        projects: [ProjectTotals] = [], agents: AgentCounts = .none,
+        activity: AgentActivityDay = .none
     ) {
         self.id = id
         self.tokens = tokens
         self.cost = cost
         self.agents = agents
+        self.activity = activity
         var ordered = signals
         ordered.windows.sort { ($0.minutes, $0.scope ?? "") < ($1.minutes, $1.scope ?? "") }
         if ordered.plan == nil { ordered.planTier = nil }
@@ -396,14 +403,15 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         plan: String? = nil, planTier: String? = nil, credits: ProviderCredits? = nil,
         projects: [ProjectTotals] = [], account: ProviderAccount? = nil,
         limitsState: ProviderLimitsState = .quiet, limitsObservedAt: Date? = nil,
-        agents: AgentCounts = .none
+        agents: AgentCounts = .none,
+        activity: AgentActivityDay = .none
     ) {
         self.init(
             id: id, tokens: tokens, cost: cost,
             signals: ProviderSignals(
                 windows: windows, plan: plan, planTier: planTier, account: account,
                 credits: credits, limitsState: limitsState, limitsObservedAt: limitsObservedAt),
-            projects: projects, agents: agents)
+            projects: projects, agents: agents, activity: activity)
     }
 }
 

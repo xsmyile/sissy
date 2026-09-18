@@ -102,7 +102,17 @@ struct UsageStateSnapshot: Codable, Equatable {
         /// discards both providers' snapshots for a change that costs Claude
         /// Code a ~16 s cold scan. `nil` is an upgrade, and the one day it
         /// lands on is the one `UsageHistoryDay.merging(counts:)` keeps whole.
-        var dailyAgentCounts: [DailyAgentCount]?
+        var dailyAgentCounts: [DailyAgentCount]? = nil
+        /// The shape of each day — which minutes carried a turn — absent in a
+        /// snapshot written before it.
+        ///
+        /// Persisted for the reason the counts are and not as an optimisation:
+        /// the offsets resume at EOF, so the minutes are read off lines
+        /// nothing will read again, and a relaunch would otherwise restart the
+        /// day's shape at the moment it happened and write that stub over a
+        /// whole day. It costs about 250 bytes a day, the bitmap being base64
+        /// with its trailing empty bytes dropped.
+        var dailyActivity: [DailyActivity]? = nil
     }
 
     /// One provider's agent counters for one archived day.
@@ -110,6 +120,12 @@ struct UsageStateSnapshot: Codable, Equatable {
         var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
         var sessions: Int
         var agents: Int
+    }
+
+    /// One provider's working shape for one archived day.
+    struct DailyActivity: Codable, Equatable {
+        var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
+        var activity: AgentActivityDay
     }
 
     /// Grouped so the absence above is one question rather than three, and so
@@ -173,6 +189,12 @@ struct UsageStateSnapshot: Codable, Equatable {
         /// session reaches its own first turn, and for every session that
         /// copied nothing.
         var copyingThrough: Date?
+        /// Whether another thread opened this rollout, which makes every turn
+        /// it spends a sub-agent's. Codex says so once, on the `session_meta`
+        /// a resumed reader is past. Written only when true, and nil in a
+        /// snapshot from before the field — which reads as a session somebody
+        /// started, the answer for all but a fifth of them.
+        var subagent: Bool?
     }
 
     /// Codex's `total_token_usage`, the running total it reports beside every
