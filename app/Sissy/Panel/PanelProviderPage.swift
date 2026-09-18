@@ -555,7 +555,7 @@ struct PanelProviderPage: View {
     /// way to the unfolded list, so nothing is out of reach — which is what
     /// the fold costs everywhere else on the panel too.
     private var projects: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Button {
                 openProjects(viewed?.id)
             } label: {
@@ -563,11 +563,13 @@ struct PanelProviderPage: View {
             }
             .buttonStyle(.plain)
             .help("Show every project")
-            ForEach(row.projects) { project in
-                ProjectRowView(
-                    row: project,
-                    checkIdentity: project.repository == nil
-                        ? nil : { openIdentities(project.id) })
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(row.projects) { project in
+                    ProjectRowView(
+                        row: project, bar: .behind,
+                        checkIdentity: project.repository == nil
+                            ? nil : { openIdentities(project.id) })
+                }
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)

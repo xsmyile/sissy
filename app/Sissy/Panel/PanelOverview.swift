@@ -460,16 +460,18 @@ struct PanelOverview: View {
     /// The fold keeps its figures for the reason it has them: the section is
     /// read against the headline, and it only reaches it if every row counts.
     private var projects: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Button(action: openProjects) {
                 ProjectsSectionLabel(text: "By project · today", count: snapshot.projectCount)
             }
             .buttonStyle(.plain)
             .help("Show every project")
-            ForEach(snapshot.projects) { row in
-                ProjectRowView(
-                    row: row,
-                    checkIdentity: row.repository == nil ? nil : { openIdentities(row.id) })
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(snapshot.projects) { row in
+                    ProjectRowView(
+                        row: row, bar: .behind,
+                        checkIdentity: row.repository == nil ? nil : { openIdentities(row.id) })
+                }
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)

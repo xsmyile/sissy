@@ -20,8 +20,12 @@ import SwiftUI
 /// the row's money, not of the row. The marks say who, the bar says how much
 /// of each, and neither costs the list a line or a legend.
 ///
-/// The remainder keeps its row here. The subtitle totals the day, and a list
-/// read against a total it cannot reach is a list with a hole in it.
+/// **The remainder is a line at the foot rather than a row in the list.** The
+/// subtitle totals the day and a list read against a total it cannot reach is
+/// a list with a hole in it — so the figure stays, and this is the one surface
+/// that carries it. What it is not is a project: it has no rank among them, no
+/// bar to be compared by, no path and nothing to open, and as the last row of
+/// the list it had all four.
 struct PanelProjectsPage: View {
     let page: UsagePanelSnapshot.ProjectsPage
     /// Opens a repository's commit identity from its own row.
@@ -44,8 +48,58 @@ struct PanelProjectsPage: View {
                     row: row, showsProviders: page.provider == nil,
                     checkIdentity: row.repository == nil ? nil : { openIdentities(row.id) })
             }
+            if let residue = page.residue {
+                ProjectsResidueLine(residue: residue)
+            }
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
+    }
+}
+
+/// What the day spent outside every repository, under the rows it is not one
+/// of.
+///
+/// Quiet, one line, and no bar: the rows above are ordered by spend and a bar
+/// here would enter this figure into that order, which is the comparison it
+/// must not invite — it is the rest of the day, not the smallest project.
+///
+/// **The split says who, and only where there is more than one answer.** One
+/// CLI gets a mark, since the figure beside it is the one already on the line;
+/// two get a figure each, which is the only reading this line can carry that
+/// the panel cannot answer anywhere else — a provider's own page shows its own
+/// residue and nothing tells you how the two compare.
+private struct ProjectsResidueLine: View {
+    let residue: UsagePanelSnapshot.ProjectsResidue
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(UsageFormat.projectsUnattributed(tokens: residue.tokens, cost: residue.cost))
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            split
+            Spacer(minLength: 0)
+        }
+        .help(UsageFormat.projectsUnattributedReason)
+    }
+
+    @ViewBuilder
+    private var split: some View {
+        if residue.providers.count == 1, let only = residue.providers.first {
+            ProviderMark(id: only.id, textSize: 11)
+                .help(UsageFormat.providerName(only.id))
+        } else {
+            ForEach(residue.providers) { provider in
+                HStack(spacing: 3) {
+                    ProviderMark(id: provider.id, textSize: 11)
+                    Text(provider.cost)
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .help(UsageFormat.providerName(provider.id))
+            }
+        }
     }
 }

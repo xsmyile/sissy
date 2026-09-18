@@ -3,8 +3,9 @@ import XCTest
 @testable import Sissy
 
 /// The page behind the project section's own row: that it holds the rows the
-/// section folded away, that it still reaches the day it prints, and that it
-/// says which CLI each repository's money went through.
+/// section folded away, that it still reaches the day it prints — which is
+/// what its residue line is for, since it is the one surface that carries
+/// one — and that it says which CLI each repository's money went through.
 final class ProjectsPageTests: XCTestCase {
     func testThePageHoldsEveryRepositoryTheSectionFoldedAway() {
         let many = (1...9).map { project("/Users/smyile/repo\($0)", 100, "1.00") }
@@ -25,20 +26,49 @@ final class ProjectsPageTests: XCTestCase {
                 providerTokens: 1_000, providerCost: "10.00"))
 
         XCTAssertEqual(snapshot.projectCount, 9)
-        XCTAssertEqual(snapshot.projects.count, 6, "the fold and the remainder are not projects")
+        XCTAssertEqual(snapshot.projects.count, 5, "the section grew a row that is not a project")
     }
 
     /// The rows are read against the total in the header, so what named no
-    /// repository keeps its row here exactly as it does in the section.
-    func testWhatNamedNoRepositoryStillReachesTheTotal() {
+    /// repository is still printed here — as the line under them rather than
+    /// as one of them.
+    func testWhatNamedNoRepositoryStillReachesTheTotal() throws {
         let page = UsagePanelSnapshot.projectsPage(
             frame: frame(
                 claude: [project("/Users/smyile/sissy", 750, "7.50")],
                 providerTokens: 1_000, providerCost: "10.00"),
             provider: nil)
 
-        XCTAssertEqual(page.rows.map(\.name), ["sissy", "Unattributed"])
+        XCTAssertEqual(page.rows.map(\.name), ["sissy"])
+        let residue = try XCTUnwrap(page.residue)
+        XCTAssertEqual(residue.cost, "$2.50")
+        XCTAssertEqual(residue.tokens, "250")
         XCTAssertEqual(page.subtitle, "today · 1 project · $10.00")
+    }
+
+    /// The rows and the header can be read an instant apart — the split is
+    /// republished on every read of a provider's day, the totals beside it
+    /// only on an emit — so the two halves of a remainder can disagree about
+    /// its sign. That is a reading that disagrees with itself, not money.
+    func testAResidueThatCameOutNegativeIsNotDrawn() {
+        let page = UsagePanelSnapshot.projectsPage(
+            frame: frame(
+                claude: [project("/Users/smyile/sissy", 250, "9.00")],
+                providerTokens: 1_000, providerCost: "6.00"),
+            provider: nil)
+
+        XCTAssertEqual(page.rows.map(\.name), ["sissy"])
+        XCTAssertNil(page.residue)
+    }
+
+    /// A day every line of which named a repository has nothing left over, and
+    /// a line reading zero would be a hole reported where there is none.
+    func testADayFullyNamedHasNoResidueLine() {
+        let page = UsagePanelSnapshot.projectsPage(
+            frame: frame(claude: [project("/Users/smyile/sissy", 750, "7.50")]),
+            provider: nil)
+
+        XCTAssertNil(page.residue)
     }
 
     /// One repository, two CLIs, one row — and the split is what says which of
@@ -83,12 +113,24 @@ final class ProjectsPageTests: XCTestCase {
         XCTAssertEqual(page.subtitle, "today · 1 project · $2.50")
     }
 
-    /// The remainder is what the day spent outside every repository, so there
-    /// is no project for a provider to have spent it on. It is asserted on the
-    /// page rather than in the section because the page is the only surface
-    /// that draws a split at all — in the section every row names none, and a
-    /// test there would pass with the rule deleted.
-    func testTheRemainderNamesNoProviderOnAPageWhereTheOtherRowsDo() throws {
+    /// A vendor's own page names the vendor, so its residue says the figure
+    /// and not who spent it either.
+    func testAProvidersOwnPageLeavesTheSplitOffItsResidue() throws {
+        let page = UsagePanelSnapshot.projectsPage(
+            frame: frame(
+                claude: [project("/Users/smyile/legion", 750, "7.50")],
+                providerTokens: 1_000, providerCost: "10.00"),
+            provider: ProviderID.claudeCode)
+
+        XCTAssertEqual(try XCTUnwrap(page.residue).cost, "$2.50")
+        XCTAssertEqual(try XCTUnwrap(page.residue).providers, [])
+    }
+
+    /// The residue is the one place the panel can say *which* CLI lost the
+    /// attribution: a provider's own page shows its own and nothing there says
+    /// how the two compare. Only the CLIs that have one are named — a zero
+    /// beside a figure reads as a CLI that spent nothing at all.
+    func testTheResidueNamesTheCLIsThatLostTheAttribution() throws {
         let claude = ProviderSlice(
             id: ProviderID.claudeCode, tokens: 1_000, cost: 10,
             projects: [project("/Users/smyile/legion", 750, "7.50")])
@@ -102,9 +144,28 @@ final class ProjectsPageTests: XCTestCase {
                 projects: FrameBuilder.combinedProjects([claude, codex])),
             provider: nil)
 
-        XCTAssertEqual(page.rows.map(\.name), ["legion", "Unattributed"])
+        XCTAssertEqual(page.rows.map(\.name), ["legion"])
         XCTAssertEqual(try XCTUnwrap(page.rows.first).providers.count, 2)
-        XCTAssertEqual(page.rows.last?.providers, [])
+        let residue = try XCTUnwrap(page.residue)
+        XCTAssertEqual(residue.cost, "$2.50")
+        XCTAssertEqual(residue.providers.map(\.id), [ProviderID.claudeCode])
+        XCTAssertEqual(residue.providers.map(\.cost), ["$2.50"])
+    }
+
+    /// Two CLIs that each spent outside every repository are two figures, in
+    /// the panel's own provider order so the marks read the same way down the
+    /// page as they do on the rows.
+    func testBothCLIsAreNamedWhenBothLostAttribution() throws {
+        let page = UsagePanelSnapshot.projectsPage(
+            frame: frame(
+                claude: [project("/Users/smyile/legion", 750, "7.50")],
+                codex: [project("/Users/smyile/legion", 250, "2.50")],
+                providerTokens: 1_000, providerCost: "10.00"),
+            provider: nil)
+
+        let residue = try XCTUnwrap(page.residue)
+        XCTAssertEqual(residue.providers.map(\.id), [ProviderID.claudeCode, ProviderID.codex])
+        XCTAssertEqual(residue.providers.map(\.cost), ["$2.50", "$7.50"])
     }
 
     private func project(_ path: String, _ tokens: Int, _ cost: String) -> ProjectTotals {

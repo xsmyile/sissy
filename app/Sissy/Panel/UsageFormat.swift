@@ -848,10 +848,16 @@ enum UsageFormat {
     /// belongs to a section that does not exist while the list is empty.
     static let projectsEmpty = "Nothing today names a repository yet."
 
-    /// What the rest of the day is called when no row can name it. Deliberately
-    /// not a name: the money was counted, and the one thing Sissy will not do
-    /// is invent a repository for it.
-    static let projectsUnattributed = "Unattributed"
+    /// What the rest of the day is called when no row can name it, as the line
+    /// under the list says it. Deliberately not a name: the money was counted,
+    /// and the one thing Sissy will not do is invent a repository for it.
+    ///
+    /// The `+` is the whole of why a figure may sit under a list without being
+    /// in it — it says the line adds to the rows above rather than standing
+    /// beside them, which is what a list read against a total needs to close.
+    static func projectsUnattributed(tokens: String, cost: String) -> String {
+        "+ \(tokens) · \(cost) unattributed"
+    }
 
     /// Why a row that is not a repository is in the list, for the hover. Both
     /// halves are real and neither is a fault: a CLI that works out of its own
