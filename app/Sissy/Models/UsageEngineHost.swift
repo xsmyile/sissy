@@ -460,6 +460,16 @@ final class UsageEngineHost {
     /// retry with.
     private(set) var forgeConnectFailure: String?
 
+    /// Forgets what the last attempt failed with.
+    ///
+    /// It outlives the window that reported it — a user who reads the failure
+    /// and cancels leaves it standing — and there is more than one door to that
+    /// window now, so a sheet opened for one host would otherwise lead with
+    /// another host's failure and no attempt behind it.
+    func clearForgeConnectFailure() {
+        forgeConnectFailure = nil
+    }
+
     /// The tokens `gh` and `glab` already hold, read on the click that offers
     /// them and never before — the rule every credential in this app is
     /// acquired under.
