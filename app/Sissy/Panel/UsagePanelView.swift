@@ -268,7 +268,9 @@ struct UsagePanelView: View {
                                 openProvider: { page = .provider($0, account: $1) },
                                 openProjects: { page = .projects(nil, account: nil) },
                                 openIdentities: { page = .identities(focus: $0) },
-                                selectPeriod: { model.setUsagePeriod($0) }
+                                selectPeriod: { model.setUsagePeriod($0) },
+                                refreshingForge: model.engine.refreshingForge,
+                                refreshForge: { model.refreshForge($0) }
                             )
                         }
                     } else {

@@ -1586,6 +1586,19 @@ actor UsageEngine {
         await identityMonitor.sweepOnce { await me.reemit() }
     }
 
+    /// Re-reads one forge connection now, for the gesture on its own row.
+    ///
+    /// The counters move when the user pushes, and the poll is on a five- to
+    /// thirty-minute cadence it cannot be told about: a merge landed a minute
+    /// ago is a row that is right and looks wrong. It is also the only way
+    /// back from a parked connection without disconnecting the host and
+    /// connecting it again.
+    func refreshForge(id: String) async {
+        guard lifecycle == .running else { return }
+        let me = self
+        await forgeMonitor.refreshOnce(id: id) { await me.reemit() }
+    }
+
     /// Switches the status readings on or off at runtime, and persists it.
     ///
     /// Stopping drops the readings with the loop, so the rows go when the

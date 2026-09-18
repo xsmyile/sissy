@@ -191,6 +191,10 @@ final class SissyModel {
         engine.refreshProvider(id)
     }
 
+    func refreshForge(_ id: String) {
+        engine.refreshForge(id)
+    }
+
     // MARK: Keep awake
 
     /// A mode the app has asked for and the engine has not answered yet.

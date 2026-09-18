@@ -74,6 +74,12 @@ final class UsageEngineHost {
     /// Which providers have a refresh in flight, so a surface can say it is
     /// refreshing rather than repeating an age that is about to change.
     private(set) var refreshing: Set<String> = []
+    /// The same, for forge connections.
+    ///
+    /// Its own set rather than a second kind of member in `refreshing`: the
+    /// panel header reads that one whole, as "the frame is being re-read", and
+    /// a forge refresh moves none of the numbers that header is dating.
+    private(set) var refreshingForge: Set<String> = []
 
     /// How long a refresh stays visible at the least.
     ///
@@ -205,6 +211,7 @@ final class UsageEngineHost {
         refreshTasks.values.forEach { $0.cancel() }
         refreshTasks.removeAll()
         refreshing.removeAll()
+        refreshingForge.removeAll()
         switchingClaudeAccount = nil
         guard let engine else { return }
         self.engine = nil
@@ -535,6 +542,25 @@ final class UsageEngineHost {
                 try? await Task.sleep(for: rest)
             }
             refreshing.remove(id)
+            refreshTasks[id] = nil
+        }
+    }
+
+    /// Re-reads one forge connection, for the refresh on its own row.
+    ///
+    /// It shares `refreshTasks` with the provider refresh above — a forge
+    /// connection is keyed `kind:host`, which no provider id can be — so a
+    /// teardown already cancels it along with the rest.
+    func refreshForge(_ id: String) {
+        guard let engine, refreshTasks[id] == nil else { return }
+        refreshingForge.insert(id)
+        refreshTasks[id] = Task {
+            let startedAt = ContinuousClock.now
+            await engine.refreshForge(id: id)
+            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
+                try? await Task.sleep(for: rest)
+            }
+            refreshingForge.remove(id)
             refreshTasks[id] = nil
         }
     }

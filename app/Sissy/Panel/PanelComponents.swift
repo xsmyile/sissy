@@ -569,13 +569,27 @@ struct ProjectRowView: View {
 /// this is the absence of one — and here it has a second, measured reason: this
 /// user's own GitLab is reached over a tunnel, so a laptop off the VPN would
 /// otherwise report a day with no work in it. A reading that arrived and has
-/// since gone stale keeps its figures and grows the caption instead, because
+/// since gone stale keeps its figures and says so in the caption, because
 /// figures that were true an hour ago plus their age is a better answer than an
 /// error where a number was.
+///
+/// **Every row is dated, not only the ones that went wrong.** The poll is on a
+/// five- to thirty-minute cadence and these counters move the moment the user
+/// pushes, so a figure with no date on it cannot be told from one taken before
+/// the merge they are looking for. The right-click re-reads that one
+/// connection, which is also the only way back from a token parked on a
+/// refusal that has since passed; the tooltip names the gesture, since nothing
+/// on the row can.
 struct ForgeRowView: View {
     let row: UsagePanelSnapshot.ForgeRow
+    let refreshing: Bool
+    let refresh: () -> Void
 
     private static let noticeSize: CGFloat = 11
+    /// Matches the panel header's, for the reason that one is a second rather
+    /// than a minute: the first minute of an age is worded in seconds.
+    private static let clockTick: TimeInterval = 1
+    private static let refreshItem = "Refresh now"
     /// Smaller than `PanelMetrics.markSize`, which labels a whole provider: a
     /// mark that qualifies one number on a line has to read as part of that
     /// number rather than as the row's own badge.
@@ -607,16 +621,35 @@ struct ForgeRowView: View {
                 Spacer(minLength: 8)
                 figures
             }
-            if let notice = row.notice {
+            notice
+        }
+        .contentShape(.rect)
+        .help(row.tooltip)
+        .contextMenu {
+            Button(Self.refreshItem, action: refresh)
+                .disabled(refreshing)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// How old the figures are, on the row's own clock.
+    ///
+    /// `TimelineView` rather than a string the snapshot already built: this
+    /// block's frame arrives every five to thirty minutes, so an age taken
+    /// from it would sit at "read 2m ago" for half an hour under an open
+    /// panel. It is what `PanelProviderStatus` does with `checkedAt`, and the
+    /// two lines are the same reading for the same reason.
+    private var notice: some View {
+        TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+            if let notice = UsageFormat.forgeNotice(
+                row.failure, readAt: row.readAt, refreshing: refreshing, now: context.date)
+            {
                 Text(notice)
                     .font(.system(size: Self.noticeSize))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         }
-        .contentShape(.rect)
-        .help(row.tooltip)
-        .accessibilityElement(children: .combine)
     }
 
     /// The contributions bare, the other three behind their own mark.

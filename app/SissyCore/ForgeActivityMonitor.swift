@@ -58,6 +58,18 @@ actor ForgeActivityMonitor {
     /// Connections whose last failure needs the user. They keep their row and
     /// their last figures; what they stop costing is a request per round.
     private var parked: Set<String> = []
+    /// The fetch already running for a connection, which a second caller joins
+    /// rather than opening a request of its own beside it.
+    ///
+    /// **Actor isolation orders the writes and not the results.** A round and
+    /// the row's own refresh can both be in flight, and the one that finishes
+    /// last is not the one that was asked last: a round that started first and
+    /// answered slowly would put its older figures back over a refresh the
+    /// user had just watched land, or park a connection that refresh had
+    /// proved healthy. Joining is what makes that unrepresentable — there is
+    /// one request, so there is one result — and it costs the vendor a request
+    /// rather than two on the click that lands mid-round.
+    private var inFlight: [String: Task<Void, Never>] = [:]
     /// Bumped by every stop, so a request in flight when the monitor was torn
     /// down cannot publish over the run that replaced it.
     private var generation = 0
@@ -95,8 +107,12 @@ actor ForgeActivityMonitor {
     }
 
     /// Starts the poll loop. `onRefresh` fires only when the published map
-    /// changes, so a forge that keeps answering the same counts costs no
-    /// frames. Idempotent, and a no-op for a build with nothing connected.
+    /// changes — which a round that reached the vendor always does, since
+    /// `readAt` is part of a reading and therefore of its equality, and the
+    /// age is a reading of its own that the row prints. What it spares is a
+    /// round that changed nothing because it asked nothing: every connection
+    /// parked, or a failure that kept the figures and the reason it already
+    /// had. Idempotent, and a no-op for a build with nothing connected.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
         guard pollTask == nil, !connections.isEmpty else { return }
         pollTask = Task { [weak self] in
@@ -117,10 +133,17 @@ actor ForgeActivityMonitor {
     /// under: the engine rebuilds every frame from `currentActivity()`, so a
     /// cancelled loop would otherwise leave a contribution count standing under
     /// a connection the user has just removed.
+    ///
+    /// The fetches are cancelled here as well as the loop, and that is not
+    /// tidiness: they are unstructured tasks, so cancelling the loop that
+    /// started them reaches none of them, and one started by a refresh has no
+    /// loop above it at all. The generation still decides what may publish.
     func stop() {
         generation &+= 1
         pollTask?.cancel()
         pollTask = nil
+        inFlight.values.forEach { $0.cancel() }
+        inFlight.removeAll()
         parked.removeAll()
         published.store([:])
     }
@@ -134,34 +157,79 @@ actor ForgeActivityMonitor {
         let stamp = generation
         let before = published.load()
         let due = connections.filter { !parked.contains($0.id) }
-        await withTaskGroup(of: (ForgeConnection, Result<ForgeActivityReading, Error>).self) {
-            group in
-            for connection in due {
-                let fetch = fetchSource
-                let token = tokenSource
-                let counters = counters
-                group.addTask {
-                    guard case .found(let secret) = token(connection.id) else {
-                        return (connection, .failure(Self.credentialFailure(token(connection.id))))
-                    }
-                    do {
-                        return (
-                            connection,
-                            .success(try await fetch(connection, secret, counters, Date()))
-                        )
-                    } catch {
-                        return (connection, .failure(error))
-                    }
-                }
-            }
-            for await (connection, outcome) in group {
-                guard stamp == generation, !Task.isCancelled else { continue }
-                apply(outcome, for: connection)
-            }
-        }
+        for task in due.map(read) { await task.value }
         guard stamp == generation, !Task.isCancelled else { return nextDelay() }
         if published.load() != before { await onRefresh() }
         return nextDelay()
+    }
+
+    /// Re-reads one connection now, for the gesture on its own row.
+    ///
+    /// **It ignores the parking, which is the point.** A connection is parked
+    /// on a failure only the user can clear, and this is the user: without it
+    /// a token refused once is never asked again until the host is connected
+    /// a second time, however transient the refusal was. What happens next is
+    /// `apply`'s to decide, so a refusal that still stands keeps the parking
+    /// and a different answer lifts it.
+    ///
+    /// No delay comes back because there is no schedule here to move. The loop
+    /// keeps the sleep it was already on: resetting it would postpone every
+    /// other connection to pay for this one, and the redundant round it saves
+    /// is a single request the join above already narrows to whichever of the
+    /// two arrives second.
+    func refreshOnce(id: String, onRefresh: @Sendable @escaping () async -> Void) async {
+        guard let connection = connections.first(where: { $0.id == id }) else { return }
+        let stamp = generation
+        let before = published.load()
+        await read(connection).value
+        guard stamp == generation else { return }
+        if published.load() != before { await onRefresh() }
+    }
+
+    /// The one fetch for a connection, started if nothing is already running.
+    ///
+    /// Synchronous on the actor so a round registers every connection before
+    /// it awaits any of them: the tasks run at once, exactly as the group they
+    /// replaced did, and a caller arriving mid-round cannot slip between the
+    /// lookup and the registration.
+    private func read(_ connection: ForgeConnection) -> Task<Void, Never> {
+        if let running = inFlight[connection.id] { return running }
+        let stamp = generation
+        let fetch = fetchSource
+        let token = tokenSource
+        let counters = counters
+        let task = Task { [weak self] in
+            let outcome: Result<ForgeActivityReading, Error>
+            let lookup = token(connection.id)
+            if case .found(let secret) = lookup {
+                do {
+                    outcome = .success(try await fetch(connection, secret, counters, Date()))
+                } catch {
+                    outcome = .failure(error)
+                }
+            } else {
+                outcome = .failure(Self.credentialFailure(lookup))
+            }
+            await self?.finish(outcome, for: connection, stamp: stamp)
+        }
+        inFlight[connection.id] = task
+        return task
+    }
+
+    /// Takes the fetch off the register and publishes what it answered.
+    ///
+    /// Clearing before the generation is checked is deliberate: a torn-down
+    /// run must not leave a connection looking busy to the run that replaced
+    /// it. Nothing newer can be cleared by mistake, because the entry is only
+    /// replaced by a caller that found it empty, and it is empty only once
+    /// this has run.
+    private func finish(
+        _ outcome: Result<ForgeActivityReading, Error>, for connection: ForgeConnection,
+        stamp: Int
+    ) {
+        inFlight[connection.id] = nil
+        guard stamp == generation, !Task.isCancelled else { return }
+        apply(outcome, for: connection)
     }
 
     /// What a keychain outcome that is not a token means to a row.
@@ -188,6 +256,13 @@ actor ForgeActivityMonitor {
     /// never answered gets the one `unavailable` row it keeps until a fetch
     /// works, whose stamp is its own because there is no earlier reading for it
     /// to misdate.
+    ///
+    /// **The parking follows the last answer rather than accumulating.** Only
+    /// a manual refresh reaches a parked connection at all, so the branch that
+    /// lifts it is that gesture's: a retryable failure means the refusal the
+    /// parking was for is not what the vendor said this time, and leaving it
+    /// parked would strand a connection on the one answer nobody can act on —
+    /// a click made off the VPN, which is this user's ordinary state.
     private func apply(_ outcome: Result<ForgeActivityReading, Error>, for connection: ForgeConnection) {
         switch outcome {
         case .success(let reading):
@@ -195,7 +270,11 @@ actor ForgeActivityMonitor {
             published.update { $0[connection.id] = reading }
         case .failure(let error):
             let failure = (error as? ForgeReadFailure) ?? .malformed
-            if failure.needsTheUser { parked.insert(connection.id) }
+            if failure.needsTheUser {
+                parked.insert(connection.id)
+            } else {
+                parked.remove(connection.id)
+            }
             published.update { map in
                 guard let previous = map[connection.id], previous.login != nil else {
                     map[connection.id] = .unavailable(connection, failure: failure)

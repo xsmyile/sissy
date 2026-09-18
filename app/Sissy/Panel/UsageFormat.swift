@@ -1207,28 +1207,52 @@ extension UsageFormat {
         }
     }
 
-    /// What a row says instead of, or beside, its figures.
+    /// Why a forge would not answer, in the one sentence every surface that
+    /// reports it uses.
     ///
     /// A refused token and a host that could not be reached are separate
     /// sentences because they need separate things from the user, and neither
     /// of them is a zero: this user's own GitLab routes over a tunnel, so a
     /// laptop off the VPN would otherwise report a day with no work on it.
-    /// When there are figures behind the failure the age is what the row says,
-    /// because figures that were true an hour ago plus how old they are is a
-    /// more useful reading than an error where a number was.
-    static func forgeNotice(
-        _ failure: ForgeReadFailure?, readAt: Date, hasFigures: Bool, now: Date = Date()
-    ) -> String? {
-        guard let failure else { return nil }
-        if hasFigures { return "last read " + age(now.timeIntervalSince(readAt)) }
+    static func forgeFailure(_ failure: ForgeReadFailure) -> String {
         switch failure {
-        case .unauthorized: return "the token was refused"
-        case .rateLimited: return "asked to slow down"
-        case .unreachable: return "could not be reached"
-        case .malformed: return "answered something Sissy could not read"
-        case .noCredential: return "no token"
-        case .credentialUnreadable: return "the keychain would not answer"
+        case .unauthorized: "the token was refused"
+        case .rateLimited: "asked to slow down"
+        case .unreachable: "could not be reached"
+        case .malformed: "answered something Sissy could not read"
+        case .noCredential: "no token"
+        case .credentialUnreadable: "the keychain would not answer"
         }
+    }
+
+    /// The line under a forge row: what it is doing, or what went wrong, and
+    /// how old the figures beside it are.
+    ///
+    /// **A healthy row dates itself**, which is the whole of what it used to be
+    /// missing. The poll runs every five to thirty minutes, so a count that is
+    /// current and a count taken before the merge the user is looking for are
+    /// the same three digits, and the row had no way to say which it was. The
+    /// panel's own header has always dated its reading this way; this is the
+    /// block whose cadence makes it worth repeating. Printing it only past
+    /// some staleness was the other way to word it and it has no honest
+    /// threshold to use: the interval is picked after each round, with jitter,
+    /// and the loop keeps it to itself.
+    ///
+    /// **A failure now says both.** The age alone stood for it while a healthy
+    /// row was silent; with one that is not, a reason left out would read as an
+    /// ordinary reading that happened to be old.
+    ///
+    /// `readAt` is nil for a connection that has never once answered. There is
+    /// no reading to date — `ForgeActivityReading.unavailable` stamps the
+    /// attempt, not a read — so that row gets the reason by itself.
+    static func forgeNotice(
+        _ failure: ForgeReadFailure?, readAt: Date?, refreshing: Bool, now: Date = Date()
+    ) -> String? {
+        if refreshing { return "refreshing…" }
+        guard let readAt else { return failure.map(forgeFailure) }
+        let read = age(now.timeIntervalSince(readAt))
+        guard let failure else { return "read " + read }
+        return forgeFailure(failure) + " · last read " + read
     }
 
     /// The hover for a forge row: what each figure counts, in the vendor's own
@@ -1240,6 +1264,11 @@ extension UsageFormat {
     /// on the widest window it says that GitHub's contributions reach back a
     /// year where the merge count beside them reaches back for ever, which is
     /// the one place `All` means two things on one line.
+    ///
+    /// It also names the right-click, where the keep-awake control names its
+    /// own and for the same reason: a gesture nothing advertises is a feature
+    /// only whoever wrote it can find, and this row has nowhere to put a
+    /// button — 340 pt already has the login truncating before the figures do.
     static func forgeTooltip(
         _ kind: ForgeKind, host: String, login: String?, period: UsagePeriod,
         boundedToOneYear: Bool
@@ -1255,6 +1284,7 @@ extension UsageFormat {
         if period == .all, boundedToOneYear {
             lines.append("Contributions reach back one year; the counts beside them are every one")
         }
+        lines.append("Right-click to refresh now")
         return lines.joined(separator: "\n")
     }
 
