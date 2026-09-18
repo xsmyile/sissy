@@ -382,6 +382,13 @@ final class ClaudeCodeAdapter: SourceAdapter {
     private static let typeKeyBytes: [UInt8] = Array("\"type\"".utf8)
     private static let assistantValueBytes: [UInt8] = Array("\"assistant\"".utf8)
 
+    /// The tool that spawns a sub-agent, under both names it has had.
+    static let agentToolNames: Set<String> = ["Agent", "Task"]
+
+    /// Where Claude Code files a sub-agent's own transcript, beside its
+    /// parent's file.
+    static let subagentDirectory = "subagents"
+
     func lineMayCount(_ buf: UnsafePointer<UInt8>, from: Int, to: Int) -> Bool {
         Self.bufferContainsAssistantMarker(buf, from: from, to: to)
     }
@@ -434,18 +441,27 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// and that covers one carrying *less*: a request id whose count goes
     /// backwards is not something this layer can act on, and re-reading a
     /// file from an earlier offset walks the same copies again by design.
-    func event(from line: SourceLine, seen: inout [String: SeenEvent]) -> UsageEvent? {
+    func event(
+        from line: SourceLine,
+        seen: inout [String: SeenEvent],
+        activity: inout [AgentActivityEvent]
+    ) -> UsageEvent? {
         guard let obj = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any],
             obj["type"] as? String == "assistant",
             let msg = obj["message"] as? [String: Any],
-            let usage = msg["usage"] as? [String: Any],
-            let model = msg["model"] as? String,
             let tsStr = obj["timestamp"] as? String
         else { return nil }
 
         guard let ts = UsageReaderShared.parseTimestamp(tsStr) else { return nil }
 
         if ts < line.retainCutoff { return nil }
+
+        countAgents(in: msg, at: ts, seen: &seen, into: &activity)
+        countSession(obj, url: line.url, at: ts, seen: &seen, into: &activity)
+
+        guard let usage = msg["usage"] as? [String: Any],
+            let model = msg["model"] as? String
+        else { return nil }
 
         let dedupeKey: String
         if let rid = obj["requestId"] as? String, !rid.isEmpty {
@@ -510,6 +526,79 @@ final class ClaudeCodeAdapter: SourceAdapter {
             cacheCreationTokens: cacheCreation,
             cost: cost
         )
+    }
+
+    /// Counts the sub-agents an assistant turn spawned.
+    ///
+    /// The evidence is the `tool_use` block itself, not the transcript the
+    /// agent writes. Claude Code files a sub-agent's own log under
+    /// `<session>/subagents/agent-*.jsonl`, and counting those files instead
+    /// would be both later — the file appears when the agent starts, the block
+    /// when the turn that asked for it was written — and narrower, since only
+    /// recent versions write them at all. Measured 2026-09-18 across 30 days,
+    /// the two agree: 189 blocks against 188 files, the odd one a call that
+    /// produced no transcript.
+    ///
+    /// Two names because the tool was renamed: `Task` is what every version
+    /// before the rename wrote, and a reader that knows only the current name
+    /// silently reports zero for every day it can still see.
+    ///
+    /// Keyed on the block's own id rather than on the line's dedup key: Claude
+    /// Code rewrites an assistant line two to four times while the answer
+    /// streams, and the tool id is what is stable across the copies. It is
+    /// claimed in the same ledger the tokens use, so a turn whose copies land
+    /// either side of a relaunch still counts one agent.
+    private func countAgents(
+        in message: [String: Any],
+        at timestamp: Date,
+        seen: inout [String: SeenEvent],
+        into activity: inout [AgentActivityEvent]
+    ) {
+        guard let content = message["content"] as? [[String: Any]] else { return }
+        let day = Calendar.current.startOfDay(for: timestamp)
+        for block in content {
+            guard block["type"] as? String == "tool_use",
+                let name = block["name"] as? String,
+                Self.agentToolNames.contains(name),
+                let id = block["id"] as? String, !id.isEmpty
+            else { continue }
+            let key = AgentActivityKey.agent(id)
+            guard seen[key] == nil else { continue }
+            seen[key] = SeenEvent(day: day, billedOutputTokens: nil)
+            activity.append(AgentActivityEvent(timestamp: timestamp, kind: .agentSpawned))
+        }
+    }
+
+    /// Counts a session the first time one of its turns is read.
+    ///
+    /// A sub-agent's transcript is not a session: it is the agent already
+    /// counted above, and counting it here would report every delegation
+    /// twice. The tree says which is which — Claude Code writes a sub-agent's
+    /// log into a `subagents` directory beside its parent's file — so the
+    /// question is answered by where the line came from rather than by a field
+    /// on it, which is also the only answer available on the versions that
+    /// wrote no `agentId`.
+    ///
+    /// Counted at the session's first *turn* rather than at its first line,
+    /// because a turn is the only line shape this adapter is handed. What that
+    /// makes the number is sessions that got an answer, which is the honest
+    /// reading: a `claude` opened and closed without asking anything spent
+    /// nothing and did nothing.
+    private func countSession(
+        _ object: [String: Any],
+        url: URL,
+        at timestamp: Date,
+        seen: inout [String: SeenEvent],
+        into activity: inout [AgentActivityEvent]
+    ) {
+        guard url.deletingLastPathComponent().lastPathComponent != Self.subagentDirectory,
+            let sessionID = object["sessionId"] as? String, !sessionID.isEmpty
+        else { return }
+        let key = AgentActivityKey.session(sessionID)
+        guard seen[key] == nil else { return }
+        seen[key] = SeenEvent(
+            day: Calendar.current.startOfDay(for: timestamp), billedOutputTokens: nil)
+        activity.append(AgentActivityEvent(timestamp: timestamp, kind: .sessionStarted))
     }
 
     /// What a later copy of a message already counted once still owes.

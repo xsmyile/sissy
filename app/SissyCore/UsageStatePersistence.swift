@@ -89,6 +89,27 @@ struct UsageStateSnapshot: Codable, Equatable {
     struct HistoryResume: Codable, Equatable {
         /// Per-model split of `dailyTotals`, at the grain the archive keeps.
         var dailyModelTotals: [DailyModelTotal]
+        /// Agents and sessions counted per day, absent in a snapshot written
+        /// before they were.
+        ///
+        /// Persisted for the reason the rows above are, and it is not an
+        /// optimisation: the offsets resume at EOF, so the lines a count was
+        /// read from are lines nothing will read again. Without this a
+        /// relaunch would restart the day at zero and the next flush would
+        /// write that partial number over a whole day.
+        ///
+        /// Optional rather than version-gated, because a `schemaVersion` bump
+        /// discards both providers' snapshots for a change that costs Claude
+        /// Code a ~16 s cold scan. `nil` is an upgrade, and the one day it
+        /// lands on is the one `UsageHistoryDay.merging(counts:)` keeps whole.
+        var dailyAgentCounts: [DailyAgentCount]?
+    }
+
+    /// One provider's agent counters for one archived day.
+    struct DailyAgentCount: Codable, Equatable {
+        var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
+        var sessions: Int
+        var agents: Int
     }
 
     /// Grouped so the absence above is one question rather than three, and so

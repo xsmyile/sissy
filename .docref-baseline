@@ -23,6 +23,7 @@ RunAtLoad
 SIGTERM
 SuspendingClock
 _NSPopoverWindow
+agentId
 argv
 caffeinate
 commitComments

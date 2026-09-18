@@ -16,6 +16,12 @@ struct ScanEntry: Encodable {
     /// app — it is the one number here that comes from neither the logs nor
     /// the pricing tables.
     let credits: ScanCredits?
+    /// Sessions started and agents spawned today, so the count can be checked
+    /// against the logs without launching the app. `--scan` runs the tail's own
+    /// 48 h window and reports today, so these are today's, exactly as the
+    /// tokens beside them are.
+    let sessions: Int
+    let agents: Int
 }
 
 /// The credits block of a `--scan` entry, in whichever unit the vendor
@@ -186,7 +192,9 @@ if args.contains("--scan") {
                         balance: figure(credits.balance),
                         currency: currency,
                         observedAt: credits.observedAt)
-                }
+                },
+                sessions: p.currentAgents().sessions,
+                agents: p.currentAgents().agents
             )
             await p.stop()
         }

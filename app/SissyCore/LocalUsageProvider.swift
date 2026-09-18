@@ -97,7 +97,20 @@ protocol SourceAdapter: AnyObject {
     /// format's business, while the ledger is the provider's because the
     /// provider is what persists and trims it. Events older than
     /// `line.retainCutoff` are dropped without claiming a key.
-    func event(from line: SourceLine, seen: inout [String: SeenEvent]) -> UsageEvent?
+    ///
+    /// `activity` is the second thing a line can report, and it is an `inout`
+    /// accumulator for the reason `seen` is: both are state the provider owns
+    /// and the adapter contributes to, and both have to be filled from the one
+    /// JSON parse this call is allowed. A line that spawns an agent is a line
+    /// that also spent tokens — measured 2026-09-18, 189 of 189 `Agent` blocks
+    /// rode an assistant line carrying `message.usage` — so asking the adapter
+    /// twice would parse the same bytes twice to learn two halves of one
+    /// reading. Appending nothing is the ordinary answer.
+    func event(
+        from line: SourceLine,
+        seen: inout [String: SeenEvent],
+        activity: inout [AgentActivityEvent]
+    ) -> UsageEvent?
 
     /// Swap in a freshly fetched rate catalog. The adapter takes the slice
     /// matching its upstream vendor.
@@ -187,6 +200,16 @@ actor LocalUsageProvider: UsageProvider {
     /// archive keeps. Fed by the same `ingest` and trimmed by the same
     /// `trim()`, so the two cannot describe different days.
     private var dailyModelTotals: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
+    /// The same days again, counted rather than measured: how many sessions
+    /// were started and how many agents they spawned.
+    ///
+    /// A third map rather than a field on the two above, because it is a third
+    /// grain: `dailyTotals` is one pair of scalars for the provider's day and
+    /// `dailyModelTotals` a row per model per project, while a count belongs to
+    /// the provider's day and to no model at all. Fed by the same `ingest` and
+    /// trimmed by the same `trim()`, so no day can exist in one and not the
+    /// others.
+    private var dailyAgentCounts: [Date: AgentCounts] = [:]
     /// Days whose archive file is behind what is in memory.
     private var historyDirtyDays: Set<Date> = []
     /// Days this process must not write, because it cannot vouch for them: a
@@ -206,6 +229,11 @@ actor LocalUsageProvider: UsageProvider {
     /// Today's project split, republished on every emit so the aggregator
     /// can read it without an actor hop.
     private let publishedProjects = LockedValue<[ProjectTotals]>([])
+    /// Today's agent counters, republished on every emit for the reason the
+    /// project split is: the aggregator reads them while this provider still
+    /// holds its own actor, so an `await` here would deadlock the emit that
+    /// produced them.
+    private let publishedAgents = LockedValue<AgentCounts>(.none)
     private let publishedUsage = LockedValue(ProviderSignals())
     private var lastPublishedSignals: ProviderSignals?
     private var pollTask: Task<Void, Never>?
@@ -613,12 +641,15 @@ actor LocalUsageProvider: UsageProvider {
     func current() -> DayTotals {
         let todayKey = Calendar.current.startOfDay(for: Date())
         publishedProjects.store(projectTotals(on: todayKey))
+        publishedAgents.store(dailyAgentCounts[todayKey] ?? .none)
         return dailyTotals[todayKey] ?? DayTotals(totalTokens: 0, totalCost: 0)
     }
 
     nonisolated func filesWatched() -> Int { watchedCounter.load() }
 
     nonisolated func currentProjects() -> [ProjectTotals] { publishedProjects.load() }
+
+    nonisolated func currentAgents() -> AgentCounts { publishedAgents.load() }
 
     /// One day's rows folded down to a total per project. A row naming no
     /// project is left out rather than grouped under a made-up one: the panel
@@ -782,6 +813,25 @@ actor LocalUsageProvider: UsageProvider {
         historyDirtyDays.insert(key)
     }
 
+    /// Buckets one agent observation into the day it happened on.
+    ///
+    /// Idempotent across a cold scan for the same reason the token totals are:
+    /// the count lands in a day bucket that the archive writes *whole*, so a
+    /// re-derived day replaces its file rather than adding to it. What stops
+    /// it double-counting inside one run is the dedup ledger the adapter
+    /// claimed its key in before this was called.
+    ///
+    /// A day this process must not write is still counted in memory. The
+    /// suppression is about the archive — a day the tail cannot vouch for is
+    /// left unwritten rather than written short — and the panel's own reading
+    /// of today is not an archive write.
+    private func ingest(_ activity: AgentActivityEvent) {
+        let key = Calendar.current.startOfDay(for: activity.timestamp)
+        dailyAgentCounts[key, default: .none].record(activity.kind)
+        guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
+        historyDirtyDays.insert(key)
+    }
+
     private func trim() {
         let cal = Calendar.current
         let cutoff = cal.startOfDay(for: retainWindowStart)
@@ -793,6 +843,7 @@ actor LocalUsageProvider: UsageProvider {
         }
         dailyTotals = dailyTotals.filter { $0.key >= cutoff }
         dailyModelTotals = dailyModelTotals.filter { $0.key >= cutoff }
+        dailyAgentCounts = dailyAgentCounts.filter { $0.key >= cutoff }
         historySuppressedDays = historySuppressedDays.filter { $0 >= cutoff }
         // Evict dedup keys for days that have aged out so the set's memory
         // footprint stays bounded across long-running sessions.
@@ -812,7 +863,15 @@ actor LocalUsageProvider: UsageProvider {
             byteOffset: byteOffset,
             retainCutoff: retainWindowStart
         )
-        guard let event = adapter.event(from: line, seen: &seenEventKeys) else { return false }
+        var observed: [AgentActivityEvent] = []
+        let event = adapter.event(from: line, seen: &seenEventKeys, activity: &observed)
+        var counted = false
+        for activity in observed {
+            if let backfill, activity.timestamp >= backfill.upperBound { continue }
+            ingest(activity)
+            counted = true
+        }
+        guard let event else { return counted }
         // Rejected here rather than at the adapter's own cutoff, and
         // deliberately after it has been asked: Codex's per-file bookkeeping —
         // which turn a copy repeats, where its running total stands — is
@@ -1035,6 +1094,12 @@ actor LocalUsageProvider: UsageProvider {
     private func restoreModelTotals(from snapshot: UsageStateSnapshot) {
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
+        for row in snapshot.historyResume?.dailyAgentCounts ?? [] {
+            guard let dayDate = dayFmt.date(from: row.day) else { continue }
+            let dayKey = cal.startOfDay(for: dayDate)
+            guard dailyTotals[dayKey] != nil else { continue }
+            dailyAgentCounts[dayKey] = AgentCounts(sessions: row.sessions, agents: row.agents)
+        }
         var restored: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
         for row in snapshot.historyResume?.dailyModelTotals ?? [] {
             guard let dayDate = dayFmt.date(from: row.day) else { continue }
@@ -1173,11 +1238,12 @@ actor LocalUsageProvider: UsageProvider {
                         + "short")
                 continue
             }
-            let record = UsageHistoryDay(
+            var record = UsageHistoryDay(
                 day: dayFmt.string(from: day),
                 provider: id,
                 updatedAt: now,
-                totals: totals
+                totals: totals,
+                agents: dailyAgentCounts[day]
             )
             switch UsageHistoryStore.stored(provider: id, day: record.day, in: historyRoot) {
             case .unreadable:
@@ -1186,7 +1252,9 @@ actor LocalUsageProvider: UsageProvider {
             where !onDisk.reattributed(by: { adapter.projects.project(for: $0) })
                 .isCoveredBy(record):
                 continue
-            case .absent, .day:
+            case .day(let onDisk):
+                record = record.merging(counts: onDisk.agents)
+            case .absent:
                 break
             }
             do {
@@ -1280,6 +1348,14 @@ actor LocalUsageProvider: UsageProvider {
                     ))
             }
         }
+        let agentCounts: [UsageStateSnapshot.DailyAgentCount] = dailyAgentCounts.compactMap {
+            day, counts in
+            guard !counts.isEmpty else { return nil }
+            return UsageStateSnapshot.DailyAgentCount(
+                day: dayFmt.string(from: day),
+                sessions: counts.sessions,
+                agents: counts.agents)
+        }
         let retainedCutoff = cal.startOfDay(for: retainWindowStart)
         let retainedKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap { key, entry in
             guard entry.day >= retainedCutoff else { return nil }
@@ -1298,8 +1374,11 @@ actor LocalUsageProvider: UsageProvider {
             files: files,
             dailyTotals: daily,
             dedupKeysToday: retainedKeys,
-            historyResume: modelTotals.isEmpty
-                ? nil : UsageStateSnapshot.HistoryResume(dailyModelTotals: modelTotals),
+            historyResume: modelTotals.isEmpty && agentCounts.isEmpty
+                ? nil
+                : UsageStateSnapshot.HistoryResume(
+                    dailyModelTotals: modelTotals,
+                    dailyAgentCounts: agentCounts.isEmpty ? nil : agentCounts),
             codexResume: adapter.resumeState(),
             projectCheckouts: nil
         )

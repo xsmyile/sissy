@@ -1,0 +1,227 @@
+import XCTest
+
+@testable import Sissy
+
+/// What the tail counts besides tokens, against the line shapes both CLIs
+/// actually write.
+///
+/// The fixtures are trimmed copies of real lines rather than minimal ones: the
+/// classification turns on fields a hand-written fixture is free to leave out,
+/// and the defect these were written for is exactly that — three Codex
+/// versions say "another thread opened this" three different ways.
+final class AgentCountingTests: XCTestCase {
+    private func line(_ json: String, url: URL, cutoff: Date = .distantPast) -> SourceLine {
+        SourceLine(data: Data(json.utf8), url: url, byteOffset: 0, retainCutoff: cutoff)
+    }
+
+    private func claudeAdapter() -> ClaudeCodeAdapter {
+        ClaudeCodeAdapter(
+            claudeDir: URL(fileURLWithPath: "/tmp/sissy-agent-tests/claude"),
+            pricingOverride: nil,
+            limitsProbe: nil,
+            webSources: LockedValue([]),
+            webLinks: LockedValue([:]),
+            profile: ClaudeProfileSource(),
+            accounts: .inert(),
+            ledger: ProjectLedger())
+    }
+
+    private func codexAdapter() -> CodexAdapter {
+        CodexAdapter(
+            codexDir: URL(fileURLWithPath: "/tmp/sissy-agent-tests/codex"),
+            pricingOverride: nil,
+            ledger: ProjectLedger())
+    }
+
+    private func assistant(session: String = "s-1", tools: String = "") -> String {
+        """
+        {"type":"assistant","sessionId":"\(session)","requestId":"req-1",
+        "timestamp":"2026-09-18T10:00:00.000Z","cwd":"/tmp",
+        "message":{"id":"m-1","model":"claude-opus-5","content":[\(tools)],
+        "usage":{"input_tokens":10,"output_tokens":5}}}
+        """
+    }
+
+    private func toolUse(_ name: String, id: String) -> String {
+        #"{"type":"tool_use","id":"\#(id)","name":"\#(name)","input":{}}"#
+    }
+
+    private func claudeActivity(
+        _ json: String, file: String = "/tmp/sissy-agent-tests/claude/proj/s-1.jsonl",
+        cutoff: Date = .distantPast, repeats: Int = 1
+    ) -> [AgentActivityEvent] {
+        let adapter = claudeAdapter()
+        var seen: [String: SeenEvent] = [:]
+        var activity: [AgentActivityEvent] = []
+        for _ in 0..<repeats {
+            _ = adapter.event(
+                from: line(json, url: URL(fileURLWithPath: file), cutoff: cutoff),
+                seen: &seen, activity: &activity)
+        }
+        return activity
+    }
+
+    private func codexActivity(_ lines: [(String, String)]) -> [AgentActivityEvent] {
+        let adapter = codexAdapter()
+        var seen: [String: SeenEvent] = [:]
+        var activity: [AgentActivityEvent] = []
+        for (file, json) in lines {
+            _ = adapter.event(
+                from: line(
+                    json, url: URL(fileURLWithPath: "/tmp/sissy-agent-tests/codex/\(file)")),
+                seen: &seen, activity: &activity)
+        }
+        return activity
+    }
+
+    private func rollout(_ payload: String) -> String {
+        """
+        {"timestamp":"2026-09-18T07:31:42.643Z","type":"session_meta","payload":{\(payload)}}
+        """
+    }
+
+    // MARK: Claude Code
+
+    func testATurnThatSpawnsTwoAgentsCountsTwoAgentsAndOneSession() {
+        let activity = claudeActivity(
+            assistant(tools: toolUse("Agent", id: "t1") + "," + toolUse("Agent", id: "t2")))
+        XCTAssertEqual(activity.filter { $0.kind == .agentSpawned }.count, 2)
+        XCTAssertEqual(activity.filter { $0.kind == .sessionStarted }.count, 1)
+    }
+
+    /// Every version before the rename wrote `Task`, and a reader that knows
+    /// only the current name reports zero for every day it can still see.
+    func testTheToolsFormerNameCountsToo() {
+        let activity = claudeActivity(assistant(tools: toolUse("Task", id: "t1")))
+        XCTAssertEqual(activity.filter { $0.kind == .agentSpawned }.count, 1)
+    }
+
+    /// Claude Code rewrites an assistant line two to four times while the
+    /// answer streams. The `tool_use` id is what is stable across the copies.
+    func testAStreamedTurnRewrittenFourTimesCountsOneAgent() {
+        let activity = claudeActivity(
+            assistant(tools: toolUse("Agent", id: "t1")), repeats: 4)
+        XCTAssertEqual(activity.filter { $0.kind == .agentSpawned }.count, 1)
+        XCTAssertEqual(activity.filter { $0.kind == .sessionStarted }.count, 1)
+    }
+
+    /// A sub-agent's transcript is the agent already counted on the turn that
+    /// asked for it; counting it here would report every delegation twice.
+    func testASubagentTranscriptIsNotASecondSession() {
+        let activity = claudeActivity(
+            assistant(session: "s-2"),
+            file: "/tmp/sissy-agent-tests/claude/proj/s-1/subagents/agent-a1.jsonl")
+        XCTAssertTrue(activity.isEmpty)
+    }
+
+    func testATurnBeforeTheRetainCutoffCountsNothing() {
+        let activity = claudeActivity(
+            assistant(tools: toolUse("Agent", id: "t1")),
+            cutoff: Date(timeIntervalSince1970: 4_000_000_000))
+        XCTAssertTrue(activity.isEmpty)
+    }
+
+    // MARK: Codex
+
+    /// Measured 2026-09-18 over 468 rollouts on one machine: 26 name a
+    /// `thread_spawn`, 119 the `review` subagent, and 58 answer only on
+    /// `thread_source`. A reader that knows one shape misses the rest.
+    func testEveryShapeOfASpawnedRolloutCountsAsAnAgent() {
+        let shapes = [
+            #""source":{"subagent":{"thread_spawn":{"parent_thread_id":"p1","depth":1}}}"#,
+            #""source":{"subagent":"review"},"thread_source":"subagent""#,
+            #""thread_source":"subagent""#,
+        ]
+        for (index, shape) in shapes.enumerated() {
+            let activity = codexActivity([
+                ("sub-\(index).jsonl", rollout(#""session_id":"c-\#(index)","cwd":"/tmp",\#(shape)"#))
+            ])
+            XCTAssertEqual(
+                activity.map(\.kind), [.agentSpawned],
+                "shape \(index) was not read as a spawned rollout")
+        }
+    }
+
+    func testARolloutAPersonStartedCountsAsASession() {
+        let activity = codexActivity([
+            (
+                "user.jsonl",
+                rollout(#""session_id":"c-3","cwd":"/tmp","source":"exec","thread_source":"user""#)
+            )
+        ])
+        XCTAssertEqual(activity.map(\.kind), [.sessionStarted])
+    }
+
+    /// A spawned rollout's `session_id` and `id` both name the thread that
+    /// spawned it, so a ledger keyed on either finds the parent's key already
+    /// claimed and drops the agent. Measured 2026-09-18, that cost a whole
+    /// day's 8 agents while a fixture carrying an id of its own passed.
+    func testASpawnedRolloutWearingItsParentsIDStillCounts() {
+        let parent = "01a0b4b9-5b2f-7520-9660-b160b379ae16"
+        let activity = codexActivity([
+            (
+                "rollout-2026-09-18T15-34-01-\(parent).jsonl",
+                rollout(
+                    #""session_id":"\#(parent)","id":"\#(parent)","cwd":"/tmp","source":"exec","thread_source":"user""#
+                )
+            ),
+            (
+                "rollout-2026-09-18T15-34-01-01a0b4b9-5b9c-7663-bc66-7ff22e641ba9.jsonl",
+                rollout(
+                    #""session_id":"\#(parent)","id":"\#(parent)","cwd":"/tmp","source":{"subagent":"review"},"thread_source":"subagent""#
+                )
+            ),
+        ])
+        XCTAssertEqual(activity.map(\.kind), [.sessionStarted, .agentSpawned])
+    }
+
+    /// The same rollout read twice — a cold scan re-reading a tree the tail
+    /// already walked — counts once.
+    func testARolloutReadTwiceCountsOnce() {
+        let json = rollout(#""session_id":"c-9","cwd":"/tmp","thread_source":"user""#)
+        let activity = codexActivity([("r.jsonl", json), ("r.jsonl", json)])
+        XCTAssertEqual(activity.map(\.kind), [.sessionStarted])
+    }
+
+    /// Counting a `review` rollout as an agent must not also make it a session
+    /// that opens by replaying its parent's turns: measured 2026-09-18, its
+    /// first `token_count` lands 0.09 s after `session_meta` and is a real
+    /// turn, so widening the replay gate to match would take it off the day.
+    func testCountingASpawnedRolloutDoesNotSuppressItsFirstTurn() {
+        let payload: [String: Any] = ["source": ["subagent": "review"]]
+        XCTAssertTrue(CodexAdapter.isSubagent(payload))
+        XCTAssertFalse(CodexAdapter.namesAParentSession(payload))
+    }
+}
+
+/// The archive's side of the count.
+final class AgentCountsArchiveTests: XCTestCase {
+    private func day(_ counts: AgentCounts?) -> UsageHistoryDay {
+        UsageHistoryDay(
+            day: "2026-09-18", provider: ProviderID.claudeCode, updatedAt: Date(),
+            totals: [:], agents: counts)
+    }
+
+    /// A run that started at noon saw the afternoon's agents and not the
+    /// morning's, and writing its number over a whole day would lose the
+    /// morning for good.
+    func testADayKeepsTheHigherCountWhenAPartialRunRewritesIt() {
+        let partial = day(AgentCounts(sessions: 3, agents: 1))
+        XCTAssertEqual(
+            partial.merging(counts: AgentCounts(sessions: 40, agents: 12)).agents,
+            AgentCounts(sessions: 40, agents: 12))
+    }
+
+    func testADayCountedByNeitherReadingCarriesNoCountAtAll() {
+        XCTAssertNil(day(.none).agents)
+        XCTAssertNil(day(nil).agents)
+    }
+
+    /// The archive re-reads a day's project paths through the resolver on
+    /// every use; the count has nothing to do with paths and must survive it.
+    func testReAttributionKeepsTheCount() {
+        XCTAssertEqual(
+            day(AgentCounts(sessions: 2, agents: 5)).reattributed(by: { $0 }).agents,
+            AgentCounts(sessions: 2, agents: 5))
+    }
+}

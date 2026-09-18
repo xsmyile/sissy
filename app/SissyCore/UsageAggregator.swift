@@ -139,7 +139,8 @@ actor UsageAggregator {
                 tokens: s.totalTokens,
                 cost: s.totalCost,
                 signals: p.currentSignals(),
-                projects: p.currentProjects()
+                projects: p.currentProjects(),
+                agents: p.currentAgents()
             )
         }
         return FrameBuilder.sortProviders(raw)
