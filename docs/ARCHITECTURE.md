@@ -301,7 +301,7 @@ nothing does.
 Menu-bar only (`LSUIElement: true`), sandbox disabled. Three surfaces and no
 windows of its own: a left-click usage panel (`Panel/`, an `NSPopover`), a short
 right-click `NSMenu` (`Menu/StatusItemController.swift`), and the SwiftUI
-`Settings` scene (`Settings/`, tabs General/Providers/About) — reachable from the app menu's
+`Settings` scene (`Settings/`, tabs General/Providers/Forge/About) — reachable from the app menu's
 Settings… item (⌘,) and, in code, only through `SettingsLink`, which takes no
 action closure and is why the panel's own settings button aims the window at a
 tab through `SissyModel.settingsTab`.
