@@ -48,6 +48,18 @@ import WebKit
 /// floats above other apps, which is also what lets a code be copied from a
 /// mail window into it, and the activation policy goes to `.regular` while it
 /// is up so the Dock and ⌘-Tab can bring it back.
+///
+/// **The way back down is not this window's to take.** Dropping to
+/// `.accessory` on close hands activation to whatever app is behind, which is
+/// what should happen when this was the only window and not when Settings is
+/// still open: the login opens from a row in Settings, so closing it sent the
+/// window the user came from behind another app — still open, no longer in
+/// front, and with the Dock icon back a moment later because the window list
+/// says it should be. Observed 2026-09-18 on the dev build.
+/// `AppDelegate.syncActivationPolicy` already asks that question against every
+/// window the app has, which this one cannot see, so the demotion is left to
+/// it. The promotion stays here because it has to happen before the activation
+/// it is for.
 /// The one question a link cannot answer for itself, in the vendor's own
 /// vocabulary: an organisation for Claude, a workspace for Codex.
 struct VendorLoginQuestion {
@@ -268,12 +280,14 @@ extension VendorLoginWindow: WKNavigationDelegate {
 }
 
 extension VendorLoginWindow: NSWindowDelegate {
+    /// Takes the window's own state down and nothing else: the activation
+    /// policy belongs to `AppDelegate.syncActivationPolicy`, which sees the
+    /// rest of the app's windows and this does not.
     nonisolated func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
             releaseWeb()
             window?.delegate = nil
             window = nil
-            NSApp.setActivationPolicy(.accessory)
             let cancelled = onCancel
             onCredential = nil
             onCancel = nil
