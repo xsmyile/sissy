@@ -6,12 +6,14 @@ import SwiftUI
 enum SettingsTab: Hashable {
     case general
     case providers
+    case forge
     case about
 
     var title: String {
         switch self {
         case .general: return "General"
         case .providers: return "Providers"
+        case .forge: return "Forge"
         case .about: return "About"
         }
     }
@@ -27,6 +29,7 @@ enum SettingsTab: Hashable {
         switch self {
         case .general: return "gearshape"
         case .providers: return "sparkles"
+        case .forge: return "arrow.triangle.branch"
         case .about: return "info.circle"
         }
     }
@@ -70,6 +73,7 @@ struct SettingsRootView: View {
         TabView(selection: $model.settingsTab) {
             tab(.general) { GeneralSettingsView(model: model) }
             tab(.providers) { ProvidersSettingsView(model: model) }
+            tab(.forge) { ForgeSettingsView(model: model) }
             tab(.about) { AboutView(model: model) }
         }
         .frame(width: Self.width)

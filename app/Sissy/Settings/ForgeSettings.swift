@@ -62,6 +62,100 @@ enum ForgeConnectCopy {
     }
 }
 
+/// The forges the user has connected, and the control that adds one.
+///
+/// **A tab rather than a section under the metering providers**, which is
+/// where it lived until 0.1.10. The rule that kept it a section — a tab is
+/// earned by a module, not by a long section — is what moves it now: forge is
+/// a module rather than one row, with `ForgeActivityMonitor` polling two
+/// counters per connection and `GitIdentityMonitor` reading a commit identity
+/// per repository beside it. Under the providers it also read as a third way
+/// to meter, which it is not: a connection here buys an activity count, never
+/// a token and never a cost, and the two are never summed.
+///
+/// **There is no on/off switch, and that is the design.** A connection is the
+/// switch: with none, nothing here makes a request, which is the rule a module
+/// that is off must not exist as far as the system is concerned. Asking the
+/// user to both connect a forge and then arm it would be the same decision
+/// twice.
+///
+/// What is deliberately **not** here is what `GitIdentityMonitor` reads. That
+/// is a reading with no lever on it, where every row in this window is a
+/// control, so it stays a page of the panel — a tab does not earn a second
+/// surface for it, and inventing a switch to fill this one would be the
+/// reasoning backwards.
+///
+/// One button rather than a menu of detected tokens, so that reading what
+/// `gh` and `glab` hold happens on a press and demonstrably nowhere else: a
+/// keychain call and a file read must not happen because a window was shown,
+/// and `Menu` gives no promise about when it builds its contents. The sheet
+/// behind the button carries both roads.
+struct ForgeSettingsView: View {
+    let model: SissyModel
+
+    /// The forge a trash was pressed for. What it deletes is a token the user
+    /// cannot read back and never typed, so the click is asked about first.
+    @State private var disconnecting: ForgeConnection?
+    /// Whether the connect sheet is up.
+    @State private var adding = false
+
+    var body: some View {
+        Form {
+            Section {
+                connect
+                ForEach(model.engine.forgeConnections) { connection in
+                    row(connection)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .sheet(isPresented: $adding) {
+            ForgeConnectSheet(model: model, isPresented: $adding)
+        }
+        .confirmationDialog(
+            disconnecting.map(ForgeConnectCopy.unlinkTitle) ?? "",
+            isPresented: Binding(
+                get: { disconnecting != nil }, set: { if !$0 { disconnecting = nil } }),
+            presenting: disconnecting
+        ) { connection in
+            Button(ForgeConnectCopy.unlinkConfirm, role: .destructive) {
+                model.engine.disconnectForge(id: connection.id)
+            }
+            Button(ForgeConnectCopy.cancel, role: .cancel) {}
+        } message: { _ in
+            Text(ForgeConnectCopy.unlinkMessage)
+        }
+    }
+
+    private var connect: some View {
+        LabeledContent {
+            Button(ForgeConnectCopy.connect) { adding = true }
+                .disabled(model.engine.connectingForge != nil)
+        } label: {
+            Text(ForgeConnectCopy.label)
+            Text(ForgeConnectCopy.caption)
+        }
+    }
+
+    private func row(_ connection: ForgeConnection) -> some View {
+        LabeledContent {
+            Button(role: .destructive) {
+                disconnecting = connection
+            } label: {
+                Image(systemName: "trash").foregroundStyle(.red)
+            }
+            .buttonStyle(.borderless)
+            .help(ForgeConnectCopy.unlinkHelp)
+            .accessibilityLabel(ForgeConnectCopy.unlink(connection))
+        } label: {
+            Text(UsageFormat.forgeName(connection.kind))
+            Text(
+                model.engine.connectingForge == connection.id
+                    ? ForgeConnectCopy.connecting : connection.host)
+        }
+    }
+}
+
 /// Connecting a forge: the tokens this Mac already holds, or one pasted by
 /// hand.
 ///
