@@ -320,6 +320,16 @@ actor ForgeActivityMonitor {
     /// half hour. The cap costs one extra round, on a day whose wait would
     /// have crossed the boundary and on no other.
     ///
+    /// It is an optimisation and not the guarantee. The target is worked out
+    /// once, here, and counted down on a clock with no notion of wall time, so
+    /// a clock step or a timezone change during the wait leaves it aiming at a
+    /// midnight that has moved. What keeps that honest is
+    /// `UsagePanelSnapshot.makeForge`, which takes `Today` off any reading from
+    /// an earlier local day however late the round arrives — so the cap only
+    /// has to be right often enough to keep the row from going blank, and a
+    /// reactive recompute would be machinery for a case the row already
+    /// survives.
+    ///
     /// Internal so a test can hold the cap against an injected instant; the
     /// jitter is what stops it being assertable to the second.
     func nextDelay(from now: Date = Date(), calendar: Calendar = .current) -> Duration {
