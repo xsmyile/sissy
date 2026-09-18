@@ -208,11 +208,15 @@ idle cadence that figure would stand under a heading naming the new day for the
 next half hour. The cap costs one extra round, on a day whose wait would have
 crossed the boundary and on no other. The cap alone is not the whole answer,
 because a Mac asleep or offline across midnight wakes with a reading from
-yesterday either way — so `makeForge` drops the figures of any reading taken on
-an earlier local day and the row falls to the dash, which is the roll-over rule
-the rate-limit windows are already on. It **outranks** the rule that a failed
-reading keeps its figures: those are stale within a day, and yesterday's numbers
-under today's heading are wrong whether or not the last attempt worked.
+yesterday either way — so `makeForge` drops that reading's `Today` figures and
+the row falls to the dash, which is the roll-over rule the rate-limit windows
+are already on. It **outranks** the rule that a failed reading keeps its
+figures: those are stale within a day, and yesterday's numbers under today's
+heading are wrong whether or not the last attempt worked. Only `Today` goes,
+because only `Today` has *ended* — seven days ending yesterday still covers six
+of the seven, thirty covers twenty-nine, and `all` has no start to move at all.
+The wider windows are stale rather than wrong, which is what the age on the row
+reports, and blanking them would throw away a reading the user can discount.
 
 **And the wait is taken in slices, because the cadence is chosen before the work
 starts.** `nextDelay` reads `lastActivity` when a round *finishes*, so a Mac that

@@ -34,6 +34,23 @@ final class ForgeRowTests: XCTestCase {
         Calendar.current.date(
             bySettingHour: 12, minute: 0, second: 0, of: readAt) ?? readAt
 
+    /// A reading taken a day before `readAt`, answering both the day window and
+    /// a wider one, so the roll-over can be held against each.
+    ///
+    /// A calendar day back rather than 24 hours, because the rule is about the
+    /// local day and a clock-change day is 23 or 25 hours long — which is also
+    /// why nothing here asserts the age to the hour.
+    private static func yesterdaysReading() -> ForgeActivityReading {
+        let yesterday =
+            Calendar.current.date(byAdding: .day, value: -1, to: readAt) ?? readAt
+        return ForgeActivityReading(
+            id: gitHub.id, kind: .gitHub, host: gitHub.host, login: "xsmyile",
+            activity: ForgeActivity(
+                contributions: [.today: 128, .sevenDays: 900], merged: [.today: 28],
+                issues: [.today: 7], comments: [:], contributionsBoundedToOneYear: true),
+            readAt: yesterday, failure: nil)
+    }
+
     /// The rows for a window, with an archive behind it.
     ///
     /// The rollup is not decoration: the snapshot only resolves a period the
@@ -195,10 +212,12 @@ final class ForgeRowTests: XCTestCase {
     /// row was silent, and now that one is dated too it would read as an
     /// ordinary reading that happened to be old.
     ///
-    /// Stale is within the day. A failure that carries figures from *before*
-    /// midnight loses them anyway — the roll-over outranks this, because
-    /// yesterday's numbers under today's heading are wrong whether or not the
-    /// last attempt worked.
+    /// Stale is within the day. On `Today` a failure carrying figures from
+    /// *before* midnight loses them anyway — the roll-over outranks this,
+    /// because yesterday's numbers under today's heading are wrong whether or
+    /// not the last attempt worked. Hence the midday fixture: `readAt` is just
+    /// after 01:00, so two hours before it is the previous day and this would
+    /// be asserting the roll-over rather than staleness.
     func testStaleFiguresKeepTheirPlaceAndSayWhyAndHowOld() throws {
         let stale = ForgeActivityReading(
             id: Self.gitHub.id, kind: .gitHub, host: Self.gitHub.host, login: "xsmyile",
@@ -212,23 +231,26 @@ final class ForgeRowTests: XCTestCase {
             notice(row, now: Self.midday), "could not be reached · last read 2h ago")
     }
 
-    /// **A reading from before midnight keeps its row and loses its figures.**
-    /// Every figure is over a window worked out from the instant it was asked
-    /// for, so yesterday's `Today` is the whole of yesterday under a heading
-    /// naming this morning. The dash is the same one a reading that never
-    /// arrived gets, and the caption says how long ago the last one was.
-    func testAReadingFromAnEarlierDayLosesItsFigures() throws {
-        let yesterday = try XCTUnwrap(
-            Calendar.current.date(byAdding: .day, value: -1, to: Self.readAt))
-        let row = try XCTUnwrap(
-            rows([
-                Self.reading(
-                    Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7,
-                    at: yesterday)
-            ]).first)
+    /// **A reading from before midnight loses `Today`.** Every figure is over a
+    /// window worked out from the instant it was asked for, so yesterday's
+    /// `Today` is the whole of yesterday under a heading naming this morning.
+    /// The dash is the same one a reading that never arrived gets, and the
+    /// caption says how long ago the last one was.
+    func testAReadingFromAnEarlierDayLosesToday() throws {
+        let row = try XCTUnwrap(rows([Self.yesterdaysReading()]).first)
         XCTAssertFalse(row.hasFigures)
         XCTAssertEqual(row.login, "xsmyile")
-        XCTAssertEqual(notice(row), "read 24h ago")
+        XCTAssertEqual(notice(row)?.hasPrefix("read "), true, notice(row) ?? "nil")
+    }
+
+    /// The wider windows have only *moved*, so they keep their figures. Seven
+    /// days ending yesterday still covers six of the seven and `all` has no
+    /// start to move at all; they are stale rather than wrong, and the age on
+    /// the row is what says by how much.
+    func testAReadingFromAnEarlierDayKeepsTheWiderWindows() throws {
+        let row = try XCTUnwrap(
+            rows([Self.yesterdaysReading()], period: .sevenDays).first)
+        XCTAssertEqual(row.contributions, "900")
     }
 
     /// A window the vendor answered nothing for is absent rather than zero, so
