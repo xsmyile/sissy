@@ -341,21 +341,38 @@ actor ForgeActivityMonitor {
     /// half hour chosen before the work started. Without it the short cadence
     /// arrives a round late, which is up to half an hour of the idle interval
     /// running over exactly the stretch the short one exists for.
-    static func waitIsOver(waited: Duration, of delay: Duration, working: Bool) -> Bool {
+    ///
+    /// `shortest` is that interval, taken as an argument so a test can hold the
+    /// boundary without naming the number the predicate reads.
+    static func waitIsOver(
+        waited: Duration, of delay: Duration, working: Bool,
+        shortest: Duration = refreshInterval
+    ) -> Bool {
         if waited >= delay { return true }
-        return working && waited >= refreshInterval
+        return working && waited >= shortest
     }
 
     /// Sleeps out `delay`, reconsidering it as it goes.
     ///
     /// Nonisolated, so a wait that is mostly sleeping never holds the actor
-    /// against a refresh arriving from the row.
-    nonisolated private func wait(_ delay: Duration) async throws {
+    /// against a refresh arriving from the row. `ContinuousClock` rather than
+    /// `SuspendingClock` on purpose: it keeps counting while the Mac is
+    /// asleep, so one waking after a nine-hour lid-close polls at once instead
+    /// of serving out the rest of an interval nobody was there for.
+    ///
+    /// `slice` and `shortest` are arguments for the reason `fetch` and `token`
+    /// are: this loop is the thing worth asserting, and a test of it cannot
+    /// wait out a real minute to watch one turn.
+    nonisolated func wait(
+        _ delay: Duration, slice: Duration = activityCheck, shortest: Duration = refreshInterval
+    ) async throws {
         let started = ContinuousClock.now
         while true {
             let waited = ContinuousClock.now - started
-            if Self.waitIsOver(waited: waited, of: delay, working: isWorking()) { return }
-            try await Task.sleep(for: min(delay - waited, Self.activityCheck))
+            let over = Self.waitIsOver(
+                waited: waited, of: delay, working: isWorking(), shortest: shortest)
+            if over { return }
+            try await Task.sleep(for: min(delay - waited, slice))
         }
     }
 }
