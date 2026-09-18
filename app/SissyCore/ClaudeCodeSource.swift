@@ -456,6 +456,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
 
         if ts < line.retainCutoff { return nil }
 
+        let delegated = Self.isSubagentTurn(obj, url: line.url)
+
         countAgents(in: msg, at: ts, seen: &seen, into: &activity)
         countSession(obj, url: line.url, at: ts, seen: &seen, into: &activity)
 
@@ -483,7 +485,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
             guard let already = billed.billedOutputTokens, output > already else { return nil }
             seen[dedupeKey]?.billedOutputTokens = output
             return streamedRemainder(
-                model: model, project: project, at: ts, outputTokens: output - already)
+                model: model, project: project, at: ts, outputTokens: output - already,
+                delegated: delegated)
         }
         seen[dedupeKey] = SeenEvent(
             day: Calendar.current.startOfDay(for: ts), billedOutputTokens: output)
@@ -524,8 +527,24 @@ final class ClaudeCodeAdapter: SourceAdapter {
             outputTokens: output,
             cacheReadTokens: cacheRead,
             cacheCreationTokens: cacheCreation,
-            cost: cost
+            cost: cost,
+            delegated: delegated
         )
+    }
+
+    /// Whether a sub-agent spent this turn rather than the session itself.
+    ///
+    /// Two answers because neither covers the history alone, and they are the
+    /// same pair `countSession` already reasons about: recent Claude Code
+    /// files a sub-agent's transcript under `<session>/subagents/`, and the
+    /// line itself carries `isSidechain` on the versions that write the two
+    /// into one file. Read off the object the turn was billed from, so it
+    /// costs no second parse.
+    static func isSubagentTurn(_ object: [String: Any], url: URL) -> Bool {
+        if url.deletingLastPathComponent().lastPathComponent == Self.subagentDirectory {
+            return true
+        }
+        return object["isSidechain"] as? Bool == true
     }
 
     /// Counts the sub-agents an assistant turn spawned.
@@ -615,7 +634,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// them, and the earlier one may already be archived by the time the
     /// later copy lands — a day the tail has closed is not one it reopens.
     private func streamedRemainder(
-        model: String, project: String?, at timestamp: Date, outputTokens: Int
+        model: String, project: String?, at timestamp: Date, outputTokens: Int, delegated: Bool
     ) -> UsageEvent {
         UsageEvent(
             timestamp: timestamp,
@@ -633,7 +652,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
                 cacheCreation: (fiveMinute: 0, oneHour: 0),
                 override: pricingOverride,
                 catalog: priceCatalog
-            )
+            ),
+            delegated: delegated
         )
     }
 }

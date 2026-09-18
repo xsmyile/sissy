@@ -99,6 +99,14 @@ final class CodexAdapter: SourceAdapter {
     /// line, which a resumed reader is already past — the same reason
     /// `fileModels` is kept and persisted.
     private var fileProjects: [URL: String] = [:]
+    /// Rollouts another thread opened, so every turn they spend counts as a
+    /// sub-agent's.
+    ///
+    /// Per file and persisted for the reason the two above are: Codex answers
+    /// it once, on the `session_meta` a resumed reader is already past, and a
+    /// reader that had forgotten would report a spawned rollout's whole day as
+    /// the session's own work.
+    private var fileSubagents: Set<URL> = []
     /// The ledger behind it is the process's, not this adapter's: none of the
     /// directories a Codex rollout names is a repository on its own, so every
     /// checkout this resolver can recognise was read by another provider.
@@ -382,6 +390,7 @@ final class CodexAdapter: SourceAdapter {
     /// whether the session opens by replaying a parent's turns.
     private func applySessionMeta(_ obj: [String: Any], url: URL) {
         guard let payload = obj["payload"] as? [String: Any] else { return }
+        if Self.isSubagent(payload) { fileSubagents.insert(url) }
         if Self.namesAParentSession(payload),
             let start = (obj["timestamp"] as? String).flatMap(UsageReaderShared.parseTimestamp)
         {
@@ -670,7 +679,8 @@ final class CodexAdapter: SourceAdapter {
             outputTokens: output,
             cacheReadTokens: cached,
             cacheCreationTokens: 0,
-            cost: cost
+            cost: cost,
+            delegated: fileSubagents.contains(line.url)
         )
     }
 
@@ -682,6 +692,7 @@ final class CodexAdapter: SourceAdapter {
         fileProjects = fileProjects.filter { files.contains($0.key) }
         fileCumulative = fileCumulative.filter { files.contains($0.key) }
         fileReplay = fileReplay.filter { files.contains($0.key) }
+        fileSubagents = fileSubagents.filter { files.contains($0) }
     }
 
     /// Restores the state that has no cheap way back.
@@ -713,6 +724,7 @@ final class CodexAdapter: SourceAdapter {
             fileModels[fileURL] = entry.model
             fileProjects[fileURL] = entry.project.flatMap { projects.project(for: $0) }
             fileCumulative[fileURL] = entry.cumulative
+            if entry.subagent == true { fileSubagents.insert(fileURL) }
             if let through = entry.copyingThrough { fileReplay[fileURL] = .copying(through: through) }
         }
         accountFingerprint = resume.accountFingerprint
@@ -739,7 +751,8 @@ final class CodexAdapter: SourceAdapter {
     func resumeState() -> UsageStateSnapshot.CodexResume? {
         UsageStateSnapshot.CodexResume(
             fileModels: Set(fileModels.keys).union(fileProjects.keys)
-                .union(fileCumulative.keys).union(fileReplay.keys).map { url in
+                .union(fileCumulative.keys).union(fileReplay.keys).union(fileSubagents)
+                .map { url in
                     UsageStateSnapshot.FileModel(
                         path: url.path,
                         model: fileModels[url] ?? Self.defaultModel,
@@ -749,7 +762,8 @@ final class CodexAdapter: SourceAdapter {
                             guard case .copying(let through) = fileReplay[url] ?? .counting
                             else { return nil }
                             return through
-                        }()
+                        }(),
+                        subagent: fileSubagents.contains(url) ? true : nil
                     )
                 },
             rateLimitWindows: published.load().windows,

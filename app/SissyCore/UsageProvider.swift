@@ -61,6 +61,11 @@ protocol UsageProvider: AnyObject, SourceSignals {
     /// has read at all, because a provider that has not has no slice.
     nonisolated func currentAgents() -> AgentCounts
 
+    /// Which minutes of today this provider was working in, and which of those
+    /// its sub-agents were. `.none` for a provider whose format cannot say, on
+    /// the same terms as the counts above.
+    nonisolated func currentActivity() -> AgentActivityDay
+
     /// Re-reads whatever this provider keeps out of band — the files it reads
     /// for a plan and an account, which no log line carries. What a user
     /// pressing refresh on this provider reaches; a provider with nothing out
@@ -84,4 +89,5 @@ extension UsageProvider {
 
     nonisolated func currentProjects() -> [ProjectTotals] { [] }
     nonisolated func currentAgents() -> AgentCounts { .none }
+    nonisolated func currentActivity() -> AgentActivityDay { .none }
 }
