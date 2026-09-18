@@ -29,7 +29,7 @@ enum PanelMetrics {
     static let rowText: CGFloat = 12
     /// How far a row's text sits inside the wash drawn behind it, so the band
     /// reads as a band rather than as a highlight clipped to the glyphs.
-    static let washInset: CGFloat = 3
+    static let washInset: CGFloat = 4
     /// The wash's corner, small enough that a share of a few percent still
     /// draws a shape with a straight edge to read its width off.
     static let washRadius: CGFloat = 4
