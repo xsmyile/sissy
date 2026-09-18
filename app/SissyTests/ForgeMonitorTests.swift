@@ -264,33 +264,60 @@ final class ForgeMonitorTests: XCTestCase {
     /// would otherwise keep the idle cadence for the rest of the wait — half
     /// an hour of it, over exactly the stretch the short cadence exists for.
     func testAnIdleWaitEndsEarlyOnceAgentsAreWorking() {
+        let short = ForgeActivityMonitor.refreshInterval
+        let idle = ForgeActivityMonitor.idleRefreshInterval
         XCTAssertFalse(
             ForgeActivityMonitor.waitIsOver(
-                waited: .seconds(240), of: .seconds(1800), working: true))
-        XCTAssertTrue(
-            ForgeActivityMonitor.waitIsOver(
-                waited: .seconds(300), of: .seconds(1800), working: true))
+                waited: short - .seconds(1), of: idle, working: true))
+        XCTAssertTrue(ForgeActivityMonitor.waitIsOver(waited: short, of: idle, working: true))
     }
 
     /// With nobody working the wait runs its full length, so an idle Mac keeps
     /// costing one request every half hour and not one every five minutes.
     func testAWaitWithNobodyWorkingRunsItsFullLength() {
+        let idle = ForgeActivityMonitor.idleRefreshInterval
         XCTAssertFalse(
-            ForgeActivityMonitor.waitIsOver(
-                waited: .seconds(1799), of: .seconds(1800), working: false))
-        XCTAssertTrue(
-            ForgeActivityMonitor.waitIsOver(
-                waited: .seconds(1800), of: .seconds(1800), working: false))
+            ForgeActivityMonitor.waitIsOver(waited: idle - .seconds(1), of: idle, working: false))
+        XCTAssertTrue(ForgeActivityMonitor.waitIsOver(waited: idle, of: idle, working: false))
     }
 
-    /// The frame path is what reports the work, without awaiting this actor.
-    func testActivityFromTheFramePathShortensTheNextInterval() async {
+    /// The frame path reports the work without awaiting this actor, and the
+    /// next interval is picked from it.
+    ///
+    /// This is the interval chosen when a round *finishes*; that a wait already
+    /// running is cut short is the test below.
+    func testTheNextIntervalIsPickedFromWhatTheFramePathReported() async {
         let monitor = idleMonitor()
         XCTAssertFalse(monitor.isWorking())
         monitor.noteActivity()
         XCTAssertTrue(monitor.isWorking())
         let delay = await monitor.nextDelay(from: at(hour: 12))
         XCTAssertLessThan(delay, ForgeActivityMonitor.idleRefreshInterval)
+    }
+
+    /// **The wait itself ends early, not just the predicate that decides it.**
+    /// The slicing loop is where a wrong clock or a wrong operand would live,
+    /// and the predicate beside it cannot catch either — so this runs a real
+    /// wait, in milliseconds rather than minutes, and holds that it comes back
+    /// long before the ceiling it was given.
+    func testAWaitInFlightEndsOnceAgentsAreWorking() async throws {
+        let monitor = idleMonitor()
+        monitor.noteActivity()
+        let ceiling = Duration.seconds(10)
+        let started = ContinuousClock.now
+        try await monitor.wait(ceiling, slice: .milliseconds(5), shortest: .milliseconds(20))
+        XCTAssertLessThan(ContinuousClock.now - started, ceiling / 2)
+    }
+
+    /// And it does run its length when nobody is working, so the slices are a
+    /// way out rather than a shorter interval by the back door.
+    func testAWaitInFlightRunsOnWithNobodyWorking() async throws {
+        let monitor = idleMonitor()
+        XCTAssertFalse(monitor.isWorking())
+        let ceiling = Duration.milliseconds(120)
+        let started = ContinuousClock.now
+        try await monitor.wait(ceiling, slice: .milliseconds(5), shortest: .milliseconds(20))
+        XCTAssertGreaterThanOrEqual(ContinuousClock.now - started, ceiling)
     }
 
     // MARK: The refresh on a row
