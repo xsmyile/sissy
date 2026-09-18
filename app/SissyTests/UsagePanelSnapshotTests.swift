@@ -143,6 +143,19 @@ final class UsagePanelSnapshotTests: XCTestCase {
         XCTAssertEqual(runsOut.timeIntervalSince(now), 37.5 * 60, accuracy: 1)
     }
 
+    /// The line the change was made for, whole: a session 37% spent with
+    /// 2h 27m left used to end "resets Sat", which is the one thing on the row
+    /// that had to say how long and the only one that did not.
+    func testASessionCaptionSaysHowLongIsLeftOfIt() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let row = try paceRow(minutes: 300, usedPercent: 37, elapsedFraction: 0.51, now: now)
+
+        XCTAssertEqual(
+            UsageFormat.windowCaption(row, now: now),
+            "14% in reserve · Lasts until reset · resets in 2h 27m"
+        )
+    }
+
     /// A window past 100% has no headroom left to project, and a reading in
     /// the past is not a projection the caption can count down to.
     func testAnExhaustedWindowRunsOutNow() throws {
