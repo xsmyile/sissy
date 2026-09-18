@@ -51,6 +51,28 @@ struct ForgeActivity: Sendable, Equatable {
     /// the difference being the private repositories the breakdown folds into
     /// `restrictedContributionsCount` without itemising.
     let issues: [UsagePeriod: Int]
+    /// Comments this account wrote in the window.
+    ///
+    /// **Neither forge publishes this as a count, and the two stand in
+    /// opposite relations to the figure beside them.** A comment is an event
+    /// GitLab records, so it comes off the same `/api/v4/events` header the
+    /// contributions do and is a *breakdown* of that number — measured
+    /// 2026-09-18, 14 of one week's 525 events. GitHub counts no comment as a
+    /// contribution at all: measured the same day, 2026-08-07 read 14
+    /// contributions against a breakdown of 14 commits and nothing else, on a
+    /// day that carried a comment, and 2026-08-24 read 23 against 20+1+2 on
+    /// another. So there the figure is disjoint from its neighbour, and it is
+    /// counted from the comments themselves — see
+    /// `GitHubActivityFeed.commentCounts`, which is also why a GitHub window
+    /// can be absent here while the three beside it are answered.
+    ///
+    /// What neither vendor can be asked for is the same set: GitHub's covers
+    /// comments on issues and on pull request conversations (measured, 86 and
+    /// 14 of one page of 100) and cannot reach review comments left on a diff,
+    /// there being no connection on `User` that returns them. GitLab's is
+    /// whatever it filed under `commented`. Two vendors counting two things is
+    /// two readings, which is the rule this whole type is already on.
+    let comments: [UsagePeriod: Int]
     /// Whether `contributions[.all]` is the vendor's whole record or a year of
     /// it. GitHub's contributions query takes a range and refuses one wider
     /// than a year, so `all` there is the last twelve months while `merged`
@@ -59,7 +81,8 @@ struct ForgeActivity: Sendable, Equatable {
     let contributionsBoundedToOneYear: Bool
 
     static let empty = Self(
-        contributions: [:], merged: [:], issues: [:], contributionsBoundedToOneYear: false)
+        contributions: [:], merged: [:], issues: [:], comments: [:],
+        contributionsBoundedToOneYear: false)
 }
 
 /// One forge connection's last reading, or the fact that there is not one.
@@ -108,12 +131,13 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     /// is still a reading; one that never answered is not.
     func hasFigures(for period: UsagePeriod) -> Bool {
         contributions(for: period) != nil || merged(for: period) != nil
-            || issues(for: period) != nil
+            || issues(for: period) != nil || comments(for: period) != nil
     }
 
     func contributions(for period: UsagePeriod) -> Int? { activity.contributions[period] }
     func merged(for period: UsagePeriod) -> Int? { activity.merged[period] }
     func issues(for period: UsagePeriod) -> Int? { activity.issues[period] }
+    func comments(for period: UsagePeriod) -> Int? { activity.comments[period] }
 }
 
 /// Why a forge would not answer.

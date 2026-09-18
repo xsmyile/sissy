@@ -21,6 +21,7 @@ final class ForgeMonitorTests: XCTestCase {
             id: connection.id, kind: connection.kind, host: connection.host, login: login,
             activity: ForgeActivity(
                 contributions: [.today: contributions], merged: [.today: merged], issues: [:],
+                comments: [:],
                 contributionsBoundedToOneYear: connection.kind == .gitHub),
             readAt: when, failure: nil)
     }

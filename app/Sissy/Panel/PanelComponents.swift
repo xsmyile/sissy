@@ -606,6 +606,19 @@ struct ForgeRowView: View {
     /// The circle-with-a-dot both forges draw an open issue with, SF's own
     /// name for GitHub's `issue-opened` octicon.
     private static let issueSymbol = "smallcircle.filled.circle"
+    /// The speech bubble both forges mark a comment with, at the same nominal
+    /// size as the two beside it rather than one of its own.
+    ///
+    /// Measured 2026-09-18 against the ink the row already lays down: at 10 pt
+    /// semibold this covers 12.00 × 11.00, so its **height lands exactly on**
+    /// the 11.00 `smallcircle.filled.circle` sets, and only its width runs a
+    /// point over — which a bubble is, being a wider shape than a circle. The
+    /// obvious correction is wrong: 9.5 pt brings the width to 11.00 and drops
+    /// the height to 10.00, which shortens the one axis a row of marks on a
+    /// baseline is read along. Every bubble SF ships — `bubble`, `text.bubble`,
+    /// `quote.bubble`, `captions.bubble` — measures identically, so the choice
+    /// among them is the octicon they draw rather than the space they take.
+    private static let commentSymbol = "bubble.left"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -631,20 +644,22 @@ struct ForgeRowView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The contributions bare, the other two behind their own mark.
+    /// The contributions bare, the other three behind their own mark.
     ///
     /// Bare because the contribution total is what the section label already
-    /// names, so a mark on it would qualify nothing; the two beside it are
+    /// names, so a mark on it would qualify nothing; the three beside it are
     /// different readings on the same line and a glyph is what tells them
     /// apart without spending the row a word each — `merged` alone was seven
     /// characters of a line 340 pt wide has to fit a login into as well.
     ///
-    /// Three figures still leave the name most of the row: measured
-    /// 2026-09-17 against the 312 pt inside the gutters, the widest real
-    /// reading on this machine wants 193.6 pt and a 24-character login with it
-    /// wants 299.6. Past that the login truncates and the figures do not,
-    /// which is the right way round — `Spacer(minLength:)` and the name's own
-    /// `lineLimit(1)` make the label yield before the reading does.
+    /// Four figures still leave the name most of the row: measured 2026-09-18
+    /// against the 312 pt inside the gutters, the widest real reading on this
+    /// machine takes 121.6 pt over three figures and 170.3 over four, so the
+    /// comment counter costs the line 48.7 pt and leaves 116.7 for the login —
+    /// which a 17-character one (`smyile-radonforge`, 106.9 pt) still fits.
+    /// Past roughly nineteen characters the login truncates and the figures do
+    /// not, which is the right way round — `Spacer(minLength:)` and the name's
+    /// own `lineLimit(1)` make the label yield before the reading does.
     @ViewBuilder
     private var figures: some View {
         if row.hasFigures {
@@ -659,6 +674,11 @@ struct ForgeRowView: View {
                     marked(
                         issues, symbol: Self.issueSymbol, tint: ProviderPalette.forgeIssue,
                         help: row.issuesHelp)
+                }
+                if let comments = row.comments {
+                    marked(
+                        comments, symbol: Self.commentSymbol,
+                        tint: ProviderPalette.forgeComment, help: row.commentsHelp)
                 }
             }
         } else {

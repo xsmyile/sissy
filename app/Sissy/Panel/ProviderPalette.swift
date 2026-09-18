@@ -50,6 +50,14 @@ enum ProviderPalette {
     /// both forges *do* agree on: green for open and red for closed.
     static let forgeMerged = Color.purple
     static let forgeIssue = Color.green
+    /// Blue, which is the one of these picked rather than copied.
+    ///
+    /// Neither forge paints a comment: it is the one mark on the row whose
+    /// colour cannot be recognised from the vendor's own pages, so the only
+    /// thing it can do is not collide. Green, purple and red are spoken for —
+    /// open, merged, closed — and blue is the nearest remaining hue the system
+    /// ships for both appearances.
+    static let forgeComment = Color.blue
 
     /// The vendor's own mark, for the providers Sissy ships one for.
     ///
