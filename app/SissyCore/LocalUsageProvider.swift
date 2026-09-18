@@ -1094,11 +1094,14 @@ actor LocalUsageProvider: UsageProvider {
     private func restoreModelTotals(from snapshot: UsageStateSnapshot) {
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
+        // Deliberately not gated on the day having token totals, which the
+        // rows below are: a day can be counted without being billed, and such
+        // a day has no entry there at all. `trim()` is what bounds these, the
+        // same as it bounds the totals themselves.
         for row in snapshot.historyResume?.dailyAgentCounts ?? [] {
             guard let dayDate = dayFmt.date(from: row.day) else { continue }
-            let dayKey = cal.startOfDay(for: dayDate)
-            guard dailyTotals[dayKey] != nil else { continue }
-            dailyAgentCounts[dayKey] = AgentCounts(sessions: row.sessions, agents: row.agents)
+            dailyAgentCounts[cal.startOfDay(for: dayDate)] = AgentCounts(
+                sessions: row.sessions, agents: row.agents)
         }
         var restored: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
         for row in snapshot.historyResume?.dailyModelTotals ?? [] {
@@ -1230,7 +1233,14 @@ actor LocalUsageProvider: UsageProvider {
                 unwritten.insert(day)
                 continue
             }
-            guard let totals = dailyModelTotals[day], !totals.isEmpty else { continue }
+            let totals = dailyModelTotals[day] ?? [:]
+            let counts = dailyAgentCounts[day] ?? .none
+            // A day can be counted without being billed: Codex writes a
+            // rollout's `session_meta` when it opens, so a session somebody
+            // started and never asked anything is one session and no tokens.
+            // Skipped on the token rows alone, such a day left the dirty set
+            // here and was never retried, so its count aged out unwritten.
+            guard !totals.isEmpty || !counts.isEmpty else { continue }
             if refusesUnpricedDays, Self.holdsAnUnpricedModel(totals) {
                 sissyLog(
                     "sissy: \(id) left \(dayFmt.string(from: day)) out of the archive — it holds "
@@ -1243,7 +1253,7 @@ actor LocalUsageProvider: UsageProvider {
                 provider: id,
                 updatedAt: now,
                 totals: totals,
-                agents: dailyAgentCounts[day]
+                agents: counts
             )
             switch UsageHistoryStore.stored(provider: id, day: record.day, in: historyRoot) {
             case .unreadable:

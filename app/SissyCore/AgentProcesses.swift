@@ -215,18 +215,32 @@ enum AgentProcessReader {
     /// The uid filter is not a nicety: `proc_pidpath` answers nothing for
     /// another user's process, so without it every root daemon costs a failed
     /// syscall per sweep to learn the same thing.
+    /// How many processes the table is allowed to grow by between the call
+    /// that sizes it and the call that fills it.
+    ///
+    /// The pair is not atomic: a process started in between makes the second
+    /// `sysctl` answer `ENOMEM`, and the sweep would report a Mac with no
+    /// agents on it — which is a reading, so it publishes, dents the series
+    /// with a zero and blanks the row for a tick. Slack costs a few kilobytes
+    /// and makes that need a burst rather than a single `fork`.
+    private static let processTableSlack = 64
+    /// How many times a sweep re-sizes and tries again before giving up. One:
+    /// a table churning faster than that will churn again, and the sweep is
+    /// due back in 15 s.
+    private static let snapshotRetries = 1
+    /// Buffer `proc_pidpath` wants, which its own header spells
+    /// `PROC_PIDPATHINFO_MAXSIZE` — a macro, so Swift does not import it.
+    /// `MAXPATHLEN` alone is the documented *minimum*, and a path longer than
+    /// it makes the call fail, which would drop an agent from the reading
+    /// rather than truncate its name.
+    private static let executablePathBufferSize = 4 * Int(MAXPATHLEN)
+
     private static func snapshot() -> [KernelProcess] {
-        var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        var size = 0
-        guard sysctl(&name, 4, nil, &size, nil, 0) == 0, size > 0 else { return [] }
-        var buffer = [kinfo_proc](
-            repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
-        var read = size
-        guard sysctl(&name, 4, &buffer, &read, nil, 0) == 0 else { return [] }
+        guard let buffer = processTable() else { return [] }
         let uid = getuid()
-        var pathBuffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        var pathBuffer = [CChar](repeating: 0, count: executablePathBufferSize)
         var out: [KernelProcess] = []
-        for entry in buffer[0..<(read / MemoryLayout<kinfo_proc>.stride)] {
+        for entry in buffer {
             let pid = entry.kp_proc.p_pid
             guard pid > 0, entry.kp_eproc.e_ucred.cr_uid == uid else { continue }
             let length = proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count))
@@ -241,6 +255,25 @@ enum AgentProcessReader {
                             + Double(started.tv_usec) / 1_000_000)))
         }
         return out
+    }
+
+    /// The kernel's process table, sized and then read.
+    ///
+    /// Nil where it could not be read at all, which is different from an empty
+    /// table and is why the caller does not treat it as a reading.
+    private static func processTable() -> [kinfo_proc]? {
+        var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        for _ in 0...snapshotRetries {
+            var size = 0
+            guard sysctl(&name, 4, nil, &size, nil, 0) == 0, size > 0 else { return nil }
+            let stride = MemoryLayout<kinfo_proc>.stride
+            var buffer = [kinfo_proc](
+                repeating: kinfo_proc(), count: size / stride + processTableSlack)
+            var read = buffer.count * stride
+            guard sysctl(&name, 4, &buffer, &read, nil, 0) == 0 else { continue }
+            return Array(buffer[0..<(read / stride)])
+        }
+        return nil
     }
 
     /// `argv[0]` of a process, which is the only place an interpreted install
