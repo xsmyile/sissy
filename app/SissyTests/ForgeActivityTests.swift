@@ -130,6 +130,101 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertEqual(ForgeWindow.vendorDay(week), "2026-09-11T00:00:00Z")
     }
 
+    /// East of Greenwich the local day opens before the vendor day it is named
+    /// after, and for that hour or two the window names a day that does not
+    /// exist yet.
+    ///
+    /// Measured 2026-09-19 at 01:01+02:00, which is 23:01 UTC on the 18th:
+    /// GitLab answered `x-total: 0` for the day against the 8 events it had
+    /// already recorded since local midnight, every one filed under the 18th in
+    /// UTC, and naming an instant inside the 18th answered 0 exactly as naming
+    /// the date did — so the bucket cannot be narrowed into and the reading is
+    /// absent rather than nothing-happened.
+    func testTodayIsClosedUntilTheVendorDayOfThatNameOpens() throws {
+        let rome = try Self.calendar("Europe/Rome")
+        let night = try Self.instant(hour: 1, minute: 1, in: rome)
+        let opens = try XCTUnwrap(ForgeWindow.opens(.today, now: night, calendar: rome))
+
+        XCTAssertEqual(opens, try Self.instant(hour: 0, minute: 0, in: Self.calendar("UTC")))
+        XCTAssertFalse(ForgeWindow.hasOpened(.today, now: night, calendar: rome))
+        XCTAssertEqual(
+            ForgeWindow.openPeriods(now: night, calendar: rome), [.sevenDays, .thirtyDays, .all])
+    }
+
+    /// The same window once the vendor has begun counting it, which is every
+    /// other hour of the day and every hour of the day west of Greenwich.
+    func testTodayIsOpenOnceTheVendorDayHasBegun() throws {
+        let rome = try Self.calendar("Europe/Rome")
+        let midday = try Self.instant(hour: 12, minute: 0, in: rome)
+        XCTAssertNil(ForgeWindow.opens(.today, now: midday, calendar: rome))
+        XCTAssertEqual(ForgeWindow.openPeriods(now: midday, calendar: rome), UsagePeriod.allCases)
+    }
+
+    /// The boundary is the window's local **date** at midnight UTC, which is
+    /// not `start` shifted by its own offset.
+    ///
+    /// Eight zones in the 2026 database move their clocks forward *at*
+    /// midnight, so `Calendar.startOfDay` answers 01:00 and the two
+    /// constructions part by an hour. `Africa/Cairo` on 2026-04-24 is the one
+    /// pinned here: the offset version put the boundary at 01:00 UTC and would
+    /// have held the row's dash an hour past the moment GitLab began counting.
+    func testTheBoundaryIsTheLocalDateRatherThanTheDaysOwnOffset() throws {
+        var cairo = Calendar(identifier: .gregorian)
+        cairo.timeZone = try XCTUnwrap(TimeZone(identifier: "Africa/Cairo"))
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 4
+        components.day = 24
+        components.hour = 1
+        let jump = try XCTUnwrap(cairo.date(from: components))
+        XCTAssertNotEqual(cairo.startOfDay(for: jump), jump.addingTimeInterval(-3600))
+
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        components.hour = 0
+        XCTAssertEqual(
+            ForgeWindow.opens(.today, now: jump, calendar: cairo),
+            try XCTUnwrap(utc.date(from: components)))
+    }
+
+    /// No document may ask a vendor for a window it has not opened: the reply
+    /// is a zero the row would print beside three real figures.
+    func testNoDocumentAsksForAWindowTheVendorHasNotOpened() throws {
+        let rome = try Self.calendar("Europe/Rome")
+        let night = try Self.instant(hour: 1, minute: 1, in: rome)
+
+        let merged = GitLabActivityFeed.document(now: night, calendar: rome)
+        XCTAssertFalse(merged.contains(ForgeAlias.merged(.today)), merged)
+        XCTAssertTrue(merged.contains(ForgeAlias.merged(.sevenDays)), merged)
+
+        let issues = GitLabActivityFeed.issuesDocument(now: night, calendar: rome)
+        XCTAssertFalse(issues.contains(ForgeAlias.issues(.today)), issues)
+        XCTAssertTrue(issues.contains(ForgeAlias.issues(.sevenDays)), issues)
+
+        let gitHub = GitHubActivityFeed.document(now: night, calendar: rome)
+        XCTAssertFalse(gitHub.contains(ForgeAlias.contributions(.today)), gitHub)
+        XCTAssertFalse(gitHub.contains(ForgeAlias.merged(.today)), gitHub)
+        XCTAssertTrue(gitHub.contains(ForgeAlias.contributions(.sevenDays)), gitHub)
+    }
+
+    private static func calendar(_ identifier: String) throws -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: identifier))
+        return calendar
+    }
+
+    /// The measured night, in whichever zone is asked for: 2026-09-19, the day
+    /// the closed window was measured on.
+    private static func instant(hour: Int, minute: Int, in calendar: Calendar) throws -> Date {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 9
+        components.day = 19
+        components.hour = hour
+        components.minute = minute
+        return try XCTUnwrap(calendar.date(from: components))
+    }
+
     /// No document may carry an instant that is not a day boundary, whatever
     /// this Mac's offset is.
     ///

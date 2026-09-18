@@ -86,6 +86,16 @@ struct UsagePanelSnapshot: Equatable {
         let readAt: Date?
         /// Why the last read did not work, nil on one that did.
         let failure: ForgeReadFailure?
+        /// When the vendor starts counting the window this row is over, nil
+        /// for one it is already counting.
+        ///
+        /// Only ever `today`, and only east of Greenwich: the row is over the
+        /// vendor's whole UTC day of the local date's name, which opens after
+        /// the local day does by the length of the offset. The row has no
+        /// figures for that hour or two — the reading is absent rather than
+        /// zero — and this is what lets the caption say why instead of leaving
+        /// a dash that reads as a vendor which answered nothing.
+        let opensAt: Date?
         let tooltip: String
         /// What each mark means, since a glyph cannot introduce itself.
         let mergedHelp: String
@@ -927,7 +937,8 @@ struct UsagePanelSnapshot: Equatable {
         _ readings: [ForgeActivityReading], period: UsagePeriod, now: Date,
         calendar: Calendar = .current
     ) -> [ForgeRow] {
-        readings.map { reading in
+        let opensAt = ForgeWindow.opens(period, now: now, calendar: calendar)
+        return readings.map { reading in
             let ended =
                 period == .today && !calendar.isDate(reading.readAt, inSameDayAs: now)
             let current = ended ? nil : reading
@@ -947,6 +958,7 @@ struct UsagePanelSnapshot: Equatable {
                 comments: comments,
                 readAt: reading.hasEverRead ? reading.readAt : nil,
                 failure: reading.failure,
+                opensAt: opensAt,
                 tooltip: UsageFormat.forgeTooltip(
                     reading.kind, host: reading.host, login: reading.login, period: period,
                     boundedToOneYear: reading.activity.contributionsBoundedToOneYear),

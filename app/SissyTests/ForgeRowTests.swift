@@ -30,6 +30,11 @@ final class ForgeRowTests: XCTestCase {
     /// reading to be hours old *without* crossing midnight — `readAt` itself
     /// is just after 01:00, so subtracting two hours from it lands on the day
     /// before and the row would lose its figures to the roll-over rule.
+    ///
+    /// It is also the hour the age wording can be read at all: at 01:00 in this
+    /// zone the vendor day `Today` names has not opened, so the row's caption
+    /// is `ForgeWindow.opens`' sentence rather than an age. Those tests take
+    /// this instant for that reason as well.
     private static let midday =
         Calendar.current.date(
             bySettingHour: 12, minute: 0, second: 0, of: readAt) ?? readAt
@@ -81,7 +86,30 @@ final class ForgeRowTests: XCTestCase {
         now: Date = ForgeRowTests.readAt
     ) -> String? {
         UsageFormat.forgeNotice(
-            row.failure, readAt: row.readAt, refreshing: refreshing, now: now)
+            row.failure, readAt: row.readAt, opensAt: row.opensAt, refreshing: refreshing, now: now)
+    }
+
+    /// A window the vendor has not begun counting says so, rather than dating
+    /// a reading it does not have. The dash beside it is the absence of a
+    /// figure; this is why there is one.
+    func testAWindowTheVendorHasNotOpenedSaysWhenItDoes() {
+        XCTAssertEqual(
+            UsageFormat.forgeNotice(
+                nil, readAt: Self.readAt, opensAt: Self.readAt.addingTimeInterval(59 * 60),
+                refreshing: false, now: Self.readAt),
+            "counted in UTC days · today opens in 59m")
+    }
+
+    /// A refused token outranks it: nobody can read a window whose credential
+    /// the vendor is turning away, and that one has something to do about it.
+    func testARefusalOutranksAWindowThatHasNotOpened() throws {
+        let notice = try XCTUnwrap(
+            UsageFormat.forgeNotice(
+                .unauthorized, readAt: Self.readAt,
+                opensAt: Self.readAt.addingTimeInterval(59 * 60), refreshing: false,
+                now: Self.readAt))
+        XCTAssertFalse(notice.contains("UTC"), notice)
+        XCTAssertTrue(notice.contains("last read"), notice)
     }
 
     /// With no archive the control does not appear and every window is today,
@@ -118,12 +146,14 @@ final class ForgeRowTests: XCTestCase {
     /// the merge they are looking at.
     func testAHealthyRowIsDatedRatherThanSilent() throws {
         let row = try XCTUnwrap(
-            rows([
-                Self.reading(
-                    Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7,
-                    at: Self.readAt.addingTimeInterval(-720))
-            ]).first)
-        XCTAssertEqual(notice(row), "read 12m ago")
+            rows(
+                [
+                    Self.reading(
+                        Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7,
+                        at: Self.midday.addingTimeInterval(-720))
+                ], now: Self.midday
+            ).first)
+        XCTAssertEqual(notice(row, now: Self.midday), "read 12m ago")
     }
 
     /// While a refresh is in flight the row says that instead of an age it is
@@ -237,10 +267,12 @@ final class ForgeRowTests: XCTestCase {
     /// The dash is the same one a reading that never arrived gets, and the
     /// caption says how long ago the last one was.
     func testAReadingFromAnEarlierDayLosesToday() throws {
-        let row = try XCTUnwrap(rows([Self.yesterdaysReading()]).first)
+        let row = try XCTUnwrap(rows([Self.yesterdaysReading()], now: Self.midday).first)
         XCTAssertFalse(row.hasFigures)
         XCTAssertEqual(row.login, "xsmyile")
-        XCTAssertEqual(notice(row)?.hasPrefix("read "), true, notice(row) ?? "nil")
+        XCTAssertEqual(
+            notice(row, now: Self.midday)?.hasPrefix("read "), true,
+            notice(row, now: Self.midday) ?? "nil")
     }
 
     /// The wider windows have only *moved*, so they keep their figures. Seven
