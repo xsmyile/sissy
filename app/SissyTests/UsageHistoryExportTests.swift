@@ -152,15 +152,15 @@ final class UsageHistoryExportTests: XCTestCase {
         XCTAssertFalse(claude.contains("gpt-5"))
     }
 
-    /// An archive with nothing in it still writes the combined file, so the
-    /// export is never a directory a reader has to guess the shape of — and
-    /// writes no per-provider file, because a provider with no days is not a
-    /// provider that spent zero.
-    func testAnEmptyArchiveWritesOnlyTheCombinedFile() throws {
+    /// An archive with nothing in it still writes the two files that are not
+    /// about a particular provider, so the export is never a directory a
+    /// reader has to guess the shape of — and writes no per-provider file,
+    /// because a provider with no days is not a provider that spent zero.
+    func testAnEmptyArchiveWritesOnlyTheProviderlessFiles() throws {
         try UsageHistoryExport.write([], to: root)
 
         let written = try FileManager.default.contentsOfDirectory(atPath: root.path).sorted()
 
-        XCTAssertEqual(written, ["sissy-usage-all.csv"])
+        XCTAssertEqual(written, ["sissy-activity.csv", "sissy-usage-all.csv"])
     }
 }
