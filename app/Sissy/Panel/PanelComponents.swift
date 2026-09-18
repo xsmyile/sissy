@@ -27,6 +27,12 @@ enum PanelMetrics {
     /// takes the smaller of the two sizes the panel uses.
     static let markSize: CGFloat = 14
     static let rowText: CGFloat = 12
+    /// How far a row's text sits inside the wash drawn behind it, so the band
+    /// reads as a band rather than as a highlight clipped to the glyphs.
+    static let washInset: CGFloat = 3
+    /// The wash's corner, small enough that a share of a few percent still
+    /// draws a shape with a straight edge to read its width off.
+    static let washRadius: CGFloat = 4
 
     /// What the popover leaves itself between its content and the screen edge:
     /// the shadow, the corner radius, and enough that a page ending exactly on
@@ -399,8 +405,9 @@ struct ProjectsSectionLabel: View {
 }
 
 /// One project's share of a day: the repository's own name, what it cost, and
-/// a bar for its share. The path stays in the tooltip — a client's name is a
-/// directory's name — and the remainder row puts its reason there instead.
+/// its share of the day, drawn wherever the surface puts it. The path stays in
+/// the tooltip — a client's name is a directory's name — and the folded row,
+/// standing for several, hovers nothing.
 ///
 /// **The forge's mark sits after the name and is the way to the page.** It is
 /// the one control on the row, it costs the row no height, and a row that has
@@ -424,6 +431,12 @@ struct ProjectsSectionLabel: View {
 /// Interface Guidelines, Menus) — and neither is the only way to anything: the
 /// repository's name is on the row and its path is on the hover.
 struct ProjectRowView: View {
+    /// Under the row, or behind it.
+    enum BarPlacement {
+        case under
+        case behind
+    }
+
     let row: UsagePanelSnapshot.ProjectRow
     /// Whether the row says which CLIs its money went through.
     ///
@@ -434,6 +447,16 @@ struct ProjectRowView: View {
     /// money instead, is two readings in one colour.
     var showsProviders: Bool = false
 
+    /// Where this surface draws the row's share of the day.
+    ///
+    /// The bar under the row is the panel's own vocabulary and it says the
+    /// most: it is a track every row starts at the same x of, and on the
+    /// projects page it carries the split in its segments. It also doubles
+    /// the row's height, which is what a folded five-row section can least
+    /// afford — so the two sections draw the same share as a wash behind the
+    /// text, where it costs the row nothing but its own inset.
+    var bar: BarPlacement = .under
+
     /// Opens this repository's commit identity, where there is a repository to
     /// open one for. On the right-click with the rest, which is where Apple's
     /// own guidance puts a small number of actions relevant to the current
@@ -442,34 +465,71 @@ struct ProjectRowView: View {
     var checkIdentity: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                HStack(spacing: 0) {
-                    if let owner = row.owner {
-                        Text(owner + "/")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .layoutPriority(-1)
-                    }
-                    Text(row.name)
-                        .font(.system(size: 12, weight: .medium))
+        placed
+            .contentShape(.rect)
+            .help(row.tooltip ?? "")
+            .contextMenu { actions }
+    }
+
+    /// The row's line, with its share wherever this surface puts it.
+    @ViewBuilder
+    private var placed: some View {
+        switch bar {
+        case .under:
+            VStack(alignment: .leading, spacing: 5) {
+                line
+                ShareBar(segments: segments)
+            }
+        case .behind:
+            line
+                .padding(.vertical, PanelMetrics.washInset)
+                .background(alignment: .leading) { wash }
+        }
+    }
+
+    private var line: some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 0) {
+                if let owner = row.owner {
+                    Text(owner + "/")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .layoutPriority(-1)
                 }
-                forgeLink
-                providerMarks
-                Spacer(minLength: 0)
-                Text("\(row.tokens) · \(row.cost)")
-                    .font(.system(size: 12))
-                    .monospacedDigit()
+                Text(row.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            ShareBar(segments: segments)
+            forgeLink
+            providerMarks
+            Spacer(minLength: 0)
+            Text("\(row.tokens) · \(row.cost)")
+                .font(.system(size: 12))
+                .monospacedDigit()
         }
-        .contentShape(.rect)
-        .help(row.tooltip ?? "")
-        .contextMenu { actions }
+    }
+
+    /// The same share the bar would draw, as a band under the text.
+    ///
+    /// `BarGeometry.fillWidth` rather than a plain multiplication, so a
+    /// repository that cost a fraction of a percent still draws the stub the
+    /// bar gives it: a band that rounds down to nothing reads as a row that
+    /// spent nothing.
+    private var wash: some View {
+        GeometryReader { proxy in
+            let shape = RoundedRectangle(
+                cornerRadius: PanelMetrics.washRadius, style: .continuous)
+            ZStack(alignment: .leading) {
+                shape.fill(.quinary)
+                shape.fill(.quaternary)
+                    .frame(width: BarGeometry.fillWidth(row.share, in: proxy.size.width))
+            }
+        }
+        .padding(.horizontal, -PanelMetrics.washInset)
+        .animation(.default, value: row.share)
     }
 
     /// The CLIs that spent on this row, after its name for the reason the
@@ -492,9 +552,9 @@ struct ProjectRowView: View {
         }
     }
 
-    /// The bar, split by provider where the row says who spent. A row that
-    /// stands for no single repository — the fold, the remainder — names no
-    /// provider and keeps the one quiet bar it has always had.
+    /// The bar, split by provider where the row says who spent. The folded
+    /// row stands for no single repository, so it names no provider and keeps
+    /// the one quiet bar it has always had.
     private var segments: [BarSegment] {
         guard showsProviders, !row.providers.isEmpty else {
             return [BarSegment(share: row.share, tint: .secondary)]

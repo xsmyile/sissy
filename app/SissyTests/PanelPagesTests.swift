@@ -405,8 +405,10 @@ final class PanelPagesTests: XCTestCase {
         XCTAssertNil(page[1].repository)
     }
 
-    /// The rows that stand for no single repository never claim an account.
-    func testTheFoldedAndUnattributedRowsNameNoAccount() throws {
+    /// The folded row stands for several repositories, so it claims neither
+    /// one's account — and a day that spent outside every repository adds no
+    /// row to a section whose label counts them.
+    func testTheFoldedRowNamesNoAccount() throws {
         let owned = (1...7).map {
             ProjectTotals(
                 path: "/src/p\($0)", tokens: 10, cost: Decimal(1), remote: Self.websiteRemote)
@@ -415,13 +417,10 @@ final class PanelPagesTests: XCTestCase {
             frame: frame([slice("claude-code", tokens: 100, cost: "10.00", projects: owned)]))
 
         let page = try XCTUnwrap(snapshot.providers.first?.projects)
-        XCTAssertEqual(page.count, 6)
+        XCTAssertEqual(page.count, 5)
         XCTAssertEqual(page[4].name, "3 more projects")
         XCTAssertNil(page[4].owner)
-        XCTAssertEqual(page[5].name, UsageFormat.projectsUnattributed)
-        XCTAssertNil(page[5].owner)
         XCTAssertNil(page[4].repository)
-        XCTAssertNil(page[5].repository)
     }
 
     private static let websiteRemote = ProjectRemote(

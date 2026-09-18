@@ -525,8 +525,8 @@ struct UsagePanelSnapshot: Equatable {
         /// is what the user calls it.
         let name: String
         /// The account the repository is pushed to, drawn quiet in front of
-        /// the name. Nil when the repository names no forge, and on the two
-        /// rows that stand for no repository at all.
+        /// the name. Nil when the repository names no forge, and on the folded
+        /// row, which stands for several.
         ///
         /// It prefixes the name rather than replacing it: two accounts can
         /// hold a `website` each, and without this the panel draws one label
@@ -538,10 +538,10 @@ struct UsagePanelSnapshot: Equatable {
         /// whose remote names no forge — both of which have nothing to open,
         /// so the click does nothing rather than opening an empty card.
         let repository: RepositoryLink?
-        /// What the row hovers: a repository's full path, or why a row that is
-        /// not a repository is there. Nil on the folded row, which stands for
-        /// several. A project path is a client's name as often as not, so the
-        /// row shows the name and keeps the rest for a hover.
+        /// What the row hovers: a repository's full path. Nil on the folded
+        /// row, which stands for several. A project path is a client's name as
+        /// often as not, so the row shows the name and keeps the rest for a
+        /// hover.
         let tooltip: String?
         let tokens: String
         let cost: String
@@ -550,10 +550,10 @@ struct UsagePanelSnapshot: Equatable {
         /// provider order so the marks and the bar's segments read the same
         /// way down the page.
         ///
-        /// Empty on the two rows that stand for no single repository, and on
-        /// every row of a single provider's own list — there the answer is the
-        /// page's own name. The shares are of the same day `share` is of, so
-        /// they sum to it.
+        /// Empty on the folded row, which stands for no single repository,
+        /// and on every row of a single provider's own list — there the answer
+        /// is the page's own name. The shares are of the same day `share` is
+        /// of, so they sum to it.
         let providers: [ProviderShare]
     }
 
@@ -566,6 +566,30 @@ struct UsagePanelSnapshot: Equatable {
         /// The provider id, which is what the mark and the tint are keyed by.
         let id: String
         let share: Double
+    }
+
+    /// What a day spent that no repository can be named for: the line under
+    /// the list rather than the last row of it.
+    ///
+    /// It is not a project, so it gets no rank among them, no bar, no path and
+    /// no forge — it is the arithmetic that lets the rows above it reach the
+    /// total beside them, which is a sentence rather than a reading. It has no
+    /// `share` for the same reason: a bar invites a comparison with the rows,
+    /// and the one thing this line is not is a project that happened to be
+    /// small.
+    struct ProjectsResidue: Equatable {
+        let tokens: String
+        let cost: String
+        /// Which CLIs it went through, where more than one is metered. Empty
+        /// on a provider's own page, whose title has named the CLI already.
+        let providers: [ProviderCost]
+    }
+
+    /// One provider's share of a figure, in money rather than in a fraction of
+    /// a bar — the residue has no bar for the fraction to be of.
+    struct ProviderCost: Equatable, Identifiable {
+        let id: String
+        let cost: String
     }
 
     /// A repository on the forge it is pushed to.
@@ -673,8 +697,7 @@ struct UsagePanelSnapshot: Equatable {
             coverage: rollup.flatMap { UsageFormat.periodCoverage($0, now: now) },
             providers: rows,
             usedToday: frame.providers.count { $0.tokens > 0 },
-            projects: makeProjects(
-                frame.projects, totalTokens: totalTokens, totalCost: totalCost),
+            projects: makeProjects(frame.projects, totalCost: totalCost),
             projectCount: frame.projects.count,
             forge: makeForge(frame.forge, period: resolved, now: now),
             identities: makeIdentities(frame.identities),
@@ -699,19 +722,16 @@ struct UsagePanelSnapshot: Equatable {
     /// takes that provider's own day, where the split would repeat the page's
     /// title on every row.
     static func projectsPage(frame: FrameData, provider: String?) -> ProjectsPage {
-        let slice = provider.flatMap { id in frame.providers.first { $0.id == id } }
-        let projects = provider == nil ? frame.projects : slice?.projects ?? []
-        let tokens =
-            provider == nil
-            ? frame.providers.reduce(0) { $0 + $1.tokens } : slice?.tokens ?? 0
-        let cost =
-            provider == nil
-            ? frame.providers.reduce(Decimal(0)) { $0 + $1.cost } : slice?.cost ?? 0
+        let slices =
+            provider.map { id in frame.providers.filter { $0.id == id } } ?? frame.providers
+        let projects = provider == nil ? frame.projects : slices.first?.projects ?? []
+        let cost = slices.reduce(Decimal(0)) { $0 + $1.cost }
         return ProjectsPage(
             provider: provider,
             rows: makeProjects(
-                projects, totalTokens: tokens, totalCost: cost, limit: nil,
+                projects, totalCost: cost, limit: nil,
                 contributors: provider == nil ? contributors(frame.providers) : [:]),
+            residue: makeResidue(slices, split: provider == nil),
             subtitle: UsageFormat.projectsSubtitle(count: projects.count, cost: cost)
         )
     }
@@ -721,10 +741,13 @@ struct UsagePanelSnapshot: Equatable {
     struct ProjectsPage: Equatable {
         /// Whose day this is, or nil for every provider summed.
         let provider: String?
-        /// Unfolded, so the page is the one place the whole list exists. The
-        /// remainder keeps its row here too — the rows are read against the
-        /// total in the subtitle, and without it they would not reach it.
+        /// Unfolded, so the page is the one place the whole list exists.
         let rows: [ProjectRow]
+        /// What named no repository, which is the only surface that says so.
+        /// The rows are read against the total in the subtitle and cannot
+        /// reach it without this, so the line carries the figure rather than
+        /// only the fact.
+        let residue: ProjectsResidue?
         /// When, how many, and how much — today's own total rather than the
         /// headline's, which is over whatever period the user picked.
         let subtitle: String
@@ -921,8 +944,7 @@ struct UsagePanelSnapshot: Equatable {
                     },
                 notice: UsageFormat.limitsNotice(slice.limitsState, provider: slice.id),
                 account: makeAccount(slice.account),
-                projects: makeProjects(
-                    slice.projects, totalTokens: slice.tokens, totalCost: slice.cost),
+                projects: makeProjects(slice.projects, totalCost: slice.cost),
                 projectCount: slice.projects.count,
                 credits: makeCredits(slice.credits, now: now),
                 status: makeStatus(status[slice.id], provider: slice.id)
@@ -1097,14 +1119,14 @@ struct UsagePanelSnapshot: Equatable {
     /// report needs more than the two days the tail retains.
     private static let projectRowLimit = 5
 
-    /// The busiest projects, with everything below them folded into one row
-    /// and whatever named no repository in a row after that, so the section
-    /// adds up to the total the header prints.
+    /// The busiest projects, with everything below them folded into one row.
     ///
-    /// The limit bounds the repositories, not the section: the remainder is
-    /// not a project competing for a slot, it is the rest of the day. It is
-    /// drawn only under rows that do name repositories — a section whose one
-    /// row says "unattributed" is the header total with a second caption.
+    /// **Every row here is a repository**, which is what lets the section's
+    /// own label count them: the fold stands for repositories too, and what
+    /// named none is not a row at all but the line `makeResidue` builds for
+    /// the page. It used to be the last row of this list, which put a reading
+    /// that is not a project under a label counting projects, and gave the one
+    /// thing on the list with nothing to open a bar, a hover and a rank.
     ///
     /// Ordered here rather than taken on trust, because this is the function
     /// that *drops* rows: a prefix over an order nobody established folds the
@@ -1114,7 +1136,6 @@ struct UsagePanelSnapshot: Equatable {
     /// summed through `combinedProjects` — and a provider's own page did not.
     private static func makeProjects(
         _ unordered: [ProjectTotals],
-        totalTokens: Int,
         totalCost: Decimal,
         limit: Int? = projectRowLimit,
         contributors: [String: [String: Decimal]] = [:]
@@ -1161,30 +1182,46 @@ struct UsagePanelSnapshot: Equatable {
                     providers: []
                 ))
         }
-        let namedTokens = projects.reduce(0) { $0 + $1.tokens }
-        let namedCost = projects.reduce(Decimal(0)) { $0 + $1.cost }
-        // Both halves or neither. A provider republishes its project split on
-        // every read of its day where the totals beside it only move on an
-        // emit, so a coalesced emit can leave the rows describing a later
-        // instant than the header — and a remainder taken across the two has
-        // no sign worth trusting, since cache reads are most of the tokens and
-        // the least of the money. A reading that disagrees with itself is
-        // owed no row rather than a negative one.
-        guard totalTokens > namedTokens, totalCost >= namedCost else { return rows }
-        let unnamedCost = totalCost - namedCost
-        rows.append(
-            ProjectRow(
-                id: Self.unattributedRowID,
-                name: UsageFormat.projectsUnattributed,
-                owner: nil,
-                repository: nil,
-                tooltip: UsageFormat.projectsUnattributedReason,
-                tokens: UsageFormat.tokens(totalTokens - namedTokens),
-                cost: UsageFormat.cost(unnamedCost),
-                share: share(unnamedCost),
-                providers: []
-            ))
         return rows
+    }
+
+    /// What the day spent outside every repository, or nil when there is none
+    /// of it.
+    ///
+    /// Summed off the slices rather than off the combined list, because the
+    /// split is per provider and the combined list is the one place that
+    /// answer has already been summed away. The two agree on the total by
+    /// construction — `combinedProjects` is these same rows added up.
+    ///
+    /// Both halves or neither. A provider republishes its project split on
+    /// every read of its day where the totals beside it only move on an emit,
+    /// so a coalesced emit can leave the rows describing a later instant than
+    /// the header — and a remainder taken across the two has no sign worth
+    /// trusting, since cache reads are most of the tokens and the least of the
+    /// money. A reading that disagrees with itself is owed no line rather than
+    /// a negative one.
+    ///
+    /// `split` is false on a provider's own page for the reason its rows carry
+    /// no marks: the page's title has already named the CLI, and a mark per
+    /// line would say it again.
+    private static func makeResidue(_ slices: [ProviderSlice], split: Bool) -> ProjectsResidue? {
+        let totalTokens = slices.reduce(0) { $0 + $1.tokens }
+        let totalCost = slices.reduce(Decimal(0)) { $0 + $1.cost }
+        let namedTokens = slices.reduce(0) { $0 + $1.projects.reduce(0) { $0 + $1.tokens } }
+        let namedCost = slices.reduce(Decimal(0)) {
+            $0 + $1.projects.reduce(Decimal(0)) { $0 + $1.cost }
+        }
+        guard totalTokens > namedTokens, totalCost >= namedCost else { return nil }
+        let unnamed = slices.compactMap { slice -> ProviderCost? in
+            let named = slice.projects.reduce(Decimal(0)) { $0 + $1.cost }
+            guard slice.cost > named else { return nil }
+            return ProviderCost(id: slice.id, cost: UsageFormat.cost(slice.cost - named))
+        }
+        return ProjectsResidue(
+            tokens: UsageFormat.tokens(totalTokens - namedTokens),
+            cost: UsageFormat.cost(totalCost - namedCost),
+            providers: split ? unnamed : []
+        )
     }
 
     /// One row's split, in the order the panel draws providers in rather than
@@ -1218,7 +1255,6 @@ struct UsagePanelSnapshot: Equatable {
     }
 
     private static let foldedProjectRowID = "sissy.projects.rest"
-    private static let unattributedRowID = "sissy.projects.unattributed"
 
     private static func makeWindow(
         _ window: UsageWindow, observedAt: Date, reading: LimitsReading, now: Date

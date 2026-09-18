@@ -3,9 +3,9 @@ import XCTest
 @testable import Sissy
 
 /// What the panel says about where a day's money went: which rows exist, what
-/// they are called, and that they still add up to the day after the tail of
-/// them has been folded away and whatever named no repository has been given
-/// the row it is owed.
+/// they are called, and that every one of them is a repository — the tail of
+/// the list folded into a row that is still repositories, and what named none
+/// left to the page's own line rather than given a rank among them.
 final class UsageProjectRowsTests: XCTestCase {
     func testADayWithNoProjectNamedDrawsNoSection() {
         let snapshot = UsagePanelSnapshot.make(frame: frame(projects: []))
@@ -58,48 +58,18 @@ final class UsageProjectRowsTests: XCTestCase {
         XCTAssertEqual(snapshot.projects.map { Int(($0.share * 100).rounded()) }, [75, 25])
     }
 
-    /// The gap between the header and the rows is the question a user asks
-    /// out loud, so the panel answers it in a row instead of leaving it to
-    /// arithmetic nobody should have to do.
-    func testWhatNamedNoRepositoryGetsTheRestOfTheDayRatherThanSilence() {
+    /// The section's label counts repositories, so a day with money outside
+    /// every repository must not answer it with a row that is not one. The
+    /// figure is not lost — it is the page's own line, asserted there.
+    func testWhatNamedNoRepositoryIsNotARowInTheSection() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(
                 projects: [project("/Users/smyile/sissy", 750, "7.50")],
                 providerTokens: 1_000,
                 providerCost: "10.00"))
-
-        XCTAssertEqual(snapshot.projects.map(\.name), ["sissy", "Unattributed"])
-        XCTAssertEqual(snapshot.projects.last?.cost, "$2.50")
-        XCTAssertEqual(snapshot.projects.last?.tokens, "250")
-        XCTAssertEqual(Int((snapshot.projects.last?.share ?? 0) * 100), 25)
-    }
-
-    /// The rows and the header can be read an instant apart — the split is
-    /// republished on every read of a provider's day, the totals beside it
-    /// only on an emit — so the two halves of a remainder can disagree about
-    /// its sign. That is a reading that disagrees with itself, not money.
-    func testARemainderThatCameOutNegativeIsNotDrawn() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(
-                projects: [project("/Users/smyile/sissy", 250, "9.00")],
-                providerTokens: 1_000,
-                providerCost: "6.00"))
 
         XCTAssertEqual(snapshot.projects.map(\.name), ["sissy"])
-    }
-
-    /// It is not a project, so it never wears a project's name or a path it
-    /// could be mistaken for.
-    func testTheRemainderHoversTheReasonRatherThanAPath() throws {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(
-                projects: [project("/Users/smyile/sissy", 750, "7.50")],
-                providerTokens: 1_000,
-                providerCost: "10.00"))
-
-        let reason = try XCTUnwrap(snapshot.projects.last?.tooltip)
-        XCTAssertEqual(reason, UsageFormat.projectsUnattributedReason)
-        XCTAssertFalse(reason.hasPrefix("/"), "the remainder hovered something that reads as a path")
+        XCTAssertEqual(snapshot.projects.count, snapshot.projectCount)
     }
 
     func testADayEveryLineOfWhichNamedARepositoryHasNoRemainderRow() {
@@ -113,22 +83,19 @@ final class UsageProjectRowsTests: XCTestCase {
         XCTAssertEqual(snapshot.projects.map(\.name), ["sissy", "legion"])
     }
 
-    /// The row limit bounds the repositories. The remainder is the rest of the
-    /// day, not a repository competing for a slot, so folding never swallows
-    /// it and it never costs a project its row.
-    func testTheRemainderDoesNotSpendAProjectsRow() {
+    /// The row limit bounds the repositories, and a day that spent outside
+    /// them does not shorten the list it is not part of.
+    func testUnnamedSpendCostsTheSectionNoRow() {
         let many = (1...9).map { project("/Users/smyile/repo\($0)", 100, "1.00") }
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(projects: many, providerTokens: 1_000, providerCost: "10.00"))
 
-        XCTAssertEqual(snapshot.projects.count, 6)
-        XCTAssertEqual(snapshot.projects[4].name, "5 more projects")
-        XCTAssertEqual(snapshot.projects[5].name, "Unattributed")
-        XCTAssertEqual(snapshot.projects[5].cost, "$1.00")
+        XCTAssertEqual(snapshot.projects.count, 5)
+        XCTAssertEqual(snapshot.projects.last?.name, "5 more projects")
     }
 
-    /// A section whose only row says "unattributed" is the header total with a
-    /// second caption under it.
+    /// A day whose every line named no repository has nothing to list, and the
+    /// panel draws no heading over an empty list.
     func testADayThatNamedNothingDrawsNoSectionAtAll() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(projects: [], providerTokens: 1_000, providerCost: "10.00"))
