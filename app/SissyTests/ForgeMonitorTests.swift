@@ -357,6 +357,47 @@ final class ForgeMonitorTests: XCTestCase {
         XCTAssertTrue(monitor.currentReadings().isEmpty)
     }
 
+    /// **A fetch torn down mid-flight deregisters nothing.** `stop()` empties
+    /// the register itself, so one landing afterwards has nothing of its own
+    /// left to take out — and taking out whatever it found would deregister
+    /// the fetch that replaced it, leaving the next caller to open the second
+    /// request the register exists to prevent.
+    ///
+    /// `stop()` is never followed by another read on the same instance today —
+    /// the engine builds a fresh monitor — so this holds the type's own
+    /// contract rather than a path a caller takes.
+    func testAStaleFetchDoesNotDeregisterTheOneThatReplacedIt() async {
+        let first = FetchGate()
+        let second = FetchGate()
+        let attempts = LockedValue(0)
+        let monitor = ForgeActivityMonitor(
+            connections: [Self.gitHub],
+            fetch: { connection, _, _, _ in
+                attempts.update { $0 += 1 }
+                await (attempts.load() == 1 ? first : second).arrive()
+                return Self.reading(connection, login: "gh", contributions: 6, merged: 1)
+            },
+            token: { _ in .found("token") })
+
+        async let round: Duration = monitor.refreshOnce {}
+        await first.waitForStart()
+        await monitor.stop()
+
+        async let replacement: Void = monitor.refreshOnce(id: Self.gitHub.id) {}
+        await second.waitForStart()
+        await first.letGo()
+        _ = await round
+        XCTAssertEqual(attempts.load(), 2)
+
+        async let joiner: Void = monitor.refreshOnce(id: Self.gitHub.id) {}
+        await letTheOtherCallerIn()
+        XCTAssertEqual(attempts.load(), 2)
+
+        await second.letGo()
+        await replacement
+        await joiner
+    }
+
     /// A refresh for a connection this monitor was not built with is a no-op
     /// rather than a row: the connections are what it was constructed from, and
     /// a rebuild is what a change to them produces.
