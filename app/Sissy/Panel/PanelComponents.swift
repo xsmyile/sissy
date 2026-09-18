@@ -29,7 +29,14 @@ enum PanelMetrics {
     static let rowText: CGFloat = 12
     /// How far a row's text sits inside the wash drawn behind it, so the band
     /// reads as a band rather than as a highlight clipped to the glyphs.
-    static let washInset: CGFloat = 3
+    ///
+    /// Half a point, because the whole point of the band is what it saves: at
+    /// 3 pt it hugged the glyphs, and 4 pt bought the room back at 2 pt a row
+    /// — measured 2026-09-19, a four-row section at 136 pt, 144 pt and
+    /// 140 pt. The half lands on a device pixel at 2x and on a rounded rect
+    /// that is antialiased either way, so it is a point of air per row rather
+    /// than a rounding nobody sees.
+    static let washInset: CGFloat = 3.5
     /// The wash's corner, small enough that a share of a few percent still
     /// draws a shape with a straight edge to read its width off.
     static let washRadius: CGFloat = 4
