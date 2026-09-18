@@ -244,7 +244,8 @@ final class ForgeMonitorTests: XCTestCase {
         let late = at(hour: 23, calendar)
         let midnight = calendar.date(
             byAdding: .day, value: 1, to: calendar.startOfDay(for: late))
-        let remaining = Duration.seconds((midnight ?? late).timeIntervalSince(late))
+        let remaining = Duration.seconds(
+            (midnight ?? late).timeIntervalSince(late))
         let delay = await idleMonitor().nextDelay(from: late, calendar: calendar)
         XCTAssertLessThanOrEqual(delay, remaining)
         XCTAssertLessThan(delay, ForgeActivityMonitor.idleRefreshInterval)
@@ -256,6 +257,40 @@ final class ForgeMonitorTests: XCTestCase {
     func testAWaitAwayFromMidnightIsTheOrdinaryInterval() async {
         let delay = await idleMonitor().nextDelay(from: at(hour: 12))
         XCTAssertGreaterThanOrEqual(delay, ForgeActivityMonitor.idleRefreshInterval)
+    }
+
+    /// **An idle wait ends early once agents are working.** The interval is
+    /// chosen when the round finishes, and work that begins a minute later
+    /// would otherwise keep the idle cadence for the rest of the wait — half
+    /// an hour of it, over exactly the stretch the short cadence exists for.
+    func testAnIdleWaitEndsEarlyOnceAgentsAreWorking() {
+        XCTAssertFalse(
+            ForgeActivityMonitor.waitIsOver(
+                waited: .seconds(240), of: .seconds(1800), working: true))
+        XCTAssertTrue(
+            ForgeActivityMonitor.waitIsOver(
+                waited: .seconds(300), of: .seconds(1800), working: true))
+    }
+
+    /// With nobody working the wait runs its full length, so an idle Mac keeps
+    /// costing one request every half hour and not one every five minutes.
+    func testAWaitWithNobodyWorkingRunsItsFullLength() {
+        XCTAssertFalse(
+            ForgeActivityMonitor.waitIsOver(
+                waited: .seconds(1799), of: .seconds(1800), working: false))
+        XCTAssertTrue(
+            ForgeActivityMonitor.waitIsOver(
+                waited: .seconds(1800), of: .seconds(1800), working: false))
+    }
+
+    /// The frame path is what reports the work, without awaiting this actor.
+    func testActivityFromTheFramePathShortensTheNextInterval() async {
+        let monitor = idleMonitor()
+        XCTAssertFalse(monitor.isWorking())
+        monitor.noteActivity()
+        XCTAssertTrue(monitor.isWorking())
+        let delay = await monitor.nextDelay(from: at(hour: 12))
+        XCTAssertLessThan(delay, ForgeActivityMonitor.idleRefreshInterval)
     }
 
     // MARK: The refresh on a row

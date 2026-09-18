@@ -29,6 +29,12 @@ actor ForgeActivityMonitor {
     /// Spread across the interval, so every Sissy started at login does not ask
     /// the same two APIs in the same second.
     static let jitterSeconds: ClosedRange<Int> = 0...30
+    /// How often a wait looks up from its sleep to see whether work has begun.
+    ///
+    /// The cadence is chosen from activity that can start *during* a wait, so
+    /// the wait is taken in slices rather than in one sleep. A slice costs a
+    /// timer and no request.
+    static let activityCheck: Duration = .seconds(60)
     /// The least a wait can be, so a delay capped at a boundary it is already
     /// on cannot come out as no wait at all and ask again in the same second.
     static let shortestWait: Duration = .seconds(1)
@@ -109,6 +115,14 @@ actor ForgeActivityMonitor {
         lastActivity.update { $0 = when }
     }
 
+    /// Whether an agent has been seen working recently enough for the short
+    /// cadence. Nonisolated because a wait consults it between slices, on the
+    /// same value the frame path writes without awaiting this actor.
+    nonisolated func isWorking(at now: Date = Date()) -> Bool {
+        guard let last = lastActivity.load() else { return false }
+        return now.timeIntervalSince(last) < Self.idleAfter
+    }
+
     /// Starts the poll loop. `onRefresh` fires only when the published map
     /// changes — which a round that reached the vendor always does, since
     /// `readAt` is part of a reading and therefore of its equality, and the
@@ -121,10 +135,10 @@ actor ForgeActivityMonitor {
         pollTask = Task { [weak self] in
             var delay: Duration = .zero
             while !Task.isCancelled {
-                if delay > .zero {
-                    do { try await Task.sleep(for: delay) } catch { return }
-                }
                 guard let self else { return }
+                if delay > .zero {
+                    do { try await self.wait(delay) } catch { return }
+                }
                 delay = await self.refreshOnce(onRefresh: onRefresh)
             }
         }
@@ -309,13 +323,39 @@ actor ForgeActivityMonitor {
     /// Internal so a test can hold the cap against an injected instant; the
     /// jitter is what stops it being assertable to the second.
     func nextDelay(from now: Date = Date(), calendar: Calendar = .current) -> Duration {
-        let working = lastActivity.load().map { now.timeIntervalSince($0) < Self.idleAfter }
-        let base = working == true ? Self.refreshInterval : Self.idleRefreshInterval
+        let base = isWorking(at: now) ? Self.refreshInterval : Self.idleRefreshInterval
         let delay = base + .seconds(Int.random(in: Self.jitterSeconds))
         guard
             let midnight = calendar.date(
                 byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
         else { return delay }
         return max(min(delay, .seconds(midnight.timeIntervalSince(now))), Self.shortestWait)
+    }
+
+    /// Whether a wait that has run for `waited` is over.
+    ///
+    /// The delay is the ceiling. The other way out is what the slices exist
+    /// for: an idle wait was sized for a Mac nobody was working at, and once
+    /// agents are working the short interval is the one in force — so a wait
+    /// that has already covered it ends rather than serving out the rest of a
+    /// half hour chosen before the work started. Without it the short cadence
+    /// arrives a round late, which is up to half an hour of the idle interval
+    /// running over exactly the stretch the short one exists for.
+    static func waitIsOver(waited: Duration, of delay: Duration, working: Bool) -> Bool {
+        if waited >= delay { return true }
+        return working && waited >= refreshInterval
+    }
+
+    /// Sleeps out `delay`, reconsidering it as it goes.
+    ///
+    /// Nonisolated, so a wait that is mostly sleeping never holds the actor
+    /// against a refresh arriving from the row.
+    nonisolated private func wait(_ delay: Duration) async throws {
+        let started = ContinuousClock.now
+        while true {
+            let waited = ContinuousClock.now - started
+            if Self.waitIsOver(waited: waited, of: delay, working: isWorking()) { return }
+            try await Task.sleep(for: min(delay - waited, Self.activityCheck))
+        }
     }
 }
