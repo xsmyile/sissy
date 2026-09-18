@@ -143,6 +143,8 @@ enum ForgeActivityFeed {
     /// be refused, and a reading that fails on a header is a reading nobody can
     /// diagnose from the row.
     static let userAgent = "Sissy"
+    private static let remainingHeader = "X-RateLimit-Remaining"
+    private static let retryAfterHeader = "Retry-After"
 
     static func read(
         _ connection: ForgeConnection, token: String,
@@ -176,10 +178,7 @@ enum ForgeActivityFeed {
         case 200:
             return (data, http)
         case 401, 403:
-            // 403 is GitHub's own answer to an exhausted rate limit as well as
-            // to a scope it will not serve, and the two are told apart by the
-            // remaining count rather than by the code.
-            throw exhausted(http) ? ForgeReadFailure.rateLimited : .unauthorized
+            throw askedToSlowDown(http) ? ForgeReadFailure.rateLimited : .unauthorized
         case 429:
             throw ForgeReadFailure.rateLimited
         default:
@@ -187,8 +186,24 @@ enum ForgeActivityFeed {
         }
     }
 
-    private static func exhausted(_ response: HTTPURLResponse) -> Bool {
-        guard let remaining = response.value(forHTTPHeaderField: "X-RateLimit-Remaining") else {
+    /// Whether a refusal is the vendor asking for less traffic rather than
+    /// refusing the token, which `403` is GitHub's answer to either way.
+    ///
+    /// The two are told apart by the headers rather than by the code, and by
+    /// two headers rather than one: an exhausted hourly quota leaves a
+    /// remaining count of zero, while a secondary limit leaves the quota
+    /// untouched and sends a retry deadline instead. Reading only the count
+    /// files a throttled account as a refused token, which `needsTheUser`
+    /// parks — so the connection stops being polled until the user replaces a
+    /// token that was never the problem. Unreachable enough while the cadence
+    /// is the only thing asking; a refresh on a click is what makes it
+    /// ordinary.
+    ///
+    /// Internal so a test can hold the distinction against a constructed reply,
+    /// which is the only seam there is: `send` goes straight to `URLSession`.
+    static func askedToSlowDown(_ response: HTTPURLResponse) -> Bool {
+        if response.value(forHTTPHeaderField: retryAfterHeader) != nil { return true }
+        guard let remaining = response.value(forHTTPHeaderField: remainingHeader) else {
             return false
         }
         return Int(remaining) == 0
