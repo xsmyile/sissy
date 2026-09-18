@@ -118,6 +118,10 @@ actor UsageEngine {
     private let forgeIndex: ForgeConnectionIndex
     private var forgeMonitor: ForgeActivityMonitor
     private let identityMonitor: GitIdentityMonitor
+    /// What the CLIs on this Mac are holding right now. Beside the monitors
+    /// above rather than on a provider: a running process belongs to the Mac,
+    /// and it is there on a day neither CLI has spent anything.
+    private let agentMonitor: AgentProcessMonitor
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
@@ -249,6 +253,7 @@ actor UsageEngine {
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         self.projectLedger = projectLedger
         self.identityMonitor = GitIdentityMonitor(ledger: projectLedger)
+        self.agentMonitor = AgentProcessMonitor()
         let limitsBackoff = LimitsBackoffStore(
             url: LimitsBackoffLedger.defaultURL(in: stateDir))
         self.limitsBackoff = limitsBackoff
@@ -418,6 +423,7 @@ actor UsageEngine {
         }
         await startForgeActivity()
         await startIdentityChecks()
+        await startAgentProcessChecks()
         await applyKeepAwake()
         guard lifecycle == .running else { return }
         let me = self
@@ -654,6 +660,7 @@ actor UsageEngine {
         await statusMonitor.stop()
         await forgeMonitor.stop()
         await identityMonitor.stop()
+        await agentMonitor.stop()
         await aggregator.stop()
         bootTask = nil
         backfillTask = nil
@@ -1478,6 +1485,20 @@ actor UsageEngine {
         }
     }
 
+    /// Starts the process sweep, under the same guard the identity checks
+    /// carry: `start()` reaches here across suspensions a `stop()` can land
+    /// in, and the monitor only knows whether it is running rather than
+    /// whether the engine still is.
+    private func startAgentProcessChecks() async {
+        guard lifecycle == .running else { return }
+        let me = self
+        await agentMonitor.start { await me.reemit() }
+        guard lifecycle == .running else {
+            await agentMonitor.stop()
+            return
+        }
+    }
+
     /// Every forge the user has connected, for the Settings list.
     ///
     /// Read from the index rather than from the monitor, so a build whose
@@ -1718,7 +1739,8 @@ actor UsageEngine {
             history: currentHistory(now: now),
             providerStatus: statusMonitor.currentStatus(),
             forge: forgeMonitor.currentReadings(),
-            identities: identityMonitor.currentIdentities()
+            identities: identityMonitor.currentIdentities(),
+            agentMemory: agentMonitor.currentMemory()
         )
         await onFrame?(frame)
     }
