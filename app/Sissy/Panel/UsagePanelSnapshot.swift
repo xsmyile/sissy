@@ -740,23 +740,31 @@ struct UsagePanelSnapshot: Equatable {
     /// and two windows under one control would be worse than one window that
     /// starts narrow.
     ///
-    /// **A reading taken on an earlier day answers no window on this one.**
-    /// Each figure is over a window the *vendor* worked out from the instant
-    /// it was asked, so a reading from before midnight covers a different set
-    /// of days than the same labels name now — `Today` most visibly, where it
-    /// is the whole of the previous day under a heading claiming this one. It
-    /// therefore keeps its row and loses its figures, which is the roll-over
-    /// rule the rate-limit windows are already on: the row draws the dash it
-    /// draws for a reading that never arrived, and the caption beside it
-    /// already says how long ago the last one was. The poll caps its own wait
-    /// at midnight so this lasts seconds; what it is really for is the Mac
-    /// that was asleep or offline across the boundary.
+    /// **A reading from before midnight loses `Today` and keeps the rest.**
+    /// Every figure is over a window the vendor worked out from the instant it
+    /// was asked for, so a reading taken yesterday answers yesterday's
+    /// windows — but only one of them has *ended*. `Today` holds the whole of
+    /// the previous day under a heading claiming this one, so it keeps its row
+    /// and loses its figures: the dash a reading that never arrived gets,
+    /// which is the roll-over rule the rate-limit windows are already on, with
+    /// the caption beside it saying how long ago the last reading was.
+    ///
+    /// The wider windows have only *moved*, and they stay. Seven days ending
+    /// yesterday still covers six of the seven, thirty covers twenty-nine, and
+    /// `all` has no start to move at all — `UsagePeriod.days` is nil for it.
+    /// Those are stale rather than wrong, staleness is what the age on the row
+    /// now reports, and blanking them would throw away a reading the user can
+    /// discount for themselves. The poll caps its own wait at midnight so even
+    /// `Today` goes blank for seconds; what this is really for is the Mac that
+    /// was asleep or offline across the boundary.
     private static func makeForge(
         _ readings: [ForgeActivityReading], period: UsagePeriod, now: Date,
         calendar: Calendar = .current
     ) -> [ForgeRow] {
         readings.map { reading in
-            let current = calendar.isDate(reading.readAt, inSameDayAs: now) ? reading : nil
+            let ended =
+                period == .today && !calendar.isDate(reading.readAt, inSameDayAs: now)
+            let current = ended ? nil : reading
             let contributions = current.flatMap { $0.contributions(for: period) }
                 .map(UsageFormat.forgeCount)
             let merged = current.flatMap { $0.merged(for: period) }.map(UsageFormat.forgeCount)
