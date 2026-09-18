@@ -6,6 +6,8 @@ Conversations
 CurrentUser
 FSEventStreamScheduleWithRunLoop
 GPTs
+ISSUE_ADVANCED
+ISSUE_HYBRID
 IgnoreSelf
 LSUIElement
 M
@@ -20,13 +22,16 @@ RunAtLoad
 SIGTERM
 _NSPopoverWindow
 argv
-arrow.trianglehead.pull
 caffeinate
+captions.bubble
+commitComments
 getcwd
+gistComments
 json.dumps
 notclaude.ai
 objectWillChange
-project.yml
+quote.bubble
+repositoryDiscussionComments
 restrictedContributionsCount
 sizeThatFits
 systemRed

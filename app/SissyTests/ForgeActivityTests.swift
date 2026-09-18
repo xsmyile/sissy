@@ -33,6 +33,39 @@ final class ForgeActivityTests: XCTestCase {
         "mergedAll":{"issueCount":403},"issuesAll":{"issueCount":188}}}
         """
 
+    /// A comment page in the shape the live document brings one back, with
+    /// stamps either side of the measured day's own windows: two on the day
+    /// itself, one inside the week, one inside the month and one far outside
+    /// every bounded window. The oldest `updatedAt` is 2026-05-30, which is
+    /// what lets the page prove it covers all three.
+    private static func gitHubComments(
+        hasNextPage: Bool = true, total: Int = 133, nodes: String? = nil
+    ) -> String {
+        let rows =
+            nodes
+                ?? """
+                {"createdAt":"2026-09-17T15:00:00Z","updatedAt":"2026-09-17T15:00:00Z"},
+                {"createdAt":"2026-09-17T09:00:00Z","updatedAt":"2026-09-17T09:00:00Z"},
+                {"createdAt":"2026-09-13T09:00:00Z","updatedAt":"2026-09-13T09:00:00Z"},
+                {"createdAt":"2026-08-30T09:00:00Z","updatedAt":"2026-08-30T09:00:00Z"},
+                {"createdAt":"2026-05-30T21:02:42Z","updatedAt":"2026-05-30T21:02:42Z"}
+                """
+        return """
+            "comments":{"totalCount":\(total),
+            "pageInfo":{"hasNextPage":\(hasNextPage)},"nodes":[\(rows)]}
+            """
+    }
+
+    /// The GitHub reply with a comment page on it, which is what the live
+    /// document actually answers with.
+    private static func gitHubReplyWithComments(_ comments: String) -> String {
+        gitHubReply.replacingOccurrences(
+            of: "\"contribAll\":{\"contributionCalendar\":{\"totalContributions\":4138}}}",
+            with:
+                "\"contribAll\":{\"contributionCalendar\":{\"totalContributions\":4138}},\(comments)}"
+        )
+    }
+
     private static let gitLabReply = """
         {"data":{"currentUser":{"username":"davide",
         "mergedToday":{"count":15},"mergedWeek":{"count":91},
@@ -138,6 +171,239 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertEqual(reading.issues(for: .today), 7)
         XCTAssertEqual(reading.issues(for: .all), 188)
         XCTAssertNil(reading.failure)
+    }
+
+    // MARK: GitHub comments
+
+    /// GitHub totals no comment counter, so the windows are cut out of one
+    /// page of the account's own comments — and that page has to land on the
+    /// same day boundary the query strings beside it carry.
+    ///
+    /// Measured 2026-09-18 on the live account: one page answered 0 today, 44
+    /// over seven days and 71 over thirty, which is exactly what reading all
+    /// 133 answers. The fixture is that arithmetic in miniature.
+    func testGitHubCutsEveryWindowOutOfTheOneCommentPage() throws {
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReplyWithComments(Self.gitHubComments())),
+            connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertEqual(reading.comments(for: .today), 2)
+        XCTAssertEqual(reading.comments(for: .sevenDays), 3)
+        XCTAssertEqual(reading.comments(for: .thirtyDays), 4)
+        // The widest window is the connection's own total, which is exact
+        // however far short the page falls.
+        XCTAssertEqual(reading.comments(for: .all), 133)
+    }
+
+    /// A comment created before a window but edited inside it does not enter
+    /// it: the page is *ordered* by `updatedAt` because that is the only order
+    /// the connection offers, and it is *counted* by `createdAt` because that
+    /// is when the comment was written.
+    func testACommentEditedInsideTheWindowIsCountedWhereItWasWritten() throws {
+        let edited = Self.gitHubComments(
+            nodes: """
+                {"createdAt":"2026-01-04T09:00:00Z","updatedAt":"2026-09-17T15:00:00Z"},
+                {"createdAt":"2025-11-02T09:00:00Z","updatedAt":"2026-05-30T21:02:42Z"}
+                """)
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReplyWithComments(edited)),
+            connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertEqual(reading.comments(for: .today), 0)
+        XCTAssertEqual(reading.comments(for: .sevenDays), 0)
+        XCTAssertEqual(reading.comments(for: .thirtyDays), 0)
+    }
+
+    /// **The page carries its own proof of coverage, and a window it cannot
+    /// prove is absent rather than a lower bound.**
+    ///
+    /// Nodes come back newest-updated first and nothing can be created after
+    /// it was updated, so once the oldest `updatedAt` on the page precedes a
+    /// window's start, no comment left unread can fall inside it. Here the page
+    /// stops on the measured day itself with more behind it, so only `all` —
+    /// which is the connection's own total — can still be answered.
+    func testAWindowThePageCannotProveIsAbsentRatherThanAnUnderCount() throws {
+        let truncated = Self.gitHubComments(
+            nodes: """
+                {"createdAt":"2026-09-17T15:00:00Z","updatedAt":"2026-09-17T15:00:00Z"},
+                {"createdAt":"2026-09-17T09:00:00Z","updatedAt":"2026-09-17T09:00:00Z"}
+                """)
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReplyWithComments(truncated)),
+            connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertNil(reading.comments(for: .today))
+        XCTAssertNil(reading.comments(for: .sevenDays))
+        XCTAssertNil(reading.comments(for: .thirtyDays))
+        XCTAssertEqual(reading.comments(for: .all), 133)
+    }
+
+    /// A page with nothing behind it proves every window, however short it is
+    /// — there is nothing left that could fall into one.
+    func testAPageWithNothingBehindItAnswersEveryWindow() throws {
+        let whole = Self.gitHubComments(
+            hasNextPage: false, total: 2,
+            nodes: """
+                {"createdAt":"2026-09-17T15:00:00Z","updatedAt":"2026-09-17T15:00:00Z"},
+                {"createdAt":"2026-09-17T09:00:00Z","updatedAt":"2026-09-17T09:00:00Z"}
+                """)
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReplyWithComments(whole)),
+            connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertEqual(reading.comments(for: .today), 2)
+        XCTAssertEqual(reading.comments(for: .thirtyDays), 2)
+        XCTAssertEqual(reading.comments(for: .all), 2)
+    }
+
+    /// A `hasNextPage` this build cannot read means *unread*, not *read*.
+    ///
+    /// The flag's whole job is to say whether anything is missing, so a flag
+    /// that is itself missing has to be taken as a yes — defaulted the other
+    /// way, a page of two comments would have reported an exact 2 for every
+    /// window on an account holding 133.
+    func testAnUnreadableHasNextPageIsTakenAsMoreToCome() throws {
+        let noFlag = """
+            "comments":{"totalCount":133,"pageInfo":{},
+            "nodes":[{"createdAt":"2026-09-17T15:00:00Z","updatedAt":"2026-09-17T15:00:00Z"}]}
+            """
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReplyWithComments(noFlag)),
+            connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertNil(reading.comments(for: .today))
+        XCTAssertNil(reading.comments(for: .thirtyDays))
+        XCTAssertEqual(reading.comments(for: .all), 133)
+    }
+
+    /// A node whose stamps will not parse takes every bounded window with it.
+    ///
+    /// Dropping it quietly would remove it from the tally *and* from the
+    /// oldest-`updatedAt` the coverage proof rests on, so the page would still
+    /// look proven while being one comment short — a lower bound wearing an
+    /// exact figure's clothes, which is the one thing this counter must not do.
+    func testANodeThatWillNotParseTakesEveryBoundedWindowWithIt() throws {
+        let unparseable = Self.gitHubComments(
+            nodes: """
+                {"createdAt":"2026-09-17T15:00:00Z","updatedAt":"2026-09-17T15:00:00Z"},
+                {"createdAt":"not a date","updatedAt":"not a date"},
+                {"createdAt":"2026-05-30T21:02:42Z","updatedAt":"2026-05-30T21:02:42Z"}
+                """)
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReplyWithComments(unparseable)),
+            connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertNil(reading.comments(for: .today))
+        XCTAssertNil(reading.comments(for: .sevenDays))
+        XCTAssertNil(reading.comments(for: .thirtyDays))
+        XCTAssertEqual(reading.comments(for: .all), 133)
+    }
+
+    /// The boundary is strict: a page reaching back only as far as a window's
+    /// own start does not prove it, because a comment created on that instant
+    /// and never edited would sit just outside the page.
+    func testAPageReachingOnlyToTheBoundaryDoesNotProveThatWindow() throws {
+        let week = try XCTUnwrap(ForgeWindow.start(of: .sevenDays, now: Self.measuredDay))
+        let boundary = ForgeWindow.vendorDay(week)
+        let toTheEdge = Self.gitHubComments(
+            nodes: """
+                {"createdAt":"2026-09-17T15:00:00Z","updatedAt":"2026-09-17T15:00:00Z"},
+                {"createdAt":"\(boundary)","updatedAt":"\(boundary)"}
+                """)
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReplyWithComments(toTheEdge)),
+            connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertNil(reading.comments(for: .sevenDays))
+        // The day above it is proven, because the page reaches past its start.
+        XCTAssertEqual(reading.comments(for: .today), 1)
+    }
+
+    /// A `nodes` that will not read as an array of objects is not an empty
+    /// page.
+    ///
+    /// GraphQL answers a partial failure by putting a null where the field
+    /// should be, so reading that as "no comments, page complete" would publish
+    /// a confident 0 for every window out of a reply that carried nothing —
+    /// and `hasNextPage: false` beside it is exactly the shape that makes the
+    /// zero look proven.
+    func testANullNodesFieldIsNotAnEmptyPage() throws {
+        let nulled = """
+            "comments":{"totalCount":133,"pageInfo":{"hasNextPage":false},"nodes":null}
+            """
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReplyWithComments(nulled)),
+            connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertNil(reading.comments(for: .today))
+        XCTAssertNil(reading.comments(for: .sevenDays))
+        XCTAssertNil(reading.comments(for: .thirtyDays))
+        XCTAssertEqual(reading.comments(for: .all), 133)
+    }
+
+    /// A genuinely empty page with nothing behind it is still a reading of
+    /// zero, which is what the case above must not be confused with.
+    func testAnEmptyPageWithNothingBehindItIsAReadingOfZero() throws {
+        let empty = """
+            "comments":{"totalCount":0,"pageInfo":{"hasNextPage":false},"nodes":[]}
+            """
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReplyWithComments(empty)),
+            connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertEqual(reading.comments(for: .today), 0)
+        XCTAssertEqual(reading.comments(for: .thirtyDays), 0)
+        XCTAssertEqual(reading.comments(for: .all), 0)
+    }
+
+    /// The boundary is `vendorDay`'s own day read back, never recomputed from
+    /// the system calendar's components.
+    ///
+    /// Recomputing it put a Mac whose calendar is Buddhist five centuries into
+    /// the future: 2026-09-18 came out as a boundary in 2569, which every
+    /// comment falls before, so every bounded window reported 0 **and looked
+    /// proven** doing it. The counter is the only figure on the row computed
+    /// locally, so it is the only one a calendar could ever reach.
+    func testTheBoundaryIsAlwaysGregorianWhateverTheSystemCalendarIs() throws {
+        let start = try XCTUnwrap(ForgeWindow.start(of: .today, now: Self.measuredDay))
+        let instant = try XCTUnwrap(ForgeWindow.vendorInstant(start))
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let parts = gregorian.dateComponents([.year, .month, .day, .hour], from: instant)
+        XCTAssertEqual(parts.year, 2026)
+        XCTAssertEqual(parts.month, 9)
+        XCTAssertEqual(parts.day, 17)
+        XCTAssertEqual(parts.hour, 0)
+    }
+
+    /// A reply with no comment block at all keeps the three counters beside
+    /// it: the page is the newest thing on this document and an account or a
+    /// build that answers nothing for it has not stopped answering for the
+    /// rest.
+    func testAReplyWithNoCommentPageStillCarriesTheOtherCounters() throws {
+        let reading = try GitHubActivityFeed.parse(
+            payload(Self.gitHubReply), connection: Self.gitHub, now: Self.measuredDay)
+        XCTAssertNil(reading.comments(for: .today))
+        XCTAssertNil(reading.comments(for: .all))
+        XCTAssertEqual(reading.contributions(for: .today), 128)
+        XCTAssertEqual(reading.merged(for: .today), 28)
+    }
+
+    /// The page rides in the same `viewer` the contributions do, which is what
+    /// keeps the fourth counter at no extra request — measured 2026-09-18, the
+    /// document still costs 1 point of 5000 an hour with it on. It also must
+    /// not carry a date: `UPDATED_AT` is an order, not a window.
+    func testGitHubDocumentAsksForTheCommentPageInsideTheSameViewer() {
+        let document = GitHubActivityFeed.document(now: Self.measuredDay)
+        let viewer = try? XCTUnwrap(document.range(of: "viewer {"))
+        XCTAssertNotNil(viewer)
+        XCTAssertTrue(
+            document.contains(
+                "comments: issueComments(first: \(GitHubActivityFeed.commentPage),"
+                    + " orderBy: {field: UPDATED_AT, direction: DESC})"), document)
+        XCTAssertTrue(document.contains("totalCount pageInfo { hasNextPage }"), document)
+        XCTAssertTrue(document.contains("nodes { createdAt updatedAt }"), document)
+    }
+
+    /// The instant the counting compares against is the one the query strings
+    /// name, or the row would answer two windows under one label.
+    func testTheCountingBoundaryIsTheSameInstantTheQueryStringsName() throws {
+        let week = try XCTUnwrap(ForgeWindow.start(of: .sevenDays, now: Self.measuredDay))
+        let instant = try XCTUnwrap(ForgeWindow.vendorInstant(week))
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        XCTAssertEqual(formatter.string(from: instant), ForgeWindow.vendorDay(week))
     }
 
     /// GitHub's contributions query refuses a range wider than a year, so its
@@ -276,6 +542,23 @@ final class ForgeActivityTests: XCTestCase {
         let everything = try XCTUnwrap(
             GitLabActivityFeed.eventsURL(Self.gitLab, period: .all, now: Self.measuredDay))
         XCTAssertFalse(everything.absoluteString.contains("after="))
+    }
+
+    /// GitLab files a comment as an event, so the comment count is the very
+    /// same header read with one filter on it — same window, same exclusive
+    /// `after`, so the figure is a part of the contributions beside it rather
+    /// than a second reading of a different period.
+    func testGitLabAsksForCommentsOnTheSameWindowAsTheEventsBesideThem() throws {
+        let plain = try XCTUnwrap(
+            GitLabActivityFeed.eventsURL(Self.gitLab, period: .sevenDays, now: Self.measuredDay))
+        let commented = try XCTUnwrap(
+            GitLabActivityFeed.eventsURL(
+                Self.gitLab, period: .sevenDays, now: Self.measuredDay,
+                action: GitLabActivityFeed.commentedAction))
+        XCTAssertFalse(plain.absoluteString.contains("action="))
+        XCTAssertTrue(commented.absoluteString.contains("action=commented"), commented.absoluteString)
+        XCTAssertTrue(commented.absoluteString.contains("after=2026-09-10"))
+        XCTAssertTrue(commented.absoluteString.contains("per_page=1"))
     }
 
     // MARK: Connections

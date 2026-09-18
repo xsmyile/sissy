@@ -14,13 +14,14 @@ final class ForgeRowTests: XCTestCase {
 
     private static func reading(
         _ connection: ForgeConnection, login: String, contributions: Int, merged: Int, issues: Int,
-        at when: Date = readAt
+        comments: Int? = nil, at when: Date = readAt
     ) -> ForgeActivityReading {
         ForgeActivityReading(
             id: connection.id, kind: connection.kind, host: connection.host, login: login,
             activity: ForgeActivity(
                 contributions: [.today: contributions], merged: [.today: merged],
                 issues: [.today: issues],
+                comments: comments.map { [.today: $0] } ?? [:],
                 contributionsBoundedToOneYear: connection.kind == .gitHub),
             readAt: when, failure: nil)
     }
@@ -64,12 +65,14 @@ final class ForgeRowTests: XCTestCase {
         let row = try XCTUnwrap(
             rows([
                 Self.reading(
-                    Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7)
+                    Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7,
+                    comments: 12)
             ]).first)
         XCTAssertEqual(row.login, "xsmyile")
         XCTAssertEqual(row.contributions, "128")
         XCTAssertEqual(row.merged, "28")
         XCTAssertEqual(row.issues, "7")
+        XCTAssertEqual(row.comments, "12")
         XCTAssertNil(row.notice)
     }
 
@@ -85,6 +88,30 @@ final class ForgeRowTests: XCTestCase {
         XCTAssertEqual(both.last?.mergedHelp, "Merge requests you opened and had merged")
         XCTAssertEqual(both.first?.issuesHelp, "Issues you opened on GitHub")
         XCTAssertEqual(both.last?.issuesHelp, "Issues you opened on GitLab")
+        XCTAssertEqual(
+            both.first?.commentsHelp, "Comments you wrote on issues and pull requests")
+        XCTAssertEqual(
+            both.last?.commentsHelp, "Comments you wrote on issues and merge requests")
+    }
+
+    /// A comment count the page could not prove drops off the row on its own,
+    /// and the three figures beside it stay.
+    ///
+    /// This is the one counter that can go missing while the rest answer —
+    /// GitHub's page proves its own coverage and a busy month can outrun it —
+    /// so the row has to degrade to three figures rather than to a dash.
+    func testAMissingCommentCountLeavesTheOtherFiguresStanding() throws {
+        let row = try XCTUnwrap(
+            rows([
+                Self.reading(
+                    Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7,
+                    comments: nil)
+            ]).first)
+        XCTAssertTrue(row.hasFigures)
+        XCTAssertNil(row.comments)
+        XCTAssertEqual(row.contributions, "128")
+        XCTAssertEqual(row.merged, "28")
+        XCTAssertEqual(row.issues, "7")
     }
 
     /// Never summed: two vendors counting two different things are two
@@ -115,7 +142,7 @@ final class ForgeRowTests: XCTestCase {
             id: Self.gitHub.id, kind: .gitHub, host: Self.gitHub.host, login: "xsmyile",
             activity: ForgeActivity(
                 contributions: [.today: 128], merged: [.today: 28], issues: [.today: 7],
-                contributionsBoundedToOneYear: true),
+                comments: [.today: 3], contributionsBoundedToOneYear: true),
             readAt: Self.readAt.addingTimeInterval(-7200), failure: .unreachable)
         let row = try XCTUnwrap(rows([stale]).first)
         XCTAssertEqual(row.contributions, "128")

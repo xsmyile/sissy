@@ -74,14 +74,18 @@ struct UsagePanelSnapshot: Equatable {
         let contributions: String?
         let merged: String?
         let issues: String?
+        let comments: String?
         /// Why there is no figure, or how old the one beside it is.
         let notice: String?
         let tooltip: String
         /// What each mark means, since a glyph cannot introduce itself.
         let mergedHelp: String
         let issuesHelp: String
+        let commentsHelp: String
 
-        var hasFigures: Bool { contributions != nil || merged != nil || issues != nil }
+        var hasFigures: Bool {
+            contributions != nil || merged != nil || issues != nil || comments != nil
+        }
     }
 
     /// Every repository Sissy could read a commit identity for, the ones that
@@ -733,7 +737,9 @@ struct UsagePanelSnapshot: Equatable {
             let contributions = reading.contributions(for: period).map(UsageFormat.forgeCount)
             let merged = reading.merged(for: period).map(UsageFormat.forgeCount)
             let issues = reading.issues(for: period).map(UsageFormat.forgeCount)
-            let hasFigures = contributions != nil || merged != nil || issues != nil
+            let comments = reading.comments(for: period).map(UsageFormat.forgeCount)
+            let hasFigures =
+                contributions != nil || merged != nil || issues != nil || comments != nil
             return ForgeRow(
                 id: reading.id,
                 kind: reading.kind,
@@ -742,13 +748,15 @@ struct UsagePanelSnapshot: Equatable {
                 contributions: contributions,
                 merged: merged,
                 issues: issues,
+                comments: comments,
                 notice: UsageFormat.forgeNotice(
                     reading.failure, readAt: reading.readAt, hasFigures: hasFigures, now: now),
                 tooltip: UsageFormat.forgeTooltip(
                     reading.kind, host: reading.host, login: reading.login, period: period,
                     boundedToOneYear: reading.activity.contributionsBoundedToOneYear),
                 mergedHelp: UsageFormat.forgeMergedHelp(reading.kind),
-                issuesHelp: UsageFormat.forgeIssuesHelp(reading.kind))
+                issuesHelp: UsageFormat.forgeIssuesHelp(reading.kind),
+                commentsHelp: UsageFormat.forgeCommentsHelp(reading.kind))
         }
     }
     /// The identities page's rows, the findings first.

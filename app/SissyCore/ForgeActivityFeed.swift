@@ -65,6 +65,34 @@ enum ForgeWindow {
     /// heatmap labels with today's date is the UTC day of the same name.
     static func vendorDay(_ start: Date) -> String { day.string(from: start) + utcMidnight }
 
+    /// The instant `vendorDay` names, as a date rather than as text.
+    ///
+    /// The one counter no forge will total is counted here instead of at the
+    /// vendor, so it needs that same boundary as something comparable. It is
+    /// **`vendorDay`'s own day, read back** rather than recomputed, which is
+    /// the only construction under which the two cannot disagree.
+    ///
+    /// Recomputing it is what the obvious version did, and it was wrong on a
+    /// Mac whose calendar is not Gregorian: taking `year`/`month`/`day` off
+    /// `Calendar.current` and building a Gregorian date from them turned a
+    /// Buddhist 2026-09-18 into a boundary in **2569**, which every comment
+    /// falls before — so every bounded window reported 0 *and* looked proven
+    /// doing it, since an oldest reading of 2026 duly precedes a boundary five
+    /// centuries out. `day` pins its own calendar and locale for exactly this
+    /// reason and this now inherits that rather than restating it.
+    static func vendorInstant(_ start: Date) -> Date? { utcDay.date(from: day.string(from: start)) }
+
+    /// `day`'s format read in UTC, which is what turns its local date into the
+    /// midnight `Z` the query strings name.
+    private static let utcDay: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     private static let utcMidnight = "T00:00:00Z"
 }
 
@@ -92,14 +120,18 @@ enum ForgeAlias {
 /// Reads one forge connection's activity counters.
 ///
 /// **One request per poll where the vendor allows it, and never one per
-/// repository.** Measured 2026-09-17: GitHub answers every period's
-/// contribution total, merged-pull-request count and opened-issue count in a
-/// single GraphQL document costing 1 point of 5000 per hour; GitLab takes two
-/// GraphQL documents — the second only because the login the first returns is
-/// what the root `issues` field filters on — plus each period's activity total
-/// in the `x-total` header of a one-row REST page, which is six small requests.
-/// A reader that asked per repository would be spending a request on each of
-/// the thirty-odd repositories a real day touches, for three numbers.
+/// repository.** Measured 2026-09-17 and re-measured 2026-09-18 with the
+/// comment counter on: GitHub answers every period's contribution total,
+/// merged-pull-request count, opened-issue count **and comment count** in a
+/// single GraphQL document still costing 1 point of 5000 per hour — the
+/// comments ride in as a page of the account's own, counted here rather than
+/// at the vendor, so the fourth counter costs no request at all. GitLab takes
+/// two GraphQL documents — the second only because the login the first returns
+/// is what the root `issues` field filters on — plus two `x-total` header reads
+/// per period, the activity total and the same filtered to `commented`, which
+/// is ten small requests. A reader that asked per repository would be spending
+/// a request on each of the thirty-odd repositories a real day touches, for
+/// four numbers.
 ///
 /// The failure vocabulary is `ForgeReadFailure` rather than HTTP's, because the
 /// row has to say what the user can do about it and "the VPN is off" and "the
@@ -263,14 +295,17 @@ enum GitHubActivityFeed {
     /// rather than per field: measured 2026-09-17, four contribution ranges and
     /// eight searches together still cost 1 point of the 5000 an hour, because
     /// a `search` asked for `first: 1` is one request node whatever it counts.
+    /// Re-measured 2026-09-18 with a hundred-comment page added to the same
+    /// `viewer`: still 1 point.
     static func document(now: Date) -> String {
-        let contributions = UsagePeriod.allCases.map { period in
-            let range =
-                ForgeWindow.start(of: period, now: now)
-                .map { "(from: \"\(ForgeWindow.vendorDay($0))\")" } ?? ""
-            let alias = ForgeAlias.contributions(period)
-            return "\(alias): contributionsCollection\(range) { \(calendarField) }"
-        }
+        let contributions =
+            UsagePeriod.allCases.map { period in
+                let range =
+                    ForgeWindow.start(of: period, now: now)
+                    .map { "(from: \"\(ForgeWindow.vendorDay($0))\")" } ?? ""
+                let alias = ForgeAlias.contributions(period)
+                return "\(alias): contributionsCollection\(range) { \(calendarField) }"
+            } + [commentField]
         let searches = UsagePeriod.allCases.flatMap { period -> [String] in
             let since =
                 ForgeWindow.start(of: period, now: now)
@@ -305,6 +340,101 @@ enum GitHubActivityFeed {
 
     private static let calendarField = "contributionCalendar { totalContributions }"
 
+    /// The alias the comment page comes back under. Its own name rather than
+    /// one of `ForgeAlias`'s, because there is one page for every window
+    /// instead of a field each — the windows are cut out of it here.
+    static let commentsAlias = "comments"
+    /// How many comments one page carries, which is the connection's own
+    /// ceiling: GraphQL refuses `first:` above 100.
+    static let commentPage = 100
+    /// One page of the account's own comments, newest-updated first.
+    ///
+    /// Ordered by `UPDATED_AT` because that is the only order this connection
+    /// offers, and it is the order the coverage proof in `commentCounts` needs
+    /// — not because the row cares when a comment was edited. `totalCount` is
+    /// what answers the widest window, and it is exact however short the page
+    /// falls.
+    private static let commentField =
+        "\(commentsAlias): issueComments(first: \(commentPage),"
+        + " orderBy: {field: UPDATED_AT, direction: DESC})"
+        + " { totalCount pageInfo { hasNextPage } nodes { createdAt updatedAt } }"
+
+    /// Every window's comment count, cut out of the one page the document
+    /// carries.
+    ///
+    /// **GitHub will not total this, so it is counted rather than asked for.**
+    /// Measured 2026-09-18 across all 1 829 types of the live schema: 18 fields
+    /// return a comment connection, **none** takes a date argument, and the
+    /// four rooted on `User` (`issueComments`, `commitComments`, `gistComments`,
+    /// `repositoryDiscussionComments`) offer only `orderBy` and paging — every
+    /// other one hangs off a repository or a thread, which is the
+    /// request-per-repository this reader exists not to do. The search that
+    /// looks like the answer is not one: `commenter:@me` counts *threads* and
+    /// `updated:` dates the thread rather than the comment, which read 35 and
+    /// 53 against the 44 and 71 actually written — and `commented:` is not a
+    /// qualifier at all, answering 0 exactly as an invented one does, on
+    /// `ISSUE`, `ISSUE_ADVANCED` and `ISSUE_HYBRID` alike.
+    ///
+    /// **The page carries its own proof of coverage**, which is what makes one
+    /// request enough. Nodes come back newest-updated first and nothing can be
+    /// created after it was updated, so once the oldest `updatedAt` on the page
+    /// precedes a window's start, no comment left unread can fall inside that
+    /// window. A window the page cannot prove is **absent rather than a lower
+    /// bound** — this type's own rule, and the reason a busy month may leave
+    /// the figure off while the three beside it answer. Measured 2026-09-18 on
+    /// an account holding 133 comments: one page answered 0 today, 44 over
+    /// seven days and 71 over thirty, which is what reading all 133 answers,
+    /// and it filled 71 of its 100 rows doing it.
+    ///
+    /// **Four things break the proof and every one of them fails to absent**,
+    /// because each would otherwise report a short count as an exact one. The
+    /// page not reaching back far enough is the ordinary case. A `hasNextPage`
+    /// this build cannot read is the second, and it defaults to *unread*: the
+    /// question the flag answers is whether anything is missing, so a flag that
+    /// is missing has to be read as a yes. A node whose stamps will not parse
+    /// is the third and the least obvious — dropping it quietly removes it from
+    /// the tally *and* from the oldest-`updatedAt` the proof rests on, so a
+    /// window could still look proven while being one comment short. A `nodes`
+    /// that will not read as an array of objects at all is the fourth, and it
+    /// is deliberately **not** the same as an empty one: GraphQL answers a
+    /// partial failure with a null in place of the field, so reading that as
+    /// "no comments, page complete" would publish a confident zero for every
+    /// window out of a reply that carried nothing. The
+    /// boundary comparison is strict for the same reason: a comment created and
+    /// never edited exactly on it would sit outside a page that reached only as
+    /// far as that instant. Only the widest window survives all three, because
+    /// `totalCount` is the connection's own and owes the page nothing.
+    static func commentCounts(_ viewer: [String: Any], now: Date) -> [UsagePeriod: Int] {
+        guard let block = viewer[commentsAlias] as? [String: Any] else { return [:] }
+        let nodes = block["nodes"] as? [[String: Any]]
+        let stamps = (nodes ?? []).compactMap { node -> (created: Date, updated: Date)? in
+            guard
+                let created = (node["createdAt"] as? String)
+                    .flatMap(UsageReaderShared.parseTimestamp),
+                let updated = (node["updatedAt"] as? String)
+                    .flatMap(UsageReaderShared.parseTimestamp)
+            else { return nil }
+            return (created, updated)
+        }
+        let total = block["totalCount"] as? Int
+        let unread = (block["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool ?? true
+        let everyNodeRead = nodes.map { stamps.count == $0.count } ?? false
+        let oldestRead = stamps.map(\.updated).min()
+        var counts: [UsagePeriod: Int] = [:]
+        for period in UsagePeriod.allCases {
+            guard let start = ForgeWindow.start(of: period, now: now) else {
+                counts[period] = total
+                continue
+            }
+            guard let boundary = ForgeWindow.vendorInstant(start) else { continue }
+            guard everyNodeRead,
+                !unread || (oldestRead.map { $0 < boundary } ?? false)
+            else { continue }
+            counts[period] = stamps.filter { $0.created >= boundary }.count
+        }
+        return counts
+    }
+
     private static func issueCount(_ payload: [String: Any], _ alias: String) -> Int? {
         (payload[alias] as? [String: Any])?["issueCount"] as? Int
     }
@@ -328,23 +458,24 @@ enum GitHubActivityFeed {
             if let count = issueCount(payload, ForgeAlias.merged(period)) { merged[period] = count }
             if let count = issueCount(payload, ForgeAlias.issues(period)) { issues[period] = count }
         }
+        let comments = commentCounts(viewer, now: now)
         // A reply that named the account and no figure at all is a shape this
         // build does not understand rather than a quiet week.
-        guard !contributions.isEmpty || !merged.isEmpty || !issues.isEmpty else {
+        guard !contributions.isEmpty || !merged.isEmpty || !issues.isEmpty || !comments.isEmpty
+        else {
             throw ForgeReadFailure.malformed
         }
         return ForgeActivityReading(
             id: connection.id, kind: connection.kind, host: connection.host, login: login,
             activity: ForgeActivity(
-                contributions: contributions, merged: merged, issues: issues,
+                contributions: contributions, merged: merged, issues: issues, comments: comments,
                 contributionsBoundedToOneYear: true),
             readAt: now, failure: nil)
     }
-
 }
 
-/// GitLab's half: one GraphQL query for the merged counts, and one header read
-/// per period for the activity total.
+/// GitLab's half: one GraphQL query for the merged counts, and two header reads
+/// per period — the activity total, and the same filtered to comments.
 ///
 /// **GitLab publishes no contribution total Sissy can read.** Its own profile
 /// squares come from `users/<name>/calendar.json`, which is a web route rather
@@ -374,15 +505,25 @@ enum GitLabActivityFeed {
         // for here rather than four requests later.
         try Task.checkCancellation()
         var contributions: [UsagePeriod: Int] = [:]
+        var comments: [UsagePeriod: Int] = [:]
+        // The two reads of a period go together rather than one after the
+        // other: the comment counter doubled the header reads and would
+        // otherwise have doubled the wall clock with them, on a self-hosted
+        // instance that is reached over a tunnel and is the slow half of this
+        // reader already. A period is still awaited before the next starts, so
+        // the instance sees two requests at a time rather than eight.
         for period in UsagePeriod.allCases {
-            contributions[period] = try await events(
+            async let total = events(connection, token: token, period: period, now: now)
+            async let commented = commentEvents(
                 connection, token: token, period: period, now: now)
+            contributions[period] = try await total
+            comments[period] = await commented
         }
         return ForgeActivityReading(
             id: connection.id, kind: connection.kind, host: connection.host, login: merged.username,
             activity: ForgeActivity(
                 contributions: contributions, merged: merged.counts, issues: issues,
-                contributionsBoundedToOneYear: false),
+                comments: comments, contributionsBoundedToOneYear: false),
             readAt: now, failure: nil)
     }
 
@@ -493,7 +634,9 @@ enum GitLabActivityFeed {
     /// a window starting on a day is asked for by naming the day before it.
     /// Measured 2026-09-17, `after=2026-09-17` answered `x-total: 0` on a day
     /// that had 95 events.
-    static func eventsURL(_ connection: ForgeConnection, period: UsagePeriod, now: Date) -> URL? {
+    static func eventsURL(
+        _ connection: ForgeConnection, period: UsagePeriod, now: Date, action: String? = nil
+    ) -> URL? {
         guard let root = connection.root,
             var components = URLComponents(
                 url: root.appendingPathComponent(apiPath), resolvingAgainstBaseURL: false)
@@ -504,14 +647,41 @@ enum GitLabActivityFeed {
         {
             query.append(URLQueryItem(name: "after", value: ForgeWindow.day.string(from: exclusive)))
         }
+        if let action { query.append(URLQueryItem(name: "action", value: action)) }
         components.queryItems = query
         return components.url
     }
 
-    private static func events(
+    /// One period's comment count, off the same header as the events total.
+    ///
+    /// GitLab files a comment as an event, so the count is the contributions
+    /// query with one filter on it — which also means it is a **part of** the
+    /// figure beside it rather than something new: measured 2026-09-18, 14 of
+    /// one week's 525 events and 62 of the month's 1 036.
+    ///
+    /// Non-throwing for the reason `issueCounts` is. `action` is an enumerated
+    /// filter and an instance that will not serve this one answers 400, which
+    /// would otherwise throw away a reading that already carries the
+    /// contributions, the merges, the issues and the account over its newest
+    /// counter. A period that could not be read is absent, never zero.
+    private static func commentEvents(
         _ connection: ForgeConnection, token: String, period: UsagePeriod, now: Date
+    ) async -> Int? {
+        guard
+            let count = try? await events(
+                connection, token: token, period: period, now: now, action: commentedAction)
+        else { return nil }
+        return count
+    }
+
+    /// GitLab's own name for the event a comment files.
+    static let commentedAction = "commented"
+
+    private static func events(
+        _ connection: ForgeConnection, token: String, period: UsagePeriod, now: Date,
+        action: String? = nil
     ) async throws -> Int? {
-        guard let url = eventsURL(connection, period: period, now: now) else {
+        guard let url = eventsURL(connection, period: period, now: now, action: action) else {
             throw ForgeReadFailure.malformed
         }
         let request = ForgeActivityFeed.request(
@@ -522,5 +692,4 @@ enum GitLabActivityFeed {
         let (_, response) = try await ForgeActivityFeed.send(request)
         return response.value(forHTTPHeaderField: totalHeader).flatMap(Int.init)
     }
-
 }

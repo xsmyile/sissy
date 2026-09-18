@@ -1192,6 +1192,21 @@ extension UsageFormat {
         "Issues you opened on " + forgeName(kind)
     }
 
+    /// What the mark beside the comment count means.
+    ///
+    /// Each vendor's own scope rather than one sentence for both, because the
+    /// two are not the same set and the row is where somebody would otherwise
+    /// assume they are: GitHub's figure is comments on issues and on pull
+    /// request conversations and cannot include a review left on a diff, where
+    /// GitLab's is everything it filed as a comment. Naming the surfaces is
+    /// also what keeps the hover honest about the one it leaves out.
+    static func forgeCommentsHelp(_ kind: ForgeKind) -> String {
+        switch kind {
+        case .gitHub: "Comments you wrote on issues and pull requests"
+        case .gitLab: "Comments you wrote on issues and merge requests"
+        }
+    }
+
     /// What a row says instead of, or beside, its figures.
     ///
     /// A refused token and a host that could not be reached are separate
