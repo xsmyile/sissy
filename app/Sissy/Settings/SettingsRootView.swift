@@ -71,9 +71,14 @@ struct SettingsRootView: View {
         // a scroll view underneath it is scrolled off the top — so General,
         // whose `Form` is one, and About, which has none and can never report
         // "at the top", disagreed about whether to draw a band under the tabs.
-        // A tab at the ceiling does scroll, and gives up that band to keep the
-        // three tabs drawing the same chrome.
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        // Visible settles that the other way round, and it is the only one of
+        // the two that a tab at the ceiling can afford: measured 2026-09-18 on
+        // macOS 27, against a harness reproducing this scene, hiding the band
+        // drew a scrolled tab's rows through the tab strip at every offset.
+        // The scroll edge effect is not a way to keep both — hiding the
+        // toolbar background hides it too, and the same harness drew the rows
+        // through the strip again with `.hard` asked for explicitly.
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
     }
 
     private func tab<Content: View>(
