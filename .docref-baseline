@@ -13,6 +13,7 @@ LSUIElement
 M
 Material.bar
 NSPanel
+NSWorkspace.runningApplications
 Optional
 PATH_MAX
 RTLD_DEFAULT
@@ -37,3 +38,4 @@ sizeThatFits
 systemRed
 totalIssueContributions
 willSet
+yieldActivation
