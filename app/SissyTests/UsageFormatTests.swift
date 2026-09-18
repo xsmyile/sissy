@@ -342,31 +342,28 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(plan?.tier, "Business Edu")
     }
 
-    func testResetLabelUsesAClockTimeLaterToday() throws {
+    func testResetLabelCountsDownRatherThanNamingTheHour() throws {
         let clock = try fixedClock()
-        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .hour, value: 4, to: clock.now))
-        XCTAssertEqual(
-            UsageFormat.resetLabel(reset, now: clock.now, calendar: clock.calendar),
-            reset.formatted(.dateTime.hour().minute())
-        )
+        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .minute, value: 267, to: clock.now))
+
+        XCTAssertEqual(UsageFormat.resetLabel(reset, now: clock.now), "in 4h 27m")
     }
 
-    /// The window that exposed the 24-hour horizon: three hours out, but on
-    /// tomorrow's page of the calendar, where a bare clock time reads as a
-    /// time this morning that has already passed.
-    func testResetLabelUsesAWeekdayOnceTheResetIsNotToday() throws {
-        let clock = try fixedClock(hour: 22)
-        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .hour, value: 3, to: clock.now))
-        XCTAssertEqual(
-            UsageFormat.resetLabel(reset, now: clock.now, calendar: clock.calendar),
-            reset.formatted(.dateTime.weekday(.abbreviated))
-        )
+    /// The window this was changed for: 2h 27m from its reset, on tomorrow's
+    /// page of the calendar, where the weekday it used to print was the same
+    /// two words a window six days out would get — a five-hour period read as
+    /// a daily one. Measured 2026-09-18 at 23:52 on both providers at once.
+    func testResetLabelSaysHowLongEvenAcrossMidnight() throws {
+        let clock = try fixedClock(hour: 23)
+        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .minute, value: 147, to: clock.now))
+
+        XCTAssertEqual(UsageFormat.resetLabel(reset, now: clock.now), "in 2h 27m")
     }
 
-    /// The notice's deadline is an hour away at most, so it is always a time
-    /// of day. Worded through `resetLabel` it inherited that rule's weekday
-    /// form — measured, a 1800 s block beginning at 23:50 read "until Fri",
-    /// which is the same half-hour described as two days.
+    /// The notice's deadline is worded "until", which takes a moment rather
+    /// than a duration. The two were once the same call, and it read a
+    /// deadline in whole days — measured, a 1800 s block beginning at 23:50
+    /// said "until Fri", the same half-hour described as two days.
     func testARateLimitNoticeNamesATimeRatherThanADay() throws {
         let clock = try fixedClock(hour: 23)
         let until = try XCTUnwrap(
@@ -382,13 +379,25 @@ final class UsageFormatTests: XCTestCase {
         )
     }
 
-    func testResetLabelUsesAWeekdayDaysOut() throws {
+    /// A weekly window answers in the same unit as the pace beside it, which
+    /// is what lets "Runs out in 1d 9h · resets in 5d 14h" be read as one
+    /// comparison instead of a duration and a date.
+    func testResetLabelSpeaksTheSameUnitAsThePaceDaysOut() throws {
         let clock = try fixedClock()
-        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .day, value: 3, to: clock.now))
-        XCTAssertEqual(
-            UsageFormat.resetLabel(reset, now: clock.now, calendar: clock.calendar),
-            reset.formatted(.dateTime.weekday(.abbreviated))
-        )
+        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .minute, value: 8040, to: clock.now))
+
+        XCTAssertEqual(UsageFormat.resetLabel(reset, now: clock.now), "in 5d 14h")
+    }
+
+    /// The caption is re-read on its own clock while `hasRolledOver` is frozen
+    /// at the snapshot, so this is the only half that can notice the crossing.
+    /// "in 0m" there would be the formatter saying a period is about to turn
+    /// over when it already has, on a row that has stopped drawing its bar.
+    func testResetLabelSaysNothingOnceTheResetIsPast() throws {
+        let clock = try fixedClock()
+        let reset = try XCTUnwrap(clock.calendar.date(byAdding: .second, value: -1, to: clock.now))
+
+        XCTAssertNil(UsageFormat.resetLabel(reset, now: clock.now))
     }
 
     // MARK: Archive window

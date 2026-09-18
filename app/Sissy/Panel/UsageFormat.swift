@@ -247,8 +247,9 @@ enum UsageFormat {
     private static let minutesPerSession = 300
     private static let minutesPerWeek = 10_080
 
-    /// The line under a limit bar: the pace where there is one, and when the
-    /// window rolls over, joined.
+    /// The line under a limit bar: the pace where there is one, and how long
+    /// until the window rolls over, joined. Both halves are durations off the
+    /// same `now`, which is what lets them be read against each other.
     ///
     /// Nil for a window the vendor has not started, which has neither — the
     /// bar at zero is the whole statement, and a caption saying so twice is
@@ -256,11 +257,10 @@ enum UsageFormat {
     ///
     /// A window that has rolled over since the reading says so instead, and in
     /// the past tense: everything else on that row describes the period that
-    /// ended, and "resets 14:30" for a time already gone reads as a countdown
-    /// still running. It is dated through `observedLabel` rather than
-    /// `resetLabel` because the question has turned from "when does this end"
-    /// into "how old is this", and a bare weekday for a date in the past
-    /// cannot say which week it belongs to.
+    /// ended, and a countdown to a reset already gone counts down to nothing.
+    /// It is dated through `observedLabel` rather than `resetLabel` because
+    /// the question has turned from "how long has this got" into "when did
+    /// this end", which is a moment rather than a duration.
     static func windowCaption(
         _ window: UsagePanelSnapshot.WindowRow,
         now: Date = Date(),
@@ -273,31 +273,43 @@ enum UsageFormat {
         }
         var parts: [String] = []
         if let pace = window.pace {
-            parts.append(paceCaption(deltaPercent: pace.deltaPercent, runsOutAt: pace.runsOutAt))
+            parts.append(
+                paceCaption(
+                    deltaPercent: pace.deltaPercent, runsOutAt: pace.runsOutAt, now: now))
         }
-        if let resetsAt = window.resetsAt {
-            parts.append("resets " + resetLabel(resetsAt, now: now, calendar: calendar))
+        if let resetsAt = window.resetsAt, let label = resetLabel(resetsAt, now: now) {
+            parts.append("resets " + label)
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    /// When a window rolls over. A clock time while that is unambiguous, the
-    /// weekday once it is not — a bare "13:00" three days out reads as today.
+    /// How long a window has left, rather than the moment it ends.
     ///
-    /// The cut is the calendar day rather than a 24-hour horizon: at 22:00 a
-    /// five-hour window resetting at 01:00 is three hours away, and "01:00"
-    /// there reads as this morning, already past. The weekday carries no
-    /// clock time because the panel gives this column 74 points and the
-    /// window's own label shares them.
-    static func resetLabel(
-        _ resetsAt: Date,
-        now: Date = Date(),
-        calendar: Calendar = .current
-    ) -> String {
-        if calendar.isDate(resetsAt, inSameDayAs: now) {
-            return resetsAt.formatted(.dateTime.hour().minute())
-        }
-        return resetsAt.formatted(.dateTime.weekday(.abbreviated))
+    /// A clock time and a weekday both answer "when", and neither answers "how
+    /// much longer" — which is the only form this reading is acted on in, and
+    /// the whole of what the row is asked. The weekday could not even bound
+    /// it: measured 2026-09-18 at 23:52, a session 2h 27m from its reset said
+    /// "resets Sat", the same two words a window six days out would get, and
+    /// Codex's own session — resetting at 04:38 the next morning — said them
+    /// too. A five-hour period described as a weekday reads as a daily one.
+    ///
+    /// What the weekday was there for was real: the cut was the calendar day
+    /// rather than a 24-hour horizon because at 22:00 a bare "01:00" three
+    /// hours out reads as this morning, already past. A duration has neither
+    /// failure, and it is the unit the pace beside it already speaks, so
+    /// "Runs out in 1d 9h · resets in 5d 14h" is one comparison rather than
+    /// two clocks the reader converts between.
+    ///
+    /// Nil past the reset rather than "in 0m", which is the formatter claiming
+    /// a period is about to turn over when it already has. That state has its
+    /// own wording, and the row draws no bar under it — a window with nothing
+    /// left to count has no duration to answer in, so this says nothing rather
+    /// than saying zero. Optional rather than left to the caller because the
+    /// caption's own `hasRolledOver` is frozen at the snapshot while this is
+    /// re-read on the clock, and only one of the two can notice the crossing.
+    static func resetLabel(_ resetsAt: Date, now: Date = Date()) -> String? {
+        guard resetsAt >= now else { return nil }
+        return "in " + countdown(resetsAt.timeIntervalSince(now))
     }
 
     /// The line under a limit bar: how far off even consumption the window is,
@@ -564,11 +576,11 @@ enum UsageFormat {
     /// is still the most important of them, since it is the only state where
     /// the windows themselves stay on screen with an age that keeps growing.
     ///
-    /// Its deadline is a clock time and deliberately not `resetLabel`, which
-    /// turns into a bare weekday once the instant is not on today's page of
-    /// the calendar. That rule is for a reset days out; this one is an hour
-    /// away at most, so the question is never which day — measured, a 1800 s
-    /// block beginning at 23:50 read "until Fri".
+    /// Its deadline is a clock time and deliberately not `resetLabel`: the
+    /// sentence says "until", which takes a moment, where that one answers in
+    /// how long. The two were once the same call, and it read the deadline in
+    /// whole days — measured, a 1800 s block beginning at 23:50 said "until
+    /// Fri", which is the same half-hour described as two days.
     /// Why a row has no reading, in the vendor's own words.
     ///
     /// Provider-aware because every sentence here names something: the CLI
@@ -928,9 +940,11 @@ enum UsageFormat {
     }
 
     /// When a cached reading was taken. A clock time for today, the weekday
-    /// and the time once it is not — the same cut `resetLabel` makes, but
-    /// keeping the clock, because this column is the width of a caption and
-    /// "how old" is the whole point of it.
+    /// and the time once it is not.
+    ///
+    /// A moment rather than the elapsed duration `resetLabel` answers in: a
+    /// reading dated "3d 4h ago" is a subtraction the reader has to undo to
+    /// place it, where a reset is only ever asked how far off it is.
     static func observedLabel(
         _ observedAt: Date,
         now: Date = Date(),

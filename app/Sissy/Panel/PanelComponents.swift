@@ -278,37 +278,62 @@ struct WindowRowView: View {
         window.hasRolledOver ? AnyShapeStyle(.tertiary) : AnyShapeStyle(emphasis)
     }
 
+    /// The whole row ticks, rather than the caption inside it.
+    ///
+    /// The caption needs a clock: both its halves are durations now, and one
+    /// built with the body is true only for as long as the body is — the
+    /// engine coalesces emits, so a Mac nobody is typing on leaves the line
+    /// sitting at "resets in 2h 27m" for as long as the panel is open. It is
+    /// what `ForgeRowView.notice` does with its own age, for the same reason.
+    ///
+    /// Wrapping the caption alone is what that row can afford and this one
+    /// cannot: a `TimelineView` is a child the stack spaces whether or not its
+    /// content renders, and this caption is nil on a window the vendor has not
+    /// started. Measured 2026-09-19 on this stack's shape at 312 pt, the two
+    /// agree at 38.00 pt with a caption and read 22.00 against 25.00 without
+    /// one — three points of gap under a bar with nothing to say. Around the
+    /// body the conditional is a direct child again and both match the bare
+    /// stack.
+    ///
+    /// A minute rather than `ForgeRowView`'s second, because `countdown`
+    /// resolves to minutes and a tick nothing can see still costs a layout and
+    /// a rasterization — the cost `UsagePanelController` drops the whole host
+    /// to avoid paying while the panel is shut.
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
-                Text(window.label)
-                    .font(.system(size: 11, weight: weight))
-                    .foregroundStyle(emphasis)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        TimelineView(.periodic(from: .now, by: Self.captionTick)) { context in
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(window.label)
+                        .font(.system(size: 11, weight: weight))
+                        .foregroundStyle(emphasis)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                Text(window.hasRolledOver ? "—" : window.reading)
-                    .font(.system(size: 11, weight: weight))
-                    .monospacedDigit()
-                    .foregroundStyle(readingStyle)
-                    .layoutPriority(1)
-            }
+                    Text(window.hasRolledOver ? "—" : window.reading)
+                        .font(.system(size: 11, weight: weight))
+                        .monospacedDigit()
+                        .foregroundStyle(readingStyle)
+                        .layoutPriority(1)
+                }
 
-            if !window.hasRolledOver {
-                ShareBar(share: window.fraction, tint: tint, pace: window.pace)
-            }
+                if !window.hasRolledOver {
+                    ShareBar(share: window.fraction, tint: tint, pace: window.pace)
+                }
 
-            if let caption = UsageFormat.windowCaption(window) {
-                Text(caption)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                if let caption = UsageFormat.windowCaption(window, now: context.date) {
+                    Text(caption)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
         }
     }
+
+    private static let captionTick: TimeInterval = 60
 }
 
 /// The account's plan, badged rather than set as plain text beside the name:
