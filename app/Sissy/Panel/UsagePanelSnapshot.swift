@@ -740,6 +740,53 @@ struct UsagePanelSnapshot: Equatable {
             /// How far back the archive actually reaches inside this window,
             /// or nil where it covers the whole of it.
             let coverage: String?
+            /// How long the window was worked, and how much of that its
+            /// sub-agents were.
+            let activity: ActivityTotals
+            /// What the window cost, which is only here so the page can put a
+            /// price on an hour of it. Never drawn on its own: the money is
+            /// the headline's question and this page is not the headline.
+            let cost: Decimal
+            /// The day's own shape, for the strip.
+            ///
+            /// **Today only.** A strip is a picture of one day, and a window
+            /// of thirty has no single day to draw — a strip per day is the
+            /// spend bar this panel already removed, and one strip averaging
+            /// thirty is a day nobody worked. The caption under it reads
+            /// `activity` instead, which carries its block count for every
+            /// window.
+            let shape: DayShape?
+
+            init(
+                counts: AgentCounts, byProvider: [ProviderCount], coverage: String?,
+                activity: ActivityTotals = .none, cost: Decimal = 0, shape: DayShape? = nil
+            ) {
+                self.counts = counts
+                self.byProvider = byProvider
+                self.coverage = coverage
+                self.activity = activity
+                self.cost = cost
+                self.shape = shape
+            }
+        }
+
+        /// One day's blocks, as the strip draws them.
+        ///
+        /// Minutes rather than fractions, and the day's own length beside
+        /// them, because a local day is 1380 or 1500 minutes across a
+        /// daylight-saving change and a strip drawn against a fixed 1440 would
+        /// put that day's evening past its own right edge.
+        struct DayShape: Equatable {
+            let blocks: [ClosedRange<Int>]
+            let dayMinutes: Int
+
+            /// Where a block sits along the strip, as a fraction of the day.
+            func span(_ block: ClosedRange<Int>) -> ClosedRange<Double> {
+                let width = Double(max(dayMinutes, 1))
+                let start = min(Double(block.lowerBound) / width, 1)
+                let end = min(Double(block.upperBound + 1) / width, 1)
+                return start...max(end, start)
+            }
         }
 
         struct Live: Equatable {
@@ -785,6 +832,22 @@ struct UsagePanelSnapshot: Equatable {
             /// How many of this vendor's processes are running now, which is
             /// the live half of the same row.
             let running: Int
+            /// How long this vendor alone was working. The rows can add up to
+            /// more than the figure above them, and that is the reading rather
+            /// than a rounding: two CLIs working in the same minute are one
+            /// minute of the day and one minute of each of theirs.
+            let activity: ActivityTotals
+
+            init(
+                id: String, name: String, counts: AgentCounts, running: Int,
+                activity: ActivityTotals = .none
+            ) {
+                self.id = id
+                self.name = name
+                self.counts = counts
+                self.running = running
+                self.activity = activity
+            }
         }
 
         /// The window a page opens on when nothing has been chosen.
@@ -806,15 +869,23 @@ struct UsagePanelSnapshot: Equatable {
     /// heading would be today's figure wearing another window's label.
     static func makeAgents(_ frame: FrameData, now: Date) -> AgentsBlock {
         let running = frame.agentMemory?.current.agents ?? []
+        // Unioned rather than summed, because two CLIs working in the same
+        // minute are one minute of the day.
+        let shape = frame.providers.reduce(into: AgentActivityDay.none) { $0.formUnion($1.activity) }
         let today = AgentsBlock.Window(
             counts: frame.providers.reduce(into: AgentCounts.none) { $0.add($1.agents) },
             byProvider: frame.providers.map { slice in
                 AgentsBlock.ProviderCount(
                     id: slice.id, name: UsageFormat.providerName(slice.id),
                     counts: slice.agents,
-                    running: running.count { $0.provider == slice.id })
+                    running: running.count { $0.provider == slice.id },
+                    activity: ActivityTotals(slice.activity))
             },
-            coverage: nil)
+            coverage: nil,
+            activity: ActivityTotals(shape),
+            cost: frame.cost,
+            shape: AgentsBlock.DayShape(
+                blocks: shape.blocks, dayMinutes: Self.minutesInDay(containing: now)))
         var counted: [UsagePeriod: AgentsBlock.Window] = [.today: today]
         for (period, rollup) in frame.history {
             counted[period] = AgentsBlock.Window(
@@ -823,10 +894,13 @@ struct UsagePanelSnapshot: Equatable {
                     .map { id, counts in
                         AgentsBlock.ProviderCount(
                             id: id, name: UsageFormat.providerName(id), counts: counts,
-                            running: running.count { $0.provider == id })
+                            running: running.count { $0.provider == id },
+                            activity: rollup.activityByProvider[id] ?? .none)
                     }
                     .sorted { $0.name < $1.name },
-                coverage: UsageFormat.periodCoverage(rollup, now: now))
+                coverage: UsageFormat.periodCoverage(rollup, now: now),
+                activity: rollup.activity,
+                cost: rollup.cost)
         }
         return AgentsBlock(
             live: frame.agentMemory.map { memory in
@@ -846,6 +920,18 @@ struct UsagePanelSnapshot: Equatable {
             },
             counted: counted,
             periods: [.today] + UsagePeriod.archived.filter { counted[$0] != nil })
+    }
+
+    /// How many minutes the local day holding `instant` is made of, which is
+    /// 1440 except across a daylight-saving change.
+    private static func minutesInDay(containing instant: Date, calendar: Calendar = .current)
+        -> Int
+    {
+        let start = calendar.startOfDay(for: instant)
+        guard let next = calendar.date(byAdding: .day, value: 1, to: start) else {
+            return ActivityMinutes.minutesPerDay
+        }
+        return Int(next.timeIntervalSince(start) / 60)
     }
 
     /// Every project a day names, unfolded, for the page behind the section's

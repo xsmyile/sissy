@@ -34,6 +34,9 @@ struct PanelStats: View {
     private static let rowSize: CGFloat = 12
     private static let sparklineHeight: CGFloat = 26
     private static let figureSpacing: CGFloat = 28
+    private static let stripHeight: CGFloat = 8
+    private static let stripSpacing: CGFloat = 5
+    private static let stripCorner: CGFloat = 2
 
     /// The chosen window, falling back to today for a period the archive has
     /// stopped answering for while the page was open.
@@ -152,7 +155,9 @@ struct PanelStats: View {
                 HStack(alignment: .top, spacing: Self.figureSpacing) {
                     figure(shown.counts.sessions, singular: "session", plural: "sessions")
                     figure(shown.counts.agents, singular: "agent", plural: "agents")
+                    worked(shown.activity)
                 }
+                if shown.activity.activeMinutes > 0 { strip(shown) }
                 if !shown.byProvider.isEmpty {
                     VStack(alignment: .leading, spacing: Self.rowSpacing) {
                         ForEach(shown.byProvider) { providerRow($0) }
@@ -179,6 +184,71 @@ struct PanelStats: View {
         }
     }
 
+    /// The worked figure, which is a duration where the two beside it are
+    /// counts — hence its own builder rather than `figure`'s plural.
+    ///
+    /// A dash for a window the archive has no shape for, which is every day
+    /// written before this shipped and every day Sissy was not running: an
+    /// unmeasured day is not a day of no work, and the panel draws the two
+    /// differently everywhere else.
+    private func worked(_ activity: ActivityTotals) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(
+                activity.activeMinutes > 0
+                    ? UsageFormat.workedDuration(minutes: activity.activeMinutes) : "—"
+            )
+            .font(.system(size: Self.headlineSize, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .contentTransition(.numericText())
+            .foregroundStyle(activity.activeMinutes > 0 ? Color.primary : .secondary)
+            Text("active")
+                .font(.system(size: Self.captionSize))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// When the day was worked, as blocks along a bar of the whole day.
+    ///
+    /// The picture answers what the figure cannot — whether twelve hours were
+    /// one stretch or seven — and it is drawn only for today, because a window
+    /// of thirty days has no single day to be a picture of.
+    ///
+    /// One intensity, not two. Inside a block the session's own turns and its
+    /// sub-agents' alternate every few minutes, and across a bar this wide
+    /// that alternation is finer than a pixel: it would draw as a moiré rather
+    /// than as a reading, so the delegated share is a clause in the caption
+    /// where it can be read.
+    @ViewBuilder
+    private func strip(_ window: UsagePanelSnapshot.AgentsBlock.Window) -> some View {
+        VStack(alignment: .leading, spacing: Self.stripSpacing) {
+            if let shape = window.shape {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.secondary.opacity(0.15))
+                        ForEach(shape.blocks, id: \.lowerBound) { block in
+                            let span = shape.span(block)
+                            RoundedRectangle(cornerRadius: Self.stripCorner)
+                                .fill(Color.accentColor)
+                                .frame(
+                                    width: max(
+                                        (span.upperBound - span.lowerBound) * geometry.size.width,
+                                        Self.stripCorner)
+                                )
+                                .offset(x: span.lowerBound * geometry.size.width)
+                        }
+                    }
+                }
+                .frame(height: Self.stripHeight)
+                .accessibilityLabel("Worked \(shape.blocks.count) times today")
+            }
+            Text(UsageFormat.activityCaption(window.activity, cost: window.cost))
+                .font(.system(size: Self.captionSize))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private func providerRow(_ row: UsagePanelSnapshot.AgentsBlock.ProviderCount) -> some View {
         HStack(spacing: 6) {
             ProviderMark(id: row.id)
@@ -191,6 +261,9 @@ struct PanelStats: View {
                     row.counts.sessions, singular: "session", plural: "sessions") + " · "
                     + UsageFormat.agentCount(
                         row.counts.agents, singular: "agent", plural: "agents")
+                    + (row.activity.activeMinutes > 0
+                        ? " · " + UsageFormat.workedDuration(minutes: row.activity.activeMinutes)
+                        : "")
             )
             .font(.system(size: Self.rowSize))
             .monospacedDigit()
