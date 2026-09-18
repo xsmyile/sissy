@@ -1189,6 +1189,57 @@ extension UsageFormat {
         formatter.setLocalizedDateFormatFromTemplate("jm")
         return "since \(formatter.string(from: since))"
     }
+
+    /// A worked duration, in the shape the figure beside it is read at a
+    /// glance: `12h03` above an hour, `47m` below one.
+    ///
+    /// Zero-padded minutes above the hour so a column of days stays aligned
+    /// and `9h05` cannot be misread as `9h50`.
+    ///
+    /// Deliberately not `countdown`, on the grounds that one is deliberately
+    /// not `held`: that reads "12h 3m", two tokens sized to what is left of
+    /// something, where this is a headline figure standing beside two counts
+    /// and changing width with the window a click away — `78h12` for a week.
+    static func workedDuration(minutes: Int) -> String {
+        let clamped = max(minutes, 0)
+        guard clamped >= minutesPerHour else { return "\(clamped)m" }
+        return String(format: "%dh%02d", clamped / minutesPerHour, clamped % minutesPerHour)
+    }
+
+    /// What the strip under the figure says, which is everything the picture
+    /// cannot: how the day broke up, how much of it was delegated, and what an
+    /// hour of it cost.
+    ///
+    /// The sub-agent share is dropped where there is none rather than printed
+    /// as zero — a day nothing was delegated on is most days, and a clause
+    /// that never changes is one nobody reads. The rate is dropped under an
+    /// hour, where dividing a few minutes into a day's spend invents a figure
+    /// that swings by the minute.
+    static func activityCaption(_ activity: ActivityTotals, cost: Decimal) -> String {
+        var parts = [agentCount(activity.blocks, singular: "block", plural: "blocks")]
+        if activity.delegatedMinutes > 0 {
+            parts.append(
+                "\(workedDuration(minutes: activity.delegatedMinutes)) of it sub-agents")
+        }
+        if activity.activeMinutes >= minutesPerHour, cost > 0 {
+            let hours = Double(activity.activeMinutes) / Double(minutesPerHour)
+            parts.append("\(hourlyRate(NSDecimalNumber(decimal: cost).doubleValue / hours))/h")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// What an hour of the window cost.
+    ///
+    /// Whole dollars above ten, against the `$0.00` every other money figure
+    /// on this panel wears: those are amounts that were actually charged,
+    /// where this is a division by a duration measured to the minute, and
+    /// cents on it would be a precision the reading does not have.
+    private static func hourlyRate(_ perHour: Double) -> String {
+        perHour >= wholeDollarRateFloor
+            ? String(format: "$%.0f", perHour) : String(format: "$%.2f", perHour)
+    }
+
+    private static let wholeDollarRateFloor: Double = 10
 }
 
 /// What a failed account switch says.
