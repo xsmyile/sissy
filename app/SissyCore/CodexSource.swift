@@ -301,16 +301,80 @@ final class CodexAdapter: SourceAdapter {
     ///
     /// One parse, then a switch: the three shapes used to be tried in turn, so
     /// a `turn_context` line paid for a `token_count` parse before its own.
-    func event(from line: SourceLine, seen: inout [String: SeenEvent]) -> UsageEvent? {
+    func event(
+        from line: SourceLine,
+        seen: inout [String: SeenEvent],
+        activity: inout [AgentActivityEvent]
+    ) -> UsageEvent? {
         guard let object = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any]
         else { return nil }
         switch object["type"] as? String {
         case "event_msg": return parseTokenCount(object, line: line, seen: &seen)
         case "turn_context": applyTurnContext(object, url: line.url)
-        case "session_meta": applySessionMeta(object, url: line.url)
+        case "session_meta":
+            applySessionMeta(object, url: line.url)
+            countRollout(object, line: line, seen: &seen, into: &activity)
         default: break
         }
         return nil
+    }
+
+    /// Counts a rollout as either a session somebody started or an agent
+    /// something spawned.
+    ///
+    /// Codex opens a file per thread, so the count is one per rollout and the
+    /// only question is which of the two it was. **Three shapes answer it, and
+    /// a reader that knows one of them reports zero for most of the history.**
+    /// Measured 2026-09-18 over 468 rollouts: `source.subagent.thread_spawn`
+    /// names 26, `source.subagent: "review"` names 119, and `thread_source`
+    /// names 58 on versions that wrote no `source` at all.
+    ///
+    /// Deliberately not `namesAParentSession`, which is the other question
+    /// about the same field. That one decides whether a rollout opens by
+    /// replaying turns it did not spend, and it must stay narrow: measured the
+    /// same day, a `review` subagent's first `token_count` lands 0.09 s after
+    /// its `session_meta` and is a real turn, so widening that gate to match
+    /// this one would take 119 genuine turns off the day. Both readings are
+    /// right; they are not the same reading.
+    ///
+    /// **The rollout is keyed by its file, because its payload names its
+    /// parent.** Measured 2026-09-18: a spawned rollout's `session_id` *and*
+    /// `id` both carry the thread that spawned it — the file
+    /// `…-5b9c-…7ff22e641ba9.jsonl` says `01a0b4b9-5b2f-…b160b379ae16`, which
+    /// is the user session sitting beside it — so a ledger keyed on either
+    /// field has the parent's key already claimed and drops every agent it
+    /// spawned. It cost all 8 of that day's agents, silently, against a unit
+    /// test that passed: the fixture had been written with an id of its own,
+    /// which is a line Codex does not write. A rollout is one file, so the
+    /// file name is the identity, and it is unique by construction — the name
+    /// carries the thread's own uuid.
+    private func countRollout(
+        _ object: [String: Any],
+        line: SourceLine,
+        seen: inout [String: SeenEvent],
+        into activity: inout [AgentActivityEvent]
+    ) {
+        guard let payload = object["payload"] as? [String: Any],
+            let timestamp = (object["timestamp"] as? String).flatMap(
+                UsageReaderShared.parseTimestamp),
+            timestamp >= line.retainCutoff
+        else { return }
+        let key = AgentActivityKey.session(line.url.lastPathComponent)
+        guard seen[key] == nil else { return }
+        seen[key] = SeenEvent(
+            day: Calendar.current.startOfDay(for: timestamp), billedOutputTokens: nil)
+        activity.append(
+            AgentActivityEvent(
+                timestamp: timestamp,
+                kind: Self.isSubagent(payload) ? .agentSpawned : .sessionStarted))
+    }
+
+    /// Whether a rollout was opened by another thread rather than by a person.
+    static func isSubagent(_ payload: [String: Any]) -> Bool {
+        if let source = payload["source"] as? [String: Any], source["subagent"] != nil {
+            return true
+        }
+        return payload["thread_source"] as? String == "subagent"
     }
 
     /// Records what a rollout's `session_meta` line says about itself: the
@@ -372,7 +436,7 @@ final class CodexAdapter: SourceAdapter {
     /// is what keeps this a per-file question — the alternative is reading the
     /// parent's rollout to recognise the copy, and a tail that opens a second
     /// file to understand the one in front of it is a different design.
-    private static func namesAParentSession(_ payload: [String: Any]) -> Bool {
+    static func namesAParentSession(_ payload: [String: Any]) -> Bool {
         if payload["forked_from_id"] is String { return true }
         guard let source = payload["source"] as? [String: Any],
             let subagent = source["subagent"] as? [String: Any],

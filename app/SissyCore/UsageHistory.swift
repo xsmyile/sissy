@@ -74,6 +74,18 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// `<synthetic>` turn with all-zero usage for its own local notices, and a
     /// row of zeroes is a model in the export that never ran.
     var models: [Entry]
+    /// How many sessions were started and how many agents they spawned.
+    ///
+    /// Beside the rows rather than inside them: a count belongs to the
+    /// provider's day and to no model or project, and a row carrying it would
+    /// make the answer depend on which model happened to reply. Optional
+    /// because every day written before the field existed decodes without one,
+    /// and `nil` there means "not counted", never "none" — which is why the
+    /// panel words an absent count as a dash rather than a zero.
+    ///
+    /// No version bump: the field is additive and an older build reading a
+    /// newer file simply ignores it, exactly as the project dimension landed.
+    var agents: AgentCounts?
 
     struct Entry: Codable, Equatable, Sendable {
         var model: String
@@ -110,12 +122,14 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
 
     init(
         day: String, provider: String, updatedAt: Date,
-        totals: [UsageHistoryRow: UsageHistoryTotals]
+        totals: [UsageHistoryRow: UsageHistoryTotals],
+        agents: AgentCounts? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.day = day
         self.provider = provider
         self.updatedAt = updatedAt
+        self.agents = agents.flatMap { $0.isEmpty ? nil : $0 }
         self.models =
             totals
             .filter { $0.value.totalTokens > 0 || $0.value.cost > 0 }
@@ -180,7 +194,33 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
             let row = UsageHistoryRow(model: entry.model, project: entry.project.flatMap(resolve))
             totals[row, default: .init()].add(entry.totals)
         }
-        return Self(day: day, provider: provider, updatedAt: updatedAt, totals: totals)
+        return Self(
+            day: day, provider: provider, updatedAt: updatedAt, totals: totals, agents: agents)
+    }
+
+    /// This day with `counts` folded in, keeping whichever reading saw more.
+    ///
+    /// The higher of the two rather than the newer, because a count can only
+    /// ever be *under*-observed: a run that started at noon saw the afternoon's
+    /// agents and not the morning's, and writing its number over a file that
+    /// holds the whole day would lose the morning for good. There is no
+    /// symmetric case — nothing re-derives a day and legitimately finds fewer
+    /// agents, since a day outside the retain window is never rewritten at all
+    /// and one inside it still has the logs it was counted from.
+    ///
+    /// This is deliberately not `isCoveredBy`'s business. That test decides
+    /// whether a *day* may be written, and refusing the whole write over a
+    /// count would freeze the day's tokens — which are the reading the archive
+    /// exists for — on every upgrade from a build that counted nothing.
+    func merging(counts: AgentCounts?) -> Self {
+        guard let counts else { return self }
+        var merged = self
+        let mine = agents ?? .none
+        let folded = AgentCounts(
+            sessions: max(mine.sessions, counts.sessions),
+            agents: max(mine.agents, counts.agents))
+        merged.agents = folded.isEmpty ? nil : folded
+        return merged
     }
 
     /// What one model spent across every project the day holds for it.

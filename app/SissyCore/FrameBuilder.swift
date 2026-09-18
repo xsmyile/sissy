@@ -361,6 +361,9 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     /// whose format names no working directory, which reads the same as a
     /// provider that has spent nothing.
     let projects: [ProjectTotals]
+    /// Sessions started and agents spawned today, as this provider counted
+    /// them. `.none` where the format names neither.
+    let agents: AgentCounts
 
     var windows: [UsageWindow] { signals.windows }
     var plan: String? { signals.plan }
@@ -370,10 +373,14 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     var limitsState: ProviderLimitsState { signals.limitsState }
     var limitsObservedAt: Date? { signals.limitsObservedAt }
 
-    init(id: String, tokens: Int, cost: Decimal, signals: ProviderSignals, projects: [ProjectTotals] = []) {
+    init(
+        id: String, tokens: Int, cost: Decimal, signals: ProviderSignals,
+        projects: [ProjectTotals] = [], agents: AgentCounts = .none
+    ) {
         self.id = id
         self.tokens = tokens
         self.cost = cost
+        self.agents = agents
         var ordered = signals
         ordered.windows.sort { ($0.minutes, $0.scope ?? "") < ($1.minutes, $1.scope ?? "") }
         if ordered.plan == nil { ordered.planTier = nil }
@@ -388,14 +395,15 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         id: String, tokens: Int, cost: Decimal, windows: [UsageWindow] = [],
         plan: String? = nil, planTier: String? = nil, credits: ProviderCredits? = nil,
         projects: [ProjectTotals] = [], account: ProviderAccount? = nil,
-        limitsState: ProviderLimitsState = .quiet, limitsObservedAt: Date? = nil
+        limitsState: ProviderLimitsState = .quiet, limitsObservedAt: Date? = nil,
+        agents: AgentCounts = .none
     ) {
         self.init(
             id: id, tokens: tokens, cost: cost,
             signals: ProviderSignals(
                 windows: windows, plan: plan, planTier: planTier, account: account,
                 credits: credits, limitsState: limitsState, limitsObservedAt: limitsObservedAt),
-            projects: projects)
+            projects: projects, agents: agents)
     }
 }
 

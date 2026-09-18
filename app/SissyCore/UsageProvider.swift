@@ -49,6 +49,18 @@ protocol UsageProvider: AnyObject, SourceSignals {
     /// totals from another.
     nonisolated func currentProjects() -> [ProjectTotals]
 
+    /// How many sessions this provider saw started today and how many agents
+    /// they spawned, as of its last emit.
+    ///
+    /// Nonisolated for the reason the projects are: the aggregator reads it
+    /// inside the hop that produced the totals beside it, so an actor hop here
+    /// would pair a count from one moment with a cost from another.
+    ///
+    /// `.none` for a provider whose format names neither, which is a reading
+    /// of zero rather than an absence — the caller knows whether the provider
+    /// has read at all, because a provider that has not has no slice.
+    nonisolated func currentAgents() -> AgentCounts
+
     /// Re-reads whatever this provider keeps out of band — the files it reads
     /// for a plan and an account, which no log line carries. What a user
     /// pressing refresh on this provider reaches; a provider with nothing out
@@ -71,4 +83,5 @@ extension UsageProvider {
     func refreshSignals() async {}
 
     nonisolated func currentProjects() -> [ProjectTotals] { [] }
+    nonisolated func currentAgents() -> AgentCounts { .none }
 }
