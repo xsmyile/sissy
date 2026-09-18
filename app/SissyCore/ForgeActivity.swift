@@ -144,6 +144,17 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
             activity: .empty, readAt: when, failure: failure)
     }
 
+    /// Whether a fetch has ever worked for this connection, which is what
+    /// makes `readAt` an age rather than a timestamp.
+    ///
+    /// The login is the evidence: it is the account the vendor answered as, so
+    /// only a reading that arrived carries one, and a failure keeps the
+    /// previous one along with the figures. It has to be asked, because
+    /// `unavailable` stamps `readAt` with the attempt — and re-stamps it every
+    /// round until one works — so a row built from it would say a connection
+    /// that has never once answered was read a moment ago.
+    var hasEverRead: Bool { login != nil }
+
     /// Whether this reading has a figure for the window the panel is showing.
     /// A connection whose token was accepted but whose window came back empty
     /// is still a reading; one that never answered is not.

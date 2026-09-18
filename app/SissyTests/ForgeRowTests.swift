@@ -47,6 +47,14 @@ final class ForgeRowTests: XCTestCase {
         return UsagePanelSnapshot.make(frame: frame, period: period, now: Self.readAt).forge
     }
 
+    /// The caption the row draws, which the view words on its own clock rather
+    /// than taking pre-built off the snapshot — so the age advances between
+    /// two frames five to thirty minutes apart.
+    private func notice(_ row: UsagePanelSnapshot.ForgeRow, refreshing: Bool = false) -> String? {
+        UsageFormat.forgeNotice(
+            row.failure, readAt: row.readAt, refreshing: refreshing, now: Self.readAt)
+    }
+
     /// With no archive the control does not appear and every window is today,
     /// which is what the forge rows then answer too.
     func testWithNoArchiveTheRowsAnswerToday() {
@@ -73,7 +81,40 @@ final class ForgeRowTests: XCTestCase {
         XCTAssertEqual(row.merged, "28")
         XCTAssertEqual(row.issues, "7")
         XCTAssertEqual(row.comments, "12")
-        XCTAssertNil(row.notice)
+    }
+
+    /// **A row that is fine says how old it is too.** The poll runs every five
+    /// to thirty minutes and these counters move the moment the user pushes,
+    /// so a figure with no date beside it cannot be told from one taken before
+    /// the merge they are looking at.
+    func testAHealthyRowIsDatedRatherThanSilent() throws {
+        let row = try XCTUnwrap(
+            rows([
+                Self.reading(
+                    Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7,
+                    at: Self.readAt.addingTimeInterval(-720))
+            ]).first)
+        XCTAssertEqual(notice(row), "read 12m ago")
+    }
+
+    /// While a refresh is in flight the row says that instead of an age it is
+    /// about to replace, which is the wording the panel header already uses.
+    func testARowBeingRefreshedSaysSoInsteadOfItsAge() throws {
+        let row = try XCTUnwrap(
+            rows([
+                Self.reading(Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7)
+            ]).first)
+        XCTAssertEqual(notice(row, refreshing: true), "refreshing…")
+    }
+
+    /// The hover names the right-click, because the row has nowhere to put a
+    /// button and a gesture nothing advertises is one nobody finds.
+    func testTheHoverNamesTheRightClick() throws {
+        let row = try XCTUnwrap(
+            rows([
+                Self.reading(Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7)
+            ]).first)
+        XCTAssertTrue(row.tooltip.contains("Right-click to refresh now"), row.tooltip)
     }
 
     /// The word left the row when the mark arrived, so the mark has to be able
@@ -133,11 +174,15 @@ final class ForgeRowTests: XCTestCase {
         let row = try XCTUnwrap(
             rows([.unavailable(Self.gitLab, failure: .unreachable, at: Self.readAt)]).first)
         XCTAssertFalse(row.hasFigures)
-        XCTAssertEqual(row.notice, "could not be reached")
+        XCTAssertNil(row.readAt)
+        XCTAssertEqual(notice(row), "could not be reached")
     }
 
-    /// Stale figures keep their place and grow a caption with their age.
-    func testStaleFiguresKeepTheirPlaceAndSayHowOldTheyAre() throws {
+    /// Stale figures keep their place and the caption carries both halves: the
+    /// reason and the age. The age alone stood for the failure while a healthy
+    /// row was silent, and now that one is dated too it would read as an
+    /// ordinary reading that happened to be old.
+    func testStaleFiguresKeepTheirPlaceAndSayWhyAndHowOld() throws {
         let stale = ForgeActivityReading(
             id: Self.gitHub.id, kind: .gitHub, host: Self.gitHub.host, login: "xsmyile",
             activity: ForgeActivity(
@@ -146,7 +191,7 @@ final class ForgeRowTests: XCTestCase {
             readAt: Self.readAt.addingTimeInterval(-7200), failure: .unreachable)
         let row = try XCTUnwrap(rows([stale]).first)
         XCTAssertEqual(row.contributions, "128")
-        XCTAssertEqual(row.notice, "last read 2h ago")
+        XCTAssertEqual(notice(row), "could not be reached · last read 2h ago")
     }
 
     /// A window the vendor answered nothing for is absent rather than zero, so

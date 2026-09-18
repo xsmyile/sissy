@@ -6,7 +6,7 @@ import SwiftUI
 /// answer "is anything wrong with what I have connected", and a row that is
 /// working has nothing to add to the identity it already prints. The sentence
 /// on the other branch is the reader's own — `UsageFormat.limitsNotice` for an
-/// account, `UsageFormat.forgeNotice` for a forge — so a state either of them
+/// account, `UsageFormat.forgeFailure` for a forge — so a state either of them
 /// learns to word reaches this row without a second vocabulary to keep in step.
 enum CredentialHealth: Equatable {
     case ok

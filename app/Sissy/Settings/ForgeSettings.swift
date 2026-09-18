@@ -243,17 +243,14 @@ struct ForgeSettingsView: View {
         return "\(login) · \(read)"
     }
 
-    /// Whether the last poll worked, in `UsageFormat.forgeNotice`'s own words.
-    /// The widest window decides whether there are figures behind a failure:
-    /// a connection that has ever answered has them, and a quiet day is not
-    /// evidence that a token has stopped working.
+    /// Whether the last poll worked, in `UsageFormat.forgeFailure`'s own words.
+    ///
+    /// The reason rather than the panel's caption, which now dates every row
+    /// it draws: a healthy connection would otherwise reach this as
+    /// "read 4m ago" and be filed as something needing attention.
     private static func health(of reading: ForgeActivityReading?) -> CredentialHealth {
-        guard let reading,
-            let notice = UsageFormat.forgeNotice(
-                reading.failure, readAt: reading.readAt,
-                hasFigures: reading.hasFigures(for: .all))
-        else { return .ok }
-        return .attention(notice)
+        guard let failure = reading?.failure else { return .ok }
+        return .attention(UsageFormat.forgeFailure(failure))
     }
 
     /// One counter's switch, wearing the mark the panel draws it with.

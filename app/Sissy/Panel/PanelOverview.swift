@@ -34,6 +34,10 @@ struct PanelOverview: View {
     /// list where none is.
     let openIdentities: (String?) -> Void
     let selectPeriod: (UsagePeriod) -> Void
+    /// Which forge connections are being re-read, so their rows can say so
+    /// where they otherwise print an age about to change.
+    let refreshingForge: Set<String>
+    let refreshForge: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -446,7 +450,10 @@ struct PanelOverview: View {
         VStack(alignment: .leading, spacing: 8) {
             SectionLabel(text: UsageFormat.forgeSectionLabel(snapshot.period))
             ForEach(snapshot.forge) { row in
-                ForgeRowView(row: row)
+                ForgeRowView(
+                    row: row,
+                    refreshing: refreshingForge.contains(row.id),
+                    refresh: { refreshForge(row.id) })
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)

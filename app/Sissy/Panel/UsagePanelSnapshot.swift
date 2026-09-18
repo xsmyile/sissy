@@ -54,11 +54,11 @@ struct UsagePanelSnapshot: Equatable {
     /// account for a token that answered as another. The forge's mark beside it
     /// is `ForgeMark`, which the project rows already carry.
     ///
-    /// `figures` and `notice` are both optional and both may be present. A
-    /// reading that has gone stale keeps its figures and takes an age beside
-    /// them; one that never arrived has a reason and no figures. Neither state
-    /// is a zero, which is the rule the whole panel is on — an empty gauge is a
-    /// measurement and this would be the absence of one.
+    /// The figures and the reading's own state are separate and may both be
+    /// present. A reading that has gone stale keeps its figures and says how
+    /// old they are; one that never arrived has a reason and no figures.
+    /// Neither state is a zero, which is the rule the whole panel is on — an
+    /// empty gauge is a measurement and this would be the absence of one.
     struct ForgeRow: Equatable, Identifiable {
         let id: String
         let kind: ForgeKind
@@ -75,8 +75,17 @@ struct UsagePanelSnapshot: Equatable {
         let merged: String?
         let issues: String?
         let comments: String?
-        /// Why there is no figure, or how old the one beside it is.
-        let notice: String?
+        /// When the figures beside it were read, nil for a connection that has
+        /// never once answered.
+        ///
+        /// The date rather than the sentence built from it, because the age
+        /// has to keep advancing under an open panel and this block's frame
+        /// arrives every five to thirty minutes. `StatusRow.checkedAt` is the
+        /// same shape for the same reason, and `PanelProviderStatus` words it
+        /// on the view's own clock.
+        let readAt: Date?
+        /// Why the last read did not work, nil on one that did.
+        let failure: ForgeReadFailure?
         let tooltip: String
         /// What each mark means, since a glyph cannot introduce itself.
         let mergedHelp: String
@@ -667,7 +676,7 @@ struct UsagePanelSnapshot: Equatable {
             projects: makeProjects(
                 frame.projects, totalTokens: totalTokens, totalCost: totalCost),
             projectCount: frame.projects.count,
-            forge: makeForge(frame.forge, period: resolved, now: now),
+            forge: makeForge(frame.forge, period: resolved),
             identities: makeIdentities(frame.identities),
             identityAlert: makeIdentityAlert(frame.identities)
         )
@@ -731,15 +740,13 @@ struct UsagePanelSnapshot: Equatable {
     /// and two windows under one control would be worse than one window that
     /// starts narrow.
     private static func makeForge(
-        _ readings: [ForgeActivityReading], period: UsagePeriod, now: Date
+        _ readings: [ForgeActivityReading], period: UsagePeriod
     ) -> [ForgeRow] {
         readings.map { reading in
             let contributions = reading.contributions(for: period).map(UsageFormat.forgeCount)
             let merged = reading.merged(for: period).map(UsageFormat.forgeCount)
             let issues = reading.issues(for: period).map(UsageFormat.forgeCount)
             let comments = reading.comments(for: period).map(UsageFormat.forgeCount)
-            let hasFigures =
-                contributions != nil || merged != nil || issues != nil || comments != nil
             return ForgeRow(
                 id: reading.id,
                 kind: reading.kind,
@@ -749,8 +756,8 @@ struct UsagePanelSnapshot: Equatable {
                 merged: merged,
                 issues: issues,
                 comments: comments,
-                notice: UsageFormat.forgeNotice(
-                    reading.failure, readAt: reading.readAt, hasFigures: hasFigures, now: now),
+                readAt: reading.hasEverRead ? reading.readAt : nil,
+                failure: reading.failure,
                 tooltip: UsageFormat.forgeTooltip(
                     reading.kind, host: reading.host, login: reading.login, period: period,
                     boundedToOneYear: reading.activity.contributionsBoundedToOneYear),
