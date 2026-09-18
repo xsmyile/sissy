@@ -12,6 +12,24 @@ enum ForgeKind: String, Sendable, Codable, Equatable, CaseIterable {
     case gitLab = "gitlab"
 }
 
+/// One of the counters a forge row carries beside its contribution total.
+///
+/// The contribution total is deliberately not among them: it is what the
+/// section is called, so a row with it switched off would be a row of nothing
+/// under a heading that names it. These three are the ones a user may not care
+/// about — and switching one off is not only a rendering choice, because a
+/// counter nobody reads must not be fetched either. On GitHub that changes
+/// nothing but the size of a reply already being made; on GitLab each of these
+/// is four requests a poll.
+enum ForgeCounter: String, Sendable, Codable, CaseIterable {
+    case merged
+    case issues
+    case comments
+
+    /// Every counter, which is what a build with nothing configured reads.
+    static let all = Set(allCases)
+}
+
 /// What one forge account did, per period, in the vendor's own arithmetic.
 ///
 /// **The figures are the vendor's and are never summed across vendors.**

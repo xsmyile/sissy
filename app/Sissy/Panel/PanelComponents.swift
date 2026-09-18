@@ -594,31 +594,6 @@ struct ForgeRowView: View {
     private static let markWeight: Font.Weight = .semibold
     private static let markGap: CGFloat = 3
     private static let figureGap: CGFloat = 9
-    /// The Y both forges draw a *merged* request with — SF's own name for
-    /// GitHub's `git-merge` octicon.
-    ///
-    /// Deliberately not `arrow.trianglehead.pull`, which is the `git-pull-request`
-    /// octicon and the state *before* this one: GitHub paints that glyph green
-    /// for an open request and this one purple for a merged one, so the pull
-    /// glyph in merged purple is a pairing neither forge has. The count is of
-    /// requests that were merged, so the mark is the merge.
-    private static let mergeSymbol = "arrow.trianglehead.merge"
-    /// The circle-with-a-dot both forges draw an open issue with, SF's own
-    /// name for GitHub's `issue-opened` octicon.
-    private static let issueSymbol = "smallcircle.filled.circle"
-    /// The speech bubble both forges mark a comment with, at the same nominal
-    /// size as the two beside it rather than one of its own.
-    ///
-    /// Measured 2026-09-18 against the ink the row already lays down: at 10 pt
-    /// semibold this covers 12.00 × 11.00, so its **height lands exactly on**
-    /// the 11.00 `smallcircle.filled.circle` sets, and only its width runs a
-    /// point over — which a bubble is, being a wider shape than a circle. The
-    /// obvious correction is wrong: 9.5 pt brings the width to 11.00 and drops
-    /// the height to 10.00, which shortens the one axis a row of marks on a
-    /// baseline is read along. Every bubble SF ships — `bubble`, `text.bubble`,
-    /// `quote.bubble`, `captions.bubble` — measures identically, so the choice
-    /// among them is the octicon they draw rather than the space they take.
-    private static let commentSymbol = "bubble.left"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -667,18 +642,20 @@ struct ForgeRowView: View {
                 if let contributions = row.contributions { count(contributions) }
                 if let merged = row.merged {
                     marked(
-                        merged, symbol: Self.mergeSymbol, tint: ProviderPalette.forgeMerged,
+                        merged, symbol: ProviderPalette.forgeSymbol(.merged),
+                        tint: ProviderPalette.forgeTint(.merged),
                         help: row.mergedHelp)
                 }
                 if let issues = row.issues {
                     marked(
-                        issues, symbol: Self.issueSymbol, tint: ProviderPalette.forgeIssue,
+                        issues, symbol: ProviderPalette.forgeSymbol(.issues),
+                        tint: ProviderPalette.forgeTint(.issues),
                         help: row.issuesHelp)
                 }
                 if let comments = row.comments {
                     marked(
-                        comments, symbol: Self.commentSymbol,
-                        tint: ProviderPalette.forgeComment, help: row.commentsHelp)
+                        comments, symbol: ProviderPalette.forgeSymbol(.comments),
+                        tint: ProviderPalette.forgeTint(.comments), help: row.commentsHelp)
                 }
             }
         } else {

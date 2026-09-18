@@ -254,7 +254,9 @@ actor UsageEngine {
         self.limitsBackoff = limitsBackoff
         let forgeIndex = ForgeConnectionIndex(url: ForgeConnectionIndex.defaultURL(in: stateDir))
         self.forgeIndex = forgeIndex
-        self.forgeMonitor = ForgeActivityMonitor(connections: forgeIndex.load())
+        self.forgeMonitor = ForgeActivityMonitor(
+            connections: forgeIndex.load(),
+            counters: (config.forgeCounters ?? .defaults).enabled)
         let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
         let claudeHome = config.providerHome(vendor: ProviderID.claudeCode)
@@ -1544,8 +1546,35 @@ actor UsageEngine {
 
     private func rebuildForgeMonitor() async {
         await forgeMonitor.stop()
-        forgeMonitor = ForgeActivityMonitor(connections: forgeIndex.load())
+        forgeMonitor = ForgeActivityMonitor(
+            connections: forgeIndex.load(),
+            counters: (config.forgeCounters ?? .defaults).enabled)
         await startForgeActivity()
+    }
+
+    /// Switches one of a forge row's counters on or off, and persists it.
+    ///
+    /// The poll is rebuilt rather than told, because the counters are what the
+    /// reader is built with — the same trade `rebuildForgeMonitor` already
+    /// makes for a connection, and it costs one round rather than a wait: a
+    /// fresh monitor asks immediately, so a counter switched back on is a
+    /// request away rather than a poll interval away.
+    ///
+    /// **Switching one off stops it being read**, which is why this is the
+    /// engine's and not a view's: on GitLab each counter is four requests a
+    /// poll, and a figure nobody has asked to see must not cost them.
+    func setForgeCounter(_ counter: ForgeCounter, enabled: Bool) async {
+        var counters = config.forgeCounters ?? .defaults
+        guard counters[counter] ?? true != enabled else { return }
+        counters[counter] = enabled
+        config.forgeCounters = counters
+        do {
+            try ServerConfig.save(config, to: configURL)
+        } catch {
+            sissyLog("sissy: failed to persist forgeCounters to \(configURL.path): \(error)")
+        }
+        await rebuildForgeMonitor()
+        await reemit()
     }
 
     /// Re-reads every repository's commit identity now, for the panel's own

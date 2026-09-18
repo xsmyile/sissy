@@ -561,6 +561,49 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertTrue(commented.absoluteString.contains("per_page=1"))
     }
 
+    // MARK: The counters a row carries
+
+    /// An absent switch is an on one, so a `server.json` written before a
+    /// counter existed does not read as that counter being switched off.
+    func testAnAbsentSwitchIsAnOnOne() {
+        XCTAssertEqual(ForgeCounters.defaults.enabled, ForgeCounter.all)
+        var some = ForgeCounters.defaults
+        some[.comments] = false
+        XCTAssertEqual(some.enabled, [.merged, .issues])
+        some[.comments] = true
+        XCTAssertEqual(some.enabled, ForgeCounter.all)
+    }
+
+    /// **A counter switched off is not asked for.** On GitHub that is only a
+    /// smaller reply, but it is the same document either way — so the test
+    /// that matters is that the fields are gone, not that a request was saved.
+    func testGitHubAsksForNothingAboutACounterThatIsOff() {
+        let only = GitHubActivityFeed.document(now: Self.measuredDay, counters: [.merged])
+        XCTAssertTrue(only.contains("mergedToday: search"), only)
+        XCTAssertFalse(only.contains("issuesToday: search"), only)
+        XCTAssertFalse(only.contains("comments: issueComments"), only)
+        // The contribution total has no switch, so it survives all of them.
+        XCTAssertTrue(only.contains("contribToday: contributionsCollection"), only)
+        XCTAssertTrue(only.contains("viewer { login"), only)
+    }
+
+    /// With every counter off the document is still a valid reading of the
+    /// contribution totals, which is the one figure that has no switch.
+    func testGitHubStillAsksForTheContributionsWithEveryCounterOff() {
+        let bare = GitHubActivityFeed.document(now: Self.measuredDay, counters: [])
+        XCTAssertFalse(bare.contains("search("), bare)
+        XCTAssertFalse(bare.contains("issueComments"), bare)
+        XCTAssertTrue(bare.contains("contribAll: contributionsCollection {"), bare)
+    }
+
+    /// GitLab's merged document empties out, but the query itself stays: it is
+    /// also what names the account, and the row's login comes off it.
+    func testGitLabKeepsTheAccountQueryWithTheMergedCounterOff() {
+        let off = GitLabActivityFeed.document(now: Self.measuredDay, counters: [.comments])
+        XCTAssertTrue(off.contains("currentUser { username"), off)
+        XCTAssertFalse(off.contains("authoredMergeRequests"), off)
+    }
+
     // MARK: Connections
 
     func testHostIsTakenOutOfWhateverWasPasted() {

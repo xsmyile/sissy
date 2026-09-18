@@ -145,13 +145,16 @@ enum ForgeActivityFeed {
     static let userAgent = "Sissy"
 
     static func read(
-        _ connection: ForgeConnection, token: String, now: Date = Date()
+        _ connection: ForgeConnection, token: String,
+        counters: Set<ForgeCounter> = ForgeCounter.all, now: Date = Date()
     ) async throws -> ForgeActivityReading {
         switch connection.kind {
         case .gitHub:
-            return try await GitHubActivityFeed.read(connection, token: token, now: now)
+            return try await GitHubActivityFeed.read(
+                connection, token: token, counters: counters, now: now)
         case .gitLab:
-            return try await GitLabActivityFeed.read(connection, token: token, now: now)
+            return try await GitLabActivityFeed.read(
+                connection, token: token, counters: counters, now: now)
         }
     }
 
@@ -280,13 +283,13 @@ enum GitHubActivityFeed {
     }
 
     static func read(
-        _ connection: ForgeConnection, token: String, now: Date
+        _ connection: ForgeConnection, token: String, counters: Set<ForgeCounter>, now: Date
     ) async throws -> ForgeActivityReading {
         guard let endpoint = endpoint(host: connection.host) else {
             throw ForgeReadFailure.malformed
         }
         let payload = try await ForgeActivityFeed.graphQL(
-            endpoint, query: document(now: now), token: token,
+            endpoint, query: document(now: now, counters: counters), token: token,
             header: authorizationHeader, scheme: authorizationScheme)
         return try parse(payload, connection: connection, now: now)
     }
@@ -297,7 +300,7 @@ enum GitHubActivityFeed {
     /// a `search` asked for `first: 1` is one request node whatever it counts.
     /// Re-measured 2026-09-18 with a hundred-comment page added to the same
     /// `viewer`: still 1 point.
-    static func document(now: Date) -> String {
+    static func document(now: Date, counters: Set<ForgeCounter> = ForgeCounter.all) -> String {
         let contributions =
             UsagePeriod.allCases.map { period in
                 let range =
@@ -305,15 +308,21 @@ enum GitHubActivityFeed {
                     .map { "(from: \"\(ForgeWindow.vendorDay($0))\")" } ?? ""
                 let alias = ForgeAlias.contributions(period)
                 return "\(alias): contributionsCollection\(range) { \(calendarField) }"
-            } + [commentField]
+            } + (counters.contains(.comments) ? [commentField] : [])
         let searches = UsagePeriod.allCases.flatMap { period -> [String] in
             let since =
                 ForgeWindow.start(of: period, now: now)
                 .map(ForgeWindow.vendorDay) ?? ""
-            return [
-                count(ForgeAlias.merged(period), "is:pr author:@me is:merged", "merged", since),
-                count(ForgeAlias.issues(period), "is:issue author:@me", "created", since),
-            ]
+            var fields: [String] = []
+            if counters.contains(.merged) {
+                fields.append(
+                    count(ForgeAlias.merged(period), "is:pr author:@me is:merged", "merged", since))
+            }
+            if counters.contains(.issues) {
+                fields.append(
+                    count(ForgeAlias.issues(period), "is:issue author:@me", "created", since))
+            }
+            return fields
         }
         return """
             query {
@@ -496,11 +505,18 @@ enum GitLabActivityFeed {
     private static let onePage = "1"
 
     static func read(
-        _ connection: ForgeConnection, token: String, now: Date
+        _ connection: ForgeConnection, token: String, counters: Set<ForgeCounter>, now: Date
     ) async throws -> ForgeActivityReading {
-        let merged = try await mergedCounts(connection, token: token, now: now)
-        let issues = await issueCounts(
-            connection, token: token, author: merged.username, now: now)
+        // Asked for whatever the counters say, because this is also the call
+        // that names the account — the row's login and the author the issue
+        // document filters on both come off it, so it is the one request here
+        // that a switch cannot take away.
+        let merged = try await mergedCounts(
+            connection, token: token, counters: counters, now: now)
+        let issues =
+            counters.contains(.issues)
+            ? await issueCounts(connection, token: token, author: merged.username, now: now)
+            : [:]
         // The one call above that cannot report a cancellation, so it is asked
         // for here rather than four requests later.
         try Task.checkCancellation()
@@ -514,8 +530,9 @@ enum GitLabActivityFeed {
         // the instance sees two requests at a time rather than eight.
         for period in UsagePeriod.allCases {
             async let total = events(connection, token: token, period: period, now: now)
-            async let commented = commentEvents(
-                connection, token: token, period: period, now: now)
+            async let commented =
+                counters.contains(.comments)
+                ? commentEvents(connection, token: token, period: period, now: now) : nil
             contributions[period] = try await total
             comments[period] = await commented
         }
@@ -528,12 +545,12 @@ enum GitLabActivityFeed {
     }
 
     private static func mergedCounts(
-        _ connection: ForgeConnection, token: String, now: Date
+        _ connection: ForgeConnection, token: String, counters: Set<ForgeCounter>, now: Date
     ) async throws -> (username: String, counts: [UsagePeriod: Int]) {
         guard let root = connection.root else { throw ForgeReadFailure.malformed }
         let endpoint = root.appendingPathComponent(graphQLPath)
         let payload = try await ForgeActivityFeed.graphQL(
-            endpoint, query: document(now: now), token: token,
+            endpoint, query: document(now: now, counters: counters), token: token,
             header: tokenHeader, scheme: nil)
         guard let user = payload["currentUser"] as? [String: Any],
             let username = user["username"] as? String, !username.isEmpty
@@ -548,14 +565,16 @@ enum GitLabActivityFeed {
         return (username, counts)
     }
 
-    static func document(now: Date) -> String {
-        let fields = UsagePeriod.allCases.map { period -> String in
-            let scope =
-                ForgeWindow.start(of: period, now: now)
-                .map { ", mergedAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
-            return
-                "\(ForgeAlias.merged(period)): authoredMergeRequests(state: merged\(scope)) { count }"
-        }
+    static func document(now: Date, counters: Set<ForgeCounter> = ForgeCounter.all) -> String {
+        let fields =
+            counters.contains(.merged)
+            ? UsagePeriod.allCases.map { period -> String in
+                let scope =
+                    ForgeWindow.start(of: period, now: now)
+                    .map { ", mergedAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
+                return
+                    "\(ForgeAlias.merged(period)): authoredMergeRequests(state: merged\(scope)) { count }"
+            } : []
         return """
             query {
               currentUser { username \(fields.joined(separator: " ")) }

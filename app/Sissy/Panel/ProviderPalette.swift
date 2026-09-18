@@ -59,6 +59,41 @@ enum ProviderPalette {
     /// ships for both appearances.
     static let forgeComment = Color.blue
 
+    /// The mark one of a forge row's counters is drawn with.
+    ///
+    /// One accessor rather than a constant per surface, because two surfaces
+    /// draw these now: the panel row, and the Settings switch that turns it
+    /// off. The switch wears the glyph it governs — the row spends a mark
+    /// exactly where it cannot spend a word, so a control that named the
+    /// counter in words alone would be the only place the two are not
+    /// obviously the same thing.
+    ///
+    /// `arrow.trianglehead.merge` is SF's name for GitHub's `git-merge`
+    /// octicon, and deliberately not `arrow.trianglehead.pull`, which is
+    /// `git-pull-request` and the state *before* this one: GitHub paints that
+    /// glyph green for an open request and this one purple for a merged one, so
+    /// the pull glyph in merged purple is a pairing neither forge has. The
+    /// count is of requests that were merged, so the mark is the merge.
+    /// `smallcircle.filled.circle` is `issue-opened`. `bubble.left` is the
+    /// speech bubble both forges mark a comment with.
+    static func forgeSymbol(_ counter: ForgeCounter) -> String {
+        switch counter {
+        case .merged: "arrow.trianglehead.merge"
+        case .issues: "smallcircle.filled.circle"
+        case .comments: "bubble.left"
+        }
+    }
+
+    /// What that mark reads as, which is the vendor's colour where there is one
+    /// to copy and a non-collision where there is not.
+    static func forgeTint(_ counter: ForgeCounter) -> Color {
+        switch counter {
+        case .merged: forgeMerged
+        case .issues: forgeIssue
+        case .comments: forgeComment
+        }
+    }
+
     /// The vendor's own mark, for the providers Sissy ships one for.
     ///
     /// Template assets, so every surface tints them with `tint(for:)` and one

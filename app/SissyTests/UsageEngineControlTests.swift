@@ -123,6 +123,44 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertNil(readiness[1].scan)
     }
 
+    // MARK: The forge counter switches
+
+    /// The switch writes an explicit value, which is what the next engine is
+    /// built from — and here that decides what is *asked for*, not only what
+    /// is drawn.
+    func testTheForgeCounterSwitchReachesTheFile() async throws {
+        let engine = makeEngine()
+        await engine.start { _ in }
+        addTeardownBlock { await engine.stop() }
+
+        await engine.setForgeCounter(.comments, enabled: false)
+        XCTAssertEqual(try ServerConfig.load(from: configURL).forgeCounters?.comments, false)
+        XCTAssertEqual(
+            try ServerConfig.load(from: configURL).forgeCounters?.enabled, [.merged, .issues])
+
+        await engine.setForgeCounter(.comments, enabled: true)
+        XCTAssertEqual(try ServerConfig.load(from: configURL).forgeCounters?.comments, true)
+    }
+
+    /// **A counter switched off survives a file the decoder can only read
+    /// part of.** The partial path is what any unreadable key falls through —
+    /// one written by a newer build, or a typo — and a counter dropped there
+    /// would come back on, which for this setting means asking the vendor for
+    /// it again on the next poll. The switch must not be undone by a
+    /// neighbouring key.
+    func testAForgeCounterSurvivesAConfigTheDecoderCanOnlyPartlyRead() throws {
+        let partial = """
+            {"forgeCounters":{"comments":false,"issues":true},"keepAwake":"who knows"}
+            """
+        try Data(partial.utf8).write(to: configURL)
+        let loaded = try ServerConfig.load(from: configURL)
+        XCTAssertEqual(loaded.forgeCounters?.comments, false)
+        XCTAssertEqual(loaded.forgeCounters?.issues, true)
+        // Unnamed stays unset, which reads as on.
+        XCTAssertNil(loaded.forgeCounters?.merged)
+        XCTAssertEqual(loaded.forgeCounters?.enabled, [.merged, .issues])
+    }
+
     // MARK: The provider switch
 
     /// The switch writes an explicit value in both directions. Applying it is
