@@ -119,9 +119,20 @@ enum ArchiveBackfill {
 /// passed over, which is what makes switching a CLI on months later fill its
 /// own history in.
 struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
-    /// Bump only when the meaning of an entry changes. A file this build
-    /// cannot read is answered as "nothing covered", which costs one pass.
-    static let currentSchemaVersion = 1
+    /// Bump when the meaning of an entry changes, **or when a pass starts
+    /// writing something the days it already covered do not carry**. A file
+    /// this build cannot read is answered as "nothing covered", which costs
+    /// one pass and is the only way a day already inside the covered span is
+    /// ever revisited.
+    ///
+    /// `2` is the session and agent counts. Without the bump the record on an
+    /// existing install says the whole window is covered, so every day before
+    /// the upgrade keeps its tokens and never gets a count — measured
+    /// 2026-09-18, 40 of 42 archived days. The re-run is safe by construction:
+    /// `isCoveredBy` still refuses a day whose tokens came back short, and
+    /// `UsageHistoryDay.merging(counts:)` keeps whichever reading counted
+    /// more, so a second pass can only fill the counts in.
+    static let currentSchemaVersion = 2
     static let fileName = "history-backfill.json"
 
     /// The span one provider's last pass covered, as `YYYY-MM-DD` in the local
