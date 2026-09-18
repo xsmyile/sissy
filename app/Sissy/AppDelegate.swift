@@ -67,6 +67,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `canBecomeMain` is the discriminator: the usage panel's popover and the
     /// status item's own window are borderless and cannot, so neither puts an
     /// icon in the Dock.
+    ///
+    /// The promotion is activated explicitly, and that is not redundant with
+    /// the window having just become key. AppKit installs the menu bar on
+    /// activation, and this runs a turn *after* the window took focus — so the
+    /// app is already frontmost when the policy flips and there is no
+    /// activation left for the menu bar to be hung off. Observed 2026-09-18 on
+    /// the dev build: the Dock icon appeared and the menu bar drew `Sissy`,
+    /// while clicking it opened nothing at all; activating another app and
+    /// coming back installed the menu, and a relaunch brought the dead menu
+    /// back. It is intermittent because it depends on whether the app still
+    /// held activation when the window opened, which is why it survived every
+    /// reading of this function.
+    ///
+    /// The guard above is what keeps this from stealing focus: the activation
+    /// only ever runs on the transition into `.regular`, never on the
+    /// notifications that find the policy already correct.
     private func syncActivationPolicy() {
         let hasWindow = NSApp.windows.contains { window in
             window.isVisible && window.canBecomeMain
@@ -74,6 +90,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let desired: NSApplication.ActivationPolicy = hasWindow ? .regular : .accessory
         guard NSApp.activationPolicy() != desired else { return }
         NSApp.setActivationPolicy(desired)
+        if desired == .regular {
+            NSApp.activate()
+        }
     }
 
     /// Lets the engine shut down before the process goes, bounded by
