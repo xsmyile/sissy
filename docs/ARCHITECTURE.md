@@ -167,6 +167,40 @@ figure out. Changing one rebuilds the poll the way connecting a forge does,
 which costs a round rather than a wait: a fresh monitor asks at once, so a
 counter switched back on is a request away rather than an interval away.
 
+**Every forge row is dated, and the row is where it is re-read from.** The poll
+runs on a five- to thirty-minute cadence and these counters move the instant the
+user pushes, so a figure with no date beside it cannot be told from one taken
+before the merge they are looking for — measured 2026-09-18, a merge an hour old
+against a row that said nothing about its own age. The caption therefore carries
+`read 12m ago` on a healthy row and `could not be reached · last read 2h ago` on
+a failed one, both halves rather than the age alone: the age stood in for the
+failure only while a healthy row was silent. It is worded from `ForgeRow.readAt`
+on a `TimelineView` in the view, never pre-built into the snapshot, because this
+block's frame arrives once a cadence — `StatusRow.checkedAt` is the same shape
+for the same reason. A row that has never once answered carries no date at all
+and prints its reason by itself: `ForgeActivityReading.unavailable` stamps the
+*attempt*, and re-stamps it every round, so `hasEverRead` is what the row asks.
+Printing the age only past some staleness was the other wording and it has no
+honest threshold: the interval is chosen after each round, with jitter, and the
+loop keeps it to itself.
+
+The re-read is a **right-click on the row**, named in the hover the way the
+keep-awake control names its own, because 340 pt already has the login
+truncating before the figures do. Three things about it are settled. It
+**joins** a fetch already in flight rather than opening a second — actor
+isolation orders the writes and not the results, so a round that started first
+and answered slowly would otherwise put its older figures back over a refresh
+the user had just watched land. It **reaches a parked connection**, which is
+the point: a refused token is otherwise never asked again until the host is
+connected a second time, however transient the refusal was; a success unparks,
+a refusal that still stands keeps the parking, and a *retryable* answer unparks
+too, because a click made off the VPN must not strand the connection on the one
+reading nobody can act on. And it leaves the loop's own sleep alone — resetting
+it would postpone every other connection to pay for this one. Making the gesture
+reachable is also what made GitHub's secondary rate limit worth telling apart:
+it answers `403` with a retry deadline and an untouched quota, which read as a
+refused token and parked a connection that would have answered on the next poll.
+
 `providers[].plan` is the account's subscription plan as the vendor's own
 lowercase token — `max`, `team`, `plus` — never a display label: the app words it
 in `UsageFormat`, so a tier a vendor ships after this release still reaches the
@@ -289,8 +323,8 @@ compiled into the app too.
 | `ForgeActivity.swift`           | `ForgeKind`, `ForgeActivity` (the four counters per period), `ForgeActivityReading` and `ForgeReadFailure`. The login is on the *reading* and never on the connection: measured 2026-09-17, `gh`'s own configuration named one account while the token in its keychain item answered as another, so a username taken from a CLI's config is a guess about whose numbers these are. A period that could not be read is absent rather than zero |
 | `ForgeConnections.swift`        | `ForgeConnection` (kind plus host — the id, so one host serving two forges is two rows), `ForgeConnectionIndex` (`forge-connections.json`, holding no secret so a lapsed grant still lists what is connected) and `ForgeTokenStore` (`com.radonforge.sissy.forge-token`). No enabled flag: a connection is the switch, and removing it is the off |
 | `ForgeTokenImport.swift`        | Reads the tokens `gh` and `glab` already hold, on the press that offers them and nowhere else. `gh`'s is in the login keychain as `go-keyring-base64:<base64>` and is read through `/usr/bin/security` because that tool is on the item's ACL and this process is not — measured 2026-09-17, no dialog. `glab`'s is plaintext in its own config. Neither CLI's storage is ever written |
-| `ForgeActivityFeed.swift`       | `ForgeWindow` (the archive's own window arithmetic, plus `vendorDay`, which renders a window start as its own local date at midnight UTC — both forges bucket by whole UTC days and an instant made the calendar snap down and buy a whole extra day) and one reader per forge. GitHub answers every period's contributions, merges, opened issues **and comments** in one GraphQL document costing 1 point of 5000/h — the comments as a page of the account's own, counted here rather than at the vendor, which totals no such thing; the page proves its own coverage through `vendorInstant`, and a window it cannot prove is absent rather than a lower bound. GitLab takes two documents — the second only because the root `issues` field filters on the login the first returns, and that login travels as a GraphQL **variable** rather than spliced into a query — plus two header reads per period, the activity total and the same filtered to `commented`. Each of the three optional counters is asked for only while its switch is on, keyed by `ForgeCounter`. `after` on GitLab's events is **exclusive**, measured, so a window names the day before it starts |
-| `ForgeActivityMonitor.swift`    | The poll: 5 min while agents are working, 30 min once nothing has, jittered, one value published for every connection. A failure keeps the last figures **and their age** — republishing would date a reading nobody took — and a refused or missing token parks the connection until the user acts, which is what separates this loop from `ProviderStatusMonitor`'s |
+| `ForgeActivityFeed.swift`       | `ForgeWindow` (the archive's own window arithmetic, plus `vendorDay`, which renders a window start as its own local date at midnight UTC — both forges bucket by whole UTC days and an instant made the calendar snap down and buy a whole extra day) and one reader per forge. GitHub answers every period's contributions, merges, opened issues **and comments** in one GraphQL document costing 1 point of 5000/h — the comments as a page of the account's own, counted here rather than at the vendor, which totals no such thing; the page proves its own coverage through `vendorInstant`, and a window it cannot prove is absent rather than a lower bound. GitLab takes two documents — the second only because the root `issues` field filters on the login the first returns, and that login travels as a GraphQL **variable** rather than spliced into a query — plus two header reads per period, the activity total and the same filtered to `commented`. Each of the three optional counters is asked for only while its switch is on, keyed by `ForgeCounter`. `after` on GitLab's events is **exclusive**, measured, so a window names the day before it starts. A `403` is told from a refused token by two headers rather than one: an exhausted hourly quota leaves a remaining count of zero, a secondary limit leaves the quota alone and sends a retry deadline, and reading only the count filed a throttled account as a refusal that parks |
+| `ForgeActivityMonitor.swift`    | The poll: 5 min while agents are working, 30 min once nothing has, jittered, one value published for every connection. A failure keeps the last figures **and their age** — republishing would date a reading nobody took — and a refused or missing token parks the connection until the user acts, which is what separates this loop from `ProviderStatusMonitor`'s. `refreshOnce(id:onRefresh:)` is that user: it reaches a parked connection, and the parking then follows the answer rather than accumulating. Both entry points go through one per-connection fetch, so a click landing mid-round joins it — two requests would answer at two moments and the row would keep whichever finished last rather than whichever was asked last. The fetches are unstructured, so `stop()` cancels them itself and the generation decides what may still publish |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow` / `ProviderAccount` / `ProviderCredits`, the burn rate, and the slice and project ordering. No formatters: the frame carries raw numbers and the app words them. `history` is one rollup per `UsagePeriod` the archive answers for, never keyed by `today` — the headline reads that off the live totals beside it |
 | `KeepAwake.swift`               | Actor owning the `PreventUserIdleSystemSleep` assertion and, when `keepScreenAwake` asks for it, the `PreventUserIdleDisplaySleep` one, plus `KeepAwakeMode` / `KeepAwakeState` / `KeepAwakeHold` / `KeepAwakePolicy`; the mode and the screen setting persist in `server.json`, the assertions die with the process |
