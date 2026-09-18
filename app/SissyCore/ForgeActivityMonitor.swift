@@ -218,17 +218,23 @@ actor ForgeActivityMonitor {
 
     /// Takes the fetch off the register and publishes what it answered.
     ///
-    /// Clearing before the generation is checked is deliberate: a torn-down
-    /// run must not leave a connection looking busy to the run that replaced
-    /// it. Nothing newer can be cleared by mistake, because the entry is only
-    /// replaced by a caller that found it empty, and it is empty only once
-    /// this has run.
+    /// **A stale fetch takes nothing off the register, which is why the
+    /// generation is checked first.** `stop()` empties the register itself, so
+    /// one that lands afterwards has nothing of its own left to remove — and
+    /// removing whatever it finds would deregister the fetch that replaced it,
+    /// leaving the next caller to open the duplicate request the register
+    /// exists to prevent. The entry cannot leak either way: it is cleared on
+    /// every path where it is still this fetch's.
+    ///
+    /// The generation is the whole test, and cancellation is not asked about
+    /// separately: `stop()` is the only thing that cancels these tasks and it
+    /// bumps the generation before it does.
     private func finish(
         _ outcome: Result<ForgeActivityReading, Error>, for connection: ForgeConnection,
         stamp: Int
     ) {
+        guard stamp == generation else { return }
         inFlight[connection.id] = nil
-        guard stamp == generation, !Task.isCancelled else { return }
         apply(outcome, for: connection)
     }
 
