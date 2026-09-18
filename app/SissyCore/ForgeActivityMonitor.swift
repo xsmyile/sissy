@@ -29,6 +29,9 @@ actor ForgeActivityMonitor {
     /// Spread across the interval, so every Sissy started at login does not ask
     /// the same two APIs in the same second.
     static let jitterSeconds: ClosedRange<Int> = 0...30
+    /// The least a wait can be, so a delay capped at a boundary it is already
+    /// on cannot come out as no wait at all and ask again in the same second.
+    static let shortestWait: Duration = .seconds(1)
 
     /// One reading per connection, published as one value: the panel reads the
     /// whole map while the poll may be part way through the next round, and a
@@ -294,9 +297,25 @@ actor ForgeActivityMonitor {
         }
     }
 
-    private func nextDelay() -> Duration {
-        let working = lastActivity.load().map { Date().timeIntervalSince($0) < Self.idleAfter }
+    /// How long to wait before the next round.
+    ///
+    /// **Capped at the next local midnight**, because every window a reading
+    /// carries is worked out from the instant it was taken: a round at 23:50
+    /// answers `Today` for the day that is ending, and on the ordinary cadence
+    /// that figure would stand under a heading naming the new day for the next
+    /// half hour. The cap costs one extra round, on a day whose wait would
+    /// have crossed the boundary and on no other.
+    ///
+    /// Internal so a test can hold the cap against an injected instant; the
+    /// jitter is what stops it being assertable to the second.
+    func nextDelay(from now: Date = Date(), calendar: Calendar = .current) -> Duration {
+        let working = lastActivity.load().map { now.timeIntervalSince($0) < Self.idleAfter }
         let base = working == true ? Self.refreshInterval : Self.idleRefreshInterval
-        return base + .seconds(Int.random(in: Self.jitterSeconds))
+        let delay = base + .seconds(Int.random(in: Self.jitterSeconds))
+        guard
+            let midnight = calendar.date(
+                byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
+        else { return delay }
+        return max(min(delay, .seconds(midnight.timeIntervalSince(now))), Self.shortestWait)
     }
 }

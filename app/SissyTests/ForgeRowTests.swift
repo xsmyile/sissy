@@ -26,6 +26,14 @@ final class ForgeRowTests: XCTestCase {
             readAt: when, failure: nil)
     }
 
+    /// Midday on the same local day as `readAt`, for the tests that need a
+    /// reading to be hours old *without* crossing midnight — `readAt` itself
+    /// is just after 01:00, so subtracting two hours from it lands on the day
+    /// before and the row would lose its figures to the roll-over rule.
+    private static let midday =
+        Calendar.current.date(
+            bySettingHour: 12, minute: 0, second: 0, of: readAt) ?? readAt
+
     /// The rows for a window, with an archive behind it.
     ///
     /// The rollup is not decoration: the snapshot only resolves a period the
@@ -34,9 +42,10 @@ final class ForgeRowTests: XCTestCase {
     /// That fallback is the forge block's own behaviour on a fresh install and
     /// it is deliberate — the block follows the control, and the control is
     /// about the money.
-    private func rows(_ readings: [ForgeActivityReading], period: UsagePeriod = .today)
-        -> [UsagePanelSnapshot.ForgeRow]
-    {
+    private func rows(
+        _ readings: [ForgeActivityReading], period: UsagePeriod = .today,
+        now: Date = ForgeRowTests.readAt
+    ) -> [UsagePanelSnapshot.ForgeRow] {
         let history: [UsagePeriod: UsageHistoryRollup] = Dictionary(
             uniqueKeysWithValues: UsagePeriod.archived.map { period in
                 (period, UsageHistoryRollup(period: period, earliestDay: nil, tokens: 1, cost: 1))
@@ -44,15 +53,18 @@ final class ForgeRowTests: XCTestCase {
         let frame = FrameBuilder.build(
             today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [], history: history,
             forge: readings)
-        return UsagePanelSnapshot.make(frame: frame, period: period, now: Self.readAt).forge
+        return UsagePanelSnapshot.make(frame: frame, period: period, now: now).forge
     }
 
     /// The caption the row draws, which the view words on its own clock rather
     /// than taking pre-built off the snapshot — so the age advances between
     /// two frames five to thirty minutes apart.
-    private func notice(_ row: UsagePanelSnapshot.ForgeRow, refreshing: Bool = false) -> String? {
+    private func notice(
+        _ row: UsagePanelSnapshot.ForgeRow, refreshing: Bool = false,
+        now: Date = ForgeRowTests.readAt
+    ) -> String? {
         UsageFormat.forgeNotice(
-            row.failure, readAt: row.readAt, refreshing: refreshing, now: Self.readAt)
+            row.failure, readAt: row.readAt, refreshing: refreshing, now: now)
     }
 
     /// With no archive the control does not appear and every window is today,
@@ -182,16 +194,41 @@ final class ForgeRowTests: XCTestCase {
     /// reason and the age. The age alone stood for the failure while a healthy
     /// row was silent, and now that one is dated too it would read as an
     /// ordinary reading that happened to be old.
+    ///
+    /// Stale is within the day. A failure that carries figures from *before*
+    /// midnight loses them anyway — the roll-over outranks this, because
+    /// yesterday's numbers under today's heading are wrong whether or not the
+    /// last attempt worked.
     func testStaleFiguresKeepTheirPlaceAndSayWhyAndHowOld() throws {
         let stale = ForgeActivityReading(
             id: Self.gitHub.id, kind: .gitHub, host: Self.gitHub.host, login: "xsmyile",
             activity: ForgeActivity(
                 contributions: [.today: 128], merged: [.today: 28], issues: [.today: 7],
                 comments: [.today: 3], contributionsBoundedToOneYear: true),
-            readAt: Self.readAt.addingTimeInterval(-7200), failure: .unreachable)
-        let row = try XCTUnwrap(rows([stale]).first)
+            readAt: Self.midday.addingTimeInterval(-7200), failure: .unreachable)
+        let row = try XCTUnwrap(rows([stale], now: Self.midday).first)
         XCTAssertEqual(row.contributions, "128")
-        XCTAssertEqual(notice(row), "could not be reached · last read 2h ago")
+        XCTAssertEqual(
+            notice(row, now: Self.midday), "could not be reached · last read 2h ago")
+    }
+
+    /// **A reading from before midnight keeps its row and loses its figures.**
+    /// Every figure is over a window worked out from the instant it was asked
+    /// for, so yesterday's `Today` is the whole of yesterday under a heading
+    /// naming this morning. The dash is the same one a reading that never
+    /// arrived gets, and the caption says how long ago the last one was.
+    func testAReadingFromAnEarlierDayLosesItsFigures() throws {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Self.readAt))
+        let row = try XCTUnwrap(
+            rows([
+                Self.reading(
+                    Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7,
+                    at: yesterday)
+            ]).first)
+        XCTAssertFalse(row.hasFigures)
+        XCTAssertEqual(row.login, "xsmyile")
+        XCTAssertEqual(notice(row), "read 24h ago")
     }
 
     /// A window the vendor answered nothing for is absent rather than zero, so
