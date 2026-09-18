@@ -4,6 +4,7 @@ AGENTS.md
 CFFIXED_USER_HOME
 Conversations
 CurrentUser
+ENOMEM
 FSEventStreamScheduleWithRunLoop
 GPTs
 ISSUE_ADVANCED
@@ -16,6 +17,7 @@ NSPanel
 NSWorkspace.runningApplications
 Optional
 PATH_MAX
+PROC_PIDPATHINFO_MAXSIZE
 RTLD_DEFAULT
 RawRepresentable
 Responses

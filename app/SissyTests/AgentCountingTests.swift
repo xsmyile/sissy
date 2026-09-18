@@ -225,3 +225,75 @@ final class AgentCountsArchiveTests: XCTestCase {
             AgentCounts(sessions: 2, agents: 5))
     }
 }
+
+/// A day the tail counted but never billed.
+///
+/// Codex writes a rollout's `session_meta` when it opens, so a session
+/// somebody started and never asked anything is one session and no tokens at
+/// all. Gated on the token rows, such a day left the dirty set unwritten and
+/// was never retried, so its count aged out — and the resume path dropped it
+/// again on the way back in.
+final class AgentCountWithoutSpendTests: XCTestCase {
+    private var logDir: URL!
+    private var stateDir: URL!
+
+    override func setUpWithError() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sissy-counts-\(UUID().uuidString)")
+        logDir = base.appendingPathComponent("sessions")
+        stateDir = base.appendingPathComponent("state")
+        try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: logDir.deletingLastPathComponent())
+    }
+
+    /// One rollout, opened and never asked anything.
+    private func writeIdleRollout() throws {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let line = """
+            {"timestamp":"\(stamp)","type":"session_meta","payload":\
+            {"session_id":"idle-1","cwd":"/tmp","source":"exec","thread_source":"user"}}
+            """
+        try (line + "\n").write(
+            to: logDir.appendingPathComponent("rollout-idle-1.jsonl"),
+            atomically: true, encoding: .utf8)
+    }
+
+    private func runTail() async {
+        let provider = LocalUsageProvider.codex(
+            codexDir: logDir,
+            persistenceURL: stateDir.appendingPathComponent("usage-state-codex.json"),
+            historyRoot: stateDir,
+            ledger: ProjectLedger(url: stateDir.appendingPathComponent("ledger.json")))
+        await provider.start { _ in }
+        _ = await provider.current()
+        await provider.stop()
+    }
+
+    private func archivedCounts() -> AgentCounts? {
+        let day = UsageReaderShared.dayFormatter.string(from: Date())
+        return UsageHistoryStore.load(provider: ProviderID.codex, day: day, in: stateDir)?.agents
+    }
+
+    func testASessionThatSpentNothingStillReachesTheArchive() async throws {
+        try writeIdleRollout()
+        await runTail()
+        XCTAssertEqual(
+            archivedCounts(), AgentCounts(sessions: 1, agents: 0),
+            "a day with a session and no tokens was never written")
+    }
+
+    /// The count has to survive the relaunch too: the snapshot carries it, and
+    /// the resume must not gate it on token totals that day has none of.
+    func testTheCountSurvivesARelaunchThatSpentNothing() async throws {
+        try writeIdleRollout()
+        await runTail()
+        await runTail()
+        XCTAssertEqual(
+            archivedCounts(), AgentCounts(sessions: 1, agents: 0),
+            "the relaunch lost the count of a day it had already written")
+    }
+}
