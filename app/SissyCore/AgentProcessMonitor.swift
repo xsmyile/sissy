@@ -58,9 +58,29 @@ actor AgentProcessMonitor {
     /// Injected by a test, so a round can be asserted without the kernel's own
     /// process table under it.
     private let read: @Sendable (Date) -> AgentProcessReading
+    /// Turns each agent's working directory into the repository it belongs to.
+    ///
+    /// The monitor's rather than the reader's, because it is the same question
+    /// a project row answers and has to be answered the same way: a worktree
+    /// counts against the checkout it was cut from, and a directory no `.git`
+    /// was ever read from is named by nothing at all.
+    ///
+    /// A resolver for the monitor's life rather than one per sweep. It pins an
+    /// answer for its own lifetime, which is exactly right here: the sweep runs
+    /// every 15 s and re-walking the same handful of directories each time
+    /// would spend the budget this reading was chosen for.
+    ///
+    /// Actor-isolated rather than a `@Sendable` closure: a resolver holds a
+    /// cache and is not `Sendable`, and the only caller is the sweep, which
+    /// already runs on this actor.
+    private let projects: ProjectResolver
 
-    init(read: @escaping @Sendable (Date) -> AgentProcessReading = AgentProcessReader.read) {
+    init(
+        read: @escaping @Sendable (Date) -> AgentProcessReading = AgentProcessReader.read,
+        ledger: ProjectLedger = ProjectLedger()
+    ) {
         self.read = read
+        self.projects = ProjectResolver(ledger: ledger)
     }
 
     /// The reading the frame carries, or nil before the first sweep.
@@ -97,7 +117,8 @@ actor AgentProcessMonitor {
     /// and assert on what it published, instead of waiting on the scheduler.
     func sampleOnce(onRefresh: @Sendable @escaping () async -> Void) async {
         let now = Date()
-        let reading = read(now)
+        var reading = read(now)
+        reading.attributeProjects(by: projects.project(for:))
         let previous = published.load()
         samples.append(reading.footprint)
         if samples.count > Self.retainedSamples {

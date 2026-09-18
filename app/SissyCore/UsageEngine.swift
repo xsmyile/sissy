@@ -253,7 +253,7 @@ actor UsageEngine {
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         self.projectLedger = projectLedger
         self.identityMonitor = GitIdentityMonitor(ledger: projectLedger)
-        self.agentMonitor = AgentProcessMonitor()
+        self.agentMonitor = AgentProcessMonitor(ledger: projectLedger)
         let limitsBackoff = LimitsBackoffStore(
             url: LimitsBackoffLedger.defaultURL(in: stateDir))
         self.limitsBackoff = limitsBackoff
@@ -1605,6 +1605,18 @@ actor UsageEngine {
     func refreshIdentities() async {
         let me = self
         await identityMonitor.sweepOnce { await me.reemit() }
+    }
+
+    /// Counts the running agents again now, for the agents page's own button.
+    ///
+    /// Worth a control where the counts beside it are not: those come off the
+    /// tail as turns land, and nothing a press could do would make a turn
+    /// arrive sooner. This is a sweep on a 15 s clock, so a user who has just
+    /// closed three sessions is looking at a figure that is right and reads as
+    /// wrong.
+    func refreshAgentProcesses() async {
+        let me = self
+        await agentMonitor.sampleOnce { await me.reemit() }
     }
 
     /// Re-reads one forge connection now, for the gesture on its own row.

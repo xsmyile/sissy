@@ -17,7 +17,7 @@ final class AgentStatsSnapshotTests: XCTestCase {
     private func agent(_ provider: String, bytes: UInt64, pid: pid_t = 1) -> AgentProcess {
         AgentProcess(
             pid: pid, provider: provider, footprint: bytes, treeFootprint: bytes * 2,
-            startedAt: Date(), version: nil)
+            startedAt: Date(), version: nil, directory: nil, project: nil)
     }
 
     private func frame(
@@ -82,15 +82,23 @@ final class AgentStatsSnapshotTests: XCTestCase {
                         id: ProviderID.codex, tokens: 5, cost: 1,
                         agents: AgentCounts(sessions: 16, agents: 8)),
                 ]),
-            period: .today)
-        XCTAssertEqual(snapshot.agents.counted, AgentCounts(sessions: 57, agents: 18))
+        )
+        XCTAssertEqual(
+            snapshot.agents.counted[.today]?.counts, AgentCounts(sessions: 57, agents: 18))
     }
 
-    func testAWiderWindowIsCountedFromTheArchive() {
+    /// The defect this replaced: the rows under the figures came off the
+    /// slices, which answer for today, so a thirty-day heading sat over
+    /// today's numbers and the two never agreed.
+    func testAWiderWindowIsCountedFromTheArchiveRowsIncluded() {
         let history: [UsagePeriod: UsageHistoryRollup] = [
             .sevenDays: UsageHistoryRollup(
                 period: .sevenDays, earliestDay: Date(), tokens: 99, cost: 1,
-                agents: AgentCounts(sessions: 300, agents: 120))
+                agents: AgentCounts(sessions: 300, agents: 120),
+                agentsByProvider: [
+                    ProviderID.claudeCode: AgentCounts(sessions: 250, agents: 100),
+                    ProviderID.codex: AgentCounts(sessions: 50, agents: 20),
+                ])
         ]
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(
@@ -99,9 +107,23 @@ final class AgentStatsSnapshotTests: XCTestCase {
                         id: ProviderID.claudeCode, tokens: 10, cost: 1,
                         agents: AgentCounts(sessions: 41, agents: 10))
                 ],
-                history: history),
-            period: .sevenDays)
-        XCTAssertEqual(snapshot.agents.counted, AgentCounts(sessions: 300, agents: 120))
+                history: history))
+        let week = snapshot.agents.counted[.sevenDays]
+        XCTAssertEqual(week?.counts, AgentCounts(sessions: 300, agents: 120))
+        XCTAssertEqual(
+            week?.byProvider.first { $0.id == ProviderID.claudeCode }?.counts,
+            AgentCounts(sessions: 250, agents: 100),
+            "the row under a seven-day heading carried today's figure")
+        XCTAssertEqual(
+            week?.byProvider.map(\.counts).reduce(into: AgentCounts.none) { $0.add($1) },
+            week?.counts,
+            "the rows did not add up to the total above them")
+    }
+
+    /// The page offers only the windows there is something to show for.
+    func testOnlyAnsweredWindowsAreOffered() {
+        let snapshot = UsagePanelSnapshot.make(frame: frame())
+        XCTAssertEqual(snapshot.agents.periods, [.today])
     }
 
     /// A provider keeps its row whether or not any of its processes is up:
@@ -117,9 +139,10 @@ final class AgentStatsSnapshotTests: XCTestCase {
                         agents: AgentCounts(sessions: 16, agents: 8))
                 ],
                 memory: memory([])))
-        XCTAssertEqual(snapshot.agents.byProvider.map(\.id), [ProviderID.codex])
-        XCTAssertEqual(snapshot.agents.byProvider.first?.running, 0)
-        XCTAssertEqual(snapshot.agents.byProvider.first?.counts.agents, 8)
+        let today = snapshot.agents.counted[.today]
+        XCTAssertEqual(today?.byProvider.map(\.id), [ProviderID.codex])
+        XCTAssertEqual(today?.byProvider.first?.running, 0)
+        XCTAssertEqual(today?.byProvider.first?.counts.agents, 8)
     }
 
     func testTheRunningCountIsPerProvider() {
@@ -135,7 +158,9 @@ final class AgentStatsSnapshotTests: XCTestCase {
                     agent(ProviderID.codex, bytes: 1, pid: 3),
                 ])))
         let byProvider = Dictionary(
-            uniqueKeysWithValues: snapshot.agents.byProvider.map { ($0.id, $0.running) })
+            uniqueKeysWithValues: (snapshot.agents.counted[.today]?.byProvider ?? []).map {
+                ($0.id, $0.running)
+            })
         XCTAssertEqual(byProvider[ProviderID.claudeCode], 2)
         XCTAssertEqual(byProvider[ProviderID.codex], 1)
     }

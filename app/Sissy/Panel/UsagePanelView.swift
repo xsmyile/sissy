@@ -231,12 +231,7 @@ struct UsagePanelView: View {
                         } else if case .identities = page {
                             PanelIdentities(rows: snapshot.identities, focus: identityFocus)
                         } else if case .stats = page {
-                            PanelStats(
-                                block: snapshot.agents,
-                                period: snapshot.period,
-                                periods: snapshot.periods,
-                                coverage: snapshot.coverage,
-                                selectPeriod: { model.setUsagePeriod($0) })
+                            PanelStats(block: snapshot.agents)
                         } else if let open, let services {
                             PanelProviderStatusPage(provider: open.id, row: services)
                         } else if let open {
@@ -325,10 +320,12 @@ struct UsagePanelView: View {
     /// The refresh is not a nicety here. A user on this page has usually just
     /// corrected a repository in a terminal, and waiting out a sweep interval
     /// to watch the row clear reads as the correction not having worked.
-    /// The stats page's own header: the way back and the title. No refresh
-    /// beside it, unlike the identities page — the sweep behind this one runs
-    /// on its own clock and the counts come off the tail, so there is nothing
-    /// a press could make happen sooner.
+    /// The agents page's own header: the way back, the title, and a re-count.
+    ///
+    /// The button reaches the process sweep and not the counts: those come off
+    /// the tail as turns land, where the sweep is on a 15 s clock and a user
+    /// who has just closed three sessions is looking at a figure that is right
+    /// and reads as wrong.
     private var statsHeader: some View {
         HStack(spacing: 8) {
             Button {
@@ -348,6 +345,19 @@ struct UsagePanelView: View {
                 .lineLimit(1)
 
             Spacer(minLength: 0)
+
+            Button {
+                model.engine.refreshAgentProcesses()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .glassEffect(.regular, in: .circle)
+            .help("Count the running agents again")
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)

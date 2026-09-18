@@ -1136,6 +1136,33 @@ extension UsageFormat {
     /// The window a series of memory samples covers, which begins when Sissy
     /// did: a reading from a Mac that was asleep is not a low reading, it is
     /// no reading.
+    /// What a running agent's row is called: the repository it is working in,
+    /// rendered as its last component exactly as a project row is.
+    ///
+    /// A directory git could not name a repository for gets the vendor's name
+    /// instead of the path. A CLI's own scratch area is not a project, and a
+    /// row named after a path Sissy cannot verify is the invented attribution
+    /// `ProjectResolver` refuses to make.
+    static func agentProcessName(_ row: UsagePanelSnapshot.AgentsBlock.Process) -> String {
+        guard let project = row.project else { return providerName(row.provider) }
+        return (project as NSString).lastPathComponent
+    }
+
+    /// How long a process has been up, at the grain a person reads it: minutes
+    /// under an hour, hours and minutes under a day, days and hours above.
+    ///
+    /// Deliberately *not* called time worked. A process says nothing about
+    /// which of its minutes were spent on a turn, and an agent left open
+    /// overnight has been up for twelve hours and working for none of them.
+    static func agentUptime(since started: Date, now: Date = Date()) -> String {
+        let seconds = max(now.timeIntervalSince(started), 0)
+        let minutes = Int(seconds / 60)
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h \(minutes % 60)m" }
+        return "\(hours / 24)d \(hours % 24)h"
+    }
+
     static func samplesSince(_ since: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = .autoupdatingCurrent

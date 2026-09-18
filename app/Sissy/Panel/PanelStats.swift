@@ -7,28 +7,39 @@ import SwiftUI
 /// at all. And **not a tile on the Overview**, which answers whether there is
 /// room to keep working and nothing else — a lifetime count belongs to the
 /// question a person asks at the end of a period, not to the one they ask
-/// while working, and putting it up there is the decorative signal on the cost
-/// axis this panel already refuses.
+/// while working.
 ///
 /// The one line the Overview does carry is the live half, because that *is* a
 /// "can I keep working" reading: a rate limit and the Mac's memory are the two
-/// things that stop work now, where what a period cost is asked afterwards.
-/// That line is also the only door to this page, so it is drawn whether or not
-/// anything is running.
+/// things that stop work now. That line is also the only door to this page, so
+/// it is drawn whether or not anything is running.
+///
+/// **The window is this page's own.** It used to be the headline's, which was
+/// wrong twice over: the Overview shows none of these figures, so sharing the
+/// selection bought nothing, and changing it here moved the money headline
+/// behind the user's back. Local means it resets on the way out, which is the
+/// arrangement `PanelIdentities.showsAll` already has and for the same reason
+/// — a page that opens on the answer to the question before last has to be
+/// read before it can be glanced at.
 struct PanelStats: View {
     let block: UsagePanelSnapshot.AgentsBlock
-    let period: UsagePeriod
-    let periods: [UsagePeriod]
-    let coverage: String?
-    let selectPeriod: (UsagePeriod) -> Void
+
+    @State private var window = UsagePanelSnapshot.AgentsBlock.defaultPeriod
 
     private static let sectionSpacing: CGFloat = 16
     private static let labelSpacing: CGFloat = 10
-    private static let rowSpacing: CGFloat = 8
+    private static let rowSpacing: CGFloat = 7
     private static let headlineSize: CGFloat = 18
     private static let captionSize: CGFloat = 11
     private static let rowSize: CGFloat = 12
-    private static let sparklineHeight: CGFloat = 28
+    private static let sparklineHeight: CGFloat = 26
+    private static let figureSpacing: CGFloat = 28
+
+    /// The chosen window, falling back to today for a period the archive has
+    /// stopped answering for while the page was open.
+    private var shown: UsagePanelSnapshot.AgentsBlock.Window? {
+        block.counted[window] ?? block.counted[.today]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Self.sectionSpacing) {
@@ -54,13 +65,13 @@ struct PanelStats: View {
     }
 
     private func running(_ live: UsagePanelSnapshot.AgentsBlock.Live) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(UsageFormat.agentsRunning(live.running, footprint: live.footprint))
                 .font(.system(size: Self.headlineSize, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .contentTransition(.numericText())
             if !live.samples.isEmpty {
-                HStack(alignment: .bottom, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     Sparkline(samples: live.samples)
                         .frame(height: Self.sparklineHeight)
                     Text(UsageFormat.bytes(live.peak))
@@ -76,7 +87,42 @@ struct PanelStats: View {
             .font(.system(size: Self.captionSize))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            processes(live.processes)
         }
+    }
+
+    /// One row per running agent.
+    ///
+    /// This is what answers "two gigabytes of what", and it is why the reading
+    /// names a repository at all: the totals above say how much, and only the
+    /// rows say *where*. The repository rather than the directory, resolved the
+    /// way a project row's is, so two worktrees of one checkout read as the one
+    /// project they are — and the path stays on the hover, because a path is a
+    /// client's name as often as not.
+    private func processes(_ rows: [UsagePanelSnapshot.AgentsBlock.Process]) -> some View {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            ForEach(rows) { row in
+                HStack(spacing: 6) {
+                    ProviderMark(id: row.provider)
+                    Text(UsageFormat.agentProcessName(row))
+                        .font(.system(size: Self.rowSize))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(row.project == nil ? Color.secondary : .primary)
+                    Spacer(minLength: 8)
+                    Text(
+                        UsageFormat.bytes(row.footprint) + " · "
+                            + UsageFormat.agentUptime(since: row.startedAt)
+                    )
+                    .font(.system(size: Self.rowSize))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+                .help(row.directory ?? "The kernel would not say where this agent is working")
+            }
+        }
+        .padding(.top, 2)
     }
 
     /// A dash and no sparkline, which is the panel's own rule for a reading
@@ -102,21 +148,21 @@ struct PanelStats: View {
                 Spacer(minLength: 0)
                 periodPicker
             }
-            HStack(alignment: .top, spacing: 24) {
-                figure(block.counted.sessions, singular: "session", plural: "sessions")
-                figure(block.counted.agents, singular: "agent", plural: "agents")
-            }
-            if !block.byProvider.isEmpty {
-                VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                    ForEach(block.byProvider) { row in
-                        providerRow(row)
+            if let shown {
+                HStack(alignment: .top, spacing: Self.figureSpacing) {
+                    figure(shown.counts.sessions, singular: "session", plural: "sessions")
+                    figure(shown.counts.agents, singular: "agent", plural: "agents")
+                }
+                if !shown.byProvider.isEmpty {
+                    VStack(alignment: .leading, spacing: Self.rowSpacing) {
+                        ForEach(shown.byProvider) { providerRow($0) }
                     }
                 }
-            }
-            if let coverage {
-                Text(coverage)
-                    .font(.system(size: Self.captionSize))
-                    .foregroundStyle(.secondary)
+                if let coverage = shown.coverage {
+                    Text(coverage)
+                        .font(.system(size: Self.captionSize))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -153,12 +199,9 @@ struct PanelStats: View {
         }
     }
 
-    /// The same control the headline carries, so the two blocks are read over
-    /// the window the person already chose rather than over one this page
-    /// picked for them.
     private var periodPicker: some View {
-        Picker("", selection: Binding(get: { period }, set: selectPeriod)) {
-            ForEach(periods, id: \.self) { option in
+        Picker("", selection: $window) {
+            ForEach(block.periods, id: \.self) { option in
                 Text(UsageFormat.periodLabel(option)).tag(option)
             }
         }
@@ -169,11 +212,15 @@ struct PanelStats: View {
     }
 }
 
-/// The memory series, drawn as a filled line.
+/// The memory series, drawn as a line.
 ///
-/// Scaled from zero rather than from the lowest sample: the question is how
-/// much of the Mac the agents are holding, and a line auto-scaled to its own
-/// range turns a quiet hour that moved by 40 MB into a mountain range.
+/// **Unfilled.** A fill under a series that hovers near its own peak shades
+/// most of the box, which reads as a quantity rather than as a shape and hides
+/// the only thing the graph is for — whether the number is climbing.
+///
+/// **Scaled from zero**, so a quiet hour that moved by 40 MB stays a flat line
+/// rather than becoming a mountain range. That flatness is the reading: the
+/// question is whether memory is growing, and a steady line answers it.
 private struct Sparkline: View {
     let samples: [UInt64]
 
@@ -185,16 +232,11 @@ private struct Sparkline: View {
             let points = samples.enumerated().map { index, value in
                 CGPoint(
                     x: CGFloat(index) * step,
-                    y: geometry.size.height
-                        * (1 - CGFloat(Double(value) / Double(peak)))
+                    y: geometry.size.height * (1 - CGFloat(Double(value) / Double(peak)))
                 )
             }
-            ZStack {
-                filled(points, to: geometry.size.height)
-                    .fill(.tint.opacity(0.18))
-                line(points)
-                    .stroke(.tint, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
-            }
+            line(points)
+                .stroke(.tint, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
         }
         .accessibilityHidden(true)
     }
@@ -204,18 +246,6 @@ private struct Sparkline: View {
         guard let first = points.first else { return path }
         path.move(to: first)
         for point in points.dropFirst() { path.addLine(to: point) }
-        return path
-    }
-
-    /// The same line closed along the baseline. `baseline` is the view's own
-    /// height because a `Path`'s origin is its top-left, so zero is the top of
-    /// the box and closing there would shade the empty half.
-    private func filled(_ points: [CGPoint], to baseline: CGFloat) -> Path {
-        var path = line(points)
-        guard let first = points.first, let last = points.last else { return path }
-        path.addLine(to: CGPoint(x: last.x, y: baseline))
-        path.addLine(to: CGPoint(x: first.x, y: baseline))
-        path.closeSubpath()
         return path
     }
 }
