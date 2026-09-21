@@ -155,8 +155,8 @@ enum ClaudeAccountLinkCopy {
 
     static let unlinkMessage =
         "Sissy stops reading this account's limits and credits from claude.ai. The Claude "
-        + "Code sign-in it archived stays, so the account is still one you can switch to — "
-        + "and you can link the session again from this window."
+        + "Code sign-in it archived stays, so the account is still one you can switch to. "
+        + "You can link the session again from this window."
 
     /// One word, because a longer one does not survive the alert's layout:
     /// every button is given the widest one's fitting width, and a row that

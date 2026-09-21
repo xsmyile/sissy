@@ -110,7 +110,7 @@ enum UsageFormat {
     /// battery complaint with no path back to its cause, and a right-click on
     /// the menu bar is the shortest path there is.
     static func keepAwakeHolding(_ interval: TimeInterval) -> String {
-        "Keep awake — holding · " + held(interval)
+        "Keep awake · holding " + held(interval)
     }
 
     /// How long the keep-awake hold has been in force, for the panel's
@@ -179,7 +179,7 @@ enum UsageFormat {
             let what =
                 state.coversScreen
                 ? "Keeping this Mac and its screen awake\(since), so it will not lock."
-                : "Keeping this Mac awake\(since) — the screen still sleeps and locks."
+                : "Keeping this Mac awake\(since). The screen still sleeps and locks."
             return what + " Closing the lid sleeps it anyway · click to allow sleep" + modes
         case (.auto, false):
             return "Waiting for the agents · the Mac will be held while they work · "
@@ -647,7 +647,7 @@ enum UsageFormat {
         case ProviderID.claudeCode:
             return "Waiting for the first reading of this account's windows."
         case ProviderID.codex:
-            return "Codex reports its limits on its own turns — the next one fills this in."
+            return "Codex reports its limits on its own turns. The next one fills this in."
         default:
             return "This provider reports no subscription limits."
         }
@@ -876,7 +876,7 @@ enum UsageFormat {
     /// scratch directory never names one, and a checkout deleted since cannot
     /// be walked up from any more.
     static let projectsUnattributedReason =
-        "Counted in the total, but its working directory names no repository — "
+        "Counted in the total, but its working directory names no repository. It is "
         + "a CLI's own scratch directory, or a checkout deleted since."
     /// The credits headline: what has been charged, against the cap when one
     /// is set.
@@ -1055,7 +1055,7 @@ extension UsageFormat {
         case .author(let author):
             return "\(author.name) <\(author.email)>"
         case .unset:
-            return "No identity resolves here — git would refuse the commit"
+            return "No identity resolves here: git would refuse the commit"
         case .unreadable(let message):
             let first = message.split(separator: "\n").first.map(String.init) ?? message
             return first.isEmpty ? "Git could not read this repository" : first
@@ -1077,7 +1077,7 @@ extension UsageFormat {
         guard case .unexpected(let expected, let agreeing) = verdict else { return nil }
         let forge = host ?? "this forge"
         let repositories = agreeing == 1 ? "repository" : "repositories"
-        return "\(forge) — \(agreeing) \(repositories) there commit as \(expected.name)"
+        return "\(forge) · \(agreeing) \(repositories) there commit as \(expected.name)"
     }
 
     /// The Overview's one line, and nothing at all where every repository
