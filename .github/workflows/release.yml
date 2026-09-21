@@ -392,7 +392,7 @@ jobs:
 
             url "https://github.com/xsmyile/sissy/releases/download/v#{version}/Sissy-#{version}.dmg"
             name "Sissy"
-            desc "Menubar token usage meter for Claude Code and Codex"
+            desc "Menu bar meter for Claude Code and Codex spend, rate limits and activity"
             homepage "https://github.com/xsmyile/sissy"
 
             depends_on macos: :tahoe
