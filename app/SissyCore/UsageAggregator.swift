@@ -140,6 +140,7 @@ actor UsageAggregator {
                 cost: s.totalCost,
                 signals: p.currentSignals(),
                 projects: p.currentProjects(),
+                models: p.currentModels(),
                 agents: p.currentAgents(),
                 activity: p.currentActivity()
             )
