@@ -93,7 +93,7 @@ version.
 
 ## What Sissy will and will not take
 
-`AGENTS.md` at the root is the long version: every settled design decision,
+[`docs/DECISIONS.md`](docs/DECISIONS.md) is the long version: every settled design decision,
 with the measurement that settled it. It is written for coding agents but it is
 the honest answer to "why is it like that", and it is worth grepping before
 proposing a change. The short version:
