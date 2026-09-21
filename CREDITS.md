@@ -13,8 +13,7 @@ credit whether or not a licence asks for one.
 - [LiteLLM](https://github.com/BerriAI/litellm): the model price table Sissy
   fetches at runtime, which is what `ccusage` prices from too.
 - [Simple Icons](https://github.com/simple-icons/simple-icons): where the
-  GitHub and GitLab marks on the panel's repository card come from, released
-  under CC0.
+  GitHub and GitLab artwork Sissy draws comes from, released under CC0.
 
 ## Trademarks
 
