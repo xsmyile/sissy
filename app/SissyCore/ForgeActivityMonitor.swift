@@ -62,7 +62,11 @@ actor ForgeActivityMonitor {
     /// a keychain item to assert what a missing token does to a row. It hands
     /// back the keychain's own outcome rather than an optional, because "never
     /// connected" and "the grant has gone stale" are different rows.
-    private let tokenSource: @Sendable (String) -> CredentialLookup<String>
+    ///
+    /// The `Bool` is whether this read may raise the keychain dialog, and it is
+    /// the same parameter `ClaudeWebSource` passes its session store: a
+    /// scheduled round reads silently, and only the gesture on the row asks.
+    private let tokenSource: @Sendable (String, Bool) -> CredentialLookup<String>
     private var pollTask: Task<Void, Never>?
     /// Connections whose last failure needs the user. They keep their row and
     /// their last figures; what they stop costing is a request per round.
@@ -91,8 +95,8 @@ actor ForgeActivityMonitor {
             ForgeActivityReading = {
                 try await ForgeActivityFeed.read($0, token: $1, counters: $2, now: $3)
             },
-        token: @escaping @Sendable (String) -> CredentialLookup<String> = {
-            ForgeTokenStore.load(connection: $0)
+        token: @escaping @Sendable (String, Bool) -> CredentialLookup<String> = {
+            ForgeTokenStore.load(connection: $0, allowingInteraction: $1)
         }
     ) {
         self.connections = connections
@@ -174,7 +178,7 @@ actor ForgeActivityMonitor {
         let stamp = generation
         let before = published.load()
         let due = connections.filter { !parked.contains($0.id) }
-        for task in due.map(read) { await task.value }
+        for task in due.map({ read($0, allowingInteraction: false) }) { await task.value }
         guard stamp == generation, !Task.isCancelled else { return nextDelay() }
         if published.load() != before { await onRefresh() }
         return nextDelay()
@@ -189,6 +193,14 @@ actor ForgeActivityMonitor {
     /// `apply`'s to decide, so a refusal that still stands keeps the parking
     /// and a different answer lifts it.
     ///
+    /// **It is also the one read that may raise the keychain dialog**, which is
+    /// the other half of the same thought and the only way back from a stale
+    /// grant. Sissy's own item stops answering the moment the app is re-signed,
+    /// and every scheduled read is suppressed, so without this the row reports
+    /// `credentialUnreadable` on every round for ever and the only cure is
+    /// re-pasting a token that was never the problem. A click is a person
+    /// waiting on an answer, so a panel in front of them is expected.
+    ///
     /// No delay comes back because there is no schedule here to move. The loop
     /// keeps the sleep it was already on: resetting it would postpone every
     /// other connection to pay for this one, and the redundant round it saves
@@ -198,7 +210,7 @@ actor ForgeActivityMonitor {
         guard let connection = connections.first(where: { $0.id == id }) else { return }
         let stamp = generation
         let before = published.load()
-        await read(connection).value
+        await read(connection, allowingInteraction: true).value
         guard stamp == generation else { return }
         if published.load() != before { await onRefresh() }
     }
@@ -209,7 +221,16 @@ actor ForgeActivityMonitor {
     /// it awaits any of them: the tasks run at once, exactly as the group they
     /// replaced did, and a caller arriving mid-round cannot slip between the
     /// lookup and the registration.
-    private func read(_ connection: ForgeConnection) -> Task<Void, Never> {
+    ///
+    /// `allowingInteraction` belongs to whoever *started* the read, so a click
+    /// that joins a round in flight gets that round's silent answer. It is left
+    /// that way because the case this matters for cannot arrive: a stale grant
+    /// is refused by the keychain with no request behind it, so the read it
+    /// would join is microseconds long, where the reads that do take time are
+    /// the ones whose token was never in question.
+    private func read(
+        _ connection: ForgeConnection, allowingInteraction: Bool
+    ) -> Task<Void, Never> {
         if let running = inFlight[connection.id] { return running }
         let stamp = generation
         let fetch = fetchSource
@@ -217,7 +238,7 @@ actor ForgeActivityMonitor {
         let counters = counters
         let task = Task { [weak self] in
             let outcome: Result<ForgeActivityReading, Error>
-            let lookup = token(connection.id)
+            let lookup = token(connection.id, allowingInteraction)
             if case .found(let secret) = lookup {
                 do {
                     outcome = .success(try await fetch(connection, secret, counters, Date()))
@@ -260,8 +281,15 @@ actor ForgeActivityMonitor {
     /// Only an item that is genuinely absent is reported as a missing
     /// credential, which is the one of these the user can act on. Everything
     /// else is the keychain declining to answer *this* read — a stale grant
-    /// after a re-signed build is the ordinary case — and it stays retryable so
-    /// the next poll can pick the account back up on its own.
+    /// after a re-signed build is the ordinary case — and it stays retryable
+    /// rather than parking a connection that is perfectly fine.
+    ///
+    /// **Retryable is not self-healing, and the difference is the dialog.**
+    /// Every scheduled read is suppressed, so a round that meets a stale grant
+    /// meets it again on the next round and on every one after: what clears it
+    /// is `refreshOnce(id:)`, the row's own gesture, which is the only read
+    /// here allowed to ask. Staying unparked is what keeps the row polling for
+    /// the refusals that *are* transient, and what keeps the gesture cheap.
     private static func credentialFailure(_ outcome: CredentialLookup<String>) -> ForgeReadFailure {
         switch outcome {
         case .absent: .noCredential

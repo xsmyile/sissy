@@ -36,7 +36,7 @@ final class ForgeMonitorTests: XCTestCase {
                     connection, login: connection.kind == .gitHub ? "gh" : "gl",
                     contributions: 10, merged: 2)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await monitor.refreshOnce {}
         let rows = monitor.currentReadings()
         XCTAssertEqual(rows.map(\.id), [Self.gitHub.id, Self.gitLab.id])
@@ -51,7 +51,7 @@ final class ForgeMonitorTests: XCTestCase {
             connections: [Self.gitHub],
             fetch: { connection, _, _, _ in Self.reading(connection, login: "gh", contributions: 1, merged: 0)
             },
-            token: { _ in .absent })
+            token: { _, _ in .absent })
         _ = await monitor.refreshOnce {}
         let row = monitor.currentReadings().first
         XCTAssertEqual(row?.failure, .noCredential)
@@ -63,8 +63,8 @@ final class ForgeMonitorTests: XCTestCase {
     /// token, and the difference is not cosmetic: the grant on Sissy's own item
     /// goes stale on every re-signed build, so reporting it as missing would
     /// park a connection that is working and leave no way back but re-pasting a
-    /// token that was never the problem. It stays retryable, so the poll picks
-    /// the account back up on its own.
+    /// token that was never the problem. It stays retryable, so the refusals
+    /// that are transient clear themselves and the row keeps its figures.
     func testAStaleKeychainGrantIsRetryableRatherThanAMissingToken() async {
         let attempts = LockedValue(0)
         let monitor = ForgeActivityMonitor(
@@ -73,12 +73,37 @@ final class ForgeMonitorTests: XCTestCase {
                 attempts.update { $0 += 1 }
                 return Self.reading(connection, login: "gh", contributions: 1, merged: 0)
             },
-            token: { _ in .interactionRequired })
+            token: { _, _ in .interactionRequired })
         _ = await monitor.refreshOnce {}
         _ = await monitor.refreshOnce {}
         XCTAssertEqual(attempts.load(), 0)
         XCTAssertEqual(monitor.currentReadings().first?.failure, .credentialUnreadable)
         XCTAssertFalse(ForgeReadFailure.credentialUnreadable.needsTheUser)
+    }
+
+    /// **A round reads silently and the row's own refresh does not**, which is
+    /// the whole of what makes the stale grant above recoverable.
+    ///
+    /// Both halves are load-bearing and they fail in opposite directions. A
+    /// suppressed read can only ever be refused again, so a refresh that could
+    /// not ask would leave the row reporting `credentialUnreadable` on every
+    /// round for ever, with no cure but re-pasting a token that was never the
+    /// problem. And a round that could ask would put the keychain's panel on
+    /// screen every five minutes, unprompted, on a Mac nobody is touching.
+    func testOnlyTheRowsOwnRefreshMayRaiseTheKeychainDialog() async {
+        let asked = LockedValue([Bool]())
+        let monitor = ForgeActivityMonitor(
+            connections: [Self.gitHub],
+            fetch: { connection, _, _, _ in
+                Self.reading(connection, login: "gh", contributions: 1, merged: 0)
+            },
+            token: { _, allowingInteraction in
+                asked.update { $0.append(allowingInteraction) }
+                return .found("token")
+            })
+        _ = await monitor.refreshOnce {}
+        await monitor.refreshOnce(id: Self.gitHub.id) {}
+        XCTAssertEqual(asked.load(), [false, true])
     }
 
     /// A connection nothing was ever filed for is the one of these the user can
@@ -91,7 +116,7 @@ final class ForgeMonitorTests: XCTestCase {
                 attempts.update { $0 += 1 }
                 return Self.reading(connection, login: "gh", contributions: 1, merged: 0)
             },
-            token: { _ in .absent })
+            token: { _, _ in .absent })
         _ = await monitor.refreshOnce {}
         _ = await monitor.refreshOnce {}
         XCTAssertEqual(attempts.load(), 0)
@@ -110,7 +135,7 @@ final class ForgeMonitorTests: XCTestCase {
                 guard outcome.load() else { throw ForgeReadFailure.unreachable }
                 return Self.reading(connection, login: "gh", contributions: 42, merged: 7)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await monitor.refreshOnce {}
         outcome.store(false)
         _ = await monitor.refreshOnce {}
@@ -131,7 +156,7 @@ final class ForgeMonitorTests: XCTestCase {
                 attempts.update { $0 += 1 }
                 throw ForgeReadFailure.unauthorized
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await monitor.refreshOnce {}
         _ = await monitor.refreshOnce {}
         _ = await monitor.refreshOnce {}
@@ -152,7 +177,7 @@ final class ForgeMonitorTests: XCTestCase {
                 attempts.update { $0 += 1 }
                 throw ForgeReadFailure.unauthorized
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await refused.refreshOnce {}
         _ = await refused.refreshOnce {}
         XCTAssertEqual(attempts.load(), 1)
@@ -161,7 +186,7 @@ final class ForgeMonitorTests: XCTestCase {
             fetch: { connection, _, _, _ in
                 Self.reading(connection, login: "gh", contributions: 5, merged: 1)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await replaced.refreshOnce {}
         XCTAssertEqual(replaced.currentReadings().first?.contributions(for: .today), 5)
         XCTAssertNil(replaced.currentReadings().first?.failure)
@@ -175,7 +200,7 @@ final class ForgeMonitorTests: XCTestCase {
             connections: [Self.gitHub],
             fetch: { connection, _, _, _ in Self.reading(connection, login: "gh", contributions: 3, merged: 0)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await monitor.refreshOnce {}
         XCTAssertFalse(monitor.currentReadings().isEmpty)
         await monitor.stop()
@@ -195,7 +220,7 @@ final class ForgeMonitorTests: XCTestCase {
             connections: [Self.gitHub],
             fetch: { connection, _, _, _ in Self.reading(connection, login: "gh", contributions: 9, merged: 4)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await monitor.refreshOnce { frames.update { $0 += 1 } }
         _ = await monitor.refreshOnce { frames.update { $0 += 1 } }
         XCTAssertEqual(frames.load(), 1)
@@ -212,7 +237,7 @@ final class ForgeMonitorTests: XCTestCase {
             fetch: { connection, _, _, _ in
                 Self.reading(connection, login: "gh", contributions: 9, merged: 4, at: when.load())
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await monitor.refreshOnce { frames.update { $0 += 1 } }
         when.store(Self.readAt.addingTimeInterval(300))
         _ = await monitor.refreshOnce { frames.update { $0 += 1 } }
@@ -227,7 +252,7 @@ final class ForgeMonitorTests: XCTestCase {
             fetch: { connection, _, _, _ in
                 Self.reading(connection, login: "gh", contributions: 1, merged: 0)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
     }
 
     private func at(hour: Int, _ calendar: Calendar = .current) -> Date {
@@ -345,7 +370,7 @@ final class ForgeMonitorTests: XCTestCase {
                 if refused.load() { throw ForgeReadFailure.unauthorized }
                 return Self.reading(connection, login: "gh", contributions: 8, merged: 3)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await monitor.refreshOnce {}
         _ = await monitor.refreshOnce {}
         XCTAssertEqual(attempts.load(), 1)
@@ -370,7 +395,7 @@ final class ForgeMonitorTests: XCTestCase {
                 attempts.update { $0 += 1 }
                 throw ForgeReadFailure.unauthorized
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await monitor.refreshOnce {}
         await monitor.refreshOnce(id: Self.gitHub.id) {}
         XCTAssertEqual(attempts.load(), 2)
@@ -391,7 +416,7 @@ final class ForgeMonitorTests: XCTestCase {
                 attempts.update { $0 += 1 }
                 throw failure.load()
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         _ = await monitor.refreshOnce {}
         XCTAssertEqual(attempts.load(), 1)
 
@@ -425,7 +450,7 @@ final class ForgeMonitorTests: XCTestCase {
                 await gate.arrive()
                 return Self.reading(connection, login: "gh", contributions: 11, merged: 2)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         async let round: Duration = monitor.refreshOnce {}
         await gate.waitForStart()
         async let manual: Void = monitor.refreshOnce(id: Self.gitHub.id) {}
@@ -449,7 +474,7 @@ final class ForgeMonitorTests: XCTestCase {
                 await gate.arrive()
                 return Self.reading(connection, login: "gh", contributions: 5, merged: 1)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         async let round: Duration = monitor.refreshOnce {}
         await gate.waitForStart()
         await monitor.stop()
@@ -478,7 +503,7 @@ final class ForgeMonitorTests: XCTestCase {
                 await (attempts.load() == 1 ? first : second).arrive()
                 return Self.reading(connection, login: "gh", contributions: 6, merged: 1)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
 
         async let round: Duration = monitor.refreshOnce {}
         await first.waitForStart()
@@ -510,7 +535,7 @@ final class ForgeMonitorTests: XCTestCase {
                 attempts.update { $0 += 1 }
                 return Self.reading(connection, login: "gh", contributions: 1, merged: 0)
             },
-            token: { _ in .found("token") })
+            token: { _, _ in .found("token") })
         await monitor.refreshOnce(id: Self.gitLab.id) {}
         XCTAssertEqual(attempts.load(), 0)
         XCTAssertTrue(monitor.currentReadings().isEmpty)
