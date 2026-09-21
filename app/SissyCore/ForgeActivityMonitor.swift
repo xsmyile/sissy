@@ -71,6 +71,14 @@ actor ForgeActivityMonitor {
     /// Connections whose last failure needs the user. They keep their row and
     /// their last figures; what they stop costing is a request per round.
     private var parked: Set<String> = []
+    /// A fetch on the register: the task to join, the number that says whether
+    /// it is still the current one, and whether it was allowed to ask the
+    /// keychain — which is what decides who may join it.
+    private struct Running {
+        let task: Task<Void, Never>
+        let seq: Int
+        let mayInteract: Bool
+    }
     /// The fetch already running for a connection, which a second caller joins
     /// rather than opening a request of its own beside it.
     ///
@@ -82,7 +90,23 @@ actor ForgeActivityMonitor {
     /// proved healthy. Joining is what makes that unrepresentable — there is
     /// one request, so there is one result — and it costs the vendor a request
     /// rather than two on the click that lands mid-round.
-    private var inFlight: [String: Task<Void, Never>] = [:]
+    ///
+    /// **A silent read is not one an interactive caller may join**, which is
+    /// the one case that opens a second request on purpose. A scheduled read
+    /// is suppressed and cannot raise the keychain's panel, so a click that
+    /// joined one would get that silence as its answer — and the click is the
+    /// only way back from a grant a re-signed build has staled. The window is
+    /// not the microseconds a local lookup takes: `suppressingInteraction`
+    /// serialises every keychain reader in the process on one lock, this
+    /// round's own connections included, and waits up to `suppressorTimeout`
+    /// for it. So the interaction the caller asked for decides, and `seq` is
+    /// what keeps the pair honest — the superseded read publishes nothing, so
+    /// two reads still leave one result.
+    private var inFlight: [String: Running] = [:]
+    /// Numbers each read so a superseded one can tell it is no longer the
+    /// connection's current fetch. Monotonic per monitor; it is only ever
+    /// compared for equality.
+    private var reads = 0
     /// Bumped by every stop, so a request in flight when the monitor was torn
     /// down cannot publish over the run that replaced it.
     private var generation = 0
@@ -163,7 +187,7 @@ actor ForgeActivityMonitor {
         generation &+= 1
         pollTask?.cancel()
         pollTask = nil
-        inFlight.values.forEach { $0.cancel() }
+        inFlight.values.forEach { $0.task.cancel() }
         inFlight.removeAll()
         parked.removeAll()
         published.store([:])
@@ -222,16 +246,21 @@ actor ForgeActivityMonitor {
     /// replaced did, and a caller arriving mid-round cannot slip between the
     /// lookup and the registration.
     ///
-    /// `allowingInteraction` belongs to whoever *started* the read, so a click
-    /// that joins a round in flight gets that round's silent answer. It is left
-    /// that way because the case this matters for cannot arrive: a stale grant
-    /// is refused by the keychain with no request behind it, so the read it
-    /// would join is microseconds long, where the reads that do take time are
-    /// the ones whose token was never in question.
+    /// **A caller joins only a read that may ask at least as much as it may.**
+    /// A scheduled read cannot raise the keychain's panel, so handing one to
+    /// the click that is trying to clear a stale grant would answer it with
+    /// the very silence it is there to break, and the row would stay stuck
+    /// under a gesture that appeared to work. The other direction still joins:
+    /// a round arriving while the user's own read is in flight wants an answer
+    /// and does not care that a panel might come with it.
     private func read(
         _ connection: ForgeConnection, allowingInteraction: Bool
     ) -> Task<Void, Never> {
-        if let running = inFlight[connection.id] { return running }
+        if let running = inFlight[connection.id], running.mayInteract || !allowingInteraction {
+            return running.task
+        }
+        reads &+= 1
+        let seq = reads
         let stamp = generation
         let fetch = fetchSource
         let token = tokenSource
@@ -248,9 +277,9 @@ actor ForgeActivityMonitor {
             } else {
                 outcome = .failure(Self.credentialFailure(lookup))
             }
-            await self?.finish(outcome, for: connection, stamp: stamp)
+            await self?.finish(outcome, for: connection, stamp: stamp, seq: seq)
         }
-        inFlight[connection.id] = task
+        inFlight[connection.id] = Running(task: task, seq: seq, mayInteract: allowingInteraction)
         return task
     }
 
@@ -264,14 +293,22 @@ actor ForgeActivityMonitor {
     /// exists to prevent. The entry cannot leak either way: it is cleared on
     /// every path where it is still this fetch's.
     ///
-    /// The generation is the whole test, and cancellation is not asked about
-    /// separately: `stop()` is the only thing that cancels these tasks and it
-    /// bumps the generation before it does.
+    /// Cancellation is not asked about separately: `stop()` is the only thing
+    /// that cancels these tasks and it bumps the generation before it does.
+    ///
+    /// **A superseded read publishes nothing either**, which is what `seq`
+    /// buys. Only an interactive caller ever opens a second read beside a
+    /// silent one, and the two can answer in either order — a suppressed read
+    /// waiting out the keychain lock can land well after the click that
+    /// overtook it. Without the test the older answer would win by arriving
+    /// last, putting the refusal the user just cleared straight back on the
+    /// row. The register is the record of which read is current, so matching
+    /// against it is the same question as "is this still mine".
     private func finish(
         _ outcome: Result<ForgeActivityReading, Error>, for connection: ForgeConnection,
-        stamp: Int
+        stamp: Int, seq: Int
     ) {
-        guard stamp == generation else { return }
+        guard stamp == generation, inFlight[connection.id]?.seq == seq else { return }
         inFlight[connection.id] = nil
         apply(outcome, for: connection)
     }
