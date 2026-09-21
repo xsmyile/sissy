@@ -16,6 +16,8 @@ jobs:
         run: shellcheck scripts/*.sh app/Sissy/Resources/*.sh
       - name: doc references
         run: python3 scripts/check-doc-refs.py
+      - name: prose
+        run: python3 scripts/check-prose.py
       - name: actionlint
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
