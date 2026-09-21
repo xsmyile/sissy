@@ -180,21 +180,47 @@ struct AgentHookInstaller {
         return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    /// Longer than parsing one line needs by any margin, and short enough that
+    /// a child that never exits does not hold the caller: this runs on the
+    /// install path, which reaffirms the hooks at launch while the switch is
+    /// on, and the wait below is blocking.
+    private static let parseTimeoutSeconds: TimeInterval = 5
+    /// What the child gets to exit in after `SIGTERM` before it is killed, on
+    /// the grounds `GitIdentityReader.killGraceSeconds` records: terminating
+    /// is a request, and a process that cannot read it takes the caller with
+    /// it for the life of the app.
+    private static let parseKillGraceSeconds: TimeInterval = 2
+
     /// Whether `sh` can parse what is about to be written into someone else's
     /// configuration. The quoting above is what makes this true; this is what
     /// proves it, and it runs only when a write is actually due.
+    ///
+    /// The child's output goes to the null device rather than to pipes nobody
+    /// drains: `-n` prints only a diagnostic this caller does not read, and a
+    /// pipe that fills with one is a deadlock on the wait below.
     static func isParsable(_ command: String) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-n"]
         let input = Pipe()
         process.standardInput = input
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
         do { try process.run() } catch { return false }
-        input.fileHandleForWriting.write(Data(command.utf8))
+        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        let executioner = DispatchWorkItem {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+        let queue = DispatchQueue.global(qos: .utility)
+        queue.asyncAfter(deadline: .now() + parseTimeoutSeconds, execute: watchdog)
+        queue.asyncAfter(
+            deadline: .now() + parseTimeoutSeconds + parseKillGraceSeconds,
+            execute: executioner)
+        try? input.fileHandleForWriting.write(contentsOf: Data(command.utf8))
         try? input.fileHandleForWriting.close()
         process.waitUntilExit()
+        watchdog.cancel()
+        executioner.cancel()
         return process.terminationStatus == 0
     }
 
