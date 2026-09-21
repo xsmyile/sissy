@@ -29,8 +29,10 @@ home directory it stats the usual `git` install prefixes (below), and reads
 Homebrew's `bin` when you press **Copy diagnostics**, to say which `ccusage`
 builds are installed.
 
-**What it asks the kernel.** `KERN_PROC_ALL`, `proc_pidpath` and
-`proc_pid_rusage`, for processes **running as you** — another user's is dropped
+**What it asks the kernel.** `KERN_PROC_ALL`, `proc_pidpath`,
+`proc_pid_rusage` and `proc_pidinfo(PROC_PIDVNODEPATHINFO)` — the last being the
+working directory, which is how a running agent is named after its repository —
+for processes **running as you** — another user's is dropped
 on the credential in its table entry before any per-process call. `KERN_PROCARGS2`,
 the one call that can return a command line, is asked only of a process whose
 executable is a JavaScript interpreter, which is the install shape where
@@ -83,7 +85,9 @@ opens only from a button, never from a poll or at launch. The Codex sign-in is
 PKCE whose redirect is cancelled and read in the window: nothing listens on the
 loopback port it names. Connecting a forge opens no window at all.
 
-**What it writes outside its own folder.** Four things, none of them automatic:
+**What it writes outside its own folder.** Four things. Only the logs happen on
+their own; nothing touches another program's configuration or credentials
+unless you ask for it:
 
 | Written | When |
 |---|---|

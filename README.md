@@ -55,7 +55,8 @@ number in the menu bar.
 - How many agents are running and how much memory they hold.
 - Where the day went, by repository. A worktree counts against the repository it
   was cut from, so one project is one row.
-- What you contributed on each connected forge, over the same period.
+- What you contributed on each connected forge, over the period you picked —
+  though on `All` each vendor answers over its own range, not the archive's.
 - A repository committing under a different name from your others on the same
   forge — and only when there is one.
 
@@ -86,10 +87,11 @@ credits. Claude Code is on unless you switch it off; Codex is picked up whenever
 its session directory exists.
 
 Rate-limit windows come from each vendor's own usage endpoint, read with the
-credential its CLI already stored, and cost no dialog: it is a file in the CLI's
-config directory, or a keychain item read through `/usr/bin/security`, which is
-already on that item's access list. Sissy never refreshes either, and replaces
-one only when you pick an account with *Use in CLI*.
+credential its CLI already stored, and cost no dialog either way: Codex's is a
+file in its config directory, and Claude's is that or — where macOS keeps it in
+the login keychain instead — an item read through `/usr/bin/security`, which is
+already on its access list. Sissy never refreshes either, and replaces one only
+when you pick an account with *Use in CLI*.
 
 A forge connection reuses the token `gh` or `glab` already holds, or one you
 paste. Sissy warns first that a CLI's token usually carries write access to
@@ -150,6 +152,8 @@ What survives, and the way out of each:
 | A linked claude.ai session (`…claude-web`) | Settings ▸ Providers, on its row |
 | Linked Codex accounts (`…codex-oauth`) | Settings ▸ Providers, on its row |
 | Connected forge tokens (`…forge-token`) | Settings ▸ Forge, on its row |
+| Any CSV you exported | wherever you saved it |
+| The Claude account *Use in CLI* last wrote to the CLI | uninstalling does not put the previous one back; `/login` or another switch does |
 | The session hooks, if you switched them on | switch them off **before** uninstalling |
 
 The hooks are the one thing that keeps running once Sissy is gone: the script
@@ -195,8 +199,8 @@ Settings.
 | `pricingOverride` | none | per-model rates that win over both sources |
 | `pollIntervalSeconds` | `60` | safety-net poll between filesystem events |
 
-Forge connections are not here — they live beside their tokens, and
-Settings ▸ Forge is the way to change them.
+Forge connections are not here — they live in `forge-connections.json`, with
+their tokens in the keychain, and Settings ▸ Forge is the way to change them.
 
 ## Build from source
 
