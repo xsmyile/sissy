@@ -110,6 +110,52 @@ struct ShareBar: View {
     }
 }
 
+/// A row's share of a day as a band behind its own text, for the sections
+/// that cannot afford the line a bar under the row would cost.
+///
+/// **One modifier rather than a background view**, because three things have
+/// to travel together and two of them used to sit at the call site: the
+/// vertical `PanelMetrics.washInset` that gives the band its height, the
+/// negative horizontal inset that lets it reach past the text it is drawn
+/// behind, and the animation. A row that took the band without the padding
+/// would draw a highlight clipped to its glyphs, which is the shape the inset
+/// exists to prevent, and nothing in the type system said so while the two
+/// halves were apart.
+///
+/// `BarGeometry.fillWidth` rather than a plain multiplication, so a row worth
+/// a fraction of a percent still draws the stub the bar gives it: a band that
+/// rounds down to nothing reads as a row that spent nothing.
+private struct ShareWash: ViewModifier {
+    let share: Double
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.vertical, PanelMetrics.washInset)
+            .background(alignment: .leading) { band }
+    }
+
+    private var band: some View {
+        GeometryReader { proxy in
+            let shape = RoundedRectangle(
+                cornerRadius: PanelMetrics.washRadius, style: .continuous)
+            ZStack(alignment: .leading) {
+                shape.fill(.quinary)
+                shape.fill(.quaternary)
+                    .frame(width: BarGeometry.fillWidth(share, in: proxy.size.width))
+            }
+        }
+        .padding(.horizontal, -PanelMetrics.washInset)
+        .animation(.default, value: share)
+    }
+}
+
+extension View {
+    /// Draws `share` of the day as a band behind this row.
+    func shareWash(_ share: Double) -> some View {
+        modifier(ShareWash(share: share))
+    }
+}
+
 /// One part of a bar that more than one thing contributed to.
 ///
 /// Only the projects page draws more than one: a repository worked on through
@@ -513,9 +559,7 @@ struct ProjectRowView: View {
                 ShareBar(segments: segments)
             }
         case .behind:
-            line
-                .padding(.vertical, PanelMetrics.washInset)
-                .background(alignment: .leading) { wash }
+            line.shareWash(row.share)
         }
     }
 
@@ -542,26 +586,6 @@ struct ProjectRowView: View {
                 .font(.system(size: 12))
                 .monospacedDigit()
         }
-    }
-
-    /// The same share the bar would draw, as a band under the text.
-    ///
-    /// `BarGeometry.fillWidth` rather than a plain multiplication, so a
-    /// repository that cost a fraction of a percent still draws the stub the
-    /// bar gives it: a band that rounds down to nothing reads as a row that
-    /// spent nothing.
-    private var wash: some View {
-        GeometryReader { proxy in
-            let shape = RoundedRectangle(
-                cornerRadius: PanelMetrics.washRadius, style: .continuous)
-            ZStack(alignment: .leading) {
-                shape.fill(.quinary)
-                shape.fill(.quaternary)
-                    .frame(width: BarGeometry.fillWidth(row.share, in: proxy.size.width))
-            }
-        }
-        .padding(.horizontal, -PanelMetrics.washInset)
-        .animation(.default, value: row.share)
     }
 
     /// The CLIs that spent on this row, after its name for the reason the
