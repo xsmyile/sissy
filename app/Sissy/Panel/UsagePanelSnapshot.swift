@@ -421,6 +421,9 @@ struct UsagePanelSnapshot: Equatable {
         /// How many repositories this provider's day names, for the row that
         /// opens the unfolded list.
         let projectCount: Int
+        /// This provider's own day by model, dearest first and never folded.
+        /// Empty below two models; `makeModels` is where the reason lives.
+        let models: [ModelRow]
         /// What the vendor has billed against a spend cap, worded. Nil for a
         /// provider that publishes none and for an account with nothing to
         /// say — no cap set and nothing spent, which is every account that
@@ -568,6 +571,26 @@ struct UsagePanelSnapshot: Equatable {
         /// is the page's own name. The shares are of the same day `share` is
         /// of, so they sum to it.
         let providers: [ProviderShare]
+    }
+
+    /// One model's share of one provider's day, as its own page prints it.
+    struct ModelRow: Equatable, Identifiable {
+        /// The model id as the vendor spells it, which is also what the row is
+        /// keyed by.
+        let id: String
+        /// The same id with a release-date suffix taken off, which is all the
+        /// row shows.
+        let name: String
+        let tokens: String
+        let cost: String
+        /// Share of the provider's day, for the band behind the text. Of the
+        /// money while there is any, and of the tokens when the whole day
+        /// priced at nothing.
+        let share: Double
+        /// The four token counters apart, with the raw id. The row's hover and
+        /// its accessibility label, which are the same sentence: anything only
+        /// a pointer can reach does not exist for VoiceOver.
+        let detail: String
     }
 
     /// What one provider spent on one project, as a share of the day.
@@ -1187,6 +1210,8 @@ struct UsagePanelSnapshot: Equatable {
                 account: makeAccount(slice.account),
                 projects: makeProjects(slice.projects, totalCost: slice.cost),
                 projectCount: slice.projects.count,
+                models: makeModels(
+                    slice.models, totalCost: slice.cost, totalTokens: slice.tokens),
                 credits: makeCredits(slice.credits, now: now),
                 status: makeStatus(status[slice.id], provider: slice.id)
             )
@@ -1424,6 +1449,65 @@ struct UsagePanelSnapshot: Equatable {
                 ))
         }
         return rows
+    }
+
+    /// How many models a day has to have used before the split says anything.
+    ///
+    /// Two. One model's breakdown is the row above it at 100%, which is the
+    /// rule `makeResidue` already applies to its own split — say it only where
+    /// there is more than one answer. Measured 2026-09-21, Codex used a single
+    /// model on 4 of the last 8 archived days, so this is the ordinary case
+    /// rather than an edge, and the block is absent on those days without
+    /// losing a reading.
+    private static let modelRowFloor = 2
+
+    /// One row per model, dearest first, or none at all.
+    ///
+    /// **No fold.** Measured 2026-09-21 over 47 archived days, the most any
+    /// provider used in one day was 3 — where `projectRowLimit` exists because
+    /// #81 measured 29 repositories in a month. A list that cannot grow past a
+    /// handful needs no row that stands for the rest.
+    ///
+    /// **The band is a share of the money, and of the tokens when there is no
+    /// money.** A day whose models have no rate in any pricing source costs
+    /// zero across the board, and sharing that would draw every band empty on
+    /// a day that measured millions of tokens — a measurement of nothing where
+    /// there was a measurement. `FrameBuilder.orderedModels` falls back the
+    /// same way, so the order and the bands cannot disagree.
+    ///
+    /// **The floor is here rather than in the view**, so the rule is asserted
+    /// in a test rather than read off a screenshot. It does mean `models` is
+    /// empty both for a day with one model and for a provider that has read
+    /// nothing, which is a distinction the frame keeps and this drops: both
+    /// render as no block, and a surface that ever needs to tell them apart
+    /// has the slice.
+    private static func makeModels(
+        _ unordered: [ModelTotals], totalCost: Decimal, totalTokens: Int
+    ) -> [ModelRow] {
+        guard unordered.count >= modelRowFloor else { return [] }
+        let byCost = totalCost > 0
+        let total =
+            byCost
+            ? NSDecimalNumber(decimal: totalCost).doubleValue : Double(totalTokens)
+        guard total > 0 else { return [] }
+        return FrameBuilder.orderedModels(unordered).map { model in
+            let part =
+                byCost
+                ? NSDecimalNumber(decimal: model.cost).doubleValue : Double(model.tokens)
+            return ModelRow(
+                id: model.model,
+                name: UsageFormat.modelName(model.model),
+                tokens: UsageFormat.tokens(model.tokens),
+                cost: UsageFormat.cost(model.cost),
+                share: part / total,
+                detail: UsageFormat.modelTokenDetail(
+                    id: model.model,
+                    input: model.totals.inputTokens,
+                    output: model.totals.outputTokens,
+                    cacheRead: model.totals.cacheReadTokens,
+                    cacheCreation: model.totals.cacheCreationTokens)
+            )
+        }
     }
 
     /// What the day spent outside every repository, or nil when there is none

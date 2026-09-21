@@ -831,6 +831,52 @@ enum UsageFormat {
         return name.isEmpty ? path : name
     }
 
+    /// What a model is called: the vendor's own id, with a trailing release
+    /// date taken off.
+    ///
+    /// **A rule about the shape, never a table of names.** There is no
+    /// hand-maintained rate table in Sissy and a display-name map would be
+    /// the same regression with different values — a model shipped tomorrow
+    /// would read as nothing until somebody cut a release. So the id is shown
+    /// as the vendor spells it, the way `UsageWindow.scope` already is, and
+    /// the one thing removed is a suffix that says nothing to a reader:
+    /// `claude-haiku-4-5-20251001` is the same model as `claude-haiku-4-5`
+    /// wherever it appears. Measured 2026-09-21 across 47 archived days on
+    /// the author's machine, none of the 5 ids seen carried one, which is
+    /// exactly why this cannot be a list.
+    ///
+    /// The raw id stays reachable: `modelTokenDetail` prints it.
+    static func modelName(_ id: String) -> String {
+        let parts = id.split(separator: "-")
+        guard let last = parts.last, last.count == modelDateSuffixLength,
+            last.allSatisfy(\.isNumber), parts.count > 1
+        else { return id }
+        return parts.dropLast().joined(separator: "-")
+    }
+
+    /// Eight digits, which is the only suffix `modelName` takes off.
+    private static let modelDateSuffixLength = 8
+
+    /// One model row's hover and its accessibility label: the id as the vendor
+    /// spells it, then the four token counters apart.
+    ///
+    /// The four rather than the total, because that is the reading ccusage's
+    /// own breakdown carries and the split cannot be recovered from a sum. It
+    /// is here rather than on the row because four unlabelled figures in
+    /// 312 pt would need a header line, and the panel has no table anywhere
+    /// in it.
+    static func modelTokenDetail(
+        id: String, input: Int, output: Int, cacheRead: Int, cacheCreation: Int
+    ) -> String {
+        [
+            id,
+            "in \(tokens(input))",
+            "out \(tokens(output))",
+            "cache read \(tokens(cacheRead))",
+            "cache write \(tokens(cacheCreation))",
+        ].joined(separator: " · ")
+    }
+
     /// Always plural: the fold only happens past the row limit, and folding a
     /// single leftover would save no row, so the folded row never stands for
     /// fewer than two projects.
