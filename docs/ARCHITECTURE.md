@@ -331,6 +331,8 @@ compiled into the app too.
 | `AgentProcessMonitor.swift`     | Samples that reading every 15 s and keeps an hour of it for the sparkline. In memory and nowhere else — a reading from a Mac that was asleep is no reading, so the series starts when Sissy does and the panel says so. Samples whether or not the panel is open, which the *surface that is not on screen costs nothing* rule permits: that rule is about retained view graphs, and a sweep is 1.2 ms. A Mac already known to be quiet costs no frame; the first sweep always does, because that is the step from having no reading to having one |
 | `GitIdentityMonitor.swift`      | Sweeps every repository the ledger names — 10 min while agents are working, an hour once nothing has been seen for one, 30 s budget for the whole round — and publishes the judged readings for the frame. Needs no scan, no configured folder and no permission: the ledger is what the tail already filled. Reads off the cooperative pool, because a `Process` read to end of file blocks. **A repository whose files have not been written since the last round keeps that round's reading**: a process costs ~67 ms whatever it runs — measured 2026-09-17, `/usr/bin/true` costs the same — so 23 repositories cost 5.82 s cold and 0.01 s at rest. `stop` drops what it published, so a warning cannot outlive the engine that took it |
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for every window `limits[]` names — the plan-wide 5-hour and weekly buckets, plus a model-scoped weekly on a plan that meters one separately, which the flat keys do not carry; 5-min refresh, 30-min backoff on 429. Its credential source is injected, so the same probe serves the file, the keychain and a test |
+| `UsageRequestError.swift`       | What a vendor answers a *limits* reader with instead of a reading — `rateLimited(retryAfter:)`, `badStatus`, `malformedPayload` — shared by the three of them (the CLI credential against `api.anthropic.com`, the claude.ai session, the Codex credential against `chatgpt.com`) because they all refuse in HTTP's vocabulary. The status and forge feeds have error types of their own. Also `backoffSeconds`, which floors a 429 at the poll interval and caps it at an hour, the header being foreign input |
+| `LimitsBackoff.swift`           | `LimitsBackoffLedger` (`limits-backoff.json`): when each limits reader may ask again, across runs. A refusal belongs to a credential rather than to a reader, so a relaunch, a provider switched off and on, and every build of a dev loop stop spending a request the vendor has already refused. Its own file, not `server.json`, whose writes these reader actors would race |
 | `ClaudeKeychainCLI.swift`       | The login keychain through `/usr/bin/security`, which is the application Claude Code's own items trust — so no Allow/Deny panel and no grant that a re-signed build invalidates. Also the CLI's service-name rule: `Claude Code-credentials-<sha256(NFC(configDir))[:8]>`, unsuffixed for the default home |
 | `ClaudeAccountStore.swift`      | Every Claude account Sissy has seen signed in: the credential in a keychain item Sissy owns, keyed by the account's uuid, and an index beside it holding identities and never a token. `ClaudeAccountProfile` turns an OAuth token into an identity and `ClaudeWebAccountProfile` turns a claude.ai reply into the same one — measured, both vendors name an account with one uuid, so a session and a credential file under one key |
 | `ClaudeAccountRegistry.swift`   | Watches the credential the CLI is signed in with, archives every new one, and switches between them. The archive is what makes a switch safe: the CLI's slots are scratch and it rewrites them with whichever account is active |
@@ -401,36 +403,67 @@ nothing does.
 
 ## The app (`app/Sissy/`)
 
-Menu-bar only (`LSUIElement: true`), sandbox disabled. Three surfaces and no
-windows of its own: a left-click usage panel (`Panel/`, an `NSPopover`), a short
+Menu-bar only (`LSUIElement: true`), sandbox disabled. Three surfaces sit on the
+status item: a left-click usage panel (`Panel/`, an `NSPopover`), a short
 right-click `NSMenu` (`Menu/StatusItemController.swift`), and the SwiftUI
 `Settings` scene (`Settings/`, tabs General/Providers/Forge/About) — reachable from the app menu's
 Settings… item (⌘,) and, in code, only through `SettingsLink`, which takes no
 action closure and is why the panel's own settings button aims the window at a
 tab through `SissyModel.settingsTab`.
 
-**The panel is two surfaces behind one popover.** `Panel/PanelOverview.swift`
-answers what the selected window cost and whether there is room to keep working
-— the cost, one row per provider carrying the window that binds, and the
-projects. The headline is over a period the user picks (`UsagePeriod`: today,
-7d, 30d, all), persisted in `preferences.json` because it changes what is
-rendered and nothing about what is metered; the frame carries every window at
-once so switching costs no round trip to the engine. Today is never rolled up
-from the archive — the archive's copy of it is written behind the tail's flush.
-It replaced a fixed 7-day line at the foot of the Overview, which included today
-without saying so: measured 2026-09-15, 24.7% of that line was the headline
-above it. `Panel/PanelProviderPage.swift` answers what one
-account is doing: its windows, who it is signed in as, its own day and its own
-projects, and the refresh, which is a different action on each provider.
-`UsagePanelView` is the shell around them — a contextual header and a `switch`
-on the open page — and that `switch` is the whole implementation of the
-rule that only the selected page exists. There is no footer: the age of the
-reading sits under the header's title, where it dates the numbers beside it,
-and the way into Settings sits beside the keep-awake switch, which is where the
-app's own controls live. A `TabView` would hold every page's
-view graph live, which is precisely the cost `UsagePanelController` drops its
-host on close to avoid. `Panel/PanelComponents.swift` holds what both pages
-draw, so a bar or a badge cannot drift a point between them.
+**The fourth is a window, and it opens once, to link an account.**
+`Accounts/VendorLoginWindow.swift` is a `WKWebView` on the vendor's own login —
+claude.ai's for a Claude account, `auth.openai.com`'s for a Codex one — because
+a credential cannot be had without one. One window for both: `Vendor.session`
+and `Vendor.code` are the two closures that say whether the sign-in ends in a
+cookie the jar receives or in a redirect carrying an authorization code, and
+everything around them is shared. It floats and the activation policy goes to
+`.regular` while it is up, because an email-code login requires leaving it and
+an `LSUIElement` app has no Dock icon and no ⌘-Tab entry to come back through —
+and the control that opens it is never disabled, a second press bringing the
+existing window forward rather than opening a second one.
+
+**The panel is six pages behind one popover.** `UsagePanelView.Page` is the
+enum, and the `switch` on it is the whole implementation of the rule that only
+the selected page exists — a `TabView` would hold every page's view graph live,
+which is precisely the cost `UsagePanelController` drops its host on close to
+avoid.
+
+`Panel/PanelOverview.swift` answers what the selected window cost and whether
+there is room to keep working: the cost, one row per account carrying the window
+that binds, what the agents running now are holding, the projects, a row per
+connected forge, and — only when there is one — a repository committing under a
+name its forge does not expect. The headline is over a period the user picks
+(`UsagePeriod`: today, 7d, 30d, all), persisted in `preferences.json` because it
+changes what is rendered and nothing about what is metered; the frame carries
+every window at once so switching costs no round trip to the engine. Today is
+never rolled up from the archive — the archive's copy of it is written behind
+the tail's flush. It replaced a fixed 7-day line at the foot of the Overview,
+which included today without saying so: measured 2026-09-15, 24.7% of that line
+was the headline above it.
+
+Five pages sit one level in from it:
+
+| Page | File | Answers |
+|---|---|---|
+| `.provider` | `PanelProviderPage.swift` | that account's windows, identity and credits, beside **the CLI's** day and projects — the slice is per provider, since a log line names no account — and the refresh, which is a different action on each provider |
+| `.services` | `PanelProviderStatusPage` in `PanelProviderStatus.swift` | that vendor's own service tree, one level in from its page |
+| `.projects` | `PanelProjectsPage.swift` | every repository the day names rather than the folded five, with the unattributed remainder as a line at the foot rather than a row in the list |
+| `.identities` | `PanelIdentities.swift` | which repositories commit under a name their forge does not expect, findings on the page and the rest behind a disclosure |
+| `.stats` | `PanelStats.swift` | what is running now, and over a window of its own how many sessions and agents have run and how long the day was worked |
+
+`.provider`, `.services` and `.projects` carry the account they were opened
+from, so the way back lands on the page that was left rather than on that
+vendor's first account. `.identities` carries the repository it was opened
+about instead, and `.stats` carries nothing: its window is its own, local to
+the page, because sharing the headline's moved the money figure behind the
+user's back.
+
+There is no footer: the age of the reading sits under the header's title, where
+it dates the numbers beside it, and the way into Settings sits beside the
+keep-awake switch, which is where the app's own controls live.
+`Panel/PanelComponents.swift` holds what the pages draw in common, so a bar or a
+badge cannot drift a point between them.
 
 The Overview carries a gauge per readable account rather than one across every
 provider. A single one reports the tightest and silently implies the rest are
