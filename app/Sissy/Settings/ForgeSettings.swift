@@ -295,14 +295,23 @@ struct ForgeSettingsView: View {
     /// Who the token turned out to belong to, and when it last answered — the
     /// two facts that say a connection is alive, where the row used to print
     /// the host it is already titled by.
+    ///
+    /// **A connection that has never answered gets neither**, which is the
+    /// distinction `hasEverRead` is named for. `unavailable` stamps `readAt`
+    /// with the *attempt* and re-stamps it on every failed round, so an age
+    /// printed on its own told a connection that had never once answered it
+    /// was read a moment ago — sitting directly above the reason it could not
+    /// be read. The login is the test because it is the evidence: only a
+    /// reading that arrived carries one, and a failure keeps the previous one
+    /// along with the figures, so a row that has ever worked still dates
+    /// itself while it is failing. `UsagePanelSnapshot` asks the same question
+    /// of the same reading; this row simply was not asking it.
     private func subtitle(
         _ connection: ForgeConnection, reading: ForgeActivityReading?
     ) -> String? {
         if model.engine.connectingForge == connection.id { return ForgeConnectCopy.connecting }
-        guard let reading else { return nil }
-        let read = ForgeConnectCopy.lastRead(reading.readAt)
-        guard let login = reading.login else { return read }
-        return "\(login) · \(read)"
+        guard let reading, let login = reading.login else { return nil }
+        return "\(login) · \(ForgeConnectCopy.lastRead(reading.readAt))"
     }
 
     /// Whether the last poll worked, in `UsageFormat.forgeFailure`'s own words.
