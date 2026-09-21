@@ -262,8 +262,28 @@ struct ClaudeAccountStore: Sendable {
     /// Called whenever the active credential turns out to be new — a switch,
     /// a `/login`, or the CLI rotating a token — so the archive tracks the
     /// live one instead of going stale behind it.
+    /// Whether the archive already holds a later-expiring credential for that
+    /// account than the one offered.
+    ///
+    /// The archive never goes backwards. A CLI keeps more than one name for
+    /// one config home and they can disagree — an earlier build of Sissy wrote
+    /// one of a pair, a mixed pair of CLI builds rotates them apart — so the
+    /// same account legitimately reaches this from two places at two ages, and
+    /// the older copy must not become the one a switch writes back: its
+    /// refresh token may already have been spent, which signs that account out
+    /// of the machine it was archived from. Rotation only ever extends the
+    /// expiry, so it is what tells the two apart.
+    private func holdsFresherCredential(than credential: Data, for uuid: String) -> Bool {
+        guard let offered = ClaudeCredentialsStore.parse(credential)?.expiresAt,
+            let held = secrets.read(uuid).flatMap({ ClaudeCredentialsStore.parse($0)?.expiresAt })
+        else { return false }
+        return held > offered
+    }
+
     func remember(_ identity: ClaudeAccountIdentity, credential: Data) throws {
-        try secrets.write(identity.uuid, credential)
+        if !holdsFresherCredential(than: credential, for: identity.uuid) {
+            try secrets.write(identity.uuid, credential)
+        }
         var index = loadIndex()
         if let existing = index.accounts.firstIndex(where: { $0.uuid == identity.uuid }) {
             index.accounts[existing] = identity
