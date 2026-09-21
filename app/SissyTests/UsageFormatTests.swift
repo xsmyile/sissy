@@ -65,7 +65,7 @@ final class UsageFormatTests: XCTestCase {
     /// a duration the user can see in both places at once.
     func testTheMenuHoldLineNamesTheHoldAndItsDuration() {
         XCTAssertEqual(
-            UsageFormat.keepAwakeHolding(900), "Keep awake — holding · " + UsageFormat.held(900))
+            UsageFormat.keepAwakeHolding(900), "Keep awake · holding " + UsageFormat.held(900))
     }
 
     func testProvidersRecapCountsTheDayAgainstWhatIsMetered() {

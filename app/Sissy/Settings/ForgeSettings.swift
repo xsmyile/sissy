@@ -10,8 +10,8 @@ enum ForgeConnectCopy {
     static let caption = "Read your own activity counts from GitHub and GitLab"
     static let infoTitle = "What a connected forge is read for"
     static let detail =
-        "Sissy reads two counters from each forge you connect — what you contributed and "
-        + "what you had merged — with a token it keeps in a keychain item of its own. It "
+        "Sissy reads two counters from each forge you connect: what you contributed and "
+        + "what you had merged, using a token it keeps in a keychain item of its own. It "
         + "never writes to a repository and never changes what gh or glab hold."
     static let connect = "Connect…"
     static let disconnectItem = "Disconnect…"
@@ -50,7 +50,7 @@ enum ForgeConnectCopy {
     /// of a connect are local writes, so there is nothing about a forge to
     /// report and nothing the user can do but try again.
     static let connectFailed =
-        "The keychain would not accept the token, so nothing was connected. The token is still in the field — try again."
+        "The keychain would not accept the token, so nothing was connected. The token is still in the field. Try again."
 
     /// What a detected candidate offers, naming the CLI it came from.
     ///
@@ -73,8 +73,8 @@ enum ForgeConnectCopy {
         Sissy copies the token into its own keychain item and only ever reads \
         activity counts with it. It never writes to a repository and never \
         changes what gh or glab hold. A token from those tools carries whatever \
-        scopes you gave them — often write access to every repository — so a \
-        read-only token you mint yourself is the narrower choice.
+        scopes you gave them. That is often write access to every repository, \
+        so a read-only token you mint yourself is the narrower choice.
         """
 
     static func unlinkTitle(_ connection: ForgeConnection) -> String {

@@ -16,7 +16,7 @@ enum AgentHookCopy {
         + "repository the directory belongs to and writes the answer down. It reads nothing else "
         + "and sends nothing anywhere.\n\n"
         + "Switching this off removes both lines and the script. Deleting Sissy without switching "
-        + "it off first does not — the two lines stay, and do nothing, because the script they "
+        + "it off first does not. The two lines stay, and do nothing, because the script they "
         + "point at is gone."
 
     static let detailButtonLabel = "What Sissy writes"
