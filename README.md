@@ -19,8 +19,6 @@ own, no telemetry, nothing to grant at first launch.
 
 [Install](#install) • [What it shows](#what-it-shows) • [What it reads](#what-it-reads) • [Privacy](#privacy) • [Uninstall](#uninstall) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build](#build-from-source)
 
-<img src="assets/overview.png" alt="The Sissy panel: the day's cost over a period you pick, a rate-limit gauge per account, what the running agents are holding, and where the day went by repository." width="380" />
-
 </div>
 
 ## Install
