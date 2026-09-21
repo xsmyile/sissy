@@ -50,8 +50,10 @@ as you can ask the same.
 
 The `git` child's environment is replaced, not inherited: an inherited `GIT_DIR`
 would answer for a repository the reader was never pointed at, and
-`GIT_AUTHOR_EMAIL` would substitute itself for the reading. Every call has a 10 s
-timeout and a `SIGKILL` two seconds after the `SIGTERM`.
+`GIT_AUTHOR_EMAIL` would substitute itself for the reading. Those calls have a
+10 s timeout and a `SIGKILL` two seconds after the `SIGTERM`; the `security`
+calls have a 5 s timeout and no escalation, the tool having no dialog to wait
+behind.
 
 **Credentials it reads, never mints.** Claude Code's OAuth token from
 `<config home>/.credentials.json`, or the login keychain through

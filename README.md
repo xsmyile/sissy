@@ -90,8 +90,9 @@ Rate-limit windows come from each vendor's own usage endpoint, read with the
 credential its CLI already stored, and cost no dialog either way: Codex's is a
 file in its config directory, and Claude's is that or — where macOS keeps it in
 the login keychain instead — an item read through `/usr/bin/security`, which is
-already on its access list. Sissy never refreshes either, and replaces one only
-when you pick an account with *Use in CLI*.
+already on its access list. Sissy never refreshes either of those — the one
+credential it renews is its own copy, minted when you link an account in the
+app — and replaces one only when you pick an account with *Use in CLI*.
 
 A forge connection reuses the token `gh` or `glab` already holds, or one you
 paste. Sissy warns first that a CLI's token usually carries write access to
