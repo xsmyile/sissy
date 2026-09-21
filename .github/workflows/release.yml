@@ -382,9 +382,10 @@ jobs:
           # name an agent nothing registers any more. They stay because the
           # machines that need them are exactly the ones that never ran the
           # in-app retirement: a user who uninstalls before ever launching
-          # 0.1.10 would otherwise keep a login item starting a binary the
-          # DMG no longer contains. Drop them with the bundled plists, a
-          # release after 0.1.10.
+          # the first release that carries LegacyAgentRetirement would
+          # otherwise keep a login item starting a binary the DMG no longer
+          # contains. 0.1.10 never shipped, so that release is still ahead —
+          # drop them with the bundled plists a release after it.
           cat > Casks/sissy.rb << 'CASK'
           cask "sissy" do
             version "__VERSION__"
