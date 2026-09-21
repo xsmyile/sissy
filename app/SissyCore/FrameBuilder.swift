@@ -104,6 +104,32 @@ struct ProjectTotals: Sendable, Equatable, Identifiable {
     }
 }
 
+/// One model's share of a day, at the grain the archive has kept since the
+/// archive existed.
+///
+/// It carries `UsageHistoryTotals` rather than a pair of scalars, which is
+/// what `ProjectTotals` beside it does: the four token counters are what a
+/// reader asking which model spent what actually wants apart, they cannot be
+/// recovered from a total, and this is already the value the tail holds — a
+/// second four-counter struct would be a second place for them to drift.
+///
+/// The model id is the vendor's own string, unworded. `UsageFormat` is what
+/// decides how it reads, the same division `plan` and `UsageWindow.scope`
+/// already draw, so a model shipped tomorrow needs no release here.
+struct ModelTotals: Sendable, Equatable, Identifiable {
+    let model: String
+    let totals: UsageHistoryTotals
+
+    var id: String { model }
+    var tokens: Int { totals.totalTokens }
+    var cost: Decimal { totals.cost }
+
+    init(model: String, totals: UsageHistoryTotals) {
+        self.model = model
+        self.totals = totals
+    }
+}
+
 /// Why a provider's rate-limit windows are missing, when they are.
 ///
 /// On the frame because the panel is the only surface where any of it can be
@@ -361,6 +387,13 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     /// whose format names no working directory, which reads the same as a
     /// provider that has spent nothing.
     let projects: [ProjectTotals]
+    /// How this provider's day splits across models.
+    ///
+    /// Unlike the projects, these add up to `tokens` and `cost` exactly: a
+    /// line that names no model produces no event at all, so there is no
+    /// remainder to word anywhere. Empty for a provider that has spent
+    /// nothing.
+    let models: [ModelTotals]
     /// Sessions started and agents spawned today, as this provider counted
     /// them. `.none` where the format names neither.
     let agents: AgentCounts
@@ -380,8 +413,8 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
 
     init(
         id: String, tokens: Int, cost: Decimal, signals: ProviderSignals,
-        projects: [ProjectTotals] = [], agents: AgentCounts = .none,
-        activity: AgentActivityDay = .none
+        projects: [ProjectTotals] = [], models: [ModelTotals] = [],
+        agents: AgentCounts = .none, activity: AgentActivityDay = .none
     ) {
         self.id = id
         self.tokens = tokens
@@ -393,6 +426,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         if ordered.plan == nil { ordered.planTier = nil }
         self.signals = ordered
         self.projects = projects
+        self.models = models
     }
 
     /// The field-by-field form, for the callers that name a slice's parts
@@ -401,7 +435,8 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     init(
         id: String, tokens: Int, cost: Decimal, windows: [UsageWindow] = [],
         plan: String? = nil, planTier: String? = nil, credits: ProviderCredits? = nil,
-        projects: [ProjectTotals] = [], account: ProviderAccount? = nil,
+        projects: [ProjectTotals] = [], models: [ModelTotals] = [],
+        account: ProviderAccount? = nil,
         limitsState: ProviderLimitsState = .quiet, limitsObservedAt: Date? = nil,
         agents: AgentCounts = .none,
         activity: AgentActivityDay = .none
@@ -411,7 +446,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
             signals: ProviderSignals(
                 windows: windows, plan: plan, planTier: planTier, account: account,
                 credits: credits, limitsState: limitsState, limitsObservedAt: limitsObservedAt),
-            projects: projects, agents: agents, activity: activity)
+            projects: projects, models: models, agents: agents, activity: activity)
     }
 }
 
@@ -562,6 +597,26 @@ enum FrameBuilder {
     static func orderedProjects(_ projects: [ProjectTotals]) -> [ProjectTotals] {
         projects.sorted {
             $0.cost == $1.cost ? $0.path < $1.path : $0.cost > $1.cost
+        }
+    }
+
+    /// The one order every list of models is shown in: dearest first, then by
+    /// the tokens it took, then by id.
+    ///
+    /// Here rather than at the fold for `orderedProjects`'s reason — a
+    /// provider folds its day out of a dictionary whose key order is not even
+    /// stable across launches, so every surface has to apply this.
+    ///
+    /// **Tokens are the second key rather than a tie-break nobody reaches.**
+    /// A day whose models have no rate in any pricing source costs zero
+    /// across the board, and cost alone would then order it alphabetically —
+    /// putting the model that did almost nothing above the one that did the
+    /// work, on a row that prints both figures.
+    static func orderedModels(_ models: [ModelTotals]) -> [ModelTotals] {
+        models.sorted {
+            if $0.cost != $1.cost { return $0.cost > $1.cost }
+            if $0.tokens != $1.tokens { return $0.tokens > $1.tokens }
+            return $0.model < $1.model
         }
     }
 

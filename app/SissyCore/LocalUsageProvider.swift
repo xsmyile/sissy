@@ -260,6 +260,9 @@ actor LocalUsageProvider: UsageProvider {
     /// Today's project split, republished on every emit so the aggregator
     /// can read it without an actor hop.
     private let publishedProjects = LockedValue<[ProjectTotals]>([])
+    /// Today's model split, republished on every emit beside the project one
+    /// and read the same way.
+    private let publishedModels = LockedValue<[ModelTotals]>([])
     /// Today's agent counters, republished on every emit for the reason the
     /// project split is: the aggregator reads them while this provider still
     /// holds its own actor, so an `await` here would deadlock the emit that
@@ -676,6 +679,7 @@ actor LocalUsageProvider: UsageProvider {
     func current() -> DayTotals {
         let todayKey = Calendar.current.startOfDay(for: Date())
         publishedProjects.store(projectTotals(on: todayKey))
+        publishedModels.store(modelTotals(on: todayKey))
         publishedAgents.store(dailyAgentCounts[todayKey] ?? .none)
         publishedActivity.store(dailyActivity[todayKey] ?? .none)
         return dailyTotals[todayKey] ?? DayTotals(totalTokens: 0, totalCost: 0)
@@ -684,6 +688,8 @@ actor LocalUsageProvider: UsageProvider {
     nonisolated func filesWatched() -> Int { watchedCounter.load() }
 
     nonisolated func currentProjects() -> [ProjectTotals] { publishedProjects.load() }
+
+    nonisolated func currentModels() -> [ModelTotals] { publishedModels.load() }
 
     nonisolated func currentAgents() -> AgentCounts { publishedAgents.load() }
 
@@ -708,6 +714,30 @@ actor LocalUsageProvider: UsageProvider {
                 cost: cost[$0] ?? 0,
                 remote: adapter.projects.repositoryRemote(for: $0)
             )
+        }
+    }
+
+    /// One day's rows folded down to a total per model, across every project
+    /// the model answered in.
+    ///
+    /// Every row is kept, unlike the project fold's: a line that names no
+    /// model produces no event at all, so there is nothing here that could
+    /// not be attributed and these sum to the day's own totals exactly.
+    ///
+    /// The one thing dropped is a model that spent nothing, which is the
+    /// filter `UsageHistoryDay.init` applies on the way to disk. It is not
+    /// cosmetic and it cannot be left to the archive: Claude Code writes a
+    /// `<synthetic>` assistant turn for its own local notices, with every
+    /// counter at zero — measured 2026-09-21, 7 of them across 3 days of
+    /// `~/.claude/projects` — and a row of zeroes is a model that never ran.
+    private func modelTotals(on day: Date) -> [ModelTotals] {
+        var byModel: [String: UsageHistoryTotals] = [:]
+        for (row, totals) in dailyModelTotals[day] ?? [:] {
+            byModel[row.model, default: .init()].add(totals)
+        }
+        return byModel.compactMap { model, totals in
+            guard totals.totalTokens > 0 || totals.cost > 0 else { return nil }
+            return ModelTotals(model: model, totals: totals)
         }
     }
 

@@ -49,6 +49,15 @@ protocol UsageProvider: AnyObject, SourceSignals {
     /// totals from another.
     nonisolated func currentProjects() -> [ProjectTotals]
 
+    /// How the provider's day splits across models, as of its last emit.
+    /// Empty for a provider that has read nothing.
+    ///
+    /// Nonisolated for the reason the projects are, and it matters as much
+    /// here: these rows add up to the totals beside them exactly, so a
+    /// breakdown fetched across an actor hop would print a split that does
+    /// not reach the figure it is the split of.
+    nonisolated func currentModels() -> [ModelTotals]
+
     /// How many sessions this provider saw started today and how many agents
     /// they spawned, as of its last emit.
     ///
@@ -88,6 +97,7 @@ extension UsageProvider {
     func refreshSignals() async {}
 
     nonisolated func currentProjects() -> [ProjectTotals] { [] }
+    nonisolated func currentModels() -> [ModelTotals] { [] }
     nonisolated func currentAgents() -> AgentCounts { .none }
     nonisolated func currentActivity() -> AgentActivityDay { .none }
 }
