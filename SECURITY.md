@@ -19,8 +19,8 @@ Only the latest release is supported. There are no backports.
 Sissy runs unsandboxed with the network-client entitlement, in a single process,
 and binds no port.
 
-**Files it reads.** The two session-log trees — `~/.claude/projects` and
-`~/.codex/sessions`, or wherever `claudeDataDir` and `CODEX_HOME` point — and
+**Files it reads.** The two session-log trees: `~/.claude/projects` and
+`~/.codex/sessions`, or wherever `claudeDataDir` and `CODEX_HOME` point. Also
 each CLI's own profile and credential files beside them. In every repository a
 session has worked in, the `.git` entry and the worktree list under it; those
 repositories can be anywhere on disk. On the press of the button that offers
@@ -30,21 +30,22 @@ Homebrew's `bin` when you press **Copy diagnostics**, to say which `ccusage`
 builds are installed.
 
 **What it asks the kernel.** `KERN_PROC_ALL`, `proc_pidpath`,
-`proc_pid_rusage` and `proc_pidinfo(PROC_PIDVNODEPATHINFO)` — the last being the
-working directory, which is how a running agent is named after its repository —
-for processes **running as you** — another user's is dropped
-on the credential in its table entry before any per-process call. `KERN_PROCARGS2`,
-the one call that can return a command line, is asked only of a process whose
-executable is a JavaScript interpreter, which is the install shape where
-`argv[0]` names the CLI. No entitlement, no TCC prompt, and any process running
-as you can ask the same.
+`proc_pid_rusage` and `proc_pidinfo(PROC_PIDVNODEPATHINFO)`. The last of these
+returns the working directory, which is how a running agent is named after its
+repository. `KERN_PROC_ALL` enumerates the whole process table, not only
+yours; another user's entry is dropped there, on the credential in its table
+entry, before any of the three per-process calls run, and those run only for
+processes **running as you**. `KERN_PROCARGS2`, the one call that can return a
+command line, is asked only of a process whose executable is a JavaScript
+interpreter, which is the install shape where `argv[0]` names the CLI. No
+entitlement, no TCC prompt, and any process running as you can ask the same.
 
 **Programs it runs.** Each at an absolute path, never resolved through `PATH`:
 
 | Program | For |
 |---|---|
-| `/usr/bin/security` | keychain items a CLI filed by shelling out to the same tool — Claude Code's credential, `gh`'s token. The tool is on those items' ACL and this process is not, so there is no Allow/Deny panel |
-| `git` | what a repository would sign a commit as. From `/opt/homebrew`, `/usr/local` or `/opt/local`, falling back to `/usr/bin/git` only once `xcode-select -p` confirms the Command Line Tools are there — the shim opens an install dialog otherwise |
+| `/usr/bin/security` | keychain items a CLI filed by shelling out to the same tool: Claude Code's credential, `gh`'s token. The tool is on those items' ACL and this process is not, so there is no Allow/Deny panel |
+| `git` | what a repository would sign a commit as. From `/opt/homebrew`, `/usr/local` or `/opt/local`, falling back to `/usr/bin/git` only once `xcode-select -p` confirms the Command Line Tools are there. The shim opens an install dialog otherwise |
 | `/usr/bin/xcode-select` | that one check |
 | `/bin/sh -n` | **parses** the hook line before it is written, executing none of it. Runs when hooks are installed or reaffirmed, including at launch while the switch is on |
 
@@ -58,12 +59,12 @@ behind.
 **Credentials it reads, never mints.** Claude Code's OAuth token from
 `<config home>/.credentials.json`, or the login keychain through
 `/usr/bin/security`; Codex's from `~/.codex/auth.json`. Sissy never refreshes
-either — both vendors rotate refresh tokens, and spending one would sign you out
-of your own terminal — and never writes one back, except on a Claude account
-switch you asked for. Codex's file is never written. A forge token is offered,
-never taken: Sissy shows what `gh` or `glab` holds, warns that such a token
-usually carries write access to every repository, and copies it only on the
-press.
+either, and never writes one back except on a Claude account switch you asked
+for: both vendors rotate refresh tokens, and spending one would sign you out
+of your own terminal. Codex's file is never written. A forge token is
+offered, never taken: Sissy shows what `gh` or `glab` holds, warns that such a
+token usually carries write access to every repository, and copies it only on
+the press.
 
 **Credentials it holds.** Four keychain items are Sissy's own:
 
@@ -71,7 +72,7 @@ press.
 |---|---|
 | `com.radonforge.sissy.claude-account` | a copy of each Claude credential seen active, so `Use in CLI` can switch back |
 | `com.radonforge.sissy.claude-web` | the claude.ai session from the in-app login window |
-| `com.radonforge.sissy.codex-oauth` | each linked Codex account's OpenAI credential — the only one Sissy renews, being its own copy |
+| `com.radonforge.sissy.codex-oauth` | each linked Codex account's OpenAI credential, Sissy's own copy and the only one it renews |
 | `com.radonforge.sissy.forge-token` | each forge connection's token, used to read activity counts and nothing else |
 
 None reaches the frame, the logs, the diagnostics report or the CSV export. No
@@ -80,12 +81,13 @@ type the panel renders carries a token field, and
 hold that line for the two that are whole sessions.
 
 **The one window that loads someone else's HTML.** `VendorLoginWindow` is a
-`WKWebView` on a vendor's own login — claude.ai's, or OpenAI's for a Codex
-account — with a non-persistent cookie jar that dies with it, no address bar, no
-tabs, and off-vendor links handed to the default browser instead of followed. It
-opens only from a button, never from a poll or at launch. The Codex sign-in is
-PKCE whose redirect is cancelled and read in the window: nothing listens on the
-loopback port it names. Connecting a forge opens no window at all.
+`WKWebView` on a vendor's own login: claude.ai's, or OpenAI's for a Codex
+account. It runs with a non-persistent cookie jar that dies with it, no address
+bar, no tabs, and off-vendor links handed to the default browser instead of
+followed. It opens only from a button, never from a poll or at launch. The
+Codex sign-in is PKCE whose redirect is cancelled and read in the window:
+nothing listens on the loopback port it names. Connecting a forge opens no
+window at all.
 
 **What it writes outside its own folder.** Four things. Only the logs happen on
 their own; nothing touches another program's configuration or credentials
@@ -98,7 +100,7 @@ unless you ask for it:
 | `~/Library/Logs/Sissy/`, rotated | always, and it outlives an uninstall |
 | CSV files | only into the folder you choose when you press Export |
 
-Nothing writes to a repository, a git config or a forge — the Identities page's
+Nothing writes to a repository, a git config or a forge. The Identities page's
 correction is a `git config --unset` put on your clipboard for you to run.
 
 **Input it does not trust.** The session hook writes into a `checkout-inbox`
@@ -113,7 +115,7 @@ each `git` call are all parsed as foreign input into typed values.
 no telemetry, no port, no raw log content leaving the machine. The README's
 *Privacy* section lists every host Sissy itself requests; a further destination
 reached by one of those requests is a bug worth reporting. The login window is
-the exception by construction — it renders the vendor's own page, so it loads
+the exception by construction: it renders the vendor's own page, so it loads
 whatever that page loads and follows the redirects its sign-in needs.
 
 ## Out of scope

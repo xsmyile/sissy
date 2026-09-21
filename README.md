@@ -8,9 +8,9 @@
 **The numbers you keep checking, in the macOS menu bar.**
 
 What your coding agents cost, how close you are to a rate limit, where the work
-went, what the sessions running now are holding, and what you pushed — read from
-the logs already on your Mac and the services you connect. No account of its
-own, no telemetry, nothing to grant at first launch.
+went, what the sessions running now are holding, and what you pushed: all read
+from the logs already on your Mac and the services you connect. No account of
+its own, no telemetry, nothing to grant at first launch.
 
 [![Release](https://img.shields.io/github/v/release/xsmyile/sissy?style=flat-square&color=black)](../../releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/xsmyile/sissy/ci.yml?branch=master&style=flat-square&color=black&label=ci)](../../actions/workflows/ci.yml)
@@ -34,7 +34,7 @@ signed and notarized, so there is no `xattr` workaround and no right-click →
 Open.
 
 Sissy lives in the menu bar, not the Dock, and starts reading on launch. **The
-first launch asks for nothing** — no Full Disk Access, no keychain dialog, no
+first launch asks for nothing**: no Full Disk Access, no keychain dialog, no
 prompt of any kind. Anything that costs a permission, or writes into another
 program's files, is off until you switch it on and says what it will do first.
 
@@ -45,29 +45,29 @@ number in the menu bar.
 
 **The Overview**
 
-- What the period cost — `Today`, `7 days`, `30 days` or `All` — with the tokens,
-  and the burn rate on Today.
+- What the period cost over `Today`, `7 days`, `30 days` or `All`, with the
+  tokens and the burn rate on Today.
 - A rate-limit gauge per account, on its most pressing window. The mark on the
   bar is where even consumption would have reached by now, so being ahead of
   pace is visible instead of calculated.
 - How many agents are running and how much memory they hold.
 - Where the day went, by repository. A worktree counts against the repository it
   was cut from, so one project is one row.
-- What you contributed on each connected forge, over the period you picked —
-  though on `All` each vendor answers over its own range, not the archive's.
+- What you contributed on each connected forge, over the period you picked. On
+  `All`, though, each vendor answers over its own range, not the archive's.
 - A repository committing under a different name from your others on the same
-  forge — and only when there is one.
+  forge, shown only when there is one.
 
-**Click a row** for the page behind it — an account's plan, windows and credits;
+**Click a row** for the page behind it: an account's plan, windows and credits;
 every repository of the day; the processes running now and how long the day was
 worked; the commit-identity findings; the vendor's own service tree.
 
 **Keep awake** is the cup in the panel header: *Never*, *While agents are
 working* (holds the Mac while turns land, lets go ten minutes after they stop),
 or *Always* (eight hours, then off). Neither overrides a closed lid, and the
-hold dies with Sissy — quit and the Mac sleeps normally, with nothing to undo.
+hold dies with Sissy. Quit and the Mac sleeps normally, with nothing to undo.
 
-**Settings** is ⌘, or the gear — General, Providers, Forge, About. **Copy
+**Settings** is ⌘, or the gear: General, Providers, Forge, About. **Copy
 diagnostics** lives in About and is what a bug report needs.
 
 ## What it reads
@@ -84,13 +84,14 @@ sessions and agents behind them, every rate-limit window, the plan and the
 credits. Claude Code is on unless you switch it off; Codex is picked up whenever
 its session directory exists.
 
-Rate-limit windows come from each vendor's own usage endpoint, read with the
-credential its CLI already stored, and cost no dialog either way: Codex's is a
-file in its config directory, and Claude's is that or — where macOS keeps it in
-the login keychain instead — an item read through `/usr/bin/security`, which is
-already on its access list. Sissy never refreshes either of those — the one
-credential it renews is its own copy, minted when you link an account in the
-app — and replaces one only when you pick an account with *Use in CLI*.
+Rate-limit windows come from each vendor's own usage endpoint, read with
+the credential its CLI already stored, and cost no dialog either way.
+Codex's is a file in its config directory. Claude's is that same file, or
+an item read through `/usr/bin/security` where macOS keeps it in the
+login keychain instead, and that tool is already on the item's access
+list. Sissy never refreshes either of those. The one credential it renews
+is its own copy, minted when you link an account in the app, and it
+replaces one only when you pick an account with *Use in CLI*.
 
 A forge connection reuses the token `gh` or `glab` already holds, or one you
 paste. Sissy warns first that a CLI's token usually carries write access to
@@ -116,7 +117,7 @@ Every request it makes is a reading you asked for, and each has its own switch:
 
 **What Sissy keeps** is one day-by-model archive under
 `~/Library/Application Support/Sissy/history/`: totals, repository paths, session
-counts and how long each day was worked — never prompts, and never a line of your
+counts and how long each day was worked. Never prompts, and never a line of your
 logs. Settings names the folder, deletes it on a button, and
 `historyRetentionDays` bounds it, with `0` recording nothing. On a first run it is
 filled in once from what the CLIs already logged, so the wider windows are not
@@ -147,7 +148,7 @@ What survives, and the way out of each:
 | The usage archive | Settings ▸ General ▸ Delete |
 | Everything else under `~/Library/Application Support/Sissy/` | delete the folder |
 | Logs under `~/Library/Logs/Sissy/` | delete the folder |
-| Archived Claude credentials (`com.radonforge.sissy.claude-account`) | Keychain Access — no control of its own yet |
+| Archived Claude credentials (`com.radonforge.sissy.claude-account`) | Keychain Access, no control of its own yet |
 | A linked claude.ai session (`…claude-web`) | Settings ▸ Providers, on its row |
 | Linked Codex accounts (`…codex-oauth`) | Settings ▸ Providers, on its row |
 | Connected forge tokens (`…forge-token`) | Settings ▸ Forge, on its row |
@@ -157,16 +158,16 @@ What survives, and the way out of each:
 
 The hooks are the one thing that keeps running once Sissy is gone: the script
 they name lives in Sissy's folder, not the app bundle, so dragging the app to the
-Trash does not stop them. Delete the folder and they go inert — but they are
+Trash does not stop them. Delete the folder and they go inert, but they are
 still lines in another program's config, so take them out by hand.
 
 ## How it works
 
-One process. Sissy watches the log directories and prices each turn as it lands;
-the readings that are not a log tail — limits, forge counters, vendor status,
-commit identity — are polls beside it. Counting happens while Sissy runs and
-resumes at the byte it stopped at, so *Start at login* is what keeps a day
-complete.
+One process. Sissy watches the log directories and prices each turn as it
+lands. Limits, forge counters, vendor status and commit identity are not read
+from a log tail, so those readings are polls beside it instead. Counting
+happens while Sissy runs and resumes at the byte it stopped at, so *Start at
+login* is what keeps a day complete.
 
 There is no price table in the source. Rates come from
 [LiteLLM](https://github.com/BerriAI/litellm) at runtime, with a generated
@@ -174,7 +175,7 @@ snapshot compiled in as the offline floor, so a CLI that ships a new model price
 correctly without a Sissy release. [`ccusage`](https://github.com/ccusage/ccusage)
 prices from LiteLLM too, which is why the two agree; CI asserts it.
 
-If they disagree on your machine, check `ccusage --version` first — a Homebrew
+If they disagree on your machine, check `ccusage --version` first. A Homebrew
 install pinned at 20.1.0 misprices 1-hour cache writes and never upgrades off
 itself.
 
@@ -198,7 +199,7 @@ Settings.
 | `pricingOverride` | none | per-model rates that win over both sources |
 | `pollIntervalSeconds` | `60` | safety-net poll between filesystem events |
 
-Forge connections are not here — they live in `forge-connections.json`, with
+Forge connections are not here. They live in `forge-connections.json`, with
 their tokens in the keychain, and Settings ▸ Forge is the way to change them.
 
 ## Build from source
