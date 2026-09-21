@@ -26,6 +26,13 @@ repos:
         files: ^(app/(Sissy|SissyCore|SissyTests)/.*\.swift|scripts/check-doc-refs\.py|\.docref-baseline)$
         pass_filenames: false
 
+      - id: prose
+        name: prose
+        entry: python3 scripts/check-prose.py
+        language: system
+        files: ^(README|SECURITY|CONTRIBUTING|CREDITS|CODE_OF_CONDUCT)\.md$|^NOTICE$|^app/(Sissy|SissyCore|SissyTests)/.*\.swift$|^scripts/check-prose\.py$
+        pass_filenames: false
+
       - id: shellcheck
         name: shellcheck
         entry: shellcheck
