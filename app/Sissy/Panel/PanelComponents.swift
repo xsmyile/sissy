@@ -40,6 +40,16 @@ enum PanelMetrics {
     /// The wash's corner, small enough that a share of a few percent still
     /// draws a shape with a straight edge to read its width off.
     static let washRadius: CGFloat = 4
+    /// What separates two readings inside one section, where the rows of a
+    /// single reading sit 2 pt apart.
+    ///
+    /// It exists because a block can hold a figure, that figure taken apart,
+    /// and a second reading with a caption of its own — and at one flat
+    /// spacing the caption lands under the split and reads as belonging to it.
+    /// Four times the row gap is what makes the grouping read without a
+    /// divider, which would say these are two sections when they are one
+    /// question.
+    static let blockGap: CGFloat = 8
 
     /// What the popover leaves itself between its content and the screen edge:
     /// the shadow, the corner radius, and enough that a page ending exactly on
@@ -453,6 +463,50 @@ struct SectionLabel: View {
         Text(text)
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(.secondary)
+    }
+}
+
+/// One model's share of a provider's day: the name the vendor gives it, what
+/// it took, and what that was worth.
+///
+/// **It is not `ProjectRowView` with a model in it.** That row carries an
+/// owner, a repository, a path for its hover and two commands on a
+/// right-click; a model has none of those, and nothing to open. What the two
+/// share is the band behind the text, which is `shareWash` and is shared as
+/// such.
+///
+/// **The four token counters are on the hover and on the accessibility label,
+/// which are the same sentence.** Four unlabelled figures on the row would
+/// need a header line in 312 pt and the panel has no table anywhere in it;
+/// putting them only on the hover would make them not exist for VoiceOver,
+/// which is the rule #107 is held to. `ProjectRowView` is the one row here
+/// with no label of its own and it is the outlier rather than the model.
+///
+/// Measured 2026-09-21 by laying the block out at `PanelMetrics.width` and
+/// asking a hosting controller for the fit: **24.0 pt a row** at the 2 pt the split is spaced
+/// at. The day block goes from 133 pt with no split to 186 pt at two models
+/// and 210 pt at three — 53 and 77 pt, the five over the rows being the gap
+/// that keeps the strip's caption off the last of them. A day that used one
+/// model draws no rows and stays at 133 pt exactly.
+struct ModelRowView: View {
+    let row: UsagePanelSnapshot.ModelRow
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(row.name)
+                .font(.system(size: PanelMetrics.rowText, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            Text("\(row.tokens) · \(row.cost)")
+                .font(.system(size: PanelMetrics.rowText))
+                .monospacedDigit()
+        }
+        .shareWash(row.share)
+        .contentShape(.rect)
+        .help(row.detail)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(row.name) · \(row.tokens) · \(row.cost) · \(row.detail)")
     }
 }
 

@@ -521,9 +521,30 @@ struct PanelProviderPage: View {
     /// The strip is absent until the archive reaches past today — a fresh
     /// install, or the archive switched off — and the headline is what stays,
     /// which is why it belongs to the page rather than to the strip.
+    ///
+    /// **The models are the headline taken apart, so they sit with it and not
+    /// with the bars.** `PanelDayBars` draws a 10 pt row of its own above the
+    /// strip, and its comment says it may be a caption rather than a heading
+    /// precisely because this page keeps today's figures above it. At the
+    /// block's flat spacing, rows in between would leave that caption sitting
+    /// under the last of them, reading as its caption — which is the mistake
+    /// `AGENTS.md` records, measured, for the limits block. So today and its
+    /// split are one group, and the strip follows after a gap.
+    ///
+    /// **All three are the CLI's day, not the viewed account's.** Every other
+    /// field on this page comes from `viewed` and none falls back to the row;
+    /// these deliberately do not, because Sissy meters a config home and does
+    /// not attribute spend to an account — a `cwd` and a `requestId` are on a
+    /// log line and an identity is not. Wiring them through the picker would
+    /// be a claim the data cannot support.
     private var day: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            today
+        VStack(alignment: .leading, spacing: dayGap) {
+            VStack(alignment: .leading, spacing: Self.splitRowGap) {
+                today
+                ForEach(row.models) { model in
+                    ModelRowView(row: model)
+                }
+            }
             if let strip {
                 PanelDayBars(strip: strip, tint: tint)
             }
@@ -531,6 +552,21 @@ struct PanelProviderPage: View {
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
     }
+
+    /// What the headline is separated from the strip by, which is not the same
+    /// question with and without the split between them.
+    ///
+    /// With rows there, the gap is what stops the strip's own caption reading
+    /// as the last of them. With no rows there is nothing to tell apart and
+    /// the headline keeps the spacing it has always had — measured
+    /// 2026-09-21, the block is 133 pt either way on a day that used one
+    /// model, so a page that shows no split is unchanged to the point.
+    private var dayGap: CGFloat {
+        row.models.isEmpty ? Self.splitAbsentGap : PanelMetrics.blockGap
+    }
+
+    private static let splitRowGap: CGFloat = 2
+    private static let splitAbsentGap: CGFloat = 3
 
     private var today: some View {
         HStack(spacing: 6) {
