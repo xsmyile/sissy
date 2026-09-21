@@ -93,10 +93,10 @@ version.
 
 ## What Sissy will and will not take
 
-[`docs/DECISIONS.md`](docs/DECISIONS.md) is the long version of every rule that links to it:
-the decision, with the measurement that settled it. It is written for coding agents but it is
-the honest answer to "why is it like that", and it is worth grepping before
-proposing a change. The short version:
+[`docs/DECISIONS.md`](docs/DECISIONS.md) is the long version of every rule
+that links to it: the decision, with the measurement that settled it. It is
+written for coding agents but it is the honest answer to "why is it like
+that", and it is worth grepping before proposing a change. The short version:
 
 **Welcome.**
 
@@ -135,3 +135,4 @@ If your report is about a number, say what `ccusage --version` prints: a stale
 Homebrew install reports a different figure and will never upgrade off itself.
 
 Security problems do not go in an issue. See [SECURITY.md](SECURITY.md).
+The [code of conduct](CODE_OF_CONDUCT.md) applies to all of it.
