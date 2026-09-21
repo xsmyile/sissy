@@ -429,18 +429,56 @@ final class ForgeMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.currentReadings().first?.failure, .unreachable)
     }
 
-    /// **A refresh that lands mid-round joins it rather than asking twice.**
-    /// Two requests would answer at two moments, and the one that finished
-    /// last — not the one that was asked last — would be the one the row kept:
-    /// a slow round could put its older figures back over a refresh the user
-    /// had just watched land, or park a connection that refresh proved healthy.
+    /// **A refresh that lands mid-round does not join it**, which is the one
+    /// case that spends a second request on purpose.
+    ///
+    /// A scheduled read is suppressed and cannot raise the keychain's panel,
+    /// so the click that is trying to clear a grant a re-signed build has
+    /// staled would be answered with the very silence it exists to break —
+    /// and the row would stay stuck under a gesture that looked like it
+    /// worked. The window is not the microseconds a local lookup takes:
+    /// `suppressingInteraction` serialises every keychain reader in the
+    /// process on one lock, this round's own connections included, and waits
+    /// out `suppressorTimeout` for it.
+    ///
+    /// **The round's own fetch still lands, and must not win by landing
+    /// last**, which is what `seq` decides. Here it is released after the
+    /// refresh that overtook it and carries different figures, so a monitor
+    /// that published on arrival rather than on currency would put the older
+    /// reading back over the one the user just watched arrive.
     ///
     /// Nothing outside the monitor can observe that the second caller is
-    /// inside it, so the pool is yielded rather than slept on before the fetch
-    /// is let go. A caller that has not joined by then spends a second
-    /// request, which is what `attempts` fails on — the test cannot pass by
-    /// never having overlapped.
-    func testARefreshDuringARoundJoinsItRatherThanAskingTwice() async {
+    /// inside it, so the pool is yielded rather than slept on.
+    func testARefreshMidRoundOpensItsOwnReadAndOutlivesTheRound() async {
+        let round = FetchGate()
+        let manual = FetchGate()
+        let attempts = LockedValue(0)
+        let monitor = ForgeActivityMonitor(
+            connections: [Self.gitHub],
+            fetch: { connection, _, _, _ in
+                attempts.update { $0 += 1 }
+                let first = attempts.load() == 1
+                await (first ? round : manual).arrive()
+                return Self.reading(
+                    connection, login: "gh", contributions: first ? 11 : 22, merged: 2)
+            },
+            token: { _, _ in .found("token") })
+        async let polled: Duration = monitor.refreshOnce {}
+        await round.waitForStart()
+        async let clicked: Void = monitor.refreshOnce(id: Self.gitHub.id) {}
+        await manual.waitForStart()
+        await manual.letGo()
+        await clicked
+        await round.letGo()
+        _ = await polled
+        XCTAssertEqual(attempts.load(), 2)
+        XCTAssertEqual(monitor.currentReadings().first?.contributions(for: .today), 22)
+    }
+
+    /// **Two clicks still join**, because the rule is about what a caller may
+    /// ask rather than about how many there are: a read already allowed to
+    /// raise the panel answers the next caller that wants one.
+    func testASecondClickJoinsTheRefreshAlreadyAsking() async {
         let gate = FetchGate()
         let attempts = LockedValue(0)
         let monitor = ForgeActivityMonitor(
@@ -451,13 +489,13 @@ final class ForgeMonitorTests: XCTestCase {
                 return Self.reading(connection, login: "gh", contributions: 11, merged: 2)
             },
             token: { _, _ in .found("token") })
-        async let round: Duration = monitor.refreshOnce {}
+        async let first: Void = monitor.refreshOnce(id: Self.gitHub.id) {}
         await gate.waitForStart()
-        async let manual: Void = monitor.refreshOnce(id: Self.gitHub.id) {}
+        async let second: Void = monitor.refreshOnce(id: Self.gitHub.id) {}
         await letTheOtherCallerIn()
         await gate.letGo()
-        _ = await round
-        await manual
+        await first
+        await second
         XCTAssertEqual(attempts.load(), 1)
         XCTAssertEqual(monitor.currentReadings().first?.contributions(for: .today), 11)
     }
