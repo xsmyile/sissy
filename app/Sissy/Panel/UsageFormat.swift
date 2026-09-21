@@ -1287,6 +1287,10 @@ enum ClaudeAccountSwitchCopy {
         switch why {
         case .notArchived:
             return "Sissy has no saved sign-in for that account yet. Sign into it once with claude /login"
+        case .activeAccountUnknown:
+            return
+                "Sissy could not tell which account Claude Code is signed in as, so it left the "
+                + "credential alone. Try again once it can reach Anthropic"
         case .keychain:
             return "The keychain would not accept the change, so the signed-in account is unchanged"
         }

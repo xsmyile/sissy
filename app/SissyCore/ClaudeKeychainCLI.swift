@@ -111,6 +111,24 @@ enum ClaudeKeychainCLI {
         return scopedClaudeService(for: home.path)
     }
 
+    /// The other service names Claude Code may keep one config home's
+    /// credential under, beside the one `claudeService(for:)` names.
+    ///
+    /// The default home is the case with two. Measured 2026-09-21 on macOS 27:
+    /// `Claude Code-credentials` (created 2026-04-28) and
+    /// `Claude Code-credentials-8a380954` — the scoped name for
+    /// `~/.claude` — both existed for it and carried the same modification
+    /// date to the second, the CLI having rewritten the pair together. The
+    /// scoped one was created 2026-09-16, after the measurement
+    /// `claudeService(for:)` is written from, so a build reading that rule
+    /// alone addresses half of what the CLI now keeps. Which of the two a
+    /// `claude` reads first is its business, so a switch reaching only one
+    /// leaves the other naming the account the user just left.
+    static func siblingClaudeServices(for home: URL) -> [String] {
+        guard home == AccountDefaults.claudeHome else { return [] }
+        return [scopedClaudeService(for: home.path)]
+    }
+
     /// The scoped name for a directory path, by the CLI's own rule.
     static func scopedClaudeService(for path: String) -> String {
         let digest = SHA256.hash(data: Data(path.precomposedStringWithCanonicalMapping.utf8))
