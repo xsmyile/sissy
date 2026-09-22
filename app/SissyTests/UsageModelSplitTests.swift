@@ -192,4 +192,18 @@ final class UsageModelSplitTests: XCTestCase {
             at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
         return repo.standardizedFileURL
     }
+
+    /// The third key. Two models tied on cost and on tokens still need one
+    /// order, or the row they are drawn in changes between launches: the fold
+    /// comes out of a dictionary whose key order is not stable.
+    func testTwoModelsTiedOnBothFallBackToTheName() {
+        let ordered = FrameBuilder.orderedModels([
+            ModelTotals(
+                model: "zeta", totals: UsageHistoryTotals(inputTokens: 10, cost: 1)),
+            ModelTotals(
+                model: "alpha", totals: UsageHistoryTotals(inputTokens: 10, cost: 1)),
+        ])
+
+        XCTAssertEqual(ordered.map(\.model), ["alpha", "zeta"])
+    }
 }

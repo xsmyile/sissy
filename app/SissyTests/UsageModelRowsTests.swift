@@ -119,6 +119,95 @@ final class UsageModelRowsTests: XCTestCase {
             "claude-opus-5 · in 1.0K · out 2.0K · cache read 3.0K · cache write 4.0K")
     }
 
+    /// A model the pricing sources do not know books its tokens at a cost of
+    /// zero, and zero is what it is not: the rate is unknown. Sharing the
+    /// money on a day that holds one printed it at `0% · $0.00` beside the
+    /// tokens it actually burned, so the denominator moves to the tokens as
+    /// soon as any model has none.
+    func testAnUnpricedModelBesideAPricedOneSharesOnTokens() {
+        let rows = models(
+            frame(
+                models: [
+                    model("claude-opus-5", 1_000, "10.00"),
+                    model("mystery-9", 3_000, "0"),
+                ]))
+
+        XCTAssertEqual(rows.map(\.name), ["opus-5", "mystery-9"])
+        XCTAssertEqual(rows.map(\.reading), ["25% · $10.00", "75% · $0.00"])
+    }
+
+    /// A share too small to round to a whole percent is worded rather than
+    /// rounded away: `0%` beside a cost that is not zero is the same claim the
+    /// bar refuses to make when a fill is too short to draw.
+    func testAShareUnderOnePercentIsWordedNotRoundedToZero() {
+        let rows = models(
+            frame(
+                models: [
+                    model("claude-opus-5", 100_000, "99.60"),
+                    model("claude-sonnet-5", 100, "0.40"),
+                ]))
+
+        XCTAssertEqual(rows.last?.reading, "<1% · $0.40")
+    }
+
+    /// A model that genuinely spent nothing on a day that did keeps its `0%`:
+    /// zero is a reading, and only a share that is not zero may not print as
+    /// one.
+    func testAShareOfExactlyZeroKeepsItsZero() {
+        XCTAssertEqual(UsageFormat.modelReading(share: 0, cost: "$0.00"), "0% · $0.00")
+    }
+
+    /// Four pills are 277 pt of the 312 a page has and five are 344, so past
+    /// four the row is folded rather than left to shrink: measured, it was the
+    /// money that truncated first.
+    func testTheFifthModelFoldsIntoOnePillForTheRest() {
+        let rows = models(
+            frame(
+                models: [
+                    model("claude-opus-5", 5_000, "50.00"),
+                    model("claude-sonnet-5", 4_000, "40.00"),
+                    model("claude-haiku-4-5", 3_000, "30.00"),
+                    model("claude-fable-5-1", 2_000, "20.00"),
+                    model("claude-opus-4-1", 1_000, "10.00"),
+                ]))
+
+        XCTAssertEqual(rows.count, 4)
+        XCTAssertEqual(rows.map(\.name), ["opus-5", "sonnet-5", "haiku-4-5", "+2 more"])
+    }
+
+    /// The fold takes the cheapest, because the list is dearest first, and it
+    /// carries their summed share and cost rather than a bare count.
+    func testTheFoldedPillCarriesWhatItStandsFor() {
+        let rows = models(
+            frame(
+                models: [
+                    model("claude-opus-5", 5_000, "50.00"),
+                    model("claude-sonnet-5", 4_000, "30.00"),
+                    model("claude-haiku-4-5", 3_000, "10.00"),
+                    model("claude-fable-5-1", 2_000, "6.00"),
+                    model("claude-opus-4-1", 1_000, "4.00"),
+                ]))
+
+        let folded = try? XCTUnwrap(rows.last)
+        XCTAssertEqual(folded?.reading, "10% · $10.00")
+        XCTAssertEqual(folded?.detail, "claude-fable-5-1 · claude-opus-4-1")
+    }
+
+    /// Exactly four is the limit rather than the first folded count: folding
+    /// one leftover would spend a pill to save a pill.
+    func testExactlyFourModelsAreFourPills() {
+        let rows = models(
+            frame(
+                models: [
+                    model("claude-opus-5", 5_000, "50.00"),
+                    model("claude-sonnet-5", 4_000, "40.00"),
+                    model("claude-haiku-4-5", 3_000, "30.00"),
+                    model("claude-fable-5-1", 2_000, "20.00"),
+                ]))
+
+        XCTAssertEqual(rows.map(\.name), ["opus-5", "sonnet-5", "haiku-4-5", "fable-5-1"])
+    }
+
     private func models(_ frame: FrameData) -> [UsagePanelSnapshot.ModelRow] {
         UsagePanelSnapshot.make(frame: frame).providers.first?.models ?? []
     }

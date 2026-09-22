@@ -889,8 +889,16 @@ enum UsageFormat {
     /// to the other surface for the other half. The separator is the panel's
     /// own, and the pair is the shape `creditsReading` already uses for a
     /// figure and its share.
-    static func modelReading(percent: Int, cost: String) -> String {
-        "\(percent)% · \(cost)"
+    ///
+    /// **A share that is not zero never reads as zero.** Rounding a model
+    /// worth 0.4% of the day to `0%` prints nothing spent beside a cost that
+    /// says otherwise, which is what `BarGeometry.fillWidth` already refuses
+    /// to do for a bar too short to draw. A share of exactly zero is a real
+    /// reading and keeps its `0%`.
+    static func modelReading(share: Double, cost: String) -> String {
+        let percent = Int((share * 100).rounded())
+        guard percent > 0 || share <= 0 else { return "<1% · \(cost)" }
+        return "\(percent)% · \(cost)"
     }
 
     /// One model row's hover and its accessibility label: the id as the vendor
@@ -911,6 +919,16 @@ enum UsageFormat {
             "cache read \(tokens(cacheRead))",
             "cache write \(tokens(cacheCreation))",
         ].joined(separator: " · ")
+    }
+
+    /// What the pill standing for the folded models is called.
+    ///
+    /// Shorter than `projectsFolded`'s sentence because it has to fit a pill
+    /// beside three others rather than a row of its own, and the word it drops
+    /// is the one the block's own context supplies. Always plural for that
+    /// function's reason: folding a single leftover would save no width.
+    static func modelsFolded(_ count: Int) -> String {
+        "+\(count) more"
     }
 
     /// Always plural: the fold only happens past the row limit, and folding a
