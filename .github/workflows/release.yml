@@ -73,6 +73,15 @@ jobs:
           # publication so a tag with nothing to say fails before the build
           # is signed and notarized, and before a bare tag is left published
           # with no release against it.
+          # A lightweight tag has no annotation, and `%(contents)` then
+          # resolves to the target commit's message — which would publish the
+          # last commit subject as the release notes and pass every text check
+          # below. The object type is the only thing that tells the two apart.
+          if [[ "$(git cat-file -t "v$VERSION" 2>/dev/null)" != "tag" ]]; then
+            echo "v$VERSION is a lightweight tag; the release notes are read from an annotation" >&2
+            echo "rewrite it with: git tag -a -f v$VERSION && git push --tags --force" >&2
+            exit 1
+          fi
           notes="$(git tag -l --format='%(contents)' "v$VERSION")"
           if [[ -z "${notes//[[:space:]]/}" || "${notes//[[:space:]]/}" == "v$VERSION" ]]; then
             echo "tag v$VERSION carries no annotation beyond its own name; the release notes are read from it" >&2
