@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (without leading v). Defaults to project.yml MARKETING_VERSION."
+        description: "Version (without leading v). Defaults to the latest git tag."
         required: false
         default: ""
       dry_run:
@@ -393,8 +393,8 @@ jobs:
           # in-app retirement: a user who uninstalls before ever launching
           # the first release that carries LegacyAgentRetirement would
           # otherwise keep a login item starting a binary the DMG no longer
-          # contains. 0.1.10 never shipped, so that release is still ahead —
-          # drop them with the bundled plists a release after it.
+          # contains. 0.2.0 is the first release that carries it, so drop them
+          # with the bundled plists a release after this one.
           cat > Casks/sissy.rb << 'CASK'
           cask "sissy" do
             version "__VERSION__"
