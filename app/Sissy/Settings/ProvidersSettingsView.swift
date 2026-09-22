@@ -412,12 +412,36 @@ struct ProvidersSettingsView: View {
     /// `UsageFormat.limitsNotice` is the panel's wording for the same states,
     /// taken rather than paraphrased: a state either vendor learns to answer
     /// with is then worded in one place, and the row cannot drift from the
-    /// notice the panel prints for the same account.
+    /// notice the panel prints for the same account. The message and the
+    /// control beside it are both read off this one notice, so the row cannot
+    /// offer one state's button under another state's sentence.
+    private func notice(
+        of signals: AccountSignals?, provider: String
+    ) -> UsagePanelSnapshot.LimitsNotice? {
+        signals.flatMap { UsageFormat.limitsNotice($0.limitsState, provider: provider) }
+    }
+
     private func health(of signals: AccountSignals?, provider: String) -> CredentialHealth {
-        guard let signals,
-            let notice = UsageFormat.limitsNotice(signals.limitsState, provider: provider)
-        else { return .ok }
-        return .attention(notice.message)
+        notice(of: signals, provider: provider).map { .attention($0.message) } ?? .ok
+    }
+
+    /// The control the panel offers beside the same notice, offered here too:
+    /// this tab is where a linked account lives, so it is where somebody comes
+    /// looking for the way to make it read again.
+    private func fix(of signals: AccountSignals?, provider: String) -> CredentialFix? {
+        guard let notice = notice(of: signals, provider: provider),
+            let action = notice.action
+        else { return nil }
+        return CredentialFix(title: action) {
+            switch notice.kind {
+            case .refresh:
+                model.engine.refreshProvider(provider)
+            case .link where provider == ProviderID.codex:
+                model.engine.addCodexAccount()
+            case .link:
+                model.engine.addClaudeAccount()
+            }
+        }
     }
 
     /// Reads the resolution rather than the stored toggle, so a provider Sissy
@@ -510,7 +534,8 @@ struct ProvidersSettingsView: View {
             badge: plan?.label,
             badgeTier: plan?.tier,
             subtitle: Self.subtitle(row),
-            health: health(of: signals, provider: ProviderID.claudeCode)
+            health: health(of: signals, provider: ProviderID.claudeCode),
+            fix: fix(of: signals, provider: ProviderID.claudeCode)
         ) {
             CredentialMonogram(
                 name: row.organization ?? row.title,
@@ -582,7 +607,8 @@ struct ProvidersSettingsView: View {
             badge: plan?.label,
             badgeTier: plan?.tier,
             subtitle: workspace,
-            health: health(of: signals, provider: ProviderID.codex)
+            health: health(of: signals, provider: ProviderID.codex),
+            fix: fix(of: signals, provider: ProviderID.codex)
         ) {
             CredentialMonogram(
                 name: workspace ?? title,

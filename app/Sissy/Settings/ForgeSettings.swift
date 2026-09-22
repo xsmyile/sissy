@@ -16,6 +16,7 @@ enum ForgeConnectCopy {
     static let connect = "Connect…"
     static let disconnectItem = "Disconnect…"
     static let reconnectItem = "Reconnect…"
+    static let allowItem = "Allow"
 
     /// When this connection last answered, which with the login beside it is
     /// what says a connection is alive. Sissy's own fetch time rather than
@@ -270,7 +271,8 @@ struct ForgeSettingsView: View {
         return CredentialRow(
             title: connection.host,
             subtitle: subtitle(connection, reading: reading),
-            health: Self.health(of: reading)
+            health: Self.health(of: reading),
+            fix: fix(connection, reading: reading)
         ) {
             CredentialDisc(tint: .secondary, health: Self.health(of: reading)) {
                 ForgeMark(host: connection.host)
@@ -322,6 +324,18 @@ struct ForgeSettingsView: View {
     private static func health(of reading: ForgeActivityReading?) -> CredentialHealth {
         guard let failure = reading?.failure else { return .ok }
         return .attention(UsageFormat.forgeFailure(failure))
+    }
+
+    /// The read that may raise the keychain's dialog, on the row whose token
+    /// the keychain would not hand over. Every other failure is the vendor's
+    /// or the network's, and the next scheduled round asks again on its own.
+    private func fix(
+        _ connection: ForgeConnection, reading: ForgeActivityReading?
+    ) -> CredentialFix? {
+        guard reading?.failure == .credentialUnreadable else { return nil }
+        return CredentialFix(title: ForgeConnectCopy.allowItem) {
+            model.engine.refreshForge(connection.id)
+        }
     }
 
     /// One counter's switch, wearing the mark the panel draws it with.
