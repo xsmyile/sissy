@@ -38,6 +38,7 @@ struct PanelProviderPage: View {
     /// from, having read another one in between.
     let openServices: (String?) -> Void
     let openProjects: (String?) -> Void
+    let openEffort: (String?) -> Void
     /// Opens a repository's commit identity from its own row, so the same row
     /// offers the same actions wherever the panel draws it.
     let openIdentities: (String) -> Void
@@ -115,40 +116,17 @@ struct PanelProviderPage: View {
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
 
-    /// The window's split by model and effort: the archived days the strip
-    /// draws, plus today off the frame.
-    ///
-    /// Today is added rather than read back, for the strip's own reason — the
-    /// day file is written on the tail's throttle while the frame moves as
-    /// events land, so taking it from disk would put a block under the bars
-    /// that disagrees with the bar above it.
-    private var effortRows: [UsagePanelSnapshot.EffortRow] {
-        UsagePanelSnapshot.makeEffort(
-            archivedDays.flatMap(\.effort).summed(with: row.effort), provider: row.id)
-    }
-
-    /// The archived days the strip draws, which is the window every figure in
-    /// this block is of.
-    private var archivedDays: [UsageHistoryDaySummary] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let start =
-            calendar.date(
-                byAdding: .day, value: -(UsagePanelSnapshot.dayStripDays - 1), to: today) ?? today
-        return series.filter { $0.day >= start && calendar.startOfDay(for: $0.day) < today }
-    }
-
-    /// How many of the strip's days actually named an effort.
-    ///
-    /// Days that named one, not days the archive holds. A day can carry its
-    /// tokens and no effort — one whose logs the CLI has since pruned, or one
-    /// the archive refuses to rewrite because the re-derivation lost a project
-    /// to a worktree deleted since. Measured 2026-09-22 on this machine, 4 of
-    /// 49 archived days. Counting those as covered would put `7 days` over a
-    /// block that answers for four of them.
-    private var effortCoverage: Int {
-        archivedDays.count { $0.effort.contains { $0.effort != nil } }
-            + (row.effort.contains { $0.effort != nil } ? 1 : 0)
+    /// The row the effort reading answers in on this page, when the window
+    /// named any effort.
+    private var effortSummary: (summary: UsagePanelSnapshot.EffortSummary, window: String)? {
+        let window = UsagePanelSnapshot.effortWindow(series: series, today: row.effort)
+        guard let summary = UsagePanelSnapshot.effortSummary(window.splits, provider: row.id)
+        else { return nil }
+        return (
+            summary,
+            UsageFormat.effortWindow(
+                covered: window.covered, of: UsagePanelSnapshot.dayStripDays)
+        )
     }
 
     private var strip: UsagePanelSnapshot.DayStrip? {
@@ -159,7 +137,7 @@ struct PanelProviderPage: View {
     }
 
     var body: some View {
-        let effortRows = self.effortRows
+        let effortSummary = self.effortSummary
         return VStack(alignment: .leading, spacing: 0) {
             identity
 
@@ -174,14 +152,14 @@ struct PanelProviderPage: View {
             Divider()
             day
 
-            if !effortRows.isEmpty {
-                Divider()
-                effort(effortRows)
-            }
-
             if !row.projects.isEmpty {
                 Divider()
                 projects
+            }
+
+            if let effortSummary {
+                Divider()
+                effort(effortSummary.summary, window: effortSummary.window)
             }
 
             if let status = row.status {
@@ -590,49 +568,51 @@ struct PanelProviderPage: View {
 
     // MARK: Effort
 
-    /// At what effort this provider's week was worked, a row per model.
+    /// At what effort this provider's week was worked, as one row.
     ///
-    /// `UsagePanelSnapshot.makeEffort` carries why it is a block rather than a
-    /// tier inside a pill, why the window is the strip's, and why each row's
-    /// shares are of its own model. What belongs here is the shape: the name
-    /// over the run rather than beside it, because a run of four efforts wants
-    /// 264 pt of the 312 a page has and a name beside it would overflow —
-    /// measured 2026-09-22 at `PanelMetrics.width`.
-    private func effort(_ rows: [UsagePanelSnapshot.EffortRow]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                SectionLabel(text: "By effort")
-                Spacer(minLength: 0)
-                Text(
-                    UsageFormat.effortWindow(
-                        covered: effortCoverage, of: UsagePanelSnapshot.dayStripDays)
-                )
+    /// `UsagePanelSnapshot.effortSummary` carries why it is a row rather than
+    /// the block it was, and when the row is a door. It sits under the
+    /// projects rather than under the day because it answers for the strip's
+    /// week and not for the day being pointed at, and a reading of a different
+    /// window between the pills and the list read as part of the day.
+    @ViewBuilder
+    private func effort(_ summary: UsagePanelSnapshot.EffortSummary, window: String)
+        -> some View
+    {
+        if summary.opens {
+            Button {
+                openEffort(viewed?.id)
+            } label: {
+                effortLabel(summary, window: window)
+            }
+            .buttonStyle(.plain)
+            .help("Show each model's split by effort")
+        } else {
+            effortLabel(summary, window: window)
+        }
+    }
+
+    private func effortLabel(_ summary: UsagePanelSnapshot.EffortSummary, window: String)
+        -> some View
+    {
+        HStack(spacing: 6) {
+            SectionLabel(text: "By effort")
+            Spacer(minLength: 8)
+            Text("\(summary.lead) · \(window)")
                 .font(.system(size: 11))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(rows) { row in
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(row.name)
-                            .font(.system(size: 12))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Text(row.run)
-                            .font(.system(size: 11))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    .contentShape(.rect)
-                    .help(row.detail)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(row.name) · \(row.detail)")
-                }
+                .lineLimit(1)
+            if summary.opens {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Projects

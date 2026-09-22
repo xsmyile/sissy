@@ -648,6 +648,39 @@ struct UsagePanelSnapshot: Equatable {
         /// has no room for either, and anything only a pointer can reach does
         /// not exist for VoiceOver.
         let detail: String
+        /// The run again, a segment per clause in the same order, which is
+        /// what the effort page draws the model's bar from.
+        let segments: [EffortSegment]
+        /// What the model spent over the window and in how many turns.
+        let total: String
+    }
+
+    /// One effort's share of one model's window, as a segment of its bar.
+    struct EffortSegment: Equatable, Identifiable {
+        /// The vendor's word, or nil for spend whose lines named no effort.
+        let effort: String?
+        let share: Double
+        /// The word and the share, as the legend under the bar prints them.
+        let label: String
+
+        var id: String { effort ?? UsageFormat.effortUnattributed }
+    }
+
+    /// What the provider page's `By effort` row says, and whether it is a door.
+    struct EffortSummary: Equatable {
+        /// The provider's leading effort and its share of the window's spend.
+        let lead: String
+        /// False when every model ran almost wholly at the effort the lead
+        /// names. The page would then draw one full bar per model, which says
+        /// nothing the row has not, so the row answers for itself instead.
+        let opens: Bool
+    }
+
+    /// The effort splits of the window the strip draws, and how many of its
+    /// days named an effort at all.
+    struct EffortWindow: Equatable {
+        let splits: [EffortSplit]
+        let covered: Int
     }
 
     /// What one provider spent on one project, as a share of the day.
@@ -1689,11 +1722,7 @@ struct UsagePanelSnapshot: Equatable {
     /// subject is which model ran at what.
     static func makeEffort(_ splits: [EffortSplit], provider: String) -> [EffortRow] {
         guard !splits.isEmpty else { return [] }
-        let unpriced = splits.contains { $0.cost == 0 && $0.tokens > 0 }
-        let weight = { (split: EffortSplit) -> Double in
-            unpriced
-                ? Double(split.tokens) : NSDecimalNumber(decimal: split.cost).doubleValue
-        }
+        let weight = effortWeight(splits)
         var byModel: [String: [EffortSplit]] = [:]
         for split in splits { byModel[split.model, default: []].append(split) }
         var models: [(model: String, splits: [EffortSplit], weight: Double)] = []
@@ -1711,8 +1740,11 @@ struct UsagePanelSnapshot: Equatable {
         }
         models.sort { $0.weight == $1.weight ? $0.model < $1.model : $0.weight > $1.weight }
         return models.map { model, ordered, total in
-            let run: [String] = ordered.map {
-                UsageFormat.effortShare($0.effort, share: weight($0) / total)
+            let segments: [EffortSegment] = ordered.map {
+                let share = weight($0) / total
+                return EffortSegment(
+                    effort: $0.effort, share: share,
+                    label: UsageFormat.effortShare($0.effort, share: share))
             }
             let detail: [(effort: String?, cost: String, turns: Int)] = ordered.map {
                 (effort: $0.effort, cost: UsageFormat.cost($0.cost), turns: $0.turns)
@@ -1720,9 +1752,100 @@ struct UsagePanelSnapshot: Equatable {
             return EffortRow(
                 id: model,
                 name: UsageFormat.modelName(model, on: provider),
-                run: run.joined(separator: " · "),
-                detail: UsageFormat.effortDetail(detail))
+                run: segments.map(\.label).joined(separator: " · "),
+                detail: UsageFormat.effortDetail(detail),
+                segments: segments,
+                total: UsageFormat.effortTotal(
+                    cost: UsageFormat.cost(ordered.reduce(Decimal(0)) { $0 + $1.cost }),
+                    turns: ordered.reduce(0) { $0 + $1.turns }))
         }
+    }
+
+    /// How one pair weighs in a share: its money, or its tokens as soon as any
+    /// pair in the window has tokens and no cost, which is `makeModels`' rule
+    /// for `makeModels`' reason.
+    private static func effortWeight(_ splits: [EffortSplit]) -> (EffortSplit) -> Double {
+        let unpriced = splits.contains { $0.cost == 0 && $0.tokens > 0 }
+        return { split in
+            unpriced
+                ? Double(split.tokens) : NSDecimalNumber(decimal: split.cost).doubleValue
+        }
+    }
+
+    /// The share at which a model's leading effort is the whole of its reading.
+    ///
+    /// Measured 2026-09-22 over 14 days of this machine: `claude-opus-5` ran
+    /// `xhigh 99%` and `claude-fable-5-1` `xhigh 100%`, while the lowest
+    /// informative lead was `gpt-6-astra`'s `medium 49%`.
+    static let effortWholeShare = 0.9
+
+    /// The one line the provider page gives the effort reading.
+    ///
+    /// **A row rather than a block**, because it answers how a week was worked
+    /// on a page about what an account is doing now, and the block it replaced
+    /// cost that page a heading and two lines a model for a question most
+    /// visits do not ask. The row names the provider's leading effort over the
+    /// window and its share of the spend — summed across this provider's
+    /// models only, which share one vendor's vocabulary, and never across
+    /// providers.
+    ///
+    /// **It opens the page only when the page has more to say.** On Claude the
+    /// reading is usually one word per model, and a door onto a page of full
+    /// bars would be a click that answers what the row already did. So the row
+    /// is a door exactly when some model either leads on another effort or
+    /// leads on this one by less than `effortWholeShare`.
+    static func effortSummary(_ splits: [EffortSplit], provider: String) -> EffortSummary? {
+        let rows = makeEffort(splits, provider: provider)
+        guard !rows.isEmpty else { return nil }
+        let weight = effortWeight(splits)
+        var byEffort: [String: Double] = [:]
+        var total = 0.0
+        for split in splits {
+            let part = weight(split)
+            total += part
+            if let effort = split.effort { byEffort[effort, default: 0] += part }
+        }
+        let lead = byEffort.max {
+            $0.value == $1.value ? $0.key > $1.key : $0.value < $1.value
+        }
+        guard total > 0, let lead else { return nil }
+        let opens = rows.contains { row in
+            guard let first = row.segments.first else { return false }
+            return first.effort != lead.key || first.share < effortWholeShare
+        }
+        return EffortSummary(
+            lead: UsageFormat.effortShare(lead.key, share: lead.value / total), opens: opens)
+    }
+
+    /// The window's splits: the archived days the strip draws, plus today off
+    /// the frame.
+    ///
+    /// Today is added rather than read back, for the strip's own reason — the
+    /// day file is written on the tail's throttle while the frame moves as
+    /// events land, so taking it from disk would put a reading under the bars
+    /// that disagrees with the bar above it.
+    ///
+    /// `covered` counts days that **named** an effort, not days the archive
+    /// holds. A day can carry its tokens and no effort — one whose logs the
+    /// CLI has since pruned, or one the archive refuses to rewrite because
+    /// the re-derivation lost a project to a worktree deleted since. Measured
+    /// 2026-09-22 on this machine, 4 of 49 archived days. Counting those as
+    /// covered would put `7 days` over a reading that answers for four.
+    static func effortWindow(
+        series: [UsageHistoryDaySummary], today: [EffortSplit], now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> EffortWindow {
+        let startOfToday = calendar.startOfDay(for: now)
+        let start =
+            calendar.date(byAdding: .day, value: -(dayStripDays - 1), to: startOfToday)
+            ?? startOfToday
+        let archived = series.filter {
+            $0.day >= start && calendar.startOfDay(for: $0.day) < startOfToday
+        }
+        let named = { (splits: [EffortSplit]) in splits.contains { $0.effort != nil } }
+        return EffortWindow(
+            splits: archived.flatMap(\.effort).summed(with: today),
+            covered: archived.count { named($0.effort) } + (named(today) ? 1 : 0))
     }
 
     /// What the day spent outside every repository, or nil when there is none

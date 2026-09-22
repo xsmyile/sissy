@@ -961,14 +961,21 @@ enum UsageFormat {
     /// What the run calls spend the lines named no effort for.
     static let effortUnattributed = "unattributed"
 
-    /// What the `By effort` heading says its window is: the strip's own width,
-    /// and how much of it the archive actually reaches when it falls short.
+    /// What the `By effort` row and page say their window is: the strip's own
+    /// width, and how much of it the archive actually reaches when it falls
+    /// short.
     ///
-    /// The short form because the strip's caption directly above already spells
-    /// the coverage out in a sentence; saying it twice in two idioms is how a
-    /// panel this narrow stops being read.
+    /// The short form because the strip's caption on the provider page already
+    /// spells the coverage out in a sentence; saying it twice in two idioms is
+    /// how a panel this narrow stops being read.
     static func effortWindow(covered: Int, of days: Int) -> String {
         covered >= days ? "\(days) days" : "\(covered) of \(days) days"
+    }
+
+    /// What one model spent over the effort window, beside its name on the
+    /// effort page.
+    static func effortTotal(cost: String, turns: Int) -> String {
+        "\(cost) · " + agentCount(turns, singular: "turn", plural: "turns")
     }
 
     /// One effort row's hover and its accessibility label, which are the same
