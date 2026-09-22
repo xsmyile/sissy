@@ -76,6 +76,10 @@ struct UsagePanelView: View {
         /// popovers, in which one emerges from another"* — and the cost was
         /// measured: see `PanelProviderStatus`.
         case services(String, account: String?)
+        /// That vendor's week by model and effort, one level in from the
+        /// `By effort` row on its page, which is the only door to it. The
+        /// account travels for the way back, as it does for the services.
+        case effort(String, account: String?)
         /// Every project of the day, unfolded: one level in from the Overview
         /// when no provider is named, and from a vendor's own page when one
         /// is. The account travels for the same reason it does above — the way
@@ -127,7 +131,7 @@ struct UsagePanelView: View {
         switch page {
         case .overview, .identities, .stats: nil
         case .provider(_, let account), .services(_, let account),
-            .projects(_, let account):
+            .effort(_, let account), .projects(_, let account):
             account
         }
     }
@@ -140,7 +144,7 @@ struct UsagePanelView: View {
     {
         switch page {
         case .overview, .identities, .stats: return nil
-        case .provider(let id, _), .services(let id, _):
+        case .provider(let id, _), .services(let id, _), .effort(let id, _):
             return providers.first { $0.id == id }
         case .projects(let id, _):
             guard let id else { return nil }
@@ -197,6 +201,10 @@ struct UsagePanelView: View {
         let services = servicesReading(of: open)
         let projects = projectsPage(of: live?.frame)
         let identityFocus = Self.identityFocus(page)
+        let onEffort: Bool = {
+            if case .effort = page { return true }
+            return false
+        }()
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 if let projects {
@@ -204,7 +212,7 @@ struct UsagePanelView: View {
                 } else if let open {
                     providerHeader(
                         open, live: live,
-                        back: services == nil
+                        back: services == nil && !onEffort
                             ? .overview : .provider(open.id, account: openAccount))
                 } else if case .identities = page {
                     identitiesHeader
@@ -234,6 +242,12 @@ struct UsagePanelView: View {
                             PanelStats(block: snapshot.agents)
                         } else if let open, let services {
                             PanelProviderStatusPage(provider: open.id, row: services)
+                        } else if let open, onEffort {
+                            PanelEffortPage(
+                                provider: open.id, today: open.effort,
+                                loadHistory: {
+                                    await model.engine.usageHistorySeries(provider: $0)
+                                })
                         } else if let open {
                             let slice = live?.frame.providers.first { $0.id == open.id }
                             PanelProviderPage(
@@ -259,6 +273,9 @@ struct UsagePanelView: View {
                                 },
                                 openProjects: {
                                     page = .projects(open.id, account: $0)
+                                },
+                                openEffort: {
+                                    page = .effort(open.id, account: $0)
                                 },
                                 openIdentities: { page = .identities(focus: $0) },
                                 loadHistory: {
