@@ -117,10 +117,23 @@ final class ClaudeWebSessionStoreTests: XCTestCase {
     /// The control used to be one "Forget session" that deleted every stored
     /// session at once, so a user with two linked accounts who wanted rid of
     /// one lost both.
+    /// The precondition is the point of the first guard, not ceremony. Without
+    /// it the failure below is reachable by a save that never landed, and it
+    /// names the delete regardless: measured 2026-09-22 on the v0.2.0 tag, a
+    /// keychain the release lane had moved under these tests reported itself
+    /// as one account's forget destroying another's session, which the store
+    /// cannot do — `identity(account:)` scopes every operation by service and
+    /// account alike. A message that asserts a cause has to rule the others out.
     func testForgettingOneAccountsSessionLeavesTheOthers() throws {
         let other = "sk-ant-sid01-" + String(repeating: "b", count: 100)
         try ClaudeWebSessionStore.save(session, account: account)
         try ClaudeWebSessionStore.save(other, account: secondAccount)
+        guard
+            case .found = ClaudeWebSessionStore.load(
+                account: secondAccount, allowingInteraction: false)
+        else {
+            return XCTFail("the second account's session did not read back before the delete")
+        }
 
         try ClaudeWebSessionStore.delete(account: account)
 
