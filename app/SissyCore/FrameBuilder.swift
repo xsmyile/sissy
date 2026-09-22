@@ -402,9 +402,10 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     /// slices to draw the day, and a slice that carried a pre-summed duration
     /// could not be unioned with another's.
     let activity: AgentActivityDay
-    /// How many of today's turns ran at each effort. `.none` where the format
-    /// names none, which reads the same as a provider that has spent nothing.
-    let effort: EffortCounts
+    /// What each of today's models spent at each effort. Empty where the
+    /// format names no effort, which reads the same as a provider that has
+    /// spent nothing.
+    let effort: [EffortSplit]
 
     var windows: [UsageWindow] { signals.windows }
     var plan: String? { signals.plan }
@@ -418,7 +419,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         id: String, tokens: Int, cost: Decimal, signals: ProviderSignals,
         projects: [ProjectTotals] = [], models: [ModelTotals] = [],
         agents: AgentCounts = .none, activity: AgentActivityDay = .none,
-        effort: EffortCounts = .none
+        effort: [EffortSplit] = []
     ) {
         self.id = id
         self.tokens = tokens
@@ -445,7 +446,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         limitsState: ProviderLimitsState = .quiet, limitsObservedAt: Date? = nil,
         agents: AgentCounts = .none,
         activity: AgentActivityDay = .none,
-        effort: EffortCounts = .none
+        effort: [EffortSplit] = []
     ) {
         self.init(
             id: id, tokens: tokens, cost: cost,

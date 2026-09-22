@@ -115,6 +115,43 @@ struct PanelProviderPage: View {
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
 
+    /// The window's split by model and effort: the archived days the strip
+    /// draws, plus today off the frame.
+    ///
+    /// Today is added rather than read back, for the strip's own reason — the
+    /// day file is written on the tail's throttle while the frame moves as
+    /// events land, so taking it from disk would put a block under the bars
+    /// that disagrees with the bar above it.
+    private var effortRows: [UsagePanelSnapshot.EffortRow] {
+        UsagePanelSnapshot.makeEffort(
+            archivedEffort.summed(with: row.effort), provider: row.id)
+    }
+
+    private var archivedEffort: [EffortSplit] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let start =
+            calendar.date(
+                byAdding: .day, value: -(UsagePanelSnapshot.dayStripDays - 1), to: today) ?? today
+        return
+            series
+            .filter { $0.day >= start && calendar.startOfDay(for: $0.day) < today }
+            .flatMap(\.effort)
+    }
+
+    /// How many of the strip's days the block actually answers for: the
+    /// archived ones inside the window, and today, which the frame always
+    /// answers for.
+    private var effortCoverage: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let start =
+            calendar.date(
+                byAdding: .day, value: -(UsagePanelSnapshot.dayStripDays - 1), to: today) ?? today
+        return series.filter { $0.day >= start && calendar.startOfDay(for: $0.day) < today }.count
+            + 1
+    }
+
     private var strip: UsagePanelSnapshot.DayStrip? {
         UsagePanelSnapshot.dayStrip(
             series: series, provider: row.id, todayTokens: todayTokens,
@@ -136,6 +173,11 @@ struct PanelProviderPage: View {
 
             Divider()
             day
+
+            if !effortRows.isEmpty {
+                Divider()
+                effort
+            }
 
             if !row.projects.isEmpty {
                 Divider()
@@ -544,6 +586,53 @@ struct PanelProviderPage: View {
         PanelDayBlock(
             today: row.tokens, todayCost: row.cost, todayModels: row.models,
             strip: strip, tint: tint)
+    }
+
+    // MARK: Effort
+
+    /// At what effort this provider's week was worked, a row per model.
+    ///
+    /// `UsagePanelSnapshot.makeEffort` carries why it is a block rather than a
+    /// tier inside a pill, why the window is the strip's, and why each row's
+    /// shares are of its own model. What belongs here is the shape: the name
+    /// over the run rather than beside it, because a run of four efforts wants
+    /// 264 pt of the 312 a page has and a name beside it would overflow —
+    /// measured 2026-09-22 at `PanelMetrics.width`.
+    private var effort: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                SectionLabel(text: "By effort")
+                Spacer(minLength: 0)
+                Text(
+                    UsageFormat.effortWindow(
+                        covered: effortCoverage, of: UsagePanelSnapshot.dayStripDays)
+                )
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(effortRows) { row in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(row.name)
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(row.run)
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .contentShape(.rect)
+                    .help(row.detail)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(row.name) · \(row.detail)")
+                }
+            }
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 12)
     }
 
     // MARK: Projects

@@ -135,10 +135,17 @@ struct UsageStateSnapshot: Codable, Equatable {
         var activity: AgentActivityDay
     }
 
-    /// One provider's turns per effort for one archived day.
+    /// One model's turns at one effort, for one archived day.
     struct DailyEffort: Codable, Equatable {
         var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
-        var effort: EffortCounts
+        var model: String
+        var effort: String
+        var turns: Int
+        var inputTokens: Int
+        var outputTokens: Int
+        var cacheReadTokens: Int
+        var cacheCreationTokens: Int
+        var cost: String
     }
 
     /// Grouped so the absence above is one question rather than three, and so
