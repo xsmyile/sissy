@@ -150,7 +150,7 @@ struct ForgeConnectRequest: Identifiable, Equatable {
 /// The forges the user has connected, and the control that adds one.
 ///
 /// **A tab rather than a section under the metering providers**, which is
-/// where it lived until 0.1.10. The rule that kept it a section — a tab is
+/// where it lived until 0.2.0. The rule that kept it a section — a tab is
 /// earned by a module, not by a long section — is what moves it now: forge is
 /// a module rather than one row, with `ForgeActivityMonitor` polling two
 /// counters per connection and `GitIdentityMonitor` reading a commit identity

@@ -126,7 +126,7 @@ enum ClaudeAccountLinkCopy {
     /// which is the half of the answer that only applies where Claude Code
     /// keeps a credential this Mac can read.
     ///
-    /// It was a row of its own, titled `Limits source`, until 0.1.10: a
+    /// It was a row of its own, titled `Limits source`, until 0.2.0: a
     /// statement of mechanism with no control on it, in a window where every
     /// other row is a control, costing 64 pt of a budget the tab was over.
     static let ownCredentialDetail =
