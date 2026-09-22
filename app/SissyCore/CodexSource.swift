@@ -519,15 +519,6 @@ final class CodexAdapter: SourceAdapter {
     /// twice for turns they had already paid for once — measured at 12% of one
     /// month, because a session forked three times replays the same history
     /// three more times.
-    /// Whether an instant falls inside the burst `isCopiedFromAParent` is
-    /// tracking, without extending it: only a `token_count` moves the burst,
-    /// so a line that bills nothing cannot keep a copy open past its end.
-    private func isInsideACopy(at timestamp: Date, in url: URL) -> Bool {
-        guard case .copying(let through) = fileReplay[url] ?? .counting else { return false }
-        let sinceLastCopy = timestamp.timeIntervalSince(through)
-        return sinceLastCopy >= 0 && sinceLastCopy <= Self.replayedTurnWindow
-    }
-
     private func isCopiedFromAParent(at timestamp: Date, in url: URL) -> Bool {
         guard case .copying(let through) = fileReplay[url] ?? .counting else { return false }
         let sinceLastCopy = timestamp.timeIntervalSince(through)
@@ -537,6 +528,15 @@ final class CodexAdapter: SourceAdapter {
         }
         fileReplay[url] = .copying(through: timestamp)
         return true
+    }
+
+    /// Whether an instant falls inside the burst `isCopiedFromAParent` is
+    /// tracking, without extending it: only a `token_count` moves the burst,
+    /// so a line that bills nothing cannot keep a copy open past its end.
+    private func isInsideACopy(at timestamp: Date, in url: URL) -> Bool {
+        guard case .copying(let through) = fileReplay[url] ?? .counting else { return false }
+        let sinceLastCopy = timestamp.timeIntervalSince(through)
+        return sinceLastCopy >= 0 && sinceLastCopy <= Self.replayedTurnWindow
     }
 
     /// Whether Codex's own running total moved, and records where it now is.
