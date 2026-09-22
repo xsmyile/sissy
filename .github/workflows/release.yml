@@ -96,38 +96,6 @@ jobs:
       - name: Install build tools
         run: brew install xcodegen create-dmg xcbeautify swiftlint
 
-      - name: Import signing certificate
-        env:
-          CERT_P12_B64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
-          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          set -euo pipefail
-          KEYCHAIN_PATH="$RUNNER_TEMP/sissy-signing.keychain-db"
-          CERT_PATH="$RUNNER_TEMP/cert.p12"
-          echo -n "$CERT_P12_B64" | base64 --decode --output "$CERT_PATH"
-
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 7200 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -P "$CERT_PASSWORD" \
-            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          # Allow codesign to use the key non-interactively
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          # Put our keychain first in the search list (login keychain still present).
-          # `mapfile` is bash 4+; macOS runners run steps under bash 3.2, so read
-          # the existing list with a loop that works on both.
-          existing_keychains=()
-          while IFS= read -r kc; do existing_keychains+=("$kc"); done \
-            < <(security list-keychain -d user | tr -d '"')
-          security list-keychain -d user -s "$KEYCHAIN_PATH" "${existing_keychains[@]}"
-          rm -f "$CERT_PATH"
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
-            | grep -q "$SIGN_IDENTITY" \
-            || { echo "imported keychain has no Developer ID cert" >&2; exit 1; }
-
       - name: Generate Xcode project
         working-directory: app
         run: xcodegen generate
@@ -192,6 +160,43 @@ jobs:
             -configuration Debug -destination 'platform=macOS' \
             test CODE_SIGNING_ALLOWED=NO \
             | xcbeautify --renderer github-actions
+
+      # After the test gates, never before them. The import puts a throwaway
+      # keychain first in the user search list, and the session-store tests
+      # write to the real one: measured 2026-09-22 on the v0.2.0 tag, five of
+      # them failed here and passed in ci.yml, which imports no certificate,
+      # on that same commit. Nothing before Build Release needs the identity.
+      - name: Import signing certificate
+        env:
+          CERT_P12_B64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/sissy-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          echo -n "$CERT_P12_B64" | base64 --decode --output "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 7200 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          # Allow codesign to use the key non-interactively
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # Put our keychain first in the search list (login keychain still present).
+          # `mapfile` is bash 4+; macOS runners run steps under bash 3.2, so read
+          # the existing list with a loop that works on both.
+          existing_keychains=()
+          while IFS= read -r kc; do existing_keychains+=("$kc"); done \
+            < <(security list-keychain -d user | tr -d '"')
+          security list-keychain -d user -s "$KEYCHAIN_PATH" "${existing_keychains[@]}"
+          rm -f "$CERT_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep -q "$SIGN_IDENTITY" \
+            || { echo "imported keychain has no Developer ID cert" >&2; exit 1; }
 
       - name: Build Release
         working-directory: app
