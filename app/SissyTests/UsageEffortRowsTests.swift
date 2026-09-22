@@ -179,6 +179,16 @@ final class UsageEffortRowsTests: XCTestCase {
         XCTAssertEqual(out?.opens, false)
     }
 
+    /// A lead of exactly the threshold is still the whole reading: the page
+    /// opens only below it.
+    func testALeadAtTheThresholdIsNotADoor() {
+        let out = summary([
+            split("astra", "high", turns: 9, cost: "9.00"),
+            split("astra", "medium", turns: 1, cost: "1.00"),
+        ])
+        XCTAssertEqual(out?.opens, false)
+    }
+
     /// A model split across efforts is what the page is for, even when the
     /// dearest model is not.
     func testOneSplitModelMakesTheRowADoor() {
