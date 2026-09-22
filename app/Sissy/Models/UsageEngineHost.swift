@@ -891,11 +891,18 @@ final class UsageEngineHost {
     /// Without it the switcher could not appear at all: the property was
     /// written only by `activateClaudeAccount`, which is reachable only from
     /// the control that the list it populates is what draws.
+    ///
+    /// The linked accounts are re-read with it because their names fall back
+    /// to this archive. Read once at `start`, they were named from whatever it
+    /// held then, which on a first launch is nothing: the archive fills on the
+    /// registry's first capture, after the engine is built, and a session with
+    /// no link of its own stayed a bare uuid in Settings until a relaunch.
     private func syncClaudeAccounts() {
         guard let engine else { return }
         let snapshot = engine.claudeAccountSnapshot
         guard snapshot != claudeAccounts else { return }
         claudeAccounts = snapshot
+        linkedClaudeAccounts = engine.linkedClaudeAccounts
     }
 
     /// Re-reads which credential Claude's limits came from.
