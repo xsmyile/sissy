@@ -80,11 +80,11 @@ The Overview line opens the Identities page. There, findings come first, each
 with the name it would commit under, what its forge expects and how many
 repositories say so, and the file the wrong value comes from. Everything that
 agrees is folded behind *Show all*. If the wrong value is set in the
-repository's own config, *Copy the fix* puts the matching `git config --unset`
-command on the clipboard. Sissy never writes to a repository or to any git
-config. A commit made with `-c`, `--author` or `GIT_AUTHOR_EMAIL` is outside
-what it can see, and the page says so. Any project row's right-click menu
-opens the same page on that repository.
+repository's own config, *Copy the fix* puts the matching
+`git config --unset-all` command on the clipboard. Sissy never writes to a
+repository or to any git config. A commit made with `-c`, `--author` or
+`GIT_AUTHOR_EMAIL` is outside what it can see, and the page says so. Any
+project row's right-click menu opens the same page on that repository.
 
 **Keep awake** is the cup in the panel header: *Never*, *While agents are
 working* (holds the Mac while turns land, lets go ten minutes after they stop),
