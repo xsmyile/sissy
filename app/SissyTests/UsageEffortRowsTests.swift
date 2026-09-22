@@ -74,13 +74,14 @@ final class UsageEffortRowsTests: XCTestCase {
         XCTAssertEqual(out.first?.detail, "medium $6.10 · 545 turns")
     }
 
-    /// Capped where the pills fold, because a row standing for several models
-    /// could carry no run at all.
-    func testTheBlockStopsAtTheSameModelCountThePillsFoldAt() {
+    /// Uncapped: the pills fold at four because four is what 312 pt holds side
+    /// by side, and these rows are stacked. Dropping a model's row without
+    /// saying so is the one thing this block cannot do, since which model ran
+    /// at what is its whole subject.
+    func testEveryModelTheWindowSpentOnGetsARow() {
         let out = rows(
             (1...6).map { split("m\($0)", "high", turns: 1, cost: "\(10 - $0).00") })
-        XCTAssertEqual(out.count, 4)
-        XCTAssertEqual(out.map(\.name), ["m1", "m2", "m3", "m4"])
+        XCTAssertEqual(out.map(\.name), ["m1", "m2", "m3", "m4", "m5", "m6"])
     }
 
     /// An absent reading is not a reading of zero: a window that named no

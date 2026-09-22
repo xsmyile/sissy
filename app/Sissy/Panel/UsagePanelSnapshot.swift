@@ -1652,10 +1652,16 @@ struct UsagePanelSnapshot: Equatable {
     /// as soon as any pair has tokens and no cost, which is `makeModels`' rule
     /// for `makeModels`' reason.
     ///
-    /// Capped at the same `modelPillLimit` the pills fold at: the cheapest
-    /// models are the ones the window did least on, and a row standing for
-    /// several could carry no run at all — a fold whose one line is blank is
-    /// worse than the models it stands for being absent.
+    /// **Uncapped, and the pills' own fold is not an argument for one.** They
+    /// fold at four because four is what 312 pt holds *side by side* —
+    /// measured 2026-09-22, five pills want 344 pt — and these rows are
+    /// stacked, so width bounds nothing here. What bounds them is that a
+    /// vendor ships a handful of models where a user touches any number of
+    /// repositories, which is why `By project` folds and this does not:
+    /// measured 2026-09-22 across 90 days of this archive, the widest 7-day
+    /// window held 3 models on Claude Code and 2 on Codex. A cap here would
+    /// drop a model's row without saying so, on the one block whose whole
+    /// subject is which model ran at what.
     static func makeEffort(_ splits: [EffortSplit], provider: String) -> [EffortRow] {
         guard !splits.isEmpty else { return [] }
         let unpriced = splits.contains { $0.cost == 0 && $0.tokens > 0 }
@@ -1677,7 +1683,7 @@ struct UsagePanelSnapshot: Equatable {
             models.append((model: model, splits: ordered, weight: total))
         }
         models.sort { $0.weight == $1.weight ? $0.model < $1.model : $0.weight > $1.weight }
-        return models.prefix(modelPillLimit).map { model, ordered, total in
+        return models.map { model, ordered, total in
             let run: [String] = ordered.map {
                 UsageFormat.effortShare($0.effort, share: weight($0) / total)
             }
