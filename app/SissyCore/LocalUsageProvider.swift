@@ -1417,6 +1417,14 @@ actor LocalUsageProvider: UsageProvider {
             case .day(let onDisk)
             where !onDisk.reattributed(by: { adapter.projects.project(for: $0) })
                 .isCoveredBy(record):
+                // Logged for the reason the save failure below is: a day the
+                // archive refuses to rewrite is indistinguishable from one it
+                // had nothing new to say about, and a field added beside the
+                // rows reaches none of the days stuck here.
+                sissyLog(
+                    "sissy: \(id) left \(record.day) as it stands — this reading knows less "
+                        + "about it than the file does (\(record.totalTokens) tokens against "
+                        + "\(onDisk.totalTokens))")
                 continue
             case .day(let onDisk):
                 record = record.merging(
