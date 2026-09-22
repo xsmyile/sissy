@@ -518,6 +518,8 @@ struct FrameData: Sendable, Equatable {
     /// the set the question is about. Empty where there is no git to read
     /// with, and while the sweep has not run.
     let identities: [RepositoryIdentity]
+    /// When the sweep behind `identities` last finished, nil until one has.
+    let identitiesCheckedAt: Date?
     /// What the CLIs on this Mac are holding right now, and the series of
     /// readings behind it.
     ///
@@ -543,6 +545,7 @@ struct FrameData: Sendable, Equatable {
         providerStatus: [String: ProviderStatusReading] = [:],
         forge: [ForgeActivityReading] = [],
         identities: [RepositoryIdentity] = [],
+        identitiesCheckedAt: Date? = nil,
         agentMemory: AgentMemoryReading? = nil
     ) {
         self.tokens = tokens
@@ -555,6 +558,7 @@ struct FrameData: Sendable, Equatable {
         self.providerStatus = providerStatus
         self.forge = forge
         self.identities = identities
+        self.identitiesCheckedAt = identitiesCheckedAt
         self.agentMemory = agentMemory
     }
 }
@@ -574,6 +578,7 @@ enum FrameBuilder {
         providerStatus: [String: ProviderStatusReading] = [:],
         forge: [ForgeActivityReading] = [],
         identities: [RepositoryIdentity] = [],
+        identitiesCheckedAt: Date? = nil,
         agentMemory: AgentMemoryReading? = nil
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
@@ -588,6 +593,7 @@ enum FrameBuilder {
             providerStatus: providerStatus,
             forge: forge,
             identities: identities,
+            identitiesCheckedAt: identitiesCheckedAt,
             agentMemory: agentMemory
         )
     }

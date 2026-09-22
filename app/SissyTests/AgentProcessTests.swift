@@ -165,6 +165,19 @@ final class AgentProcessMonitorTests: XCTestCase {
         await monitor.stop()
         XCTAssertNil(monitor.currentMemory())
     }
+
+    /// The header says a recount is running while it runs, and dates the
+    /// count once it has landed.
+    func testTheHeaderSaysCountingUntilTheCountLands() {
+        let now = Date()
+        XCTAssertEqual(
+            UsageFormat.agentsReading(observedAt: now, refreshing: true, now: now), "counting…")
+        XCTAssertEqual(
+            UsageFormat.agentsReading(
+                observedAt: now.addingTimeInterval(-30), refreshing: false, now: now),
+            "counted 30s ago")
+        XCTAssertNil(UsageFormat.agentsReading(observedAt: nil, refreshing: false, now: now))
+    }
 }
 
 /// A counter the injected reader can advance from a `@Sendable` closure.

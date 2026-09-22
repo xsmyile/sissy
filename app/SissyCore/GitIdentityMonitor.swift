@@ -39,6 +39,10 @@ actor GitIdentityMonitor {
     /// status monitor's is: the panel reads the whole set while a sweep may be
     /// part way through the next one, and a verdict is a property of the set.
     nonisolated private let published = LockedValue([RepositoryIdentity]())
+    /// When the last round finished, whether or not it changed anything: a
+    /// page that dates the reading has to move when a press re-read the same
+    /// answer, or the press reads as having done nothing.
+    nonisolated private let checkedAt = LockedValue<Date?>(nil)
     nonisolated private let lastActivity = LockedValue<Date?>(nil)
     /// The generation the blocking read loop checks between repositories.
     ///
@@ -61,11 +65,13 @@ actor GitIdentityMonitor {
     private let home: URL?
     private var pollTask: Task<Void, Never>?
     private var generation = 0
-    /// Whether a round is in flight. The actor is reentrant across the hop the
-    /// reads take, so the poll loop and the panel's own refresh can otherwise
-    /// run one each — and the slower of the two writes its own `scans` back
-    /// last, reinstating a reading the faster one had already replaced.
-    private var sweeping = false
+    /// The round in flight. The actor is reentrant across the hop the reads
+    /// take, so the poll loop and the panel's own refresh can otherwise run
+    /// one each — and the slower of the two writes its own `scans` back last,
+    /// reinstating a reading the faster one had already replaced. A second
+    /// caller waits on this one rather than returning at once, so a press
+    /// landing during the poll's round ends when that round does.
+    private var inFlight: Task<Void, Never>?
     /// The last reading of each repository, and when each file behind it was
     /// written. A round that finds every stamp where it left it reuses the
     /// reading rather than spawning three processes to arrive at it again.
@@ -83,13 +89,15 @@ actor GitIdentityMonitor {
 
     nonisolated func currentIdentities() -> [RepositoryIdentity] { published.load() }
 
+    nonisolated func currentCheckedAt() -> Date? { checkedAt.load() }
+
     nonisolated func noteActivity(at when: Date = Date()) {
         lastActivity.update { $0 = when }
     }
 
-    /// Starts the sweep loop. `onRefresh` fires only when what is published
-    /// changes, so a machine whose repositories keep answering the same thing
-    /// costs no frames. Idempotent, and a no-op where there is no git to run.
+    /// Starts the sweep loop. `onRefresh` fires once per finished round, which
+    /// is one frame every ten minutes at the most. Idempotent, and a no-op
+    /// where there is no git to run.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
         guard pollTask == nil, home != nil else { return }
         pollTask = Task { [weak self] in
@@ -110,9 +118,12 @@ actor GitIdentityMonitor {
         liveGeneration.update { $0 &+= 1 }
         pollTask?.cancel()
         pollTask = nil
+        inFlight?.cancel()
+        inFlight = nil
         scans = [:]
         stamps = [:]
         published.store([])
+        checkedAt.store(nil)
     }
 
     /// One round over every repository the ledger names.
@@ -120,7 +131,17 @@ actor GitIdentityMonitor {
     /// Internal rather than private so a test can run exactly one round and
     /// assert on what it published, instead of waiting on the scheduler.
     func sweepOnce(onRefresh: @Sendable @escaping () async -> Void) async {
-        guard !sweeping else { return }
+        if let inFlight {
+            await inFlight.value
+            return
+        }
+        let round = Task { await sweep(onRefresh: onRefresh) }
+        inFlight = round
+        await round.value
+        inFlight = nil
+    }
+
+    private func sweep(onRefresh: @Sendable @escaping () async -> Void) async {
         if !didLocate {
             didLocate = true
             git = GitIdentityReader.locate()
@@ -129,17 +150,15 @@ actor GitIdentityMonitor {
         let stamp = generation
         let targets = repositories()
         guard !targets.isEmpty else { return }
-        sweeping = true
         let round = await read(targets, git: git, home: home, reusing: scans, stamps: stamps)
-        sweeping = false
         guard stamp == generation, !Task.isCancelled else { return }
         scans = round.scans
         stamps = round.stamps
         let judged = GitIdentityConsensus.judged(round.scans.values.map(\.identity)).sorted {
             $0.repository.localizedStandardCompare($1.repository) == .orderedAscending
         }
-        guard judged != published.load() else { return }
         published.store(judged)
+        checkedAt.store(Date())
         await onRefresh()
     }
 

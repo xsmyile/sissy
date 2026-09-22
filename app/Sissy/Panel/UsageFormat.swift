@@ -1267,6 +1267,21 @@ extension UsageFormat {
         return anyRead ? nil : "No repository has been read yet."
     }
 
+    /// What the identities page's header says under its title: that a
+    /// re-read is running, or when the last one finished. Nil before the
+    /// first sweep, which the page itself already says.
+    static func identitiesReading(checkedAt: Date?, refreshing: Bool, now: Date) -> String? {
+        if refreshing { return "checking…" }
+        return checkedAt.map { statusAge(checkedAt: $0, now: now) }
+    }
+
+    /// What the agents page's header says under its title: that a recount is
+    /// running, or when the count on screen was taken.
+    static func agentsReading(observedAt: Date?, refreshing: Bool, now: Date) -> String? {
+        if refreshing { return "counting…" }
+        return observedAt.map { "counted " + age(now.timeIntervalSince($0)) }
+    }
+
     /// The sentence the page leads with once anything has been read.
     ///
     /// "Every repository" only when every one was judged and agrees: a

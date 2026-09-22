@@ -50,10 +50,14 @@ actor AgentProcessMonitor {
     /// A sparkline 300 pt wide cannot draw more, and an hour is the longest
     /// window the question "why is this Mac struggling" is asked over.
     static let retainedSamples = 240
+    /// How long a Mac with nothing running goes without a frame at the most,
+    /// so a page dating the count is never more than a minute behind it.
+    static let quietFrameInterval: TimeInterval = 60
 
     nonisolated private let published = LockedValue<AgentMemoryReading?>(nil)
     private var samples: [UInt64] = []
     private var firstSampleAt: Date?
+    private var lastFrameAt: Date?
     private var pollTask: Task<Void, Never>?
     /// Injected by a test, so a round can be asserted without the kernel's own
     /// process table under it.
@@ -91,9 +95,10 @@ actor AgentProcessMonitor {
     nonisolated func currentMemory() -> AgentMemoryReading? { published.load() }
 
     /// Starts sampling. `onRefresh` fires when the reading is worth a frame,
-    /// which a Mac with no agents on it is not: two empty readings in a row
-    /// say the same thing and rebuilding the frame for the second is work
-    /// nobody asked for.
+    /// which a Mac with no agents on it mostly is not: two empty readings in a
+    /// row say the same thing, so the second earns one only once
+    /// `quietFrameInterval` has passed, which is what keeps the age the
+    /// agents page prints true.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
@@ -110,6 +115,7 @@ actor AgentProcessMonitor {
         pollTask = nil
         samples = []
         firstSampleAt = nil
+        lastFrameAt = nil
         published.store(nil)
     }
 
@@ -147,7 +153,12 @@ actor AgentProcessMonitor {
         // difference between the panel drawing a dash and drawing "nothing
         // running". Only a quiet Mac that was already known to be quiet is
         // skipped.
-        if let previous, previous.current.agents.isEmpty, reading.agents.isEmpty { return }
+        if let previous, previous.current.agents.isEmpty, reading.agents.isEmpty,
+            let lastFrameAt, now.timeIntervalSince(lastFrameAt) < Self.quietFrameInterval
+        {
+            return
+        }
+        lastFrameAt = now
         await onRefresh()
     }
 }

@@ -215,9 +215,9 @@ struct UsagePanelView: View {
                         back: services == nil && !onEffort
                             ? .overview : .provider(open.id, account: openAccount))
                 } else if case .identities = page {
-                    identitiesHeader
+                    identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt)
                 } else if case .stats = page {
-                    statsHeader
+                    statsHeader(observedAt: live?.frame.agentMemory?.current.observedAt)
                 } else {
                     header(live)
                 }
@@ -337,7 +337,7 @@ struct UsagePanelView: View {
     /// the tail as turns land, where the sweep is on a 15 s clock and a user
     /// who has just closed three sessions is looking at a figure that is right
     /// and reads as wrong.
-    private var statsHeader: some View {
+    private func statsHeader(observedAt: Date?) -> some View {
         HStack(spacing: 8) {
             Button {
                 page = .overview
@@ -351,9 +351,22 @@ struct UsagePanelView: View {
             .foregroundStyle(.secondary)
             .help("Back to today")
 
-            Text("Agents")
-                .font(.system(size: Self.headerTitleSize, weight: .semibold))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Agents")
+                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
+                    .lineLimit(1)
+                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+                    if let line = UsageFormat.agentsReading(
+                        observedAt: observedAt, refreshing: model.engine.refreshingAgents,
+                        now: context.date)
+                    {
+                        Text(line)
+                            .font(.system(size: PanelMetrics.headlineMeta))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
 
             Spacer(minLength: 0)
 
@@ -374,13 +387,15 @@ struct UsagePanelView: View {
         .padding(.vertical, 12)
     }
 
-    /// The identities page's own header: the way back, the title, and a
-    /// re-read.
+    /// The identities page's own header: the way back, the title, when the
+    /// repositories were last read, and a re-read.
     ///
     /// The refresh is not a nicety here. A user on this page has usually just
     /// corrected a repository in a terminal, and waiting out a sweep interval
-    /// to watch the row clear reads as the correction not having worked.
-    private var identitiesHeader: some View {
+    /// to watch the row clear reads as the correction not having worked. The
+    /// age under the title is what answers a press that changed nothing: the
+    /// rows stand still, so without it the button reads as broken.
+    private func identitiesHeader(checkedAt: Date?) -> some View {
         HStack(spacing: 8) {
             Button {
                 page = .overview
@@ -394,9 +409,22 @@ struct UsagePanelView: View {
             .foregroundStyle(.secondary)
             .help("Back to today")
 
-            Text("Identities")
-                .font(.system(size: Self.headerTitleSize, weight: .semibold))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Identities")
+                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
+                    .lineLimit(1)
+                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+                    if let line = UsageFormat.identitiesReading(
+                        checkedAt: checkedAt, refreshing: model.engine.refreshingIdentities,
+                        now: context.date)
+                    {
+                        Text(line)
+                            .font(.system(size: PanelMetrics.headlineMeta))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
 
             Spacer(minLength: 0)
 
@@ -414,7 +442,7 @@ struct UsagePanelView: View {
             .help("Read every repository's commit identity again")
         }
         .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
     }
 
     private func header(_ live: SissyModel.LiveFrame?) -> some View {

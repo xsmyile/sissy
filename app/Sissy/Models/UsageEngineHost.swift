@@ -80,6 +80,10 @@ final class UsageEngineHost {
     /// panel header reads that one whole, as "the frame is being re-read", and
     /// a forge refresh moves none of the numbers that header is dating.
     private(set) var refreshingForge: Set<String> = []
+    /// Whether the identities page's re-read is in flight, for its header.
+    private(set) var refreshingIdentities = false
+    /// Whether the agents page's recount is in flight, for its header.
+    private(set) var refreshingAgents = false
 
     /// How long a refresh stays visible at the least.
     ///
@@ -212,6 +216,12 @@ final class UsageEngineHost {
         refreshTasks.removeAll()
         refreshing.removeAll()
         refreshingForge.removeAll()
+        identityRefresh?.cancel()
+        identityRefresh = nil
+        refreshingIdentities = false
+        agentRefresh?.cancel()
+        agentRefresh = nil
+        refreshingAgents = false
         switchingClaudeAccount = nil
         guard let engine else { return }
         self.engine = nil
@@ -583,13 +593,19 @@ final class UsageEngineHost {
     /// no second answer.
     func refreshIdentities() {
         guard let engine, identityRefresh == nil else { return }
+        refreshingIdentities = true
         identityRefresh = Task {
+            let startedAt = ContinuousClock.now
             await engine.refreshIdentities()
+            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
+                try? await Task.sleep(for: rest)
+            }
+            refreshingIdentities = false
             identityRefresh = nil
         }
     }
 
-    private var identityRefresh: Task<Void, Never>?
+    @ObservationIgnored private var identityRefresh: Task<Void, Never>?
 
     /// Counts the running agents again, for the agents page's own button.
     ///
@@ -597,15 +613,24 @@ final class UsageEngineHost {
     /// rather than a process per repository: two in flight would publish two
     /// readings a millisecond apart and the page would keep whichever landed
     /// last rather than whichever was asked for last.
+    ///
+    /// The sweep returns inside a frame, so the floor is what lets the word
+    /// paint at all.
     func refreshAgentProcesses() {
         guard let engine, agentRefresh == nil else { return }
+        refreshingAgents = true
         agentRefresh = Task {
+            let startedAt = ContinuousClock.now
             await engine.refreshAgentProcesses()
+            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
+                try? await Task.sleep(for: rest)
+            }
+            refreshingAgents = false
             agentRefresh = nil
         }
     }
 
-    private var agentRefresh: Task<Void, Never>?
+    @ObservationIgnored private var agentRefresh: Task<Void, Never>?
 
     /// What is left of the floor once the work has taken its time, and nil
     /// once there is nothing left to wait for.
