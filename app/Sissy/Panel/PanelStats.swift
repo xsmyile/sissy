@@ -33,6 +33,9 @@ struct PanelStats: View {
     let block: UsagePanelSnapshot.AgentsBlock
 
     @State private var window = UsagePanelSnapshot.AgentsBlock.defaultPeriod
+    /// Local to the page for the reason `window` is: coming back asks the
+    /// question again rather than showing the list opened last time.
+    @State private var showsAllProcesses = false
 
     private static let sectionSpacing: CGFloat = 16
     private static let labelSpacing: CGFloat = 10
@@ -98,7 +101,7 @@ struct PanelStats: View {
             .font(.system(size: Self.captionSize))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
-            processes(live.processes)
+            processes(live)
         }
     }
 
@@ -110,30 +113,66 @@ struct PanelStats: View {
     /// way a project row's is, so two worktrees of one checkout read as the one
     /// project they are — and the path stays on the hover, because a path is a
     /// client's name as often as not.
-    private func processes(_ rows: [UsagePanelSnapshot.AgentsBlock.Process]) -> some View {
-        VStack(alignment: .leading, spacing: Self.rowSpacing) {
-            ForEach(rows) { row in
-                HStack(spacing: 6) {
-                    ProviderMark(id: row.provider)
-                    Text(UsageFormat.agentProcessName(row))
-                        .font(.system(size: Self.rowSize))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .foregroundStyle(row.project == nil ? Color.secondary : .primary)
-                    Spacer(minLength: 8)
-                    Text(
-                        UsageFormat.bytes(row.footprint) + " · "
-                            + UsageFormat.agentUptime(since: row.startedAt)
-                    )
-                    .font(.system(size: Self.rowSize))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+    ///
+    /// Past `processRowLimit` the rest fold behind one row carrying what they
+    /// hold, and open *under* it, so the control stays where the pointer is —
+    /// the arrangement the identities page's disclosure has.
+    private func processes(_ live: UsagePanelSnapshot.AgentsBlock.Live) -> some View {
+        let folded = live.foldedProcesses
+        return VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            ForEach(live.standingProcesses) { processRow($0) }
+            if !folded.isEmpty {
+                processDisclosure(folded)
+                if showsAllProcesses {
+                    ForEach(folded) { processRow($0) }
                 }
-                .help(row.directory ?? "The kernel would not say where this agent is working")
             }
         }
         .padding(.top, 2)
+    }
+
+    private func processDisclosure(_ folded: [UsagePanelSnapshot.AgentsBlock.Process])
+        -> some View
+    {
+        Button {
+            showsAllProcesses.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: showsAllProcesses ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(
+                    UsageFormat.agentsFolded(
+                        folded.count, footprint: folded.reduce(0) { $0 + $1.footprint })
+                )
+                .monospacedDigit()
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func processRow(_ row: UsagePanelSnapshot.AgentsBlock.Process) -> some View {
+        HStack(spacing: 6) {
+            ProviderMark(id: row.provider)
+            Text(UsageFormat.agentProcessName(row))
+                .font(.system(size: Self.rowSize))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(row.project == nil ? Color.secondary : .primary)
+            Spacer(minLength: 8)
+            Text(
+                UsageFormat.bytes(row.footprint) + " · "
+                    + UsageFormat.agentUptime(since: row.startedAt)
+            )
+            .font(.system(size: Self.rowSize))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        .help(row.directory ?? "The kernel would not say where this agent is working")
     }
 
     /// A dash and no sparkline, which is the panel's own rule for a reading

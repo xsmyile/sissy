@@ -924,6 +924,28 @@ struct UsagePanelSnapshot: Equatable {
             /// One row per running process, dearest first, which is what
             /// answers "two gigabytes of what".
             let processes: [Process]
+
+            /// Five agents and the fold, the rule the project list keeps at
+            /// three: a list at or under the limit is drawn whole, because a
+            /// fold standing for one row costs the row it hides.
+            ///
+            /// The list is the last thing on its page and changes length with
+            /// every sweep, so the bound is not about what sits below it. It is
+            /// about the page being read at a glance: measured 2026-09-22 with
+            /// eight agents running, the three rows past the fifth held 829 MB
+            /// of 2.56 GB, which the fold still says in one line.
+            static let processRowLimit = 6
+
+            /// The rows drawn without being asked for.
+            var standingProcesses: [Process] {
+                processes.count <= Self.processRowLimit
+                    ? processes : Array(processes.prefix(Self.processRowLimit - 1))
+            }
+
+            /// The rows behind the fold, empty where the list is drawn whole.
+            var foldedProcesses: [Process] {
+                Array(processes.dropFirst(standingProcesses.count))
+            }
         }
 
         /// One running agent, as a row.

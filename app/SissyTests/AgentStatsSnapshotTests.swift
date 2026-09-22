@@ -164,9 +164,36 @@ final class AgentStatsSnapshotTests: XCTestCase {
         XCTAssertEqual(byProvider[ProviderID.claudeCode], 2)
         XCTAssertEqual(byProvider[ProviderID.codex], 1)
     }
+    private func agents(_ count: Int) -> [AgentProcess] {
+        (0..<count).map {
+            agent(ProviderID.claudeCode, bytes: UInt64(1_000 * (count - $0)), pid: pid_t($0 + 1))
+        }
+    }
+
+    /// A list at the limit is drawn whole: a fold standing for one row costs
+    /// the row it hides.
+    func testAListAtTheLimitIsNotFolded() {
+        let live = UsagePanelSnapshot.make(
+            frame: frame(
+                memory: memory(agents(UsagePanelSnapshot.AgentsBlock.Live.processRowLimit)))
+        ).agents.live
+        XCTAssertEqual(live?.standingProcesses.count, 6)
+        XCTAssertEqual(live?.foldedProcesses, [])
+    }
+
+    /// Past it, the dearest five stand and the rest fold, in order, so the
+    /// fold's own figure is what the rows under the headline were missing.
+    func testAListPastTheLimitFoldsAllButTheDearestFive() throws {
+        let live = try XCTUnwrap(
+            UsagePanelSnapshot.make(frame: frame(memory: memory(agents(8)))).agents.live)
+        XCTAssertEqual(live.standingProcesses.map(\.id), [1, 2, 3, 4, 5])
+        XCTAssertEqual(live.foldedProcesses.map(\.id), [6, 7, 8])
+        XCTAssertEqual(
+            (live.standingProcesses + live.foldedProcesses).reduce(0) { $0 + $1.footprint },
+            live.footprint)
+    }
 }
 
-/// How the figures are worded.
 final class AgentFormatTests: XCTestCase {
     /// Base ten, because this figure sits beside Activity Monitor's and macOS
     /// has counted in base ten since 10.6.
@@ -182,5 +209,10 @@ final class AgentFormatTests: XCTestCase {
             UsageFormat.agentCount(1, singular: "session", plural: "sessions"), "1 session")
         XCTAssertEqual(
             UsageFormat.agentCount(0, singular: "session", plural: "sessions"), "0 sessions")
+    }
+
+    /// The fold carries what it hides, so the list still reaches its total.
+    func testTheFoldSaysWhatItHolds() {
+        XCTAssertEqual(UsageFormat.agentsFolded(3, footprint: 829_000_000), "3 more · 829 MB")
     }
 }
