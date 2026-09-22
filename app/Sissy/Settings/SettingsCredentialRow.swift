@@ -18,6 +18,21 @@ enum CredentialHealth: Equatable {
     }
 }
 
+/// The one control that recovers a row needing attention, beside the sentence
+/// that says what is wrong.
+///
+/// On the row rather than only on the panel. A credential another signature
+/// filed, or one whose grant a re-signing cost, can be read again only by a
+/// read that may raise the keychain's dialog, and the only such read used to
+/// be `Refresh now` in the context menu of a panel row: measured 2026-09-22,
+/// the way back from a lapsed forge grant was a secondary click on a row
+/// inside a popover that also eats the first click, and nothing on the tab
+/// that lists the connection said it existed.
+struct CredentialFix {
+    let title: String
+    let act: () -> Void
+}
+
 /// The disc a credential row leads on, with whatever it is the row's own
 /// answer to "which of these is this" drawn in it.
 ///
@@ -143,6 +158,7 @@ struct CredentialRow<Leading: View, Actions: View>: View {
     let badgeTier: String?
     let subtitle: String?
     let health: CredentialHealth
+    let fix: CredentialFix?
     let leading: Leading
     let actions: Actions
 
@@ -154,6 +170,7 @@ struct CredentialRow<Leading: View, Actions: View>: View {
         badgeTier: String? = nil,
         subtitle: String? = nil,
         health: CredentialHealth = .ok,
+        fix: CredentialFix? = nil,
         @ViewBuilder leading: () -> Leading,
         @ViewBuilder actions: () -> Actions
     ) {
@@ -162,6 +179,7 @@ struct CredentialRow<Leading: View, Actions: View>: View {
         self.badgeTier = badgeTier
         self.subtitle = subtitle
         self.health = health
+        self.fix = fix
         self.leading = leading()
         self.actions = actions()
     }
@@ -187,10 +205,19 @@ struct CredentialRow<Leading: View, Actions: View>: View {
                         .truncationMode(.middle)
                 }
                 if let message = health.message {
-                    Text(message)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(message)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let fix {
+                            Spacer(minLength: 0)
+                            Button(fix.title, action: fix.act)
+                                .font(.callout)
+                                .buttonStyle(.borderless)
+                                .layoutPriority(1)
+                        }
+                    }
                 }
             }
             actions
