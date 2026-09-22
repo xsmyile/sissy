@@ -183,6 +183,84 @@ final class AgentCountingTests: XCTestCase {
         XCTAssertEqual(activity.map(\.kind), [.sessionStarted])
     }
 
+    // MARK: Turn duration
+
+    private static let claudeTurnDuration = """
+        {"parentUuid":"p","isSidechain":false,"type":"system","subtype":"turn_duration",\
+        "durationMs":329844,"messageCount":311,"timestamp":"2026-09-22T21:41:19.239Z",\
+        "uuid":"u","isMeta":false,"cwd":"/tmp","sessionId":"s-1"}
+        """
+
+    private static let codexTaskComplete = """
+        {"timestamp":"2026-09-22T21:38:35.939Z","type":"event_msg","payload":{\
+        "type":"task_complete","turn_id":"t","last_agent_message":"done",\
+        "started_at":1790112985,"completed_at":1790113115,"duration_ms":130047,\
+        "time_to_first_token_ms":4075}}
+        """
+
+    private func passesPrefilter(
+        _ json: String, _ lineMayCount: (UnsafePointer<UInt8>, Int, Int) -> Bool
+    ) -> Bool {
+        Array(json.utf8).withUnsafeBufferPointer { lineMayCount($0.baseAddress!, 0, $0.count) }
+    }
+
+    /// The line bills nothing, so a prefilter that knew only billing lines
+    /// would never hand it to the parse.
+    func testTheClaudeTurnLineReachesTheParse() {
+        XCTAssertTrue(passesPrefilter(Self.claudeTurnDuration, claudeAdapter().lineMayCount))
+    }
+
+    func testAClaudeTurnLineReportsHowLongTheTurnRan() {
+        XCTAssertEqual(
+            claudeActivity(Self.claudeTurnDuration).map(\.kind),
+            [.turnCompleted(milliseconds: 329_844)])
+    }
+
+    func testTheCodexTaskLineReachesTheParse() {
+        XCTAssertTrue(passesPrefilter(Self.codexTaskComplete, codexAdapter().lineMayCount))
+    }
+
+    func testACodexTaskLineReportsHowLongTheTurnRan() {
+        XCTAssertEqual(
+            codexActivity([("r.jsonl", Self.codexTaskComplete)]).map(\.kind),
+            [.turnCompleted(milliseconds: 130_047)])
+    }
+
+    /// Two turns on one day keep the longer, and a re-read of the shorter one
+    /// cannot take it back.
+    func testADayKeepsItsLongestTurnWhateverOrderTheyAreReadIn() {
+        var day = AgentActivityDay.none
+        day.recordTurn(milliseconds: 90_000)
+        day.recordTurn(milliseconds: 20_000)
+        day.recordTurn(milliseconds: 90_000)
+        XCTAssertEqual(day.longestTurnMilliseconds, 90_000)
+    }
+
+    /// A window's longest turn is its longest day's, not their sum.
+    func testAWindowsLongestTurnIsTheLongestOfItsDays() {
+        var window = ActivityTotals(AgentActivityDay(longestTurnMilliseconds: 40_000))
+        window.add(ActivityTotals(AgentActivityDay(longestTurnMilliseconds: 70_000)))
+        window.add(ActivityTotals(AgentActivityDay()))
+        XCTAssertEqual(window.longestTurnMilliseconds, 70_000)
+    }
+
+    /// A day written before turns were timed has no reading, and folding it
+    /// in must not invent one of zero.
+    func testADayWithNoTimedTurnHasNoLongestTurn() {
+        let folded = AgentActivityDay.none.union(.none)
+        XCTAssertNil(folded.longestTurnMilliseconds)
+        XCTAssertTrue(folded.isEmpty)
+    }
+
+    /// The field landed after the archive did, so a day written before it
+    /// decodes with no reading rather than failing.
+    func testADayWrittenBeforeTurnsWereTimedStillDecodes() throws {
+        let old = try JSONEncoder().encode(AgentActivityDay(turns: ActivityMinutes(minutes: [3])))
+        let decoded = try JSONDecoder().decode(AgentActivityDay.self, from: old)
+        XCTAssertNil(decoded.longestTurnMilliseconds)
+        XCTAssertTrue(decoded.turns.contains(3))
+    }
+
     /// Counting a `review` rollout as an agent must not also make it a session
     /// that opens by replaying its parent's turns: measured 2026-09-18, its
     /// first `token_count` lands 0.09 s after `session_meta` and is a real

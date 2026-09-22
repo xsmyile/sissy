@@ -147,7 +147,11 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// keep its tokens and never name an effort. The merge takes whichever
     /// reading counted more turns for a pair, whole, so a second pass can only
     /// fill in.
-    static let currentSchemaVersion = 4
+    ///
+    /// `5` is the longest turn, for the same reason: both CLIs have timed
+    /// every turn for months on a line nothing read, and the merge takes the
+    /// longer of the two readings, so a second pass can only fill in.
+    static let currentSchemaVersion = 5
     static let fileName = "history-backfill.json"
 
     /// The span one provider's last pass covered, as `YYYY-MM-DD` in the local

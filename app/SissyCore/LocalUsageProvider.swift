@@ -943,7 +943,11 @@ actor LocalUsageProvider: UsageProvider {
     /// of today is not an archive write.
     private func ingest(_ activity: AgentActivityEvent) {
         let key = Calendar.current.startOfDay(for: activity.timestamp)
-        dailyAgentCounts[key, default: .none].record(activity.kind)
+        if case .turnCompleted(let milliseconds) = activity.kind {
+            dailyActivity[key, default: .none].recordTurn(milliseconds: milliseconds)
+        } else {
+            dailyAgentCounts[key, default: .none].record(activity.kind)
+        }
         guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
         historyDirtyDays.insert(key)
     }

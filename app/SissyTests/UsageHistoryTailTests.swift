@@ -95,6 +95,26 @@ final class UsageHistoryTailTests: XCTestCase {
         XCTAssertGreaterThan(Decimal(string: day.models.first?.cost ?? "0") ?? 0, 0)
     }
 
+    /// The turn's length rides a line that bills nothing, so it reaches the
+    /// archive only if the tail hands that line to the adapter at all.
+    func testATimedTurnReachesTheArchivedDay() async throws {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        try writeTurn("a.jsonl", requestId: "r1")
+        let timed = """
+            {"type":"system","subtype":"turn_duration","durationMs":42000,\
+            "timestamp":"\(iso.string(from: Date()))","sessionId":"s-1"}
+            """
+        let handle = try FileHandle(forWritingTo: logDir.appendingPathComponent("a.jsonl"))
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((timed + "\n").utf8))
+        try handle.close()
+
+        try await runTail(archiving: true)
+
+        XCTAssertEqual(try XCTUnwrap(archivedToday()).activity?.longestTurnMilliseconds, 42_000)
+    }
+
     /// A resumed tail re-reads nothing it has already consumed, so a day it
     /// restarts from zero is a day that loses everything before the relaunch.
     func testARelaunchContinuesTheDayInsteadOfRestartingIt() async throws {
