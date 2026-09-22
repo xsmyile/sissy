@@ -1371,6 +1371,12 @@ extension UsageFormat {
         "\(bytes(tree)) with what they started"
     }
 
+    /// The fold under the agent rows, carrying what the folded rows hold so
+    /// the list still adds up to the figure at the top of its section.
+    static func agentsFolded(_ count: Int, footprint: UInt64) -> String {
+        "\(count) more · \(bytes(footprint))"
+    }
+
     /// One count, worded so a reading of none is not mistaken for a reading
     /// that has not happened. The dash is the caller's.
     static func agentCount(_ count: Int, singular: String, plural: String) -> String {
