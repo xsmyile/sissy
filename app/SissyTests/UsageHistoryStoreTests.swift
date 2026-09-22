@@ -181,6 +181,17 @@ final class UsageHistoryStoreTests: XCTestCase {
         )
     }
 
+    private func writeRows(
+        provider: String,
+        day dayKey: String,
+        rows: [UsageHistoryRow: UsageHistoryTotals]
+    ) throws {
+        try UsageHistoryStore.save(
+            UsageHistoryDay(
+                day: dayKey, provider: provider, updatedAt: Date(), totals: rows),
+            in: root)
+    }
+
     private func write(
         provider: String,
         day dayKey: String,
@@ -292,6 +303,26 @@ final class UsageHistoryStoreTests: XCTestCase {
 
         XCTAssertEqual(series.map(\.tokens), [20, 10], "today or another provider leaked in")
         XCTAssertEqual(series.map(\.cost), [Decimal(2), Decimal(1)])
+    }
+
+    /// The archive keeps a row per model per project; a strip of bars answers
+    /// at the day. So the series folds the projects away and one model worked
+    /// on in two repositories is one entry, at the sum of both.
+    func testTheSeriesFoldsOneModelsProjectsIntoOneEntry() throws {
+        try writeRows(
+            provider: "claude-code", day: day(-1),
+            rows: [
+                UsageHistoryRow(model: "claude-opus-5", project: "/a"): totals(input: 300, cost: "3"),
+                UsageHistoryRow(model: "claude-opus-5", project: "/b"): totals(input: 100, cost: "1"),
+                UsageHistoryRow(model: "claude-sonnet-5", project: "/a"): totals(input: 50, cost: "0.5"),
+            ])
+
+        let series = UsageHistoryStore.series(provider: "claude-code", days: 7, in: root)
+        let models = try XCTUnwrap(series.first?.models).sorted { $0.cost > $1.cost }
+
+        XCTAssertEqual(models.map(\.model), ["claude-opus-5", "claude-sonnet-5"])
+        XCTAssertEqual(models.first?.tokens, 400)
+        XCTAssertEqual(models.first?.cost, Decimal(4))
     }
 
     /// A day outside the window is not the reader's to draw, and a day Sissy

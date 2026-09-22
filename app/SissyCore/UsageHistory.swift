@@ -394,13 +394,20 @@ struct UsageHistoryRollup: Sendable, Equatable {
 /// What one archived day came to for one provider, which is the grain a
 /// per-day reading is drawn from.
 ///
-/// Carries no model or project split: the split is what the export and the
-/// report are for, and a value that held it would be re-read on every frame
-/// the panel is open for the sake of a number nobody is looking at.
+/// Carries the model split and not the project one. The models are already
+/// decoded — every day file is one `models` array and the totals beside them
+/// are folded out of it — so keeping them costs the retain and nothing else,
+/// and the strip's pills are read off exactly the bytes its bars are. The
+/// projects are a different matter: they are the wider dimension, the panel
+/// draws them for today only, and a value holding them would be re-read on
+/// every frame for a number nobody is looking at.
 struct UsageHistoryDaySummary: Equatable, Sendable {
     let day: Date
     let tokens: Int
     let cost: Decimal
+    /// That day's totals per model, folded across the projects the archive
+    /// keeps them split by. Empty for a day whose file holds no row.
+    let models: [ModelTotals]
 }
 
 /// File-level wrapper over the archive: one directory per provider, one file
@@ -590,10 +597,26 @@ enum UsageHistoryStore {
                 return UsageHistoryDaySummary(
                     day: day,
                     tokens: decoded.models.reduce(0) { $0 + $1.totalTokens },
-                    cost: decoded.models.reduce(Decimal(0)) { $0 + (Decimal(string: $1.cost) ?? 0) }
+                    cost: decoded.models.reduce(Decimal(0)) { $0 + (Decimal(string: $1.cost) ?? 0) },
+                    models: foldByModel(decoded.models)
                 )
             }
             .sorted { $0.day < $1.day }
+    }
+
+    /// One day's archived rows folded down to a total per model.
+    ///
+    /// The archive keeps a row per model *per project*, which is the grain the
+    /// export answers at; a strip of bars answers at the day, so the projects
+    /// are summed away here rather than by every caller. No zero filter: a row
+    /// that spent nothing never reached the file, which is what
+    /// `UsageHistoryDay.init` guarantees on the way to disk.
+    private static func foldByModel(_ entries: [UsageHistoryDay.Entry]) -> [ModelTotals] {
+        var byModel: [String: UsageHistoryTotals] = [:]
+        for entry in entries {
+            byModel[entry.model, default: .init()].add(entry.totals)
+        }
+        return byModel.map { ModelTotals(model: $0.key, totals: $0.value) }
     }
 
     /// Drops the files for days that have fallen out of retention, across

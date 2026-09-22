@@ -58,6 +58,12 @@ struct PanelProviderPage: View {
     /// the frame and a stored strip would freeze it at the moment the page was
     /// opened while the `Today` row below it kept moving.
     @State private var series: [UsageHistoryDaySummary] = []
+    /// The day the pointer is on in the strip, by day key, or nil for none.
+    ///
+    /// Here rather than in `PanelDayBars` because the pills under the bars
+    /// read it too: the bars own the gesture, the page owns the answer, and
+    /// both blocks word the same day.
+    @State private var pointedDay: String?
     /// The account picked but not yet confirmed. Picking is not switching:
     /// the write reaches Claude Code's own credential, and the one thing a
     /// user cannot work out for themselves — that an open session undoes it —
@@ -117,8 +123,26 @@ struct PanelProviderPage: View {
 
     private var strip: UsagePanelSnapshot.DayStrip? {
         UsagePanelSnapshot.dayStrip(
-            series: series, todayTokens: todayTokens, todayCost: todayCost,
+            series: series, provider: row.id, todayTokens: todayTokens,
+            todayCost: todayCost, todayModels: row.models,
             days: UsagePanelSnapshot.dayStripDays)
+    }
+
+    /// The split the pills draw: the pointed day's, or today's when the
+    /// pointer is on no bar.
+    ///
+    /// Today is the resting answer rather than an empty block, because the
+    /// pills are the caption of a strip whose last bar is today and the page
+    /// has to say something before the pointer arrives. A pointed day the
+    /// archive has no file for answers with nothing, which is the one case
+    /// where the block goes away under the pointer — an absent reading is not
+    /// a reading of zero, and holding the previous day's pills there would be
+    /// the strip's own rule broken by the block under it.
+    private var pointedModels: [UsagePanelSnapshot.ModelRow] {
+        guard let pointedDay, let strip,
+            let pointed = strip.rows.first(where: { $0.id == pointedDay })
+        else { return row.models }
+        return pointed.models
     }
 
     var body: some View {
@@ -543,11 +567,12 @@ struct PanelProviderPage: View {
         VStack(alignment: .leading, spacing: Self.splitAbsentGap) {
             today
             if let strip {
-                PanelDayBars(strip: strip, tint: tint)
+                PanelDayBars(strip: strip, tint: tint, hovered: $pointedDay)
             }
-            if !row.models.isEmpty {
+            let models = pointedModels
+            if !models.isEmpty {
                 HStack(spacing: Self.pillGap) {
-                    ForEach(row.models) { model in
+                    ForEach(models) { model in
                         ModelPill(row: model)
                     }
                     Spacer(minLength: 0)

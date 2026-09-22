@@ -477,17 +477,21 @@ final class PanelPagesTests: XCTestCase {
 
     private static let stripDays = 7
 
-    private func day(_ back: Int, cost: Decimal, now: Date) -> UsageHistoryDaySummary {
+    private func day(
+        _ back: Int, cost: Decimal, now: Date, models: [ModelTotals] = []
+    ) -> UsageHistoryDaySummary {
         let day = Calendar.current.date(
             byAdding: .day, value: -back, to: Calendar.current.startOfDay(for: now))!
-        return UsageHistoryDaySummary(day: day, tokens: 1_000, cost: cost)
+        return UsageHistoryDaySummary(day: day, tokens: 1_000, cost: cost, models: models)
     }
 
     private func strip(
-        _ series: [UsageHistoryDaySummary], todayCost: Decimal, now: Date
+        _ series: [UsageHistoryDaySummary], todayCost: Decimal, now: Date,
+        todayModels: [UsagePanelSnapshot.ModelRow] = []
     ) -> UsagePanelSnapshot.DayStrip? {
         UsagePanelSnapshot.dayStrip(
-            series: series, todayTokens: 500, todayCost: todayCost,
+            series: series, provider: ProviderID.claudeCode, todayTokens: 500,
+            todayCost: todayCost, todayModels: todayModels,
             days: Self.stripDays, now: now)
     }
 
@@ -497,7 +501,8 @@ final class PanelPagesTests: XCTestCase {
     func testTodaysBarComesFromTheFrameAndNotTheArchive() throws {
         let now = Date()
         let stale = UsageHistoryDaySummary(
-            day: Calendar.current.startOfDay(for: now), tokens: 1, cost: Decimal(1))
+            day: Calendar.current.startOfDay(for: now), tokens: 1, cost: Decimal(1),
+            models: [])
 
         let strip = try XCTUnwrap(
             strip([day(1, cost: 10, now: now), stale], todayCost: Decimal(40), now: now))

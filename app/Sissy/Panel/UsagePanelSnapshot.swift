@@ -189,6 +189,17 @@ struct UsagePanelSnapshot: Equatable {
         /// What the day cost, or why there is nothing to name. The strip has
         /// no axis, so this is where a value is read.
         let figures: String
+        /// That day's split by model, as the pills under the strip draw it
+        /// while the pointer is on this bar.
+        ///
+        /// On the row rather than fetched when the pointer arrives: the whole
+        /// series is already decoded and folded by the time the strip exists,
+        /// so a lookup on hover would be a second read of the same bytes at
+        /// the one moment the user is waiting. Empty for a day the archive has
+        /// no file for, which is a bar the strip still draws — an absent
+        /// reading is not a reading of zero, and the pills say nothing rather
+        /// than keeping the last day that had some.
+        let models: [ModelRow]
     }
 
     /// A provider's recent days, with the window they cover named.
@@ -212,6 +223,11 @@ struct UsagePanelSnapshot: Equatable {
     /// The strip for one provider: the archive for every day before today, and
     /// today from the frame.
     ///
+    /// **Today's pills are handed in rather than rebuilt.** They are the same
+    /// rows the page is already drawing under the bars, so recomputing them
+    /// from the slice would be a second derivation of one reading and a second
+    /// place for the last bar to disagree with the block beside it.
+    ///
     /// **Today never comes from the archive.** Both are the same tail reading
     /// the same events — `LocalUsageProvider.ingest` feeds the day buckets and
     /// the day file from one `UsageEvent` — but the file is written on a
@@ -229,8 +245,10 @@ struct UsagePanelSnapshot: Equatable {
     /// nothing on screen accounts for.
     static func dayStrip(
         series: [UsageHistoryDaySummary],
+        provider: String,
         todayTokens: Int,
         todayCost: Decimal,
+        todayModels: [ModelRow],
         days: Int,
         now: Date = Date(),
         calendar: Calendar = .current
@@ -252,6 +270,12 @@ struct UsagePanelSnapshot: Equatable {
             let isToday = back == 0
             let tokens = isToday ? todayTokens : archived[day]?.tokens
             let cost: Decimal? = isToday ? todayCost : archived[day]?.cost
+            let models =
+                isToday
+                ? todayModels
+                : makeModels(
+                    archived[day]?.models ?? [], provider: provider,
+                    totalCost: cost ?? 0, totalTokens: tokens ?? 0)
             return DayRow(
                 id: UsageReaderShared.dayFormatter.string(from: day),
                 label: isToday ? "Today" : day.formatted(.dateTime.weekday(.abbreviated)),
@@ -259,7 +283,8 @@ struct UsagePanelSnapshot: Equatable {
                 cost: cost,
                 fraction: Self.share(cost, of: peak),
                 title: UsageFormat.dayTitle(day),
-                figures: UsageFormat.dayFigures(tokens: tokens, cost: cost))
+                figures: UsageFormat.dayFigures(tokens: tokens, cost: cost),
+                models: models)
         }
         let covered = rows.count { $0.cost != nil }
         return DayStrip(
