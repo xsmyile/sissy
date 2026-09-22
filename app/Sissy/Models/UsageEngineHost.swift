@@ -602,6 +602,7 @@ final class UsageEngineHost {
             if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
                 try? await Task.sleep(for: rest)
             }
+            guard !Task.isCancelled else { return }
             refreshingIdentities = false
             identityRefresh = nil
         }
@@ -627,6 +628,7 @@ final class UsageEngineHost {
             if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
                 try? await Task.sleep(for: rest)
             }
+            guard !Task.isCancelled else { return }
             refreshingAgents = false
             agentRefresh = nil
         }
@@ -647,6 +649,7 @@ final class UsageEngineHost {
                 refreshProvider(id)
             }
             await engine.refreshForgeConnections()
+            guard !Task.isCancelled else { return }
             allRefresh = nil
         }
     }
