@@ -186,7 +186,13 @@ struct AgentActivityDay: Equatable, Sendable, Codable {
     /// before the archive carried this both read as.
     static let none = Self()
 
-    var isEmpty: Bool { turns.isEmpty && delegated.isEmpty && longestTurnMilliseconds == nil }
+    var isEmpty: Bool { !hasMinutes && longestTurnMilliseconds == nil }
+
+    /// Whether any minute was recorded, which is the question a reading of
+    /// the day's length asks: a day holding only a timed turn — one whose
+    /// line landed past midnight while its billed minutes fell before it —
+    /// has a longest turn and no length at all.
+    var hasMinutes: Bool { !turns.isEmpty || !delegated.isEmpty }
 
     var blocks: [ClosedRange<Int>] { turns.blocks(separatedByMoreThan: Self.idleGapMinutes) }
 

@@ -125,7 +125,7 @@ enum UsageHistoryExport {
     static func activityCSV(_ days: [UsageHistoryDay]) -> String {
         var lines = [activityColumns.joined(separator: ",")]
         for day in days {
-            guard let activity = day.activity, !activity.isEmpty else { continue }
+            guard let activity = day.activity, activity.hasMinutes else { continue }
             let row: [String] = [
                 day.day,
                 day.provider,

@@ -386,6 +386,11 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// how long it ran in `durationMs` and bills nothing.
     static let turnDurationSubtype = "turn_duration"
     private static let turnDurationBytes: [UInt8] = Array("\"\(turnDurationSubtype)\"".utf8)
+    /// The longest a `turn_duration` line is looked for in. It is a control
+    /// line of a dozen fields — measured 2026-09-23 across 2904 of them, 395
+    /// to 551 bytes — so the second scan skips the tool results and pasted
+    /// files that make up the long lines, which are most of a tree's bytes.
+    private static let turnDurationLineLimit = 2048
 
     /// The tool that spawns a sub-agent, under both names it has had.
     static let agentToolNames: Set<String> = ["Agent", "Task"]
@@ -396,7 +401,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
 
     func lineMayCount(_ buf: UnsafePointer<UInt8>, from: Int, to: Int) -> Bool {
         Self.bufferContainsAssistantMarker(buf, from: from, to: to)
-            || Self.bufferContains(buf, from: from, to: to, pattern: Self.turnDurationBytes)
+            || (to - from <= Self.turnDurationLineLimit
+                && Self.bufferContains(buf, from: from, to: to, pattern: Self.turnDurationBytes))
     }
 
     private static func bufferContains(
