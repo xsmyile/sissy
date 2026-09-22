@@ -270,15 +270,7 @@ struct PanelStats: View {
     }
 
     private func figure(_ value: Int, singular: String, plural: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text("\(value)")
-                .font(.system(size: Self.headlineSize, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-            Text(value == 1 ? singular : plural)
-                .font(.system(size: Self.captionSize))
-                .foregroundStyle(.secondary)
-        }
+        reading("\(value)", caption: value == 1 ? singular : plural)
     }
 
     /// The worked figure, which is a duration where the two beside it are
