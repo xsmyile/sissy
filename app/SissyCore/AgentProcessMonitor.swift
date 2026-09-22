@@ -28,7 +28,7 @@ struct AgentMemoryReading: Sendable, Equatable {
     /// **Since Sissy started watching, never since each process started.**
     /// The kernel's counters run from a process's birth, so a session left
     /// open for three days would carry three days into a figure read beside
-    /// an hour's sparkline. The monitor sums what each sweep adds instead,
+    /// an hour's chart. The monitor sums what each sweep adds instead,
     /// which is the rule the series already keeps: it starts when Sissy does
     /// and says so.
     var cpuTime: TimeInterval = 0
@@ -39,6 +39,14 @@ struct AgentMemoryReading: Sendable, Equatable {
     /// move once the series has rolled, because nothing was dropped from the
     /// sums. Nil for a reading built by hand with no counters.
     var countedSince: Date?
+    /// Each sweep's agents, one entry per element of `samples` and in the same
+    /// order, so the total at an index is the sum of the entry at it.
+    ///
+    /// Per agent rather than per total because the total answers "how much"
+    /// and never "whose": a step in a single line is anonymous. Kept for the
+    /// same hour as the series and in memory for the same reason; measured
+    /// against eight agents it is about 15 KB.
+    var perAgent: [[AgentProcess.Key: AgentSample]] = []
 }
 
 /// Samples what the CLIs on this Mac are holding, on its own clock.
@@ -54,7 +62,7 @@ struct AgentMemoryReading: Sendable, Equatable {
 /// — is about retained view graphs, and this is not one: a sweep costs 1.2 ms
 /// measured across 665 processes, which at this cadence is about a hundredth of
 /// a percent of one core. The alternative is a series that begins when the
-/// popover opens, which is a sparkline that is always empty exactly when
+/// popover opens, which is a chart that is always empty exactly when
 /// somebody wants to look at it.
 actor AgentProcessMonitor {
     /// How often the processes are counted.
@@ -64,7 +72,7 @@ actor AgentProcessMonitor {
     /// minutes.
     static let sampleInterval: Duration = .seconds(15)
     /// How many samples are kept, which at the interval above is one hour.
-    /// A sparkline 300 pt wide cannot draw more, and an hour is the longest
+    /// A chart 300 pt wide cannot draw more, and an hour is the longest
     /// window the question "why is this Mac struggling" is asked over.
     static let retainedSamples = 240
     /// How long a Mac with nothing running goes without a frame at the most,
@@ -73,6 +81,7 @@ actor AgentProcessMonitor {
 
     nonisolated private let published = LockedValue<AgentMemoryReading?>(nil)
     private var samples: [UInt64] = []
+    private var perAgent: [[AgentProcess.Key: AgentSample]] = []
     private var firstSampleAt: Date?
     private var lastFrameAt: Date?
     /// Each agent's counters at the sweep before, so the next one can take
@@ -138,6 +147,7 @@ actor AgentProcessMonitor {
         pollTask?.cancel()
         pollTask = nil
         samples = []
+        perAgent = []
         firstSampleAt = nil
         lastFrameAt = nil
         counters = [:]
@@ -156,8 +166,15 @@ actor AgentProcessMonitor {
         accrue(&reading, at: now)
         let previous = published.load()
         samples.append(reading.footprint)
+        perAgent.append(
+            Dictionary(
+                reading.agents.map {
+                    ($0.key, AgentSample(footprint: $0.footprint, cpuLoad: $0.cpuLoad))
+                },
+                uniquingKeysWith: { first, _ in first }))
         if samples.count > Self.retainedSamples {
             samples.removeFirst(samples.count - Self.retainedSamples)
+            perAgent.removeFirst(perAgent.count - Self.retainedSamples)
         }
         // The first retained sample, not the first ever taken: once the ring
         // has rolled, the older ones are gone and a `since` naming them would
@@ -179,7 +196,8 @@ actor AgentProcessMonitor {
                 since: since,
                 cpuTime: cpuTotal,
                 energy: energyTotal,
-                countedSince: firstSampleAt))
+                countedSince: firstSampleAt,
+                perAgent: perAgent))
         // The *first* sweep always earns a frame, empty or not: it is the
         // transition from having no reading to having one, which is the
         // difference between the panel drawing a dash and drawing "nothing

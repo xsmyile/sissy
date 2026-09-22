@@ -99,7 +99,7 @@ private func reading(_ bytes: UInt64, at when: Date = Date()) -> AgentProcessRea
             ])
 }
 
-/// The series behind the sparkline.
+/// The series behind the chart.
 final class AgentProcessMonitorTests: XCTestCase {
     func testNoSweepYetIsNotAReadingOfNothing() async {
         let monitor = AgentProcessMonitor { _ in reading(0) }

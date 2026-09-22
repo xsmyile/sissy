@@ -37,6 +37,9 @@ struct PanelStats: View {
     /// Local to the page for the reason `window` is: coming back asks the
     /// question again rather than showing the list opened last time.
     @State private var showsAllProcesses = false
+    /// The chart sample under the pointer, which the caption and every lane
+    /// answer for while it is set.
+    @State private var hoveredSample: Int?
 
     private static let sectionSpacing: CGFloat = 16
     private static let labelSpacing: CGFloat = 10
@@ -44,7 +47,6 @@ struct PanelStats: View {
     private static let headlineSize: CGFloat = 18
     private static let captionSize: CGFloat = 11
     private static let rowSize: CGFloat = 12
-    private static let sparklineHeight: CGFloat = 26
     private static let figureSpacing: CGFloat = 28
     private static let stripHeight: CGFloat = 8
     private static let stripSpacing: CGFloat = 5
@@ -89,23 +91,15 @@ struct PanelStats: View {
                 .font(.system(size: Self.headlineSize, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .contentTransition(.numericText())
-            if !live.samples.isEmpty {
-                HStack(alignment: .center, spacing: 8) {
-                    Sparkline(samples: live.samples)
-                        .frame(height: Self.sparklineHeight)
-                    Text(UsageFormat.bytes(live.peak))
-                        .font(.system(size: Self.captionSize))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
+            if let chart = live.chart {
+                AgentMemoryChart(chart: chart, hovered: $hoveredSample)
             }
-            Text(
-                UsageFormat.samplesSince(live.since) + " · "
-                    + UsageFormat.agentsWithChildren(live.treeFootprint)
-            )
-            .font(.system(size: Self.captionSize))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            Text(caption(live))
+                .font(.system(size: Self.captionSize))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
             if let countedSince = live.countedSince {
                 Text(
                     UsageFormat.agentsLoad(
@@ -121,6 +115,25 @@ struct PanelStats: View {
             }
             processes(live)
         }
+    }
+
+    /// Under the pointer the caption answers for the instant it is on, and at
+    /// rest for the hour: the rule the day strip keeps, where a hover replaces
+    /// the caption and never the headline, so the figure a reader came for
+    /// does not change on the pointer's way to the chart.
+    private func caption(_ live: UsagePanelSnapshot.AgentsBlock.Live) -> String {
+        guard let chart = live.chart, let index = hoveredSample, index < chart.totals.count else {
+            return UsageFormat.samplesSince(live.since) + " · "
+                + UsageFormat.agentsWithChildren(live.treeFootprint)
+        }
+        let names = Dictionary(
+            live.processes.map { ($0.id, UsageFormat.agentProcessName($0)) },
+            uniquingKeysWith: { first, _ in first })
+        return UsageFormat.chartInstant(
+            chart.instant(index), total: chart.totals[index],
+            leaders: chart.leaders(at: index).compactMap { leader in
+                names[leader.process].map { ($0, leader.bytes) }
+            })
     }
 
     /// One row per running agent.
@@ -181,6 +194,11 @@ struct PanelStats: View {
                 .truncationMode(.middle)
                 .foregroundStyle(row.project == nil ? Color.secondary : .primary)
             Spacer(minLength: 8)
+            if !row.lane.isEmpty {
+                CPULane(
+                    lane: row.lane, tint: AgentMemoryChart.bandTint(row.band),
+                    hovered: hoveredSample)
+            }
             if let load = row.cpuLoad {
                 Text(UsageFormat.cpuLoad(load) + " ·")
                     .font(.system(size: Self.rowSize))
@@ -203,7 +221,7 @@ struct PanelStats: View {
         .help(row.directory ?? "The kernel would not say where this agent is working")
     }
 
-    /// A dash and no sparkline, which is the panel's own rule for a reading
+    /// A dash and no chart, which is the panel's own rule for a reading
     /// that has not happened: a flat line at zero is a measurement, and an
     /// unmeasured Mac has not made one.
     private var idle: some View {
@@ -360,40 +378,172 @@ struct PanelStats: View {
     }
 }
 
-/// The memory series, drawn as a line.
+/// The retained hour, split by agent and stacked, the dearest at the axis.
 ///
-/// **Unfilled.** A fill under a series that hovers near its own peak shades
-/// most of the box, which reads as a quantity rather than as a shape and hides
-/// the only thing the graph is for — whether the number is climbing.
+/// **Filled, where the single line it replaced was not.** A fill under one
+/// series that hovers near its own peak shades most of the box and reads as a
+/// quantity instead of a shape; here the fill *is* the reading, because what
+/// the chart answers that the line could not is whose the memory was.
 ///
-/// **Scaled from zero**, so a quiet hour that moved by 40 MB stays a flat line
-/// rather than becoming a mountain range. That flatness is the reading: the
-/// question is whether memory is growing, and a steady line answers it.
-private struct Sparkline: View {
-    let samples: [UInt64]
+/// **One hue in steps, never a colour per project.** Eight agents in three
+/// repositories would repeat a project's colour across bands and read as one
+/// series; a step of the accent per standing row and grey for the rest is the
+/// list's own order drawn, and it is the colour each row's lane carries.
+///
+/// **Scaled from zero**, for the reason the line was: a quiet hour that moved
+/// by 40 MB stays flat, and that flatness is the reading.
+struct AgentMemoryChart: View {
+    let chart: UsagePanelSnapshot.AgentsBlock.MemoryChart
+    @Binding var hovered: Int?
+
+    static let plotHeight: CGFloat = 44
+    private static let tickHeight: CGFloat = 4
+    private static let axisSize: CGFloat = 9.5
+    /// Opacity of the accent for each standing band, dearest first; the list
+    /// shows five rows, so five steps.
+    private static let bandOpacities: [Double] = [1, 0.74, 0.54, 0.38, 0.26]
+    private static let restOpacity: Double = 0.2
+    private static let cursorOpacity: Double = 0.5
+    private static let secondsPerMinute: Double = 60
+
+    static func bandTint(_ band: Int?) -> Color {
+        guard let band, band < bandOpacities.count else {
+            return Color.secondary.opacity(restOpacity)
+        }
+        return Color.accentColor.opacity(bandOpacities[band])
+    }
 
     var body: some View {
-        GeometryReader { geometry in
-            let peak = max(samples.max() ?? 1, 1)
-            let step =
-                samples.count > 1 ? geometry.size.width / CGFloat(samples.count - 1) : 0
-            let points = samples.enumerated().map { index, value in
-                CGPoint(
-                    x: CGFloat(index) * step,
-                    y: geometry.size.height * (1 - CGFloat(Double(value) / Double(peak)))
-                )
+        VStack(alignment: .leading, spacing: 3) {
+            Canvas { context, size in draw(in: &context, size: size) }
+                .frame(height: Self.plotHeight + Self.tickHeight + 2)
+                .contentShape(.rect)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.width
+                } action: {
+                    width = $0
+                }
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let location): hovered = index(at: location.x)
+                    case .ended: hovered = nil
+                    }
+                }
+            HStack {
+                Text(UsageFormat.chartSpan(minutes: spanMinutes))
+                Spacer(minLength: 8)
+                Text("peak " + UsageFormat.bytes(chart.peak))
             }
-            line(points)
-                .stroke(.tint, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+            .font(.system(size: Self.axisSize))
+            .monospacedDigit()
+            .foregroundStyle(.tertiary)
         }
+        .accessibilityElement()
+        .accessibilityLabel(
+            "Agent memory over the last \(spanMinutes) minutes, peaking at "
+                + UsageFormat.bytes(chart.peak))
+    }
+
+    private var spanMinutes: Int {
+        Int((Double(max(chart.totals.count - 1, 0)) * chart.interval / Self.secondsPerMinute).rounded())
+    }
+
+    /// The plot's width, for turning a hover's x into a sample: the hover
+    /// arrives in the same coordinate space the canvas draws in.
+    @State private var width: CGFloat = 0
+
+    private func index(at x: CGFloat) -> Int? {
+        guard width > 0, chart.totals.count > 1 else { return nil }
+        let step = width / CGFloat(chart.totals.count - 1)
+        return min(max(Int((x / step).rounded()), 0), chart.totals.count - 1)
+    }
+
+    private func draw(in context: inout GraphicsContext, size: CGSize) {
+        let count = chart.totals.count
+        guard count > 1 else { return }
+        let peak = Double(max(chart.peak, 1))
+        let step = size.width / CGFloat(count - 1)
+        let y = { (bytes: UInt64) in Self.plotHeight * (1 - CGFloat(Double(bytes) / peak)) }
+        var base = [UInt64](repeating: 0, count: count)
+        for (position, band) in chart.bands.enumerated() {
+            let top = zip(base, band.values).map { $0 + $1 }
+            var path = Path()
+            path.move(to: CGPoint(x: 0, y: y(top[0])))
+            for index in 1..<count { path.addLine(to: CGPoint(x: CGFloat(index) * step, y: y(top[index]))) }
+            for index in stride(from: count - 1, through: 0, by: -1) {
+                path.addLine(to: CGPoint(x: CGFloat(index) * step, y: y(base[index])))
+            }
+            path.closeSubpath()
+            let isRest = band.process == nil
+            context.fill(path, with: .color(Self.bandTint(isRest ? nil : position)))
+            base = top
+        }
+        for start in chart.starts {
+            var tick = Path()
+            let x = CGFloat(start) * step
+            tick.move(to: CGPoint(x: x, y: Self.plotHeight + 2))
+            tick.addLine(to: CGPoint(x: x, y: Self.plotHeight + 2 + Self.tickHeight))
+            context.stroke(tick, with: .color(.secondary), lineWidth: 1)
+        }
+        if let hovered, hovered < count {
+            var cursor = Path()
+            let x = CGFloat(hovered) * step
+            cursor.move(to: CGPoint(x: x, y: 0))
+            cursor.addLine(to: CGPoint(x: x, y: Self.plotHeight))
+            context.stroke(cursor, with: .color(.primary.opacity(Self.cursorOpacity)), lineWidth: 1)
+        }
+    }
+}
+
+/// One agent's hour, as a strip of cells whose depth is its CPU.
+///
+/// The same hour the chart above draws, compressed into the row, so a row
+/// says whether its agent is working or has sat open and idle for half of
+/// it: memory says what a session holds, and only the load says whether it
+/// is doing anything with it. A cell before the agent started is not drawn,
+/// because an agent that did not exist yet did not idle.
+struct CPULane: View {
+    let lane: [Double?]
+    let tint: Color
+    let hovered: Int?
+
+    static let width: CGFloat = 70
+    private static let height: CGFloat = 9
+    private static let cells = 36
+    private static let floorOpacity: Double = 0.12
+    private static let cellGap: CGFloat = 0.5
+
+    var body: some View {
+        Canvas { context, size in
+            let cellWidth = size.width / CGFloat(Self.cells)
+            for cell in 0..<Self.cells {
+                guard let load = load(of: cell) else { continue }
+                let rect = CGRect(
+                    x: CGFloat(cell) * cellWidth, y: 0,
+                    width: max(cellWidth - Self.cellGap, 0.5), height: size.height)
+                let depth = Self.floorOpacity + (1 - Self.floorOpacity) * min(load, 1)
+                context.fill(Path(rect), with: .color(tint.opacity(depth)))
+            }
+            if let hovered, lane.count > 1 {
+                let x = CGFloat(hovered) / CGFloat(lane.count - 1) * size.width
+                var cursor = Path()
+                cursor.move(to: CGPoint(x: x, y: -1))
+                cursor.addLine(to: CGPoint(x: x, y: size.height + 1))
+                context.stroke(cursor, with: .color(.primary.opacity(0.6)), lineWidth: 1)
+            }
+        }
+        .frame(width: Self.width, height: Self.height)
         .accessibilityHidden(true)
     }
 
-    private func line(_ points: [CGPoint]) -> Path {
-        var path = Path()
-        guard let first = points.first else { return path }
-        path.move(to: first)
-        for point in points.dropFirst() { path.addLine(to: point) }
-        return path
+    /// The mean load over one cell's samples, nil where the agent was not
+    /// running in any of them.
+    private func load(of cell: Int) -> Double? {
+        guard !lane.isEmpty else { return nil }
+        let from = cell * lane.count / Self.cells
+        let to = max((cell + 1) * lane.count / Self.cells, from + 1)
+        let readings = lane[from..<min(to, lane.count)].compactMap { $0 }
+        guard !readings.isEmpty else { return nil }
+        return readings.reduce(0, +) / Double(readings.count)
     }
 }

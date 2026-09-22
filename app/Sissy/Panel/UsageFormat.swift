@@ -1403,6 +1403,30 @@ extension UsageFormat {
     private static let nanojoulesPerWattHour: Double = 3_600_000_000_000
     private static let percent: Double = 100
 
+    /// What the chart's caption says for the instant under the pointer: the
+    /// time, the total, and the two agents holding the most of it.
+    ///
+    /// Two rather than all of them, because the caption is one line in a
+    /// 312 pt column and the rows under the chart already carry the rest.
+    static func chartInstant(_ instant: Date, total: UInt64, leaders: [(String, UInt64)])
+        -> String
+    {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("jm")
+        var parts = [formatter.string(from: instant), bytes(total)]
+        let named = leaders.prefix(chartLeaders).map { "\($0.0) \(bytes($0.1))" }
+        if !named.isEmpty { parts.append(named.joined(separator: ", ")) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The left end of the chart's axis: how long ago its first sample was.
+    static func chartSpan(minutes: Int) -> String {
+        "\(max(minutes, 1))m ago"
+    }
+
+    private static let chartLeaders = 2
+
     /// The fold under the agent rows, carrying what the folded rows hold so
     /// the list still adds up to the figure at the top of its section.
     static func agentsFolded(_ count: Int, footprint: UInt64) -> String {

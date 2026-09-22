@@ -5,13 +5,21 @@ import XCTest
 /// What the Overview's agents door and the stats page behind it say.
 final class AgentStatsSnapshotTests: XCTestCase {
     private func memory(
-        _ agents: [AgentProcess], samples: [UInt64] = [], since: Date = Date()
+        _ agents: [AgentProcess], samples: [UInt64] = [], since: Date = Date(),
+        perAgent: [[AgentProcess.Key: AgentSample]]? = nil
     ) -> AgentMemoryReading {
         AgentMemoryReading(
             current: AgentProcessReading(observedAt: since, agents: agents),
             samples: samples,
             interval: 15,
-            since: since)
+            since: since,
+            perAgent: perAgent
+                ?? samples.map { _ in
+                    Dictionary(
+                        uniqueKeysWithValues: agents.map {
+                            ($0.key, AgentSample(footprint: $0.footprint, cpuLoad: nil))
+                        })
+                })
     }
 
     private func agent(_ provider: String, bytes: UInt64, pid: pid_t = 1) -> AgentProcess {
@@ -56,16 +64,60 @@ final class AgentStatsSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.agents.summary, "2 agents · 1.94 GB")
     }
 
-    /// One sample is not a line, and a sparkline drawn through it would be a
+    /// One sample is not a line, and a chart drawn through it would be a
     /// claim about a stretch that has not been measured yet.
-    func testOneSampleDrawsNoSparkline() {
+    func testOneSampleDrawsNoChart() {
         let single = UsagePanelSnapshot.make(
             frame: frame(memory: memory([agent(ProviderID.codex, bytes: 512)], samples: [512])))
-        XCTAssertEqual(single.agents.live?.samples, [])
+        XCTAssertNil(single.agents.live?.chart)
         let pair = UsagePanelSnapshot.make(
             frame: frame(
                 memory: memory([agent(ProviderID.codex, bytes: 512)], samples: [512, 600])))
-        XCTAssertEqual(pair.agents.live?.samples, [512, 600])
+        XCTAssertEqual(pair.agents.live?.chart?.totals, [512, 600])
+    }
+
+    /// The bands stack in the list's order with the rest on top, and at every
+    /// sample they add up to the total the single line used to draw, exited
+    /// agents included.
+    func testTheBandsFollowTheListAndReachTheTotal() throws {
+        let running = agents(7)
+        let exited = agent(ProviderID.codex, bytes: 40, pid: 99)
+        let first = Dictionary(
+            uniqueKeysWithValues: (running + [exited]).map {
+                ($0.key, AgentSample(footprint: $0.footprint, cpuLoad: nil))
+            })
+        let second = Dictionary(
+            uniqueKeysWithValues: running.map {
+                ($0.key, AgentSample(footprint: $0.footprint, cpuLoad: 0.5))
+            })
+        let totals = [first, second].map { $0.values.reduce(0) { $0 + $1.footprint } }
+        let chart = try XCTUnwrap(
+            UsagePanelSnapshot.make(
+                frame: frame(memory: memory(running, samples: totals, perAgent: [first, second]))
+            ).agents.live?.chart)
+        XCTAssertEqual(chart.bands.map(\.process), [1, 2, 3, 4, 5, nil])
+        for index in totals.indices {
+            XCTAssertEqual(chart.bands.reduce(0) { $0 + $1.values[index] }, totals[index])
+        }
+    }
+
+    /// A lane starts where its agent did, and the chart marks that sample.
+    func testALaneStartsWhereItsAgentDid() throws {
+        let old = agent(ProviderID.claudeCode, bytes: 900, pid: 1)
+        let new = agent(ProviderID.claudeCode, bytes: 100, pid: 2)
+        let before = [old.key: AgentSample(footprint: 900, cpuLoad: 0.2)]
+        let after = [
+            old.key: AgentSample(footprint: 900, cpuLoad: 0.1),
+            new.key: AgentSample(footprint: 100, cpuLoad: 0.9),
+        ]
+        let live = try XCTUnwrap(
+            UsagePanelSnapshot.make(
+                frame: frame(
+                    memory: memory([old, new], samples: [900, 1_000], perAgent: [before, after]))
+            ).agents.live)
+        XCTAssertEqual(live.processes.first { $0.id == 2 }?.lane, [nil, 0.9])
+        XCTAssertEqual(live.chart?.starts, [1])
+        XCTAssertEqual(live.chart?.leaders(at: 1).map(\.process), [1, 2])
     }
 
     /// Today comes off the slices, never the archive: the archive's copy of
@@ -224,6 +276,17 @@ final class AgentFormatTests: XCTestCase {
         XCTAssertEqual(
             UsageFormat.agentsLoad(cpu: 1_129, energy: 1_004_600_000_000, since: since),
             "CPU 18m 49s · 0.28 Wh " + UsageFormat.samplesSince(since))
+    }
+
+    /// The caption under the pointer names the time, the total and the two
+    /// agents holding most of it, never more.
+    func testTheInstantCaptionNamesTheTwoLeaders() {
+        let instant = Date()
+        let caption = UsageFormat.chartInstant(
+            instant, total: 2_410_000_000,
+            leaders: [("sissy", 612_000_000), ("legion", 540_000_000), ("orca", 90_000_000)])
+        XCTAssertTrue(caption.hasSuffix(" · 2.41 GB · sissy 612 MB, legion 540 MB"), caption)
+        XCTAssertEqual(UsageFormat.chartSpan(minutes: 60), "60m ago")
     }
 
     /// The fold carries what it hides, so the list still reaches its total.
