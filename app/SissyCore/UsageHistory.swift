@@ -97,6 +97,20 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// No version bump: additive, and an older build reading a newer file
     /// ignores it.
     var activity: AgentActivityDay?
+    /// How many turns the day ran at each effort, which is a third reading of
+    /// the same turns the two above are.
+    ///
+    /// Beside the rows for their reason, and not a third key on
+    /// `UsageHistoryRow`: a row split by effort would not cover the rows
+    /// already on disk, so `isCoveredBy` would refuse every day this build
+    /// re-derived and the archive would freeze rather than be rewritten.
+    /// Optional on the same terms as the two above, so a day written before
+    /// the field reads as "not measured" rather than as a day nothing was set
+    /// on.
+    ///
+    /// No version bump: additive, and an older build reading a newer file
+    /// ignores it.
+    var effort: EffortCounts?
 
     struct Entry: Codable, Equatable, Sendable {
         var model: String
@@ -135,7 +149,8 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         day: String, provider: String, updatedAt: Date,
         totals: [UsageHistoryRow: UsageHistoryTotals],
         agents: AgentCounts? = nil,
-        activity: AgentActivityDay? = nil
+        activity: AgentActivityDay? = nil,
+        effort: EffortCounts? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.day = day
@@ -143,6 +158,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         self.updatedAt = updatedAt
         self.agents = agents.flatMap { $0.isEmpty ? nil : $0 }
         self.activity = activity.flatMap { $0.isEmpty ? nil : $0 }
+        self.effort = effort.flatMap { $0.isEmpty ? nil : $0 }
         self.models =
             totals
             .filter { $0.value.totalTokens > 0 || $0.value.cost > 0 }
@@ -209,7 +225,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         }
         return Self(
             day: day, provider: provider, updatedAt: updatedAt, totals: totals, agents: agents,
-            activity: activity)
+            activity: activity, effort: effort)
     }
 
     /// This day with `counts` folded in, keeping whichever reading saw more.
@@ -226,7 +242,10 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// whether a *day* may be written, and refusing the whole write over a
     /// count would freeze the day's tokens — which are the reading the archive
     /// exists for — on every upgrade from a build that counted nothing.
-    func merging(counts: AgentCounts?, activity other: AgentActivityDay? = nil) -> Self {
+    func merging(
+        counts: AgentCounts?, activity other: AgentActivityDay? = nil,
+        effort otherEffort: EffortCounts? = nil
+    ) -> Self {
         var merged = self
         if let counts {
             let mine = agents ?? .none
@@ -238,6 +257,10 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         if let other {
             let folded = (activity ?? .none).union(other)
             merged.activity = folded.isEmpty ? nil : folded
+        }
+        if let otherEffort {
+            let folded = (effort ?? .none).merging(otherEffort)
+            merged.effort = folded.isEmpty ? nil : folded
         }
         return merged
     }
@@ -374,11 +397,23 @@ struct UsageHistoryRollup: Sendable, Equatable {
     /// legitimately add up to more than `activity`, because two CLIs working
     /// in the same minute are one minute of the day and two of each other's.
     let activityByProvider: [String: ActivityTotals]
+    /// How many of the window's turns ran at each effort, summed over every
+    /// provider that names one.
+    ///
+    /// Summed rather than kept apart, because the page draws one row of pills
+    /// for the window: the per-provider rows above them answer how much each
+    /// CLI did, and an effort is a setting rather than a quantity to attribute.
+    /// A day written before the archive carried it contributes nothing, which
+    /// under-reports a window spanning the change rather than misreporting it
+    /// — the same terms the counts are on, and the coverage line already says
+    /// how far back the archive reaches.
+    let effort: EffortCounts
 
     init(
         period: UsagePeriod, earliestDay: Date?, tokens: Int, cost: Decimal,
         agents: AgentCounts = .none, agentsByProvider: [String: AgentCounts] = [:],
-        activity: ActivityTotals = .none, activityByProvider: [String: ActivityTotals] = [:]
+        activity: ActivityTotals = .none, activityByProvider: [String: ActivityTotals] = [:],
+        effort: EffortCounts = .none
     ) {
         self.period = period
         self.earliestDay = earliestDay
@@ -388,6 +423,7 @@ struct UsageHistoryRollup: Sendable, Equatable {
         self.agentsByProvider = agentsByProvider
         self.activity = activity
         self.activityByProvider = activityByProvider
+        self.effort = effort
     }
 }
 
@@ -525,6 +561,7 @@ enum UsageHistoryStore {
         // union of the day's readers and only the sum of the days.
         var unionByDay: [Date: AgentActivityDay] = [:]
         var activityByProvider: [UsagePeriod: [String: ActivityTotals]] = [:]
+        var effort: [UsagePeriod: EffortCounts] = [:]
         for provider in providers(in: parent) {
             for (dayKey, url) in dayFiles(provider: provider, in: parent) {
                 guard dayKey <= today, let decoded = decode(at: url) else { continue }
@@ -545,6 +582,7 @@ enum UsageHistoryStore {
                     byProvider[period, default: [:]][provider, default: .none]
                         .add(decoded.agents ?? .none)
                     activityByProvider[period, default: [:]][provider, default: .none].add(mine)
+                    effort[period, default: .none].add(decoded.effort ?? .none)
                     earliest[period] = earliest[period].map { min($0, dayKey) } ?? dayKey
                 }
             }
@@ -566,7 +604,8 @@ enum UsageHistoryStore {
                 agents: agents[period] ?? .none,
                 agentsByProvider: byProvider[period] ?? [:],
                 activity: activity[period] ?? .none,
-                activityByProvider: activityByProvider[period] ?? [:])
+                activityByProvider: activityByProvider[period] ?? [:],
+                effort: effort[period] ?? .none)
         }
         return out
     }

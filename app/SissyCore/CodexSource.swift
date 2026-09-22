@@ -94,6 +94,13 @@ final class CodexAdapter: SourceAdapter {
     /// agent; keeping per-file state preserves that correctly.
     private var fileModels: [URL: String] = [:]
 
+    /// Per-file "last seen effort", read off the same `turn_context` payload
+    /// the model is and resolved the same way: an effort belongs to every
+    /// `token_count` after the line that named it, until another names a
+    /// different one. Codex reassigns it mid-session exactly as it does the
+    /// model.
+    private var fileEfforts: [URL: String] = [:]
+
     /// Per-file project, resolved from the `cwd` on the rollout's
     /// `session_meta`. Per file because Codex names it once, on the first
     /// line, which a resumed reader is already past — the same reason
@@ -454,14 +461,22 @@ final class CodexAdapter: SourceAdapter {
         return spawn["parent_thread_id"] is String
     }
 
-    /// Updates per-file model from a `turn_context` line. Idempotent; called
-    /// from the streaming reader before any subsequent `token_count` event.
+    /// Updates per-file model and effort from a `turn_context` line.
+    /// Idempotent; called from the streaming reader before any subsequent
+    /// `token_count` event.
+    ///
+    /// The two are taken apart rather than together: a payload naming an
+    /// effort and no model is still an effort this file's next turn ran at,
+    /// and older Codex versions wrote `model_provider` without a `model` at
+    /// all.
     private func applyTurnContext(_ obj: [String: Any], url: URL) {
-        guard let payload = obj["payload"] as? [String: Any],
-            let model = payload["model"] as? String,
-            !model.isEmpty
-        else { return }
-        fileModels[url] = model
+        guard let payload = obj["payload"] as? [String: Any] else { return }
+        if let model = payload["model"] as? String, !model.isEmpty {
+            fileModels[url] = model
+        }
+        if let effort = payload["effort"] as? String, !effort.isEmpty {
+            fileEfforts[url] = effort
+        }
     }
 
     /// Whether this event is one of the turns the session copied from its
@@ -680,7 +695,8 @@ final class CodexAdapter: SourceAdapter {
             cacheReadTokens: cached,
             cacheCreationTokens: 0,
             cost: cost,
-            delegated: fileSubagents.contains(line.url)
+            delegated: fileSubagents.contains(line.url),
+            effort: fileEfforts[line.url]
         )
     }
 
@@ -689,6 +705,7 @@ final class CodexAdapter: SourceAdapter {
     /// would be a model map for a file nothing reads.
     func trim(retaining files: Set<URL>) {
         fileModels = fileModels.filter { files.contains($0.key) }
+        fileEfforts = fileEfforts.filter { files.contains($0.key) }
         fileProjects = fileProjects.filter { files.contains($0.key) }
         fileCumulative = fileCumulative.filter { files.contains($0.key) }
         fileReplay = fileReplay.filter { files.contains($0.key) }
@@ -722,6 +739,7 @@ final class CodexAdapter: SourceAdapter {
             let fileURL = URL(fileURLWithPath: entry.path)
             guard offsets[fileURL] != nil else { continue }
             fileModels[fileURL] = entry.model
+            fileEfforts[fileURL] = entry.effort
             fileProjects[fileURL] = entry.project.flatMap { projects.project(for: $0) }
             fileCumulative[fileURL] = entry.cumulative
             if entry.subagent == true { fileSubagents.insert(fileURL) }
@@ -752,6 +770,7 @@ final class CodexAdapter: SourceAdapter {
         UsageStateSnapshot.CodexResume(
             fileModels: Set(fileModels.keys).union(fileProjects.keys)
                 .union(fileCumulative.keys).union(fileReplay.keys).union(fileSubagents)
+                .union(fileEfforts.keys)
                 .map { url in
                     UsageStateSnapshot.FileModel(
                         path: url.path,
@@ -763,7 +782,8 @@ final class CodexAdapter: SourceAdapter {
                             else { return nil }
                             return through
                         }(),
-                        subagent: fileSubagents.contains(url) ? true : nil
+                        subagent: fileSubagents.contains(url) ? true : nil,
+                        effort: fileEfforts[url]
                     )
                 },
             rateLimitWindows: published.load().windows,

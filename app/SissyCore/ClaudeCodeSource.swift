@@ -528,7 +528,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
             cacheReadTokens: cacheRead,
             cacheCreationTokens: cacheCreation,
             cost: cost,
-            delegated: delegated
+            delegated: delegated,
+            effort: obj["effort"] as? String
         )
     }
 
@@ -633,6 +634,10 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// whole to the later one. Both days are right about what was spent in
     /// them, and the earlier one may already be archived by the time the
     /// later copy lands — a day the tail has closed is not one it reopens.
+    ///
+    /// It names no effort, and that is what keeps the effort count in turns: a
+    /// copy is the turn already counted, so only the first sighting of a
+    /// request id carries the word the line was written with.
     private func streamedRemainder(
         model: String, project: String?, at timestamp: Date, outputTokens: Int, delegated: Bool
     ) -> UsageEvent {

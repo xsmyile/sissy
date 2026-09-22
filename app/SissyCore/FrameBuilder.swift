@@ -402,6 +402,9 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     /// slices to draw the day, and a slice that carried a pre-summed duration
     /// could not be unioned with another's.
     let activity: AgentActivityDay
+    /// How many of today's turns ran at each effort. `.none` where the format
+    /// names none, which reads the same as a provider that has spent nothing.
+    let effort: EffortCounts
 
     var windows: [UsageWindow] { signals.windows }
     var plan: String? { signals.plan }
@@ -414,13 +417,15 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     init(
         id: String, tokens: Int, cost: Decimal, signals: ProviderSignals,
         projects: [ProjectTotals] = [], models: [ModelTotals] = [],
-        agents: AgentCounts = .none, activity: AgentActivityDay = .none
+        agents: AgentCounts = .none, activity: AgentActivityDay = .none,
+        effort: EffortCounts = .none
     ) {
         self.id = id
         self.tokens = tokens
         self.cost = cost
         self.agents = agents
         self.activity = activity
+        self.effort = effort
         var ordered = signals
         ordered.windows.sort { ($0.minutes, $0.scope ?? "") < ($1.minutes, $1.scope ?? "") }
         if ordered.plan == nil { ordered.planTier = nil }
@@ -439,14 +444,16 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         account: ProviderAccount? = nil,
         limitsState: ProviderLimitsState = .quiet, limitsObservedAt: Date? = nil,
         agents: AgentCounts = .none,
-        activity: AgentActivityDay = .none
+        activity: AgentActivityDay = .none,
+        effort: EffortCounts = .none
     ) {
         self.init(
             id: id, tokens: tokens, cost: cost,
             signals: ProviderSignals(
                 windows: windows, plan: plan, planTier: planTier, account: account,
                 credits: credits, limitsState: limitsState, limitsObservedAt: limitsObservedAt),
-            projects: projects, models: models, agents: agents, activity: activity)
+            projects: projects, models: models, agents: agents, activity: activity,
+            effort: effort)
     }
 }
 

@@ -36,6 +36,7 @@ json.dumps
 launchd
 notclaude.ai
 objectWillChange
+perTurnEffort
 repositoryDiscussionComments
 restrictedContributionsCount
 sizeThatFits

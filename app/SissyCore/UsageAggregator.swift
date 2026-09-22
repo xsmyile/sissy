@@ -142,7 +142,8 @@ actor UsageAggregator {
                 projects: p.currentProjects(),
                 models: p.currentModels(),
                 agents: p.currentAgents(),
-                activity: p.currentActivity()
+                activity: p.currentActivity(),
+                effort: p.currentEffort()
             )
         }
         return FrameBuilder.sortProviders(raw)
