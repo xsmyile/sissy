@@ -399,9 +399,10 @@ struct AgentMemoryChart: View {
     static let plotHeight: CGFloat = 44
     private static let tickHeight: CGFloat = 4
     private static let axisSize: CGFloat = 9.5
-    /// Opacity of the accent for each standing band, dearest first; the list
-    /// shows five rows, so five steps.
-    private static let bandOpacities: [Double] = [1, 0.74, 0.54, 0.38, 0.26]
+    /// Opacity of the accent for each standing band, dearest first: one step
+    /// per row the list can draw without folding, which is
+    /// `processRowLimit` — six when exactly six agents run.
+    static let bandOpacities: [Double] = [1, 0.78, 0.6, 0.45, 0.33, 0.24]
     private static let restOpacity: Double = 0.2
     private static let cursorOpacity: Double = 0.5
     private static let secondsPerMinute: Double = 60
