@@ -315,7 +315,7 @@ final class UsageEngineHost {
                 guard let self else { return }
                 Task { [weak self] in
                     let outcome = await engine.linkClaudeWebSession(session)
-                    guard let self, let window = loginWindow else { return }
+                    guard let self, loginWindow === window else { return }
                     switch outcome {
                     case .success(let choice):
                         guard let choice else { return complete(window) }
@@ -398,7 +398,7 @@ final class UsageEngineHost {
                 guard let self else { return }
                 Task { [weak self] in
                     let outcome = await engine.linkCodexAccount(code: code, flow: flow)
-                    guard let self, let window = loginWindow else { return }
+                    guard let self, loginWindow === window else { return }
                     switch outcome {
                     case .success(let choice):
                         guard let choice else { return complete(window) }
