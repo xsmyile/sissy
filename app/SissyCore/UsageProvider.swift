@@ -75,6 +75,11 @@ protocol UsageProvider: AnyObject, SourceSignals {
     /// the same terms as the counts above.
     nonisolated func currentActivity() -> AgentActivityDay
 
+    /// How many of today's turns ran at each effort, as of this provider's
+    /// last emit. `.none` for a provider whose format names none, on the same
+    /// terms as the counts above.
+    nonisolated func currentEffort() -> EffortCounts
+
     /// Re-reads whatever this provider keeps out of band — the files it reads
     /// for a plan and an account, which no log line carries. What a user
     /// pressing refresh on this provider reaches; a provider with nothing out
@@ -100,4 +105,5 @@ extension UsageProvider {
     nonisolated func currentModels() -> [ModelTotals] { [] }
     nonisolated func currentAgents() -> AgentCounts { .none }
     nonisolated func currentActivity() -> AgentActivityDay { .none }
+    nonisolated func currentEffort() -> EffortCounts { .none }
 }

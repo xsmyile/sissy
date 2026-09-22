@@ -24,10 +24,21 @@ struct UsageEvent: Sendable, Equatable {
     /// the rollout. A second pass to learn it would parse the line twice, which
     /// is the economy `AgentActivityEvent` exists to keep.
     let delegated: Bool
+    /// Which effort this turn ran at, as the vendor spells it, and nil for a
+    /// line that names none.
+    ///
+    /// **Nil also means "not a new turn"**, which is the whole of why it is
+    /// here rather than counted off the line: Claude Code rewrites an
+    /// assistant line while the answer streams, and each copy is billed for
+    /// the output it added. The first sighting of a turn carries the effort
+    /// and every copy after it carries nothing, so a count of turns per effort
+    /// counts each turn once without a ledger of its own.
+    let effort: String?
 
     init(
         timestamp: Date, model: String, project: String?, inputTokens: Int, outputTokens: Int,
-        cacheReadTokens: Int, cacheCreationTokens: Int, cost: Decimal, delegated: Bool = false
+        cacheReadTokens: Int, cacheCreationTokens: Int, cost: Decimal, delegated: Bool = false,
+        effort: String? = nil
     ) {
         self.timestamp = timestamp
         self.model = model
@@ -38,6 +49,7 @@ struct UsageEvent: Sendable, Equatable {
         self.cacheCreationTokens = cacheCreationTokens
         self.cost = cost
         self.delegated = delegated
+        self.effort = effort
     }
 }
 
@@ -241,6 +253,14 @@ actor LocalUsageProvider: UsageProvider {
     /// belonging to the provider's day and to no model, project or count — and
     /// fed by the same `ingest` so no day can exist in one and not the others.
     private var dailyActivity: [Date: AgentActivityDay] = [:]
+    /// The same days again, counted a third way: how many turns each ran at
+    /// each effort.
+    ///
+    /// A fifth map for the reason there is a third and a fourth — it is a
+    /// fifth grain, belonging to the provider's day and to no model, project,
+    /// count or minute — and fed by the same `ingest` so no day can exist in
+    /// one and not the others.
+    private var dailyEffort: [Date: EffortCounts] = [:]
     /// Days whose archive file is behind what is in memory.
     private var historyDirtyDays: Set<Date> = []
     /// Days this process must not write, because it cannot vouch for them: a
@@ -272,6 +292,9 @@ actor LocalUsageProvider: UsageProvider {
     /// for the same reason: the aggregator reads it while this provider still
     /// holds its own actor.
     private let publishedActivity = LockedValue<AgentActivityDay>(.none)
+    /// Today's effort split, republished on every emit beside the counters and
+    /// read the same way.
+    private let publishedEffort = LockedValue<EffortCounts>(.none)
     private let publishedUsage = LockedValue(ProviderSignals())
     private var lastPublishedSignals: ProviderSignals?
     private var pollTask: Task<Void, Never>?
@@ -682,6 +705,7 @@ actor LocalUsageProvider: UsageProvider {
         publishedModels.store(modelTotals(on: todayKey))
         publishedAgents.store(dailyAgentCounts[todayKey] ?? .none)
         publishedActivity.store(dailyActivity[todayKey] ?? .none)
+        publishedEffort.store(dailyEffort[todayKey] ?? .none)
         return dailyTotals[todayKey] ?? DayTotals(totalTokens: 0, totalCost: 0)
     }
 
@@ -694,6 +718,8 @@ actor LocalUsageProvider: UsageProvider {
     nonisolated func currentAgents() -> AgentCounts { publishedAgents.load() }
 
     nonisolated func currentActivity() -> AgentActivityDay { publishedActivity.load() }
+
+    nonisolated func currentEffort() -> EffortCounts { publishedEffort.load() }
 
     /// One day's rows folded down to a total per project. A row naming no
     /// project is left out rather than grouped under a made-up one: the panel
@@ -879,6 +905,7 @@ actor LocalUsageProvider: UsageProvider {
         dailyModelTotals[key] = byRow
         dailyActivity[key, default: .none].record(
             minute: AgentActivityDay.minute(of: event.timestamp), delegated: event.delegated)
+        if let effort = event.effort { dailyEffort[key, default: .none].record(effort) }
         guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
         historyDirtyDays.insert(key)
     }
@@ -915,6 +942,7 @@ actor LocalUsageProvider: UsageProvider {
         dailyModelTotals = dailyModelTotals.filter { $0.key >= cutoff }
         dailyAgentCounts = dailyAgentCounts.filter { $0.key >= cutoff }
         dailyActivity = dailyActivity.filter { $0.key >= cutoff }
+        dailyEffort = dailyEffort.filter { $0.key >= cutoff }
         historySuppressedDays = historySuppressedDays.filter { $0 >= cutoff }
         // Evict dedup keys for days that have aged out so the set's memory
         // footprint stays bounded across long-running sessions.
@@ -1178,6 +1206,10 @@ actor LocalUsageProvider: UsageProvider {
             guard let dayDate = dayFmt.date(from: row.day) else { continue }
             dailyActivity[cal.startOfDay(for: dayDate)] = row.activity
         }
+        for row in snapshot.historyResume?.dailyEffort ?? [] {
+            guard let dayDate = dayFmt.date(from: row.day) else { continue }
+            dailyEffort[cal.startOfDay(for: dayDate)] = row.effort
+        }
         var restored: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
         for row in snapshot.historyResume?.dailyModelTotals ?? [] {
             guard let dayDate = dayFmt.date(from: row.day) else { continue }
@@ -1315,12 +1347,14 @@ actor LocalUsageProvider: UsageProvider {
             let totals = dailyModelTotals[day] ?? [:]
             let counts = dailyAgentCounts[day] ?? .none
             let activity = dailyActivity[day] ?? .none
+            let effort = dailyEffort[day] ?? .none
             // A day can be counted without being billed: Codex writes a
             // rollout's `session_meta` when it opens, so a session somebody
             // started and never asked anything is one session and no tokens.
             // Skipped on the token rows alone, such a day left the dirty set
             // here and was never retried, so its count aged out unwritten.
-            guard !totals.isEmpty || !counts.isEmpty || !activity.isEmpty else { continue }
+            guard !totals.isEmpty || !counts.isEmpty || !activity.isEmpty || !effort.isEmpty
+            else { continue }
             if refusesUnpricedDays, Self.holdsAnUnpricedModel(totals) {
                 sissyLog(
                     "sissy: \(id) left \(dayFmt.string(from: day)) out of the archive — it holds "
@@ -1334,7 +1368,8 @@ actor LocalUsageProvider: UsageProvider {
                 updatedAt: now,
                 totals: totals,
                 agents: counts,
-                activity: activity
+                activity: activity,
+                effort: effort
             )
             switch UsageHistoryStore.stored(provider: id, day: record.day, in: historyRoot) {
             case .unreadable:
@@ -1344,7 +1379,8 @@ actor LocalUsageProvider: UsageProvider {
                 .isCoveredBy(record):
                 continue
             case .day(let onDisk):
-                record = record.merging(counts: onDisk.agents, activity: onDisk.activity)
+                record = record.merging(
+                    counts: onDisk.agents, activity: onDisk.activity, effort: onDisk.effort)
             case .absent:
                 break
             }
@@ -1452,6 +1488,10 @@ actor LocalUsageProvider: UsageProvider {
             return UsageStateSnapshot.DailyActivity(
                 day: dayFmt.string(from: day), activity: shape)
         }
+        let effort: [UsageStateSnapshot.DailyEffort] = dailyEffort.compactMap { day, counts in
+            guard !counts.isEmpty else { return nil }
+            return UsageStateSnapshot.DailyEffort(day: dayFmt.string(from: day), effort: counts)
+        }
         let retainedCutoff = cal.startOfDay(for: retainWindowStart)
         let retainedKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap { key, entry in
             guard entry.day >= retainedCutoff else { return nil }
@@ -1471,11 +1511,13 @@ actor LocalUsageProvider: UsageProvider {
             dailyTotals: daily,
             dedupKeysToday: retainedKeys,
             historyResume: modelTotals.isEmpty && agentCounts.isEmpty && activity.isEmpty
+                && effort.isEmpty
                 ? nil
                 : UsageStateSnapshot.HistoryResume(
                     dailyModelTotals: modelTotals,
                     dailyAgentCounts: agentCounts.isEmpty ? nil : agentCounts,
-                    dailyActivity: activity.isEmpty ? nil : activity),
+                    dailyActivity: activity.isEmpty ? nil : activity,
+                    dailyEffort: effort.isEmpty ? nil : effort),
             codexResume: adapter.resumeState(),
             projectCheckouts: nil
         )

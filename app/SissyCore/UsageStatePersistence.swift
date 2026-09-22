@@ -113,6 +113,13 @@ struct UsageStateSnapshot: Codable, Equatable {
         /// whole day. It costs about 250 bytes a day, the bitmap being base64
         /// with its trailing empty bytes dropped.
         var dailyActivity: [DailyActivity]? = nil
+        /// Turns per effort per day, absent in a snapshot written before it.
+        ///
+        /// Persisted for the reason the counts are: the offsets resume at EOF,
+        /// so the lines an effort was read from are lines nothing will read
+        /// again, and a relaunch would otherwise restart the day at zero and
+        /// write that partial count over a whole day.
+        var dailyEffort: [DailyEffort]? = nil
     }
 
     /// One provider's agent counters for one archived day.
@@ -126,6 +133,12 @@ struct UsageStateSnapshot: Codable, Equatable {
     struct DailyActivity: Codable, Equatable {
         var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
         var activity: AgentActivityDay
+    }
+
+    /// One provider's turns per effort for one archived day.
+    struct DailyEffort: Codable, Equatable {
+        var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
+        var effort: EffortCounts
     }
 
     /// Grouped so the absence above is one question rather than three, and so
@@ -195,6 +208,15 @@ struct UsageStateSnapshot: Codable, Equatable {
         /// snapshot from before the field — which reads as a session somebody
         /// started, the answer for all but a fifth of them.
         var subagent: Bool?
+        /// The effort the rollout's last `turn_context` named, absent in a
+        /// snapshot written before the field and for a rollout whose
+        /// `turn_context` carried none. Per file and persisted for the reason
+        /// the model is, and it matters more: measured 2026-09-22 over 41
+        /// rollouts, Codex writes about 1.8 `turn_context` lines per file
+        /// against many `token_count` events, so a reader that resumed at EOF
+        /// with no memory of it would name no effort until the user next
+        /// changed model or effort.
+        var effort: String?
     }
 
     /// Codex's `total_token_usage`, the running total it reports beside every
