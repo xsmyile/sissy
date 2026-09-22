@@ -32,6 +32,15 @@ struct AgentProcess: Sendable, Equatable, Identifiable {
     /// directory no `.git` was ever read from — a CLI's own scratch area is
     /// not a project, and naming it after its path would be inventing one.
     var project: String?
+    /// CPU the process itself has used since it started, in seconds.
+    var cpuTime: TimeInterval = 0
+    /// Energy the kernel has billed to the process since it started, in
+    /// nanojoules.
+    var energy: UInt64 = 0
+    /// How many cores' worth of CPU the process used since the sweep before,
+    /// which the monitor sets. Nil on the sweep that first sees it: one
+    /// reading of a counter is a total, not a rate.
+    var cpuLoad: Double?
 }
 
 /// What the agents on this Mac are holding right now.
@@ -107,7 +116,9 @@ enum AgentProcessReader {
         var agents: [AgentProcess] = []
         for process in processes {
             guard let provider = classify(process) else { continue }
-            let own = footprint(process.pid, cache: &footprints)
+            let counters = usage(process.pid)
+            let own = counters?.ri_phys_footprint ?? 0
+            footprints[process.pid] = own
             agents.append(
                 AgentProcess(
                     pid: process.pid,
@@ -117,7 +128,9 @@ enum AgentProcessReader {
                         of: process.pid, childrenOf: childrenOf, cache: &footprints),
                     startedAt: process.startedAt,
                     version: version(of: process),
-                    directory: workingDirectory(of: process.pid)))
+                    directory: workingDirectory(of: process.pid),
+                    cpuTime: counters.map { seconds(machTicks: $0.ri_user_time + $0.ri_system_time) } ?? 0,
+                    energy: counters?.ri_energy_nj ?? 0))
         }
         return AgentProcessReading(
             observedAt: now, agents: agents.sorted { $0.footprint > $1.footprint })
@@ -191,16 +204,44 @@ enum AgentProcessReader {
     /// started from the same shell.
     private static func footprint(_ pid: pid_t, cache: inout [pid_t: UInt64]) -> UInt64 {
         if let known = cache[pid] { return known }
-        var info = rusage_info_v4()
-        let status = withUnsafeMutablePointer(to: &info) { pointer in
-            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
-                proc_pid_rusage(pid, RUSAGE_INFO_V4, $0)
-            }
-        }
-        let bytes = status == 0 ? info.ri_phys_footprint : 0
+        let bytes = usage(pid)?.ri_phys_footprint ?? 0
         cache[pid] = bytes
         return bytes
     }
+
+    /// Everything the kernel accounts to one process, nil where it refused.
+    ///
+    /// The sixth revision rather than the fourth the footprint alone needs,
+    /// because it is the first to carry `ri_energy_nj`, and it costs the same
+    /// one syscall. It asks for no permission for a process of this user,
+    /// measured 2026-09-22 across eight agents.
+    private static func usage(_ pid: pid_t) -> rusage_info_v6? {
+        var info = rusage_info_v6()
+        let status = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+                proc_pid_rusage(pid, RUSAGE_INFO_V6, $0)
+            }
+        }
+        return status == 0 ? info : nil
+    }
+
+    /// The kernel's CPU times in seconds.
+    ///
+    /// They are mach ticks, not nanoseconds, whatever the header's silence
+    /// suggests: measured 2026-09-22 on Apple silicon, a timebase of 125/3,
+    /// the raw figure read as nanoseconds said 1.50 s for a process `ps` put
+    /// at 62.32 s, and converted through the timebase it said 62.32 s.
+    static func seconds(machTicks ticks: UInt64) -> TimeInterval {
+        Double(ticks) * timebaseRatio / nanosecondsPerSecond
+    }
+
+    private static let nanosecondsPerSecond: Double = 1_000_000_000
+
+    private static let timebaseRatio: Double = {
+        var base = mach_timebase_info_data_t()
+        guard mach_timebase_info(&base) == KERN_SUCCESS, base.denom > 0 else { return 1 }
+        return Double(base.numer) / Double(base.denom)
+    }()
 
     /// What the kernel says about one process, before anything is made of it.
     struct KernelProcess: Sendable, Equatable {

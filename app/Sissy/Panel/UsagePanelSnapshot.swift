@@ -924,6 +924,12 @@ struct UsagePanelSnapshot: Equatable {
             /// One row per running process, dearest first, which is what
             /// answers "two gigabytes of what".
             let processes: [Process]
+            /// CPU and energy the agents themselves used since `countedSince`,
+            /// exited ones included. Nil `countedSince` is a reading with no
+            /// counters, which the page leaves unsaid rather than printing zero.
+            var cpuTime: TimeInterval = 0
+            var energy: UInt64 = 0
+            var countedSince: Date?
 
             /// Five agents and the fold, the rule the project list keeps at
             /// three: a list at or under the limit is drawn whole, because a
@@ -959,6 +965,9 @@ struct UsagePanelSnapshot: Equatable {
             let directory: String?
             let footprint: UInt64
             let startedAt: Date
+            /// Cores' worth of CPU since the sweep before, nil on the sweep
+            /// that first saw the process.
+            var cpuLoad: Double?
         }
 
         /// What the Overview's agents door says. A Mac that has never measured
@@ -1060,8 +1069,11 @@ struct UsagePanelSnapshot: Equatable {
                         AgentsBlock.Process(
                             id: $0.pid, provider: $0.provider, project: $0.project,
                             directory: $0.directory, footprint: $0.footprint,
-                            startedAt: $0.startedAt)
-                    })
+                            startedAt: $0.startedAt, cpuLoad: $0.cpuLoad)
+                    },
+                    cpuTime: memory.cpuTime,
+                    energy: memory.energy,
+                    countedSince: memory.countedSince)
             },
             counted: counted,
             periods: [.today] + UsagePeriod.archived.filter { counted[$0] != nil })

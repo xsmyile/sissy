@@ -49,6 +49,10 @@ struct PanelStats: View {
     private static let stripHeight: CGFloat = 8
     private static let stripSpacing: CGFloat = 5
     private static let stripCorner: CGFloat = 2
+    /// Where an agent's load is worth the row's one colour: most of a core,
+    /// held for a whole sweep, which a session waiting on its user never
+    /// spends. The figure is written whatever it is; only the colour waits.
+    private static let busyLoad: Double = 0.8
 
     /// The chosen window, falling back to today for a period the archive has
     /// stopped answering for while the page was open.
@@ -102,6 +106,19 @@ struct PanelStats: View {
             .font(.system(size: Self.captionSize))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            if let countedSince = live.countedSince {
+                Text(
+                    UsageFormat.agentsLoad(
+                        cpu: live.cpuTime, energy: live.energy, since: countedSince)
+                )
+                .font(.system(size: Self.captionSize))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .help(
+                    "What the agents themselves used since Sissy started counting, "
+                        + "including agents that have since exited. "
+                        + "What they started, a build or a dev server, is not in it.")
+            }
             processes(live)
         }
     }
@@ -164,6 +181,16 @@ struct PanelStats: View {
                 .truncationMode(.middle)
                 .foregroundStyle(row.project == nil ? Color.secondary : .primary)
             Spacer(minLength: 8)
+            if let load = row.cpuLoad {
+                Text(UsageFormat.cpuLoad(load) + " ·")
+                    .font(.system(size: Self.rowSize))
+                    .monospacedDigit()
+                    .foregroundStyle(
+                        load >= Self.busyLoad ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)
+                    )
+                    .lineLimit(1)
+                    .help("CPU since the last sweep, as a share of one core")
+            }
             Text(
                 UsageFormat.bytes(row.footprint) + " · "
                     + UsageFormat.agentUptime(since: row.startedAt)

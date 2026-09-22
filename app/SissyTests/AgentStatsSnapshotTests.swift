@@ -211,6 +211,21 @@ final class AgentFormatTests: XCTestCase {
             UsageFormat.agentCount(0, singular: "session", plural: "sessions"), "0 sessions")
     }
 
+    func testTheLoadIsWordedTheWayPsReadsIt() {
+        XCTAssertEqual(UsageFormat.cpuDuration(42), "42s")
+        XCTAssertEqual(UsageFormat.cpuDuration(1_129), "18m 49s")
+        XCTAssertEqual(UsageFormat.cpuDuration(4_380), "1h 13m")
+        XCTAssertEqual(UsageFormat.cpuLoad(0.964), "96%")
+        XCTAssertEqual(UsageFormat.cpuLoad(2.5), "250%")
+    }
+
+    func testTheCountersCaptionSaysWhatAndSince() {
+        let since = Date()
+        XCTAssertEqual(
+            UsageFormat.agentsLoad(cpu: 1_129, energy: 1_004_600_000_000, since: since),
+            "CPU 18m 49s · 0.28 Wh " + UsageFormat.samplesSince(since))
+    }
+
     /// The fold carries what it hides, so the list still reaches its total.
     func testTheFoldSaysWhatItHolds() {
         XCTAssertEqual(UsageFormat.agentsFolded(3, footprint: 829_000_000), "3 more · 829 MB")
