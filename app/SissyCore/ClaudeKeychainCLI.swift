@@ -37,7 +37,7 @@ enum ClaudeKeychainCLI {
     /// Service name Sissy files its own copy of an account's credential under.
     /// Its keychain account is the Claude account's uuid, so one item is one
     /// account for as long as that account exists.
-    static let sissyAccountService = "com.radonforge.sissy.claude-account"
+    static let sissyAccountService = SissyPaths.keychainService("claude-account")
 
     private static let toolPath = "/usr/bin/security"
     /// `security` answers in milliseconds and has no dialog to wait behind

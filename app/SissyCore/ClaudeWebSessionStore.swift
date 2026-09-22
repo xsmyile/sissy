@@ -26,7 +26,7 @@ import Security
 enum ClaudeWebSessionStore {
     /// Service the item is filed under. A literal rather than a provider id:
     /// renaming a provider must not orphan a credential the user imported.
-    static let keychainService = "com.radonforge.sissy.claude-web"
+    static let keychainService = SissyPaths.keychainService("claude-web")
     /// Where a session waits until Sissy knows whose it is.
     ///
     /// Sessions are filed under the Anthropic account uuid they belong to,

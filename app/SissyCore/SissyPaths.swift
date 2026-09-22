@@ -22,6 +22,27 @@ enum SissyPaths {
     /// all live under a single isolated tree.
     static var supportDirName: String { isDev ? "Sissy-Dev" : "Sissy" }
 
+    /// Namespace every keychain item Sissy owns is filed under: the release
+    /// bundle id, or the Debug one.
+    ///
+    /// Split for the reason the support directory is. What names a credential
+    /// — which account a session belongs to, which organisation it is read
+    /// for — lives in that directory, so two builds sharing one set of items
+    /// and not the index beside it drew every item the other build linked as
+    /// a bare uuid, measured 2026-09-22 on a Mac running both. The other
+    /// build's item also answers a scheduled read with
+    /// `errSecInteractionNotAllowed`, being another signature's, so the row
+    /// carried no reading either.
+    private static var keychainNamespace: String {
+        isDev ? "com.radonforge.sissy.dev" : "com.radonforge.sissy"
+    }
+
+    /// The keychain service for one kind of item Sissy owns, in this build's
+    /// namespace.
+    static func keychainService(_ item: String) -> String {
+        "\(keychainNamespace).\(item)"
+    }
+
     /// True when a test runner launched this process.
     ///
     /// The unit tests are hosted inside `Sissy.app`, so the bundle id they run

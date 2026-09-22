@@ -127,7 +127,7 @@ struct ForgeConnectionIndex: Sendable {
 enum ForgeTokenStore {
     /// A literal rather than anything derived from a forge id, so renaming a
     /// kind cannot orphan a token the user connected.
-    static let keychainService = "com.radonforge.sissy.forge-token"
+    static let keychainService = SissyPaths.keychainService("forge-token")
 
     /// Files a token under a connection, replacing whatever was there.
     ///
