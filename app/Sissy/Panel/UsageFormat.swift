@@ -1371,6 +1371,38 @@ extension UsageFormat {
         "\(bytes(tree)) with what they started"
     }
 
+    /// What the agents themselves have used since Sissy started counting:
+    /// `CPU 18m 49s · 0.28 Wh since 13:10`.
+    ///
+    /// Watt-hours rather than joules because that is the unit a battery is
+    /// read in; the figure is small, measured 2026-09-22 at 0.28 Wh for eight
+    /// agents over four hours, and saying so is the reading.
+    static func agentsLoad(cpu: TimeInterval, energy nanojoules: UInt64, since: Date) -> String {
+        let wattHours = Double(nanojoules) / nanojoulesPerWattHour
+        return "CPU \(cpuDuration(cpu)) · " + String(format: "%.2f Wh ", wattHours)
+            + samplesSince(since)
+    }
+
+    /// CPU time at the grain `ps` reads it: seconds under a minute, minutes and
+    /// seconds under an hour, hours and minutes above.
+    static func cpuDuration(_ seconds: TimeInterval) -> String {
+        let whole = Int(max(seconds, 0))
+        if whole < secondsPerMinute { return "\(whole)s" }
+        let minutes = whole / secondsPerMinute
+        if minutes < minutesPerHour { return "\(minutes)m \(whole % secondsPerMinute)s" }
+        return "\(minutes / minutesPerHour)h \(minutes % minutesPerHour)m"
+    }
+
+    /// One agent's share of the CPU since the sweep before, as a percentage of
+    /// one core, which is how Activity Monitor words it and why it can pass
+    /// 100%.
+    static func cpuLoad(_ cores: Double) -> String {
+        "\(Int((cores * percent).rounded()))%"
+    }
+
+    private static let nanojoulesPerWattHour: Double = 3_600_000_000_000
+    private static let percent: Double = 100
+
     /// The fold under the agent rows, carrying what the folded rows hold so
     /// the list still adds up to the figure at the top of its section.
     static func agentsFolded(_ count: Int, footprint: UInt64) -> String {

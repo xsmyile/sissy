@@ -166,6 +166,83 @@ final class AgentProcessMonitorTests: XCTestCase {
         XCTAssertNil(monitor.currentMemory())
     }
 
+    /// A process's counters run from its birth, so an agent already running
+    /// at the first sweep brings none of its past in: the sums start when
+    /// Sissy does, and only what each sweep adds is counted.
+    func testTheSumsCountOnlyWhatEachSweepAdds() async {
+        let started = Date(timeIntervalSince1970: 1_000)
+        let cpu = Counter([100, 130, 175])
+        let monitor = AgentProcessMonitor { now in
+            let seconds = cpu.next()
+            return AgentProcessReading(
+                observedAt: now,
+                agents: [
+                    AgentProcess(
+                        pid: 7, provider: ProviderID.claudeCode, footprint: 1, treeFootprint: 1,
+                        startedAt: started, version: nil, directory: nil,
+                        cpuTime: TimeInterval(seconds), energy: seconds * 1_000)
+                ])
+        }
+        await monitor.sampleOnce {}
+        XCTAssertEqual(monitor.currentMemory()?.cpuTime, 0)
+        XCTAssertNil(monitor.currentMemory()?.current.agents.first?.cpuLoad)
+        await monitor.sampleOnce {}
+        await monitor.sampleOnce {}
+        XCTAssertEqual(monitor.currentMemory()?.cpuTime, 75)
+        XCTAssertEqual(monitor.currentMemory()?.energy, 75_000)
+        XCTAssertNotNil(monitor.currentMemory()?.current.agents.first?.cpuLoad)
+    }
+
+    /// An agent that started after the sweep before was entirely inside the
+    /// stretch being counted, so all of it counts.
+    func testAnAgentStartedSinceTheLastSweepCountsWhole() async {
+        let sweeps = Counter()
+        let monitor = AgentProcessMonitor { now in
+            guard sweeps.next() > 1 else { return AgentProcessReading(observedAt: now, agents: []) }
+            return AgentProcessReading(
+                observedAt: now,
+                agents: [
+                    AgentProcess(
+                        pid: 9, provider: ProviderID.codex, footprint: 1, treeFootprint: 1,
+                        startedAt: Date(), version: nil, directory: nil, cpuTime: 12,
+                        energy: 500)
+                ])
+        }
+        await monitor.sampleOnce {}
+        await monitor.sampleOnce {}
+        XCTAssertEqual(monitor.currentMemory()?.cpuTime, 12)
+        XCTAssertEqual(monitor.currentMemory()?.energy, 500)
+    }
+
+    /// A pid the kernel hands to a new process is a new agent, not the old
+    /// one's counters going backwards.
+    func testAReusedPidDoesNotInheritItsPredecessor() async {
+        let sweeps = Counter()
+        let monitor = AgentProcessMonitor { now in
+            let sweep = sweeps.next()
+            return AgentProcessReading(
+                observedAt: now,
+                agents: [
+                    AgentProcess(
+                        pid: 4, provider: ProviderID.claudeCode, footprint: 1, treeFootprint: 1,
+                        startedAt: sweep == 1 ? Date(timeIntervalSince1970: 1) : Date(),
+                        version: nil, directory: nil, cpuTime: sweep == 1 ? 500 : 3)
+                ])
+        }
+        await monitor.sampleOnce {}
+        await monitor.sampleOnce {}
+        XCTAssertEqual(monitor.currentMemory()?.cpuTime, 3)
+        XCTAssertNil(monitor.currentMemory()?.current.agents.first?.cpuLoad)
+    }
+
+    /// The kernel's CPU times are mach ticks, and the raw uptime clock is the
+    /// same ticks, so converting it must land on the nanosecond clock.
+    func testMachTicksConvertToSeconds() {
+        let ticks = mach_absolute_time()
+        let uptime = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1_000_000_000
+        XCTAssertEqual(AgentProcessReader.seconds(machTicks: ticks), uptime, accuracy: 0.05)
+    }
+
     /// The header says a recount is running while it runs, and dates the
     /// count once it has landed.
     func testTheHeaderSaysCountingUntilTheCountLands() {

@@ -22,6 +22,23 @@ struct AgentMemoryReading: Sendable, Equatable {
     /// The highest the processes have been seen at since watching began, which
     /// is the one figure on the block that a single quiet moment cannot undo.
     var peak: UInt64 { samples.max() ?? current.footprint }
+    /// CPU the agents themselves used since `countedSince`, in seconds,
+    /// including agents that have since exited.
+    ///
+    /// **Since Sissy started watching, never since each process started.**
+    /// The kernel's counters run from a process's birth, so a session left
+    /// open for three days would carry three days into a figure read beside
+    /// an hour's sparkline. The monitor sums what each sweep adds instead,
+    /// which is the rule the series already keeps: it starts when Sissy does
+    /// and says so.
+    var cpuTime: TimeInterval = 0
+    /// Energy billed to the agents themselves over the same stretch, in
+    /// nanojoules.
+    var energy: UInt64 = 0
+    /// When the counting began: the first sweep, which unlike `since` does not
+    /// move once the series has rolled, because nothing was dropped from the
+    /// sums. Nil for a reading built by hand with no counters.
+    var countedSince: Date?
 }
 
 /// Samples what the CLIs on this Mac are holding, on its own clock.
@@ -58,6 +75,13 @@ actor AgentProcessMonitor {
     private var samples: [UInt64] = []
     private var firstSampleAt: Date?
     private var lastFrameAt: Date?
+    /// Each agent's counters at the sweep before, so the next one can take
+    /// what it added. Keyed by pid and checked against the start time, so a
+    /// pid the kernel hands to a new process does not inherit the old one's.
+    private var counters: [pid_t: Counters] = [:]
+    private var lastSweepAt: Date?
+    private var cpuTotal: TimeInterval = 0
+    private var energyTotal: UInt64 = 0
     private var pollTask: Task<Void, Never>?
     /// Injected by a test, so a round can be asserted without the kernel's own
     /// process table under it.
@@ -116,6 +140,10 @@ actor AgentProcessMonitor {
         samples = []
         firstSampleAt = nil
         lastFrameAt = nil
+        counters = [:]
+        lastSweepAt = nil
+        cpuTotal = 0
+        energyTotal = 0
         published.store(nil)
     }
 
@@ -125,6 +153,7 @@ actor AgentProcessMonitor {
         let now = Date()
         var reading = read(now)
         reading.attributeProjects(by: projects.project(for:))
+        accrue(&reading, at: now)
         let previous = published.load()
         samples.append(reading.footprint)
         if samples.count > Self.retainedSamples {
@@ -147,7 +176,10 @@ actor AgentProcessMonitor {
                 current: reading,
                 samples: samples,
                 interval: Self.sampleInterval.asTimeInterval,
-                since: since))
+                since: since,
+                cpuTime: cpuTotal,
+                energy: energyTotal,
+                countedSince: firstSampleAt))
         // The *first* sweep always earns a frame, empty or not: it is the
         // transition from having no reading to having one, which is the
         // difference between the panel drawing a dash and drawing "nothing
@@ -160,6 +192,41 @@ actor AgentProcessMonitor {
         }
         lastFrameAt = now
         await onRefresh()
+    }
+
+    private struct Counters {
+        let startedAt: Date
+        let cpuTime: TimeInterval
+        let energy: UInt64
+    }
+
+    /// Adds what each agent used since the sweep before to the running sums,
+    /// and sets its load.
+    ///
+    /// An agent seen for the first time adds nothing unless it started after
+    /// that sweep: one that was already running when Sissy first looked would
+    /// otherwise bring its whole life into a stretch that began just now. A
+    /// counter that went backwards adds nothing rather than wrapping.
+    private func accrue(_ reading: inout AgentProcessReading, at now: Date) {
+        let elapsed = lastSweepAt.map { now.timeIntervalSince($0) } ?? 0
+        for index in reading.agents.indices {
+            let agent = reading.agents[index]
+            if let prior = counters[agent.pid], prior.startedAt == agent.startedAt {
+                let cpu = max(agent.cpuTime - prior.cpuTime, 0)
+                cpuTotal += cpu
+                energyTotal += agent.energy >= prior.energy ? agent.energy - prior.energy : 0
+                if elapsed > 0 { reading.agents[index].cpuLoad = cpu / elapsed }
+            } else if let lastSweepAt, agent.startedAt >= lastSweepAt {
+                cpuTotal += agent.cpuTime
+                energyTotal += agent.energy
+            }
+        }
+        counters = Dictionary(
+            reading.agents.map {
+                ($0.pid, Counters(startedAt: $0.startedAt, cpuTime: $0.cpuTime, energy: $0.energy))
+            },
+            uniquingKeysWith: { first, _ in first })
+        lastSweepAt = now
     }
 }
 
