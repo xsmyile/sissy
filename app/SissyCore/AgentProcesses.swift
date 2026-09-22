@@ -41,6 +41,21 @@ struct AgentProcess: Sendable, Equatable, Identifiable {
     /// which the monitor sets. Nil on the sweep that first sees it: one
     /// reading of a counter is a total, not a rate.
     var cpuLoad: Double?
+
+    /// Who a process is across sweeps: its pid, and the start time that tells
+    /// it apart from a later process the kernel hands the same pid to.
+    struct Key: Hashable, Sendable {
+        let pid: pid_t
+        let startedAt: Date
+    }
+
+    var key: Key { Key(pid: pid, startedAt: startedAt) }
+}
+
+/// One agent at one sweep, as the per-agent series keeps it.
+struct AgentSample: Sendable, Equatable {
+    let footprint: UInt64
+    let cpuLoad: Double?
 }
 
 /// What the agents on this Mac are holding right now.

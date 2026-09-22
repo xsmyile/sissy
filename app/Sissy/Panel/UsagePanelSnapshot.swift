@@ -917,19 +917,19 @@ struct UsagePanelSnapshot: Equatable {
             let footprint: UInt64
             let treeFootprint: UInt64
             let peak: UInt64
-            /// Footprints oldest first, for the sparkline. Empty until a
-            /// second sample lands — one point is not a line.
-            let samples: [UInt64]
             let since: Date
             /// One row per running process, dearest first, which is what
             /// answers "two gigabytes of what".
-            let processes: [Process]
+            var processes: [Process]
             /// CPU and energy the agents themselves used since `countedSince`,
             /// exited ones included. Nil `countedSince` is a reading with no
             /// counters, which the page leaves unsaid rather than printing zero.
             var cpuTime: TimeInterval = 0
             var energy: UInt64 = 0
             var countedSince: Date?
+            /// The hour behind the headline, split by agent. Nil until a
+            /// second sample lands: one point is not a line.
+            var chart: MemoryChart?
 
             /// Five agents and the fold, the rule the project list keeps at
             /// three: a list at or under the limit is drawn whole, because a
@@ -968,6 +968,54 @@ struct UsagePanelSnapshot: Equatable {
             /// Cores' worth of CPU since the sweep before, nil on the sweep
             /// that first saw the process.
             var cpuLoad: Double?
+            /// Its load at each sample of the chart, nil where it was not
+            /// running, so its lane starts where it did.
+            var lane: [Double?] = []
+            /// Which band of the chart is this row's, nil for a row the list
+            /// folds, whose memory the chart draws in the band for the rest.
+            var band: Int?
+        }
+
+        /// What the agents held over the retained hour, one band per standing
+        /// row and one for everything else.
+        ///
+        /// **Bottom first, in the list's order**, so the band that sits on the
+        /// axis is the row at the top of the list, and a band's colour is the
+        /// row's lane. An agent that exits ends its band where it exited; what
+        /// it held before is still in the total and still under the top edge,
+        /// which is what keeps the chart the same shape the single line was.
+        struct MemoryChart: Equatable {
+            struct Band: Equatable {
+                /// The standing row this band is, nil for the rest.
+                let process: pid_t?
+                let values: [UInt64]
+            }
+
+            let bands: [Band]
+            let totals: [UInt64]
+            let since: Date
+            let interval: TimeInterval
+            /// Samples at which a standing agent first appears after the chart
+            /// began, which the chart marks along its axis.
+            let starts: [Int]
+
+            var peak: UInt64 { totals.max() ?? 0 }
+
+            func instant(_ index: Int) -> Date {
+                since.addingTimeInterval(Double(index) * interval)
+            }
+
+            /// The standing rows at one sample, dearest first, for the caption
+            /// that replaces the resting one under the pointer.
+            func leaders(at index: Int) -> [(process: pid_t, bytes: UInt64)] {
+                bands.compactMap { band in
+                    guard let process = band.process, index < band.values.count,
+                        band.values[index] > 0
+                    else { return nil }
+                    return (process, band.values[index])
+                }
+                .sorted { $0.bytes > $1.bytes }
+            }
         }
 
         /// What the Overview's agents door says. A Mac that has never measured
@@ -1063,7 +1111,6 @@ struct UsagePanelSnapshot: Equatable {
                     footprint: memory.current.footprint,
                     treeFootprint: memory.current.treeFootprint,
                     peak: memory.peak,
-                    samples: memory.samples.count > 1 ? memory.samples : [],
                     since: memory.since,
                     processes: memory.current.agents.map {
                         AgentsBlock.Process(
@@ -1073,7 +1120,8 @@ struct UsagePanelSnapshot: Equatable {
                     },
                     cpuTime: memory.cpuTime,
                     energy: memory.energy,
-                    countedSince: memory.countedSince)
+                    countedSince: memory.countedSince
+                ).charted(memory)
             },
             counted: counted,
             periods: [.today] + UsagePeriod.archived.filter { counted[$0] != nil })
@@ -2037,5 +2085,50 @@ struct UsagePanelSnapshot: Equatable {
         guard rate > 0 else { return nil }
         let untilEmpty = headroom / rate
         return untilEmpty >= remaining ? nil : observedAt.addingTimeInterval(untilEmpty)
+    }
+}
+
+extension UsagePanelSnapshot.AgentsBlock.Live {
+    /// This reading with its chart and its rows' lanes, from the per-agent
+    /// series behind it.
+    ///
+    /// Only where the series is aligned with the totals and holds a line's
+    /// worth of samples: a reading built without one keeps no chart, which
+    /// the page draws as no chart at all.
+    func charted(_ memory: AgentMemoryReading) -> Self {
+        let series = memory.perAgent
+        guard memory.samples.count > 1, series.count == memory.samples.count else { return self }
+        var out = self
+        let standing = standingProcesses
+        let keys = standing.map { AgentProcess.Key(pid: $0.id, startedAt: $0.startedAt) }
+        typealias Band = UsagePanelSnapshot.AgentsBlock.MemoryChart.Band
+        var bands = keys.enumerated().map { index, key in
+            Band(process: standing[index].id, values: series.map { $0[key]?.footprint ?? 0 })
+        }
+        let standingKeys = Set(keys)
+        bands.append(
+            Band(
+                process: nil,
+                values: series.map { sample in
+                    sample.filter { !standingKeys.contains($0.key) }.values.reduce(0) { $0 + $1.footprint }
+                }))
+        let starts = keys.compactMap { key in
+            series.firstIndex { $0[key] != nil }.flatMap { $0 > 0 ? $0 : nil }
+        }
+        out.chart = UsagePanelSnapshot.AgentsBlock.MemoryChart(
+            bands: bands,
+            totals: memory.samples,
+            since: memory.since,
+            interval: memory.interval,
+            starts: starts.sorted())
+        let bandOf = Dictionary(keys.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        out.processes = processes.map { row in
+            var row = row
+            let key = AgentProcess.Key(pid: row.id, startedAt: row.startedAt)
+            row.lane = series.map { sample in sample[key].map { $0.cpuLoad ?? 0 } }
+            row.band = bandOf[key]
+            return row
+        }
+        return out
     }
 }
