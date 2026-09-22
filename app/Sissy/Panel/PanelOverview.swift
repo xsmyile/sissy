@@ -38,21 +38,16 @@ struct PanelOverview: View {
     /// where they otherwise print an age about to change.
     let refreshingForge: Set<String>
     let refreshForge: (String) -> Void
-    /// Opens the stats page. The line it hangs off is the only way there, so
-    /// it is drawn on every frame rather than only when something is running.
+    /// Opens the stats page. The providers label it hangs off is the only way
+    /// there, so that label is drawn on every frame, rows or none.
     let openStats: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headline
 
-            if !snapshot.providers.isEmpty {
-                Divider()
-                providers
-            }
-
             Divider()
-            agents
+            providers
 
             if !snapshot.projects.isEmpty {
                 Divider()
@@ -69,46 +64,6 @@ struct PanelOverview: View {
         }
     }
 
-    // MARK: Agents
-
-    /// What the CLIs on this Mac are holding, and the way to the page behind
-    /// it.
-    ///
-    /// **Under the providers rather than under the projects**, which is where
-    /// the identity line sits and for the opposite reason. That one is about
-    /// the repositories and is quiet on an ordinary day, so it does not get to
-    /// push the day's spend down; this answers the same question the gauges above
-    /// it do — whether there is room to keep working — on the other axis that
-    /// stops work now. The two readings belong together. It costs the projects
-    /// one row's height.
-    ///
-    /// Drawn before the first sweep lands and on a Mac with nothing running,
-    /// because it is the only door to the page and a door that comes and goes
-    /// with the day is not one.
-    private var agents: some View {
-        Button(action: openStats) {
-            HStack(spacing: 6) {
-                Text(snapshot.agents.summary)
-                    .font(.system(size: PanelMetrics.rowText))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .foregroundStyle(
-                        snapshot.agents.live?.running ?? 0 > 0 ? .primary : Color.secondary
-                    )
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help("How many sessions and agents have run, and what they are holding now")
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 10)
-    }
-
     // MARK: Identities
 
     /// The door to the identities page, drawn on every frame.
@@ -117,9 +72,9 @@ struct PanelOverview: View {
     /// only while a repository disagreed with its forge, which left the page
     /// behind a right-click on a project row on every other day — so the
     /// check went unnoticed until it had something to say, and a user who had
-    /// never seen the line had no reason to trust its absence. It now takes
-    /// the agents line's shape and its rule: a door that comes and goes is not
-    /// one. What stays true of the old design is the weight. With no finding
+    /// never seen the line had no reason to trust its absence. It now keeps
+    /// the agents door's rule: a door that comes and goes is not one. What
+    /// stays true of the old design is the weight. With no finding
     /// the line is secondary, a tick and a count; a finding turns it primary
     /// with the warning mark and names the repository whenever there is only
     /// one, because naming it is the whole of the remaining work.
@@ -254,9 +209,16 @@ struct PanelOverview: View {
     /// One row per provider, each carrying the window it is closest to running
     /// out of. A row opens that provider's page, which is where its other
     /// windows, its plan, its account, its day and its own projects live.
+    ///
+    /// Drawn with no rows at all before the first reading lands and with every
+    /// provider switched off, because its label carries the agents door.
     private var providers: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionLabel(text: providersLabel)
+            HStack(spacing: 6) {
+                SectionLabel(text: providersLabel)
+                Spacer(minLength: 8)
+                agentsDoor
+            }
             ForEach(snapshot.gaugeRows) { row in
                 Button {
                     openProvider(row.provider, row.account)
@@ -269,6 +231,45 @@ struct PanelOverview: View {
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
+    }
+
+    /// What the CLIs on this Mac are holding, and the way to the page behind
+    /// it, at the end of the providers label.
+    ///
+    /// **On the label rather than a row of its own**, which is where it sat
+    /// until the row was all it cost: a row's height of the Overview for one
+    /// reading and a chevron. It keeps the adjacency the row was placed for —
+    /// it answers the question the gauges under it do, whether there is room
+    /// to keep working, on the other axis that stops work now — and it takes
+    /// the shape `ProjectsSectionLabel` already taught the panel: a reading at
+    /// the end of a label, and a chevron. The reading names *agents* in its
+    /// own words, never a bare count, because a number at the end of this
+    /// label would read as a count of providers. Measured 2026-09-22, the
+    /// longest label and the widest reading need about 298 pt of the 312.
+    ///
+    /// Drawn before the first sweep lands and on a Mac with nothing running,
+    /// because it is the only door to the page and a door that comes and goes
+    /// with the day is not one.
+    private var agentsDoor: some View {
+        Button(action: openStats) {
+            HStack(spacing: 6) {
+                Text(snapshot.agents.summary)
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .foregroundStyle(
+                        snapshot.agents.live?.running ?? 0 > 0 ? .primary : Color.secondary
+                    )
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .layoutPriority(1)
+        .help("How many sessions and agents have run, and what they are holding now")
     }
 
     /// The block's label, with the day's recap folded into it rather than

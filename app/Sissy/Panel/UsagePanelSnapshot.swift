@@ -961,8 +961,8 @@ struct UsagePanelSnapshot: Equatable {
             let startedAt: Date
         }
 
-        /// What the Overview's one line says. A Mac that has never measured
-        /// and one that measured nothing both get the row, because it is the
+        /// What the Overview's agents door says. A Mac that has never measured
+        /// and one that measured nothing both get the door, because it is the
         /// only way to the page and a door that comes and goes is not one.
         var summary: String {
             guard let live else { return "no reading yet" }

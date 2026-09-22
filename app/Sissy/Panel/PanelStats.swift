@@ -9,10 +9,11 @@ import SwiftUI
 /// question a person asks at the end of a period, not to the one they ask
 /// while working.
 ///
-/// The one line the Overview does carry is the live half, because that *is* a
-/// "can I keep working" reading: a rate limit and the Mac's memory are the two
-/// things that stop work now. That line is also the only door to this page, so
-/// it is drawn whether or not anything is running.
+/// The one reading the Overview does carry is the live half, because that *is*
+/// a "can I keep working" reading: a rate limit and the Mac's memory are the
+/// two things that stop work now. It sits at the end of the providers label and
+/// is the only door to this page, so it is drawn whether or not anything is
+/// running.
 ///
 /// **The window is this page's own.** It used to be the headline's, which was
 /// wrong twice over: the Overview shows none of these figures, so sharing the
