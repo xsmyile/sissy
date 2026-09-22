@@ -58,6 +58,11 @@ enum PanelMetrics {
     static let pillPadding: CGFloat = 7
     static let pillInset: CGFloat = 3
     static let pillRadius: CGFloat = 7
+    /// What two pills leave between them, narrow because the shape already
+    /// separates them and the width is what a pill row is short of. Here
+    /// rather than on each row, because two rows of the same component drifting
+    /// apart is a difference nobody chose.
+    static let pillGap: CGFloat = 4
     /// What separates two readings inside one section, where the rows of a
     /// single reading sit 2 pt apart.
     ///
@@ -516,6 +521,12 @@ struct SectionLabel: View {
 /// **The four token counters are on the hover and on the accessibility label,
 /// which are the same sentence.** Putting them only on the hover would make
 /// them not exist for VoiceOver, which is the rule #107 is held to.
+///
+/// **A row whose pills have nothing further to say leaves `detail` empty, and
+/// then there is no hover and no third clause.** The effort row is that case:
+/// its pill already carries the whole reading, so a detail would repeat the
+/// name and the count back — `xhigh · 92% · 46 · 46 turns at xhigh` is what
+/// VoiceOver read before this, a sentence that says everything twice.
 struct ModelPill: View {
     let row: UsagePanelSnapshot.ModelRow
 
@@ -539,7 +550,13 @@ struct ModelPill: View {
         .contentShape(.rect)
         .help(row.detail)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.name) · \(row.reading) · \(row.detail)")
+        .accessibilityLabel(spoken)
+    }
+
+    private var spoken: String {
+        [row.name, row.reading, row.detail]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 }
 

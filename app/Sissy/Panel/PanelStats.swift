@@ -37,9 +37,6 @@ struct PanelStats: View {
     private static let stripHeight: CGFloat = 8
     private static let stripSpacing: CGFloat = 5
     private static let stripCorner: CGFloat = 2
-    /// What two pills leave between them, the same gap `PanelDayBlock` sets
-    /// for the row it draws with the same component.
-    private static let pillGap: CGFloat = 4
 
     /// The chosen window, falling back to today for a period the archive has
     /// stopped answering for while the page was open.
@@ -268,7 +265,7 @@ struct PanelStats: View {
     /// period picker — which is what lets this inherit a window rather than
     /// invent a second selector in a 340 pt panel.
     private func effortPills(_ rows: [UsagePanelSnapshot.ModelRow]) -> some View {
-        HStack(spacing: Self.pillGap) {
+        HStack(spacing: PanelMetrics.pillGap) {
             ForEach(rows) { ModelPill(row: $0) }
             Spacer(minLength: 0)
         }

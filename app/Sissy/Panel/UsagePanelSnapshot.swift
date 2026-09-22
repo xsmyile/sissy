@@ -1620,6 +1620,12 @@ struct UsagePanelSnapshot: Equatable {
     /// read short — the shares would sum to a fraction of the window and say
     /// nothing about why.
     ///
+    /// **A single effort's pill carries no detail.** It already says the word,
+    /// the share and the count, so a hover could only repeat them — which is
+    /// what `ModelPill` leaves out of its spoken label when the field is empty.
+    /// The folded pill keeps one, because the efforts it stands for are the
+    /// one thing it cannot show.
+    ///
     /// Empty where nothing named one, which is every window whose days predate
     /// the field. A row of pills at zero would report a setting nobody chose,
     /// and an absent reading is not a reading of none — the rule the strip and
@@ -1635,7 +1641,7 @@ struct UsagePanelSnapshot: Equatable {
                 name: share.effort,
                 reading: UsageFormat.effortReading(
                     share: Double(share.turns) / total, turns: share.turns),
-                detail: UsageFormat.effortDetail(share.effort, turns: share.turns))
+                detail: "")
         }
         guard kept < ordered.count else { return rows }
         let rest = ordered.dropFirst(kept)

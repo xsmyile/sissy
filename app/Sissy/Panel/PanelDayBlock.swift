@@ -34,7 +34,7 @@ struct PanelDayBlock: View {
             }
             let models = pointedModels
             if !models.isEmpty {
-                HStack(spacing: Self.pillGap) {
+                HStack(spacing: PanelMetrics.pillGap) {
                     ForEach(models) { model in
                         ModelPill(row: model)
                     }
@@ -80,7 +80,4 @@ struct PanelDayBlock: View {
     /// their own separation with `PanelMetrics.blockGap` instead, so a day
     /// with no split is unchanged to the point.
     private static let headlineGap: CGFloat = 3
-    /// What two pills leave between them, narrow because the shape already
-    /// separates them and the width is what the block is short of.
-    private static let pillGap: CGFloat = 4
 }
