@@ -58,6 +58,23 @@ struct PanelIdentities: View {
 
     private var shown: [UsagePanelSnapshot.IdentityRow] { showsAll ? rows : standing }
 
+    /// The sentence that answers for the whole list, where the list has
+    /// anything to answer for. Nothing read is not everything agreeing: a
+    /// project row offers this page before the first sweep has landed, and on
+    /// a Mac with no git to read with it never lands.
+    private var verdict: String? {
+        guard !rows.isEmpty, standing.isEmpty, !showsAll else { return nil }
+        return "Every repository commits under the name its forge expects."
+    }
+
+    /// The repository the page was opened about, when no reading of it has
+    /// been taken yet — so the page answers the row it came from rather than
+    /// only the ones around it.
+    private var unreadFocus: String? {
+        guard let focus, !rows.contains(where: { $0.id == focus }) else { return nil }
+        return focus
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Self.labelSpacing) {
             HStack(spacing: 6) {
@@ -68,9 +85,15 @@ struct PanelIdentities: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            if standing.isEmpty && !showsAll {
-                Text("Every repository commits under the name its forge expects.")
+            if let verdict {
+                Text(verdict)
                     .font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let unread = UsageFormat.identityUnread(focus: unreadFocus, anyRead: !rows.isEmpty) {
+                Text(unread)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !shown.isEmpty {

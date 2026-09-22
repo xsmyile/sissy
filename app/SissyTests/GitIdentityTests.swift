@@ -445,6 +445,23 @@ final class GitIdentityPanelTests: XCTestCase {
         XCTAssertEqual(rows.map(\.mark), [.unexpected, .unjudged, .agrees, .agrees])
     }
 
+    /// Nothing read is not everything agreeing: the page is reachable from a
+    /// project row before the first sweep lands, and must not reassure there.
+    func testThePageSaysNothingHasBeenReadBeforeTheFirstSweep() {
+        XCTAssertEqual(
+            UsageFormat.identityUnread(focus: nil, anyRead: false),
+            "No repository has been read yet.")
+        XCTAssertNil(UsageFormat.identityUnread(focus: nil, anyRead: true))
+    }
+
+    /// The repository a row was clicked for answers for itself, even when the
+    /// rest of the list has been read.
+    func testTheRepositoryAskedAboutSaysItHasNotBeenRead() {
+        XCTAssertEqual(
+            UsageFormat.identityUnread(focus: "/repos/fresh", anyRead: true),
+            "fresh has not been read yet.")
+    }
+
     private func snapshot(_ identities: [RepositoryIdentity]) -> UsagePanelSnapshot {
         UsagePanelSnapshot.make(
             frame: FrameData(

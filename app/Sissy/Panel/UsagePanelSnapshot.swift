@@ -109,8 +109,8 @@ struct UsagePanelSnapshot: Equatable {
 
     /// Every repository Sissy could read a commit identity for, the ones that
     /// disagree with their forge first. Empty where there is no git to read
-    /// with and until the first sweep has run, and the page is then not
-    /// reachable rather than empty.
+    /// with and until the first sweep has run, and the page then says nothing
+    /// has been read rather than that everything agrees.
     let identities: [IdentityRow]
     /// The Overview's one line about identities, nil when every repository
     /// agrees with its forge — which is the ordinary state, and a line that
