@@ -1157,7 +1157,8 @@ struct UsagePanelSnapshot: Equatable {
             origin: unexpected ? origin.map(UsageFormat.identityOrigin) : nil,
             expectation: UsageFormat.identityExpectation(identity.verdict, host: identity.host),
             fix: unexpected && origin?.scope == Self.localConfigScope
-                ? GitIdentityReader.unsetCommand(repository: identity.repository) : nil
+                ? GitIdentityReader.unsetCommand(
+                    repository: identity.repository, keys: identity.localKeys) : nil
         )
     }
 

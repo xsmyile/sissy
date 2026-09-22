@@ -308,8 +308,25 @@ final class GitIdentityTests: XCTestCase {
     /// A path `sh` quoting cannot make safe gets no command rather than an
     /// unquoted one on the clipboard.
     func testAnUnquotablePathIsOfferedNoCommand() {
-        XCTAssertNil(GitIdentityReader.unsetCommand(repository: "/repos/two\nlines"))
-        XCTAssertNotNil(GitIdentityReader.unsetCommand(repository: "/repos/it's fine"))
+        let keys = ["user.email"]
+        XCTAssertNil(GitIdentityReader.unsetCommand(repository: "/repos/two\nlines", keys: keys))
+        XCTAssertNotNil(GitIdentityReader.unsetCommand(repository: "/repos/it's fine", keys: keys))
+    }
+
+    /// The repository whose only override is `user.name` is the one the
+    /// origin rule exists to catch, and a command that unset `user.email`
+    /// first stopped there: git exits 5 on an absent key and `&&` goes no
+    /// further. The command is run as the user would run it.
+    func testTheCorrectionTakesOutANameOnlyOverride() throws {
+        writeGlobal("[user]\n\tname = Personal\n\temail = personal@example.com\n")
+        let repository = try makeRepository("name-only")
+        try run(["-C", repository, "config", "user.name", "Stray"])
+        let reading = try XCTUnwrap(read(repository))
+        XCTAssertEqual(reading.localKeys, ["user.name"])
+        let command = try XCTUnwrap(
+            GitIdentityReader.unsetCommand(repository: repository, keys: reading.localKeys))
+        XCTAssertEqual(try shell(command), 0, command)
+        XCTAssertEqual(try XCTUnwrap(read(repository)).author?.name, "Personal")
     }
 
     // MARK: Helpers
@@ -356,6 +373,23 @@ final class GitIdentityTests: XCTestCase {
         guard let resolved = realpath(url.path, nil) else { return url }
         defer { free(resolved) }
         return URL(fileURLWithPath: String(cString: resolved))
+    }
+
+    /// Runs a command the way a pasted one runs, with this test's `HOME` and
+    /// the real `git` first on the path.
+    private func shell(_ command: String) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+        process.environment = [
+            "HOME": home.path,
+            "PATH": git.deletingLastPathComponent().path + ":/usr/bin:/bin",
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 
     private func run(_ arguments: [String]) throws {
@@ -479,6 +513,7 @@ final class GitIdentityPanelTests: XCTestCase {
             remote: ProjectRemote(
                 host: host, owner: "owner",
                 repository: (path as NSString).lastPathComponent, page: nil),
-            verdict: .unjudged)
+            verdict: .unjudged,
+            localKeys: scope == "local" ? ["user.email"] : [])
     }
 }

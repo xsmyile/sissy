@@ -123,21 +123,25 @@ enum GitIdentityReader {
         let settings = entries(in: origins.output, repository: repository)
         let sources = ambient + settings.map(\.origin.file).filter { !ambient.contains($0) }
         let origin = winningOrigin(in: settings)
+        let local = localKeys(in: settings)
         guard settings.contains(where: { $0.key == emailKey }) else {
             return GitIdentityScan(
-                identity: identity(repository, remote: remote, reading: .unset, origin: origin),
+                identity: identity(
+                    repository, remote: remote, reading: .unset, origin: origin, localKeys: local),
                 sources: sources)
         }
         let ident = invoke(["var", "GIT_AUTHOR_IDENT"])
         guard ident.status == 0, let author = author(of: ident.output) else {
             return GitIdentityScan(
                 identity: identity(
-                    repository, remote: remote, reading: .unreadable(ident.failure), origin: origin),
+                    repository, remote: remote, reading: .unreadable(ident.failure), origin: origin,
+                    localKeys: local),
                 sources: sources)
         }
         return GitIdentityScan(
             identity: identity(
-                repository, remote: remote, reading: .author(author), origin: origin),
+                repository, remote: remote, reading: .author(author), origin: origin,
+                localKeys: local),
             sources: sources)
     }
 
@@ -180,14 +184,22 @@ enum GitIdentityReader {
     /// already has a terminal open for. It unsets rather than rewrites,
     /// because the value that should win is the one the configuration already
     /// resolves to once the override is gone.
+    ///
+    /// One `--unset` per key the repository actually sets, and only those:
+    /// git exits 5 on a key that is absent, so a fixed pair chained with `&&`
+    /// stopped before the second key whenever the first was not there — which
+    /// is exactly the repository whose only override is `user.name`.
+    ///
     /// Nil for a path `sh` quoting cannot make safe. The alternative is the
     /// raw path in a command the user is invited to paste into a shell, which
     /// is an injection through a directory name — so a repository that cannot
-    /// be named safely is offered no command at all.
-    static func unsetCommand(repository: String) -> String? {
-        guard let quoted = AgentHookInstaller.quoted(repository) else { return nil }
-        return "git -C \(quoted) config --unset user.email"
-            + " && git -C \(quoted) config --unset user.name"
+    /// be named safely is offered no command at all. Nil too where there is
+    /// no key to unset.
+    static func unsetCommand(repository: String, keys: [String]) -> String? {
+        guard !keys.isEmpty, let quoted = AgentHookInstaller.quoted(repository) else {
+            return nil
+        }
+        return keys.map { "git -C \(quoted) config --unset \($0)" }.joined(separator: " && ")
     }
 
     private static let userKeyPattern = "^user\\.(name|email)$"
@@ -203,12 +215,25 @@ enum GitIdentityReader {
 
     private static func identity(
         _ repository: String, remote: ProjectRemote?, reading: GitIdentityReading,
-        origin: GitConfigOrigin?
+        origin: GitConfigOrigin?, localKeys: [String] = []
     ) -> RepositoryIdentity {
         RepositoryIdentity(
             repository: repository, reading: reading, origin: origin, remote: remote,
-            verdict: .unjudged)
+            verdict: .unjudged, localKeys: localKeys)
     }
+
+    /// The `user.*` keys set in the repository's own file, once each and in
+    /// the order git parsed them.
+    private static func localKeys(in settings: [GitSetting]) -> [String] {
+        var keys: [String] = []
+        for setting in settings
+        where setting.origin.scope == localScope && !keys.contains(setting.key) {
+            keys.append(setting.key)
+        }
+        return keys
+    }
+
+    private static let localScope = "local"
 
     /// The most local of the files that set a `user.*` key, which is the one a
     /// correction has to name.
