@@ -443,17 +443,18 @@ the tail's flush. It replaced a fixed 7-day line at the foot of the Overview,
 which included today without saying so: measured 2026-09-15, 24.7% of that line
 was the headline above it.
 
-Five pages sit one level in from it:
+Six pages sit one level in from it:
 
 | Page | File | Answers |
 |---|---|---|
 | `.provider` | `PanelProviderPage.swift` | that account's windows, identity and credits, beside **the CLI's** day, its split by model and its projects — the slice is per provider, since a log line names no account — and the refresh, which is a different action on each provider. The model split is a row of `ModelPill`s **under** the strip, two tiers each, because it is the caption of the day the bars are about rather than a second list in the idiom `By project` already owns — and it follows the pointer, since every `DayRow` carries its own split off bytes `UsageHistoryStore.series` had already decoded |
 | `.services` | `PanelProviderStatusPage` in `PanelProviderStatus.swift` | that vendor's own service tree, one level in from its page |
-| `.projects` | `PanelProjectsPage.swift` | every repository the day names rather than the folded five, with the unattributed remainder as a line at the foot rather than a row in the list |
+| `.effort` | `PanelEffortPage.swift` | that vendor's week by model and effort, a bar per model, one level in from the `By effort` row on its page, which opens only when the split says more than the row |
+| `.projects` | `PanelProjectsPage.swift` | every repository the day names rather than the folded three, with the unattributed remainder as a line at the foot rather than a row in the list |
 | `.identities` | `PanelIdentities.swift` | which repositories commit under a name their forge does not expect, findings on the page and the rest behind a disclosure |
 | `.stats` | `PanelStats.swift` | what is running now, and over a window of its own how many sessions and agents have run and how long the day was worked |
 
-`.provider`, `.services` and `.projects` carry the account they were opened
+`.provider`, `.services`, `.effort` and `.projects` carry the account they were opened
 from, so the way back lands on the page that was left rather than on that
 vendor's first account. `.identities` carries the repository it was opened
 about instead, and `.stats` carries nothing: its window is its own, local to
