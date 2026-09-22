@@ -46,7 +46,7 @@ targets:
       # longer ships. Measured: with these removed, `.status` answers
       # "Unable to find service status" and the retirement is a no-op on
       # exactly the machines that need it. Delete them a release after
-      # 0.1.10, once installs have rolled through.
+      # 0.2.0, once installs have rolled through.
       - path: ServiceManagement/com.radonforge.sissy.server.plist
         buildPhase:
           copyFiles:
