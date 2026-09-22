@@ -60,7 +60,13 @@ struct PanelDayBars: View {
     let tint: Color
 
     /// The day under the pointer, by day key.
-    @State private var hovered: String?
+    ///
+    /// Owned by the page rather than by this view, because two blocks read it:
+    /// this one swaps its caption for the pointed day's figures, and the pills
+    /// under the bars swap for that day's split. A second copy of the state
+    /// would let the caption name one day while the pills answered for
+    /// another.
+    @Binding var hovered: String?
 
     private var pointed: UsagePanelSnapshot.DayRow? {
         hovered.flatMap { key in strip.rows.first { $0.id == key } }
