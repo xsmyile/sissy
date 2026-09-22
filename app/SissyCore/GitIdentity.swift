@@ -69,6 +69,11 @@ struct RepositoryIdentity: Sendable, Equatable, Identifiable {
     /// same repository out of its directory.
     let remote: ProjectRemote?
     let verdict: GitIdentityVerdict
+    /// The `user.*` keys the repository's own configuration sets, which are
+    /// the ones a correction can take out. Named rather than assumed:
+    /// `git config --unset` exits 5 on a key that is not there, so a command
+    /// that unset both regardless stopped at the first absent one.
+    var localKeys: [String] = []
 
     var host: String? { remote?.host }
 
@@ -79,7 +84,7 @@ struct RepositoryIdentity: Sendable, Equatable, Identifiable {
     func with(verdict: GitIdentityVerdict) -> Self {
         Self(
             repository: repository, reading: reading, origin: origin, remote: remote,
-            verdict: verdict)
+            verdict: verdict, localKeys: localKeys)
     }
 
     var author: GitAuthor? {
