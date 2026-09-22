@@ -153,7 +153,10 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// One model's turns at one effort, as the file keeps them.
     struct EffortEntry: Codable, Equatable, Sendable {
         var model: String
-        var effort: String
+        /// Absent where the lines behind this spend named no effort, which
+        /// `EffortKey` carries the reason for, and for every entry written
+        /// before the field was optional.
+        var effort: String?
         /// How many turns ran at this pair. The count an effort is actually
         /// set per, kept beside the money because a share of spend cannot say
         /// how often a setting was reached for.
@@ -208,7 +211,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
                         cacheCreationTokens: value.totals.cacheCreationTokens,
                         cost: NSDecimalNumber(decimal: value.totals.cost).stringValue)
                 }
-                .sorted { ($0.model, $0.effort) < ($1.model, $1.effort) }
+                .sorted { ($0.model, $0.effort ?? "") < ($1.model, $1.effort ?? "") }
         self.models =
             totals
             .filter { $0.value.totalTokens > 0 || $0.value.cost > 0 }
@@ -342,7 +345,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
             }
             merged.effort =
                 folded.isEmpty
-                ? nil : folded.sorted { ($0.model, $0.effort) < ($1.model, $1.effort) }
+                ? nil : folded.sorted { ($0.model, $0.effort ?? "") < ($1.model, $1.effort ?? "") }
         }
         return merged
     }

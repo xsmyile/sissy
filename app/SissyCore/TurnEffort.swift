@@ -12,7 +12,19 @@ import Foundation
 /// `models × projects × efforts`.
 struct EffortKey: Hashable, Sendable {
     let model: String
-    let effort: String
+    /// The vendor's own word, and **nil for spend the line named no effort
+    /// for**.
+    ///
+    /// Nil is a key rather than a reason to drop the event, because the block
+    /// this feeds sits under the model pills and has to reach them: an event
+    /// left out here still counts in the rows, so a model with nine tagged
+    /// turns and one untagged would read `high 100%` over a fraction of what
+    /// the pill above it says. It is reachable — Codex names the effort on a
+    /// `turn_context` a resumed reader is past, so the first launch after an
+    /// upgrade has turns no `fileEfforts` entry covers yet — and it is the one
+    /// shape that makes "a model's efforts add up to what that model spent"
+    /// true by construction rather than by the vendor's good behaviour.
+    let effort: String?
 }
 
 /// What one model spent at one effort: the turns it took and what they came
@@ -58,19 +70,21 @@ struct EffortSplit: Sendable, Equatable, Identifiable {
     let totals: EffortTotals
 
     var model: String { key.model }
-    var effort: String { key.effort }
+    /// Nil where the lines behind this spend named no effort. `EffortKey`
+    /// carries why that is a bucket rather than a dropped event.
+    var effort: String? { key.effort }
     var turns: Int { totals.turns }
     var tokens: Int { totals.tokens }
     var cost: Decimal { totals.cost }
 
-    var id: String { "\(key.model)\u{1F}\(key.effort)" }
+    var id: String { "\(key.model)\u{1F}\(key.effort ?? "")" }
 
     init(key: EffortKey, totals: EffortTotals) {
         self.key = key
         self.totals = totals
     }
 
-    init(model: String, effort: String, totals: EffortTotals) {
+    init(model: String, effort: String?, totals: EffortTotals) {
         self.init(key: EffortKey(model: model, effort: effort), totals: totals)
     }
 }

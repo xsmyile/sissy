@@ -139,7 +139,8 @@ struct UsageStateSnapshot: Codable, Equatable {
     struct DailyEffort: Codable, Equatable {
         var day: String  // YYYY-MM-DD; must equal the daily-total bucket.
         var model: String
-        var effort: String
+        /// Absent where the lines behind this spend named no effort.
+        var effort: String?
         var turns: Int
         var inputTokens: Int
         var outputTokens: Int

@@ -147,7 +147,8 @@ struct PanelProviderPage: View {
     /// 49 archived days. Counting those as covered would put `7 days` over a
     /// block that answers for four of them.
     private var effortCoverage: Int {
-        archivedDays.count { !$0.effort.isEmpty } + (row.effort.isEmpty ? 0 : 1)
+        archivedDays.count { $0.effort.contains { $0.effort != nil } }
+            + (row.effort.contains { $0.effort != nil } ? 1 : 0)
     }
 
     private var strip: UsagePanelSnapshot.DayStrip? {
@@ -158,7 +159,8 @@ struct PanelProviderPage: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let effortRows = self.effortRows
+        return VStack(alignment: .leading, spacing: 0) {
             identity
 
             Divider()
@@ -174,7 +176,7 @@ struct PanelProviderPage: View {
 
             if !effortRows.isEmpty {
                 Divider()
-                effort
+                effort(effortRows)
             }
 
             if !row.projects.isEmpty {
@@ -596,7 +598,7 @@ struct PanelProviderPage: View {
     /// over the run rather than beside it, because a run of four efforts wants
     /// 264 pt of the 312 a page has and a name beside it would overflow —
     /// measured 2026-09-22 at `PanelMetrics.width`.
-    private var effort: some View {
+    private func effort(_ rows: [UsagePanelSnapshot.EffortRow]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 SectionLabel(text: "By effort")
@@ -610,7 +612,7 @@ struct PanelProviderPage: View {
                 .foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(effortRows) { row in
+                ForEach(rows) { row in
                     VStack(alignment: .leading, spacing: 1) {
                         Text(row.name)
                             .font(.system(size: 12))
