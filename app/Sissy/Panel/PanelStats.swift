@@ -21,6 +21,14 @@ import SwiftUI
 /// arrangement `PanelIdentities.showsAll` already has and for the same reason
 /// — a page that opens on the answer to the question before last has to be
 /// read before it can be glanced at.
+///
+/// **The counted half leads and the live half follows**, although the door
+/// to the page is the live reading. The live half changes length with every
+/// sweep — an agent starting or exiting is a row — and the popover grows from
+/// its top edge, so whatever sits under that list moves. Under it used to be
+/// the page's one control: the window picker slid by a row for every agent
+/// that came or went, on a 15 s sweep, under a pointer on its way to it. With
+/// the list last, nothing that can be clicked sits below a reading that moves.
 struct PanelStats: View {
     let block: UsagePanelSnapshot.AgentsBlock
 
@@ -46,9 +54,9 @@ struct PanelStats: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Self.sectionSpacing) {
-            liveSection
-            Divider()
             countedSection
+            Divider()
+            liveSection
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
