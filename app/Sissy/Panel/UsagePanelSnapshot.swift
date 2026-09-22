@@ -879,10 +879,14 @@ struct UsagePanelSnapshot: Equatable {
             /// `activity` instead, which carries its block count for every
             /// window.
             let shape: DayShape?
+            /// How much of the window's input the cache answered, for the
+            /// section that follows this window's picker.
+            let cache: CacheReading
 
             init(
                 counts: AgentCounts, byProvider: [ProviderCount], coverage: String?,
-                activity: ActivityTotals = .none, cost: Decimal = 0, shape: DayShape? = nil
+                activity: ActivityTotals = .none, cost: Decimal = 0, shape: DayShape? = nil,
+                cache: CacheReading = .none
             ) {
                 self.counts = counts
                 self.byProvider = byProvider
@@ -890,6 +894,7 @@ struct UsagePanelSnapshot: Equatable {
                 self.activity = activity
                 self.cost = cost
                 self.shape = shape
+                self.cache = cache
             }
         }
 
@@ -1087,7 +1092,8 @@ struct UsagePanelSnapshot: Equatable {
             activity: ActivityTotals(shape),
             cost: frame.cost,
             shape: AgentsBlock.DayShape(
-                blocks: shape.blocks, dayMinutes: Self.minutesInDay(containing: now)))
+                blocks: shape.blocks, dayMinutes: Self.minutesInDay(containing: now)),
+            cache: frame.cache)
         var counted: [UsagePeriod: AgentsBlock.Window] = [.today: today]
         for (period, rollup) in frame.history {
             counted[period] = AgentsBlock.Window(
@@ -1102,7 +1108,8 @@ struct UsagePanelSnapshot: Equatable {
                     .sorted { $0.name < $1.name },
                 coverage: UsageFormat.periodCoverage(rollup, now: now),
                 activity: rollup.activity,
-                cost: rollup.cost)
+                cost: rollup.cost,
+                cache: rollup.cache)
         }
         return AgentsBlock(
             live: frame.agentMemory.map { memory in

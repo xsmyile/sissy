@@ -38,6 +38,20 @@ enum UsageFormat {
         String(format: "$%.2f", NSDecimalNumber(decimal: cost).doubleValue)
     }
 
+    /// A share of input the cache answered, to a tenth of a point.
+    ///
+    /// Tenths because the reading lives in the high nineties, where whole
+    /// points would print the same figure for a week that halved its fresh
+    /// input. Truncated rather than rounded, so a window that sent one fresh
+    /// token never reads `100.0%`.
+    static func cacheShare(_ share: Double) -> String {
+        let permille = (min(max(share, 0), 1) * permillePerWhole).rounded(.down)
+        return String(format: "%.1f%%", permille / permillePerPercent)
+    }
+
+    private static let permillePerWhole: Double = 1000
+    private static let permillePerPercent: Double = 10
+
     /// Tokens per hour, worded like any other token count. Takes a rate rather
     /// than an optional so the absence of one stays a question the caller
     /// answers: a day with no spend has no rate, and "0/h" is a claim about

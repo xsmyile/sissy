@@ -485,6 +485,32 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertEqual(rollups[.all]?.tokens, 5)
     }
 
+    /// The archive keeps counters and no saving, so a window is priced when
+    /// it is read, model by model, at the rates it is handed.
+    func testAWindowPricesItsCacheReadsAtTheRatesItIsHanded() throws {
+        let pricing = ProviderPricing(
+            override: [
+                "a": ModelPricing(
+                    inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3,
+                    cacheCreationPerMTok: 3.75)
+            ],
+            catalog: nil)
+        try write(
+            provider: "claude-code", day: day(-1),
+            models: [
+                "a": UsageHistoryTotals(
+                    inputTokens: 250_000, outputTokens: 0, cacheReadTokens: 1_000_000,
+                    cacheCreationTokens: 0, cost: 0)
+            ])
+
+        let cache = try XCTUnwrap(
+            UsageHistoryStore.rollups(for: [.sevenDays], in: root, pricing: pricing)[.sevenDays]
+        ).cache
+
+        XCTAssertEqual(cache.saved, Decimal(string: "2.7"))
+        XCTAssertEqual(try XCTUnwrap(cache.share), 0.8, accuracy: 1e-9)
+    }
+
     /// Asking for nothing walks nothing: the archive is a directory tree, and
     /// an empty request that still enumerated and decoded it would be paid for
     /// on every frame that wanted no window.

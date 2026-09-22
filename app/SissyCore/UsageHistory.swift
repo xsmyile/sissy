@@ -482,11 +482,15 @@ struct UsageHistoryRollup: Sendable, Equatable {
     /// legitimately add up to more than `activity`, because two CLIs working
     /// in the same minute are one minute of the day and two of each other's.
     let activityByProvider: [String: ActivityTotals]
+    /// How much of the window's input the cache answered, priced model by
+    /// model at the rates `rollups` was handed.
+    let cache: CacheReading
 
     init(
         period: UsagePeriod, earliestDay: Date?, tokens: Int, cost: Decimal,
         agents: AgentCounts = .none, agentsByProvider: [String: AgentCounts] = [:],
-        activity: ActivityTotals = .none, activityByProvider: [String: ActivityTotals] = [:]
+        activity: ActivityTotals = .none, activityByProvider: [String: ActivityTotals] = [:],
+        cache: CacheReading = .none
     ) {
         self.period = period
         self.earliestDay = earliestDay
@@ -496,6 +500,7 @@ struct UsageHistoryRollup: Sendable, Equatable {
         self.agentsByProvider = agentsByProvider
         self.activity = activity
         self.activityByProvider = activityByProvider
+        self.cache = cache
     }
 }
 
@@ -627,7 +632,8 @@ enum UsageHistoryStore {
     /// that checks. Order is not lost with it — the result is keyed, and the
     /// order the panel offers the windows in is `UsagePeriod.archived`'s.
     static func rollups(
-        for periods: Set<UsagePeriod>, in parent: URL, now: Date = Date()
+        for periods: Set<UsagePeriod>, in parent: URL, now: Date = Date(),
+        pricing: ProviderPricing = .seed
     ) -> [UsagePeriod: UsageHistoryRollup] {
         guard !periods.isEmpty else { return [:] }
         let cal = Calendar.current
@@ -649,14 +655,19 @@ enum UsageHistoryStore {
         // union of the day's readers and only the sum of the days.
         var unionByDay: [Date: AgentActivityDay] = [:]
         var activityByProvider: [UsagePeriod: [String: ActivityTotals]] = [:]
+        var cache: [UsagePeriod: CacheReading] = [:]
         for provider in providers(in: parent) {
             for (dayKey, url) in dayFiles(provider: provider, in: parent) {
                 guard dayKey <= today, let decoded = decode(at: url) else { continue }
                 var dayTokens = 0
                 var dayCost: Decimal = 0
+                var dayCache = CacheReading.none
                 for entry in decoded.models {
                     dayTokens += entry.totalTokens
                     dayCost += Decimal(string: entry.cost) ?? 0
+                    dayCache.add(
+                        provider: provider, model: entry.model, totals: entry.totals,
+                        pricing: pricing)
                 }
                 if let shape = decoded.activity {
                     unionByDay[dayKey, default: .none].formUnion(shape)
@@ -669,6 +680,7 @@ enum UsageHistoryStore {
                     byProvider[period, default: [:]][provider, default: .none]
                         .add(decoded.agents ?? .none)
                     activityByProvider[period, default: [:]][provider, default: .none].add(mine)
+                    cache[period, default: .none].add(dayCache)
                     earliest[period] = earliest[period].map { min($0, dayKey) } ?? dayKey
                 }
             }
@@ -690,7 +702,8 @@ enum UsageHistoryStore {
                 agents: agents[period] ?? .none,
                 agentsByProvider: byProvider[period] ?? [:],
                 activity: activity[period] ?? .none,
-                activityByProvider: activityByProvider[period] ?? [:])
+                activityByProvider: activityByProvider[period] ?? [:],
+                cache: cache[period] ?? .none)
         }
         return out
     }

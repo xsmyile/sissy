@@ -3,6 +3,15 @@ import XCTest
 @testable import Sissy
 
 final class UsageFormatTests: XCTestCase {
+    func testACacheShareReadsToATenthOfAPoint() {
+        XCTAssertEqual(UsageFormat.cacheShare(0.9812), "98.1%")
+    }
+
+    /// One fresh token in a window must not print as a perfect cache.
+    func testACacheShareShortOfWholeNeverReadsAsAHundred() {
+        XCTAssertEqual(UsageFormat.cacheShare(0.99999), "99.9%")
+    }
+
     func testAgeUnderFiveSecondsReadsAsJustNow() {
         XCTAssertEqual(UsageFormat.age(4), "just now")
     }
