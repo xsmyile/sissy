@@ -27,10 +27,14 @@ import SwiftUI
 /// not the half that was removed, which was bounding a section to keep the
 /// popover on the display.
 ///
-/// Collapsed it still answers the question: one sentence saying whether
-/// anything is wrong, and the count of what was read. The repository a project
-/// row was clicked for stays out of the fold, or the click would answer about
-/// everything except the row it came from.
+/// **A recap leads the page, whatever is folded under it.** One sentence
+/// saying whether anything is wrong, then a count per mark, so what the fold
+/// holds is said before it is opened. A repository that was not judged is
+/// under the fold with the ones that agree: the count names it, and a row of
+/// its own above the fold read as a finding it is not. The repository a
+/// project row was clicked for answers on a line of the recap rather than as
+/// a row: standing alone under the label it read as a repository picked at
+/// random, and once the list is open it is marked in its sorted place.
 ///
 /// **Nothing here writes anything.** The correction is a command on the
 /// clipboard, which is why this page needs no preview, no backup, no refusal
@@ -49,26 +53,34 @@ struct PanelIdentities: View {
 
     private static let labelSpacing: CGFloat = 10
     private static let rowSpacing: CGFloat = 12
+    private static let recapSpacing: CGFloat = 6
+    private static let countSpacing: CGFloat = 10
 
-    /// What the page shows without being asked: anything that is not a plain
-    /// agreement, plus the repository it was opened about.
+    /// What the page shows without being asked: the findings.
     private var standing: [UsagePanelSnapshot.IdentityRow] {
-        rows.filter { $0.mark != .agrees || $0.id == focus }
+        rows.filter { $0.mark == .unexpected }
     }
 
     /// What the disclosure folds, drawn under it so opening and closing it
     /// leaves the control where the pointer is.
     private var rest: [UsagePanelSnapshot.IdentityRow] {
-        rows.filter { $0.mark == .agrees && $0.id != focus }
+        rows.filter { $0.mark != .unexpected }
     }
 
-    /// The sentence that answers for the whole list, where the list has
-    /// anything to answer for. Nothing read is not everything agreeing: a
-    /// project row offers this page before the first sweep has landed, and on
-    /// a Mac with no git to read with it never lands.
-    private var verdict: String? {
-        guard !rows.isEmpty, standing.isEmpty else { return nil }
-        return "Every repository commits under the name its forge expects."
+    /// How many rows carry each mark, in the order the rows sort, leaving out
+    /// the marks no row carries.
+    private var counts: [(mark: UsagePanelSnapshot.IdentityMark, count: Int)] {
+        let marks: [UsagePanelSnapshot.IdentityMark] = [.unexpected, .agrees, .unjudged]
+        return marks.compactMap { mark in
+            let count = rows.count { $0.mark == mark }
+            return count == 0 ? nil : (mark, count)
+        }
+    }
+
+    /// The row the page was opened about, when it sits under the fold — a
+    /// finding already answers for itself above it.
+    private var foldedFocus: UsagePanelSnapshot.IdentityRow? {
+        rest.first { $0.id == focus }
     }
 
     /// The repository the page was opened about, when no reading of it has
@@ -89,10 +101,8 @@ struct PanelIdentities: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            if let verdict {
-                Text(verdict)
-                    .font(.system(size: 12))
-                    .fixedSize(horizontal: false, vertical: true)
+            if !rows.isEmpty {
+                recap
             }
             if let unread = UsageFormat.identityUnread(focus: unreadFocus, anyRead: !rows.isEmpty) {
                 Text(unread)
@@ -113,6 +123,38 @@ struct PanelIdentities: View {
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
+    }
+
+    /// The sentence, the count per mark and, when the page came from a
+    /// project row whose repository is folded, that repository's verdict.
+    private var recap: some View {
+        VStack(alignment: .leading, spacing: Self.recapSpacing) {
+            Text(
+                UsageFormat.identityVerdict(
+                    unexpected: standing.count,
+                    unjudged: rows.count { $0.mark == .unjudged })
+            )
+            .font(.system(size: 12))
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: Self.countSpacing) {
+                ForEach(counts, id: \.mark) { entry in
+                    HStack(spacing: 4) {
+                        IdentityMarkView(mark: entry.mark)
+                        Text(UsageFormat.identityCount(entry.mark, count: entry.count))
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if let foldedFocus {
+                Text(UsageFormat.identityOpened(name: foldedFocus.name, mark: foldedFocus.mark))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
     }
 
     private func rowList(_ list: [UsagePanelSnapshot.IdentityRow]) -> some View {
@@ -176,7 +218,7 @@ private struct IdentityRowView: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            mark
+            IdentityMarkView(mark: row.mark)
                 .frame(width: Self.markWidth, alignment: .leading)
             VStack(alignment: .leading, spacing: Self.detailSpacing) {
                 Text(row.name)
@@ -222,13 +264,16 @@ private struct IdentityRowView: View {
             }
         }
     }
+}
 
-    /// A tick, a warning, or a dash. The dash is the panel's own rule for a
-    /// reading that was not taken: an empty mark would be a verdict, and there
-    /// is none.
-    @ViewBuilder
-    private var mark: some View {
-        switch row.mark {
+/// A tick, a warning, or a dash, the same on a row and in the recap's counts.
+/// The dash is the panel's own rule for a reading that was not taken: an
+/// empty mark would be a verdict, and there is none.
+private struct IdentityMarkView: View {
+    let mark: UsagePanelSnapshot.IdentityMark
+
+    var body: some View {
+        switch mark {
         case .agrees:
             Image(systemName: "checkmark")
                 .font(.system(size: 10, weight: .semibold))

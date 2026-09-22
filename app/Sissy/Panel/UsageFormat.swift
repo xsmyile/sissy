@@ -1267,6 +1267,42 @@ extension UsageFormat {
         return anyRead ? nil : "No repository has been read yet."
     }
 
+    /// The sentence the page leads with once anything has been read.
+    ///
+    /// "Every repository" only when every one was judged and agrees: a
+    /// repository with no remote or a lone account is read and not judged, and
+    /// a sentence claiming it agrees would claim a verdict the page does not
+    /// give — the reason the Overview's line says "no findings".
+    static func identityVerdict(unexpected: Int, unjudged: Int) -> String {
+        switch unexpected {
+        case 1: return "1 repository commits under an unexpected name."
+        case 2...: return "\(unexpected) repositories commit under an unexpected name."
+        default:
+            return unjudged == 0
+                ? "Every repository commits under the name its forge expects."
+                : "No repository commits under an unexpected name."
+        }
+    }
+
+    /// One of the recap's counts, beside the mark it counts.
+    static func identityCount(_ mark: UsagePanelSnapshot.IdentityMark, count: Int) -> String {
+        "\(count) \(identityVerdictWord(mark))"
+    }
+
+    /// The recap's line for the repository a project row opened the page
+    /// about, when that repository is under the fold.
+    static func identityOpened(name: String, mark: UsagePanelSnapshot.IdentityMark) -> String {
+        "Opened for \(name) · \(identityVerdictWord(mark))"
+    }
+
+    private static func identityVerdictWord(_ mark: UsagePanelSnapshot.IdentityMark) -> String {
+        switch mark {
+        case .unexpected: return "unexpected"
+        case .agrees: return "as expected"
+        case .unjudged: return "not judged"
+        }
+    }
+
     /// The control that opens the repositories the page did not need to show.
     static func identityDisclosure(all: Int) -> String {
         "Show all \(all)"
