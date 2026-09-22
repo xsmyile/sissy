@@ -222,6 +222,8 @@ final class UsageEngineHost {
         agentRefresh?.cancel()
         agentRefresh = nil
         refreshingAgents = false
+        allRefresh?.cancel()
+        allRefresh = nil
         switchingClaudeAccount = nil
         guard let engine else { return }
         self.engine = nil
@@ -631,6 +633,25 @@ final class UsageEngineHost {
     }
 
     @ObservationIgnored private var agentRefresh: Task<Void, Never>?
+
+    /// Everything the panel's own buttons re-read, at once, for the menu's
+    /// Refresh All: every metered provider, every forge connection, the
+    /// identities and the agents. Each part keeps its own guard, so a part
+    /// already in flight is not started twice.
+    func refreshAll() {
+        guard let engine, allRefresh == nil else { return }
+        refreshIdentities()
+        refreshAgentProcesses()
+        allRefresh = Task {
+            for id in await engine.meteringProviderIDs() {
+                refreshProvider(id)
+            }
+            await engine.refreshForgeConnections()
+            allRefresh = nil
+        }
+    }
+
+    @ObservationIgnored private var allRefresh: Task<Void, Never>?
 
     /// What is left of the floor once the work has taken its time, and nil
     /// once there is nothing left to wait for.
