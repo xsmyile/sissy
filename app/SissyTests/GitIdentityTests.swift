@@ -549,6 +549,20 @@ final class GitIdentityPanelTests: XCTestCase {
         XCTAssertEqual(UsageFormat.identityCount(.unjudged, count: 2), "2 not judged")
     }
 
+    /// A press that changed no row still moves the header, which is what
+    /// tells it apart from a button that did nothing.
+    func testTheHeaderSaysCheckingUntilTheSweepLands() {
+        let now = Date()
+        XCTAssertEqual(
+            UsageFormat.identitiesReading(checkedAt: now, refreshing: true, now: now),
+            "checking…")
+        XCTAssertEqual(
+            UsageFormat.identitiesReading(
+                checkedAt: now.addingTimeInterval(-180), refreshing: false, now: now),
+            "checked 3m ago")
+        XCTAssertNil(UsageFormat.identitiesReading(checkedAt: nil, refreshing: false, now: now))
+    }
+
     private func snapshot(_ identities: [RepositoryIdentity]) -> UsagePanelSnapshot {
         UsagePanelSnapshot.make(
             frame: FrameData(

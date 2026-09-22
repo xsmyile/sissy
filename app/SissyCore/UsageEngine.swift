@@ -1614,9 +1614,12 @@ actor UsageEngine {
     /// arrive sooner. This is a sweep on a 15 s clock, so a user who has just
     /// closed three sessions is looking at a figure that is right and reads as
     /// wrong.
+    ///
+    /// Always a frame, including on a quiet Mac: the press is what asked for
+    /// one, and the page dates the count by it.
     func refreshAgentProcesses() async {
-        let me = self
-        await agentMonitor.sampleOnce { await me.reemit() }
+        await agentMonitor.sampleOnce {}
+        await reemit()
     }
 
     /// Re-reads one forge connection now, for the gesture on its own row.
@@ -1752,6 +1755,7 @@ actor UsageEngine {
             providerStatus: statusMonitor.currentStatus(),
             forge: forgeMonitor.currentReadings(),
             identities: identityMonitor.currentIdentities(),
+            identitiesCheckedAt: identityMonitor.currentCheckedAt(),
             agentMemory: agentMonitor.currentMemory()
         )
         await onFrame?(frame)
