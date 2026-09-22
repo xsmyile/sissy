@@ -101,6 +101,14 @@ final class AgentStatsSnapshotTests: XCTestCase {
         }
     }
 
+    /// Every row the list draws has a band of its own colour, including the
+    /// sixth one a list of exactly six keeps unfolded.
+    func testEveryStandingRowHasItsOwnStep() {
+        XCTAssertEqual(
+            AgentMemoryChart.bandOpacities.count,
+            UsagePanelSnapshot.AgentsBlock.Live.processRowLimit)
+    }
+
     /// A lane starts where its agent did, and the chart marks that sample.
     func testALaneStartsWhereItsAgentDid() throws {
         let old = agent(ProviderID.claudeCode, bytes: 900, pid: 1)
