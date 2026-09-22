@@ -932,20 +932,44 @@ enum UsageFormat {
         "+\(count) more"
     }
 
-    /// One effort pill's second line: the share of the window's counted turns
-    /// and how many of them there were.
+    /// One effort inside a model's run: the vendor's word and that effort's
+    /// share of what the model spent over the window.
     ///
-    /// Turns rather than money, which is the whole of why this is not
-    /// `modelReading`: an effort is a setting a turn ran under and changes no
-    /// rate, so the figure beside the share is the count the section is
-    /// already about. `<1%` for the same reason the model pill has one — a
-    /// share that rounds to nothing beside a count that is not zero is the
-    /// same lie in smaller type.
-    static func effortReading(share: Double, turns: Int) -> String {
+    /// **The share and not the money**, measured 2026-09-22 at
+    /// `PanelMetrics.width`: a run carrying a currency figure per effort wants
+    /// 324 pt at three efforts and 430 at four, against the 312 a page has,
+    /// while the shares alone want 264 pt at four. The money is on the row's
+    /// hover, where a figure that cannot be read at all is worse than a figure
+    /// one gesture away.
+    ///
+    /// **A share of the money**, which is what makes the run comparable with
+    /// the model pills above it — of the tokens instead as soon as any model
+    /// in the window has tokens and no cost, the rule `makeModels` already
+    /// holds for the same reason. `<1%` rather than `0%` for that block's
+    /// reason too: a share too small to round is not a share of nothing.
+    static func effortShare(_ effort: String, share: Double) -> String {
         let percent = Int((share * 100).rounded())
-        let count = "\(turns)"
-        guard percent > 0 || share <= 0 else { return "<1% · \(count)" }
-        return "\(percent)% · \(count)"
+        guard percent > 0 || share <= 0 else { return "\(effort) <1%" }
+        return "\(effort) \(percent)%"
+    }
+
+    /// What the `By effort` heading says its window is: the strip's own width,
+    /// and how much of it the archive actually reaches when it falls short.
+    ///
+    /// The short form because the strip's caption directly above already spells
+    /// the coverage out in a sentence; saying it twice in two idioms is how a
+    /// panel this narrow stops being read.
+    static func effortWindow(covered: Int, of days: Int) -> String {
+        covered >= days ? "\(days) days" : "\(covered) of \(days) days"
+    }
+
+    /// One effort row's hover and its accessibility label, which are the same
+    /// sentence: what each effort cost and how many turns it took, since
+    /// neither fits the run beside it.
+    static func effortDetail(_ splits: [(effort: String, cost: String, turns: Int)]) -> String {
+        splits
+            .map { "\($0.effort) \($0.cost) · \(agentCount($0.turns, singular: "turn", plural: "turns"))" }
+            .joined(separator: " · ")
     }
 
     /// Always plural: the fold only happens past the row limit, and folding a

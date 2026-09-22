@@ -97,20 +97,25 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// No version bump: additive, and an older build reading a newer file
     /// ignores it.
     var activity: AgentActivityDay?
-    /// How many turns the day ran at each effort, which is a third reading of
-    /// the same turns the two above are.
+    /// What each model spent at each effort, which is a third reading of the
+    /// same turns the two above are.
     ///
     /// Beside the rows for their reason, and not a third key on
-    /// `UsageHistoryRow`: a row split by effort would not cover the rows
-    /// already on disk, so `isCoveredBy` would refuse every day this build
-    /// re-derived and the archive would freeze rather than be rewritten.
-    /// Optional on the same terms as the two above, so a day written before
-    /// the field reads as "not measured" rather than as a day nothing was set
-    /// on.
+    /// `UsageHistoryRow` — `EffortKey` carries why. Optional on the same terms
+    /// as the two above, so a day written before the field reads as "not
+    /// measured" rather than as a day nothing was set on.
+    ///
+    /// **It restates tokens the rows already hold, and that is the trade.**
+    /// The rows are `model × project` and these are `model × effort`; neither
+    /// can be derived from the other, and both are filled from one pass over
+    /// one event, so the only way they disagree is a defect. What it buys is
+    /// that the archive answers a question about effort without the row key
+    /// that would freeze it.
     ///
     /// No version bump: additive, and an older build reading a newer file
-    /// ignores it.
-    var effort: EffortCounts?
+    /// ignores it. `ArchiveBackfillLedger.currentSchemaVersion` is what makes
+    /// the days already covered come back and name one.
+    var effort: [EffortEntry]?
 
     struct Entry: Codable, Equatable, Sendable {
         var model: String
@@ -145,12 +150,41 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         }
     }
 
+    /// One model's turns at one effort, as the file keeps them.
+    struct EffortEntry: Codable, Equatable, Sendable {
+        var model: String
+        var effort: String
+        /// How many turns ran at this pair. The count an effort is actually
+        /// set per, kept beside the money because a share of spend cannot say
+        /// how often a setting was reached for.
+        var turns: Int
+        var inputTokens: Int
+        var outputTokens: Int
+        var cacheReadTokens: Int
+        var cacheCreationTokens: Int
+        /// Decimal as String, the reason `Entry.cost` is one.
+        var cost: String
+
+        var split: EffortSplit {
+            EffortSplit(
+                model: model, effort: effort,
+                totals: EffortTotals(
+                    turns: turns,
+                    totals: UsageHistoryTotals(
+                        inputTokens: inputTokens,
+                        outputTokens: outputTokens,
+                        cacheReadTokens: cacheReadTokens,
+                        cacheCreationTokens: cacheCreationTokens,
+                        cost: Decimal(string: cost) ?? 0)))
+        }
+    }
+
     init(
         day: String, provider: String, updatedAt: Date,
         totals: [UsageHistoryRow: UsageHistoryTotals],
         agents: AgentCounts? = nil,
         activity: AgentActivityDay? = nil,
-        effort: EffortCounts? = nil
+        effort: [EffortKey: EffortTotals] = [:]
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.day = day
@@ -158,7 +192,23 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         self.updatedAt = updatedAt
         self.agents = agents.flatMap { $0.isEmpty ? nil : $0 }
         self.activity = activity.flatMap { $0.isEmpty ? nil : $0 }
-        self.effort = effort.flatMap { $0.isEmpty ? nil : $0 }
+        self.effort =
+            effort.isEmpty
+            ? nil
+            : effort
+                .filter { $0.value.turns > 0 }
+                .map { key, value in
+                    EffortEntry(
+                        model: key.model,
+                        effort: key.effort,
+                        turns: value.turns,
+                        inputTokens: value.totals.inputTokens,
+                        outputTokens: value.totals.outputTokens,
+                        cacheReadTokens: value.totals.cacheReadTokens,
+                        cacheCreationTokens: value.totals.cacheCreationTokens,
+                        cost: NSDecimalNumber(decimal: value.totals.cost).stringValue)
+                }
+                .sorted { ($0.model, $0.effort) < ($1.model, $1.effort) }
         self.models =
             totals
             .filter { $0.value.totalTokens > 0 || $0.value.cost > 0 }
@@ -195,6 +245,17 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         return out
     }
 
+    /// The effort entries back as running totals, so a reader that folds days
+    /// together continues the count rather than starting it again.
+    var effortByKey: [EffortKey: EffortTotals] {
+        var out: [EffortKey: EffortTotals] = [:]
+        for entry in effort ?? [] {
+            out[EffortKey(model: entry.model, effort: entry.effort), default: .init()]
+                .add(entry.split.totals)
+        }
+        return out
+    }
+
     /// This day with every project path read through `resolve` again.
     ///
     /// The archive keeps the working directory it saw, and that stays a
@@ -225,7 +286,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         }
         return Self(
             day: day, provider: provider, updatedAt: updatedAt, totals: totals, agents: agents,
-            activity: activity, effort: effort)
+            activity: activity, effort: effortByKey)
     }
 
     /// This day with `counts` folded in, keeping whichever reading saw more.
@@ -238,13 +299,19 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
     /// agents, since a day outside the retain window is never rewritten at all
     /// and one inside it still has the logs it was counted from.
     ///
+    /// The effort entries fold by the same rule at the pair, and **whichever
+    /// reading counted more turns wins the entry whole** rather than each of
+    /// its counters separately: turns, tokens and money for one pair came off
+    /// one pass over one set of events, and taking the maximum of each apart
+    /// would publish a combination no reading ever made.
+    ///
     /// This is deliberately not `isCoveredBy`'s business. That test decides
     /// whether a *day* may be written, and refusing the whole write over a
     /// count would freeze the day's tokens — which are the reading the archive
     /// exists for — on every upgrade from a build that counted nothing.
     func merging(
         counts: AgentCounts?, activity other: AgentActivityDay? = nil,
-        effort otherEffort: EffortCounts? = nil
+        effort otherEffort: [EffortEntry]? = nil
     ) -> Self {
         var merged = self
         if let counts {
@@ -259,8 +326,23 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
             merged.activity = folded.isEmpty ? nil : folded
         }
         if let otherEffort {
-            let folded = (effort ?? .none).merging(otherEffort)
-            merged.effort = folded.isEmpty ? nil : folded
+            var folded = effort ?? []
+            var at = Dictionary(
+                uniqueKeysWithValues: folded.enumerated().map {
+                    (EffortKey(model: $0.element.model, effort: $0.element.effort), $0.offset)
+                })
+            for entry in otherEffort {
+                let key = EffortKey(model: entry.model, effort: entry.effort)
+                guard let index = at[key] else {
+                    at[key] = folded.count
+                    folded.append(entry)
+                    continue
+                }
+                if entry.turns > folded[index].turns { folded[index] = entry }
+            }
+            merged.effort =
+                folded.isEmpty
+                ? nil : folded.sorted { ($0.model, $0.effort) < ($1.model, $1.effort) }
         }
         return merged
     }
@@ -397,23 +479,11 @@ struct UsageHistoryRollup: Sendable, Equatable {
     /// legitimately add up to more than `activity`, because two CLIs working
     /// in the same minute are one minute of the day and two of each other's.
     let activityByProvider: [String: ActivityTotals]
-    /// How many of the window's turns ran at each effort, summed over every
-    /// provider that names one.
-    ///
-    /// Summed rather than kept apart, because the page draws one row of pills
-    /// for the window: the per-provider rows above them answer how much each
-    /// CLI did, and an effort is a setting rather than a quantity to attribute.
-    /// A day written before the archive carried it contributes nothing, which
-    /// under-reports a window spanning the change rather than misreporting it
-    /// — the same terms the counts are on, and the coverage line already says
-    /// how far back the archive reaches.
-    let effort: EffortCounts
 
     init(
         period: UsagePeriod, earliestDay: Date?, tokens: Int, cost: Decimal,
         agents: AgentCounts = .none, agentsByProvider: [String: AgentCounts] = [:],
-        activity: ActivityTotals = .none, activityByProvider: [String: ActivityTotals] = [:],
-        effort: EffortCounts = .none
+        activity: ActivityTotals = .none, activityByProvider: [String: ActivityTotals] = [:]
     ) {
         self.period = period
         self.earliestDay = earliestDay
@@ -423,7 +493,6 @@ struct UsageHistoryRollup: Sendable, Equatable {
         self.agentsByProvider = agentsByProvider
         self.activity = activity
         self.activityByProvider = activityByProvider
-        self.effort = effort
     }
 }
 
@@ -444,6 +513,22 @@ struct UsageHistoryDaySummary: Equatable, Sendable {
     /// That day's totals per model, folded across the projects the archive
     /// keeps them split by. Empty for a day whose file holds no row.
     let models: [ModelTotals]
+    /// That day's split by model and effort, straight off the entries the
+    /// file keeps beside its rows. Empty for a day written before the archive
+    /// carried the dimension, which is an absent reading rather than a day
+    /// nothing was set on.
+    let effort: [EffortSplit]
+
+    init(
+        day: Date, tokens: Int, cost: Decimal, models: [ModelTotals],
+        effort: [EffortSplit] = []
+    ) {
+        self.day = day
+        self.tokens = tokens
+        self.cost = cost
+        self.models = models
+        self.effort = effort
+    }
 }
 
 /// File-level wrapper over the archive: one directory per provider, one file
@@ -561,7 +646,6 @@ enum UsageHistoryStore {
         // union of the day's readers and only the sum of the days.
         var unionByDay: [Date: AgentActivityDay] = [:]
         var activityByProvider: [UsagePeriod: [String: ActivityTotals]] = [:]
-        var effort: [UsagePeriod: EffortCounts] = [:]
         for provider in providers(in: parent) {
             for (dayKey, url) in dayFiles(provider: provider, in: parent) {
                 guard dayKey <= today, let decoded = decode(at: url) else { continue }
@@ -582,7 +666,6 @@ enum UsageHistoryStore {
                     byProvider[period, default: [:]][provider, default: .none]
                         .add(decoded.agents ?? .none)
                     activityByProvider[period, default: [:]][provider, default: .none].add(mine)
-                    effort[period, default: .none].add(decoded.effort ?? .none)
                     earliest[period] = earliest[period].map { min($0, dayKey) } ?? dayKey
                 }
             }
@@ -604,8 +687,7 @@ enum UsageHistoryStore {
                 agents: agents[period] ?? .none,
                 agentsByProvider: byProvider[period] ?? [:],
                 activity: activity[period] ?? .none,
-                activityByProvider: activityByProvider[period] ?? [:],
-                effort: effort[period] ?? .none)
+                activityByProvider: activityByProvider[period] ?? [:])
         }
         return out
     }
@@ -637,7 +719,8 @@ enum UsageHistoryStore {
                     day: day,
                     tokens: decoded.models.reduce(0) { $0 + $1.totalTokens },
                     cost: decoded.models.reduce(Decimal(0)) { $0 + (Decimal(string: $1.cost) ?? 0) },
-                    models: foldByModel(decoded.models)
+                    models: foldByModel(decoded.models),
+                    effort: (decoded.effort ?? []).map(\.split)
                 )
             }
             .sorted { $0.day < $1.day }

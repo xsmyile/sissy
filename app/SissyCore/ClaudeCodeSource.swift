@@ -486,7 +486,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
             seen[dedupeKey]?.billedOutputTokens = output
             return streamedRemainder(
                 model: model, project: project, at: ts, outputTokens: output - already,
-                delegated: delegated)
+                delegated: delegated, effort: obj["effort"] as? String)
         }
         seen[dedupeKey] = SeenEvent(
             day: Calendar.current.startOfDay(for: ts), billedOutputTokens: output)
@@ -635,11 +635,13 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// them, and the earlier one may already be archived by the time the
     /// later copy lands — a day the tail has closed is not one it reopens.
     ///
-    /// It names no effort, and that is what keeps the effort count in turns: a
-    /// copy is the turn already counted, so only the first sighting of a
-    /// request id carries the word the line was written with.
+    /// It names its effort and starts no turn. A copy is the turn already
+    /// counted, so only the first sighting of a request id adds to the count —
+    /// but the output it carries was spent at the effort the turn was set at,
+    /// and a remainder that named none dropped that spend out of the split.
     private func streamedRemainder(
-        model: String, project: String?, at timestamp: Date, outputTokens: Int, delegated: Bool
+        model: String, project: String?, at timestamp: Date, outputTokens: Int, delegated: Bool,
+        effort: String?
     ) -> UsageEvent {
         UsageEvent(
             timestamp: timestamp,
@@ -658,7 +660,9 @@ final class ClaudeCodeAdapter: SourceAdapter {
                 override: pricingOverride,
                 catalog: priceCatalog
             ),
-            delegated: delegated
+            delegated: delegated,
+            effort: effort,
+            startsTurn: false
         )
     }
 }

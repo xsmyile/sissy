@@ -24,21 +24,32 @@ struct UsageEvent: Sendable, Equatable {
     /// the rollout. A second pass to learn it would parse the line twice, which
     /// is the economy `AgentActivityEvent` exists to keep.
     let delegated: Bool
-    /// Which effort this turn ran at, as the vendor spells it, and nil for a
+    /// Which effort this spend ran at, as the vendor spells it, and nil for a
     /// line that names none.
     ///
-    /// **Nil also means "not a new turn"**, which is the whole of why it is
-    /// here rather than counted off the line: Claude Code rewrites an
-    /// assistant line while the answer streams, and each copy is billed for
-    /// the output it added. The first sighting of a turn carries the effort
-    /// and every copy after it carries nothing, so a count of turns per effort
-    /// counts each turn once without a ledger of its own.
+    /// Read off the same JSON object the tokens were, the reason `delegated`
+    /// is: Claude Code writes `effort` at the top level of the assistant line
+    /// and Codex on the `turn_context` that precedes the `token_count`, so a
+    /// second pass to learn it would parse the same bytes twice.
     let effort: String?
+    /// Whether this event is a turn beginning rather than more of one already
+    /// counted.
+    ///
+    /// **Apart from `effort`, because they are two facts and one field got one
+    /// of them wrong.** Claude Code rewrites an assistant line while the answer
+    /// streams and each copy is billed for the output it added; a copy is not
+    /// a new turn, but the money it carries still belongs to the effort the
+    /// turn was set at. Carrying that as a nil effort dropped the copy's spend
+    /// out of the split altogether — measured 2026-09-22 over 14 days, 0.4% of
+    /// `claude-opus-5` and **8.6%** of `claude-sonnet-5`, which is a block
+    /// whose rows cannot reach the pill above them. So a remainder names its
+    /// effort and starts no turn.
+    let startsTurn: Bool
 
     init(
         timestamp: Date, model: String, project: String?, inputTokens: Int, outputTokens: Int,
         cacheReadTokens: Int, cacheCreationTokens: Int, cost: Decimal, delegated: Bool = false,
-        effort: String? = nil
+        effort: String? = nil, startsTurn: Bool = true
     ) {
         self.timestamp = timestamp
         self.model = model
@@ -50,6 +61,7 @@ struct UsageEvent: Sendable, Equatable {
         self.cost = cost
         self.delegated = delegated
         self.effort = effort
+        self.startsTurn = startsTurn
     }
 }
 
@@ -253,14 +265,14 @@ actor LocalUsageProvider: UsageProvider {
     /// belonging to the provider's day and to no model, project or count — and
     /// fed by the same `ingest` so no day can exist in one and not the others.
     private var dailyActivity: [Date: AgentActivityDay] = [:]
-    /// The same days again, counted a third way: how many turns each ran at
-    /// each effort.
+    /// The same days again at a fifth grain: what each model spent at each
+    /// effort.
     ///
-    /// A fifth map for the reason there is a third and a fourth — it is a
-    /// fifth grain, belonging to the provider's day and to no model, project,
-    /// count or minute — and fed by the same `ingest` so no day can exist in
-    /// one and not the others.
-    private var dailyEffort: [Date: EffortCounts] = [:]
+    /// A fifth map because `(model, effort)` is neither of the two grains
+    /// above it — `EffortKey` carries why it is not a third key on the rows —
+    /// and fed by the same `ingest` so no day can exist in one and not the
+    /// others.
+    private var dailyEffort: [Date: [EffortKey: EffortTotals]] = [:]
     /// Days whose archive file is behind what is in memory.
     private var historyDirtyDays: Set<Date> = []
     /// Days this process must not write, because it cannot vouch for them: a
@@ -292,9 +304,9 @@ actor LocalUsageProvider: UsageProvider {
     /// for the same reason: the aggregator reads it while this provider still
     /// holds its own actor.
     private let publishedActivity = LockedValue<AgentActivityDay>(.none)
-    /// Today's effort split, republished on every emit beside the counters and
-    /// read the same way.
-    private let publishedEffort = LockedValue<EffortCounts>(.none)
+    /// Today's effort split, republished on every emit beside the model one
+    /// and read the same way.
+    private let publishedEffort = LockedValue<[EffortSplit]>([])
     private let publishedUsage = LockedValue(ProviderSignals())
     private var lastPublishedSignals: ProviderSignals?
     private var pollTask: Task<Void, Never>?
@@ -705,7 +717,7 @@ actor LocalUsageProvider: UsageProvider {
         publishedModels.store(modelTotals(on: todayKey))
         publishedAgents.store(dailyAgentCounts[todayKey] ?? .none)
         publishedActivity.store(dailyActivity[todayKey] ?? .none)
-        publishedEffort.store(dailyEffort[todayKey] ?? .none)
+        publishedEffort.store(effortSplits(on: todayKey))
         return dailyTotals[todayKey] ?? DayTotals(totalTokens: 0, totalCost: 0)
     }
 
@@ -719,7 +731,12 @@ actor LocalUsageProvider: UsageProvider {
 
     nonisolated func currentActivity() -> AgentActivityDay { publishedActivity.load() }
 
-    nonisolated func currentEffort() -> EffortCounts { publishedEffort.load() }
+    nonisolated func currentEffort() -> [EffortSplit] { publishedEffort.load() }
+
+    /// One day's `(model, effort)` pairs as the frame carries them.
+    private func effortSplits(on day: Date) -> [EffortSplit] {
+        (dailyEffort[day] ?? [:]).map { EffortSplit(key: $0.key, totals: $0.value) }
+    }
 
     /// One day's rows folded down to a total per project. A row naming no
     /// project is left out rather than grouped under a made-up one: the panel
@@ -905,7 +922,11 @@ actor LocalUsageProvider: UsageProvider {
         dailyModelTotals[key] = byRow
         dailyActivity[key, default: .none].record(
             minute: AgentActivityDay.minute(of: event.timestamp), delegated: event.delegated)
-        if let effort = event.effort { dailyEffort[key, default: .none].record(effort) }
+        if let effort = event.effort {
+            dailyEffort[key, default: [:]][
+                EffortKey(model: event.model, effort: effort), default: .init()
+            ].record(event)
+        }
         guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
         historyDirtyDays.insert(key)
     }
@@ -1208,7 +1229,17 @@ actor LocalUsageProvider: UsageProvider {
         }
         for row in snapshot.historyResume?.dailyEffort ?? [] {
             guard let dayDate = dayFmt.date(from: row.day) else { continue }
-            dailyEffort[cal.startOfDay(for: dayDate)] = row.effort
+            dailyEffort[cal.startOfDay(for: dayDate), default: [:]][
+                EffortKey(model: row.model, effort: row.effort), default: .init()
+            ].add(
+                EffortTotals(
+                    turns: row.turns,
+                    totals: UsageHistoryTotals(
+                        inputTokens: row.inputTokens,
+                        outputTokens: row.outputTokens,
+                        cacheReadTokens: row.cacheReadTokens,
+                        cacheCreationTokens: row.cacheCreationTokens,
+                        cost: Decimal(string: row.cost) ?? 0)))
         }
         var restored: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
         for row in snapshot.historyResume?.dailyModelTotals ?? [] {
@@ -1356,7 +1387,7 @@ actor LocalUsageProvider: UsageProvider {
             let totals = dailyModelTotals[day] ?? [:]
             let counts = dailyAgentCounts[day] ?? .none
             let activity = dailyActivity[day] ?? .none
-            let effort = dailyEffort[day] ?? .none
+            let effort = dailyEffort[day] ?? [:]
             // A day can be counted without being billed: Codex writes a
             // rollout's `session_meta` when it opens, so a session somebody
             // started and never asked anything is one session and no tokens.
@@ -1497,9 +1528,22 @@ actor LocalUsageProvider: UsageProvider {
             return UsageStateSnapshot.DailyActivity(
                 day: dayFmt.string(from: day), activity: shape)
         }
-        let effort: [UsageStateSnapshot.DailyEffort] = dailyEffort.compactMap { day, counts in
-            guard !counts.isEmpty else { return nil }
-            return UsageStateSnapshot.DailyEffort(day: dayFmt.string(from: day), effort: counts)
+        var effort: [UsageStateSnapshot.DailyEffort] = []
+        for (day, byKey) in dailyEffort {
+            let dayString = dayFmt.string(from: day)
+            for (key, totals) in byKey where totals.turns > 0 {
+                effort.append(
+                    UsageStateSnapshot.DailyEffort(
+                        day: dayString,
+                        model: key.model,
+                        effort: key.effort,
+                        turns: totals.turns,
+                        inputTokens: totals.totals.inputTokens,
+                        outputTokens: totals.totals.outputTokens,
+                        cacheReadTokens: totals.totals.cacheReadTokens,
+                        cacheCreationTokens: totals.totals.cacheCreationTokens,
+                        cost: NSDecimalNumber(decimal: totals.totals.cost).stringValue))
+            }
         }
         let retainedCutoff = cal.startOfDay(for: retainWindowStart)
         let retainedKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap { key, entry in

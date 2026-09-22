@@ -450,6 +450,10 @@ struct UsagePanelSnapshot: Equatable {
         /// as the pills under the strip. One model is one pill; empty means
         /// the provider has read nothing.
         let models: [ModelRow]
+        /// Today's `(model, effort)` pairs, raw. Raw because the page folds
+        /// them together with the archived days the strip draws, and a slice
+        /// carrying a pre-shared row could not be added to another day's.
+        let effort: [EffortSplit]
         /// What the vendor has billed against a spend cap, worded. Nil for a
         /// provider that publishes none and for an account with nothing to
         /// say — no cap set and nothing spent, which is every account that
@@ -614,6 +618,25 @@ struct UsagePanelSnapshot: Equatable {
         /// The four token counters apart, with the raw id. The pill's hover
         /// and its accessibility label, which are the same sentence: anything
         /// only a pointer can reach does not exist for VoiceOver.
+        let detail: String
+    }
+
+    /// One model's day split by the effort it ran at, as a row of the provider
+    /// page's `By effort` block.
+    struct EffortRow: Equatable, Identifiable {
+        /// The model id as the vendor spells it, which is what the row is
+        /// keyed by.
+        let id: String
+        /// The same id the pills above spell, so the two blocks name one model
+        /// one way.
+        let name: String
+        /// The efforts as one run: the vendor's word and that effort's share
+        /// of what this model spent, dearest first.
+        let run: String
+        /// What each effort cost and how many turns it took. The row's hover
+        /// and its accessibility label, which are the same sentence — the run
+        /// has no room for either, and anything only a pointer can reach does
+        /// not exist for VoiceOver.
         let detail: String
     }
 
@@ -813,18 +836,10 @@ struct UsagePanelSnapshot: Equatable {
             /// `activity` instead, which carries its block count for every
             /// window.
             let shape: DayShape?
-            /// One pill per effort the window's turns ran at, busiest first.
-            ///
-            /// Empty for a window whose days all predate the field, which is
-            /// the archive's own answer for a reading it never took — and the
-            /// block is drawn only when there is one, because pills at zero
-            /// would report a setting nobody chose.
-            let effort: [ModelRow]
 
             init(
                 counts: AgentCounts, byProvider: [ProviderCount], coverage: String?,
-                activity: ActivityTotals = .none, cost: Decimal = 0, shape: DayShape? = nil,
-                effort: [ModelRow] = []
+                activity: ActivityTotals = .none, cost: Decimal = 0, shape: DayShape? = nil
             ) {
                 self.counts = counts
                 self.byProvider = byProvider
@@ -832,7 +847,6 @@ struct UsagePanelSnapshot: Equatable {
                 self.activity = activity
                 self.cost = cost
                 self.shape = shape
-                self.effort = effort
             }
         }
 
@@ -951,9 +965,7 @@ struct UsagePanelSnapshot: Equatable {
             activity: ActivityTotals(shape),
             cost: frame.cost,
             shape: AgentsBlock.DayShape(
-                blocks: shape.blocks, dayMinutes: Self.minutesInDay(containing: now)),
-            effort: makeEffort(
-                frame.providers.reduce(into: EffortCounts.none) { $0.add($1.effort) }))
+                blocks: shape.blocks, dayMinutes: Self.minutesInDay(containing: now)))
         var counted: [UsagePeriod: AgentsBlock.Window] = [.today: today]
         for (period, rollup) in frame.history {
             counted[period] = AgentsBlock.Window(
@@ -968,8 +980,7 @@ struct UsagePanelSnapshot: Equatable {
                     .sorted { $0.name < $1.name },
                 coverage: UsageFormat.periodCoverage(rollup, now: now),
                 activity: rollup.activity,
-                cost: rollup.cost,
-                effort: makeEffort(rollup.effort))
+                cost: rollup.cost)
         }
         return AgentsBlock(
             live: frame.agentMemory.map { memory in
@@ -1249,6 +1260,7 @@ struct UsagePanelSnapshot: Equatable {
                 models: makeModels(
                     slice.models, provider: slice.id, totalCost: slice.cost,
                     totalTokens: slice.tokens),
+                effort: slice.effort,
                 credits: makeCredits(slice.credits, now: now),
                 status: makeStatus(status[slice.id], provider: slice.id)
             )
@@ -1608,51 +1620,76 @@ struct UsagePanelSnapshot: Equatable {
         return Array(rows.prefix(kept)) + [more]
     }
 
-    /// One pill per effort the window's turns ran at, busiest first.
+    /// One row per model, each carrying how its spend split by effort over the
+    /// window the strip above it draws.
     ///
-    /// Drawn with `ModelPill` unchanged, and folded at `modelPillLimit` for
-    /// that block's measured reason: the page is the same 312 pt wide and an
-    /// effort's word is no longer than a model's.
+    /// **A block of its own under the day, not a tier inside the model pill
+    /// and not a pill per pair.** A third tier could name only the busiest
+    /// effort, which on a real Codex model throws away the half that makes the
+    /// reading interesting — measured 2026-09-22, `gpt-6-astra` ran
+    /// `medium 49% · high 38% · ultra 11% · xhigh 3%`, so the top word alone
+    /// says 49% of nothing in particular. A pill per `(model, effort)` pair is
+    /// six or seven pills on a page that folds at four, and the fold would
+    /// take exactly the tail that carries the answer.
     ///
-    /// **The denominator is the turns that named an effort, not the window's
-    /// turns.** A provider whose format names none contributes nothing here,
-    /// and dividing by a total that counted its turns would make every pill
-    /// read short — the shares would sum to a fraction of the window and say
-    /// nothing about why.
+    /// **The window is the strip's, and it is named beside the heading.** A
+    /// single day cannot carry this reading: measured the same day, 98.7% of
+    /// this machine's Claude turns were one model at one effort, so a day's
+    /// split is a word repeated. Over the strip's week it becomes an
+    /// allocation — which model the high-effort turns are going to — and the
+    /// days are already decoded, because `UsageHistoryStore.series` is what
+    /// draws the bars.
     ///
-    /// **A single effort's pill carries no detail.** It already says the word,
-    /// the share and the count, so a hover could only repeat them — which is
-    /// what `ModelPill` leaves out of its spoken label when the field is empty.
-    /// The folded pill keeps one, because the efforts it stands for are the
-    /// one thing it cannot show.
+    /// **It does not follow the strip's pointer.** The pills under the bars
+    /// answer for the day being pointed at, which is their whole contract;
+    /// this answers for the window, and a block that changed under the pointer
+    /// while its own heading named a week would be two readings in one place.
     ///
-    /// Empty where nothing named one, which is every window whose days predate
-    /// the field. A row of pills at zero would report a setting nobody chose,
-    /// and an absent reading is not a reading of none — the rule the strip and
-    /// the `active` figure beside it already hold.
-    private static func makeEffort(_ counts: EffortCounts) -> [ModelRow] {
-        let total = Double(counts.total)
-        guard total > 0 else { return [] }
-        let ordered = counts.ordered
-        let kept = ordered.count <= modelPillLimit ? ordered.count : modelPillLimit - 1
-        var rows = ordered.prefix(kept).map { share in
-            ModelRow(
-                id: share.effort,
-                name: share.effort,
-                reading: UsageFormat.effortReading(
-                    share: Double(share.turns) / total, turns: share.turns),
-                detail: "")
+    /// **Each row's shares are of its own model.** They sum to 100 across the
+    /// row and never across the block, because the question is how *this*
+    /// model's spend splits — a share of the provider's whole day would make
+    /// every row but the busiest read as noise. Of the money, or of the tokens
+    /// as soon as any pair has tokens and no cost, which is `makeModels`' rule
+    /// for `makeModels`' reason.
+    ///
+    /// Capped at the same `modelPillLimit` the pills fold at: the cheapest
+    /// models are the ones the window did least on, and a row standing for
+    /// several could carry no run at all — a fold whose one line is blank is
+    /// worse than the models it stands for being absent.
+    static func makeEffort(_ splits: [EffortSplit], provider: String) -> [EffortRow] {
+        guard !splits.isEmpty else { return [] }
+        let unpriced = splits.contains { $0.cost == 0 && $0.tokens > 0 }
+        let weight = { (split: EffortSplit) -> Double in
+            unpriced
+                ? Double(split.tokens) : NSDecimalNumber(decimal: split.cost).doubleValue
         }
-        guard kept < ordered.count else { return rows }
-        let rest = ordered.dropFirst(kept)
-        let turns = rest.reduce(0) { $0 + $1.turns }
-        rows.append(
-            ModelRow(
-                id: rest.map(\.effort).joined(separator: " "),
-                name: UsageFormat.pillsFolded(rest.count),
-                reading: UsageFormat.effortReading(share: Double(turns) / total, turns: turns),
-                detail: rest.map(\.effort).joined(separator: " · ")))
-        return rows
+        var byModel: [String: [EffortSplit]] = [:]
+        for split in splits { byModel[split.model, default: []].append(split) }
+        var models: [(model: String, splits: [EffortSplit], weight: Double)] = []
+        for (model, splits) in byModel {
+            let total: Double = splits.reduce(0) { $0 + weight($1) }
+            guard total > 0 else { continue }
+            let ordered = splits.sorted { left, right in
+                let a = weight(left)
+                let b = weight(right)
+                return a == b ? left.effort < right.effort : a > b
+            }
+            models.append((model: model, splits: ordered, weight: total))
+        }
+        models.sort { $0.weight == $1.weight ? $0.model < $1.model : $0.weight > $1.weight }
+        return models.prefix(modelPillLimit).map { model, ordered, total in
+            let run: [String] = ordered.map {
+                UsageFormat.effortShare($0.effort, share: weight($0) / total)
+            }
+            let detail: [(effort: String, cost: String, turns: Int)] = ordered.map {
+                (effort: $0.effort, cost: UsageFormat.cost($0.cost), turns: $0.turns)
+            }
+            return EffortRow(
+                id: model,
+                name: UsageFormat.modelName(model, on: provider),
+                run: run.joined(separator: " · "),
+                detail: UsageFormat.effortDetail(detail))
+        }
     }
 
     /// What the day spent outside every repository, or nil when there is none
