@@ -138,7 +138,15 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// without a re-run the page would answer for the day it shipped and say
     /// nothing about the month behind it. The merge is a union of minute
     /// bitmaps, which like the counts can only ever fill in.
-    static let currentSchemaVersion = 3
+    ///
+    /// `4` is the effort split, on the same grounds again: the words are on
+    /// lines the CLIs wrote months ago and the archive's days are the only
+    /// place a window wider than today can read them from. Measured
+    /// 2026-09-22, the record on this machine claimed 2026-06-22 through
+    /// 2026-09-18 covered, so without the bump every one of those days would
+    /// keep its tokens and never name an effort. The merge takes the higher
+    /// count per effort, so a second pass can only fill in.
+    static let currentSchemaVersion = 4
     static let fileName = "history-backfill.json"
 
     /// The span one provider's last pass covered, as `YYYY-MM-DD` in the local
