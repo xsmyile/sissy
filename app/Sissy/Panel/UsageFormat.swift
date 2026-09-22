@@ -1725,18 +1725,33 @@ extension UsageFormat {
     /// fault. It is worded before the age and after the failure: an age dates a
     /// reading this window has none of, and a token the vendor is refusing is
     /// the more actionable of the two.
+    ///
+    /// **It names the vendor and a clock time, and never the mechanism.** The
+    /// sentence it replaced, `counted in UTC days · today opens in 1h 27m`, was
+    /// the implementation read aloud: "today opens" at half past midnight is a
+    /// contradiction on its face, and a countdown is arithmetic the reader has
+    /// to redo every minute. `GitHub's day starts at 02:00` says the one thing
+    /// the dash needs, that the vendor's day is not the user's, and the UTC
+    /// explanation moves to the hover for whoever wants it.
     static func forgeNotice(
-        _ failure: ForgeReadFailure?, readAt: Date?, opensAt: Date? = nil, refreshing: Bool,
-        now: Date = Date()
+        _ kind: ForgeKind, failure: ForgeReadFailure?, readAt: Date?, opensAt: Date? = nil,
+        refreshing: Bool, now: Date = Date()
     ) -> String? {
         if refreshing { return "refreshing…" }
         guard let readAt else { return failure.map(forgeFailure) }
         let read = age(now.timeIntervalSince(readAt))
         if let failure { return forgeFailure(failure) + " · last read " + read }
-        if let opensAt, let label = resetLabel(opensAt, now: now) {
-            return "counted in UTC days · today opens " + label
+        if let opensAt, opensAt > now {
+            return forgeName(kind) + "'s day starts at " + forgeClock(opensAt)
         }
         return "read " + read
+    }
+
+    /// The clock time a vendor's day starts at, in the user's own zone and
+    /// locale, which is the one form of that instant the row and its hover
+    /// both word.
+    static func forgeClock(_ instant: Date) -> String {
+        instant.formatted(.dateTime.hour().minute())
     }
 
     /// The hover for a forge row: what each figure counts, in the vendor's own
@@ -1753,17 +1768,26 @@ extension UsageFormat {
     /// own and for the same reason: a gesture nothing advertises is a feature
     /// only whoever wrote it can find, and this row has nowhere to put a
     /// button — 340 pt already has the login truncating before the figures do.
+    ///
+    /// **The vendor's day is named by the clock time it starts at here**, which
+    /// is what the caption's `GitHub's day starts at 02:00` leans on: "whole
+    /// UTC days" alone left the reader to work out the offset. It is a fact
+    /// about the zone rather than about the moment, so it holds at any hour
+    /// the hover is read — the snapshot builds this once per frame while the
+    /// caption beside it re-reads the clock, and a line gated on the day not
+    /// having started would outlive the start by up to a whole poll.
     static func forgeTooltip(
         _ kind: ForgeKind, host: String, login: String?, period: UsagePeriod,
-        boundedToOneYear: Bool
+        boundedToOneYear: Bool, vendorDayStart: Date
     ) -> String {
         var lines = [forgeName(kind) + " · " + host]
         if let login { lines.append("Read as \(login)") }
+        let days = "in UTC days that start at " + forgeClock(vendorDayStart) + " here"
         switch kind {
         case .gitHub:
-            lines.append("Contributions as GitHub counts them, in its own whole UTC days")
+            lines.append("Contributions as GitHub counts them, " + days)
         case .gitLab:
-            lines.append("Events GitLab recorded for you, in its own whole UTC days")
+            lines.append("Events GitLab recorded for you, " + days)
         }
         if period == .all, boundedToOneYear {
             lines.append("Contributions reach back one year; the counts beside them are every one")
