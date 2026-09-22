@@ -59,14 +59,12 @@ struct PanelOverview: View {
                 projects
             }
 
+            Divider()
+            identityLine(snapshot.identityLine)
+
             if !snapshot.forge.isEmpty {
                 Divider()
                 forge
-            }
-
-            if let alert = snapshot.identityAlert {
-                Divider()
-                identityAlert(alert)
             }
         }
     }
@@ -77,9 +75,9 @@ struct PanelOverview: View {
     /// it.
     ///
     /// **Under the providers rather than under the projects**, which is where
-    /// the identity alert sits and for the opposite reason. That one is silent
-    /// on an ordinary day, so it does not get to push the day's spend down;
-    /// this is never silent, and it answers the same question the gauges above
+    /// the identity line sits and for the opposite reason. That one is about
+    /// the repositories and is quiet on an ordinary day, so it does not get to
+    /// push the day's spend down; this answers the same question the gauges above
     /// it do — whether there is room to keep working — on the other axis that
     /// stops work now. The two readings belong together. It costs the projects
     /// one row's height.
@@ -113,32 +111,34 @@ struct PanelOverview: View {
 
     // MARK: Identities
 
-    /// One line, and only when a repository commits under a name its forge
-    /// does not expect.
+    /// The door to the identities page, drawn on every frame.
     ///
-    /// **Silent on an ordinary day, which is the whole design.** A badge per
-    /// project row was the alternative and it is the wrong axis: the project
-    /// list is ordered by spend and answers where the money went, so a mark
-    /// about identity riding on it is the decorative signal on the cost axis
-    /// this panel already refuses. A row that exists only when there is
-    /// something to act on costs a healthy Mac nothing at all, and names the
-    /// repository rather than a count whenever there is only one — because
-    /// naming it is the whole of the remaining work.
+    /// **Always there, and quiet unless something is wrong.** It was drawn
+    /// only while a repository disagreed with its forge, which left the page
+    /// behind a right-click on a project row on every other day — so the
+    /// check went unnoticed until it had something to say, and a user who had
+    /// never seen the line had no reason to trust its absence. It now takes
+    /// the agents line's shape and its rule: a door that comes and goes is not
+    /// one. What stays true of the old design is the weight. With no finding
+    /// the line is secondary, a tick and a count; a finding turns it primary
+    /// with the warning mark and names the repository whenever there is only
+    /// one, because naming it is the whole of the remaining work.
     ///
-    /// It sits under the projects rather than over them. Sissy's reason for
-    /// being in the menu bar is the day's spend, and a reading that is right
-    /// on most days does not get to push it down.
-    private func identityAlert(_ alert: UsagePanelSnapshot.IdentityAlert) -> some View {
+    /// **Under the projects, above the forge.** It is about repositories, so it
+    /// sits after the list of them rather than inside it — a badge per project
+    /// row is the decorative signal on the cost axis this panel refuses, since
+    /// that list is ordered by spend — and it answers for every repository
+    /// Sissy knows whether or not a forge is connected, which is why it is not
+    /// part of the forge section.
+    private func identityLine(_ line: UsagePanelSnapshot.IdentityLine) -> some View {
         Button {
-            openIdentities(alert.repository)
+            openIdentities(line.repository)
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
-                Text(alert.summary)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                identityMark(line.state)
+                Text(line.summary)
+                    .font(.system(size: PanelMetrics.rowText))
+                    .foregroundStyle(line.state == .findings ? .primary : Color.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
@@ -152,6 +152,24 @@ struct PanelOverview: View {
         .help("Show every repository's commit identity")
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 10)
+    }
+
+    /// The page's own marks, so the line and the rows it leads to read alike.
+    /// Nothing read carries no mark: a tick there would be a verdict.
+    @ViewBuilder
+    private func identityMark(_ state: UsagePanelSnapshot.IdentityLineState) -> some View {
+        switch state {
+        case .findings:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.orange)
+        case .clean:
+            Image(systemName: "checkmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+        case .unread:
+            EmptyView()
+        }
     }
 
     // MARK: Headline

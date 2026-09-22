@@ -112,10 +112,10 @@ struct UsagePanelSnapshot: Equatable {
     /// with and until the first sweep has run, and the page then says nothing
     /// has been read rather than that everything agrees.
     let identities: [IdentityRow]
-    /// The Overview's one line about identities, nil when every repository
-    /// agrees with its forge — which is the ordinary state, and a line that
-    /// said so would be a row that never changes.
-    let identityAlert: IdentityAlert?
+    /// The Overview's one line about identities, drawn on every frame: it is
+    /// the door to the page, and a door that comes and goes with the findings
+    /// is one nobody learns is there.
+    let identityLine: IdentityLine
     /// What is running on this Mac right now, and what the archive has
     /// counted over the window the headline is showing.
     let agents: AgentsBlock
@@ -160,10 +160,20 @@ struct UsagePanelSnapshot: Equatable {
     }
 
     /// The Overview's identity line, and where it leads.
-    struct IdentityAlert: Equatable {
+    struct IdentityLine: Equatable {
+        let state: IdentityLineState
         let summary: String
         /// The repository to open the page on, when exactly one is wrong.
         let repository: String?
+    }
+
+    /// What the Overview's identity line is saying, which decides its mark and
+    /// its weight. `unread` is its own state rather than a `clean` with a zero
+    /// in it: nothing read is the absence of a reading, never an agreement.
+    enum IdentityLineState: Equatable {
+        case unread
+        case clean
+        case findings
     }
 
     /// One day of a provider's recent spend, as a bar on its page.
@@ -784,7 +794,7 @@ struct UsagePanelSnapshot: Equatable {
             projectCount: frame.projects.count,
             forge: makeForge(frame.forge, period: resolved, now: now),
             identities: makeIdentities(frame.identities),
-            identityAlert: makeIdentityAlert(frame.identities),
+            identityLine: makeIdentityLine(frame.identities),
             agents: makeAgents(frame, now: now)
         )
     }
@@ -1181,14 +1191,18 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
-    private static func makeIdentityAlert(_ identities: [RepositoryIdentity]) -> IdentityAlert? {
+    private static func makeIdentityLine(_ identities: [RepositoryIdentity]) -> IdentityLine {
         let wrong = identities.filter {
             if case .unexpected = $0.verdict { return true }
             return false
         }
-        guard let summary = UsageFormat.identityAlert(wrong.map(identityName)) else { return nil }
-        return IdentityAlert(
-            summary: summary, repository: wrong.count == 1 ? wrong[0].repository : nil)
+        let state: IdentityLineState =
+            !wrong.isEmpty ? .findings : identities.isEmpty ? .unread : .clean
+        return IdentityLine(
+            state: state,
+            summary: UsageFormat.identityLine(
+                unexpected: wrong.map(identityName), checked: identities.count),
+            repository: wrong.count == 1 ? wrong[0].repository : nil)
     }
     /// Which windows the headline may be put over: today, which needs no
     /// archive, and each of the rest the frame actually carries a total for.

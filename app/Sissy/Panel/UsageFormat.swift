@@ -1232,17 +1232,24 @@ extension UsageFormat {
         return "\(forge) · \(agreeing) \(repositories) there commit as \(expected.name)"
     }
 
-    /// The Overview's one line, and nothing at all where every repository
-    /// agrees with its forge.
+    /// The Overview's one line.
     ///
-    /// One repository is named, because naming it is the whole of the
-    /// remaining work; several are counted, because a list does not fit a line
-    /// and the page behind it is where a list belongs.
-    static func identityAlert(_ unexpected: [String]) -> String? {
+    /// A finding names one repository, because naming it is the whole of the
+    /// remaining work, and counts several, because a list does not fit a line
+    /// and the page behind it is where a list belongs. Without one the line
+    /// leads with the feature's name, which is the only place on the Overview
+    /// it is said, and says how many repositories that answer covers. "No
+    /// findings" rather than "commit as expected": a repository with no remote
+    /// or a lone account is read and not judged, and a line claiming it agrees
+    /// would claim a verdict the page does not give.
+    static func identityLine(unexpected: [String], checked: Int) -> String {
         switch unexpected.count {
-        case 0: return nil
         case 1: return "\(unexpected[0]) commits under an unexpected name"
-        default: return "\(unexpected.count) repositories commit under an unexpected name"
+        case 2...: return "\(unexpected.count) repositories commit under an unexpected name"
+        default:
+            guard checked > 0 else { return "Commit identity · nothing read yet" }
+            let repositories = checked == 1 ? "repository" : "repositories"
+            return "Commit identity · no findings in \(checked) \(repositories)"
         }
     }
 

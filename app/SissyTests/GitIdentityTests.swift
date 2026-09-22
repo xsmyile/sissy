@@ -444,26 +444,36 @@ final class GitIdentityPanelTests: XCTestCase {
         let one = snapshot([
             identity("/repos/stray", author: personal),
             identity("/repos/a", author: work), identity("/repos/b", author: work),
-        ]).identityAlert
-        XCTAssertEqual(one?.summary, "owner/stray commits under an unexpected name")
-        XCTAssertEqual(one?.repository, "/repos/stray")
+        ]).identityLine
+        XCTAssertEqual(one.state, .findings)
+        XCTAssertEqual(one.summary, "owner/stray commits under an unexpected name")
+        XCTAssertEqual(one.repository, "/repos/stray")
 
         let several = snapshot([
             identity("/repos/x", author: personal), identity("/repos/y", author: personal),
             identity("/repos/a", author: work), identity("/repos/b", author: work),
             identity("/repos/c", author: work),
-        ]).identityAlert
-        XCTAssertEqual(several?.summary, "2 repositories commit under an unexpected name")
+        ]).identityLine
+        XCTAssertEqual(several.summary, "2 repositories commit under an unexpected name")
         XCTAssertNil(
-            several?.repository, "a line that cannot name one repository opens the whole list")
+            several.repository, "a line that cannot name one repository opens the whole list")
     }
 
-    /// The ordinary state is silent: a line saying every repository is fine
-    /// would be a row that never changes.
-    func testTheOverviewSaysNothingWhenEveryRepositoryAgrees() {
+    /// The line is the page's door, so it stays on the Overview when every
+    /// repository agrees, quiet and with the count of what was read.
+    func testTheOverviewKeepsItsLineWhenEveryRepositoryAgrees() {
         let clean = snapshot([identity("/repos/a", author: work), identity("/repos/b", author: work)])
-        XCTAssertNil(clean.identityAlert)
-        XCTAssertEqual(clean.identities.count, 2)
+        XCTAssertEqual(clean.identityLine.state, .clean)
+        XCTAssertEqual(clean.identityLine.summary, "Commit identity · no findings in 2 repositories")
+        XCTAssertNil(clean.identityLine.repository)
+    }
+
+    /// Before the first sweep there is nothing to agree with, and the line
+    /// says so rather than wearing a tick with a zero beside it.
+    func testTheOverviewLineSaysNothingWasReadBeforeTheFirstSweep() {
+        let unread = snapshot([]).identityLine
+        XCTAssertEqual(unread.state, .unread)
+        XCTAssertEqual(unread.summary, "Commit identity · nothing read yet")
     }
 
     /// A page whose one wrong repository sorts to the middle has to be read
