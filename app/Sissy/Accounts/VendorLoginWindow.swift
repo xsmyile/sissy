@@ -112,16 +112,12 @@ final class VendorLoginWindow: NSObject {
         self.vendor = vendor
     }
 
-    /// Opens the window, or brings the one already open to the front.
-    ///
-    /// Re-presenting rather than refusing is the point: the control that opens
-    /// this is the only way back to a window that has gone behind, so a second
-    /// press has to mean "show me the one I already have".
+    /// Whether the window is still up. A controller whose window has closed
+    /// is spent: its callbacks are consumed, and the next link needs a new one.
+    var isOpen: Bool { window != nil }
+
+    /// Opens the window. Called once per controller.
     func present(onCredential: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
-        guard window == nil else {
-            front()
-            return
-        }
         self.onCredential = onCredential
         self.onCancel = onCancel
 
@@ -152,7 +148,7 @@ final class VendorLoginWindow: NSObject {
 
         web.load(URLRequest(url: vendor.startURL))
         NSApp.setActivationPolicy(.regular)
-        front()
+        bringToFront()
     }
 
     /// Asks the question the link could not answer, in the window the
@@ -195,13 +191,20 @@ final class VendorLoginWindow: NSObject {
         close()
     }
 
-    private func front() {
+    /// Brings the open window forward. The control that opens it is the only
+    /// way back to a window that has gone behind, so a second press has to
+    /// mean "show me the one I already have".
+    func bringToFront() {
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Closes the window, which is reported to the caller as a cancel unless
+    /// `finish()` came first. The window's own Cancel and Retry come through
+    /// here, and they are cancels: marking them finished left the caller
+    /// holding a controller whose window was gone, which the next link then
+    /// re-presented with nothing listening for its credential.
     private func close() {
-        finished = true
         window?.close()
     }
 
@@ -215,7 +218,7 @@ final class VendorLoginWindow: NSObject {
         window.contentView = host
         window.setContentSize(NSSize(width: size.width, height: max(size.height, fitted.height)))
         window.center()
-        front()
+        bringToFront()
     }
 
     /// Drops the web view and its cookie jar as soon as the login is over.
@@ -287,8 +290,12 @@ extension VendorLoginWindow: NSWindowDelegate {
     /// Takes the window's own state down and nothing else: the activation
     /// policy belongs to `AppDelegate.syncActivationPolicy`, which sees the
     /// rest of the app's windows and this does not.
+    ///
+    /// Synchronous, because a Retry closes this window and starts the next
+    /// link on the same turn: the caller has to have heard the cancel before
+    /// it decides whether a login is still open.
     nonisolated func windowWillClose(_ notification: Notification) {
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             releaseWeb()
             window?.delegate = nil
             window = nil
