@@ -55,12 +55,36 @@ number in the menu bar.
   was cut from, so one project is one row.
 - What you contributed on each connected forge, over the period you picked. On
   `All`, though, each vendor answers over its own range, not the archive's.
-- A repository committing under a different name from your others on the same
-  forge, shown only when there is one.
+- Whether any repository commits under a name its forge does not expect. The
+  line is always there: quiet with a count when nothing is wrong, and naming
+  the repository when something is.
 
 **Click a row** for the page behind it: an account's plan, windows and credits;
 every repository of the day; the processes running now and how long the day was
 worked; the commit-identity findings; the vendor's own service tree.
+
+**Commit identity** catches the work repository you are about to push under
+your personal name, or the other way round. For every repository your agents
+have worked in, Sissy asks `git` who would sign the next commit. That answer
+follows git's own rules, so global config, a repository's own config and
+`includeIf` profiles all count, worktrees included. The repositories are then
+grouped by the account on the forge their `origin` points to, such as
+`github.com/acme`. Once two or more of an account's repositories commit under
+the same name, that name is what the account expects, and a repository that
+differs is a finding. When an account has only one repository, the other
+accounts on the same host decide, but only if they all agree. Nothing needs
+configuring and nothing is guessed: a repository with no remote, an account
+with a single repository, or a tie gets no verdict at all.
+
+The Overview line opens the Identities page. There, findings come first, each
+with the name it would commit under, what its forge expects and how many
+repositories say so, and the file the wrong value comes from. Everything that
+agrees is folded behind *Show all*. If the wrong value is set in the
+repository's own config, *Copy the fix* puts the matching `git config --unset`
+command on the clipboard. Sissy never writes to a repository or to any git
+config. A commit made with `-c`, `--author` or `GIT_AUTHOR_EMAIL` is outside
+what it can see, and the page says so. Any project row's right-click menu
+opens the same page on that repository.
 
 **Keep awake** is the cup in the panel header: *Never*, *While agents are
 working* (holds the Mac while turns land, lets go ten minutes after they stop),
