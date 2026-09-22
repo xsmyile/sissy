@@ -124,32 +124,30 @@ struct PanelProviderPage: View {
     /// that disagrees with the bar above it.
     private var effortRows: [UsagePanelSnapshot.EffortRow] {
         UsagePanelSnapshot.makeEffort(
-            archivedEffort.summed(with: row.effort), provider: row.id)
+            archivedDays.flatMap(\.effort).summed(with: row.effort), provider: row.id)
     }
 
-    private var archivedEffort: [EffortSplit] {
+    /// The archived days the strip draws, which is the window every figure in
+    /// this block is of.
+    private var archivedDays: [UsageHistoryDaySummary] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let start =
             calendar.date(
                 byAdding: .day, value: -(UsagePanelSnapshot.dayStripDays - 1), to: today) ?? today
-        return
-            series
-            .filter { $0.day >= start && calendar.startOfDay(for: $0.day) < today }
-            .flatMap(\.effort)
+        return series.filter { $0.day >= start && calendar.startOfDay(for: $0.day) < today }
     }
 
-    /// How many of the strip's days the block actually answers for: the
-    /// archived ones inside the window, and today, which the frame always
-    /// answers for.
+    /// How many of the strip's days actually named an effort.
+    ///
+    /// Days that named one, not days the archive holds. A day can carry its
+    /// tokens and no effort — one whose logs the CLI has since pruned, or one
+    /// the archive refuses to rewrite because the re-derivation lost a project
+    /// to a worktree deleted since. Measured 2026-09-22 on this machine, 4 of
+    /// 49 archived days. Counting those as covered would put `7 days` over a
+    /// block that answers for four of them.
     private var effortCoverage: Int {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let start =
-            calendar.date(
-                byAdding: .day, value: -(UsagePanelSnapshot.dayStripDays - 1), to: today) ?? today
-        return series.filter { $0.day >= start && calendar.startOfDay(for: $0.day) < today }.count
-            + 1
+        archivedDays.count { !$0.effort.isEmpty } + (row.effort.isEmpty ? 0 : 1)
     }
 
     private var strip: UsagePanelSnapshot.DayStrip? {
