@@ -144,8 +144,9 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// place a window wider than today can read them from. Measured
     /// 2026-09-22, the record on this machine claimed 2026-06-22 through
     /// 2026-09-18 covered, so without the bump every one of those days would
-    /// keep its tokens and never name an effort. The merge takes the higher
-    /// count per effort, so a second pass can only fill in.
+    /// keep its tokens and never name an effort. The merge takes whichever
+    /// reading counted more turns for a pair, whole, so a second pass can only
+    /// fill in.
     static let currentSchemaVersion = 4
     static let fileName = "history-backfill.json"
 
