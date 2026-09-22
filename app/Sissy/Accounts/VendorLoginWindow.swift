@@ -208,8 +208,12 @@ final class VendorLoginWindow: NSObject {
     private func swap(to content: some View, size: NSSize) {
         releaseWeb()
         guard let window else { return }
-        window.contentView = NSHostingView(rootView: content)
-        window.setContentSize(size)
+        let host = NSHostingView(rootView: content)
+        host.sizingOptions = []
+        let fitted = NSHostingController(rootView: content).sizeThatFits(
+            in: NSSize(width: size.width, height: .greatestFiniteMagnitude))
+        window.contentView = host
+        window.setContentSize(NSSize(width: size.width, height: max(size.height, fitted.height)))
         window.center()
         front()
     }
