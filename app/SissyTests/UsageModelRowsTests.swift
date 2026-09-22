@@ -3,10 +3,10 @@ import XCTest
 @testable import Sissy
 
 /// What the provider page says about which models a day's money went to:
-/// which rows exist, what they are called, what their bands are a share of,
-/// and that the four token counters stay reachable without a pointer.
+/// which pills exist, what they are called, what their percentage is a share
+/// of, and that the four token counters stay reachable without a pointer.
 final class UsageModelRowsTests: XCTestCase {
-    func testTwoModelsAreTwoRowsDearestFirst() {
+    func testTwoModelsAreTwoPillsDearestFirst() {
         let rows = models(
             frame(
                 models: [
@@ -14,26 +14,26 @@ final class UsageModelRowsTests: XCTestCase {
                     model("claude-opus-5", 3_900, "396.88"),
                 ]))
 
-        XCTAssertEqual(rows.map(\.name), ["claude-opus-5", "claude-sonnet-5"])
-        XCTAssertEqual(rows.map(\.cost), ["$396.88", "$19.39"])
+        XCTAssertEqual(rows.map(\.name), ["opus-5", "sonnet-5"])
+        XCTAssertEqual(rows.map(\.reading), ["95% · $396.88", "5% · $19.39"])
     }
 
     /// One model's split is the row above it at 100%, so it is not drawn. The
     /// same rule the page's unattributed line follows: say it only where there
     /// is more than one answer.
-    func testOneModelDrawsNoRows() {
+    func testOneModelDrawsNoPills() {
         let rows = models(frame(models: [model("claude-opus-5", 3_900, "396.88")]))
 
         XCTAssertTrue(rows.isEmpty, "a single model repeated the figure above it")
     }
 
-    func testAProviderThatHasReadNothingDrawsNoRows() {
+    func testAProviderThatHasReadNothingDrawsNoPills() {
         XCTAssertTrue(models(frame(models: [])).isEmpty)
     }
 
-    /// The rows sit under the day's own figure, so their bands have to be
-    /// shares of it rather than of each other.
-    func testTheSharesAreSharesOfTheProvidersDay() {
+    /// The pills are the split of the provider's whole day, so the
+    /// percentages have to be shares of it rather than of each other.
+    func testThePercentagesAreSharesOfTheProvidersDay() {
         let rows = models(
             frame(
                 models: [
@@ -41,13 +41,13 @@ final class UsageModelRowsTests: XCTestCase {
                     model("claude-sonnet-5", 250, "2.50"),
                 ]))
 
-        XCTAssertEqual(rows.map { Int(($0.share * 100).rounded()) }, [75, 25])
+        XCTAssertEqual(rows.map(\.reading), ["75% · $7.50", "25% · $2.50"])
     }
 
     /// A day no pricing source has a rate for costs zero across the board.
     /// Sharing that would draw every band empty on a day that measured
     /// millions of tokens, so the tokens are what the bands are of.
-    func testADayWithNoCostSharesOnTokensInstead() {
+    func testADayWithNoCostTakesItsPercentagesFromTokens() {
         let rows = models(
             frame(
                 models: [
@@ -56,13 +56,13 @@ final class UsageModelRowsTests: XCTestCase {
                 ]))
 
         XCTAssertEqual(rows.map(\.name), ["mystery-9", "mystery-1"])
-        XCTAssertEqual(rows.map { Int(($0.share * 100).rounded()) }, [90, 10])
+        XCTAssertEqual(rows.map(\.reading), ["90% · $0.00", "10% · $0.00"])
     }
 
     /// The date a vendor puts on an id says nothing to a reader, and taking it
     /// off is a rule about the shape rather than a table of names — so the raw
     /// id has to stay somewhere, and that is the detail line.
-    func testADatedIdIsTrimmedOnTheRowAndKeptInTheDetail() {
+    func testADatedIdIsTrimmedOnThePillAndKeptInTheDetail() {
         let rows = models(
             frame(
                 models: [
@@ -70,18 +70,30 @@ final class UsageModelRowsTests: XCTestCase {
                     model("claude-opus-5", 100, "1.00"),
                 ]))
 
-        XCTAssertEqual(rows.first?.name, "claude-haiku-4-5")
+        XCTAssertEqual(rows.first?.name, "haiku-4-5")
         XCTAssertEqual(rows.first?.id, "claude-haiku-4-5-20251001")
         XCTAssertTrue(
             rows.first?.detail.hasPrefix("claude-haiku-4-5-20251001") == true,
-            "the raw id was nowhere on the row")
+            "the raw id was nowhere on the pill")
     }
 
     func testAnIdThatMerelyEndsInNumbersKeepsThemAll() {
-        XCTAssertEqual(UsageFormat.modelName("gpt-5.6-sol"), "gpt-5.6-sol")
-        XCTAssertEqual(UsageFormat.modelName("claude-opus-5"), "claude-opus-5")
-        XCTAssertEqual(UsageFormat.modelName("o3-2025"), "o3-2025")
-        XCTAssertEqual(UsageFormat.modelName("20251001"), "20251001")
+        XCTAssertEqual(UsageFormat.modelName("gpt-5.6-sol", on: ProviderID.codex), "gpt-5.6-sol")
+        XCTAssertEqual(UsageFormat.modelName("o3-2025", on: ProviderID.codex), "o3-2025")
+        XCTAssertEqual(UsageFormat.modelName("20251001", on: ProviderID.codex), "20251001")
+    }
+
+    /// The prefix comes off only when it is the page's own provider. `gpt` is
+    /// not `Codex`, so nothing comes off an OpenAI id, and a name that is only
+    /// the vendor word survives whole rather than becoming nothing.
+    func testTheVendorPrefixComesOffOnlyOnItsOwnPage() {
+        XCTAssertEqual(
+            UsageFormat.modelName("claude-opus-5", on: ProviderID.claudeCode), "opus-5")
+        XCTAssertEqual(
+            UsageFormat.modelName("claude-opus-5", on: ProviderID.codex), "claude-opus-5")
+        XCTAssertEqual(
+            UsageFormat.modelName("gpt-5-codex", on: ProviderID.codex), "gpt-5-codex")
+        XCTAssertEqual(UsageFormat.modelName("claude", on: ProviderID.claudeCode), "claude")
     }
 
     /// ccusage's own breakdown prints the four counters apart, and a total

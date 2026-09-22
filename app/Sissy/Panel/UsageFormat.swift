@@ -831,22 +831,46 @@ enum UsageFormat {
         return name.isEmpty ? path : name
     }
 
-    /// What a model is called: the vendor's own id, with a trailing release
-    /// date taken off.
+    /// What a model is called on the page of the provider that ran it: the
+    /// vendor's own id, with a trailing release date taken off and the
+    /// vendor's own name taken off the front.
     ///
-    /// **A rule about the shape, never a table of names.** There is no
+    /// **Two rules about the shape, never a table of names.** There is no
     /// hand-maintained rate table in Sissy and a display-name map would be
     /// the same regression with different values — a model shipped tomorrow
     /// would read as nothing until somebody cut a release. So the id is shown
     /// as the vendor spells it, the way `UsageWindow.scope` already is, and
-    /// the one thing removed is a suffix that says nothing to a reader:
+    /// only two things come off, both of them mechanical.
+    ///
+    /// The **date suffix**, because it says nothing to a reader:
     /// `claude-haiku-4-5-20251001` is the same model as `claude-haiku-4-5`
     /// wherever it appears. Measured 2026-09-21 across 47 archived days on
     /// the author's machine, none of the 5 ids seen carried one, which is
     /// exactly why this cannot be a list.
     ///
+    /// The **vendor prefix**, because the page's own header already prints it
+    /// — and because it is what makes the block fit. Measured 2026-09-22 at
+    /// `PanelMetrics.width`: four pills carrying the full ids want 378 pt of
+    /// the 312 a page has, and the same four want 249.5 pt without the
+    /// prefix. It is taken off only when the leading dash-delimited token is
+    /// the provider's own name, which `providerName` already answers, so a
+    /// provider whose models do not start with it keeps them whole: `gpt` is
+    /// not `Codex`, so nothing comes off `gpt-5-codex`, while a future
+    /// `codex-mini` on that page would read `mini`. Deriving it from the name
+    /// already on the header is what keeps this a rule rather than the list
+    /// the first paragraph forbids.
+    ///
     /// The raw id stays reachable: `modelTokenDetail` prints it.
-    static func modelName(_ id: String) -> String {
+    static func modelName(_ id: String, on provider: String) -> String {
+        let dated = withoutDateSuffix(id)
+        let parts = dated.split(separator: "-")
+        guard parts.count > 1,
+            parts[0].caseInsensitiveCompare(providerName(provider)) == .orderedSame
+        else { return dated }
+        return parts.dropFirst().joined(separator: "-")
+    }
+
+    private static func withoutDateSuffix(_ id: String) -> String {
         let parts = id.split(separator: "-")
         guard let last = parts.last, last.count == modelDateSuffixLength,
             last.allSatisfy(\.isNumber), parts.count > 1
@@ -854,8 +878,20 @@ enum UsageFormat {
         return parts.dropLast().joined(separator: "-")
     }
 
-    /// Eight digits, which is the only suffix `modelName` takes off.
+    /// Eight digits, which is the only suffix `withoutDateSuffix` takes off.
     private static let modelDateSuffixLength = 8
+
+    /// One model pill's second line: its share of the day and what it cost.
+    ///
+    /// The two together because the choice between them was a false one. The
+    /// percentage answers which model the day went to and the money answers
+    /// what that was worth, and a pill carrying one of them sends the reader
+    /// to the other surface for the other half. The separator is the panel's
+    /// own, and the pair is the shape `creditsReading` already uses for a
+    /// figure and its share.
+    static func modelReading(percent: Int, cost: String) -> String {
+        "\(percent)% · \(cost)"
+    }
 
     /// One model row's hover and its accessibility label: the id as the vendor
     /// spells it, then the four token counters apart.
