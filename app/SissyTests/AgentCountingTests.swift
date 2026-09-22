@@ -261,6 +261,37 @@ final class AgentCountingTests: XCTestCase {
         XCTAssertTrue(decoded.turns.contains(3))
     }
 
+    /// A fork replays its parent's turns stamped at its own start, so an old
+    /// turn would land on the day of the fork. Only the fork's own turns count.
+    func testAForkDoesNotTimeTheTurnsItCopied() {
+        let meta = """
+            {"timestamp":"2026-09-22T10:00:00.000Z","type":"session_meta",\
+            "payload":{"session_id":"f","cwd":"/tmp","forked_from_id":"parent-xyz"}}
+            """
+        let copied = """
+            {"timestamp":"2026-09-22T10:00:00.002Z","type":"event_msg",\
+            "payload":{"type":"task_complete","duration_ms":900000}}
+            """
+        let own = """
+            {"timestamp":"2026-09-22T10:05:00.000Z","type":"event_msg",\
+            "payload":{"type":"task_complete","duration_ms":30000}}
+            """
+        let turns = codexActivity([("fork.jsonl", meta), ("fork.jsonl", copied), ("fork.jsonl", own)])
+            .filter { $0.kind != .sessionStarted && $0.kind != .agentSpawned }
+        XCTAssertEqual(turns.map(\.kind), [.turnCompleted(milliseconds: 30_000)])
+    }
+
+    /// The export's minutes columns answer for a day's length, so a day that
+    /// holds only a timed turn has no row there rather than a row of zeroes.
+    func testADayWithOnlyATimedTurnExportsNoMinutes() {
+        let day = UsageHistoryDay(
+            day: "2026-09-22", provider: ProviderID.claudeCode, updatedAt: Date(), totals: [:],
+            activity: AgentActivityDay(longestTurnMilliseconds: 42_000))
+        XCTAssertEqual(
+            UsageHistoryExport.activityCSV([day]).split(separator: "\n").count, 1,
+            "a day with no minutes wrote a row of zeroes")
+    }
+
     /// Counting a `review` rollout as an agent must not also make it a session
     /// that opens by replaying its parent's turns: measured 2026-09-18, its
     /// first `token_count` lands 0.09 s after `session_meta` and is a real

@@ -395,9 +395,12 @@ final class CodexAdapter: SourceAdapter {
     /// Reads how long a turn ran off the `task_complete` Codex writes when it
     /// ends.
     ///
-    /// Claimed in no ledger, because what it feeds is a maximum: a forked
-    /// rollout replays its parent's lines, and a replayed turn lands on the
-    /// figure the original already set.
+    /// Claimed in no ledger, because what it feeds is a maximum and a line
+    /// read twice lands on the figure it already set. What a maximum does not
+    /// absorb is a fork: its parent's turns are replayed stamped at the fork's
+    /// own start, so an old turn would land on the day of the fork. A line
+    /// inside that burst is skipped, the rule its `token_count`s already
+    /// follow.
     private func timeTurn(
         _ object: [String: Any], line: SourceLine, into activity: inout [AgentActivityEvent]
     ) {
@@ -406,7 +409,8 @@ final class CodexAdapter: SourceAdapter {
             let milliseconds = payload["duration_ms"] as? Int, milliseconds > 0,
             let timestamp = (object["timestamp"] as? String).flatMap(
                 UsageReaderShared.parseTimestamp),
-            timestamp >= line.retainCutoff
+            timestamp >= line.retainCutoff,
+            !isInsideACopy(at: timestamp, in: line.url)
         else { return }
         activity.append(
             AgentActivityEvent(timestamp: timestamp, kind: .turnCompleted(milliseconds: milliseconds)))
@@ -515,6 +519,15 @@ final class CodexAdapter: SourceAdapter {
     /// twice for turns they had already paid for once — measured at 12% of one
     /// month, because a session forked three times replays the same history
     /// three more times.
+    /// Whether an instant falls inside the burst `isCopiedFromAParent` is
+    /// tracking, without extending it: only a `token_count` moves the burst,
+    /// so a line that bills nothing cannot keep a copy open past its end.
+    private func isInsideACopy(at timestamp: Date, in url: URL) -> Bool {
+        guard case .copying(let through) = fileReplay[url] ?? .counting else { return false }
+        let sinceLastCopy = timestamp.timeIntervalSince(through)
+        return sinceLastCopy >= 0 && sinceLastCopy <= Self.replayedTurnWindow
+    }
+
     private func isCopiedFromAParent(at timestamp: Date, in url: URL) -> Bool {
         guard case .copying(let through) = fileReplay[url] ?? .counting else { return false }
         let sinceLastCopy = timestamp.timeIntervalSince(through)
