@@ -24,7 +24,7 @@ import Security
 enum CodexAccountStore {
     /// Service the items are filed under. A literal rather than a provider id,
     /// so renaming a provider cannot orphan a credential the user linked.
-    static let keychainService = "com.radonforge.sissy.codex-oauth"
+    static let keychainService = SissyPaths.keychainService("codex-oauth")
 
     /// Files a credential under the login it belongs to, replacing whatever
     /// was there.

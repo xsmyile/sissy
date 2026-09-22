@@ -75,6 +75,9 @@ the press.
 | `com.radonforge.sissy.codex-oauth` | each linked Codex account's OpenAI credential, Sissy's own copy and the only one it renews |
 | `com.radonforge.sissy.forge-token` | each forge connection's token, used to read activity counts and nothing else |
 
+A Debug build files the same four under `com.radonforge.sissy.dev.*`, so a
+development copy never reads or overwrites what the released app holds.
+
 None reaches the frame, the logs, the diagnostics report or the CSV export. No
 type the panel renders carries a token field, and
 `ClaudeWebSessionSecrecyTests` plus the secrecy cases in `CodexAccountLinkTests`
