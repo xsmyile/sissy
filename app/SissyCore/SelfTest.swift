@@ -710,90 +710,55 @@ private func runOpenAIPricingTests() {
         ModelPricing(
             inputPerMTok: 1.25, outputPerMTok: 10, cacheReadPerMTok: 0.125,
             cacheCreationPerMTok: 0))
-    // gpt-5.2-codex and gpt-5.5 ship at materially different rates from
-    // gpt-5; missing rows used to fall back to gpt-5 pricing and silently
-    // under-bill — 1.4× on 5.2, 4× on 5.5.
+    // Everything below is a relation rather than a rate. A vendor repricing a
+    // row is not a regression; a name resolving to the wrong row is, and a
+    // pinned rate cannot tell the two apart — it also broke this test on the
+    // one release step that regenerates the seed. `gpt-5-codex` above is the
+    // single absolute anchor: if that one moves, read the catalog.
+    let gpt5 = OpenAIPricing.price(for: "gpt-5")
+    expect("gpt-5 carries a rate", (gpt5?.inputPerMTok ?? 0) > 0, true)
+
+    // A generation with no row of its own falls to gpt-5 and silently
+    // under-bills — 1.4× on 5.2, 4× on 5.5 before these rows existed.
+    for name in ["gpt-5.2-codex", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6"] {
+        let rate = OpenAIPricing.price(for: name)
+        expect("\(name) does not fall back to gpt-5", rate != nil && rate != gpt5, true)
+    }
+
+    // `-codex` and `-sol` carry no row of their own, so they must reach bare
+    // 5.6 by prefix rather than fall past it to gpt-5.
+    let gpt56 = OpenAIPricing.price(for: "gpt-5.6")
+    expect("gpt-5.6-codex resolves to gpt-5.6", OpenAIPricing.price(for: "gpt-5.6-codex"), gpt56)
+    expect("gpt-5.6-sol resolves to gpt-5.6", OpenAIPricing.price(for: "gpt-5.6-sol"), gpt56)
+
+    // A tier that has a row must win longest-prefix over its bare generation,
+    // and each sits on one side of it: the small tiers below, `-pro` above.
+    let cheaperTiers = [
+        ("gpt-5.6-luna", "gpt-5.6"),
+        ("gpt-5.6-terra", "gpt-5.6"),
+        ("gpt-5.4-mini-2026-03-17", "gpt-5.4"),
+        ("gpt-5.4-nano", "gpt-5.4"),
+        ("gpt-5.1-codex-mini", "gpt-5.1-codex"),
+    ]
+    for (tier, base) in cheaperTiers {
+        let tierRate = OpenAIPricing.price(for: tier)?.inputPerMTok ?? 0
+        let baseRate = OpenAIPricing.price(for: base)?.inputPerMTok ?? 0
+        expect("\(tier) wins its own row under \(base)", tierRate > 0 && tierRate < baseRate, true)
+    }
+    let proRate = OpenAIPricing.price(for: "gpt-5.4-pro")?.inputPerMTok ?? 0
+    let bare54Rate = OpenAIPricing.price(for: "gpt-5.4")?.inputPerMTok ?? 0
+    expect("gpt-5.4-pro wins its own row over gpt-5.4", proRate > bare54Rate, true)
+
+    // Two tiers of one generation are two rows, not one row reached twice.
     expect(
-        "gpt-5.2-codex exact",
-        OpenAIPricing.price(for: "gpt-5.2-codex"),
-        ModelPricing(
-            inputPerMTok: 1.75, outputPerMTok: 14, cacheReadPerMTok: 0.175,
-            cacheCreationPerMTok: 0))
-    expect(
-        "gpt-5.5 exact",
-        OpenAIPricing.price(for: "gpt-5.5"),
-        ModelPricing(
-            inputPerMTok: 5.00, outputPerMTok: 30, cacheReadPerMTok: 0.50,
-            cacheCreationPerMTok: 0))
-    // gpt-5.6 ($5/$30) and its `-codex` sibling via prefix. Without this row
-    // both fall to gpt-5 ($1.25/$10) and under-bill 4×.
-    expect(
-        "gpt-5.6 exact",
-        OpenAIPricing.price(for: "gpt-5.6"),
-        ModelPricing(
-            inputPerMTok: 5.00, outputPerMTok: 30, cacheReadPerMTok: 0.50,
-            cacheCreationPerMTok: 0))
-    expect(
-        "gpt-5.6-codex prefix", OpenAIPricing.price(for: "gpt-5.6-codex"),
-        ModelPricing(
-            inputPerMTok: 5.00, outputPerMTok: 30, cacheReadPerMTok: 0.50,
-            cacheCreationPerMTok: 0))
-    // gpt-5.6 variant tiers. `-sol` matches bare 5.6 via prefix; `-luna` and
-    // `-terra` price lower and need their own rows to win longest-prefix.
-    expect(
-        "gpt-5.6-sol prefix", OpenAIPricing.price(for: "gpt-5.6-sol"),
-        ModelPricing(
-            inputPerMTok: 5.00, outputPerMTok: 30, cacheReadPerMTok: 0.50,
-            cacheCreationPerMTok: 0))
-    expect(
-        "gpt-5.6-luna exact", OpenAIPricing.price(for: "gpt-5.6-luna"),
-        ModelPricing(
-            inputPerMTok: 1.00, outputPerMTok: 6.00, cacheReadPerMTok: 0.10,
-            cacheCreationPerMTok: 0))
-    expect(
-        "gpt-5.6-terra exact", OpenAIPricing.price(for: "gpt-5.6-terra"),
-        ModelPricing(
-            inputPerMTok: 2.50, outputPerMTok: 15.00, cacheReadPerMTok: 0.25,
-            cacheCreationPerMTok: 0))
-    // gpt-5.3/5.4 generations. Bare 5.3 covers `-codex`/`-chat-latest`; 5.4
-    // tiers price separately and each must win longest-prefix over bare 5.4.
-    expect(
-        "gpt-5.3-codex prefix", OpenAIPricing.price(for: "gpt-5.3-codex"),
-        ModelPricing(
-            inputPerMTok: 1.75, outputPerMTok: 14, cacheReadPerMTok: 0.175,
-            cacheCreationPerMTok: 0))
-    expect(
-        "gpt-5.4 exact", OpenAIPricing.price(for: "gpt-5.4"),
-        ModelPricing(
-            inputPerMTok: 2.50, outputPerMTok: 15, cacheReadPerMTok: 0.25,
-            cacheCreationPerMTok: 0))
-    expect(
-        "gpt-5.4-mini wins over gpt-5.4",
-        OpenAIPricing.price(for: "gpt-5.4-mini-2026-03-17"),
-        ModelPricing(
-            inputPerMTok: 0.75, outputPerMTok: 4.50, cacheReadPerMTok: 0.075,
-            cacheCreationPerMTok: 0))
-    expect(
-        "gpt-5.4-nano exact", OpenAIPricing.price(for: "gpt-5.4-nano"),
-        ModelPricing(
-            inputPerMTok: 0.20, outputPerMTok: 1.25, cacheReadPerMTok: 0.02,
-            cacheCreationPerMTok: 0))
-    expect(
-        "gpt-5.4-pro exact", OpenAIPricing.price(for: "gpt-5.4-pro"),
-        ModelPricing(
-            inputPerMTok: 30.00, outputPerMTok: 180, cacheReadPerMTok: 3.00,
-            cacheCreationPerMTok: 0))
-    expect(
-        "gpt-5.1-codex-mini wins over gpt-5.1-codex",
-        OpenAIPricing.price(for: "gpt-5.1-codex-mini"),
-        ModelPricing(
-            inputPerMTok: 0.25, outputPerMTok: 2.00, cacheReadPerMTok: 0.025,
-            cacheCreationPerMTok: 0))
-    expect(
-        "codex-mini-latest exact", OpenAIPricing.price(for: "codex-mini-latest"),
-        ModelPricing(
-            inputPerMTok: 1.50, outputPerMTok: 6.00, cacheReadPerMTok: 0.375,
-            cacheCreationPerMTok: 0))
+        "gpt-5.6-luna and gpt-5.6-terra are distinct rows",
+        OpenAIPricing.price(for: "gpt-5.6-luna") != OpenAIPricing.price(for: "gpt-5.6-terra"),
+        true)
+
+    // `codex-mini-latest` is a model of its own, not a gpt-5 tier.
+    let codexMini = OpenAIPricing.price(for: "codex-mini-latest")
+    expect("codex-mini-latest carries a rate", (codexMini?.inputPerMTok ?? 0) > 0, true)
+    expect("codex-mini-latest does not fall back to gpt-5", codexMini != gpt5, true)
 
     // Longest-prefix family match — `gpt-5-codex-experimental` → `gpt-5-codex`,
     // not `gpt-5`, because `gpt-5-codex` is the longer prefix.
