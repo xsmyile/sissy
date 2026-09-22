@@ -948,13 +948,6 @@ enum UsageFormat {
         return "\(percent)% · \(count)"
     }
 
-    /// One effort pill's hover and its accessibility label, which are the same
-    /// sentence: anything only a pointer can reach does not exist for
-    /// VoiceOver.
-    static func effortDetail(_ effort: String, turns: Int) -> String {
-        "\(agentCount(turns, singular: "turn", plural: "turns")) at \(effort)"
-    }
-
     /// Always plural: the fold only happens past the row limit, and folding a
     /// single leftover would save no row, so the folded row never stands for
     /// fewer than two projects.

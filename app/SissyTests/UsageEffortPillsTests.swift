@@ -27,6 +27,34 @@ final class UsageEffortPillsTests: XCTestCase {
         return try XCTUnwrap(block.counted[window]).effort.map { ($0.name, $0.reading) }
     }
 
+    private func rows(_ window: UsagePeriod, in frame: FrameData) throws
+        -> [UsagePanelSnapshot.ModelRow]
+    {
+        try XCTUnwrap(UsagePanelSnapshot.make(frame: frame).agents.counted[window]).effort
+    }
+
+    /// The pill already carries the word, the share and the count, so a detail
+    /// would say all three again — which VoiceOver would read aloud.
+    func testASingleEffortsPillCarriesNoDetailToRepeatItself() throws {
+        let frame = frame(providers: [
+            slice(ProviderID.claudeCode, effort: EffortCounts(["xhigh": 46]))
+        ])
+        XCTAssertEqual(try rows(.today, in: frame).map(\.detail), [""])
+    }
+
+    /// The folded pill is the exception: the efforts it stands for are the one
+    /// thing its two lines cannot show.
+    func testTheFoldedPillNamesTheEffortsItStandsFor() throws {
+        let frame = frame(providers: [
+            slice(
+                ProviderID.claudeCode,
+                effort: EffortCounts([
+                    "ultra": 50, "xhigh": 30, "high": 10, "medium": 8, "low": 2,
+                ]))
+        ])
+        XCTAssertEqual(try rows(.today, in: frame).last?.detail, "medium · low")
+    }
+
     func testTodaysPillsSumTheSlicesAndNameTheirShare() throws {
         let frame = frame(providers: [
             slice(ProviderID.claudeCode, effort: EffortCounts(["xhigh": 46, "high": 1])),
