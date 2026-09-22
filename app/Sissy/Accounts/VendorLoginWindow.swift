@@ -83,6 +83,8 @@ final class VendorLoginWindow: NSObject {
     /// window's job is only to notice it.
     struct Vendor: Sendable {
         let title: String
+        /// How the log names this vendor's sign-in.
+        let logName: String
         let startURL: URL
         /// Whether a host is part of this vendor's own sign-in.
         let isInternal: @Sendable (String) -> Bool
@@ -149,11 +151,14 @@ final class VendorLoginWindow: NSObject {
         web.load(URLRequest(url: vendor.startURL))
         NSApp.setActivationPolicy(.regular)
         bringToFront()
+        sissyLog("sissy: opened the \(vendor.logName) login")
     }
 
     /// Asks the question the link could not answer, in the window the
     /// credential was just obtained in.
     func ask(_ question: VendorLoginQuestion, onPick: @escaping (String) -> Void) {
+        sissyLog(
+            "sissy: the \(vendor.logName) login is asking which of \(question.options.count) to link")
         swap(
             to: VendorLinkQuestionView(
                 question: question,
@@ -188,6 +193,7 @@ final class VendorLoginWindow: NSObject {
     /// first, so the close this causes is not reported as one.
     func finish() {
         finished = true
+        sissyLog("sissy: the \(vendor.logName) login completed")
         close()
     }
 
@@ -240,6 +246,7 @@ final class VendorLoginWindow: NSObject {
     private func deliver(_ credential: String) {
         guard let pending = onCredential else { return }
         onCredential = nil
+        sissyLog("sissy: the \(vendor.logName) login produced a credential")
         working()
         pending(credential)
     }
@@ -303,6 +310,7 @@ extension VendorLoginWindow: NSWindowDelegate {
             onCredential = nil
             onCancel = nil
             guard !finished else { return }
+            sissyLog("sissy: the \(vendor.logName) login was closed before it completed")
             cancelled?()
         }
     }
@@ -313,6 +321,7 @@ extension VendorLoginWindow.Vendor {
     static var claude: Self {
         Self(
             title: "Add Claude account",
+            logName: "claude.ai",
             startURL: URL(string: "https://claude.ai/login")!,
             isInternal: { isHost($0, in: "claude.ai") },
             session: { cookies in
@@ -330,6 +339,7 @@ extension VendorLoginWindow.Vendor {
     static func codex(flow: CodexOAuth.Flow) -> Self {
         Self(
             title: "Add Codex account",
+            logName: "OpenAI",
             startURL: flow.url,
             isInternal: { host in
                 isHost(host, in: "openai.com") || isHost(host, in: "chatgpt.com")
