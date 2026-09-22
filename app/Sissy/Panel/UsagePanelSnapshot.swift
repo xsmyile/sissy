@@ -813,10 +813,18 @@ struct UsagePanelSnapshot: Equatable {
             /// `activity` instead, which carries its block count for every
             /// window.
             let shape: DayShape?
+            /// One pill per effort the window's turns ran at, busiest first.
+            ///
+            /// Empty for a window whose days all predate the field, which is
+            /// the archive's own answer for a reading it never took — and the
+            /// block is drawn only when there is one, because pills at zero
+            /// would report a setting nobody chose.
+            let effort: [ModelRow]
 
             init(
                 counts: AgentCounts, byProvider: [ProviderCount], coverage: String?,
-                activity: ActivityTotals = .none, cost: Decimal = 0, shape: DayShape? = nil
+                activity: ActivityTotals = .none, cost: Decimal = 0, shape: DayShape? = nil,
+                effort: [ModelRow] = []
             ) {
                 self.counts = counts
                 self.byProvider = byProvider
@@ -824,6 +832,7 @@ struct UsagePanelSnapshot: Equatable {
                 self.activity = activity
                 self.cost = cost
                 self.shape = shape
+                self.effort = effort
             }
         }
 
@@ -942,7 +951,9 @@ struct UsagePanelSnapshot: Equatable {
             activity: ActivityTotals(shape),
             cost: frame.cost,
             shape: AgentsBlock.DayShape(
-                blocks: shape.blocks, dayMinutes: Self.minutesInDay(containing: now)))
+                blocks: shape.blocks, dayMinutes: Self.minutesInDay(containing: now)),
+            effort: makeEffort(
+                frame.providers.reduce(into: EffortCounts.none) { $0.add($1.effort) }))
         var counted: [UsagePeriod: AgentsBlock.Window] = [.today: today]
         for (period, rollup) in frame.history {
             counted[period] = AgentsBlock.Window(
@@ -957,7 +968,8 @@ struct UsagePanelSnapshot: Equatable {
                     .sorted { $0.name < $1.name },
                 coverage: UsageFormat.periodCoverage(rollup, now: now),
                 activity: rollup.activity,
-                cost: rollup.cost)
+                cost: rollup.cost,
+                effort: makeEffort(rollup.effort))
         }
         return AgentsBlock(
             live: frame.agentMemory.map { memory in
@@ -1589,11 +1601,52 @@ struct UsagePanelSnapshot: Equatable {
         let cost = rest.reduce(Decimal(0)) { $0 + $1.cost }
         let more = ModelRow(
             id: rest.map(\.model).joined(separator: " "),
-            name: UsageFormat.modelsFolded(rest.count),
+            name: UsageFormat.pillsFolded(rest.count),
             reading: UsageFormat.modelReading(
                 share: total > 0 ? part / total : 0, cost: UsageFormat.cost(cost)),
             detail: rest.map(\.model).joined(separator: " · "))
         return Array(rows.prefix(kept)) + [more]
+    }
+
+    /// One pill per effort the window's turns ran at, busiest first.
+    ///
+    /// Drawn with `ModelPill` unchanged, and folded at `modelPillLimit` for
+    /// that block's measured reason: the page is the same 312 pt wide and an
+    /// effort's word is no longer than a model's.
+    ///
+    /// **The denominator is the turns that named an effort, not the window's
+    /// turns.** A provider whose format names none contributes nothing here,
+    /// and dividing by a total that counted its turns would make every pill
+    /// read short — the shares would sum to a fraction of the window and say
+    /// nothing about why.
+    ///
+    /// Empty where nothing named one, which is every window whose days predate
+    /// the field. A row of pills at zero would report a setting nobody chose,
+    /// and an absent reading is not a reading of none — the rule the strip and
+    /// the `active` figure beside it already hold.
+    private static func makeEffort(_ counts: EffortCounts) -> [ModelRow] {
+        let total = Double(counts.total)
+        guard total > 0 else { return [] }
+        let ordered = counts.ordered
+        let kept = ordered.count <= modelPillLimit ? ordered.count : modelPillLimit - 1
+        var rows = ordered.prefix(kept).map { share in
+            ModelRow(
+                id: share.effort,
+                name: share.effort,
+                reading: UsageFormat.effortReading(
+                    share: Double(share.turns) / total, turns: share.turns),
+                detail: UsageFormat.effortDetail(share.effort, turns: share.turns))
+        }
+        guard kept < ordered.count else { return rows }
+        let rest = ordered.dropFirst(kept)
+        let turns = rest.reduce(0) { $0 + $1.turns }
+        rows.append(
+            ModelRow(
+                id: rest.map(\.effort).joined(separator: " "),
+                name: UsageFormat.pillsFolded(rest.count),
+                reading: UsageFormat.effortReading(share: Double(turns) / total, turns: turns),
+                detail: rest.map(\.effort).joined(separator: " · ")))
+        return rows
     }
 
     /// What the day spent outside every repository, or nil when there is none

@@ -921,14 +921,38 @@ enum UsageFormat {
         ].joined(separator: " · ")
     }
 
-    /// What the pill standing for the folded models is called.
+    /// What the pill standing for the folded rest is called, whether the row
+    /// is one of models or one of efforts.
     ///
     /// Shorter than `projectsFolded`'s sentence because it has to fit a pill
     /// beside three others rather than a row of its own, and the word it drops
     /// is the one the block's own context supplies. Always plural for that
     /// function's reason: folding a single leftover would save no width.
-    static func modelsFolded(_ count: Int) -> String {
+    static func pillsFolded(_ count: Int) -> String {
         "+\(count) more"
+    }
+
+    /// One effort pill's second line: the share of the window's counted turns
+    /// and how many of them there were.
+    ///
+    /// Turns rather than money, which is the whole of why this is not
+    /// `modelReading`: an effort is a setting a turn ran under and changes no
+    /// rate, so the figure beside the share is the count the section is
+    /// already about. `<1%` for the same reason the model pill has one — a
+    /// share that rounds to nothing beside a count that is not zero is the
+    /// same lie in smaller type.
+    static func effortReading(share: Double, turns: Int) -> String {
+        let percent = Int((share * 100).rounded())
+        let count = "\(turns)"
+        guard percent > 0 || share <= 0 else { return "<1% · \(count)" }
+        return "\(percent)% · \(count)"
+    }
+
+    /// One effort pill's hover and its accessibility label, which are the same
+    /// sentence: anything only a pointer can reach does not exist for
+    /// VoiceOver.
+    static func effortDetail(_ effort: String, turns: Int) -> String {
+        "\(agentCount(turns, singular: "turn", plural: "turns")) at \(effort)"
     }
 
     /// Always plural: the fold only happens past the row limit, and folding a
