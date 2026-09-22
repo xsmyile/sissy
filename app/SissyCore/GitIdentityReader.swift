@@ -185,10 +185,12 @@ enum GitIdentityReader {
     /// because the value that should win is the one the configuration already
     /// resolves to once the override is gone.
     ///
-    /// One `--unset` per key the repository actually sets, and only those:
+    /// One `--unset-all` per key the repository actually sets, and only those:
     /// git exits 5 on a key that is absent, so a fixed pair chained with `&&`
     /// stopped before the second key whenever the first was not there — which
-    /// is exactly the repository whose only override is `user.name`.
+    /// is exactly the repository whose only override is `user.name`. `-all`
+    /// because plain `--unset` exits 5 too on a key set more than once, and
+    /// every value of it is the override.
     ///
     /// Nil for a path `sh` quoting cannot make safe. The alternative is the
     /// raw path in a command the user is invited to paste into a shell, which
@@ -199,7 +201,7 @@ enum GitIdentityReader {
         guard !keys.isEmpty, let quoted = AgentHookInstaller.quoted(repository) else {
             return nil
         }
-        return keys.map { "git -C \(quoted) config --unset \($0)" }.joined(separator: " && ")
+        return keys.map { "git -C \(quoted) config --unset-all \($0)" }.joined(separator: " && ")
     }
 
     private static let userKeyPattern = "^user\\.(name|email)$"
@@ -233,7 +235,9 @@ enum GitIdentityReader {
         return keys
     }
 
-    private static let localScope = "local"
+    /// The scope git names a repository's own configuration with, which is
+    /// the only one `--unset-all` without a scope flag reaches.
+    static let localScope = "local"
 
     /// The most local of the files that set a `user.*` key, which is the one a
     /// correction has to name.

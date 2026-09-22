@@ -329,6 +329,20 @@ final class GitIdentityTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(read(repository)).author?.name, "Personal")
     }
 
+    /// An override written twice is still one override, and plain `--unset`
+    /// refuses a key with more than one value.
+    func testTheCorrectionTakesOutAKeySetMoreThanOnce() throws {
+        writeGlobal("[user]\n\tname = Personal\n\temail = personal@example.com\n")
+        let repository = try makeRepository("twice")
+        try run(["-C", repository, "config", "user.email", "one@example.com"])
+        try run(["-C", repository, "config", "--add", "user.email", "two@example.com"])
+        let reading = try XCTUnwrap(read(repository))
+        let command = try XCTUnwrap(
+            GitIdentityReader.unsetCommand(repository: repository, keys: reading.localKeys))
+        XCTAssertEqual(try shell(command), 0, command)
+        XCTAssertEqual(try XCTUnwrap(read(repository)).author?.email, "personal@example.com")
+    }
+
     // MARK: Helpers
 
     private func writeGlobal(_ contents: String) {
