@@ -56,14 +56,18 @@ struct PanelIdentities: View {
         rows.filter { $0.mark != .agrees || $0.id == focus }
     }
 
-    private var shown: [UsagePanelSnapshot.IdentityRow] { showsAll ? rows : standing }
+    /// What the disclosure folds, drawn under it so opening and closing it
+    /// leaves the control where the pointer is.
+    private var rest: [UsagePanelSnapshot.IdentityRow] {
+        rows.filter { $0.mark == .agrees && $0.id != focus }
+    }
 
     /// The sentence that answers for the whole list, where the list has
     /// anything to answer for. Nothing read is not everything agreeing: a
     /// project row offers this page before the first sweep has landed, and on
     /// a Mac with no git to read with it never lands.
     private var verdict: String? {
-        guard !rows.isEmpty, standing.isEmpty, !showsAll else { return nil }
+        guard !rows.isEmpty, standing.isEmpty else { return nil }
         return "Every repository commits under the name its forge expects."
     }
 
@@ -96,20 +100,27 @@ struct PanelIdentities: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if !shown.isEmpty {
-                VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                    ForEach(shown) { row in
-                        IdentityRowView(row: row, isFocused: row.id == focus)
-                    }
-                }
+            if !standing.isEmpty {
+                rowList(standing)
             }
-            if rows.count > standing.count {
+            if !rest.isEmpty {
                 disclosure
+                if showsAll {
+                    rowList(rest)
+                }
             }
             footer
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
+    }
+
+    private func rowList(_ list: [UsagePanelSnapshot.IdentityRow]) -> some View {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            ForEach(list) { row in
+                IdentityRowView(row: row, isFocused: row.id == focus)
+            }
+        }
     }
 
     private var disclosure: some View {
