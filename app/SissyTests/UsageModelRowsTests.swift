@@ -18,13 +18,14 @@ final class UsageModelRowsTests: XCTestCase {
         XCTAssertEqual(rows.map(\.reading), ["95% · $396.88", "5% · $19.39"])
     }
 
-    /// One model's split is the row above it at 100%, so it is not drawn. The
-    /// same rule the page's unattributed line follows: say it only where there
-    /// is more than one answer.
-    func testOneModelDrawsNoPills() {
+    /// A day spent entirely on one model is the day the block is most needed:
+    /// nothing else on the page says which model it was. Only the percentage
+    /// is redundant at 100%, and the pill is not there for the percentage.
+    func testOneModelIsOnePillNamingIt() {
         let rows = models(frame(models: [model("claude-opus-5", 3_900, "396.88")]))
 
-        XCTAssertTrue(rows.isEmpty, "a single model repeated the figure above it")
+        XCTAssertEqual(rows.map(\.name), ["opus-5"])
+        XCTAssertEqual(rows.map(\.reading), ["100% · $396.88"])
     }
 
     func testAProviderThatHasReadNothingDrawsNoPills() {

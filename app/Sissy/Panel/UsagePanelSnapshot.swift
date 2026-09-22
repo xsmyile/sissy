@@ -422,8 +422,8 @@ struct UsagePanelSnapshot: Equatable {
         /// opens the unfolded list.
         let projectCount: Int
         /// This provider's own day by model, dearest first and never folded,
-        /// as the pills under the strip. Empty below two models; `makeModels`
-        /// is where the reason lives.
+        /// as the pills under the strip. One model is one pill; empty means
+        /// the provider has read nothing.
         let models: [ModelRow]
         /// What the vendor has billed against a spend cap, worded. Nil for a
         /// provider that publishes none and for an account with nothing to
@@ -1451,16 +1451,6 @@ struct UsagePanelSnapshot: Equatable {
         return rows
     }
 
-    /// How many models a day has to have used before the split says anything.
-    ///
-    /// Two. One model's breakdown is the row above it at 100%, which is the
-    /// rule `makeResidue` already applies to its own split — say it only where
-    /// there is more than one answer. Measured 2026-09-21, Codex used a single
-    /// model on 4 of the last 8 archived days, so this is the ordinary case
-    /// rather than an edge, and the block is absent on those days without
-    /// losing a reading.
-    private static let modelRowFloor = 2
-
     /// One pill per model, dearest first, or none at all.
     ///
     /// **No fold.** Measured 2026-09-21 over 47 archived days, the most any
@@ -1475,16 +1465,22 @@ struct UsagePanelSnapshot: Equatable {
     /// where there was a measurement. `FrameBuilder.orderedModels` falls back
     /// the same way, so the order and the percentages cannot disagree.
     ///
-    /// **The floor is here rather than in the view**, so the rule is asserted
-    /// in a test rather than read off a screenshot. It does mean `models` is
-    /// empty both for a day with one model and for a provider that has read
-    /// nothing, which is a distinction the frame keeps and this drops: both
-    /// render as no block, and a surface that ever needs to tell them apart
-    /// has the slice.
+    /// **One model is one pill, and there is no floor.** There was, of two,
+    /// for as long as the split was a list of rows under the `Today` figure:
+    /// a row reading `claude-opus-5  8.1M · $8.17` under a headline reading
+    /// `8.3M · $8.46` printed the same numbers twice, so a day with one model
+    /// was better off silent. The pill answers a different question. It sits
+    /// under the strip and what it carries that nothing else on the page does
+    /// is the model's **name** — so a day spent entirely on one model is
+    /// exactly the day the block is needed, because there is otherwise no
+    /// surface in Sissy that says which one it was. Only the percentage is
+    /// redundant at 100%, and a percentage is not what the pill is for.
+    ///
+    /// Empty therefore means one thing again: a provider that has read
+    /// nothing.
     private static func makeModels(
         _ unordered: [ModelTotals], provider: String, totalCost: Decimal, totalTokens: Int
     ) -> [ModelRow] {
-        guard unordered.count >= modelRowFloor else { return [] }
         let byCost = totalCost > 0
         let total =
             byCost
