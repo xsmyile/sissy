@@ -520,6 +520,35 @@ final class GitIdentityPanelTests: XCTestCase {
             "fresh has not been read yet.")
     }
 
+    /// A repository that was not judged is not one that agrees, so the page
+    /// does not say every repository does while one of them was not judged.
+    func testTheRecapClaimsAgreementOnlyWhenEveryRepositoryWasJudged() {
+        XCTAssertEqual(
+            UsageFormat.identityVerdict(unexpected: 0, unjudged: 0),
+            "Every repository commits under the name its forge expects.")
+        XCTAssertEqual(
+            UsageFormat.identityVerdict(unexpected: 0, unjudged: 1),
+            "No repository commits under an unexpected name.")
+    }
+
+    func testTheRecapCountsItsFindings() {
+        XCTAssertEqual(
+            UsageFormat.identityVerdict(unexpected: 1, unjudged: 0),
+            "1 repository commits under an unexpected name.")
+        XCTAssertEqual(
+            UsageFormat.identityVerdict(unexpected: 3, unjudged: 2),
+            "3 repositories commit under an unexpected name.")
+    }
+
+    /// The repository a project row opened the page about is named with its
+    /// verdict, so it does not stand alone as a row nobody asked for.
+    func testTheRecapNamesTheRepositoryItWasOpenedFor() {
+        XCTAssertEqual(
+            UsageFormat.identityOpened(name: "xsmyile/sissy", mark: .agrees),
+            "Opened for xsmyile/sissy · as expected")
+        XCTAssertEqual(UsageFormat.identityCount(.unjudged, count: 2), "2 not judged")
+    }
+
     private func snapshot(_ identities: [RepositoryIdentity]) -> UsagePanelSnapshot {
         UsagePanelSnapshot.make(
             frame: FrameData(
