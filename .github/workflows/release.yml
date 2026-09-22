@@ -340,9 +340,13 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          # A copy without the version, so releases/latest/download/Sissy.dmg
+          # always resolves to the newest build; the website links to it.
+          cp "dist/Sissy-$VERSION.dmg" dist/Sissy.dmg
           gh release create "v$VERSION" \
             "dist/Sissy-$VERSION.dmg" \
             "dist/Sissy-$VERSION.dmg.sha256" \
+            dist/Sissy.dmg \
             --title "Sissy $VERSION" \
             --notes-file "$RUNNER_TEMP/release-notes.md"
 
