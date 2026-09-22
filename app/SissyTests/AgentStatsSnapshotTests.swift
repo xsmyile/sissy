@@ -180,6 +180,24 @@ final class AgentStatsSnapshotTests: XCTestCase {
             "the rows did not add up to the total above them")
     }
 
+    /// Under the hood follows the picker, so each window carries its own
+    /// cache reading: today's off the frame, a wider one off its rollup.
+    func testEachWindowCarriesItsOwnCacheReading() {
+        let today = CacheReading(cacheReadTokens: 9, inputSideTokens: 10, saved: 1)
+        let week = CacheReading(cacheReadTokens: 90, inputSideTokens: 100, saved: 12)
+        let snapshot = UsagePanelSnapshot.make(
+            frame: FrameData(
+                tokens: 0, cost: 0, burn: nil, providers: [], keepAwake: .off,
+                history: [
+                    .sevenDays: UsageHistoryRollup(
+                        period: .sevenDays, earliestDay: Date(), tokens: 1, cost: 1, cache: week)
+                ],
+                cache: today))
+
+        XCTAssertEqual(snapshot.agents.counted[.today]?.cache, today)
+        XCTAssertEqual(snapshot.agents.counted[.sevenDays]?.cache, week)
+    }
+
     /// The page offers only the windows there is something to show for.
     func testOnlyAnsweredWindowsAreOffered() {
         let snapshot = UsagePanelSnapshot.make(frame: frame())

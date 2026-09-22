@@ -65,6 +65,10 @@ struct PanelStats: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Self.sectionSpacing) {
             countedSection
+            if let shown, let share = shown.cache.share {
+                Divider()
+                underTheHood(shown.cache, share: share)
+            }
             Divider()
             liveSection
         }
@@ -362,6 +366,40 @@ struct PanelStats: View {
             .monospacedDigit()
             .foregroundStyle(.secondary)
             .lineLimit(1)
+        }
+    }
+
+    // MARK: Under the hood
+
+    /// What the cache did for the window the picker above names.
+    ///
+    /// **Under the counted half and not under Now**, because it is a reading of
+    /// the same window: the picker is the counted section's and this follows
+    /// it, where the CPU and energy in Now are counted from when each process
+    /// or Sissy started and would be mislabelled by any window at all.
+    ///
+    /// Drawn only for a window that sent input. A window with none has no
+    /// share to state, and a section whose one figure is a dash is a heading
+    /// with nothing under it.
+    private func underTheHood(_ cache: CacheReading, share: Double) -> some View {
+        VStack(alignment: .leading, spacing: Self.labelSpacing) {
+            SectionLabel(text: "Under the hood")
+            HStack(alignment: .top, spacing: Self.figureSpacing) {
+                reading(UsageFormat.cacheShare(share), caption: "of input from cache")
+                reading(UsageFormat.cost(cache.saved), caption: "saved at list price")
+            }
+        }
+    }
+
+    private func reading(_ value: String, caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value)
+                .font(.system(size: Self.headlineSize, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            Text(caption)
+                .font(.system(size: Self.captionSize))
+                .foregroundStyle(.secondary)
         }
     }
 

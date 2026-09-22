@@ -530,6 +530,15 @@ struct FrameData: Sendable, Equatable {
     /// which the panel draws as a dash — a reading of no agents is a
     /// measurement, and not having measured yet is not.
     let agentMemory: AgentMemoryReading?
+    /// How much of today's input the cache answered across every slice,
+    /// priced by the engine because the rates are the engine's.
+    ///
+    /// On the frame rather than derived by the panel from `providers`, which
+    /// carry the counters and not the rates: the app holds no price, and
+    /// giving it one to price with would be a second lookup beside the
+    /// readers'. The windows before today carry theirs on each
+    /// `UsageHistoryRollup`.
+    let cache: CacheReading
 
     /// Defaulted so a frame can be built without naming the split: a caller
     /// that has none is saying there is none, and every test and future field
@@ -546,7 +555,8 @@ struct FrameData: Sendable, Equatable {
         forge: [ForgeActivityReading] = [],
         identities: [RepositoryIdentity] = [],
         identitiesCheckedAt: Date? = nil,
-        agentMemory: AgentMemoryReading? = nil
+        agentMemory: AgentMemoryReading? = nil,
+        cache: CacheReading = .none
     ) {
         self.tokens = tokens
         self.cost = cost
@@ -560,6 +570,7 @@ struct FrameData: Sendable, Equatable {
         self.identities = identities
         self.identitiesCheckedAt = identitiesCheckedAt
         self.agentMemory = agentMemory
+        self.cache = cache
     }
 }
 
@@ -579,7 +590,8 @@ enum FrameBuilder {
         forge: [ForgeActivityReading] = [],
         identities: [RepositoryIdentity] = [],
         identitiesCheckedAt: Date? = nil,
-        agentMemory: AgentMemoryReading? = nil
+        agentMemory: AgentMemoryReading? = nil,
+        pricing: ProviderPricing = .seed
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
         return FrameData(
@@ -594,7 +606,8 @@ enum FrameBuilder {
             forge: forge,
             identities: identities,
             identitiesCheckedAt: identitiesCheckedAt,
-            agentMemory: agentMemory
+            agentMemory: agentMemory,
+            cache: CacheReading.of(providers, pricing: pricing)
         )
     }
 

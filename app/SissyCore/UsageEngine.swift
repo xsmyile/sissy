@@ -54,6 +54,10 @@ actor UsageEngine {
     /// prices historical events against exactly the rates the tail used. Nil
     /// is the embedded seed, which is a rate source rather than a failure.
     private var initialPriceCatalog: PriceCatalog?
+    /// The rates a reading taken after the events is priced at — the cache
+    /// saving, today's and the archive's — kept in step with every catalog
+    /// the readers are handed.
+    private var pricing: ProviderPricing
     /// Whether a provider has produced a reading yet. It is what a config
     /// change re-emits against: before the first one there is nothing to
     /// rebuild, and the change lands on the first real frame instead.
@@ -237,6 +241,7 @@ actor UsageEngine {
         keepAwakePolicy: KeepAwakePolicy = .default
     ) {
         self.config = config
+        self.pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: nil)
         self.configURL = configURL
         self.keepAwakePolicy = keepAwakePolicy
 
@@ -1773,7 +1778,8 @@ actor UsageEngine {
             forge: forgeMonitor.currentReadings(),
             identities: identityMonitor.currentIdentities(),
             identitiesCheckedAt: identityMonitor.currentCheckedAt(),
-            agentMemory: agentMonitor.currentMemory()
+            agentMemory: agentMonitor.currentMemory(),
+            pricing: pricing
         )
         await onFrame?(frame)
     }
@@ -1800,7 +1806,7 @@ actor UsageEngine {
         let stale = now.timeIntervalSince(historyRollupAt) >= Self.historyRollupTTL
         if historyRollups.isEmpty || stale {
             historyRollups = UsageHistoryStore.rollups(
-                for: Set(UsagePeriod.archived), in: stateDir, now: now)
+                for: Set(UsagePeriod.archived), in: stateDir, now: now, pricing: pricing)
             historyRollupAt = now
         }
         return (historyRollups[.all]?.tokens ?? 0) > 0 ? historyRollups : [:]
@@ -1965,15 +1971,25 @@ actor UsageEngine {
         initialPriceCatalog = resolved
         if let resolved {
             await aggregator.applyPriceCatalog(resolved)
+            applyPricing(resolved)
         }
         let aggregator = self.aggregator
-        priceCatalogTask = Task.detached {
+        priceCatalogTask = Task.detached { [weak self] in
             await PriceCatalogSource.refreshLoop(
                 initialDelay: initialDelay,
                 initialPrevious: resolved
-            ) { catalog in
+            ) { [weak self] catalog in
                 await aggregator.applyPriceCatalog(catalog)
+                await self?.applyPricing(catalog)
             }
         }
+    }
+
+    /// Reprices the readings taken after the events. The archive's are
+    /// dropped rather than left to their TTL, so a window is never priced at
+    /// two catalogs on one page.
+    private func applyPricing(_ catalog: PriceCatalog) {
+        pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: catalog)
+        historyRollups = [:]
     }
 }
