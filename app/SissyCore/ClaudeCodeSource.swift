@@ -382,6 +382,11 @@ final class ClaudeCodeAdapter: SourceAdapter {
     private static let typeKeyBytes: [UInt8] = Array("\"type\"".utf8)
     private static let assistantValueBytes: [UInt8] = Array("\"assistant\"".utf8)
 
+    /// The `system` line Claude Code writes when a turn ends, which carries
+    /// how long it ran in `durationMs` and bills nothing.
+    static let turnDurationSubtype = "turn_duration"
+    private static let turnDurationBytes: [UInt8] = Array("\"\(turnDurationSubtype)\"".utf8)
+
     /// The tool that spawns a sub-agent, under both names it has had.
     static let agentToolNames: Set<String> = ["Agent", "Task"]
 
@@ -391,6 +396,18 @@ final class ClaudeCodeAdapter: SourceAdapter {
 
     func lineMayCount(_ buf: UnsafePointer<UInt8>, from: Int, to: Int) -> Bool {
         Self.bufferContainsAssistantMarker(buf, from: from, to: to)
+            || Self.bufferContains(buf, from: from, to: to, pattern: Self.turnDurationBytes)
+    }
+
+    private static func bufferContains(
+        _ buf: UnsafePointer<UInt8>, from: Int, to: Int, pattern: [UInt8]
+    ) -> Bool {
+        var i = from
+        while i <= to - pattern.count {
+            if matches(buf, at: i, pattern: pattern) { return true }
+            i += 1
+        }
+        return false
     }
 
     static func bufferContainsAssistantMarker(
@@ -446,8 +463,13 @@ final class ClaudeCodeAdapter: SourceAdapter {
         seen: inout [String: SeenEvent],
         activity: inout [AgentActivityEvent]
     ) -> UsageEvent? {
-        guard let obj = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any],
-            obj["type"] as? String == "assistant",
+        guard let obj = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any]
+        else { return nil }
+        if obj["type"] as? String == "system" {
+            timeTurn(obj, line: line, into: &activity)
+            return nil
+        }
+        guard obj["type"] as? String == "assistant",
             let msg = obj["message"] as? [String: Any],
             let tsStr = obj["timestamp"] as? String
         else { return nil }
@@ -546,6 +568,23 @@ final class ClaudeCodeAdapter: SourceAdapter {
             return true
         }
         return object["isSidechain"] as? Bool == true
+    }
+
+    /// Reads how long a turn ran off the line Claude Code writes when it ends.
+    ///
+    /// Claimed in no ledger, because what it feeds is a maximum: a line read
+    /// twice lands on the figure it already set.
+    private func timeTurn(
+        _ object: [String: Any], line: SourceLine, into activity: inout [AgentActivityEvent]
+    ) {
+        guard object["subtype"] as? String == Self.turnDurationSubtype,
+            let milliseconds = object["durationMs"] as? Int, milliseconds > 0,
+            let timestamp = (object["timestamp"] as? String).flatMap(
+                UsageReaderShared.parseTimestamp),
+            timestamp >= line.retainCutoff
+        else { return }
+        activity.append(
+            AgentActivityEvent(timestamp: timestamp, kind: .turnCompleted(milliseconds: milliseconds)))
     }
 
     /// Counts the sub-agents an assistant turn spawned.

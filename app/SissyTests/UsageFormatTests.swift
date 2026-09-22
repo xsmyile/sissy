@@ -3,6 +3,14 @@ import XCTest
 @testable import Sissy
 
 final class UsageFormatTests: XCTestCase {
+    func testATurnUnderAMinuteReadsInSeconds() {
+        XCTAssertEqual(UsageFormat.turnDuration(milliseconds: 59_999), "59s")
+    }
+
+    func testALongTurnKeepsItsSeconds() {
+        XCTAssertEqual(UsageFormat.turnDuration(milliseconds: 329_844), "5m 29s")
+    }
+
     func testACacheShareReadsToATenthOfAPoint() {
         XCTAssertEqual(UsageFormat.cacheShare(0.9812), "98.1%")
     }

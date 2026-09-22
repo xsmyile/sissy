@@ -160,17 +160,33 @@ struct AgentActivityDay: Equatable, Sendable, Codable {
     /// The same, for turns a sub-agent spent rather than the session itself.
     /// A subset of `turns` by construction, so its blocks nest inside theirs.
     var delegated: ActivityMinutes
+    /// How long the day's longest turn ran, as the CLI timed it from the
+    /// prompt to the end of the answer. Nil where no turn reported one, which
+    /// is every day written before this was read and is not a turn of zero.
+    ///
+    /// A reading of the same turns the minutes are, and beside them for that
+    /// reason: it belongs to the provider's day and to no model, and folding
+    /// it here is what carries it through the snapshot, the archive and the
+    /// slice without a sixth map. The maximum rather than a list, because a
+    /// maximum is idempotent — Claude Code writes the line once per turn and
+    /// a forked Codex rollout replays its parent's, and a re-read of either
+    /// lands on the same figure.
+    var longestTurnMilliseconds: Int?
 
-    init(turns: ActivityMinutes = .init(), delegated: ActivityMinutes = .init()) {
+    init(
+        turns: ActivityMinutes = .init(), delegated: ActivityMinutes = .init(),
+        longestTurnMilliseconds: Int? = nil
+    ) {
         self.turns = turns
         self.delegated = delegated
+        self.longestTurnMilliseconds = longestTurnMilliseconds
     }
 
     /// Nothing observed, which is what a day with no file and a day written
     /// before the archive carried this both read as.
     static let none = Self()
 
-    var isEmpty: Bool { turns.isEmpty && delegated.isEmpty }
+    var isEmpty: Bool { turns.isEmpty && delegated.isEmpty && longestTurnMilliseconds == nil }
 
     var blocks: [ClosedRange<Int>] { turns.blocks(separatedByMoreThan: Self.idleGapMinutes) }
 
@@ -185,9 +201,24 @@ struct AgentActivityDay: Equatable, Sendable, Codable {
         if isDelegated { delegated.insert(minute) }
     }
 
+    mutating func recordTurn(milliseconds: Int) {
+        guard milliseconds > 0 else { return }
+        longestTurnMilliseconds = Self.longer(longestTurnMilliseconds, milliseconds)
+    }
+
     mutating func formUnion(_ other: Self) {
         turns.formUnion(other.turns)
         delegated.formUnion(other.delegated)
+        longestTurnMilliseconds = Self.longer(
+            longestTurnMilliseconds, other.longestTurnMilliseconds)
+    }
+
+    /// The longer of two readings, where nil is no reading rather than zero.
+    static func longer(_ lhs: Int?, _ rhs: Int?) -> Int? {
+        switch (lhs, rhs) {
+        case (let lhs?, let rhs?): max(lhs, rhs)
+        default: lhs ?? rhs
+        }
     }
 
     /// Two providers' readings of one day, as one.
@@ -229,18 +260,25 @@ struct ActivityTotals: Equatable, Sendable {
     /// page could only say `0 blocks` for every window but today, which is the
     /// false zero this panel refuses everywhere else.
     var blocks: Int
+    /// The longest turn any of those days held, nil where none reported one.
+    var longestTurnMilliseconds: Int?
 
-    init(activeMinutes: Int = 0, delegatedMinutes: Int = 0, blocks: Int = 0) {
+    init(
+        activeMinutes: Int = 0, delegatedMinutes: Int = 0, blocks: Int = 0,
+        longestTurnMilliseconds: Int? = nil
+    ) {
         self.activeMinutes = activeMinutes
         self.delegatedMinutes = delegatedMinutes
         self.blocks = blocks
+        self.longestTurnMilliseconds = longestTurnMilliseconds
     }
 
     init(_ day: AgentActivityDay) {
         self.init(
             activeMinutes: day.activeMinutes,
             delegatedMinutes: day.delegatedMinutes,
-            blocks: day.blocks.count)
+            blocks: day.blocks.count,
+            longestTurnMilliseconds: day.longestTurnMilliseconds)
     }
 
     static let none = Self()
@@ -251,5 +289,7 @@ struct ActivityTotals: Equatable, Sendable {
         activeMinutes += other.activeMinutes
         delegatedMinutes += other.delegatedMinutes
         blocks += other.blocks
+        longestTurnMilliseconds = AgentActivityDay.longer(
+            longestTurnMilliseconds, other.longestTurnMilliseconds)
     }
 }

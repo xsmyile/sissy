@@ -1500,6 +1500,16 @@ extension UsageFormat {
     /// not `held`: that reads "12h 3m", two tokens sized to what is left of
     /// something, where this is a headline figure standing beside two counts
     /// and changing width with the window a click away — `78h12` for a week.
+    /// How long one turn ran, at the grain `cpuDuration` reads a process's
+    /// time: a turn is a stretch of wall clock of the same order, and a
+    /// five-minute turn read as `5m` would hide the half of it that decides
+    /// whether it was long.
+    static func turnDuration(milliseconds: Int) -> String {
+        cpuDuration(TimeInterval(milliseconds) / millisecondsPerSecond)
+    }
+
+    private static let millisecondsPerSecond: TimeInterval = 1000
+
     static func workedDuration(minutes: Int) -> String {
         let clamped = max(minutes, 0)
         guard clamped >= minutesPerHour else { return "\(clamped)m" }

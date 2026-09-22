@@ -8,9 +8,14 @@ import Foundation
 /// own. Measured 2026-09-18 over 30 days of `~/.claude/projects`, 442 sessions
 /// spawned 189 agents — one number is how often the user sat down, the other
 /// how much of the work was delegated, and their sum is neither.
-enum AgentActivityKind: String, Codable, Sendable, CaseIterable {
+///
+/// A third kind is not a count at all: a turn ending, and how long the CLI
+/// says it ran. It rides the same accumulator because both CLIs write it on a
+/// line of its own that bills nothing, so it has no `UsageEvent` to travel on.
+enum AgentActivityKind: Sendable, Equatable {
     case sessionStarted
     case agentSpawned
+    case turnCompleted(milliseconds: Int)
 }
 
 /// One observation an adapter read off a line.
@@ -68,6 +73,7 @@ struct AgentCounts: Codable, Equatable, Sendable {
         switch kind {
         case .sessionStarted: sessions += 1
         case .agentSpawned: agents += 1
+        case .turnCompleted: break
         }
     }
 

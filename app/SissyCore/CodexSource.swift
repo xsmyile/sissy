@@ -264,6 +264,11 @@ final class CodexAdapter: SourceAdapter {
     /// working directory the session was started in.
     private static let sessionMetaMarker: [UInt8] = Array("\"session_meta\"".utf8)
 
+    /// The `event_msg` Codex writes when a turn ends, which carries how long
+    /// it ran in `duration_ms` and bills nothing.
+    static let taskCompleteType = "task_complete"
+    private static let taskCompleteMarker: [UInt8] = Array("\"\(taskCompleteType)\"".utf8)
+
     /// Linear scan for `marker` within `buf[from..<to]`. Cheap substring
     /// prefilter run before paying the JSON-parse cost on a candidate line.
     private static func bufferContainsMarker(
@@ -307,6 +312,7 @@ final class CodexAdapter: SourceAdapter {
         Self.bufferContainsTokenCountMarker(buf, from: from, to: to)
             || Self.bufferContainsTurnContextMarker(buf, from: from, to: to)
             || Self.bufferContainsSessionMetaMarker(buf, from: from, to: to)
+            || Self.bufferContainsMarker(buf, from: from, to: to, marker: Self.taskCompleteMarker)
     }
 
     /// Routes a JSONL line to the right parser. `turn_context` lines update
@@ -324,7 +330,9 @@ final class CodexAdapter: SourceAdapter {
         guard let object = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any]
         else { return nil }
         switch object["type"] as? String {
-        case "event_msg": return parseTokenCount(object, line: line, seen: &seen)
+        case "event_msg":
+            timeTurn(object, line: line, into: &activity)
+            return parseTokenCount(object, line: line, seen: &seen)
         case "turn_context": applyTurnContext(object, url: line.url)
         case "session_meta":
             applySessionMeta(object, url: line.url)
@@ -382,6 +390,26 @@ final class CodexAdapter: SourceAdapter {
             AgentActivityEvent(
                 timestamp: timestamp,
                 kind: Self.isSubagent(payload) ? .agentSpawned : .sessionStarted))
+    }
+
+    /// Reads how long a turn ran off the `task_complete` Codex writes when it
+    /// ends.
+    ///
+    /// Claimed in no ledger, because what it feeds is a maximum: a forked
+    /// rollout replays its parent's lines, and a replayed turn lands on the
+    /// figure the original already set.
+    private func timeTurn(
+        _ object: [String: Any], line: SourceLine, into activity: inout [AgentActivityEvent]
+    ) {
+        guard let payload = object["payload"] as? [String: Any],
+            payload["type"] as? String == Self.taskCompleteType,
+            let milliseconds = payload["duration_ms"] as? Int, milliseconds > 0,
+            let timestamp = (object["timestamp"] as? String).flatMap(
+                UsageReaderShared.parseTimestamp),
+            timestamp >= line.retainCutoff
+        else { return }
+        activity.append(
+            AgentActivityEvent(timestamp: timestamp, kind: .turnCompleted(milliseconds: milliseconds)))
     }
 
     /// Whether a rollout was opened by another thread rather than by a person.

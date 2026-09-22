@@ -65,9 +65,9 @@ struct PanelStats: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Self.sectionSpacing) {
             countedSection
-            if let shown, let share = shown.cache.share {
+            if let shown, shown.cache.share != nil || shown.activity.longestTurnMilliseconds != nil {
                 Divider()
-                underTheHood(shown.cache, share: share)
+                underTheHood(shown)
             }
             Divider()
             liveSection
@@ -370,25 +370,38 @@ struct PanelStats: View {
     /// it, where the CPU and energy in Now are counted from when each process
     /// or Sissy started and would be mislabelled by any window at all.
     ///
-    /// Drawn only for a window that sent input. A window with none has no
-    /// share to state, and a section whose one figure is a dash is a heading
-    /// with nothing under it.
-    private func underTheHood(_ cache: CacheReading, share: Double) -> some View {
+    /// Drawn only for a window with something to say. One figure missing is
+    /// a dash, the rule `worked` keeps: a window written before turns were
+    /// timed has a share and no longest turn, and that is not a turn of zero.
+    ///
+    /// The saving is the caption rather than a third figure, because three
+    /// figures and their captions want the whole 312 pt a page has and a
+    /// four-digit saving would push the last one off it.
+    private func underTheHood(_ window: UsagePanelSnapshot.AgentsBlock.Window) -> some View {
         VStack(alignment: .leading, spacing: Self.labelSpacing) {
             SectionLabel(text: "Under the hood")
             HStack(alignment: .top, spacing: Self.figureSpacing) {
-                reading(UsageFormat.cacheShare(share), caption: "of input from cache")
-                reading(UsageFormat.cost(cache.saved), caption: "saved at list price")
+                reading(
+                    window.cache.share.map(UsageFormat.cacheShare), caption: "of input from cache")
+                reading(
+                    window.activity.longestTurnMilliseconds.map(UsageFormat.turnDuration),
+                    caption: "longest turn")
+            }
+            if window.cache.share != nil {
+                Text("\(UsageFormat.cost(window.cache.saved)) saved by the cache at list price")
+                    .font(.system(size: Self.captionSize))
+                    .foregroundStyle(.secondary)
             }
         }
     }
 
-    private func reading(_ value: String, caption: String) -> some View {
+    private func reading(_ value: String?, caption: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(value)
+            Text(value ?? "—")
                 .font(.system(size: Self.headlineSize, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .contentTransition(.numericText())
+                .foregroundStyle(value == nil ? Color.secondary : .primary)
             Text(caption)
                 .font(.system(size: Self.captionSize))
                 .foregroundStyle(.secondary)
