@@ -86,7 +86,7 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// What the Mac is doing about sleep, and quit.
+    /// What the Mac is doing about sleep, a re-read of everything, and quit.
     ///
     /// The three modes used to hang here as a radio group, on the grounds that
     /// the menu bar is the one surface always present while every other way to
@@ -103,6 +103,13 @@ final class StatusItemController: NSObject {
         holdItem.isEnabled = false
         menu.addItem(holdItem)
         menu.addItem(holdSeparator)
+
+        let refresh = NSMenuItem(
+            title: Self.refreshAllTitle, action: #selector(handleRefreshAll), keyEquivalent: "r")
+        refresh.target = self
+        refresh.keyEquivalentModifierMask = [.command]
+        menu.addItem(refresh)
+        menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit Sissy", action: #selector(handleQuit), keyEquivalent: "q")
         quit.target = self
@@ -215,6 +222,15 @@ final class StatusItemController: NSObject {
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    /// Every reading the panel's pages re-read one at a time, in one gesture.
+    /// Here rather than on the panel because it answers for no one page: the
+    /// menu is the app's own surface, and each page keeps its own button.
+    private static let refreshAllTitle = "Refresh All"
+
+    @objc private func handleRefreshAll() {
+        model.refreshAll()
     }
 
     @objc private func handleQuit() {

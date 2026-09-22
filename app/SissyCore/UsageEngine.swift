@@ -1622,6 +1622,23 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// Re-reads every forge connection now, for the menu's Refresh All.
+    ///
+    /// The poll's own round rather than each row's gesture: it leaves a parked
+    /// connection parked and never raises the keychain dialog, because one
+    /// menu item answering for every host is not the user asking about any
+    /// one of them.
+    func refreshForgeConnections() async {
+        guard lifecycle == .running else { return }
+        let me = self
+        _ = await forgeMonitor.refreshOnce { await me.reemit() }
+    }
+
+    /// The providers this engine meters, for a refresh that reaches each one.
+    func meteringProviderIDs() -> [String] {
+        resolvedProviders.filter { $0.activation.isMetering }.map(\.id)
+    }
+
     /// Re-reads one forge connection now, for the gesture on its own row.
     ///
     /// The counters move when the user pushes, and the poll is on a five- to
