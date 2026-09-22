@@ -314,12 +314,6 @@ struct UsagePanelView: View {
         return focus
     }
 
-    /// The identities page's own header: the way back, the title, and a
-    /// re-read.
-    ///
-    /// The refresh is not a nicety here. A user on this page has usually just
-    /// corrected a repository in a terminal, and waiting out a sweep interval
-    /// to watch the row clear reads as the correction not having worked.
     /// The agents page's own header: the way back, the title, and a re-count.
     ///
     /// The button reaches the process sweep and not the counts: those come off
@@ -363,6 +357,12 @@ struct UsagePanelView: View {
         .padding(.vertical, 12)
     }
 
+    /// The identities page's own header: the way back, the title, and a
+    /// re-read.
+    ///
+    /// The refresh is not a nicety here. A user on this page has usually just
+    /// corrected a repository in a terminal, and waiting out a sweep interval
+    /// to watch the row clear reads as the correction not having worked.
     private var identitiesHeader: some View {
         HStack(spacing: 8) {
             Button {
@@ -370,7 +370,7 @@ struct UsagePanelView: View {
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 20, height: 20)
+                    .frame(width: Self.backButtonSize, height: Self.backButtonSize)
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
