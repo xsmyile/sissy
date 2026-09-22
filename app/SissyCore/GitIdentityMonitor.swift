@@ -135,10 +135,11 @@ actor GitIdentityMonitor {
             await inFlight.value
             return
         }
+        let owner = generation
         let round = Task { await sweep(onRefresh: onRefresh) }
         inFlight = round
         await round.value
-        inFlight = nil
+        if owner == generation { inFlight = nil }
     }
 
     private func sweep(onRefresh: @Sendable @escaping () async -> Void) async {
