@@ -1166,15 +1166,11 @@ struct UsagePanelSnapshot: Equatable {
             author: UsageFormat.identityAuthor(identity.reading),
             origin: unexpected ? origin.map(UsageFormat.identityOrigin) : nil,
             expectation: UsageFormat.identityExpectation(identity.verdict, host: identity.host),
-            fix: unexpected && origin?.scope == Self.localConfigScope
+            fix: unexpected && origin?.scope == GitIdentityReader.localScope
                 ? GitIdentityReader.unsetCommand(
                     repository: identity.repository, keys: identity.localKeys) : nil
         )
     }
-
-    /// The scope git names a repository's own configuration with, which is the
-    /// only one `--unset` without a scope flag reaches.
-    private static let localConfigScope = "local"
 
     private static func identityName(_ identity: RepositoryIdentity) -> String {
         guard let remote = identity.remote else {
