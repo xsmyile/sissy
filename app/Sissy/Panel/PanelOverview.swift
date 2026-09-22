@@ -216,6 +216,8 @@ struct PanelOverview: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 SectionLabel(text: providersLabel)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 8)
                 agentsDoor
             }
@@ -250,6 +252,11 @@ struct PanelOverview: View {
     /// Drawn before the first sweep lands and on a Mac with nothing running,
     /// because it is the only door to the page and a door that comes and goes
     /// with the day is not one.
+    ///
+    /// The button's target reaches past the label's line by `doorHitSlop` on
+    /// each side and gives the room back to the layout, so an 11 pt run of
+    /// text is not the only thing a click can land on while the section keeps
+    /// the height it had.
     private var agentsDoor: some View {
         Button(action: openStats) {
             HStack(spacing: 6) {
@@ -265,9 +272,11 @@ struct PanelOverview: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
+            .padding(.vertical, Self.doorHitSlop)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .padding(.vertical, -Self.doorHitSlop)
         .layoutPriority(1)
         .help("How many sessions and agents have run, and what they are holding now")
     }
@@ -296,6 +305,9 @@ struct PanelOverview: View {
     /// mark goes red the moment the fill passes it — and it says it without
     /// spending the row's one colour.
     private static let bindingWarningPercent = 90
+
+    /// How far the agents door's target reaches above and below its text.
+    private static let doorHitSlop: CGFloat = 6
 
     /// The row's tooltip for its gauge: the window named, how full it is, and
     /// the pace sentence the page prints under the same bar.
