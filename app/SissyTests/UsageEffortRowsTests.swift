@@ -6,7 +6,7 @@ import XCTest
 /// that model's spend split across the efforts it ran at.
 final class UsageEffortRowsTests: XCTestCase {
     private func split(
-        _ model: String, _ effort: String, turns: Int, cost: String, tokens: Int = 100
+        _ model: String, _ effort: String?, turns: Int, cost: String, tokens: Int = 100
     ) -> EffortSplit {
         EffortSplit(
             model: model, effort: effort,
@@ -108,5 +108,40 @@ final class UsageEffortRowsTests: XCTestCase {
         XCTAssertEqual(summed.count, 1)
         XCTAssertEqual(summed.first?.turns, 15)
         XCTAssertEqual(summed.first?.cost, Decimal(string: "1.50"))
+    }
+
+    /// An event whose line named no effort still counts in the model's rows,
+    /// so leaving it out here would put `high 100%` under a pill counting more
+    /// than the run accounts for.
+    func testSpendThatNamedNoEffortStaysInTheDenominator() {
+        let out = rows([
+            split("astra", "high", turns: 9, cost: "9.00"),
+            split("astra", nil, turns: 1, cost: "1.00"),
+        ])
+        XCTAssertEqual(out.first?.run, "high 90% · unattributed 10%")
+    }
+
+    /// It is not an effort, so it never takes the rank a setting would: last
+    /// however large, the rule the projects residue already holds.
+    func testUnattributedSpendIsTheLastClauseHoweverLargeItIs() {
+        let out = rows([
+            split("astra", nil, turns: 90, cost: "90.00"),
+            split("astra", "high", turns: 10, cost: "10.00"),
+        ])
+        XCTAssertEqual(out.first?.run, "high 10% · unattributed 90%")
+    }
+
+    /// A row reading `unattributed 100%` is an absent reading dressed as one.
+    func testAModelWhoseSplitIsOnlyUnattributedGetsNoRow() {
+        XCTAssertTrue(rows([split("astra", nil, turns: 5, cost: "5.00")]).isEmpty)
+    }
+
+    /// The hover names it too, since the run has no room for the money.
+    func testTheDetailNamesTheUnattributedSpend() {
+        let out = rows([
+            split("astra", "high", turns: 9, cost: "9.00"),
+            split("astra", nil, turns: 1, cost: "1.00"),
+        ])
+        XCTAssertEqual(out.first?.detail, "high $9.00 · 9 turns · unattributed $1.00 · 1 turn")
     }
 }

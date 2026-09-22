@@ -1652,6 +1652,16 @@ struct UsagePanelSnapshot: Equatable {
     /// as soon as any pair has tokens and no cost, which is `makeModels`' rule
     /// for `makeModels`' reason.
     ///
+    /// **Spend the lines named no effort for is the run's last clause, never
+    /// its first.** It is in the denominator, because leaving it out would let
+    /// a model with nine tagged turns and one untagged read `high 100%` under
+    /// a pill counting all ten; and it is pinned last however large it is,
+    /// because it is not an effort and ranking it among them would give an
+    /// absence the standing of a setting — the rule `makeResidue` already
+    /// holds for spend no repository claims. A model whose split is *only*
+    /// unattributed gets no row at all, since a row reading `unattributed
+    /// 100%` is an absent reading dressed as one.
+    ///
     /// **Uncapped, and the pills' own fold is not an argument for one.** They
     /// fold at four because four is what 312 pt holds *side by side* —
     /// measured 2026-09-22, five pills want 344 pt — and these rows are
@@ -1674,12 +1684,14 @@ struct UsagePanelSnapshot: Equatable {
         var models: [(model: String, splits: [EffortSplit], weight: Double)] = []
         for (model, splits) in byModel {
             let total: Double = splits.reduce(0) { $0 + weight($1) }
-            guard total > 0 else { continue }
-            let ordered = splits.sorted { left, right in
+            let named = splits.filter { $0.effort != nil }
+            guard total > 0, !named.isEmpty else { continue }
+            var ordered = named.sorted { left, right in
                 let a = weight(left)
                 let b = weight(right)
-                return a == b ? left.effort < right.effort : a > b
+                return a == b ? (left.effort ?? "") < (right.effort ?? "") : a > b
             }
+            ordered.append(contentsOf: splits.filter { $0.effort == nil })
             models.append((model: model, splits: ordered, weight: total))
         }
         models.sort { $0.weight == $1.weight ? $0.model < $1.model : $0.weight > $1.weight }
@@ -1687,7 +1699,7 @@ struct UsagePanelSnapshot: Equatable {
             let run: [String] = ordered.map {
                 UsageFormat.effortShare($0.effort, share: weight($0) / total)
             }
-            let detail: [(effort: String, cost: String, turns: Int)] = ordered.map {
+            let detail: [(effort: String?, cost: String, turns: Int)] = ordered.map {
                 (effort: $0.effort, cost: UsageFormat.cost($0.cost), turns: $0.turns)
             }
             return EffortRow(

@@ -947,11 +947,19 @@ enum UsageFormat {
     /// in the window has tokens and no cost, the rule `makeModels` already
     /// holds for the same reason. `<1%` rather than `0%` for that block's
     /// reason too: a share too small to round is not a share of nothing.
-    static func effortShare(_ effort: String, share: Double) -> String {
+    /// Nil is the spend whose lines named no effort, worded with the term the
+    /// projects list already uses for a reading that resolves to nothing. It
+    /// is what lets the run reach the pill above it rather than describing a
+    /// fraction of it as the whole.
+    static func effortShare(_ effort: String?, share: Double) -> String {
+        let name = effort ?? effortUnattributed
         let percent = Int((share * 100).rounded())
-        guard percent > 0 || share <= 0 else { return "\(effort) <1%" }
-        return "\(effort) \(percent)%"
+        guard percent > 0 || share <= 0 else { return "\(name) <1%" }
+        return "\(name) \(percent)%"
     }
+
+    /// What the run calls spend the lines named no effort for.
+    static let effortUnattributed = "unattributed"
 
     /// What the `By effort` heading says its window is: the strip's own width,
     /// and how much of it the archive actually reaches when it falls short.
@@ -966,9 +974,12 @@ enum UsageFormat {
     /// One effort row's hover and its accessibility label, which are the same
     /// sentence: what each effort cost and how many turns it took, since
     /// neither fits the run beside it.
-    static func effortDetail(_ splits: [(effort: String, cost: String, turns: Int)]) -> String {
+    static func effortDetail(_ splits: [(effort: String?, cost: String, turns: Int)]) -> String {
         splits
-            .map { "\($0.effort) \($0.cost) · \(agentCount($0.turns, singular: "turn", plural: "turns"))" }
+            .map {
+                "\($0.effort ?? effortUnattributed) \($0.cost) · "
+                    + agentCount($0.turns, singular: "turn", plural: "turns")
+            }
             .joined(separator: " · ")
     }
 

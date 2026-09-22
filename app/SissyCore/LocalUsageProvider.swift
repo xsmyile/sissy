@@ -922,11 +922,9 @@ actor LocalUsageProvider: UsageProvider {
         dailyModelTotals[key] = byRow
         dailyActivity[key, default: .none].record(
             minute: AgentActivityDay.minute(of: event.timestamp), delegated: event.delegated)
-        if let effort = event.effort {
-            dailyEffort[key, default: [:]][
-                EffortKey(model: event.model, effort: effort), default: .init()
-            ].record(event)
-        }
+        dailyEffort[key, default: [:]][
+            EffortKey(model: event.model, effort: event.effort), default: .init()
+        ].record(event)
         guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
         historyDirtyDays.insert(key)
     }
