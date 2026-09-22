@@ -355,7 +355,7 @@ struct UsagePanelSnapshot: Equatable {
     ///
     /// Carries no money, which is not an omission. A log line names no
     /// account, so the day belongs to the config home and cannot be split; the
-    /// Overview's block has answered pressure and nothing else since 0.1.10.
+    /// Overview's block has answered pressure and nothing else since 0.2.0.
     struct GaugeRow: Equatable, Identifiable {
         let id: String
         /// Which page this opens, which is the vendor's — an account is a
