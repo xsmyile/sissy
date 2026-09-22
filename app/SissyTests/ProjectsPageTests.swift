@@ -11,7 +11,7 @@ final class ProjectsPageTests: XCTestCase {
         let many = (1...9).map { project("/Users/smyile/repo\($0)", 100, "1.00") }
         let frame = frame(claude: many)
 
-        XCTAssertEqual(UsagePanelSnapshot.make(frame: frame).projects.count, 5)
+        XCTAssertEqual(UsagePanelSnapshot.make(frame: frame).projects.count, 3)
         XCTAssertEqual(
             UsagePanelSnapshot.projectsPage(frame: frame, provider: nil).rows.count, 9,
             "the page folded the list it exists to unfold")
@@ -26,7 +26,7 @@ final class ProjectsPageTests: XCTestCase {
                 providerTokens: 1_000, providerCost: "10.00"))
 
         XCTAssertEqual(snapshot.projectCount, 9)
-        XCTAssertEqual(snapshot.projects.count, 5, "the section grew a row that is not a project")
+        XCTAssertEqual(snapshot.projects.count, 3, "the section grew a row that is not a project")
     }
 
     /// The rows are read against the total in the header, so what named no

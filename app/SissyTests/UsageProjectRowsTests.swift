@@ -25,22 +25,22 @@ final class UsageProjectRowsTests: XCTestCase {
         let many = (1...9).map { project("/Users/smyile/repo\($0)", 100, "1.00") }
         let snapshot = UsagePanelSnapshot.make(frame: frame(projects: many))
 
-        XCTAssertEqual(snapshot.projects.count, 5, "the popover grew a row per repository")
-        XCTAssertEqual(snapshot.projects.last?.name, "5 more projects")
+        XCTAssertEqual(snapshot.projects.count, 3, "the popover grew a row per repository")
+        XCTAssertEqual(snapshot.projects.last?.name, "7 more projects")
         XCTAssertNil(
             snapshot.projects.last?.tooltip, "the folded row claimed one project's path")
         XCTAssertEqual(
-            snapshot.projects.last?.cost, "$5.00",
+            snapshot.projects.last?.cost, "$7.00",
             "the folded row dropped what it stands for")
     }
 
     /// One project past the limit still folds two, because folding one would
     /// cost the same row it saves.
     func testTheSmallestFoldStandsForTwoProjects() {
-        let many = (1...6).map { project("/Users/smyile/repo\($0)", 100, "1.00") }
+        let many = (1...4).map { project("/Users/smyile/repo\($0)", 100, "1.00") }
         let snapshot = UsagePanelSnapshot.make(frame: frame(projects: many))
 
-        XCTAssertEqual(snapshot.projects.count, 5)
+        XCTAssertEqual(snapshot.projects.count, 3)
         XCTAssertEqual(snapshot.projects.last?.name, "2 more projects")
     }
 
@@ -90,8 +90,8 @@ final class UsageProjectRowsTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(projects: many, providerTokens: 1_000, providerCost: "10.00"))
 
-        XCTAssertEqual(snapshot.projects.count, 5)
-        XCTAssertEqual(snapshot.projects.last?.name, "5 more projects")
+        XCTAssertEqual(snapshot.projects.count, 3)
+        XCTAssertEqual(snapshot.projects.last?.name, "7 more projects")
     }
 
     /// A day whose every line named no repository has nothing to list, and the

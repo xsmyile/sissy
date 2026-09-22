@@ -417,10 +417,10 @@ final class PanelPagesTests: XCTestCase {
             frame: frame([slice("claude-code", tokens: 100, cost: "10.00", projects: owned)]))
 
         let page = try XCTUnwrap(snapshot.providers.first?.projects)
-        XCTAssertEqual(page.count, 5)
-        XCTAssertEqual(page[4].name, "3 more projects")
-        XCTAssertNil(page[4].owner)
-        XCTAssertNil(page[4].repository)
+        XCTAssertEqual(page.count, 3)
+        XCTAssertEqual(page[2].name, "5 more projects")
+        XCTAssertNil(page[2].owner)
+        XCTAssertNil(page[2].repository)
     }
 
     private static let websiteRemote = ProjectRemote(

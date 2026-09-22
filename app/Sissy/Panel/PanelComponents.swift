@@ -634,7 +634,7 @@ struct ProjectRowView: View {
     /// The bar under the row is the panel's own vocabulary and it says the
     /// most: it is a track every row starts at the same x of, and on the
     /// projects page it carries the split in its segments. It also doubles
-    /// the row's height, which is what a folded five-row section can least
+    /// the row's height, which is what a folded three-row section can least
     /// afford — so the two sections draw the same share as a wash behind the
     /// text, where it costs the row nothing but its own inset.
     var bar: BarPlacement = .under

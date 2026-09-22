@@ -470,7 +470,7 @@ struct PanelOverview: View {
     /// real ones.
     ///
     /// **The section's own label is the way to the whole list**, not the
-    /// folded row under it. The fold exists only past five repositories, so a
+    /// folded row under it. The fold exists only past three repositories, so a
     /// door on it would be a door that comes and goes with the day — and it
     /// is not the last row either, since the remainder sits below it, which
     /// puts a navigation in the middle of a list of readings. The label is

@@ -1443,7 +1443,11 @@ struct UsagePanelSnapshot: Equatable {
 
     /// Rows a popover can hold. Past this the answer is a report, and a
     /// report needs more than the two days the tail retains.
-    private static let projectRowLimit = 5
+    ///
+    /// Three: two repositories and the fold. The label above the list is the
+    /// door to all of it, so a fourth and fifth row bought the Overview and
+    /// every provider page 48 pt for readings one click away.
+    private static let projectRowLimit = 3
 
     /// The busiest projects, with everything below them folded into one row.
     ///
@@ -1529,7 +1533,7 @@ struct UsagePanelSnapshot: Equatable {
     /// held 3; that was true of the rows it described and of a block with a
     /// floor of two under it, and neither is the case any more.
     ///
-    /// The fold is `projectRowLimit`'s, one pill standing for the rest, and it
+    /// The fold is `modelPillLimit`'s, one pill standing for the rest, and it
     /// takes the **cheapest** because the list is dearest first — the models
     /// folded away are the ones the day did least on. It carries their summed
     /// share and their summed cost rather than a bare count, which is what
