@@ -1226,6 +1226,9 @@ struct UsagePanelSnapshot: Equatable {
         calendar: Calendar = .current
     ) -> [ForgeRow] {
         let opensAt = ForgeWindow.opens(period, now: now, calendar: calendar)
+        var vendorCalendar = Calendar(identifier: .gregorian)
+        vendorCalendar.timeZone = .gmt
+        let vendorDayStart = vendorCalendar.startOfDay(for: now)
         return readings.map { reading in
             let ended =
                 period == .today && !calendar.isDate(reading.readAt, inSameDayAs: now)
@@ -1249,7 +1252,8 @@ struct UsagePanelSnapshot: Equatable {
                 opensAt: opensAt,
                 tooltip: UsageFormat.forgeTooltip(
                     reading.kind, host: reading.host, login: reading.login, period: period,
-                    boundedToOneYear: reading.activity.contributionsBoundedToOneYear),
+                    boundedToOneYear: reading.activity.contributionsBoundedToOneYear,
+                    vendorDayStart: vendorDayStart),
                 mergedHelp: UsageFormat.forgeMergedHelp(reading.kind),
                 issuesHelp: UsageFormat.forgeIssuesHelp(reading.kind),
                 commentsHelp: UsageFormat.forgeCommentsHelp(reading.kind))

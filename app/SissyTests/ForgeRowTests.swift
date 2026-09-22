@@ -86,18 +86,35 @@ final class ForgeRowTests: XCTestCase {
         now: Date = ForgeRowTests.readAt
     ) -> String? {
         UsageFormat.forgeNotice(
-            row.failure, readAt: row.readAt, opensAt: row.opensAt, refreshing: refreshing, now: now)
+            row.kind, failure: row.failure, readAt: row.readAt, opensAt: row.opensAt,
+            refreshing: refreshing, now: now)
     }
 
     /// A window the vendor has not begun counting says so, rather than dating
     /// a reading it does not have. The dash beside it is the absence of a
-    /// figure; this is why there is one.
-    func testAWindowTheVendorHasNotOpenedSaysWhenItDoes() {
+    /// figure; this is why there is one, in the vendor's name and a clock time.
+    func testAWindowTheVendorHasNotOpenedSaysWhenItsDayStarts() {
+        let opensAt = Self.readAt.addingTimeInterval(59 * 60)
         XCTAssertEqual(
             UsageFormat.forgeNotice(
-                nil, readAt: Self.readAt, opensAt: Self.readAt.addingTimeInterval(59 * 60),
+                .gitHub, failure: nil, readAt: Self.readAt, opensAt: opensAt,
                 refreshing: false, now: Self.readAt),
-            "counted in UTC days · today opens in 59m")
+            "GitHub's day starts at " + UsageFormat.forgeClock(opensAt))
+    }
+
+    /// The hover names the clock time the vendor's day starts at here, which is
+    /// what the caption leans on and what "whole UTC days" alone left the
+    /// reader to work out.
+    func testTheHoverNamesWhenTheVendorsDayStartsHere() {
+        let dayStart = Self.readAt.addingTimeInterval(59 * 60)
+        let tooltip = UsageFormat.forgeTooltip(
+            .gitLab, host: Self.gitLab.host, login: "davide", period: .today,
+            boundedToOneYear: false, vendorDayStart: dayStart)
+        XCTAssertTrue(
+            tooltip.contains(
+                "Events GitLab recorded for you, in UTC days that start at "
+                    + UsageFormat.forgeClock(dayStart) + " here"),
+            tooltip)
     }
 
     /// A refused token outranks it: nobody can read a window whose credential
@@ -105,10 +122,10 @@ final class ForgeRowTests: XCTestCase {
     func testARefusalOutranksAWindowThatHasNotOpened() throws {
         let notice = try XCTUnwrap(
             UsageFormat.forgeNotice(
-                .unauthorized, readAt: Self.readAt,
+                .gitHub, failure: .unauthorized, readAt: Self.readAt,
                 opensAt: Self.readAt.addingTimeInterval(59 * 60), refreshing: false,
                 now: Self.readAt))
-        XCTAssertFalse(notice.contains("UTC"), notice)
+        XCTAssertFalse(notice.contains("day starts"), notice)
         XCTAssertTrue(notice.contains("last read"), notice)
     }
 
