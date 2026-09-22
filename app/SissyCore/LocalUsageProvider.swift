@@ -1289,16 +1289,25 @@ actor LocalUsageProvider: UsageProvider {
     /// the dialog promises today keeps counting, and a day still being counted
     /// has to be back on disk at the next flush rather than at the next
     /// relaunch.
+    ///
+    /// **Every day map, not the ones that carry tokens.** The suppression used
+    /// to be taken from the token rows and the worked minutes alone, and a day
+    /// that has only been *counted* is in neither: Codex writes a rollout's
+    /// `session_meta` when it opens, so a session somebody started and never
+    /// asked anything is one session, no tokens and no minutes. Such a day
+    /// survived the delete unsuppressed, and the next event stamped on it put
+    /// its file back carrying a count the user had asked Sissy to forget.
     func forgetArchivedDays() async {
         let today = Calendar.current.startOfDay(for: Date())
-        for day in dailyModelTotals.keys where day < today {
-            historySuppressedDays.insert(day)
-        }
-        for day in dailyActivity.keys where day < today {
+        let held = Set(dailyModelTotals.keys).union(dailyActivity.keys)
+            .union(dailyAgentCounts.keys).union(dailyEffort.keys)
+        for day in held where day < today {
             historySuppressedDays.insert(day)
         }
         dailyModelTotals = dailyModelTotals.filter { $0.key >= today }
         dailyActivity = dailyActivity.filter { $0.key >= today }
+        dailyAgentCounts = dailyAgentCounts.filter { $0.key >= today }
+        dailyEffort = dailyEffort.filter { $0.key >= today }
         historyDirtyDays = Set(dailyModelTotals.keys)
     }
 
