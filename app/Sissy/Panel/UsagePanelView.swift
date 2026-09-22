@@ -93,8 +93,8 @@ struct UsagePanelView: View {
         /// to read the whole list.
         case identities(focus: String?)
         /// How many agents have run and what the ones running now hold, one
-        /// level in from the Overview's live line — which is the only door to
-        /// it, and is therefore drawn whether or not anything is running.
+        /// level in from the agents door on the Overview's providers label, the
+        /// only door to it, drawn whether or not anything is running.
         case stats
     }
 

@@ -2,7 +2,7 @@ import XCTest
 
 @testable import Sissy
 
-/// What the Overview's agent line and the stats page behind it say.
+/// What the Overview's agents door and the stats page behind it say.
 final class AgentStatsSnapshotTests: XCTestCase {
     private func memory(
         _ agents: [AgentProcess], samples: [UInt64] = [], since: Date = Date()

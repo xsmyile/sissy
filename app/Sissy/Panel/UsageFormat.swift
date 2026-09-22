@@ -1352,9 +1352,9 @@ extension UsageFormat {
         return String(format: "%.0f KB", value / 1_000)
     }
 
-    /// The Overview's one line about agents, and the Stats page's headline.
+    /// The Overview's agents door, and the Stats page's headline.
     ///
-    /// Names what is running rather than what it costs: the row exists to
+    /// Names what is running rather than what it costs: the door exists to
     /// answer whether there is room to keep working, which is the same
     /// question the gauges above it answer on a different axis.
     static func agentsRunning(_ count: Int, footprint: UInt64) -> String {
