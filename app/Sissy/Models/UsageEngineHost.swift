@@ -302,8 +302,8 @@ final class UsageEngineHost {
     /// only way back to a window that went behind.
     func addClaudeAccount() {
         guard let engine else { return }
-        guard loginWindow == nil else {
-            loginWindow?.present(onCredential: { _ in }, onCancel: {})
+        if let loginWindow, loginWindow.isOpen {
+            loginWindow.bringToFront()
             return
         }
         linkingClaudeAccount = true
@@ -386,8 +386,8 @@ final class UsageEngineHost {
     /// account cannot change which account the terminal is on.
     func addCodexAccount() {
         guard let engine else { return }
-        guard loginWindow == nil else {
-            loginWindow?.present(onCredential: { _ in }, onCancel: {})
+        if let loginWindow, loginWindow.isOpen {
+            loginWindow.bringToFront()
             return
         }
         let flow = CodexOAuth.begin()
