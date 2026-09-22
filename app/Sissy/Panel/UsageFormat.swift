@@ -1246,6 +1246,13 @@ extension UsageFormat {
         }
     }
 
+    /// What the page says for a repository it holds no reading of: the one it
+    /// was opened about, or every repository before the first sweep lands.
+    static func identityUnread(focus: String?, anyRead: Bool) -> String? {
+        if let focus { return "\(projectName(focus)) has not been read yet." }
+        return anyRead ? nil : "No repository has been read yet."
+    }
+
     /// The control that opens the repositories the page did not need to show.
     static func identityDisclosure(all: Int) -> String {
         "Show all \(all)"
