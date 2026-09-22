@@ -421,8 +421,9 @@ struct UsagePanelSnapshot: Equatable {
         /// How many repositories this provider's day names, for the row that
         /// opens the unfolded list.
         let projectCount: Int
-        /// This provider's own day by model, dearest first and never folded.
-        /// Empty below two models; `makeModels` is where the reason lives.
+        /// This provider's own day by model, dearest first and never folded,
+        /// as the pills under the strip. Empty below two models; `makeModels`
+        /// is where the reason lives.
         let models: [ModelRow]
         /// What the vendor has billed against a spend cap, worded. Nil for a
         /// provider that publishes none and for an account with nothing to
@@ -575,21 +576,19 @@ struct UsagePanelSnapshot: Equatable {
 
     /// One model's share of one provider's day, as its own page prints it.
     struct ModelRow: Equatable, Identifiable {
-        /// The model id as the vendor spells it, which is also what the row is
-        /// keyed by.
+        /// The model id as the vendor spells it, which is also what the pill
+        /// is keyed by.
         let id: String
-        /// The same id with a release-date suffix taken off, which is all the
-        /// row shows.
+        /// The same id with its release date and its vendor prefix taken off,
+        /// which is the pill's first line.
         let name: String
-        let tokens: String
-        let cost: String
-        /// Share of the provider's day, for the band behind the text. Of the
-        /// money while there is any, and of the tokens when the whole day
-        /// priced at nothing.
-        let share: Double
-        /// The four token counters apart, with the raw id. The row's hover and
-        /// its accessibility label, which are the same sentence: anything only
-        /// a pointer can reach does not exist for VoiceOver.
+        /// The pill's second line: the share of the day and what it cost.
+        /// The share is of the money while there is any, and of the tokens
+        /// when the whole day priced at nothing.
+        let reading: String
+        /// The four token counters apart, with the raw id. The pill's hover
+        /// and its accessibility label, which are the same sentence: anything
+        /// only a pointer can reach does not exist for VoiceOver.
         let detail: String
     }
 
@@ -1211,7 +1210,8 @@ struct UsagePanelSnapshot: Equatable {
                 projects: makeProjects(slice.projects, totalCost: slice.cost),
                 projectCount: slice.projects.count,
                 models: makeModels(
-                    slice.models, totalCost: slice.cost, totalTokens: slice.tokens),
+                    slice.models, provider: slice.id, totalCost: slice.cost,
+                    totalTokens: slice.tokens),
                 credits: makeCredits(slice.credits, now: now),
                 status: makeStatus(status[slice.id], provider: slice.id)
             )
@@ -1461,19 +1461,19 @@ struct UsagePanelSnapshot: Equatable {
     /// losing a reading.
     private static let modelRowFloor = 2
 
-    /// One row per model, dearest first, or none at all.
+    /// One pill per model, dearest first, or none at all.
     ///
     /// **No fold.** Measured 2026-09-21 over 47 archived days, the most any
     /// provider used in one day was 3 — where `projectRowLimit` exists because
     /// #81 measured 29 repositories in a month. A list that cannot grow past a
     /// handful needs no row that stands for the rest.
     ///
-    /// **The band is a share of the money, and of the tokens when there is no
-    /// money.** A day whose models have no rate in any pricing source costs
-    /// zero across the board, and sharing that would draw every band empty on
-    /// a day that measured millions of tokens — a measurement of nothing where
-    /// there was a measurement. `FrameBuilder.orderedModels` falls back the
-    /// same way, so the order and the bands cannot disagree.
+    /// **The percentage is a share of the money, and of the tokens when there
+    /// is no money.** A day whose models have no rate in any pricing source
+    /// costs zero across the board, and sharing that would print every pill at
+    /// 0% on a day that measured millions of tokens — a measurement of nothing
+    /// where there was a measurement. `FrameBuilder.orderedModels` falls back
+    /// the same way, so the order and the percentages cannot disagree.
     ///
     /// **The floor is here rather than in the view**, so the rule is asserted
     /// in a test rather than read off a screenshot. It does mean `models` is
@@ -1482,7 +1482,7 @@ struct UsagePanelSnapshot: Equatable {
     /// render as no block, and a surface that ever needs to tell them apart
     /// has the slice.
     private static func makeModels(
-        _ unordered: [ModelTotals], totalCost: Decimal, totalTokens: Int
+        _ unordered: [ModelTotals], provider: String, totalCost: Decimal, totalTokens: Int
     ) -> [ModelRow] {
         guard unordered.count >= modelRowFloor else { return [] }
         let byCost = totalCost > 0
@@ -1496,10 +1496,10 @@ struct UsagePanelSnapshot: Equatable {
                 ? NSDecimalNumber(decimal: model.cost).doubleValue : Double(model.tokens)
             return ModelRow(
                 id: model.model,
-                name: UsageFormat.modelName(model.model),
-                tokens: UsageFormat.tokens(model.tokens),
-                cost: UsageFormat.cost(model.cost),
-                share: part / total,
+                name: UsageFormat.modelName(model.model, on: provider),
+                reading: UsageFormat.modelReading(
+                    percent: Int((part / total * 100).rounded()),
+                    cost: UsageFormat.cost(model.cost)),
                 detail: UsageFormat.modelTokenDetail(
                     id: model.model,
                     input: model.totals.inputTokens,

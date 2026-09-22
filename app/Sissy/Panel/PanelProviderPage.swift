@@ -522,14 +522,16 @@ struct PanelProviderPage: View {
     /// install, or the archive switched off — and the headline is what stays,
     /// which is why it belongs to the page rather than to the strip.
     ///
-    /// **The models are the headline taken apart, so they sit with it and not
-    /// with the bars.** `PanelDayBars` draws a 10 pt row of its own above the
-    /// strip, and its comment says it may be a caption rather than a heading
-    /// precisely because this page keeps today's figures above it. At the
-    /// block's flat spacing, rows in between would leave that caption sitting
-    /// under the last of them, reading as its caption — which is the mistake
-    /// `AGENTS.md` records, measured, for the limits block. So today and its
-    /// split are one group, and the strip follows after a gap.
+    /// **The models sit under the strip, not between it and the headline.**
+    /// They were between the two and it was wrong twice over. It put a list
+    /// where the strip's own caption had to be read, so `Last 7 days` came
+    /// after the split and read as belonging to it; and it drew the pills in
+    /// the idiom the `By project` list further down already owns, so the page
+    /// said one thing twice and the second time it was the models. Under the
+    /// bars they are the caption of the day the bars are about, which is the
+    /// reading they will keep when the pointed day drives them — the rule this
+    /// block already states, that a hover replaces the caption and never the
+    /// headline.
     ///
     /// **All three are the CLI's day, not the viewed account's.** Every other
     /// field on this page comes from `viewed` and none falls back to the row;
@@ -538,35 +540,38 @@ struct PanelProviderPage: View {
     /// log line and an identity is not. Wiring them through the picker would
     /// be a claim the data cannot support.
     private var day: some View {
-        VStack(alignment: .leading, spacing: dayGap) {
-            VStack(alignment: .leading, spacing: Self.splitRowGap) {
-                today
-                ForEach(row.models) { model in
-                    ModelRowView(row: model)
-                }
-            }
+        VStack(alignment: .leading, spacing: Self.splitAbsentGap) {
+            today
             if let strip {
                 PanelDayBars(strip: strip, tint: tint)
+            }
+            if !row.models.isEmpty {
+                HStack(spacing: Self.pillGap) {
+                    ForEach(row.models) { model in
+                        ModelPill(row: model)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, PanelMetrics.blockGap - Self.splitAbsentGap)
             }
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
     }
 
-    /// What the headline is separated from the strip by, which is not the same
-    /// question with and without the split between them.
+    /// The headline keeps the spacing it has always had, and the pills pay for
+    /// their own separation.
     ///
-    /// With rows there, the gap is what stops the strip's own caption reading
-    /// as the last of them. With no rows there is nothing to tell apart and
-    /// the headline keeps the spacing it has always had — measured
-    /// 2026-09-21, the block is 133 pt either way on a day that used one
-    /// model, so a page that shows no split is unchanged to the point.
-    private var dayGap: CGFloat {
-        row.models.isEmpty ? Self.splitAbsentGap : PanelMetrics.blockGap
-    }
-
-    private static let splitRowGap: CGFloat = 2
+    /// With the split under the bars rather than above them, nothing sits
+    /// between the headline and the strip any more, so the gap that used to
+    /// vary with the model count is one number again. What needs telling apart
+    /// is the pills from the day labels over them, and that is `blockGap` —
+    /// applied on the pills rather than to the stack, so a page with no split
+    /// is unchanged to the point.
     private static let splitAbsentGap: CGFloat = 3
+    /// What two pills leave between them, narrow because the shape already
+    /// separates them and the width is what the block is short of.
+    private static let pillGap: CGFloat = 4
 
     private var today: some View {
         HStack(spacing: 6) {

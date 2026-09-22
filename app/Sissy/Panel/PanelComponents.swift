@@ -40,6 +40,24 @@ enum PanelMetrics {
     /// The wash's corner, small enough that a share of a few percent still
     /// draws a shape with a straight edge to read its width off.
     static let washRadius: CGFloat = 4
+    /// The model pill's two tiers: the name it is called by, and the figures
+    /// under it.
+    ///
+    /// The name takes the size the plan badge does, since both are a word
+    /// naming what a reading is *of*; the figures go a point under it so the
+    /// pair reads as one object with a subject and a predicate rather than as
+    /// two stacked labels of equal rank.
+    static let pillName: CGFloat = 10
+    static let pillReading: CGFloat = 9
+    /// What the pill leaves around its text.
+    ///
+    /// Wider than the plan badge's 5 pt because this one is two lines tall: a
+    /// `Capsule` at that height curves through where the first and last glyph
+    /// sit, so the shape is a rounded rectangle and the padding is what keeps
+    /// the text off its corners.
+    static let pillPadding: CGFloat = 7
+    static let pillInset: CGFloat = 3
+    static let pillRadius: CGFloat = 7
     /// What separates two readings inside one section, where the rows of a
     /// single reading sit 2 pt apart.
     ///
@@ -466,47 +484,61 @@ struct SectionLabel: View {
     }
 }
 
-/// One model's share of a provider's day: the name the vendor gives it, what
-/// it took, and what that was worth.
+/// One model's share of a provider's day, as a pill under the strip: the name
+/// the vendor gives it over what it took of the day and what that was worth.
 ///
-/// **It is not `ProjectRowView` with a model in it.** That row carries an
-/// owner, a repository, a path for its hover and two commands on a
-/// right-click; a model has none of those, and nothing to open. What the two
-/// share is the band behind the text, which is `shareWash` and is shared as
-/// such.
+/// **Two tiers rather than one line, because the two readings would not fit
+/// on one.** Measured 2026-09-22 at `PanelMetrics.width`, which leaves 312 pt:
+/// four pills carrying the name, the percentage and the cost on a single line
+/// want 434.9 pt, and three want 325.1 — the block overflows at the third
+/// model, which is the ordinary case rather than an edge. Stacking the figures
+/// under the name makes a pill as wide as the wider of its two lines instead
+/// of as wide as their sum: four Claude pills come to 249.5 pt and four Codex
+/// pills carrying that vendor's longest ids come to 291.1, both inside 312.
+/// The block is **30 pt whatever the model count**, against the 24 pt a row
+/// each the list it replaced cost — 48 pt at two models and 96 at four.
+///
+/// **It is not `ProjectRowView` with a model in it, and the first attempt
+/// was.** That row carries an owner, a repository, a path for its hover and
+/// two commands on a right-click; a model has none of those and nothing to
+/// open. Drawn in that shape the split was indistinguishable from the `By
+/// project` list further down the same page, so the panel said one thing
+/// twice in one idiom and the second time it was the models.
+///
+/// **The pill does not fill in proportion to its share.** A capsule filled to
+/// 96% beside one filled to 4% invites the comparison and cannot honour it:
+/// the two pills are different widths, so the fills are shares of different
+/// totals. It is the rule the project tracks already follow — every track
+/// starts at the same x, because two bars of different lengths cannot be
+/// compared — and a fill inside a pill breaks it by construction. The
+/// percentage is therefore written, and the background is flat.
 ///
 /// **The four token counters are on the hover and on the accessibility label,
-/// which are the same sentence.** Four unlabelled figures on the row would
-/// need a header line in 312 pt and the panel has no table anywhere in it;
-/// putting them only on the hover would make them not exist for VoiceOver,
-/// which is the rule #107 is held to. `ProjectRowView` is the one row here
-/// with no label of its own and it is the outlier rather than the model.
-///
-/// Measured 2026-09-21 by laying the block out at `PanelMetrics.width` and
-/// asking a hosting controller for the fit: **24.0 pt a row** at the 2 pt the split is spaced
-/// at. The day block goes from 133 pt with no split to 186 pt at two models
-/// and 210 pt at three — 53 and 77 pt, the five over the rows being the gap
-/// that keeps the strip's caption off the last of them. A day that used one
-/// model draws no rows and stays at 133 pt exactly.
-struct ModelRowView: View {
+/// which are the same sentence.** Putting them only on the hover would make
+/// them not exist for VoiceOver, which is the rule #107 is held to.
+struct ModelPill: View {
     let row: UsagePanelSnapshot.ModelRow
 
     var body: some View {
-        HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(row.name)
-                .font(.system(size: PanelMetrics.rowText, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 8)
-            Text("\(row.tokens) · \(row.cost)")
-                .font(.system(size: PanelMetrics.rowText))
+                .font(.system(size: PanelMetrics.pillName, weight: .medium))
+            Text(row.reading)
+                .font(.system(size: PanelMetrics.pillReading))
+                .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
-        .shareWash(row.share)
+        .lineLimit(1)
+        .padding(.horizontal, PanelMetrics.pillPadding)
+        .padding(.vertical, PanelMetrics.pillInset)
+        .background(
+            RoundedRectangle(cornerRadius: PanelMetrics.pillRadius, style: .continuous)
+                .fill(.quaternary)
+        )
         .contentShape(.rect)
         .help(row.detail)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.name) · \(row.tokens) · \(row.cost) · \(row.detail)")
+        .accessibilityLabel("\(row.name) · \(row.reading) · \(row.detail)")
     }
 }
 
