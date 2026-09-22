@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Every repository the day names, in one scrollable list.
 ///
-/// The panel's lists fold past five rows because a popover has to leave room
+/// The panel's lists fold past three rows because a popover has to leave room
 /// for what sits under them — and a fold is a reading with nowhere to go, so
 /// this is where the rest of it lives. Nothing is bounded here: the page is
 /// the whole list, and what bounds it is the panel's own ceiling against the
@@ -31,7 +31,7 @@ struct PanelProjectsPage: View {
     /// Opens a repository's commit identity from its own row.
     ///
     /// The list folds on the Overview, so most repositories are only ever seen
-    /// here — a right-click that offered the check on the folded five and not
+    /// here — a right-click that offered the check on the rows it keeps and not
     /// on the rest would put the same row under two different rules.
     let openIdentities: (String) -> Void
 

@@ -641,7 +641,7 @@ struct PanelProviderPage: View {
     /// the Overview's list is the two summed, and a page that repeated it
     /// would answer a question nobody asked here.
     ///
-    /// Folded past five rows exactly as the Overview's is, and for the same
+    /// Folded past three rows exactly as the Overview's is, and for the same
     /// reason: this page has a plan, an account, its windows, its week and its
     /// vendor's status under it, and a repository per row would push all of
     /// them below whatever the busiest day happened to be. The label is the
