@@ -163,11 +163,24 @@ ls -lh "$DIST_DIR/Sissy-$VERSION".{dmg,dmg.sha256}
 if [[ "$PUBLISH" == 1 ]]; then
   command -v gh >/dev/null || die "gh CLI required for --publish"
   TAG="v$VERSION"
+  # Without --verify-tag, `gh release create` creates a missing tag itself,
+  # from the remote default branch: the DMG built here would publish under a
+  # tag naming a different commit. The notes are the tag's own annotation,
+  # the same source release.yml reads, so the two paths cannot disagree about
+  # what a release says. A lightweight tag resolves `%(contents)` to its
+  # commit message, which is why the object type is checked rather than the
+  # text alone.
+  [[ "$(git -C "$REPO_ROOT" cat-file -t "$TAG" 2>/dev/null)" == "tag" ]] \
+    || die "$TAG is not an annotated tag; write one with: git tag -a -f $TAG"
+  NOTES="$(git -C "$REPO_ROOT" tag -l --format='%(contents)' "$TAG")"
+  [[ -n "${NOTES//[[:space:]]/}" && "${NOTES//[[:space:]]/}" != "$TAG" ]] \
+    || die "$TAG carries no annotation beyond its own name; the release notes are read from it"
   log "gh release create $TAG"
   gh release create "$TAG" \
     "$DMG_PATH" "$DMG_PATH.sha256" \
     --title "Sissy $VERSION" \
-    --generate-notes
+    --verify-tag \
+    --notes "$NOTES"
 fi
 
 log "done. Test with: open $DMG_PATH"
