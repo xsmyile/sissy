@@ -1777,7 +1777,7 @@ struct UsagePanelSnapshot: Equatable {
     /// Measured 2026-09-22 over 14 days of this machine: `claude-opus-5` ran
     /// `xhigh 99%` and `claude-fable-5-1` `xhigh 100%`, while the lowest
     /// informative lead was `gpt-6-astra`'s `medium 49%`.
-    static let effortWholeShare = 0.9
+    private static let effortWholeShare = 0.9
 
     /// The one line the provider page gives the effort reading.
     ///
