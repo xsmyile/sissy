@@ -58,12 +58,6 @@ struct PanelProviderPage: View {
     /// the frame and a stored strip would freeze it at the moment the page was
     /// opened while the `Today` row below it kept moving.
     @State private var series: [UsageHistoryDaySummary] = []
-    /// The day the pointer is on in the strip, by day key, or nil for none.
-    ///
-    /// Here rather than in `PanelDayBars` because the pills under the bars
-    /// read it too: the bars own the gesture, the page owns the answer, and
-    /// both blocks word the same day.
-    @State private var pointedDay: String?
     /// The account picked but not yet confirmed. Picking is not switching:
     /// the write reaches Claude Code's own credential, and the one thing a
     /// user cannot work out for themselves — that an open session undoes it —
@@ -126,23 +120,6 @@ struct PanelProviderPage: View {
             series: series, provider: row.id, todayTokens: todayTokens,
             todayCost: todayCost, todayModels: row.models,
             days: UsagePanelSnapshot.dayStripDays)
-    }
-
-    /// The split the pills draw: the pointed day's, or today's when the
-    /// pointer is on no bar.
-    ///
-    /// Today is the resting answer rather than an empty block, because the
-    /// pills are the caption of a strip whose last bar is today and the page
-    /// has to say something before the pointer arrives. A pointed day the
-    /// archive has no file for answers with nothing, which is the one case
-    /// where the block goes away under the pointer — an absent reading is not
-    /// a reading of zero, and holding the previous day's pills there would be
-    /// the strip's own rule broken by the block under it.
-    private var pointedModels: [UsagePanelSnapshot.ModelRow] {
-        guard let pointedDay, let strip,
-            let pointed = strip.rows.first(where: { $0.id == pointedDay })
-        else { return row.models }
-        return pointed.models
     }
 
     var body: some View {
@@ -564,48 +541,9 @@ struct PanelProviderPage: View {
     /// log line and an identity is not. Wiring them through the picker would
     /// be a claim the data cannot support.
     private var day: some View {
-        VStack(alignment: .leading, spacing: Self.splitAbsentGap) {
-            today
-            if let strip {
-                PanelDayBars(strip: strip, tint: tint, hovered: $pointedDay)
-            }
-            let models = pointedModels
-            if !models.isEmpty {
-                HStack(spacing: Self.pillGap) {
-                    ForEach(models) { model in
-                        ModelPill(row: model)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.top, PanelMetrics.blockGap - Self.splitAbsentGap)
-            }
-        }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
-    }
-
-    /// The headline keeps the spacing it has always had, and the pills pay for
-    /// their own separation.
-    ///
-    /// With the split under the bars rather than above them, nothing sits
-    /// between the headline and the strip any more, so the gap that used to
-    /// vary with the model count is one number again. What needs telling apart
-    /// is the pills from the day labels over them, and that is `blockGap` —
-    /// applied on the pills rather than to the stack, so a page with no split
-    /// is unchanged to the point.
-    private static let splitAbsentGap: CGFloat = 3
-    /// What two pills leave between them, narrow because the shape already
-    /// separates them and the width is what the block is short of.
-    private static let pillGap: CGFloat = 4
-
-    private var today: some View {
-        HStack(spacing: 6) {
-            SectionLabel(text: "Today")
-            Spacer(minLength: 0)
-            Text("\(row.tokens) · \(row.cost)")
-                .font(.system(size: 12))
-                .monospacedDigit()
-        }
+        PanelDayBlock(
+            today: row.tokens, todayCost: row.cost, todayModels: row.models,
+            strip: strip, tint: tint)
     }
 
     // MARK: Projects

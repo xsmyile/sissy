@@ -523,6 +523,7 @@ struct ModelPill: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(row.name)
                 .font(.system(size: PanelMetrics.pillName, weight: .medium))
+                .truncationMode(.tail)
             Text(row.reading)
                 .font(.system(size: PanelMetrics.pillReading))
                 .foregroundStyle(.secondary)

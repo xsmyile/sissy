@@ -1478,17 +1478,52 @@ struct UsagePanelSnapshot: Equatable {
 
     /// One pill per model, dearest first, or none at all.
     ///
-    /// **No fold.** Measured 2026-09-21 over 47 archived days, the most any
-    /// provider used in one day was 3 — where `projectRowLimit` exists because
-    /// #81 measured 29 repositories in a month. A list that cannot grow past a
-    /// handful needs no row that stands for the rest.
+    /// **Folded past four, which is what the width holds.** Measured
+    /// 2026-09-22 at `PanelMetrics.width`: three pills want 210 pt of the 312
+    /// a page has, four want 277, five want 344 and six 419. Past four the row
+    /// does not degrade gracefully — both of a pill's lines shrink, and it was
+    /// the money that went first, rendering `62% · $…` and `9% · $0.…`, where
+    /// a truncated currency figure cannot be read at all. Pinning the figures
+    /// to their ideal width only moved the damage: the row then overflowed and
+    /// was clipped at both ends, losing the leading pill's first glyphs.
     ///
-    /// **The percentage is a share of the money, and of the tokens when there
-    /// is no money.** A day whose models have no rate in any pricing source
-    /// costs zero across the board, and sharing that would print every pill at
-    /// 0% on a day that measured millions of tokens — a measurement of nothing
-    /// where there was a measurement. `FrameBuilder.orderedModels` falls back
-    /// the same way, so the order and the percentages cannot disagree.
+    /// Four is therefore the limit and it is a measurement rather than a
+    /// guess: it is every model Claude ships in a day (opus, sonnet, haiku,
+    /// fable) and it holds Codex's longest ids at 291 pt. The docstring here
+    /// used to say **no fold**, on the grounds that the archive's busiest day
+    /// held 3; that was true of the rows it described and of a block with a
+    /// floor of two under it, and neither is the case any more.
+    ///
+    /// The fold is `projectRowLimit`'s, one pill standing for the rest, and it
+    /// takes the **cheapest** because the list is dearest first — the models
+    /// folded away are the ones the day did least on. It carries their summed
+    /// share and their summed cost rather than a bare count, which is what
+    /// `makeResidue` does for the spend no repository claims.
+    ///
+    /// **The percentage is a share of the money, and of the tokens as soon as
+    /// any model has none.** A model the pricing sources do not know books
+    /// tokens at a cost of zero, and zero is what it is *not*: the rate is
+    /// unknown, which is the distinction `ProviderCredits` already holds for
+    /// money and the strip holds for a day with no file. Sharing cost on a day
+    /// that holds one would print that model at `0% · $0.00` beside millions
+    /// of tokens — a measurement of nothing where there was a measurement, and
+    /// the failure this paragraph used to claim to prevent while covering only
+    /// the day where *every* model was unpriced. So the denominator is the
+    /// tokens whenever a model has tokens and no cost, not only when the whole
+    /// day prices at zero. The money stays on the pill either way.
+    /// `FrameBuilder.orderedModels` falls back the same way, so the order and
+    /// the percentages cannot disagree.
+    ///
+    /// **A share that rounds to nothing is worded, not rounded away.** A model
+    /// worth 0.4% of the day would print `0%` beside a cost that is not zero,
+    /// which is the same lie in smaller type; `<1%` is what the bar's own
+    /// `BarGeometry.fillWidth` does for the identical case, where a share too
+    /// small to draw still draws a stub. The percentages are therefore **not**
+    /// renormalised to sum to 100 — three equal models read 33% each and sum
+    /// to 99. Nobody adds four pills up, and the alternative is worse: largest
+    /// remainder makes a model's own displayed share depend on which other
+    /// models happen to sit beside it, so the same day could read 33% or 34%
+    /// for the same money.
     ///
     /// **One model is one pill, and there is no floor.** There was, of two,
     /// for as long as the split was a list of rows under the `Today` figure:
@@ -1506,12 +1541,14 @@ struct UsagePanelSnapshot: Equatable {
     private static func makeModels(
         _ unordered: [ModelTotals], provider: String, totalCost: Decimal, totalTokens: Int
     ) -> [ModelRow] {
-        let byCost = totalCost > 0
+        let unpriced = unordered.contains { $0.cost == 0 && $0.tokens > 0 }
+        let byCost = totalCost > 0 && !unpriced
         let total =
             byCost
             ? NSDecimalNumber(decimal: totalCost).doubleValue : Double(totalTokens)
         guard total > 0 else { return [] }
-        return FrameBuilder.orderedModels(unordered).map { model in
+        let ordered = FrameBuilder.orderedModels(unordered)
+        let rows = ordered.map { model -> ModelRow in
             let part =
                 byCost
                 ? NSDecimalNumber(decimal: model.cost).doubleValue : Double(model.tokens)
@@ -1519,7 +1556,7 @@ struct UsagePanelSnapshot: Equatable {
                 id: model.model,
                 name: UsageFormat.modelName(model.model, on: provider),
                 reading: UsageFormat.modelReading(
-                    percent: Int((part / total * 100).rounded()),
+                    share: part / total,
                     cost: UsageFormat.cost(model.cost)),
                 detail: UsageFormat.modelTokenDetail(
                     id: model.model,
@@ -1529,6 +1566,34 @@ struct UsagePanelSnapshot: Equatable {
                     cacheCreation: model.totals.cacheCreationTokens)
             )
         }
+        return folded(rows, of: ordered, byCost: byCost, total: total)
+    }
+
+    /// How many pills the page's width holds whole. `makeModels` carries the
+    /// measurement.
+    private static let modelPillLimit = 4
+
+    /// The list as it is drawn: every pill while they fit, and otherwise the
+    /// dearest few with one standing for the rest.
+    private static func folded(
+        _ rows: [ModelRow], of models: [ModelTotals], byCost: Bool, total: Double
+    ) -> [ModelRow] {
+        guard rows.count > modelPillLimit else { return rows }
+        let kept = modelPillLimit - 1
+        let rest = models.dropFirst(kept)
+        let part = rest.reduce(0.0) {
+            $0
+                + (byCost
+                    ? NSDecimalNumber(decimal: $1.cost).doubleValue : Double($1.tokens))
+        }
+        let cost = rest.reduce(Decimal(0)) { $0 + $1.cost }
+        let more = ModelRow(
+            id: rest.map(\.model).joined(separator: " "),
+            name: UsageFormat.modelsFolded(rest.count),
+            reading: UsageFormat.modelReading(
+                share: total > 0 ? part / total : 0, cost: UsageFormat.cost(cost)),
+            detail: rest.map(\.model).joined(separator: " · "))
+        return Array(rows.prefix(kept)) + [more]
     }
 
     /// What the day spent outside every repository, or nil when there is none
