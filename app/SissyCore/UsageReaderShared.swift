@@ -183,15 +183,78 @@ enum UsageReaderShared {
             ?? isoFormatterNoFrac.date(from: text)
     }
 
-    /// `yyyy-MM-dd` day-bucket key formatter. POSIX locale + Gregorian
-    /// calendar so the key is stable across locale changes that would
-    /// otherwise shift digit shaping.
-    static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        return f
+    /// `yyyy-MM-dd` day-bucket key formatter, in the zone `Calendar.current`
+    /// is in when it is asked. Built once, which is also what starts
+    /// `DayKeyFormatter.followSystemZone`.
+    static let dayFormatter: DayKeyFormatter = {
+        DayKeyFormatter.followSystemZone()
+        return DayKeyFormatter()
     }()
+}
+
+/// The `yyyy-MM-dd` key a day is filed under, read in the zone in force at
+/// the moment of the call.
+///
+/// POSIX locale and Gregorian calendar so the key is stable across locale
+/// changes that would otherwise shift digit shaping. The zone is asked for on
+/// every call because a menu-bar app runs for weeks: a formatter that took
+/// `.current` once kept the launch zone after a flight while the tail's
+/// buckets, `startOfDay` and the rollups follow `Calendar.current`, so a key
+/// and the day it was computed for could name two different dates.
+final class DayKeyFormatter: @unchecked Sendable {
+    private static let format = "yyyy-MM-dd"
+    private static let localeIdentifier = "en_US_POSIX"
+    /// Held for the life of the process, which is the life of the shared
+    /// formatter it serves.
+    nonisolated(unsafe) private static var zoneObserver: NSObjectProtocol?
+    private static let observerLock = NSLock()
+
+    private let formatter: DateFormatter
+    private let zone: @Sendable () -> TimeZone
+    /// `DateFormatter` is safe to read from several threads, not to have its
+    /// zone set under a reader.
+    private let lock = NSLock()
+
+    init(zone: @escaping @Sendable () -> TimeZone = { Calendar.current.timeZone }) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = Self.format
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: Self.localeIdentifier)
+        formatter.timeZone = zone()
+        self.formatter = formatter
+        self.zone = zone
+    }
+
+    func string(from date: Date) -> String {
+        lock.withLock {
+            settleZone()
+            return formatter.string(from: date)
+        }
+    }
+
+    func date(from string: String) -> Date? {
+        lock.withLock {
+            settleZone()
+            return formatter.date(from: string)
+        }
+    }
+
+    private func settleZone() {
+        let current = zone()
+        if formatter.timeZone != current { formatter.timeZone = current }
+    }
+
+    /// Drops Foundation's cached system zone whenever the system reports a
+    /// new one, so `Calendar.current` and every key read after it agree on
+    /// the zone the Mac is in now rather than on the one it launched in.
+    static func followSystemZone() {
+        observerLock.withLock {
+            guard zoneObserver == nil else { return }
+            zoneObserver = NotificationCenter.default.addObserver(
+                forName: .NSSystemTimeZoneDidChange, object: nil, queue: nil
+            ) { _ in
+                NSTimeZone.resetSystemTimeZone()
+            }
+        }
+    }
 }
