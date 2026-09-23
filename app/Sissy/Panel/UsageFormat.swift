@@ -1608,12 +1608,12 @@ enum ClaudeAccountSwitchCopy {
             return "Sissy has no saved sign-in for that account yet. Sign into it once with claude /login"
         case .activeAccountUnknown:
             return
-                "Sissy could not tell which account Claude Code is signed in as, so it left the "
-                + "credential alone. Try again once it can reach Anthropic"
+                "Sissy could not confirm which account Claude Code is signed in as, so it left "
+                + "the credential alone. Try the switch again in a minute"
         case .slotUnreadable:
             return
                 "Sissy could not read one of Claude Code's saved sign-ins, so it changed nothing. "
-                + "Check that the .credentials.json beside its config can be read"
+                + "If it keeps happening, sign in again with claude /login"
         case .slotChanged:
             return
                 "Claude Code renewed its sign-in while Sissy was switching, so it changed "
