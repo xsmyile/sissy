@@ -147,6 +147,19 @@ final class SessionHookScriptTests: XCTestCase {
     /// The payload is the only thing the script is told, and `cwd` is the only
     /// field it reads. A working directory it cannot decode has to fall back to
     /// the process's own rather than guess at a half-decoded path.
+    /// On a Mac without the Command Line Tools `/usr/bin/git` is a shim that
+    /// offers to install them, and a hook runs it on every session start.
+    /// `xcode-select -p` failing cannot be arranged from here, so what is
+    /// pinned is that the script asks before git is ever run; the tests above
+    /// prove the answer on this Mac lets it through.
+    func testTheScriptAsksXcodeSelectBeforeRunningGit() throws {
+        let source = try String(contentsOf: script, encoding: .utf8)
+
+        let check = try XCTUnwrap(source.range(of: "/usr/bin/xcode-select -p"))
+        let firstRun = try XCTUnwrap(source.range(of: "$(git_ "))
+        XCTAssertLessThan(check.lowerBound, firstRun.lowerBound)
+    }
+
     func testAnUndecodableWorkingDirectoryIsNotGuessedAt() throws {
         let repository = try makeRepository("sissy")
 

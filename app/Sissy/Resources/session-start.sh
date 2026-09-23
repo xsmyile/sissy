@@ -50,6 +50,12 @@ esac
 dir=$(cd "$dir" 2>/dev/null && pwd -P) || exit 0
 [ -n "$dir" ] || exit 0
 
+# On a Mac without the Command Line Tools /usr/bin/git is a shim that offers to
+# install them, and this runs at every session start. `xcode-select -p` answers
+# whether anything stands behind it without offering anything, which is the
+# check GitIdentityReader makes before it runs the same git.
+/usr/bin/xcode-select -p || exit 0
+
 # `env -i` is what drops an inherited GIT_DIR or GIT_WORK_TREE, which otherwise
 # beat `-C` and answer for a repository the session was never in. HOME stays so
 # the user's own git config — `safe.directory` above all — still applies.
