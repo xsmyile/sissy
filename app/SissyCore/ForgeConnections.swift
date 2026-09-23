@@ -98,13 +98,12 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
     static func parse(kind: ForgeKind, host typed: String, path typedPath: String = "")
         -> Result<Self, ForgeAddressProblem>
     {
-        var value = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !value.isEmpty else { return .failure(.empty) }
-        if let separator = value.range(of: schemeSeparator) {
-            let scheme = String(value[value.startIndex..<separator.lowerBound])
-            if scheme == insecureScheme { return .failure(.insecureScheme) }
-            guard scheme == Self.scheme else { return .failure(.scheme) }
-            value = String(value[separator.upperBound...])
+        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return .failure(.empty) }
+        let value: String
+        switch withoutScheme(trimmed) {
+        case .success(let rest): value = rest
+        case .failure(let problem): return .failure(problem)
         }
         if value.contains("?") { return .failure(.query) }
         if value.contains("#") { return .failure(.fragment) }
@@ -128,6 +127,15 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
         return basePath(from: typedPath).map { path in
             Self(kind: kind, host: host, port: port, basePath: path)
         }
+    }
+
+    /// What follows the scheme, or the whole value when none was typed.
+    private static func withoutScheme(_ value: String) -> Result<String, ForgeAddressProblem> {
+        guard let separator = value.range(of: schemeSeparator) else { return .success(value) }
+        let typedScheme = String(value[value.startIndex..<separator.lowerBound])
+        if typedScheme == insecureScheme { return .failure(.insecureScheme) }
+        guard typedScheme == scheme else { return .failure(.scheme) }
+        return .success(String(value[separator.upperBound...]))
     }
 
     /// The port `https` answers on when none is named, which is the same
