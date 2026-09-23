@@ -110,7 +110,33 @@ final class HTTPStoragePurgeTests: XCTestCase {
 
     func testAMissingTreeIsNotAnError() throws {
         try FileManager.default.removeItem(at: library)
-        XCTAssertEqual(HTTPStoragePurge.run(in: roots), [])
+        let outcome = HTTPStoragePurge.run(in: roots)
+        XCTAssertEqual(outcome.removed, [])
+        XCTAssertEqual(outcome.unreadable, [])
+    }
+
+    func testADirectoryThatCannotBeListedIsReportedRatherThanPassedOverAsClean() throws {
+        let cache = roots.caches.appendingPathComponent(Self.release)
+        let planted = try write(cache.appendingPathComponent("Cache.db"))
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: cache.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cache.path)
+        }
+        let outcome = HTTPStoragePurge.run(in: roots)
+        XCTAssertEqual(outcome.unreadable.map(\.path), [cache.path])
+        XCTAssertFalse(outcome.removed.contains(planted))
+    }
+
+    func testTheUsersRootsAreWhereTheDefaultSessionWrites() throws {
+        let library = try XCTUnwrap(
+            FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first)
+        let caches = try XCTUnwrap(
+            FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first)
+        let user = HTTPStoragePurge.Roots.user()
+        XCTAssertEqual(user.caches.standardizedFileURL, caches.standardizedFileURL)
+        XCTAssertEqual(
+            user.httpStorages.standardizedFileURL,
+            library.appendingPathComponent("HTTPStorages").standardizedFileURL)
     }
 
     private func write(_ url: URL) throws -> URL {
