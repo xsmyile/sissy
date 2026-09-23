@@ -195,6 +195,80 @@ final class UsageArchiveRepriceTests: XCTestCase {
         XCTAssertEqual(today.totals(forModel: Self.newModel).cost, Self.oracleTurnCost)
     }
 
+    /// Enough archived days that the walk gives the actor up many times over.
+    private static let archivedDayCount = 200
+    private static let untouched = Date(timeIntervalSince1970: 0)
+
+    /// Archives a free row on each of `archivedDayCount` past days, dated as
+    /// never touched, and answers with their files.
+    private func archiveFreeDays() throws -> [URL] {
+        let calendar = Calendar.current
+        var files: [URL] = []
+        for offset in 0..<Self.archivedDayCount {
+            let date = try XCTUnwrap(
+                calendar.date(byAdding: .day, value: -(Self.daysAgo + offset), to: Date()))
+            let key = UsageReaderShared.dayFormatter.string(from: date)
+            let day = UsageHistoryDay(
+                day: key, provider: ProviderID.claudeCode, updatedAt: Date(),
+                totals: [UsageHistoryRow(model: Self.newModel, project: nil): freeRow()])
+            try UsageHistoryStore.save(day, in: stateDir)
+            let file = UsageHistoryStore.url(provider: ProviderID.claudeCode, day: key, in: stateDir)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Self.untouched], ofItemAtPath: file.path)
+            files.append(file)
+        }
+        return files
+    }
+
+    private static func anyRewritten(_ files: [URL]) throws -> Bool {
+        try files.contains { file in
+            let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+            let modified = attributes[.modificationDate] as? Date
+            return modified.map { $0 > untouched } ?? false
+        }
+    }
+
+    /// The walk yields between files, and an event ingested in one of those
+    /// yields is priced at the new rates: landing on a free row the tail had
+    /// not priced yet, it would leave that row with a cost and its earlier
+    /// tokens free for good. So the tail's rows are priced before the walk
+    /// first gives the actor up, and any reading taken once the walk has
+    /// written a day already carries them.
+    func testTheTailsFreeRowIsPricedBeforeTheArchiveWalkYields() async throws {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let line = """
+            {"type":"assistant","timestamp":"\(iso.string(from: Date()))","requestId":"r1",\
+            "message":{"id":"m1","model":"\(Self.newModel)","usage":{"input_tokens":1000,\
+            "output_tokens":0}}}
+            """
+        try (line + "\n").write(
+            to: logDir.appendingPathComponent("s.jsonl"), atomically: true, encoding: .utf8)
+        let live = tail()
+        await live.start { _ in }
+        let before = await live.current()
+        XCTAssertGreaterThan(before.totalTokens, 0)
+        XCTAssertEqual(before.totalCost, 0)
+        let archived = try archiveFreeDays()
+
+        let finished = LockedValue(false)
+        let apply = Task {
+            await live.applyPriceCatalog(Self.catalog)
+            finished.store(true)
+        }
+        var freeReadingsMidWalk = 0
+        while !finished.load() {
+            if try Self.anyRewritten(archived), await live.current().totalCost == 0 {
+                freeReadingsMidWalk += 1
+            }
+            await Task.yield()
+        }
+        await apply.value
+        await live.stop()
+
+        XCTAssertEqual(freeReadingsMidWalk, 0)
+    }
+
     /// Codex prices through its own table, with no cache-write tiers, so its
     /// archived days are repriced by that arithmetic and not by Claude's.
     func testAnArchivedCodexDayIsPricedByTheCodexArithmetic() async throws {

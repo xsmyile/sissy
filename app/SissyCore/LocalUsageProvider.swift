@@ -478,10 +478,16 @@ actor LocalUsageProvider: UsageProvider {
 
     /// Takes the new rates, and prices the rows they are the first to cover:
     /// the tail's own, and the archived days it no longer holds.
+    ///
+    /// The tail's rows are priced in the same actor turn the adapter takes
+    /// the rates, before the archive walk yields: an event ingested during a
+    /// yield is priced at the new rates, and a free row it landed on would
+    /// then carry a cost and no longer say which of its tokens were free.
     func applyPriceCatalog(_ catalog: PriceCatalog) async {
         adapter.applyPriceCatalog(catalog)
+        let repricedLive = repriceUnpricedRows()
         await repriceArchivedDays()
-        guard repriceUnpricedRows() else { return }
+        guard repricedLive else { return }
         await emitReading()
     }
 
