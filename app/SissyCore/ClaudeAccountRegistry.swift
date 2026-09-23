@@ -334,6 +334,11 @@ actor ClaudeAccountRegistry {
     /// for the length of it: a switch that ran in the gap has already written
     /// another account and marked it, and a capture resuming over it put the
     /// badge back on the account the user had just left.
+    ///
+    /// A task cancelled in that turn writes nothing. It is the watcher of an
+    /// engine being stopped, and an engine is rebuilt on every provider
+    /// toggle, so one resuming after its replacement started wrote the
+    /// archive and the index behind the new one's back.
     @discardableResult
     private func file(credential: Data, markActive: Bool) async -> Bool {
         guard let parsed = ClaudeCredentialBlob.credentials(in: credential) else { return false }
@@ -344,7 +349,7 @@ actor ClaudeAccountRegistry {
             sissyLog("sissy: could not identify a Claude credential: \(error)")
             return false
         }
-        guard Self.loadIndex(store) != nil else { return false }
+        guard !Task.isCancelled, Self.loadIndex(store) != nil else { return false }
         do {
             try store.remember(identity, credential: credential)
         } catch {
