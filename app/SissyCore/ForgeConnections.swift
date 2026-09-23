@@ -405,14 +405,21 @@ struct ForgeTokenReconciler: Sendable {
 /// written unless it answers.
 ///
 /// The effects are closures so the order can be held without a keychain or a
-/// network: the index, then the probe, then the token, then the index again,
-/// and a token whose index write failed is taken back out rather than left for
-/// nothing to name.
+/// network: the index, then the probe, then the token, then the index again.
+/// **A failed index write puts the keychain back as it found it**: the token
+/// the item held before this connect is filed again, and an item this connect
+/// created is taken out. The index alone cannot say which of the two it is,
+/// because a token can outlive its record: an index set aside leaves every
+/// token it named behind, and deleting one of those on a failure lost it
+/// together with the token that had just replaced it.
 struct ForgeConnector: Sendable {
     /// The connections the index names now, which says whether this connect
     /// replaces one. Throws for an index that will not read.
     let recorded: @Sendable () throws -> [ForgeConnection]
     let probe: @Sendable (ForgeConnection, String) async throws -> String
+    /// The token filed under a connection before this connect writes one,
+    /// read without a dialog.
+    let storedToken: @Sendable (String) -> CredentialLookup<String>
     let saveToken: @Sendable (String, String) throws -> Void
     let deleteToken: @Sendable (String) throws -> Void
     let remember: @Sendable (ForgeConnection) throws -> Void
@@ -425,17 +432,14 @@ struct ForgeConnector: Sendable {
         /// nothing was written.
         case refused(ForgeReadFailure)
         /// The forge answered and a local write failed, so nothing is
-        /// connected.
+        /// connected and the keychain holds what it held before.
         case notFiled
         /// The index would not read, so nothing was asked or written.
         case indexUnreadable
     }
 
-    /// Probes, then files. A connection the index already names is a
-    /// replacement: a failed index write then leaves the new token in place,
-    /// because deleting it would leave that row with no token at all. An
-    /// index that will not read cannot say which this is, so nothing is
-    /// probed and nothing written.
+    /// Probes, then files. An index that will not read cannot say whether
+    /// this replaces a connection, so nothing is probed and nothing written.
     func connect(_ connection: ForgeConnection, token: String) async -> Outcome {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .notFiled }
@@ -452,6 +456,7 @@ struct ForgeConnector: Sendable {
         } catch {
             return .refused(error as? ForgeReadFailure ?? .unreachable)
         }
+        let prior = storedToken(connection.id)
         do {
             try saveToken(trimmed, connection.id)
         } catch {
@@ -462,15 +467,35 @@ struct ForgeConnector: Sendable {
             try remember(connection)
         } catch {
             sissyLog("sissy: could not record the forge connection \(connection.id) (\(error))")
-            guard !replacing else { return .notFiled }
-            do {
-                try deleteToken(connection.id)
-            } catch {
-                sissyLog("sissy: the forge token for \(connection.id) outlived a failed connect (\(error))")
-            }
-            return .notFiled
+            return restore(prior, for: connection.id, replacing: replacing, login: login)
         }
         return .connected(login: login)
+    }
+
+    /// Puts back what the keychain held before a connect whose index write
+    /// failed. A prior token that could not be read cannot be put back, and
+    /// neither can one whose restore fails: the item keeps the token the
+    /// forge just accepted, which for a connection the index already names
+    /// is that row connected with it, and for any other is a token Settings
+    /// lists as one no connection names.
+    private func restore(
+        _ prior: CredentialLookup<String>, for id: String, replacing: Bool, login: String
+    ) -> Outcome {
+        do {
+            switch prior {
+            case .found(let previous):
+                try saveToken(previous, id)
+            case .absent:
+                try deleteToken(id)
+            case .denied, .interactionRequired, .unreadable, .timedOut:
+                sissyLog("sissy: the token \(id) held before a failed connect could not be read to put back")
+                return replacing ? .connected(login: login) : .notFiled
+            }
+        } catch {
+            sissyLog("sissy: could not put back the forge token for \(id) after a failed connect (\(error))")
+            return replacing ? .connected(login: login) : .notFiled
+        }
+        return .notFiled
     }
 }
 
@@ -485,7 +510,8 @@ struct ForgeConnector: Sendable {
 ///
 /// The value is the token and nothing else. It is never logged, never put on a
 /// frame, and never reaches the diagnostics report or the export; it leaves
-/// this type as an `Authorization` or `PRIVATE-TOKEN` header and nowhere else.
+/// this type as an `Authorization` or `PRIVATE-TOKEN` header, or back into
+/// this item when a connect whose index write failed puts it back.
 enum ForgeTokenStore {
     /// A literal rather than anything derived from a forge id, so renaming a
     /// kind cannot orphan a token the user connected.

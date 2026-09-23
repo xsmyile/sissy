@@ -301,28 +301,44 @@ final class ForgeConnectionTests: XCTestCase {
     private final class Effects: @unchecked Sendable {
         private let lock = NSLock()
         private var log: [String] = []
+        private var filed: [String: String] = [:]
 
         func record(_ entry: String) {
             lock.withLock { log.append(entry) }
         }
 
+        func file(_ token: String?, under id: String) {
+            lock.withLock { filed[id] = token }
+        }
+
         var entries: [String] { lock.withLock { log } }
+
+        func token(_ id: String) -> String? { lock.withLock { filed[id] } }
     }
 
     private struct Refusal: Error {}
 
     private func connector(
         _ effects: Effects, probe: Result<String, ForgeReadFailure> = .success("davide"),
-        recorded: Result<[ForgeConnection], Refusal> = .success([]), rememberFails: Bool = false
+        recorded: Result<[ForgeConnection], Refusal> = .success([]), rememberFails: Bool = false,
+        prior: CredentialLookup<String> = .absent
     ) -> ForgeConnector {
-        ForgeConnector(
+        if case .found(let token) = prior { effects.file(token, under: Self.gitLab.id) }
+        return ForgeConnector(
             recorded: { try recorded.get() },
             probe: { connection, _ in
                 effects.record("probe \(connection.id)")
                 return try probe.get()
             },
-            saveToken: { _, id in effects.record("save \(id)") },
-            deleteToken: { id in effects.record("delete \(id)") },
+            storedToken: { _ in prior },
+            saveToken: { token, id in
+                effects.record("save \(id)")
+                effects.file(token, under: id)
+            },
+            deleteToken: { id in
+                effects.record("delete \(id)")
+                effects.file(nil, under: id)
+            },
             remember: { connection in
                 effects.record("remember \(connection.id)")
                 if rememberFails { throw Refusal() }
@@ -367,14 +383,42 @@ final class ForgeConnectionTests: XCTestCase {
         XCTAssertEqual(effects.entries.last, "delete \(Self.gitLab.id)")
     }
 
-    /// A replacement's token is kept on the same failure: deleting it would
-    /// leave the row the index still names with no token at all.
-    func testAReplacementTokenSurvivesAFailedIndexWrite() async {
+    /// A reconnect whose index write failed puts the token it replaced back,
+    /// so the row the index still names reads with what it read before and
+    /// the sheet's "nothing was connected" is true. It used to keep the new
+    /// token behind that message, under a monitor nobody rebuilt.
+    func testAReplacedTokenIsPutBackWhenTheIndexWriteFails() async {
         let effects = Effects()
-        let outcome = await connector(effects, recorded: .success([Self.gitLab]), rememberFails: true)
+        let outcome = await connector(
+            effects, recorded: .success([Self.gitLab]), rememberFails: true, prior: .found("glpat-old")
+        ).connect(Self.gitLab, token: "glpat-test")
+        XCTAssertEqual(outcome, .notFiled)
+        XCTAssertEqual(effects.token(Self.gitLab.id), "glpat-old")
+        XCTAssertFalse(effects.entries.contains("delete \(Self.gitLab.id)"))
+    }
+
+    /// A token the index does not name, left by an index set aside, is still
+    /// the keychain's. A failed connect to its address used to take it for
+    /// one the connect had created and delete it, losing both tokens.
+    func testAnOrphanedTokenIsPutBackWhenTheIndexWriteFails() async {
+        let effects = Effects()
+        let outcome = await connector(effects, rememberFails: true, prior: .found("glpat-old"))
             .connect(Self.gitLab, token: "glpat-test")
         XCTAssertEqual(outcome, .notFiled)
+        XCTAssertEqual(effects.token(Self.gitLab.id), "glpat-old")
         XCTAssertFalse(effects.entries.contains("delete \(Self.gitLab.id)"))
+    }
+
+    /// A prior token that could not be read cannot be put back. The row the
+    /// index names then reads with the token the forge just accepted, so the
+    /// connect says it connected and the monitor is rebuilt for it.
+    func testAReplacementWhosePriorTokenCannotBeReadIsConnected() async {
+        let effects = Effects()
+        let outcome = await connector(
+            effects, recorded: .success([Self.gitLab]), rememberFails: true, prior: .interactionRequired
+        ).connect(Self.gitLab, token: "glpat-test")
+        XCTAssertEqual(outcome, .connected(login: "davide"))
+        XCTAssertEqual(effects.token(Self.gitLab.id), "glpat-test")
     }
 
     func testABlankTokenIsNeverProbed() async {

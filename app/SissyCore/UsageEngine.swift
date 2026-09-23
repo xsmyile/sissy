@@ -1643,6 +1643,7 @@ actor UsageEngine {
         let connector = ForgeConnector(
             recorded: { try index.loadSettingAside() },
             probe: { try await ForgeActivityFeed.probe($0, token: $1) },
+            storedToken: { ForgeTokenStore.load(connection: $0) },
             saveToken: { try ForgeTokenStore.save($0, connection: $1) },
             deleteToken: { try ForgeTokenStore.delete(connection: $0) },
             remember: { try index.remember($0) })
