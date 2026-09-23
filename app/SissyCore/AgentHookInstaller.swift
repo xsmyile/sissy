@@ -19,6 +19,37 @@ enum AgentHookOutcome: Equatable, Sendable {
     case failed
 }
 
+/// What a launch does about the agent hooks, decided before either CLI's
+/// configuration is opened.
+enum AgentHookLaunchPass: Equatable, Sendable {
+    /// Neither file is read or written.
+    case skip
+    /// Installs or removes whatever the files hold.
+    case apply
+    /// Reads both files and removes only an entry of this install's still
+    /// there, which is a removal the record lost.
+    case lookFirst
+
+    /// A config that would not parse is a run on defaults with no record of
+    /// the switch at all, so it is skipped rather than read as "off": the
+    /// look would find the user's own entry and take it out, with the script,
+    /// the backups and an inbox not yet folded into the ledger, over a typo
+    /// in a hand-edited file.
+    static func decide(enabled: Bool, removalPending: Bool, configIsWritable: Bool) -> Self {
+        guard configIsWritable else { return .skip }
+        return enabled || removalPending ? .apply : .lookFirst
+    }
+
+    /// Whether the pass goes on to write, given what the look found.
+    func proceeds(holdsOwnEntry: Bool) -> Bool {
+        switch self {
+        case .skip: false
+        case .apply: true
+        case .lookFirst: holdsOwnEntry
+        }
+    }
+}
+
 /// Puts Sissy's SessionStart entry into the CLIs' own hook configuration, and
 /// takes it back out.
 ///
@@ -193,6 +224,13 @@ struct AgentHookInstaller {
                 }
             }
         }
+    }
+
+    /// Whether a removal is still owed after a pass: read back from the files
+    /// rather than inferred from the report, so an entry still there keeps it
+    /// owed whatever each target answered.
+    static func removalOwed(enabled: Bool, refused: [String], entrySurvives: Bool) -> Bool {
+        !enabled && (!refused.isEmpty || entrySurvives)
     }
 
     /// The line the CLIs run.

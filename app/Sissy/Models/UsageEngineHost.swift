@@ -144,14 +144,15 @@ final class UsageEngineHost {
         agentHooks = config.agentHooks
         // Re-affirmed at every launch rather than written once: the CLIs
         // rewrite these files themselves, and a line that has gone has to come
-        // back without the user noticing it was missing. With the switch off
-        // and nothing pending the pass only looks: an entry of this install's
-        // still in either file is a removal the record lost, which a config
-        // that would not parse is one way to lose.
+        // back without the user noticing it was missing.
         if isLaunch {
-            applyAgentHooks(
-                config.agentHooks,
-                onlyIfRegistered: !config.agentHooks && !config.agentHooksRemovalPending)
+            let pass = AgentHookLaunchPass.decide(
+                enabled: config.agentHooks,
+                removalPending: config.agentHooksRemovalPending,
+                configIsWritable: loaded.isWritable)
+            if pass != .skip {
+                applyAgentHooks(config.agentHooks, onlyIfRegistered: pass == .lookFirst)
+            }
         }
         let host = self
         bootTask = Task {
@@ -906,7 +907,9 @@ final class UsageEngineHost {
             let stopping = await MainActor.run { host.isStopped }
             guard !stopping else { return }
             let installer = AgentHookInstaller(stateDirectory: stateDirectory, targets: targets)
-            if onlyIfRegistered, !installer.holdsOwnEntry() { return }
+            let pass: AgentHookLaunchPass = onlyIfRegistered ? .lookFirst : .apply
+            guard pass.proceeds(holdsOwnEntry: onlyIfRegistered && installer.holdsOwnEntry())
+            else { return }
             // Persist the retry before touching either foreign configuration.
             await engine.setAgentHooks(enabled: enabled, removalPending: !enabled)
             let report: [AgentHookTarget: AgentHookOutcome]
@@ -920,9 +923,9 @@ final class UsageEngineHost {
                 .filter { _, outcome in outcome == .failed || outcome == .unreadable }
                 .keys.map(\.name)
                 .sorted()
-            // Read back rather than inferred from the report: an entry still
-            // there is a removal still owed, whatever each target answered.
-            let owed = !enabled && (!refused.isEmpty || installer.holdsOwnEntry())
+            let owed = AgentHookInstaller.removalOwed(
+                enabled: enabled, refused: refused,
+                entrySurvives: !enabled && installer.holdsOwnEntry())
             await engine.setAgentHooks(enabled: enabled, removalPending: owed)
             await MainActor.run {
                 guard host.agentHooksGeneration == generation else { return }
