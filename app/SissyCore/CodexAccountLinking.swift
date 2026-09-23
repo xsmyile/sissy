@@ -99,15 +99,21 @@ enum CodexAccountLinking {
         guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw UsageRequestError.malformedPayload
         }
-        return workspaces(in: body)
+        return try workspaces(in: body)
     }
 
     /// One reply's worth of workspaces. Pure, so which ones a payload yields is
     /// testable without a token: an entry with no id is no workspace, and one
     /// with no name takes its id, which is at least addressable.
-    static func workspaces(in body: [String: Any]) -> [CodexWorkspace] {
-        let items = (body["items"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
-        return items.compactMap { item in
+    ///
+    /// A reply with no `items` list throws rather than answering an empty
+    /// one. It is a list Sissy could not read, and read as empty it linked
+    /// the default workspace without the window saying so.
+    static func workspaces(in body: [String: Any]) throws -> [CodexWorkspace] {
+        guard let listed = body["items"] as? [Any] else {
+            throw UsageRequestError.malformedPayload
+        }
+        return listed.compactMap { $0 as? [String: Any] }.compactMap { item in
             guard let id = UsageReaderShared.sanitizedDisplayText(item["id"] as? String) else {
                 return nil
             }

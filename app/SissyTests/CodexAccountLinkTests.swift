@@ -21,7 +21,7 @@ final class CodexAccountLinkTests: XCTestCase {
 
     // MARK: - Which workspaces a login holds
 
-    func testReadsTheWorkspacesOpenAILists() {
+    func testReadsTheWorkspacesOpenAILists() throws {
         let body = Self.body(
             """
             {"items": [
@@ -29,7 +29,7 @@ final class CodexAccountLinkTests: XCTestCase {
               {"id": "a1b2", "name": "Acme", "structure": "workspace"}
             ]}
             """)
-        let found = CodexAccountLinking.workspaces(in: body)
+        let found = try CodexAccountLinking.workspaces(in: body)
         XCTAssertEqual(found.map(\.id), ["7c31482a", "a1b2"])
         XCTAssertEqual(found.map(\.name), ["Personal", "Acme"])
         XCTAssertEqual(found.first?.structure, "personal")
@@ -38,14 +38,27 @@ final class CodexAccountLinkTests: XCTestCase {
     /// An entry with no id is no workspace: it cannot be asked about and it
     /// cannot be read for. One with no name takes its id, which is at least
     /// addressable.
-    func testDropsAWorkspaceWithNoIDAndNamesOneWithNoName() {
-        let found = CodexAccountLinking.workspaces(
+    func testDropsAWorkspaceWithNoIDAndNamesOneWithNoName() throws {
+        let found = try CodexAccountLinking.workspaces(
             in: Self.body(
                 """
                 {"items": [{"name": "Nameless"}, {"id": "a1b2"}]}
                 """))
         XCTAssertEqual(found.map(\.id), ["a1b2"])
         XCTAssertEqual(found.first?.name, "a1b2")
+    }
+
+    /// A reply with no list in it is a list Sissy could not read, not a
+    /// login with no workspaces: taken as empty, it linked without the
+    /// window ever saying which workspace it had defaulted to.
+    func testAReplyWithNoWorkspaceListIsUnreadable() {
+        XCTAssertThrowsError(
+            try CodexAccountLinking.workspaces(in: Self.body(#"{"accounts": []}"#)))
+    }
+
+    func testAWorkspaceListThatIsNotAListIsUnreadable() {
+        XCTAssertThrowsError(
+            try CodexAccountLinking.workspaces(in: Self.body(#"{"items": {"id": "a1b2"}}"#)))
     }
 
     // MARK: - What a link decides
