@@ -809,4 +809,16 @@ final class ForgeActivityTests: XCTestCase {
                 of: try answer(200, from: Self.graphQLEndpoint),
                 addressedTo: URL(string: Self.graphQLEndpoint)))
     }
+
+    /// `SissyHTTP` throws a reply from another host rather than handing it
+    /// over, and that is the same answer as a refusal from one: never the
+    /// token's, so never a connection parked behind a replacement.
+    func testAReplyFromAnotherHostThrownByTheSessionIsARedirect() {
+        XCTAssertEqual(
+            ForgeActivityFeed.failure(thrown: SissyHTTP.LeftItsOrigin(status: 401)), .redirected)
+    }
+
+    func testAnyOtherErrorFromTheSessionIsAForgeOutOfReach() {
+        XCTAssertEqual(ForgeActivityFeed.failure(thrown: URLError(.timedOut)), .unreachable)
+    }
 }

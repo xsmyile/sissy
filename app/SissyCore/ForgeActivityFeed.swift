@@ -236,11 +236,18 @@ enum ForgeActivityFeed {
         do {
             (data, response) = try await SissyHTTP.data(for: request)
         } catch {
-            throw ForgeReadFailure.unreachable
+            throw failure(thrown: error)
         }
         guard let http = response as? HTTPURLResponse else { throw ForgeReadFailure.malformed }
         if let failure = failure(of: http, addressedTo: request.url) { throw failure }
         return (data, http)
+    }
+
+    /// What a request that produced no reply means for the row: a reply from
+    /// another host, which `SissyHTTP` throws rather than hands over, is
+    /// `redirected`, and anything else is a forge out of reach.
+    static func failure(thrown error: Error) -> ForgeReadFailure {
+        error is SissyHTTP.LeftItsOrigin ? .redirected : .unreachable
     }
 
     /// What a reply means for the row, `nil` for one worth reading.
