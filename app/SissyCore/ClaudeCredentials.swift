@@ -65,7 +65,7 @@ enum ClaudeCredentialsStore {
     /// they are milliseconds. Claude Code writes `expiresAt` in ms; the guard
     /// keeps the parse correct if that ever changes.
     ///
-    /// Shared with `ClaudeFileCredentials`, which parses the same field out of
+    /// Shared with `ClaudeCredentialBlob`, which parses the same field out of
     /// the copy the CLI keeps in its config home: two readers of one vendor's
     /// number must not disagree about its unit.
     static let secondsUpperBound: Double = 4_102_444_800

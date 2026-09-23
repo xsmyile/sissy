@@ -242,8 +242,10 @@ seat metered at the same tier keeps "Team" and puts the tier in the row's
 tooltip, because "Team 5x" is a plan nobody sells.
 
 Claude Code's windows come from the credential the CLI is signed in with,
-read from `<home>/.credentials.json` where there is one and from the login
-keychain where there is not. **Neither costs a permission**, which is why there
+read in the CLI's own macOS order: the login keychain first, and
+`<home>/.credentials.json` only when no keychain item holds one.
+`ClaudeCLISlot` is that lookup, and the account registry reads the same one,
+so the name on the row and the limits under it come off the same bytes. **Neither costs a permission**, which is why there
 is no switch in front of them: a keychain item's ACL names *applications*, and
 Claude Code files its own item by shelling out to `security`, so
 `/usr/bin/security` is the application on that list and Sissy is not. Reading
@@ -339,7 +341,7 @@ compiled into the app too.
 | `ClaudeAccountRegistry.swift`   | Watches the credential the CLI is signed in with, archives every new one, and switches between them. The archive is what makes a switch safe: the CLI's slots are scratch and it rewrites them with whichever account is active |
 | `ProviderAccounts.swift`        | `ProviderHome` — the one config home per vendor Sissy meters, and every path resolved from it, so a credential and a log tree can never be read out of two different places |
 | `ClaudeCredentials.swift`       | `ClaudeCredentials` and the outcome of looking one up, plus the `SecItem` query `ClaudeWebSessionStore` reads Sissy's own item with. Never writes a credential and never refreshes one: Anthropic's refresh tokens rotate on use, so spending one would sign the user out of their own terminal |
-| `ClaudeFileCredentials.swift`   | The credential beside the CLI's config (`<home>/.credentials.json`), and `ClaudeCodeCredentials`, which reads that file and falls back to the login keychain — the two places the signed-in token lives, in one order |
+| `ClaudeCLISlot.swift`          | Every place Claude Code keeps one home's credential (the keychain items and `<home>/.credentials.json`), the one the CLI is using, and `ClaudeCredentialBlob`, the account half a switch archives and merges. `ClaudeCodeCredentials` reads the same lookup for the limits probe |
 | `ClaudeProfile.swift`           | Reads the plan, the tier, the account and the vendor's own cached credits reply out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain and no network. A cached reading carries the vendor's own `fetchedAt`, which the panel prints beside it |
 | `ClaudeUsagePayload.swift`      | The one parser for the usage body Anthropic answers with, wherever it was read — the OAuth endpoint, claude.ai, or the CLI's cached copy of one. Measured to be the same object in all three, so there is no second reading of `spend` to drift |
 | `ClaudeWebSessionStore.swift`   | The imported session, in a keychain item Sissy owns and nothing else rewrites. Presence is asked without decrypting, so Settings answers on a build whose grant lapsed. Keyed by account, so more than one is a stored row rather than a rewrite |

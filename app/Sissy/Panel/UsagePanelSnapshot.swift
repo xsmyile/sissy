@@ -416,6 +416,9 @@ struct UsagePanelSnapshot: Equatable {
         let isSignedIn: Bool
         /// Whether Sissy holds a credential it could sign the CLI in with.
         let isSwitchable: Bool
+        /// Whether the credential Sissy holds has a refresh token that has
+        /// expired, so only a `claude /login` as this account brings it back.
+        let needsLogin: Bool
     }
 
     struct ProviderRow: Equatable, Identifiable {
@@ -426,6 +429,10 @@ struct UsagePanelSnapshot: Equatable {
         /// control that does nothing, and the fields below are that one
         /// account's reading anyway.
         let accounts: [AccountEntry]
+        /// Why accounts the switcher used to list may be missing, worded. Nil
+        /// the rest of the time, which is every install whose account index
+        /// has always read.
+        let accountsNotice: String?
         /// Subscription plan, already worded. Nil leaves the row's header at
         /// the name alone — an API-key user has no plan to name, and a Codex
         /// that has not taken a turn yet has not said which it is on.
@@ -1376,6 +1383,8 @@ struct UsagePanelSnapshot: Equatable {
                         ? claudeAccounts : ClaudeAccountRegistry.Snapshot(),
                     provider: slice.id,
                     reading: limitsReading, now: now),
+                accountsNotice: slice.id == ProviderID.claudeCode && claudeAccounts.indexSetAside
+                    ? ClaudeAccountSwitchCopy.indexSetAside : nil,
                 plan: plan?.label,
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
@@ -1494,8 +1503,7 @@ struct UsagePanelSnapshot: Equatable {
         now: Date
     ) -> [AccountEntry] {
         let byID = Dictionary(readings.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let switchable = Set(known.accounts.map(\.uuid))
-        let ids = switchable.union(byID.keys)
+        let ids = Set(known.accounts.map(\.uuid)).union(byID.keys)
         guard ids.count > 1 else { return [] }
 
         let entries = ids.map { id -> AccountEntry in
@@ -1525,7 +1533,8 @@ struct UsagePanelSnapshot: Equatable {
                 notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet, provider: provider),
                 isReadable: reading != nil,
                 isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID),
-                isSwitchable: switchable.contains(id))
+                isSwitchable: known.switchable.contains(id),
+                needsLogin: known.needsLogin.contains(id))
         }
         return entries.sorted { lhs, rhs in
             (lhs.isSignedIn ? 0 : 1, lhs.label) < (rhs.isSignedIn ? 0 : 1, rhs.label)

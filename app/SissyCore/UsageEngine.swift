@@ -297,11 +297,14 @@ actor UsageEngine {
         // Built before the providers rather than after: the Claude adapter's
         // signals hold it, because who the CLI is signed in as is what says
         // which of the per-account readings is the one the row already shows.
+        // The slot is the one the limits probe reads below, so the name on the
+        // row and the limits under it are resolved from the same credential.
+        let claudeSlot = ClaudeCLISlot.live(home: claudeHome)
         let accountRegistry =
             claudeAccounts
             ?? ClaudeAccountRegistry(
                 store: ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: stateDir)),
-                slot: .live(home: claudeHome))
+                slot: claudeSlot)
         self.claudeAccounts = accountRegistry
         let webIndex = ClaudeWebSessionIndex(
             url: ClaudeWebSessionIndex.defaultURL(in: stateDir))
@@ -345,8 +348,8 @@ actor UsageEngine {
                     ))
             default:
                 // The CLI's own credential answers the usage endpoint with no
-                // dialog and no grant to lapse, from the file where there is
-                // one and from the login keychain where there is not. Built
+                // dialog and no grant to lapse, from the login keychain where
+                // the CLI keeps it and from the file where it does not. Built
                 // unconditionally: asking which of the two holds it would
                 // spawn `security` on whatever thread is constructing the
                 // engine, and the probe's own first read answers the same
@@ -354,17 +357,16 @@ actor UsageEngine {
                 // it as the fallback for a Mac that has neither, which is a
                 // CLI nobody has signed into.
                 // The read goes through `loadOffPool` because it is blocking:
-                // where there is no file it forks `/usr/bin/security`, and
-                // called straight from the probe that runs on the actor's own
-                // executor, parking a cooperative thread once every five
-                // minutes per home. Off-pool is also what gives the timeout
+                // it forks `/usr/bin/security`, and called straight from the
+                // probe that runs on the actor's own executor, parking a
+                // cooperative thread once every five minutes per home. Off-pool is also what gives the timeout
                 // the probe already passes something to bound.
                 let probe =
                     limitsProbe
                     ?? ClaudeLimitsProbe(
                         credentials: { timeout in
                             await ClaudeCredentialsStore.loadOffPool(timeout: timeout) {
-                                ClaudeCodeCredentials.load(home: home)
+                                ClaudeCodeCredentials.load(slot: claudeSlot)
                             }
                         },
                         backoff: limitsBackoff.slot(for: LimitsBackoffLedger.claudeCLIKey))

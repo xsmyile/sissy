@@ -29,8 +29,8 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// test of the loop this probe runs has to answer for it without a
     /// keychain. It takes no interaction flag, because nothing this probe
     /// reads can ask the user anything — `ClaudeCodeCredentials` reads the
-    /// CLI's own file and falls back to `/usr/bin/security`, and neither
-    /// raises a dialog.
+    /// CLI's own keychain item through `/usr/bin/security` and falls back to
+    /// its file, and neither raises a dialog.
     private let credentialsSource: @Sendable (Duration) async -> ClaudeCredentialsLookup
     /// The network half, injectable for the same reason: a test of the refresh
     /// contract must not reach Anthropic to observe it.
@@ -233,10 +233,9 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// It was written when this read was `SecItemCopyMatching`, which could
     /// raise the legacy keychain panel and earn a grant that a token rotation
     /// invalidated; the engine now injects `ClaudeCodeCredentials.load`, which
-    /// asks macOS for nothing. Where the CLI keeps `.credentials.json` that is
-    /// a file read costing about a millisecond; where it does not, it is a
-    /// `/usr/bin/security` spawn, which is the expensive arm and still only
-    /// once every five minutes.
+    /// asks macOS for nothing. It is a `/usr/bin/security` spawn, read in the
+    /// CLI's own order so the token spent here is the one the account
+    /// registry identified, and still only once every five minutes.
     ///
     /// The read is a suspension a `stop()` or a second `refresh` can land in,
     /// which is what `stamp` guards. The generation is checked rather than
@@ -261,12 +260,11 @@ actor ClaudeLimitsProbe: SourceSignals {
         case .absent:
             publishFailure(.signedOut)
             report(
-                "no Claude Code credentials in the keychain under "
-                    + "\(ClaudeCredentialsStore.keychainService); limits stay hidden until "
-                    + "you sign into the CLI")
+                "no stored Claude Code login in the keychain or beside the config; limits "
+                    + "stay hidden until the CLI keeps one")
         // Neither can arise here, and saying so is the point. Both are answers
         // macOS gives an in-process `SecItemCopyMatching`; this probe reads the
-        // CLI's own file and falls back to `/usr/bin/security`, neither of
+        // CLI's own item through `/usr/bin/security` or its file, neither of
         // which asks the user anything, so there is nobody to refuse and no
         // grant to go stale. They report rather than publish a state, because
         // a notice telling someone to grant access names a dialog that cannot

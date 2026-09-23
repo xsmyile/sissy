@@ -188,7 +188,9 @@ struct PanelProviderPage: View {
     /// a label on the app.
     @ViewBuilder
     private var identity: some View {
-        if row.account != nil || row.plan != nil || !row.accounts.isEmpty {
+        if row.account != nil || row.plan != nil || !row.accounts.isEmpty
+            || row.accountsNotice != nil
+        {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     if let email = shownEmail {
@@ -216,13 +218,25 @@ struct PanelProviderPage: View {
                 switchProgress(choice)
             }
             if let switchFailure, pendingAccount == nil, switchingAccount == nil {
-                Text(switchFailure)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, PanelMetrics.gutter)
-                    .padding(.bottom, 10)
+                identityCaption(switchFailure)
+            } else if let viewed, !viewed.isSignedIn, viewed.needsLogin {
+                identityCaption(ClaudeAccountSwitchCopy.needsLogin)
+            }
+            if let notice = row.accountsNotice {
+                identityCaption(notice)
             }
         }
+    }
+
+    /// A sentence under the identity line, for what the switcher has to say
+    /// about an account rather than about its limits.
+    private func identityCaption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, PanelMetrics.gutter)
+            .padding(.bottom, 10)
     }
 
     /// The question, the warning and the two answers, inside the panel.

@@ -56,9 +56,10 @@ would answer for a repository the reader was never pointed at, and
 calls have a 5 s timeout and no escalation, the tool having no dialog to wait
 behind.
 
-**Credentials it reads, never mints.** Claude Code's OAuth token from
-`<config home>/.credentials.json`, or the login keychain through
-`/usr/bin/security`; Codex's from `~/.codex/auth.json`. Sissy never refreshes
+**Credentials it reads, never mints.** Claude Code's OAuth token from the
+login keychain through `/usr/bin/security`, or from
+`<config home>/.credentials.json` when the keychain holds none; Codex's from
+`~/.codex/auth.json`. Sissy never refreshes
 either, and never writes one back except on a Claude account switch you asked
 for: both vendors rotate refresh tokens, and spending one would sign you out
 of your own terminal. Codex's file is never written. A forge token is
@@ -109,7 +110,7 @@ unless you ask for it:
 | Written | When |
 |---|---|
 | a line in `~/.claude/settings.json` and one in `~/.codex/hooks.json` | only under `Name projects even when Sissy is off`; both point at a script in Sissy's own folder and both come out when you switch it off |
-| Claude Code's keychain slot and its `.credentials.json` mirror | only when you pick an account with *Use in CLI*. Uninstalling does not switch it back |
+| the account part of Claude Code's keychain slot and its `.credentials.json` mirror | only when you pick an account with *Use in CLI*. Everything else in them, such as MCP server logins, is left as it was. Uninstalling does not switch it back |
 | `~/Library/Logs/Sissy/`, rotated | always, and it outlives an uninstall |
 | CSV files | only into the folder you choose when you press Export |
 

@@ -29,7 +29,18 @@ enum ClaudeKeychainCLI {
         /// `security` exited non-zero for some other reason, carrying its code
         /// so a refusal can be told from a tool that would not run at all.
         case tool(Int32)
+        /// `security` did not answer: it could not be started, or it outlived
+        /// its budget and was stopped. Nothing is known about the item.
+        case unavailable
     }
+
+    /// `security`'s exit codes for a keychain that cannot be used right now
+    /// rather than an item that refused: 36 is `errSecInteractionNotAllowed`
+    /// (the keychain is locked and no dialog may be shown) and 51 is
+    /// `errSecAuthFailed`, each truncated to the eight bits an exit status
+    /// carries. Neither is fixed by signing in again, so neither may be worded
+    /// as if it were.
+    static let unavailableStatuses: Set<Int32> = [36, 51]
 
     /// Service name Claude Code files the credential of a CLI started with no
     /// `CLAUDE_CONFIG_DIR` under.
@@ -92,9 +103,14 @@ enum ClaudeKeychainCLI {
     }
 
     /// Whether an item exists, asked without reading its secret.
-    static func contains(service: String, account: String) -> Bool {
-        let result = try? run(["find-generic-password", "-s", service, "-a", account])
-        return result?.status == 0
+    ///
+    /// Throws where the lookup itself failed, because a keychain that could
+    /// not be asked is not one without the item.
+    static func contains(service: String, account: String) throws -> Bool {
+        let result = try run(["find-generic-password", "-s", service, "-a", account])
+        if result.status == itemNotFound { return false }
+        guard result.status == 0 else { throw Failure.tool(result.status) }
+        return true
     }
 
     /// The service name Claude Code files one config home's credential under.
@@ -130,6 +146,14 @@ enum ClaudeKeychainCLI {
     /// alone addresses half of what the CLI now keeps. Which of the two a
     /// `claude` reads first is its business, so a switch reaching only one
     /// leaves the other naming the account the user just left.
+    ///
+    /// The pair does not stay in step. Measured 2026-09-23 against Claude
+    /// Code 2.1.280: a `claude /login` wrote the unscoped item alone at
+    /// 09:20:38Z and left this one on the previous account, and the CLI went
+    /// on running as the account the unscoped item named. So this name is a
+    /// sibling rather than a peer: `ClaudeCLISlot` reads it only when the
+    /// unscoped item holds nothing, and a switch writes it only where it
+    /// already holds a credential.
     static func siblingClaudeServices(for home: URL) -> [String] {
         guard AccountDefaults.isDefaultClaudeHome(home) else { return [] }
         return [scopedClaudeService(for: home.path)]
@@ -163,7 +187,8 @@ enum ClaudeKeychainCLI {
     ///
     /// Standard error goes to the null device rather than a pipe: nothing here
     /// reads it, and a pipe nobody drains blocks the child once the kernel
-    /// buffer fills.
+    /// buffer fills. A tool that would not start and one the watchdog had to
+    /// stop are both `unavailable`: neither is an answer about the item.
     private static func run(_ arguments: [String]) throws -> (status: Int32, output: Data) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: toolPath)
@@ -171,12 +196,17 @@ enum ClaudeKeychainCLI {
         let stdout = Pipe()
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
-        try process.run()
+        do {
+            try process.run()
+        } catch {
+            throw Failure.unavailable
+        }
         let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
         let output = stdout.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         watchdog.cancel()
+        guard process.terminationReason == .exit else { throw Failure.unavailable }
         return (process.terminationStatus, output)
     }
 }
