@@ -214,10 +214,14 @@ struct GeneralSettingsView: View {
                 Toggle("Start at login", isOn: launchAtLoginBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
+                    .disabled(model.loginItem.location.isTransient && !model.loginItem.isEnabled)
             }
         } label: {
             Text("Start at login")
-            Text("Sissy counts only while it is running, so this is what keeps a day complete.")
+            Text(
+                model.loginItem.location.notice
+                    ?? "Sissy counts only while it is running, so this is what keeps a day complete."
+            )
         }
     }
 

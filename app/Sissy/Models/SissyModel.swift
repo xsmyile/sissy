@@ -45,8 +45,14 @@ final class SissyModel {
     /// The query costs 1–7 ms against launchd, measured, at a point where
     /// nothing is drawn yet. Settings keeps refreshing on appearance: only the
     /// system knows that the user has since undone it from Login Items.
+    ///
+    /// A copy that will not survive to the next login is logged here, because
+    /// the one place it is shown is a Settings row nobody may open.
     func start() {
         loginItem.refresh()
+        if loginItem.location.isTransient {
+            sissyLog("sissy: running from a \(loginItem.location) copy; start at login is withheld")
+        }
         retireLegacyAgentIfNeeded()
         engine.start()
     }

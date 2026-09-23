@@ -20,11 +20,17 @@ final class LoginItemController {
 
     @ObservationIgnored private let service: SMAppService
 
+    /// Where the running copy lives, read once: a bundle does not move while
+    /// it runs, and what it says decides whether the switch can turn on.
+    @ObservationIgnored let location: BundleLocation
+
     /// `service` is injected so a test can point the controller at a service
-    /// that is definitely not registered. Left to its default it asks about
-    /// the running app.
-    init(service: SMAppService = .mainApp) {
+    /// that is definitely not registered, and `location` so a test can stand
+    /// the app on a copy that is about to vanish. Left to their defaults they
+    /// ask about the running app.
+    init(service: SMAppService = .mainApp, location: BundleLocation = .current()) {
         self.service = service
+        self.location = location
     }
 
     var isEnabled: Bool { status == .enabled }
@@ -37,7 +43,13 @@ final class LoginItemController {
         status = service.status
     }
 
+    /// Turning the login item on from a transient copy throws
+    /// `BundleLocation.Refusal` before launchd is asked: the registration
+    /// would name a bundle that is gone by the next login. Turning it off is
+    /// always passed through, since a registration made from an earlier copy
+    /// is one the user has every reason to take back.
     func setEnabled(_ enabled: Bool) throws {
+        if enabled, location.isTransient { throw BundleLocation.Refusal(location) }
         defer { refresh() }
         do {
             if enabled {
