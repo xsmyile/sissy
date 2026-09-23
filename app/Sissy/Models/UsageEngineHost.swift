@@ -146,12 +146,8 @@ final class UsageEngineHost {
         // back without the user noticing it was missing.
         if isLaunch {
             let pass = AgentHookLaunchPass.decide(
-                enabled: config.agentHooks,
-                removalPending: config.agentHooksRemovalPending,
-                configIsWritable: loaded.isWritable)
-            if pass != .skip {
-                applyAgentHooks(config.agentHooks, onlyIfRegistered: pass == .lookFirst)
-            }
+                enabled: config.agentHooks, removalPending: config.agentHooksRemovalPending)
+            applyAgentHooks(config.agentHooks, onlyIfRegistered: pass == .lookFirst)
         }
         let host = self
         bootTask = Task {
@@ -790,7 +786,9 @@ final class UsageEngineHost {
     /// intent is written to `server.json` *before* either file is touched, so
     /// a removal interrupted half-way is retried at the next launch instead of
     /// leaving a line in someone else's configuration under a switch that is
-    /// already off.
+    /// already off. A run whose `server.json` would not parse saves none of
+    /// that; its retry is the look the next launch makes with the switch off,
+    /// which finds the entry still there.
     ///
     /// No pass begins once teardown has: `stop()` joins the one it finds and
     /// the process exits on its reply, so a pass started inside that window is
