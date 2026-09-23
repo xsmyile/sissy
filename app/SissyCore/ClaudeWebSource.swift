@@ -226,8 +226,8 @@ actor ClaudeWebSource: SourceSignals {
             }
             return .ready(found.accessToken)
         case .absent:
-            publishFailure(.signedOut)
-            report("no claude.ai session imported; limits stay hidden until one is")
+            publishFailure(.sessionUnreadable)
+            report("the linked claude.ai session is no longer filed; link the account again")
             return .wait(Self.refreshInterval)
         case .interactionRequired:
             publishFailure(.needsAuthorization)
@@ -239,7 +239,7 @@ actor ClaudeWebSource: SourceSignals {
             cancelRequests()
             return .wait(Self.refreshInterval)
         case .unreadable(let status):
-            publishFailure(.signedOut)
+            publishFailure(.sessionUnreadable)
             report("the claude.ai session could not be read (status \(status))")
             return .wait(Self.refreshInterval)
         case .timedOut:

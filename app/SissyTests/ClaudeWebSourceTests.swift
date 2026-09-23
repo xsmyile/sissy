@@ -213,13 +213,25 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertEqual(source.currentSignals().limitsState, .needsAuthorization)
     }
 
-    /// Nothing imported is not the same as something that stopped working.
-    func testNoImportedSessionReadsAsSignedOut() async {
+    /// Every reader is built for a session that was listed as stored, so an
+    /// item that is not there by the time it is read is a linked session gone
+    /// missing, not a Claude Code with no stored login.
+    func testAVanishedSessionReadsAsUnreadableRatherThanSignedOut() async {
         let source = source(
             lookup: { _ in .absent },
             fetch: { _, _ in throw UsageRequestError.malformedPayload })
         _ = await source.refreshOnce {}
-        XCTAssertEqual(source.currentSignals().limitsState, .signedOut)
+        XCTAssertEqual(source.currentSignals().limitsState, .sessionUnreadable)
+    }
+
+    /// A stored session the keychain will not decode is the same case, and
+    /// the same fix: link the account again.
+    func testASessionTheKeychainCannotDecodeReadsAsUnreadable() async {
+        let source = source(
+            lookup: { _ in .unreadable(errSecDecode) },
+            fetch: { _, _ in throw UsageRequestError.malformedPayload })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().limitsState, .sessionUnreadable)
     }
 
     // MARK: - The recorded organisation

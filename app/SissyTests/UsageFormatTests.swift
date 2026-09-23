@@ -269,6 +269,27 @@ final class UsageFormatTests: XCTestCase {
             notice.message, "No stored Claude login to read limits from")
     }
 
+    /// A linked claude.ai session Sissy cannot read is its own sentence, and
+    /// it names the session rather than the CLI: Claude Code may be signed in
+    /// perfectly well while one linked account's item is missing.
+    func testAnUnreadableLinkedSessionIsNotWordedAsTheCLI() throws {
+        let notice = try XCTUnwrap(
+            UsageFormat.limitsNotice(.sessionUnreadable, provider: ProviderID.claudeCode))
+
+        XCTAssertTrue(notice.message.contains("claude.ai"), notice.message)
+        XCTAssertFalse(notice.message.contains("Claude Code"), notice.message)
+        XCTAssertNotEqual(
+            notice.message,
+            UsageFormat.limitsNotice(.signedOut, provider: ProviderID.claudeCode)?.message)
+    }
+
+    /// What rewrites the item is a fresh sign-in, so that is the control.
+    func testAnUnreadableLinkedSessionOffersToLinkAgain() {
+        let notice = UsageFormat.limitsNotice(.sessionUnreadable, provider: ProviderID.claudeCode)
+        XCTAssertEqual(notice?.kind, .link)
+        XCTAssertEqual(notice?.action, "Link again")
+    }
+
     /// The common case, and the reason a row that is fine says nothing: one
     /// that explains itself every time is one nobody reads when it matters.
     func testWorkingLimitsSayNothing() {
