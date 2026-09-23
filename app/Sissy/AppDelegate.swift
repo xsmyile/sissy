@@ -14,6 +14,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isTerminating = false
     private var repliedToTerminate = false
 
+    /// The launch run of `HTTPStoragePurge`, held here so the delete has an
+    /// owner and stays off the main thread, at utility priority because
+    /// nothing waits on it.
+    ///
+    /// Its order against the engine's `start()` does not matter: `SissyHTTP`
+    /// keeps no disk cache and no cookie jar, so nothing the engine sends can
+    /// write into the trees the purge is deleting.
+    private var storagePurge: Task<Void, Never>?
+
     /// How long quitting waits for the engine to shut down.
     ///
     /// What the wait buys is each reader's final offset flush — without it the
@@ -32,7 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The test host must not start the user's engine or retire login items.
         guard NSClassFromString("XCTestCase") == nil else { return }
-        HTTPStoragePurge.run(in: .user())
+        storagePurge = Task.detached(priority: .utility) {
+            HTTPStoragePurge.run(in: .user())
+        }
         model.start()
 
         let statusController = StatusItemController(model: model)
