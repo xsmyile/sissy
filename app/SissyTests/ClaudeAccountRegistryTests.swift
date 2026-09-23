@@ -977,6 +977,23 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertFalse(registry.currentSnapshot().indexSetAside)
         XCTAssertEqual(registry.currentSnapshot().accounts.map(\.uuid), ["u-tok-a"])
     }
+
+    /// A truncated index holds nothing that decodes, and the archived secrets
+    /// it named are still in the keychain. Read as empty, the next capture
+    /// wrote over it and every one of them left the switcher.
+    func testAnEmptyIndexIsSetAsideRatherThanOverwritten() async throws {
+        let vault = Vault()
+        try Data().write(to: ClaudeAccountStore.defaultURL(in: tempDir))
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(vault, identify: Self.byToken)
+
+        await registry.captureActive()
+
+        let aside = try FileManager.default.contentsOfDirectory(atPath: tempDir.path)
+            .filter { $0.hasPrefix(ClaudeAccountStore.setAsidePrefix) }
+        XCTAssertEqual(aside.count, 1)
+        XCTAssertTrue(registry.currentSnapshot().indexSetAside)
+    }
 }
 
 /// Holds an async caller until the test lets it go.
