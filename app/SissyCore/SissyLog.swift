@@ -12,33 +12,80 @@ final class SissyLogFile: @unchecked Sendable {
     private let url: URL
     private let rotatedURL: URL
     private let maxBytes: UInt64
+    private let open: @Sendable (URL) throws -> FileHandle
     private let lock = NSLock()
     private var handle: FileHandle?
     private var written: UInt64 = 0
+    private var failed = 0
 
-    init(directory: URL, name: String = "sissy.err.log", maxBytes: UInt64 = 2 * 1024 * 1024) {
+    /// `open` hands back a handle positioned at the end of the file it was
+    /// given; tests pass one that refuses every write.
+    init(
+        directory: URL,
+        name: String = "sissy.err.log",
+        maxBytes: UInt64 = 2 * 1024 * 1024,
+        open: @escaping @Sendable (URL) throws -> FileHandle = SissyLogFile.openForAppending
+    ) {
         let url = directory.appendingPathComponent(name)
         self.url = url
         self.rotatedURL = url.deletingPathExtension()
             .appendingPathExtension("1")
             .appendingPathExtension(url.pathExtension)
         self.maxBytes = maxBytes
+        self.open = open
+    }
+
+    /// Lines this log could not write, because the file would not open or
+    /// the write itself failed.
+    var failures: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return failed
     }
 
     /// Appends `data`, rotating first when it would not fit. A line is never
     /// split across generations: the cap is a bound on the file, not on what
     /// a reader has to reassemble.
+    ///
+    /// A failed write is counted and dropped, and so is the handle, so the
+    /// next line opens the file again. It is never logged: the log is the
+    /// thing that just failed, and `sissyLog` from here would recurse.
     func write(_ data: Data) {
         lock.lock()
         defer { lock.unlock() }
-        guard var handle = opened() else { return }
+        guard var handle = opened() else {
+            failed += 1
+            return
+        }
         if written + UInt64(data.count) > maxBytes {
             rotate()
-            guard let fresh = opened() else { return }
+            guard let fresh = opened() else {
+                failed += 1
+                return
+            }
             handle = fresh
         }
-        handle.write(data)
-        written += UInt64(data.count)
+        do {
+            try handle.write(contentsOf: data)
+            written += UInt64(data.count)
+        } catch {
+            failed += 1
+            try? handle.close()
+            self.handle = nil
+        }
+    }
+
+    /// The handle `init` opens by default: the directory and the file created
+    /// when missing, and the offset at the end of what is already there.
+    static func openForAppending(_ url: URL) throws -> FileHandle {
+        let fm = FileManager.default
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: url.path) {
+            fm.createFile(atPath: url.path, contents: nil)
+        }
+        let opened = try FileHandle(forWritingTo: url)
+        try opened.seekToEnd()
+        return opened
     }
 
     /// The open handle, opening it on first use. `written` starts from what is
@@ -46,20 +93,10 @@ final class SissyLogFile: @unchecked Sendable {
     /// rotated by the first line of this one rather than grown further.
     private func opened() -> FileHandle? {
         if let handle { return handle }
-        let fm = FileManager.default
-        do {
-            try fm.createDirectory(
-                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if !fm.fileExists(atPath: url.path) {
-                fm.createFile(atPath: url.path, contents: nil)
-            }
-            let opened = try FileHandle(forWritingTo: url)
-            written = try opened.seekToEnd()
-            handle = opened
-            return opened
-        } catch {
-            return nil
-        }
+        guard let opened = try? open(url) else { return nil }
+        written = (try? opened.offset()) ?? 0
+        handle = opened
+        return opened
     }
 
     /// Moves the current log aside. The handle goes with it, so the next write
@@ -76,6 +113,37 @@ final class SissyLogFile: @unchecked Sendable {
         try? handle?.close()
         handle = nil
         written = 0
+    }
+}
+
+/// A handle every log line is also copied to, standard error in the app.
+///
+/// Same rule as `SissyLogFile`: a write the handle refuses is counted and
+/// dropped, never raised and never logged.
+final class SissyLogStream: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private var failed = 0
+
+    init(handle: FileHandle) {
+        self.handle = handle
+    }
+
+    /// Lines the handle refused.
+    var failures: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return failed
+    }
+
+    func write(_ data: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        do {
+            try handle.write(contentsOf: data)
+        } catch {
+            failed += 1
+        }
     }
 }
 
@@ -112,9 +180,10 @@ enum SissyLogLine {
 }
 
 let logFile = SissyLogFile(directory: SissyPaths.logsDir)
+let standardErrorLog = SissyLogStream(handle: .standardError)
 
 func sissyLog(_ message: String) {
     let data = Data((SissyLogLine.single(message) + "\n").utf8)
-    FileHandle.standardError.write(data)
+    standardErrorLog.write(data)
     logFile.write(data)
 }
