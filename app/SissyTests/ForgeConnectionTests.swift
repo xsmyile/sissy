@@ -321,13 +321,14 @@ final class ForgeConnectionTests: XCTestCase {
     private func connector(
         _ effects: Effects, probe: Result<String, ForgeReadFailure> = .success("davide"),
         recorded: Result<[ForgeConnection], Refusal> = .success([]), rememberFails: Bool = false,
-        prior: CredentialLookup<String> = .absent
+        prior: CredentialLookup<String> = .absent, gate: ProbeGate? = nil
     ) -> ForgeConnector {
         if case .found(let token) = prior { effects.file(token, under: Self.gitLab.id) }
         return ForgeConnector(
             recorded: { try recorded.get() },
             probe: { connection, _ in
                 effects.record("probe \(connection.id)")
+                if let gate { await gate.hold() }
                 return try probe.get()
             },
             storedToken: { _ in prior },
@@ -346,6 +347,44 @@ final class ForgeConnectionTests: XCTestCase {
     }
 
     private static let gitLab = ForgeConnection(kind: .gitLab, host: "gitlab.example.com")
+
+    /// A probe held until the test lets it answer, so a call can be made to
+    /// the connecting actor while the forge is still being asked.
+    private actor ProbeGate {
+        private var arrived = false
+        private var arrival: CheckedContinuation<Void, Never>?
+        private var release: CheckedContinuation<Void, Never>?
+
+        func hold() async {
+            arrived = true
+            arrival?.resume()
+            arrival = nil
+            await withCheckedContinuation { release = $0 }
+        }
+
+        func waitForProbe() async {
+            guard !arrived else { return }
+            await withCheckedContinuation { arrival = $0 }
+        }
+
+        func open() {
+            release?.resume()
+            release = nil
+        }
+    }
+
+    /// The engine's part: the actor a connect runs on, and the disconnect it
+    /// can take while that connect waits on its probe.
+    private actor Owner {
+        private var wanted = true
+
+        func disconnect() { wanted = false }
+
+        func connect(_ connector: ForgeConnector) async -> ForgeConnector.Outcome {
+            await connector.connect(
+                ForgeConnectionTests.gitLab, token: "glpat-test", stillWanted: { self.wanted })
+        }
+    }
 
     func testARefusedTokenIsNotSaved() async {
         let effects = Effects()
@@ -419,6 +458,23 @@ final class ForgeConnectionTests: XCTestCase {
         ).connect(Self.gitLab, token: "glpat-test")
         XCTAssertEqual(outcome, .connected(login: "davide"))
         XCTAssertEqual(effects.token(Self.gitLab.id), "glpat-test")
+    }
+
+    /// A disconnect taken while a reconnect waited on its probe used to be
+    /// undone when the probe answered: the token was filed and the connection
+    /// recorded again, polling a forge the user had just removed.
+    func testADisconnectDuringTheProbeWithdrawsTheConnect() async {
+        let effects = Effects()
+        let gate = ProbeGate()
+        let owner = Owner()
+        let connector = connector(effects, recorded: .success([Self.gitLab]), gate: gate)
+        let attempt = Task { await owner.connect(connector) }
+        await gate.waitForProbe()
+        await owner.disconnect()
+        await gate.open()
+        let outcome = await attempt.value
+        XCTAssertEqual(outcome, .withdrawn)
+        XCTAssertEqual(effects.entries, ["probe \(Self.gitLab.id)"])
     }
 
     func testABlankTokenIsNeverProbed() async {

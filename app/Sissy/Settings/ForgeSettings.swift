@@ -76,6 +76,8 @@ enum ForgeConnectCopy {
             return connectFailed
         case .indexUnreadable:
             return indexUnreadableOnConnect
+        case .withdrawn:
+            return "\(address) was disconnected while \(forge) was being asked, so nothing was saved."
         case .refused(.unauthorized):
             return "\(forge) at \(address) refused the token, so nothing was saved. "
                 + "Check the token and its scopes."

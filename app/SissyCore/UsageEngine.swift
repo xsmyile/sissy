@@ -125,11 +125,11 @@ actor UsageEngine {
     /// a forge reader holds resumes from an offset. What it costs is one poll.
     private let forgeIndex: ForgeConnectionIndex
     private let forgeTokens: ForgeTokenReconciler
-    /// The connections a connect is filing right now. `ForgeConnector` runs
-    /// off the actor, so a removal can land between its token and its index
-    /// write, and this is what keeps that token from being taken for an
-    /// orphan and deleted.
-    private var connectingForgeIDs: Set<String> = []
+    /// The connections a connect is filing right now, each with the attempt
+    /// filing it. Orphan removal spares the tokens under them, since each is
+    /// an address about to be filed. A disconnect takes its entry out, which
+    /// is what tells the attempt waiting on the probe to write nothing.
+    private var connectingForges: [String: UUID] = [:]
     private var forgeMonitor: ForgeActivityMonitor
     private let identityMonitor: GitIdentityMonitor
     /// What the CLIs on this Mac are holding right now. Beside the monitors
@@ -1608,7 +1608,7 @@ actor UsageEngine {
     /// A delete that fails leaves the row in the list, which is what says so.
     func removeOrphanedForgeToken(id: String) async {
         do {
-            _ = try forgeTokens.removeOrphan(id: id, sparing: connectingForgeIDs)
+            _ = try forgeTokens.removeOrphan(id: id, sparing: Set(connectingForges.keys))
         } catch {
             sissyLog("sissy: could not remove the orphaned forge token \(id) (\(error))")
         }
@@ -1647,9 +1647,13 @@ actor UsageEngine {
             saveToken: { try ForgeTokenStore.save($0, connection: $1) },
             deleteToken: { try ForgeTokenStore.delete(connection: $0) },
             remember: { try index.remember($0) })
-        connectingForgeIDs.insert(connection.id)
-        let outcome = await connector.connect(connection, token: token)
-        connectingForgeIDs.remove(connection.id)
+        let attempt = UUID()
+        connectingForges[connection.id] = attempt
+        let outcome = await connector.connect(
+            connection, token: token, stillWanted: { self.connectingForges[connection.id] == attempt })
+        if connectingForges[connection.id] == attempt {
+            connectingForges[connection.id] = nil
+        }
         guard case .connected = outcome else { return outcome }
         await rebuildForgeMonitor()
         await reemit()
@@ -1660,8 +1664,11 @@ actor UsageEngine {
     ///
     /// The record goes first and the token second, so an interrupted removal
     /// leaves a token nothing reads rather than a row nothing can answer for,
-    /// and that token is listed in Settings as one without a connection.
+    /// and that token is listed in Settings as one without a connection. A
+    /// connect to the same address still waiting on its probe is withdrawn
+    /// first, so its answer cannot file the connection again.
     func disconnectForge(id: String) async {
+        connectingForges[id] = nil
         do {
             try forgeIndex.forget(id: id)
         } catch {
