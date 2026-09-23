@@ -305,7 +305,12 @@ final class UsageEngineHost {
     /// would race for the same keychain item.
     private(set) var linkingClaudeAccount = false
     private(set) var claudeWebLinkFailure: ClaudeWebAccountLink.Failure?
-
+    /// Why the last Unlink of a claude.ai session did not finish, nil once
+    /// one has. The confirmation dialog is gone by the time the keychain
+    /// answers, so this row is the only place a refusal can be read.
+    private(set) var claudeWebUnlinkFailure: AccountUnlink.Failure?
+    /// The same, for the last Unlink of a Codex account.
+    private(set) var codexUnlinkFailure: AccountUnlink.Failure?
     /// Opens claude.ai's own login and links whatever account it produces.
     ///
     /// The whole flow lives in that window — see `VendorLoginWindow`. A
@@ -549,10 +554,12 @@ final class UsageEngineHost {
     /// sign-in moves with it.
     func forgetCodexAccount(id: String) {
         guard let engine else { return }
+        codexUnlinkFailure = nil
         Task { [weak self] in
-            await engine.forgetCodexAccount(id: id)
+            let outcome = await engine.forgetCodexAccount(id: id)
             guard let self else { return }
             linkedCodexAccounts = engine.linkedCodexAccounts
+            if case .failure(let why) = outcome { codexUnlinkFailure = why }
         }
     }
 
@@ -562,11 +569,13 @@ final class UsageEngineHost {
     /// linked, Sissy cannot make another, and only `claude /login` can.
     func forgetClaudeWebSession(account: String) {
         guard let engine else { return }
+        claudeWebUnlinkFailure = nil
         Task { [weak self] in
-            await engine.forgetClaudeWebSession(account: account)
+            let outcome = await engine.forgetClaudeWebSession(account: account)
             guard let self else { return }
             claudeWebSession = engine.hasClaudeWebSession
             linkedClaudeAccounts = engine.linkedClaudeAccounts
+            if case .failure(let why) = outcome { claudeWebUnlinkFailure = why }
         }
     }
 
