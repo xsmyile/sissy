@@ -284,8 +284,10 @@ struct ClaudeAccountStore: Sendable {
     /// back as an empty index, and the next `remember` wrote over it: every
     /// account left the switcher while its secret stayed in the keychain with
     /// nothing to name it. Every write here follows a load that succeeded, so
-    /// a file this refuses is never overwritten. An empty file holds nothing
-    /// to lose and reads as an empty index.
+    /// a file this refuses is never overwritten. An empty file is refused
+    /// too: `saveIndex` writes atomically and never leaves one, so a file with
+    /// no bytes is one something truncated, and the accounts it listed are
+    /// still archived behind it.
     func loadIndex() throws -> Index {
         let data: Data
         do {
@@ -295,7 +297,6 @@ struct ClaudeAccountStore: Sendable {
         } catch {
             throw StoreError.indexUnreadable
         }
-        guard !data.isEmpty else { return Index() }
         guard let decoded = try? JSONDecoder().decode(Index.self, from: data) else {
             throw StoreError.indexUnreadable
         }

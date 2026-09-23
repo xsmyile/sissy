@@ -84,9 +84,12 @@ actor ClaudeAccountRegistry {
 
     /// A registry that knows nothing and learns nothing: no keychain, no
     /// network, no index on disk. The default everywhere an engine is built
-    /// without one.
+    /// without one. Its index sits in a directory nobody creates, so it reads
+    /// as absent and no write to it can land.
     static func inert() -> ClaudeAccountRegistry {
-        var store = ClaudeAccountStore(indexURL: URL(fileURLWithPath: "/dev/null"))
+        let nowhere = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sissy-inert-\(UUID().uuidString)", isDirectory: true)
+        var store = ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: nowhere))
         store.secrets = .none
         return ClaudeAccountRegistry(store: store, slot: .inert) { _ in
             throw ClaudeAccountProfile.Failure.malformedPayload
