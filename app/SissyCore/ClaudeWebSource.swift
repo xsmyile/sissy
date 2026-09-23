@@ -290,8 +290,11 @@ actor ClaudeWebSource: SourceSignals {
     /// A 401 or 403 is the session having ended, which is the one outcome the
     /// user can act on: it is published rather than merely logged, and the
     /// held copy is dropped so the next poll reads the item again instead of
-    /// spending a session claude.ai has already closed. The organization goes
-    /// with it — the next session may not be the same account's.
+    /// spending a session claude.ai has already closed. The organization
+    /// falls back to the one the link recorded rather than to none: this
+    /// reader only ever reads its own account's item, so the next session is
+    /// that account's, and a reader left to derive one would take whichever
+    /// `chat` organization the server lists first.
     private func handle(_ error: Error) async -> Duration {
         if case UsageRequestError.rateLimited(let retryAfter) = error {
             let seconds = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
@@ -303,7 +306,7 @@ actor ClaudeWebSource: SourceSignals {
         }
         if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
             cached = nil
-            organization = nil
+            organization = linkedOrganization
             publishFailure(.sessionExpired)
             report("the claude.ai session was refused (status \(code)); import it again")
             return Self.refreshInterval
