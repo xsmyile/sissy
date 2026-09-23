@@ -5,6 +5,16 @@ import Foundation
 /// `project.yml` gives Debug a `.dev` suffix while Release keeps the canonical
 /// id, so a Debug `sissy-cli` reads what a dev `Sissy.app` wrote.
 enum SissyPaths {
+    /// The id `project.yml` gives the release `Sissy.app`.
+    static let releaseBundleIdentifier = "com.radonforge.sissy"
+
+    /// What `project.yml` appends to a target's id for its Debug build, and
+    /// what `isDev` looks for.
+    static let devBundleSuffix = ".dev"
+
+    /// The id of a Debug `Sissy.app`, which `scripts/dev-build-app.sh` signs.
+    static let devBundleIdentifier = releaseBundleIdentifier + devBundleSuffix
+
     /// True when the running bundle id ends in `.dev`. False for a bundle with
     /// no identifier at all, so a `swift test` binary cannot pollute a
     /// `Sissy-Dev/` tree nothing else reads.
@@ -13,7 +23,7 @@ enum SissyPaths {
         // lives in the binary's `__TEXT,__info_plist` section via
         // `CREATE_INFOPLIST_SECTION_IN_BINARY: YES`, so this resolves there too.
         guard let id = Bundle.main.bundleIdentifier else { return false }
-        return id.hasSuffix(".dev")
+        return id.hasSuffix(devBundleSuffix)
     }()
 
     /// `Sissy` (release) or `Sissy-Dev` (Debug). Used as both the
@@ -34,7 +44,7 @@ enum SissyPaths {
     /// `errSecInteractionNotAllowed`, being another signature's, so the row
     /// carried no reading either.
     private static var keychainNamespace: String {
-        isDev ? "com.radonforge.sissy.dev" : "com.radonforge.sissy"
+        isDev ? devBundleIdentifier : releaseBundleIdentifier
     }
 
     /// The keychain service for one kind of item Sissy owns, in this build's
