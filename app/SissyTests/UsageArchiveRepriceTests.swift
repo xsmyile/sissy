@@ -252,8 +252,9 @@ final class UsageArchiveRepriceTests: XCTestCase {
         let archived = try archiveFreeDays()
 
         let finished = LockedValue(false)
-        let apply = Task {
-            await live.applyPriceCatalog(Self.catalog)
+        let catalog = Self.catalog
+        let apply = Task { [live, finished, catalog] in
+            await live.applyPriceCatalog(catalog)
             finished.store(true)
         }
         var freeReadingsMidWalk = 0
