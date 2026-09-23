@@ -42,6 +42,11 @@ enum ForgeConnectCopy {
     static let detectedForHost = "What gh or glab holds for this host now"
     static let orPaste = "Or paste one"
     static let hostPrompt = "Host"
+
+    /// Said under a host typed with `http://`, which is asked over https.
+    static let askedOverHTTPS =
+        "Sissy asks every forge over https, so the token never travels in the clear."
+
     static let pathPrompt = "Path, if served under one (optional)"
     static let tokenPrompt = "Token"
     static let cancel = "Cancel"
@@ -102,9 +107,7 @@ enum ForgeConnectCopy {
     static func addressProblem(_ problem: ForgeAddressProblem) -> String {
         switch problem {
         case .empty: "Type the forge's host."
-        case .scheme: "Only https:// can go in front of the host."
-        case .insecureScheme:
-            "Sissy only talks to a forge over https, so the token never travels in the clear."
+        case .scheme: "Only https:// or http:// can go in front of the host."
         case .credentials: "Leave out the user@ part. The token is what signs Sissy in."
         case .query: "Leave out the ? and everything after it."
         case .fragment: "Leave out the # and everything after it."
@@ -606,6 +609,11 @@ struct ForgeConnectSheet: View {
                     .font(.callout)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
+            } else if draft.upgradesToHTTPS {
+                Text(ForgeConnectCopy.askedOverHTTPS)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             SecureField(ForgeConnectCopy.tokenPrompt, text: $token)
                 .frame(width: Self.fieldWidth)
@@ -726,6 +734,9 @@ struct ForgeConnectDraft: Equatable {
     var connection: Result<ForgeConnection, ForgeAddressProblem> {
         ForgeConnection.parse(kind: kind, host: host, path: path)
     }
+
+    /// The host was typed with `http://` and will be asked over https.
+    var upgradesToHTTPS: Bool { ForgeConnection.namesPlainHTTP(host) }
 
     /// What to say under the fields, nil while they parse or the host is
     /// still empty: an empty field is one the user has not reached yet, and
