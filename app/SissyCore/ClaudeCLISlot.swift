@@ -165,8 +165,17 @@ struct ClaudeCLISlot: Sendable {
     /// The name the CLI is reading its credential from, and those bytes, or
     /// nil when no name holds one.
     func current() throws -> (name: Name, data: Data)? {
-        for name in names() {
-            guard let data = try read(name), ClaudeCredentialBlob.oauth(in: data) != nil else {
+        try Self.reading(names(), read)
+    }
+
+    /// The first of `names` whose bytes hold a usable credential, and those
+    /// bytes. The one rule for which name the CLI is reading, whether the
+    /// bytes come from the slot itself or from a reading already taken.
+    static func reading(
+        _ names: [Name], _ bytes: (Name) throws -> Data?
+    ) rethrows -> (name: Name, data: Data)? {
+        for name in names {
+            guard let data = try bytes(name), ClaudeCredentialBlob.oauth(in: data) != nil else {
                 continue
             }
             return (name, data)
