@@ -3,10 +3,11 @@ import XCTest
 @testable import Sissy
 
 /// What a forge connection is made of before anything is filed: the address
-/// parsed out of the sheet's fields, the index it is recorded in, and the
-/// tokens it is reconciled against.
+/// parsed out of the sheet's fields, the index it is recorded in, and the probe
+/// a token has to pass before either is written.
 ///
-/// Pure or on a temporary directory: no keychain and no network.
+/// Pure or on a temporary directory: no keychain and no network, the effects
+/// of a connect standing in as closures that record what they were asked.
 final class ForgeConnectionTests: XCTestCase {
     private let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("forge-connection-tests-\(UUID().uuidString)")
@@ -196,5 +197,92 @@ final class ForgeConnectionTests: XCTestCase {
                 stored: [gitLab.id, "gitlab:old.example.com", ForgeConnection.gitHub().id],
                 connected: [ForgeConnection.gitHub(), gitLab]),
             ["gitlab:old.example.com"])
+    }
+
+    // MARK: The probe
+
+    private final class Effects: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [String] = []
+
+        func record(_ entry: String) {
+            lock.withLock { log.append(entry) }
+        }
+
+        var entries: [String] { lock.withLock { log } }
+    }
+
+    private struct Refusal: Error {}
+
+    private func connector(
+        _ effects: Effects, probe: Result<String, ForgeReadFailure> = .success("davide"),
+        rememberFails: Bool = false
+    ) -> ForgeConnector {
+        ForgeConnector(
+            probe: { connection, _ in
+                effects.record("probe \(connection.id)")
+                return try probe.get()
+            },
+            saveToken: { _, id in effects.record("save \(id)") },
+            deleteToken: { id in effects.record("delete \(id)") },
+            remember: { connection in
+                effects.record("remember \(connection.id)")
+                if rememberFails { throw Refusal() }
+            })
+    }
+
+    private static let gitLab = ForgeConnection(kind: .gitLab, host: "gitlab.example.com")
+
+    func testARefusedTokenIsNotSaved() async {
+        let effects = Effects()
+        let outcome = await connector(effects, probe: .failure(.unauthorized))
+            .connect(Self.gitLab, token: "glpat-test", replacing: false)
+        XCTAssertEqual(outcome, .refused(.unauthorized))
+        XCTAssertEqual(effects.entries, ["probe \(Self.gitLab.id)"])
+    }
+
+    func testAHostThatCannotBeReachedSavesNothing() async {
+        let effects = Effects()
+        let outcome = await connector(effects, probe: .failure(.unreachable))
+            .connect(Self.gitLab, token: "glpat-test", replacing: false)
+        XCTAssertEqual(outcome, .refused(.unreachable))
+        XCTAssertEqual(effects.entries, ["probe \(Self.gitLab.id)"])
+    }
+
+    func testAnAcceptedTokenIsSavedThenRecorded() async {
+        let effects = Effects()
+        let outcome = await connector(effects)
+            .connect(Self.gitLab, token: "glpat-test", replacing: false)
+        XCTAssertEqual(outcome, .connected(login: "davide"))
+        XCTAssertEqual(
+            effects.entries,
+            ["probe \(Self.gitLab.id)", "save \(Self.gitLab.id)", "remember \(Self.gitLab.id)"])
+    }
+
+    /// A new token whose connection could not be recorded is taken back out,
+    /// rather than left in the keychain for nothing to name.
+    func testANewTokenWhoseIndexWriteFailedIsTakenBack() async {
+        let effects = Effects()
+        let outcome = await connector(effects, rememberFails: true)
+            .connect(Self.gitLab, token: "glpat-test", replacing: false)
+        XCTAssertEqual(outcome, .notFiled)
+        XCTAssertEqual(effects.entries.last, "delete \(Self.gitLab.id)")
+    }
+
+    /// A replacement's token is kept on the same failure: deleting it would
+    /// leave the row the index still names with no token at all.
+    func testAReplacementTokenSurvivesAFailedIndexWrite() async {
+        let effects = Effects()
+        let outcome = await connector(effects, rememberFails: true)
+            .connect(Self.gitLab, token: "glpat-test", replacing: true)
+        XCTAssertEqual(outcome, .notFiled)
+        XCTAssertFalse(effects.entries.contains("delete \(Self.gitLab.id)"))
+    }
+
+    func testABlankTokenIsNeverProbed() async {
+        let effects = Effects()
+        let outcome = await connector(effects).connect(Self.gitLab, token: "  \n", replacing: false)
+        XCTAssertEqual(outcome, .notFiled)
+        XCTAssertEqual(effects.entries, [])
     }
 }

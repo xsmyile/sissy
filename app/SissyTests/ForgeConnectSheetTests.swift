@@ -139,6 +139,30 @@ final class ForgeConnectSheetTests: XCTestCase {
         XCTAssertEqual(Set(sentences).count, ForgeAddressProblem.allCases.count)
     }
 
+    /// The probe runs before anything is written, so a refusal says nothing
+    /// was saved and names the address it went to.
+    func testARefusedTokenSaysNothingWasSaved() throws {
+        let sentence = try XCTUnwrap(
+            ForgeConnectCopy.failure(.refused(.unauthorized), connection: Self.gitLab))
+        XCTAssertTrue(sentence.contains("refused the token"), sentence)
+        XCTAssertTrue(sentence.contains("nothing was saved"), sentence)
+        XCTAssertTrue(sentence.contains(Self.gitLab.address), sentence)
+    }
+
+    func testEachProbeFailureIsWordedApart() {
+        let failures: [ForgeReadFailure] = [
+            .unauthorized, .unreachable, .malformed, .redirected, .rateLimited,
+        ]
+        let sentences = failures.compactMap {
+            ForgeConnectCopy.failure(.refused($0), connection: Self.gitLab)
+        }
+        XCTAssertEqual(Set(sentences).count, failures.count)
+    }
+
+    func testAConnectionThatWorkedSaysNothing() {
+        XCTAssertNil(ForgeConnectCopy.failure(.connected(login: "davide"), connection: Self.gitLab))
+    }
+
     func testAnOrphanedTokenIsTitledByItsForgeAndAddress() {
         XCTAssertEqual(ForgeConnectCopy.orphanTitle(Self.gitLab.id), "GitLab · gitlab.example.com")
     }

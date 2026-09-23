@@ -597,11 +597,11 @@ final class UsageEngineHost {
         connectingForge = connection.id
         forgeConnectFailure = nil
         Task { [weak self] in
-            let connected = await engine.connectForge(connection, token: token)
+            let outcome = await engine.connectForge(connection, token: token)
             guard let self else { return }
             connectingForge = nil
             noteForgeConnections(engine)
-            forgeConnectFailure = connected ? nil : ForgeConnectCopy.connectFailed
+            forgeConnectFailure = ForgeConnectCopy.failure(outcome, connection: connection)
         }
     }
 

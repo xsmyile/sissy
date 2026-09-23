@@ -1629,29 +1629,33 @@ actor UsageEngine {
         ForgeTokenImport.candidates()
     }
 
-    /// Files a token for a forge and starts reading it.
+    /// Files a token for a forge and starts reading it, once the forge has
+    /// answered for it.
     ///
-    /// The token is written before the connection is recorded, so a failure
-    /// leaves no row promising a reading there is no credential for. Answers
-    /// whether it is now connected, and the caller has to say so: a write that
-    /// failed with the sheet already dismissed would take the pasted token with
-    /// it and leave nothing on screen to explain the missing row.
+    /// `ForgeConnector` holds the order: a probe first, so a refused token or
+    /// a host that is not the forge named is never filed, then the token, then
+    /// the index, so a failure leaves no row promising a reading there is no
+    /// credential for. The outcome travels back because the caller has to say
+    /// it: the token is only in the sheet, and a sheet dismissed on a failure
+    /// would take it with it.
     ///
     /// **Connecting the same host again is how a refused or missing token is
     /// replaced.** The index keys on the host, the monitor is rebuilt from it,
     /// and a fresh monitor has nothing parked — so this is the way back from
     /// both states the poll stops asking about.
-    func connectForge(_ connection: ForgeConnection, token: String) async -> Bool {
-        do {
-            try ForgeTokenStore.save(token, connection: connection.id)
-            try forgeIndex.remember(connection)
-        } catch {
-            sissyLog("sissy: could not connect \(connection.id) (\(error))")
-            return false
-        }
+    func connectForge(_ connection: ForgeConnection, token: String) async -> ForgeConnector.Outcome {
+        let index = forgeIndex
+        let known = (try? index.loadSettingAside()).map { $0.contains { $0.id == connection.id } } ?? true
+        let connector = ForgeConnector(
+            probe: { try await ForgeActivityFeed.probe($0, token: $1) },
+            saveToken: { try ForgeTokenStore.save($0, connection: $1) },
+            deleteToken: { try ForgeTokenStore.delete(connection: $0) },
+            remember: { try index.remember($0) })
+        let outcome = await connector.connect(connection, token: token, replacing: known)
+        guard case .connected = outcome else { return outcome }
         await rebuildForgeMonitor()
         await reemit()
-        return true
+        return outcome
     }
 
     /// Forgets a forge: the connection, its token, and the reading on the row.
