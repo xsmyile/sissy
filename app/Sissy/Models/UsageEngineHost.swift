@@ -135,7 +135,7 @@ final class UsageEngineHost {
         linkedClaudeAccounts = engine.linkedClaudeAccounts
         linkedCodexAccounts = engine.linkedCodexAccounts
         settleUnlinkFailures()
-        forgeConnections = engine.forgeConnections
+        noteForgeConnections(engine)
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
         statusChecks = config.statusChecks
@@ -432,7 +432,7 @@ final class UsageEngineHost {
         claudeWebSession = engine?.hasClaudeWebSession ?? false
         linkedClaudeAccounts = engine?.linkedClaudeAccounts ?? []
         linkedCodexAccounts = engine?.linkedCodexAccounts ?? []
-        forgeConnections = engine?.forgeConnections ?? []
+        if let engine { noteForgeConnections(engine) }
         settleUnlinkFailures()
     }
 
@@ -452,6 +452,15 @@ final class UsageEngineHost {
         {
             codexUnlinkFailure = nil
         }
+    }
+
+    /// Re-reads the connection index and the tokens behind it together, so
+    /// Settings never lists a token as orphaned against a stale list of the
+    /// connections that name it.
+    private func noteForgeConnections(_ engine: UsageEngine) {
+        forgeConnections = engine.forgeConnections
+        orphanedForgeTokens = engine.orphanedForgeTokens
+        forgeIndexSetAside = engine.forgeIndexSetAside
     }
 
     /// Opens OpenAI's own login and links whatever account it produces.
@@ -539,6 +548,11 @@ final class UsageEngineHost {
     /// The forges the user has connected. Settings lists these; the panel draws
     /// what they answered, which travels on the frame instead.
     private(set) var forgeConnections: [ForgeConnection] = []
+    /// Tokens Sissy holds for a forge no connection names, which Settings
+    /// lists so they can be removed.
+    private(set) var orphanedForgeTokens: [String] = []
+    /// Whether an unreadable connection index was set aside.
+    private(set) var forgeIndexSetAside = false
     /// Set while a connection is being filed, so the control that started it
     /// can say so: it is a keychain write plus the first read of two counters.
     private(set) var connectingForge: String?
@@ -586,7 +600,7 @@ final class UsageEngineHost {
             let connected = await engine.connectForge(connection, token: token)
             guard let self else { return }
             connectingForge = nil
-            forgeConnections = engine.forgeConnections
+            noteForgeConnections(engine)
             forgeConnectFailure = connected ? nil : ForgeConnectCopy.connectFailed
         }
     }
@@ -597,7 +611,17 @@ final class UsageEngineHost {
         Task { [weak self] in
             await engine.disconnectForge(id: id)
             guard let self else { return }
-            forgeConnections = engine.forgeConnections
+            noteForgeConnections(engine)
+        }
+    }
+
+    /// Removes a token no connection names.
+    func removeOrphanedForgeToken(id: String) {
+        guard let engine else { return }
+        Task { [weak self] in
+            await engine.removeOrphanedForgeToken(id: id)
+            guard let self else { return }
+            noteForgeConnections(engine)
         }
     }
 

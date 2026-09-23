@@ -156,6 +156,15 @@ struct ForgeConnectionIndex: Sendable {
         return names.contains { $0.hasPrefix(Self.setAsidePrefix) }
     }
 
+    /// The connections a token is filed under that the index does not name,
+    /// which is what an interrupted connect or disconnect, or an index set
+    /// aside, leaves behind. Pure, so the reconciliation can be held without a
+    /// keychain.
+    static func orphans(stored: [String], connected: [ForgeConnection]) -> [String] {
+        let named = Set(connected.map(\.id))
+        return stored.filter { !named.contains($0) }.sorted()
+    }
+
     /// Records a connection, replacing one on the same host. Connecting the
     /// same host again is a re-connection rather than a second row: the token
     /// behind it has just been replaced too.

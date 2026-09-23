@@ -2,9 +2,10 @@ import XCTest
 
 @testable import Sissy
 
-/// The index a forge connection is recorded in.
+/// The index a forge connection is recorded in, and the tokens it is
+/// reconciled against.
 ///
-/// On a temporary directory: no keychain and no network.
+/// Pure or on a temporary directory: no keychain and no network.
 final class ForgeConnectionTests: XCTestCase {
     private let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("forge-connection-tests-\(UUID().uuidString)")
@@ -73,5 +74,16 @@ final class ForgeConnectionTests: XCTestCase {
         try index.remember(ForgeConnection.gitHub())
         XCTAssertEqual(try index.loadSettingAside(), [ForgeConnection.gitHub()])
         XCTAssertFalse(index.hasSetAside())
+    }
+
+    // MARK: Reconciliation
+
+    func testATokenNoConnectionNamesIsAnOrphan() {
+        let gitLab = ForgeConnection(kind: .gitLab, host: "gitlab.example.com")
+        XCTAssertEqual(
+            ForgeConnectionIndex.orphans(
+                stored: [gitLab.id, "gitlab:old.example.com", ForgeConnection.gitHub().id],
+                connected: [ForgeConnection.gitHub(), gitLab]),
+            ["gitlab:old.example.com"])
     }
 }
