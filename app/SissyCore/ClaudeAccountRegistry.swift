@@ -130,12 +130,19 @@ actor ClaudeAccountRegistry {
     /// that has been signed out is on no account and a badge saying otherwise
     /// outlived every `/logout`. A slot that cannot be read changes nothing:
     /// it says nothing about who is signed in.
+    ///
+    /// Every poll also asks whether an archived refresh token has died since
+    /// the last publish. Nothing in the slot moves when it does, so returning
+    /// on an unchanged token left `Use in CLI` on an account whose click
+    /// could only fail.
     @discardableResult
     func captureActive() async -> Bool {
         let before = published.load()
         if !reconciled {
             reconciled = true
             publishIndex()
+        } else {
+            republishIfExpiryPassed()
         }
         let current: Data?
         do {
@@ -433,6 +440,16 @@ actor ClaudeAccountRegistry {
 
     private static func expired(_ index: ClaudeAccountStore.Index, now: Date) -> Set<String> {
         Set((index.refreshExpiries ?? [:]).filter { $0.value <= now }.keys)
+    }
+
+    /// Publishes again when an archived refresh token has died since the last
+    /// publish. Costs a read of the index, and the keychain only on the poll
+    /// that finds one.
+    private func republishIfExpiryPassed() {
+        guard let index = Self.loadIndex(store),
+            Self.expired(index, now: now()) != published.load().needsLogin
+        else { return }
+        publish(index)
     }
 
     private func setActive(_ uuid: String?) {
