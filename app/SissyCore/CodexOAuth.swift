@@ -71,6 +71,11 @@ enum CodexOAuth {
         case refused
         case unidentified
         case interrupted
+        /// OpenAI signed the account in and the keychain would not keep it: a
+        /// locked login keychain, or one that refused this build. The vendor
+        /// did its part, so a sentence naming it sends the user to fix the
+        /// wrong thing.
+        case notFiled
     }
 
     /// Why a renewal produced no credential, in the two answers a reader can

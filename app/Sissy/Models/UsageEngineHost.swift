@@ -383,6 +383,12 @@ final class UsageEngineHost {
         window.finish()
         loginWindow = nil
         linkingClaudeAccount = false
+        noteLinkedAccounts()
+    }
+
+    /// Lets the surfaces notice an account that has just been filed, before
+    /// the window that filed it is necessarily down.
+    private func noteLinkedAccounts() {
         claudeWebSession = engine?.hasClaudeWebSession ?? false
         linkedClaudeAccounts = engine?.linkedClaudeAccounts ?? []
         linkedCodexAccounts = engine?.linkedCodexAccounts ?? []
@@ -412,8 +418,18 @@ final class UsageEngineHost {
                     let outcome = await engine.linkCodexAccount(code: code, flow: flow)
                     guard let self, loginWindow === window else { return }
                     switch outcome {
-                    case .success(let choice):
-                        guard let choice else { return complete(window) }
+                    case .success(.linked):
+                        complete(window)
+                    case .success(.linkedToDefault(let email, let workspace)):
+                        noteLinkedAccounts()
+                        window.inform(
+                            title: CodexAccountLinkCopy.linkedToDefaultTitle,
+                            message: CodexAccountLinkCopy.linkedToDefault(
+                                email: email, workspace: workspace)
+                        ) { [weak self] in
+                            self?.complete(window)
+                        }
+                    case .success(.choice(let choice)):
                         window.ask(Self.question(choice)) { [weak self] workspace in
                             self?.pickWorkspace(workspace, in: window)
                         }

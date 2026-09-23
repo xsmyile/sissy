@@ -1247,12 +1247,13 @@ actor UsageEngine {
     /// Files the account a sign-in produced, and says whether one question is
     /// left.
     ///
-    /// `.success(nil)` is a link that is complete. `.success(choice)` is a
-    /// login holding more than one workspace, whose credential is held here —
-    /// unwritten — until the user says which.
+    /// `.linked` is a link that is complete, and `.linkedToDefault` one that
+    /// is complete on a workspace nobody was asked about. `.choice` is a
+    /// login holding more than one workspace, whose credential is held here,
+    /// unwritten, until the user says which.
     func linkCodexAccount(
         code: String, flow: CodexOAuth.Flow
-    ) async -> Result<CodexLinkChoice?, CodexOAuth.Failure> {
+    ) async -> Result<CodexLinkStep, CodexOAuth.Failure> {
         guard lifecycle == .running else { return .failure(.interrupted) }
         let credential: CodexCredential
         do {
@@ -1270,10 +1271,14 @@ actor UsageEngine {
         }
         switch outcome {
         case .linked(let link):
-            return await store(credential, as: link).map { nil }
+            return await store(credential, as: link).map { .linked }
+        case .linkedToDefault(let link, let workspaceId):
+            return await store(credential, as: link).map {
+                .linkedToDefault(email: link.identity.email, workspaceId: workspaceId)
+            }
         case .choice(let choice):
             pendingCodexLink = (credential: credential, choice: choice)
-            return .success(choice)
+            return .success(.choice(choice))
         }
     }
 
@@ -1306,7 +1311,9 @@ actor UsageEngine {
     ///
     /// A failed `remember` keeps the credential, for the reason the claude.ai
     /// link does: losing a sign-in to a disk error is worse than a row that
-    /// reads its account by id until the next link.
+    /// reads its account by id until the next link. A failed save is
+    /// `notFiled` rather than a vendor refusal, because OpenAI completed the
+    /// sign-in and the keychain is what would not keep it.
     ///
     /// Whatever the renewal still holds for this login is dropped first: a
     /// renewal of the previous link landing after this save would file the
@@ -1327,8 +1334,8 @@ actor UsageEngine {
         do {
             try CodexAccountStore.save(configured, account: link.identity.id)
         } catch {
-            sissyLog("sissy: the Codex credential could not be filed")
-            return .failure(.refused)
+            sissyLog("sissy: the Codex credential could not be filed (\(error))")
+            return .failure(.notFiled)
         }
         do {
             try codexIndex.remember(link)

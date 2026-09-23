@@ -184,6 +184,21 @@ final class VendorLoginWindow: NSObject {
             size: Self.promptSize)
     }
 
+    /// Says what the link did when it is worth saying, and closes as a
+    /// completed link on Done, or on the window's own close button.
+    func inform(title: String, message: String, onDone: @escaping () -> Void) {
+        finished = true
+        swap(
+            to: VendorLinkNoticeView(
+                title: title,
+                message: message,
+                onDone: { [weak self] in
+                    self?.close()
+                    onDone()
+                }),
+            size: Self.promptSize)
+    }
+
     /// Says the credential is in hand while the caller resolves it.
     func working() {
         swap(to: VendorLinkProgressView(), size: Self.promptSize)
@@ -412,6 +427,32 @@ private struct VendorLinkProgressView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// What the link did, when the user was not asked and could not tell.
+private struct VendorLinkNoticeView: View {
+    let title: String
+    let message: String
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            HStack {
+                Spacer()
+                Button(ClaudeAccountLinkCopy.done, action: onDone)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

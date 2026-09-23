@@ -81,13 +81,33 @@ final class CodexAccountLinkTests: XCTestCase {
 
     /// A workspace list Sissy could not read costs the row a name, never the
     /// login: the credential already carries the workspace OpenAI defaults it
-    /// to, which is the vendor's own answer.
+    /// to, which is the vendor's own answer. It is a different outcome from a
+    /// login with one workspace, because the window has to say which was
+    /// linked when nobody was asked.
     func testAFailedWorkspaceListStillLinks() async throws {
         let outcome = try await CodexAccountLinking.resolve(
             credential: Self.credential(),
             workspaces: { _ in throw UsageRequestError.badStatus(500) })
-        guard case .linked(let link) = outcome else { return XCTFail("the login still holds") }
+        guard case .linkedToDefault(let link, let workspace) = outcome else {
+            return XCTFail("the login still holds")
+        }
         XCTAssertNil(link.workspace)
+        XCTAssertEqual(workspace, "7c31482a")
+    }
+
+    func testTheWindowNamesTheWorkspaceItLinkedByDefault() {
+        let message = CodexAccountLinkCopy.linkedToDefault(
+            email: "someone@example.com", workspace: "7c31482a")
+        XCTAssertTrue(message.contains("7c31482a"), message)
+        XCTAssertTrue(message.contains("someone@example.com"), message)
+    }
+
+    /// The sign-in worked; the Mac would not keep it. A message sending the
+    /// user back to OpenAI names the wrong thing to fix.
+    func testAKeychainThatWouldNotFileTheLinkSaysSo() {
+        let message = CodexAccountLinkCopy.failure(.notFiled)
+        XCTAssertTrue(message.contains("keychain"), message)
+        XCTAssertNotEqual(message, CodexAccountLinkCopy.failure(.refused))
     }
 
     /// A row keyed by nothing cannot be drawn, listed or unlinked, so this is
