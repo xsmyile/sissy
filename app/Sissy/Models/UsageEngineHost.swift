@@ -239,6 +239,22 @@ final class UsageEngineHost {
         Task { host.apply(await engine.providerReadiness()) }
     }
 
+    /// Looks for Claude Code credentials filed for homes Sissy does not read.
+    ///
+    /// Asked when the Providers tab opens and at no other time: the listing
+    /// is a keychain query, cheap but not free, and the answer changes only
+    /// when somebody signs a `claude` in under another `CLAUDE_CONFIG_DIR`.
+    /// Off the main actor for the reason the token import is.
+    func refreshUnsupportedClaudeHomes() {
+        guard let engine else { return }
+        let host = self
+        Task {
+            let found = await Task.detached { engine.unsupportedClaudeHomes() }.value
+            host.claudeConfigHome = engine.claudeConfigHome
+            host.unsupportedClaudeHomes = found
+        }
+    }
+
     /// Why the last account switch did not happen, or nil when none has
     /// failed. Published because a switch that silently does nothing leaves
     /// the user typing `claude` and meeting the account they just left.
@@ -311,6 +327,15 @@ final class UsageEngineHost {
     private(set) var claudeWebUnlinkFailure: AccountUnlink.Failure?
     /// The same, for the last Unlink of a Codex account.
     private(set) var codexUnlinkFailure: AccountUnlink.Failure?
+    /// Keychain items Claude Code filed for config homes Sissy does not read,
+    /// by service name. Settings says so, because `CLAUDE_CONFIG_DIR` is not
+    /// followed and a user who set it would otherwise meet a missing account
+    /// with no explanation.
+    private(set) var unsupportedClaudeHomes: [String] = []
+    /// The config home those were measured against, which is the one the
+    /// notice names as the folder Sissy does read.
+    private(set) var claudeConfigHome = AccountDefaults.claudeHome
+
     /// Opens claude.ai's own login and links whatever account it produces.
     ///
     /// The whole flow lives in that window — see `VendorLoginWindow`. A

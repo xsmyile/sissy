@@ -58,7 +58,7 @@ enum ClaudeKeychainCLI {
     private static let itemNotFound: Int32 = 44
     /// Hex characters of the digest Claude Code keeps. Its own constant, not a
     /// tuning knob: a different length addresses a different item.
-    private static let suffixLength = 8
+    static let suffixLength = 8
     private static let loginNamePattern = try? NSRegularExpression(
         pattern: "^[a-zA-Z0-9._-]+$")
     private static let fallbackLoginName = "claude-code-user"
