@@ -188,6 +188,23 @@ final class CodexUsageSourceTests: XCTestCase {
         XCTAssertFalse(source.currentSignals().windows.isEmpty)
     }
 
+    /// A refusal from the host OpenAI redirected to was a refusal of a
+    /// request carrying no token, so the credential is not reported spent.
+    func testARefusalFromAnotherHostIsNotASpentCredential() async {
+        let refuse = LockedValue(false)
+        let source = Self.source(
+            credential: { _ in .found(Self.credential()) },
+            fetch: { _ in
+                if refuse.load() { throw SissyHTTP.LeftItsOrigin(status: 403) }
+                return CodexUsagePayload.reading(Self.reply(), observedAt: Date())
+            })
+        _ = await source.refreshOnce {}
+        refuse.store(true)
+        _ = await source.refreshOnce {}
+        XCTAssertNotEqual(source.currentSignals().limitsState, .sessionExpired)
+        XCTAssertFalse(source.currentSignals().windows.isEmpty)
+    }
+
     func testA429BacksOffAndNamesWhen() async {
         let source = Self.source(
             credential: { _ in .found(Self.credential()) },

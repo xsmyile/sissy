@@ -153,6 +153,86 @@ final class SissyHTTPTests: XCTestCase {
         XCTAssertNil(followed)
     }
 
+    private static func reply(_ status: Int, from url: String, location: String? = nil) throws
+        -> HTTPURLResponse
+    {
+        try XCTUnwrap(
+            HTTPURLResponse(
+                url: XCTUnwrap(URL(string: url)), statusCode: status, httpVersion: nil,
+                headerFields: location.map { ["Location": $0] }))
+    }
+
+    /// A refusal from the host a credentialed request was redirected to is a
+    /// refusal of the stripped copy, and says nothing about the credential.
+    func testARefusalFromAnotherOriginIsNotAnAnswerToTheCredential() throws {
+        let request = Self.credentialed(try XCTUnwrap(URL(string: "https://claude.ai/api/usage")))
+        for status in [401, 403] {
+            XCTAssertEqual(
+                SissyHTTP.leftItsOrigin(
+                    try Self.reply(status, from: "https://sso.example.net/login"),
+                    answering: request),
+                SissyHTTP.LeftItsOrigin(status: status))
+        }
+    }
+
+    func testARefusalFromTheOriginItselfIsTheVendorsAnswer() throws {
+        let request = Self.credentialed(try XCTUnwrap(URL(string: "https://claude.ai/api/usage")))
+        XCTAssertNil(
+            SissyHTTP.leftItsOrigin(
+                try Self.reply(401, from: "https://claude.ai/api/usage"), answering: request))
+    }
+
+    /// A request carrying no credential lost nothing on the way, so wherever
+    /// it was answered from is its answer.
+    func testAnUncredentialedRequestMayBeAnsweredFromAnotherOrigin() throws {
+        let request = URLRequest(url: try XCTUnwrap(URL(string: "https://raw.example.com/a.json")))
+        XCTAssertNil(
+            SissyHTTP.leftItsOrigin(
+                try Self.reply(200, from: "https://cdn.example.net/a.json"), answering: request))
+    }
+
+    /// The redirect the session would not follow reaches the caller as the
+    /// `3xx` itself, which is no more the vendor's verdict than a refusal
+    /// from the other host would be.
+    func testARedirectOffTheOriginThatWasNotFollowedIsReported() throws {
+        var posted = URLRequest(url: try XCTUnwrap(URL(string: "https://auth.openai.com/oauth/token")))
+        posted.httpMethod = "POST"
+        XCTAssertEqual(
+            SissyHTTP.leftItsOrigin(
+                try Self.reply(
+                    307, from: "https://auth.openai.com/oauth/token",
+                    location: "https://elsewhere.example.net/oauth/token"),
+                answering: posted),
+            SissyHTTP.LeftItsOrigin(status: 307))
+    }
+
+    func testARedirectOnTheOriginIsNotADeparture() throws {
+        let request = URLRequest(url: try XCTUnwrap(URL(string: "https://auth.openai.com/oauth/token")))
+        XCTAssertNil(
+            SissyHTTP.leftItsOrigin(
+                try Self.reply(302, from: "https://auth.openai.com/oauth/token", location: "/v2/token"),
+                answering: request))
+    }
+
+    /// End to end through a session carrying the real delegate: a
+    /// credentialed request redirected off its origin and refused there
+    /// throws rather than handing the caller a `401` it would read as the
+    /// vendor's.
+    func testAnAuthenticatedRequestRefusedAfterARedirectOffItsOriginThrows() async throws {
+        let configuration = SissyHTTP.configuration()
+        configuration.protocolClasses = [OffOriginStub.self]
+        let session = URLSession(
+            configuration: configuration, delegate: SissyHTTP.RedirectGuard(), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let request = Self.credentialed(try XCTUnwrap(URL(string: OffOriginStub.origin)))
+        do {
+            _ = try await SissyHTTP.data(for: request, through: session)
+            XCTFail("a refusal from another origin reached the caller as the vendor's")
+        } catch let departure as SissyHTTP.LeftItsOrigin {
+            XCTAssertEqual(departure, SissyHTTP.LeftItsOrigin(status: OffOriginStub.refusal))
+        }
+    }
+
     private static func credentialed(_ url: URL) -> URLRequest {
         var request = URLRequest(url: url)
         request.setValue("Bearer token", forHTTPHeaderField: "Authorization")
@@ -162,4 +242,35 @@ final class SissyHTTPTests: XCTestCase {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request
     }
+}
+
+/// A vendor that sends every request to another host, which refuses it.
+private final class OffOriginStub: URLProtocol, @unchecked Sendable {
+    static let origin = "https://vendor.example.com/api/usage"
+    static let elsewhere = "https://sso.example.net/login"
+    static let refusal = 401
+    private static let redirect = 302
+
+    override static func canInit(with request: URLRequest) -> Bool { true }
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url, let target = URL(string: Self.elsewhere) else { return }
+        let onTarget = SissyHTTP.sameOrigin(url, target)
+        guard
+            let answer = HTTPURLResponse(
+                url: url, statusCode: onTarget ? Self.refusal : Self.redirect, httpVersion: nil,
+                headerFields: onTarget ? nil : ["Location": Self.elsewhere])
+        else { return }
+        if onTarget {
+            client?.urlProtocol(self, didReceive: answer, cacheStoragePolicy: .notAllowed)
+        } else {
+            var next = request
+            next.url = target
+            client?.urlProtocol(self, wasRedirectedTo: next, redirectResponse: answer)
+        }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
