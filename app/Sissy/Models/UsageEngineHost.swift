@@ -810,7 +810,16 @@ final class UsageEngineHost {
             agentHooksRefused = [AgentHookCopy.missingScript]
             return
         }
-        let stateDirectory = ServerConfig.defaultURL.deletingLastPathComponent()
+        let agreed = AgentHookInstaller.stateDirectory(
+            home: home, engineState: ServerConfig.defaultURL.deletingLastPathComponent())
+        if enabled && agreed == nil {
+            sissyLog(
+                "sissy: agent hooks: refusing to install, Sissy's own folder is not under "
+                    + "this account's home")
+            agentHooksRefused = [AgentHookCopy.unknownHome]
+            return
+        }
+        let stateDirectory = agreed ?? SissyPaths.appSupportDir(home: home)
         let targets = AgentHookInstaller.targets(home: home)
         agentHooksGeneration += 1
         let generation = agentHooksGeneration

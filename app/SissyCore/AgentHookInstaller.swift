@@ -73,6 +73,24 @@ struct AgentHookInstaller {
         return URL(fileURLWithPath: String(cString: directory)).standardizedFileURL
     }
 
+    /// Where the script and the inbox go for the account whose home is
+    /// `home`, or nil when the engine keeps its state anywhere else.
+    ///
+    /// Built from the same home as the targets, which is what the guard above
+    /// is about: the command names this directory, and one derived from
+    /// `NSHomeDirectory()` would be a directory whoever set
+    /// `CFFIXED_USER_HOME` owns, holding a script they could swap after it
+    /// was laid down. The engine reads the inbox from `engineState`, so a
+    /// hook writing anywhere else would record nothing it ever reads; the two
+    /// disagreeing is refused rather than half-installed.
+    static func stateDirectory(home: URL, engineState: URL) -> URL? {
+        let wanted = SissyPaths.appSupportDir(home: home)
+        guard wanted.standardizedFileURL.path == engineState.standardizedFileURL.path else {
+            return nil
+        }
+        return wanted
+    }
+
     static func targets(home: URL) -> [AgentHookTarget] {
         [
             AgentHookTarget(

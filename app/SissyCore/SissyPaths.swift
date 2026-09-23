@@ -81,8 +81,14 @@ enum SissyPaths {
 
     static var appSupportDir: URL {
         if isTestHarness { return testRoot.appendingPathComponent("Application Support") }
-        return URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support/\(supportDirName)")
+        return appSupportDir(home: URL(fileURLWithPath: NSHomeDirectory()))
+    }
+
+    /// This build's support directory under `home`, for a caller that has a
+    /// home of its own to answer for rather than the one `NSHomeDirectory()`
+    /// reports.
+    static func appSupportDir(home: URL) -> URL {
+        home.appendingPathComponent("Library/Application Support/\(supportDirName)")
     }
 
     static var logsDir: URL {

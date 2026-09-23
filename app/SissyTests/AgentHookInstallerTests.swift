@@ -252,6 +252,31 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertEqual(AgentHookInstaller.targets(home: home).count, 2)
     }
 
+    /// The script path in the command comes from the account's own home, the
+    /// one `getpwuid` answers, and not from `NSHomeDirectory()`, which follows
+    /// `CFFIXED_USER_HOME`.
+    func testTheHooksStateDirectoryIsUnderTheHomeGiven() throws {
+        let home = root.appendingPathComponent("account")
+
+        let state = try XCTUnwrap(
+            AgentHookInstaller.stateDirectory(
+                home: home, engineState: SissyPaths.appSupportDir(home: home)))
+
+        XCTAssertEqual(state.standardizedFileURL, SissyPaths.appSupportDir(home: home).standardizedFileURL)
+    }
+
+    /// An engine reading its inbox under another home would never see what
+    /// the hook writes, and the directory the command names would be one some
+    /// other process chose.
+    func testAnEngineStateUnderAnotherHomeRefusesTheHook() {
+        let home = root.appendingPathComponent("account")
+        let elsewhere = root.appendingPathComponent("elsewhere")
+
+        XCTAssertNil(
+            AgentHookInstaller.stateDirectory(
+                home: home, engineState: SissyPaths.appSupportDir(home: elsewhere)))
+    }
+
     private func make(_ name: String) -> (AgentHookInstaller, AgentHookTarget) {
         let configuration = root.appendingPathComponent("\(name)/home/.claude/settings.json")
         try? FileManager.default.createDirectory(
