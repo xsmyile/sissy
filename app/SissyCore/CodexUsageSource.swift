@@ -44,6 +44,9 @@ actor CodexUsageSource: SourceSignals {
     /// readers' is: the keychain is what can raise a dialog, and a test of the
     /// polling contract must be able to answer for one without a keychain.
     private let credentialSource: @Sendable (Bool) async -> CodexCredentialReading
+    /// How a credential OpenAI refused is renewed before the row gives up on
+    /// it, and nil for the CLI's own, which only `codex login` may renew.
+    private let renewRefused: (@Sendable (CodexCredential) async -> CodexCredentialReading)?
     /// The network half, injectable so a test of the refresh contract never
     /// reaches OpenAI.
     private let fetchSource: @Sendable (CodexCredential) async throws -> CodexUsagePayload.Reading
@@ -65,6 +68,7 @@ actor CodexUsageSource: SourceSignals {
         account: String? = nil,
         workspace: String? = nil,
         credentialSource: @escaping @Sendable (Bool) async -> CodexCredentialReading,
+        renewRefused: (@Sendable (CodexCredential) async -> CodexCredentialReading)? = nil,
         fetchSource:
             @escaping @Sendable (CodexCredential) async throws ->
             CodexUsagePayload.Reading = fetch,
@@ -74,6 +78,7 @@ actor CodexUsageSource: SourceSignals {
         self.workspace = workspace
         self.backoff = backoff
         self.credentialSource = credentialSource
+        self.renewRefused = renewRefused
         self.fetchSource = fetchSource
     }
 
@@ -238,19 +243,65 @@ actor CodexUsageSource: SourceSignals {
         case .wait(let delay): return delay
         }
         do {
-            let reading = try await fetchSource(credential)
-            guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-            if let named = reading.accountId, let asked = credential.accountId, named != asked {
-                report("OpenAI answered for a different account than the one asked for")
-            }
-            publish(reading)
-            await backoff?.record(nil)
-            return Self.refreshInterval
+            return try await read(with: credential, generation: stamp)
         } catch {
             guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-            return await handle(error)
+            guard Self.isRefusal(error), let renewRefused else { return await handle(error) }
+            return await renewAndReadAgain(
+                refused: credential, renewing: renewRefused, generation: stamp)
         }
     }
+
+    private func read(with credential: CodexCredential, generation stamp: Int) async throws
+        -> Duration
+    {
+        let reading = try await fetchSource(credential)
+        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+        if let named = reading.accountId, let asked = credential.accountId, named != asked {
+            report("OpenAI answered for a different account than the one asked for")
+        }
+        publish(reading)
+        await backoff?.record(nil)
+        return Self.refreshInterval
+    }
+
+    /// One renewal and one read, and never a second of either: a renewed
+    /// token OpenAI refuses too is a link that has ended, and renewing again
+    /// would spend the grant on every poll.
+    ///
+    /// A renewal that could not reach an answer keeps the row as it was.
+    /// It says nothing about the grant, and the next poll asks again once the
+    /// renewal's own backoff allows.
+    private func renewAndReadAgain(
+        refused: CodexCredential,
+        renewing: @Sendable (CodexCredential) async -> CodexCredentialReading,
+        generation stamp: Int
+    ) async -> Duration {
+        let outcome = await renewing(refused)
+        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+        switch outcome {
+        case .found(let renewed):
+            do {
+                return try await read(with: renewed, generation: stamp)
+            } catch {
+                guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+                return await handle(error)
+            }
+        case .expired:
+            published.update { $0.limitsState = .sessionExpired }
+            report("the Codex credential was refused and its renewal was rejected; link it again")
+        case .unreadable, .missing, .signedOut, .needsAuthorization, .refused:
+            report("the Codex credential was refused and could not be renewed yet")
+        }
+        return Self.refreshInterval
+    }
+
+    private static func isRefusal(_ error: Error) -> Bool {
+        guard case UsageRequestError.badStatus(let code) = error else { return false }
+        return refusalStatuses.contains(code)
+    }
+
+    private static let refusalStatuses: Set<Int> = [401, 403]
 
     /// The wait a refusal recorded on an earlier run still has left, guarded
     /// by the generation on the reasoning the Claude probe's twin carries.
@@ -286,7 +337,9 @@ actor CodexUsageSource: SourceSignals {
     ///
     /// A 401 is the credential having died, which is the one outcome the user
     /// can act on: the held copy is dropped so the next poll reads it again
-    /// rather than spending a token OpenAI has retired. The windows stay,
+    /// rather than spending a token OpenAI has retired. For a linked account
+    /// it reaches here only once `renewAndReadAgain` has renewed the token
+    /// and been refused again. The windows stay,
     /// because the last reading and its age are still true and this row's
     /// other source — the CLI's own turns — is still writing them.
     ///
@@ -303,7 +356,7 @@ actor CodexUsageSource: SourceSignals {
             report("OpenAI answered 429; backing off until \(until)")
             return .seconds(seconds)
         }
-        if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
+        if case UsageRequestError.badStatus(let code) = error, Self.refusalStatuses.contains(code) {
             let refused: ProviderLimitsState = account == nil ? .credentialRefused : .sessionExpired
             published.update { $0.limitsState = refused }
             report("the Codex credential was refused (status \(code)); sign in again")

@@ -397,4 +397,47 @@ final class CodexRenewalTests: XCTestCase {
         _ = await renewal.supply(account: Self.account, allowingInteraction: false)
         XCTAssertEqual(requests.load(), 2)
     }
+
+    // MARK: - A token refused before it expired
+
+    /// OpenAI can revoke an access token early. The refresh token behind it
+    /// may still be good, so a refusal is renewed once whatever the clock says.
+    func testARefusedTokenIsRenewedAlthoughItHasNotExpired() async {
+        let live = Self.credential(expiresAt: .distantFuture)
+        let keychain = Keychain(holding: live)
+        let requests = LockedValue(0)
+        let renewal = Self.renewal(keychain: keychain) { _ in
+            requests.update { $0 += 1 }
+            return Self.renewed
+        }
+        let reading = await renewal.renewRefused(account: Self.account, refused: live)
+        XCTAssertEqual(reading, .found(Self.renewed))
+        XCTAssertEqual(keychain.items.load()[Self.account], Self.renewed)
+        XCTAssertEqual(requests.load(), 1)
+    }
+
+    /// Another reader of the account renewed it already, so the refused token
+    /// is not the one on file and redeeming again would spend a live grant.
+    func testARefusalOfATokenAlreadyReplacedIsNotRenewedAgain() async {
+        let keychain = Keychain(holding: Self.renewed)
+        let requests = LockedValue(0)
+        let renewal = Self.renewal(keychain: keychain) { _ in
+            requests.update { $0 += 1 }
+            return Self.credential(access: "access-third", expiresAt: .distantFuture)
+        }
+        let reading = await renewal.renewRefused(
+            account: Self.account, refused: Self.credential(expiresAt: .distantFuture))
+        XCTAssertEqual(reading, .found(Self.renewed))
+        XCTAssertEqual(requests.load(), 0)
+    }
+
+    func testARefusedTokenWhoseRenewalIsRejectedReadsAsExpired() async {
+        let live = Self.credential(expiresAt: .distantFuture)
+        let keychain = Keychain(holding: live)
+        let renewal = Self.renewal(keychain: keychain) { _ in
+            throw CodexOAuth.RenewalFailure.rejected
+        }
+        let reading = await renewal.renewRefused(account: Self.account, refused: live)
+        XCTAssertEqual(reading, .expired)
+    }
 }

@@ -28,6 +28,11 @@ import Foundation
 /// ended. No ordering can close that without writing the secret somewhere
 /// less protected than the keychain first.
 ///
+/// A token OpenAI refused before its expiry is renewed through
+/// `renewRefused`, once per refused token: the vendor can revoke an access
+/// token early while the refresh token behind it is still good, and reading
+/// that as an ended link sent the user to link an account that needed nothing.
+///
 /// Whether a failed renewal ends the link is `CodexOAuth.RenewalFailure`'s
 /// answer. Only a grant the endpoint rejected does; anything else defers the
 /// next attempt, and the reader keeps its last reading meanwhile.
@@ -88,16 +93,38 @@ actor CodexRenewal {
 
     /// The credential a reader should poll with, renewed if it is spent.
     func supply(account: String, allowingInteraction: Bool) async -> CodexCredentialReading {
-        let current: CodexCredentialReading
-        if let held = unsaved[account] {
-            scheduleSave(account: account)
-            current = .found(held)
-        } else {
-            current = load(account, allowingInteraction)
-        }
+        let current = held(account: account, allowingInteraction: allowingInteraction)
         guard case .found(let credential) = current, credential.isExpired(at: now()) else {
             return current
         }
+        return await renew(credential, account: account)
+    }
+
+    /// The credential to read again with after OpenAI refused `refused`,
+    /// renewed whatever its expiry says.
+    ///
+    /// Keyed on the refused token rather than on the call: a renewal that
+    /// landed since, from this reader or another of the same account, is
+    /// handed over as it is, because redeeming again would spend the grant
+    /// that renewal was just given.
+    func renewRefused(account: String, refused: CodexCredential) async -> CodexCredentialReading {
+        if let running = inFlight[account] { return await running.value }
+        let current = held(account: account, allowingInteraction: false)
+        guard case .found(let credential) = current,
+            credential.accessToken == refused.accessToken
+        else { return current }
+        return await renew(credential, account: account)
+    }
+
+    /// A renewal the keychain has not taken yet outranks the item, which
+    /// still holds the refresh token that renewal spent.
+    private func held(account: String, allowingInteraction: Bool) -> CodexCredentialReading {
+        guard let held = unsaved[account] else { return load(account, allowingInteraction) }
+        scheduleSave(account: account)
+        return .found(held)
+    }
+
+    private func renew(_ credential: CodexCredential, account: String) async -> CodexCredentialReading {
         if let running = inFlight[account] { return await running.value }
         if let deferral = deferrals[account], deferral.until > now() {
             return .unreadable("the Codex renewal is deferred until \(deferral.until)")

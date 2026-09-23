@@ -1397,6 +1397,9 @@ actor UsageEngine {
                 await CodexRenewal.shared.supply(
                     account: id, allowingInteraction: allowingInteraction)
             },
+            renewRefused: { refused in
+                await CodexRenewal.shared.renewRefused(account: id, refused: refused)
+            },
             backoff: backoff?.slot(for: LimitsBackoffLedger.codexKey(account: id)))
     }
 
