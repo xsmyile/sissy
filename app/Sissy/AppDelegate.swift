@@ -14,6 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isTerminating = false
     private var repliedToTerminate = false
 
+    /// What a reopen does when no window is up: opens the usage panel.
+    /// Wired in `applicationDidFinishLaunching` beside the status item's own
+    /// click, and left nil in the test host, which builds neither.
+    var onReopen: (() -> Void)?
+
     /// The launch run of `HTTPStoragePurge`, held here so the delete has an
     /// owner and stays off the main thread, at utility priority because
     /// nothing waits on it.
@@ -59,6 +64,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusController.onPrimaryClick = { [weak statusController, weak panelController] in
             guard let button = statusController?.statusButton else { return }
             panelController?.toggle(relativeTo: button)
+        }
+        onReopen = { [weak statusController, weak panelController] in
+            guard let button = statusController?.statusButton else { return }
+            panelController?.show(relativeTo: button)
         }
 
         let center = NotificationCenter.default
@@ -110,6 +119,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if desired == .regular {
             NSApp.activate()
         }
+    }
+
+    /// Opening Sissy while it already runs opens the panel.
+    ///
+    /// LaunchServices delivers a double-click in Applications, a Spotlight
+    /// hit or `open -a Sissy` to the running instance as a reopen, which went
+    /// unanswered before this. The status item is the app's only standing
+    /// surface and it can be out of sight, behind the notch on a full menu
+    /// bar or switched off in the menu bar's settings, so a relaunch that did
+    /// nothing read as an app that would not start while it was counting.
+    ///
+    /// A window already up is left to AppKit, whose own reopen brings it
+    /// forward: that is Settings or the login window, and the panel would
+    /// only open over it.
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication, hasVisibleWindows flag: Bool
+    ) -> Bool {
+        guard !flag else { return true }
+        onReopen?()
+        return false
     }
 
     /// Lets the engine shut down and the Codex renewals file what they hold

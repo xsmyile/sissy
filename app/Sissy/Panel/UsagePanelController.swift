@@ -93,8 +93,18 @@ final class UsagePanelController: NSObject {
     func toggle(relativeTo button: NSStatusBarButton) {
         if popover.isShown {
             close()
-            return
+        } else {
+            show(relativeTo: button)
         }
+    }
+
+    /// Opens the panel, and leaves one already open as it is: a reopen of the
+    /// app asks for the panel, never for it to go away.
+    ///
+    /// A button with no window has nothing to anchor to, and `NSPopover`
+    /// raises rather than returns on a view outside a window.
+    func show(relativeTo button: NSStatusBarButton) {
+        guard !popover.isShown, button.window != nil else { return }
         let host = NSHostingController(
             rootView: UsagePanelView(
                 model: model,
