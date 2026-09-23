@@ -591,8 +591,11 @@ a cold scan instead of only a cancelled boot task doing so.
   catalog: a cache newer than the seed is applied before the scan starts, otherwise
   the first fetch is awaited under `PriceCatalogSource.coldStartBudget` and the seed
   prices the scan if it doesn't land. A refresh never reprices what it already
-  counted, so letting a catalog arrive mid-scan would split a single day across two
-  rate sets. `remotePricing: false` pins Sissy to the seed and stops all outbound
+  priced, so letting a catalog arrive mid-scan would split a single day across two
+  rate sets. The one thing it does price is a row the tail counted while no source
+  carried its model, in the same actor turn the rates arrive in: the next event of
+  that model lands on the same row, and a row that has a cost can no longer say
+  which of its tokens were free. `remotePricing: false` pins Sissy to the seed and stops all outbound
   requests. Regenerate the seed when cutting a release:
   `sissy-cli --dump-seed > app/SissyCore/PricingSeed.swift`. The `pricing-oracle` CI
   job asserts exact agreement with `ccusage`, which prices from the same LiteLLM data.
