@@ -115,6 +115,7 @@ actor CodexRenewal {
     /// re-creates an item the user deleted.
     func forget(account: String) {
         generations[account, default: 0] += 1
+        inFlight[account] = nil
         unsaved[account] = nil
         deferrals[account] = nil
         saving[account]?.cancel()
@@ -127,27 +128,46 @@ actor CodexRenewal {
         await saving[account]?.value
     }
 
+    /// A reply that lands after `forget` answers for a link that no longer
+    /// exists, whether it renewed the grant or refused it, so it touches
+    /// nothing the replacement holds: read as `.expired` or as a deferral it
+    /// ended or held back a link the user had just made.
     private func renewAndFile(
         _ credential: CodexCredential, account: String, generation: Int
     ) async -> CodexCredentialReading {
-        defer { inFlight[account] = nil }
-        let renewed: CodexCredential
+        defer {
+            if generations[account, default: 0] == generation { inFlight[account] = nil }
+        }
+        let renewed: Result<CodexCredential, Error>
         do {
-            renewed = try await renew(credential)
-        } catch CodexOAuth.RenewalFailure.rejected {
-            deferrals[account] = nil
-            return .expired
-        } catch CodexOAuth.RenewalFailure.deferred(let retryAfter) {
-            return postpone(account: account, retryAfter: retryAfter)
+            renewed = .success(try await renew(credential))
         } catch {
-            return postpone(account: account, retryAfter: nil)
+            renewed = .failure(error)
         }
         guard generations[account, default: 0] == generation else {
-            return .unreadable("the Codex account was unlinked while its sign-in was renewed")
+            return .unreadable("the Codex account was unlinked or relinked while its sign-in was renewed")
         }
+        switch renewed {
+        case .success(let fresh):
+            return file(fresh, account: account)
+        case .failure(CodexOAuth.RenewalFailure.rejected):
+            deferrals[account] = nil
+            return .expired
+        case .failure(CodexOAuth.RenewalFailure.deferred(let retryAfter)):
+            return postpone(account: account, retryAfter: retryAfter)
+        case .failure:
+            return postpone(account: account, retryAfter: nil)
+        }
+    }
+
+    /// A save that lands supersedes any renewal still held unsaved: that one
+    /// carries a refresh token this renewal has spent, so handing it over or
+    /// filing it on retry would hand over a dead link.
+    private func file(_ renewed: CodexCredential, account: String) -> CodexCredentialReading {
         deferrals[account] = nil
         do {
             try save(renewed, account)
+            unsaved[account] = nil
         } catch {
             sissyLog("sissy: a renewed Codex credential could not be filed (\(error)); retrying")
             unsaved[account] = renewed
