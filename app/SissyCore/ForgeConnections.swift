@@ -74,31 +74,100 @@ struct ForgeConnectionIndex: Sendable {
         parent.appendingPathComponent(fileName)
     }
 
+    /// What an index that would not read is renamed to, with a timestamp
+    /// after it so a second one never replaces the first.
+    static let setAsidePrefix = "forge-connections.unreadable-"
+
     private struct Contents: Codable {
         var connections: [ForgeConnection] = []
     }
 
+    /// Why the index would not answer.
+    enum LoadError: Error, Equatable {
+        /// The file is there and does not decode, or cannot be read. `reason`
+        /// is the error's domain and code and never the file's bytes.
+        case unreadable(reason: String)
+    }
+
     /// Every connection, in a stable order so two reads agree and the panel's
-    /// rows do not swap places between polls.
-    func load() -> [ForgeConnection] {
-        guard let data = try? Data(contentsOf: url),
-            let decoded = try? JSONDecoder().decode(Contents.self, from: data)
-        else { return [] }
-        return decoded.connections.sorted { $0.id < $1.id }
+    /// rows do not swap places between polls. Empty when there is no file yet.
+    ///
+    /// Throws for a file that is there and will not read, which used to come
+    /// back as an empty list: every connection left Settings and the panel,
+    /// and the next `remember` wrote over the file with the one new host, so
+    /// the tokens behind the rest stayed in the keychain with nothing to name
+    /// them. Every write here follows a load that succeeded, so a file this
+    /// refuses is never overwritten. An empty file is refused too: `save`
+    /// writes atomically and never leaves one. The rule
+    /// `ClaudeAccountStore.loadIndex` is on, for the same reason.
+    func load() throws -> [ForgeConnection] {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch CocoaError.fileReadNoSuchFile {
+            return []
+        } catch {
+            throw LoadError.unreadable(reason: Self.reason(error))
+        }
+        do {
+            return try JSONDecoder().decode(Contents.self, from: data).connections
+                .sorted { $0.id < $1.id }
+        } catch {
+            throw LoadError.unreadable(reason: "\(data.count) bytes, \(Self.reason(error))")
+        }
+    }
+
+    /// Every connection, with an index that will not read moved out of the
+    /// way first.
+    ///
+    /// Moved rather than deleted: it is the only list of which tokens belong
+    /// to which host, and a person can still read it. Once it is aside the
+    /// tokens it named surface in Settings as tokens without a connection, and
+    /// a new connection starts a fresh file instead of writing over the old
+    /// one. Throws only when the file would not read and could not be moved,
+    /// which is the one answer under which nothing may be written.
+    func loadSettingAside(now: Date = Date()) throws -> [ForgeConnection] {
+        do {
+            return try load()
+        } catch let unreadable {
+            let aside = url.deletingLastPathComponent()
+                .appendingPathComponent("\(Self.setAsidePrefix)\(Int(now.timeIntervalSince1970)).json")
+            do {
+                try FileManager.default.moveItem(at: url, to: aside)
+            } catch {
+                sissyLog(
+                    "sissy: the forge connection index would not read (\(unreadable)) and could "
+                        + "not be moved (\(Self.reason(error)))")
+                throw unreadable
+            }
+            sissyLog(
+                "sissy: the forge connection index would not read (\(unreadable)); kept it as "
+                    + aside.lastPathComponent)
+            return []
+        }
+    }
+
+    /// Whether an index has ever been set aside beside this one. Read off the
+    /// directory rather than remembered, so Settings keeps saying so across a
+    /// relaunch until the file is dealt with.
+    func hasSetAside() -> Bool {
+        let parent = url.deletingLastPathComponent()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: parent.path)) ?? []
+        return names.contains { $0.hasPrefix(Self.setAsidePrefix) }
     }
 
     /// Records a connection, replacing one on the same host. Connecting the
     /// same host again is a re-connection rather than a second row: the token
     /// behind it has just been replaced too.
     func remember(_ connection: ForgeConnection) throws {
-        var connections = load().filter { $0.id != connection.id }
+        var connections = try load().filter { $0.id != connection.id }
         connections.append(connection)
         try save(connections)
     }
 
     /// Drops one. A connection that was not there is not a failure.
     func forget(id: String) throws {
-        let connections = load()
+        let connections = try load()
         let kept = connections.filter { $0.id != id }
         guard kept.count != connections.count else { return }
         try save(kept)
@@ -109,6 +178,11 @@ struct ForgeConnectionIndex: Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let contents = Contents(connections: connections.sorted { $0.id < $1.id })
         try encoder.encode(contents).write(to: url, options: .atomic)
+    }
+
+    private static func reason(_ error: Error) -> String {
+        let bridged = error as NSError
+        return "\(bridged.domain) \(bridged.code)"
     }
 }
 

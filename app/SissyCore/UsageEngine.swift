@@ -271,7 +271,7 @@ actor UsageEngine {
         let forgeIndex = ForgeConnectionIndex(url: ForgeConnectionIndex.defaultURL(in: stateDir))
         self.forgeIndex = forgeIndex
         self.forgeMonitor = ForgeActivityMonitor(
-            connections: forgeIndex.load(),
+            connections: (try? forgeIndex.loadSettingAside()) ?? [],
             counters: (config.forgeCounters ?? .defaults).enabled)
         let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
@@ -1585,9 +1585,10 @@ actor UsageEngine {
     /// keychain grant has lapsed still lists what is connected and offers the
     /// way to remove it — the rule `linkedCodexAccounts` next door is under.
     /// Nonisolated because Settings reads it while the engine is mid-poll, and
-    /// the index is an immutable value holding no secret.
+    /// the index is an immutable value holding no secret. An index that will
+    /// not read is set aside here rather than read as empty and overwritten.
     nonisolated var forgeConnections: [ForgeConnection] {
-        forgeIndex.load()
+        (try? forgeIndex.loadSettingAside()) ?? []
     }
 
     /// The tokens `gh` and `glab` already hold on this Mac.
@@ -1648,7 +1649,7 @@ actor UsageEngine {
     private func rebuildForgeMonitor() async {
         await forgeMonitor.stop()
         forgeMonitor = ForgeActivityMonitor(
-            connections: forgeIndex.load(),
+            connections: (try? forgeIndex.loadSettingAside()) ?? [],
             counters: (config.forgeCounters ?? .defaults).enabled)
         await startForgeActivity()
     }
