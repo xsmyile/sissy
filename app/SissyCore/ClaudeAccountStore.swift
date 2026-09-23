@@ -264,7 +264,9 @@ struct ClaudeAccountStore: Sendable {
     /// Why the store would not do what it was asked.
     enum StoreError: Error, Equatable {
         /// The index file is there and does not decode, or cannot be read.
-        case indexUnreadable
+        /// `reason` is the error's domain and code and never the file's
+        /// bytes, so a log line built from it carries no account.
+        case indexUnreadable(reason: String)
         /// The credential offered carries no account to archive.
         case noAccount
     }
@@ -295,12 +297,18 @@ struct ClaudeAccountStore: Sendable {
         } catch CocoaError.fileReadNoSuchFile {
             return Index()
         } catch {
-            throw StoreError.indexUnreadable
+            throw StoreError.indexUnreadable(reason: Self.reason(error))
         }
-        guard let decoded = try? JSONDecoder().decode(Index.self, from: data) else {
-            throw StoreError.indexUnreadable
+        do {
+            return try JSONDecoder().decode(Index.self, from: data)
+        } catch {
+            throw StoreError.indexUnreadable(reason: "\(data.count) bytes, \(Self.reason(error))")
         }
-        return decoded
+    }
+
+    private static func reason(_ error: Error) -> String {
+        let bridged = error as NSError
+        return "\(bridged.domain) \(bridged.code)"
     }
 
     /// Moves an index that will not read out of the way, and answers where it

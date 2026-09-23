@@ -439,15 +439,18 @@ actor ClaudeAccountRegistry {
     private static func loadIndex(_ store: ClaudeAccountStore) -> ClaudeAccountStore.Index? {
         do {
             return try store.loadIndex()
-        } catch {
+        } catch let unreadable {
             do {
                 let aside = try store.setAsideIndex()
                 sissyLog(
-                    "sissy: the Claude account index would not read; kept it as "
+                    "sissy: the Claude account index would not read (\(unreadable)); kept it as "
                         + aside.lastPathComponent)
                 return ClaudeAccountStore.Index()
             } catch {
-                sissyLog("sissy: the Claude account index would not read and could not be moved")
+                let moved = error as NSError
+                sissyLog(
+                    "sissy: the Claude account index would not read (\(unreadable)) and could "
+                        + "not be moved (\(moved.domain) \(moved.code))")
                 return nil
             }
         }
