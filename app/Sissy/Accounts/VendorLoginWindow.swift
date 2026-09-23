@@ -94,7 +94,24 @@ final class VendorLoginWindow: NSObject {
         /// The credential a navigation carries, if this vendor ends its
         /// sign-in with a redirect.
         let code: (@Sendable (URL) -> String?)?
+        /// Why a navigation ends the sign-in without a credential, if this
+        /// vendor ends it with a redirect: the same redirect carrying an error
+        /// where the code would be.
+        let declined: (@Sendable (URL) -> String?)?
     }
+
+    /// Why the page itself ended the sign-in, as the caller words it.
+    enum PageFailure: Equatable {
+        /// The vendor's redirect said no, in its own OAuth error code.
+        case declined(String)
+        /// A page of the sign-in did not load.
+        case unreachable
+    }
+
+    /// WebKit's code for a load it abandoned because the navigation delegate
+    /// cancelled it, which is every redirect this window takes a code from.
+    nonisolated static let frameLoadInterruptedByPolicyChange = 102
+    nonisolated private static let webKitErrorDomain = "WebKitErrorDomain"
 
     private static let contentSize = NSSize(width: 520, height: 680)
     private static let promptSize = NSSize(width: 420, height: 260)
@@ -108,6 +125,9 @@ final class VendorLoginWindow: NSObject {
     private var onCredential: ((String) -> Void)?
     /// Called once when the window goes away without the flow completing.
     private var onCancel: (() -> Void)?
+    /// Called when the page ends the sign-in before any credential, so the
+    /// caller can say why and offer the login again.
+    private var onFailure: ((PageFailure) -> Void)?
     private var finished = false
 
     init(vendor: Vendor) {
@@ -119,8 +139,13 @@ final class VendorLoginWindow: NSObject {
     var isOpen: Bool { window != nil }
 
     /// Opens the window. Called once per controller.
-    func present(onCredential: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+    func present(
+        onCredential: @escaping (String) -> Void,
+        onFailure: @escaping (PageFailure) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
         self.onCredential = onCredential
+        self.onFailure = onFailure
         self.onCancel = onCancel
 
         let configuration = WKWebViewConfiguration()
@@ -261,9 +286,34 @@ final class VendorLoginWindow: NSObject {
     private func deliver(_ credential: String) {
         guard let pending = onCredential else { return }
         onCredential = nil
+        onFailure = nil
         sissyLog("sissy: the \(vendor.logName) login produced a credential")
         working()
         pending(credential)
+    }
+
+    /// Hands a page failure over once, and only while no credential has been:
+    /// after one, the web view is gone and the flow is the caller's.
+    private func fail(_ failure: PageFailure) {
+        guard onCredential != nil, let pending = onFailure else { return }
+        onCredential = nil
+        onFailure = nil
+        sissyLog("sissy: the \(vendor.logName) login page ended the sign-in")
+        pending(failure)
+    }
+
+    /// What a load error means for the sign-in, and nil for the errors a
+    /// navigation this window cancelled reports on its way out: the code
+    /// redirect, the decline and every link handed to the default browser.
+    nonisolated static func pageFailure(for error: Error) -> PageFailure? {
+        let failure = error as NSError
+        if failure.domain == NSURLErrorDomain, failure.code == NSURLErrorCancelled { return nil }
+        if failure.domain == webKitErrorDomain,
+            failure.code == frameLoadInterruptedByPolicyChange
+        {
+            return nil
+        }
+        return .unreachable
     }
 }
 
@@ -299,12 +349,31 @@ extension VendorLoginWindow: WKNavigationDelegate {
             Task { @MainActor [weak self] in self?.deliver(code) }
             return .cancel
         }
+        if let reason = vendor.declined?(url) {
+            Task { @MainActor [weak self] in self?.fail(.declined(reason)) }
+            return .cancel
+        }
         guard navigationAction.navigationType == .linkActivated,
             let host = url.host(),
             !vendor.isInternal(host)
         else { return .allow }
         NSWorkspace.shared.open(url)
         return .cancel
+    }
+
+    func webView(
+        _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation?,
+        withError error: Error
+    ) {
+        guard let failure = Self.pageFailure(for: error) else { return }
+        Task { @MainActor [weak self] in self?.fail(failure) }
+    }
+
+    func webView(
+        _ webView: WKWebView, didFail navigation: WKNavigation?, withError error: Error
+    ) {
+        guard let failure = Self.pageFailure(for: error) else { return }
+        Task { @MainActor [weak self] in self?.fail(failure) }
     }
 }
 
@@ -323,6 +392,7 @@ extension VendorLoginWindow: NSWindowDelegate {
             window = nil
             let cancelled = onCancel
             onCredential = nil
+            onFailure = nil
             onCancel = nil
             guard !finished else { return }
             sissyLog("sissy: the \(vendor.logName) login was closed before it completed")
@@ -346,7 +416,8 @@ extension VendorLoginWindow.Vendor {
                         && !$0.value.isEmpty
                 }?.value
             },
-            code: nil)
+            code: nil,
+            declined: nil)
     }
 
     /// OpenAI's login, which ends in a redirect to the CLI's loopback address
@@ -360,7 +431,8 @@ extension VendorLoginWindow.Vendor {
                 isHost(host, in: "openai.com") || isHost(host, in: "chatgpt.com")
             },
             session: nil,
-            code: { flow.code(fromRedirect: $0) })
+            code: { flow.code(fromRedirect: $0) },
+            declined: { flow.declined(fromRedirect: $0) })
     }
 
     /// A host that is the vendor's or a subdomain of it, and nothing that
