@@ -603,7 +603,8 @@ enum GitHubActivityFeed {
 /// `x-total: 0` on a day that had 91 events, so a window starting on a day is
 /// asked for by naming the day before it.
 enum GitLabActivityFeed {
-    /// GitLab's own hosted instance.
+    /// GitLab's own hosted instance, which the connect sheet offers when the
+    /// forge is picked.
     static let dotComHost = "gitlab.com"
     /// Where GitLab stops counting. Past it the events endpoint drops
     /// `x-total` and keeps paginating, per GitLab's REST documentation read

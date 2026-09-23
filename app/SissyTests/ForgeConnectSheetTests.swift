@@ -81,9 +81,37 @@ final class ForgeConnectSheetTests: XCTestCase {
 
     // MARK: The fields
 
+    /// The defect: the host stayed on `github.com` when GitLab was picked, and
+    /// a GitLab token pasted under it was sent to GitHub on every poll.
+    func testPickingGitLabPutsGitLabsHostInTheField() {
+        var draft = ForgeConnectDraft()
+        draft.pick(.gitLab)
+        XCTAssertEqual(draft.host, GitLabActivityFeed.dotComHost)
+    }
+
+    func testPickingAForgeReplacesAHostTheUserTyped() {
+        var draft = ForgeConnectDraft()
+        draft.pick(.gitLab)
+        draft.host = "gitlab.corp.example"
+        draft.path = "gitlab"
+        draft.pick(.gitHub)
+        XCTAssertEqual(draft.host, GitHubActivityFeed.dotComHost)
+        XCTAssertEqual(draft.path, "")
+    }
+
+    /// A click on the segment already picked is not a change of forge, and
+    /// must not throw away what was typed.
+    func testPickingTheSameForgeKeepsTheTypedHost() {
+        var draft = ForgeConnectDraft()
+        draft.pick(.gitLab)
+        draft.host = "gitlab.corp.example"
+        draft.pick(.gitLab)
+        XCTAssertEqual(draft.host, "gitlab.corp.example")
+    }
+
     func testAHostThatCannotBeConnectedSaysWhyUnderTheFields() {
         var draft = ForgeConnectDraft()
-        draft.kind = .gitLab
+        draft.pick(.gitLab)
         draft.host = "davide@gitlab.corp.example"
         XCTAssertEqual(draft.problem, .credentials)
     }
