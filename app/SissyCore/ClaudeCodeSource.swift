@@ -46,7 +46,9 @@ struct ClaudeCodeSignals: SourceSignals {
         var reading = Self.merge(
             profile: Self.attributed(file, to: signedIn),
             web: Self.webReading(for: active, among: sources),
-            probe: limitsProbe.flatMap { Self.probeReading($0.currentReading(), for: signedIn) })
+            probe: limitsProbe.flatMap {
+                Self.probeReading($0.currentReading(), for: signedIn, naming: active)
+            })
         reading.accounts = Self.perAccount(
             reading, sources: sources, known: signedIn, active: active, links: webLinks.load())
         return reading
@@ -83,17 +85,24 @@ struct ClaudeCodeSignals: SourceSignals {
     /// did. A reading withheld here comes back on the registry's next poll,
     /// which identifies the new token and re-emits.
     ///
-    /// Where the registry names nobody there is no name to put the reading
-    /// under wrongly, and it stands as it always has. A reading with no
-    /// fingerprint carries no windows and no credits, only why they are
-    /// missing, and stands too.
+    /// `active` is the name the row carries, from `activeAccount`, and the
+    /// judgement follows it rather than the registry's field alone. Where
+    /// nothing names anybody there is no name to put the reading under
+    /// wrongly, and it stands as it always has. Where only the config file
+    /// names somebody, nothing has matched the probe's token to that name:
+    /// the file can predate a `/login` the probe has already spent the token
+    /// of, so the reading is withheld until the registry identifies it. A
+    /// reading with no fingerprint carries no windows and no credits, only
+    /// why they are missing, and stands too.
     static func probeReading(
         _ reading: ClaudeLimitsProbe.AttributedReading,
-        for signedIn: ClaudeAccountRegistry.Snapshot
+        for signedIn: ClaudeAccountRegistry.Snapshot,
+        naming active: String?
     ) -> ProviderSignals? {
-        guard signedIn.activeUUID != nil, let credential = reading.credential else {
+        guard active != nil, let credential = reading.credential else {
             return reading.signals
         }
+        guard signedIn.activeUUID == active else { return nil }
         return credential == signedIn.activeCredential ? reading.signals : nil
     }
 
