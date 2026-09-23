@@ -30,6 +30,9 @@ final class CodexRenewalTests: XCTestCase {
         let items = LockedValue<[String: CodexCredential]>([:])
         let failures = LockedValue(0)
         let saves = LockedValue(0)
+        /// Access tokens whose save always throws, for a renewal the keychain
+        /// refuses while a later one lands.
+        let refusing = LockedValue<Set<String>>([])
 
         init(holding credential: CodexCredential) {
             items.store([CodexRenewalTests.account: credential])
@@ -46,7 +49,9 @@ final class CodexRenewalTests: XCTestCase {
                 failing = $0 > 0
                 if failing { $0 -= 1 }
             }
-            if failing { throw CodexAccountStoreError.keychain(errSecInteractionNotAllowed) }
+            if failing || refusing.load().contains(credential.accessToken) {
+                throw CodexAccountStoreError.keychain(errSecInteractionNotAllowed)
+            }
             items.update { $0[account] = credential }
         }
     }
@@ -322,5 +327,74 @@ final class CodexRenewalTests: XCTestCase {
         await gate.open()
         _ = await caller.value
         XCTAssertNil(keychain.items.load()[Self.account])
+    }
+
+    /// A renewal that is filed supersedes one still held unsaved: the held one
+    /// carries a refresh token the later renewal has spent, so handing it
+    /// over, or filing it on retry, is handing over a dead link.
+    func testAFiledRenewalReplacesAnEarlierUnsavedOne() async {
+        let keychain = Keychain(holding: Self.credential())
+        let spentSoon = Self.credential(access: "access-mid", refresh: "refresh-mid")
+        keychain.refusing.store([spentSoon.accessToken])
+        let replies = LockedValue([spentSoon, Self.renewed])
+        let renewal = Self.renewal(keychain: keychain) { _ in
+            var next: CodexCredential?
+            replies.update { next = $0.isEmpty ? nil : $0.removeFirst() }
+            guard let next else { throw CodexOAuth.RenewalFailure.rejected }
+            return next
+        }
+        _ = await renewal.supply(account: Self.account, allowingInteraction: false)
+        await renewal.settle(account: Self.account)
+        _ = await renewal.supply(account: Self.account, allowingInteraction: false)
+        await renewal.settle(account: Self.account)
+        let later = await renewal.supply(account: Self.account, allowingInteraction: false)
+        XCTAssertEqual(later, .found(Self.renewed))
+        XCTAssertEqual(keychain.items.load()[Self.account], Self.renewed)
+    }
+
+    // MARK: - A link replaced while its renewal was out
+
+    /// The rejection is of the grant the old link held. Read as `.expired` it
+    /// told the reader the link it now serves had ended, one sign-in after the
+    /// user made it.
+    func testARejectionForAReplacedLinkDoesNotEndTheNewOne() async {
+        let keychain = Keychain(holding: Self.credential())
+        let gate = Gate()
+        let renewal = Self.renewal(keychain: keychain) { _ in
+            await gate.arrive()
+            throw CodexOAuth.RenewalFailure.rejected
+        }
+        let caller = Task {
+            await renewal.supply(account: Self.account, allowingInteraction: false)
+        }
+        await gate.waitForArrival()
+        await renewal.forget(account: Self.account)
+        keychain.items.store([Self.account: Self.renewed])
+        await gate.open()
+        let reading = await caller.value
+        XCTAssertNotEqual(reading, .expired)
+    }
+
+    /// A backoff earned by the old link's grant is not the new link's: its
+    /// first renewal goes out at once.
+    func testADeferralForAReplacedLinkDoesNotHoldTheNewOne() async {
+        let keychain = Keychain(holding: Self.credential())
+        let gate = Gate()
+        let requests = LockedValue(0)
+        let renewal = Self.renewal(keychain: keychain) { _ in
+            requests.update { $0 += 1 }
+            await gate.arrive()
+            throw CodexOAuth.RenewalFailure.deferred(retryAfter: nil)
+        }
+        let caller = Task {
+            await renewal.supply(account: Self.account, allowingInteraction: false)
+        }
+        await gate.waitForArrival()
+        await renewal.forget(account: Self.account)
+        keychain.items.store([Self.account: Self.credential(access: "access-relinked")])
+        await gate.open()
+        _ = await caller.value
+        _ = await renewal.supply(account: Self.account, allowingInteraction: false)
+        XCTAssertEqual(requests.load(), 2)
     }
 }
