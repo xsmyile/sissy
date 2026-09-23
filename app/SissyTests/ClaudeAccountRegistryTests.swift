@@ -168,6 +168,9 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         var fileReadFailure: Error?
         /// Writes that throw, by name, and whether a put-back throws too.
         var writeFailures: [ClaudeCLISlot.Name: Error] = [:]
+        /// Writes that land and then throw, once each, the way a `security`
+        /// process that commits and then outlives its budget does.
+        var landThenFail: [ClaudeCLISlot.Name: Error] = [:]
         var restoreFails = false
         var secretReadFailure: Error?
         var primaryReadFailure: Error?
@@ -243,6 +246,10 @@ final class ClaudeAccountRegistryTests: XCTestCase {
                         store(data, at: name)
                         writes += 1
                         touched.append(name)
+                        if let failure = landThenFail.removeValue(forKey: name) {
+                            failed = true
+                            throw failure
+                        }
                     }
                 },
                 remove: { [self] name in
@@ -909,6 +916,38 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         await archiveTwo(vault, registry)
         vault.file = credential("tok-a")
         vault.writeFailures[.file] = CocoaError(.fileWriteNoPermission)
+        vault.restoreFails = true
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.partialSwitch) = outcome else { return XCTFail("expected partialSwitch") }
+    }
+
+    /// A write can land and still report a failure, as a `security` process
+    /// that commits and then outlives its budget does. That name is put back
+    /// too, so the error's claim that nothing changed is true.
+    func testAWriteThatLandedBeforeItFailedIsPutBack() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.landThenFail[Vault.primary] = ClaudeKeychainCLI.Failure.unavailable
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.keychainUnavailable) = outcome else {
+            return XCTFail("expected keychainUnavailable")
+        }
+        XCTAssertEqual(token(vault.active), "tok-a")
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-tok-a")
+    }
+
+    /// And when that name will not go back, the switch is reported as the
+    /// partial one it is rather than as a refusal that changed nothing.
+    func testAWriteThatLandedAndWillNotGoBackIsAPartialSwitch() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.landThenFail[Vault.primary] = ClaudeKeychainCLI.Failure.unavailable
         vault.restoreFails = true
 
         let outcome = await registry.activate(uuid: "u-tok-b")
