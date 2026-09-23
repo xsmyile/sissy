@@ -638,6 +638,10 @@ enum UsageFormat {
         case .sessionExpired:
             let ended = isCodex ? "The OpenAI sign-in" : "The claude.ai session"
             return .init(message: "\(ended) has ended", action: "Link again", kind: .link)
+        case .sessionUnreadable:
+            return .init(
+                message: "Sissy could not read this account's saved claude.ai session",
+                action: "Link again", kind: .link)
         case .credentialRefused:
             // No action, deliberately. The credential is the CLI's own and
             // the CLI rotates it on its own schedule, so every button this row

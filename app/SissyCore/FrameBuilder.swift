@@ -160,6 +160,14 @@ enum ProviderLimitsState: Sendable, Equatable {
     /// to import again, and only saying which of the two happened tells them
     /// which button to press.
     case sessionExpired
+    /// A linked claude.ai session that is filed and cannot be read back: the
+    /// item went between the listing and the read, or the keychain would not
+    /// decode it. Distinct from `signedOut`, which is Claude Code with no
+    /// stored login, because the CLI may be signed in perfectly well while one
+    /// linked account's item is missing, and distinct from `sessionExpired`
+    /// because claude.ai never saw it. The remedy is the same fresh sign-in,
+    /// which rewrites the item.
+    case sessionUnreadable
     /// The credential is readable and the vendor will not accept it.
     ///
     /// Distinct from every state above it, which are all about *getting* a
