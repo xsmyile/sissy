@@ -122,7 +122,9 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
             guard !digits.isEmpty, digits.allSatisfy({ $0.isASCII && $0.isNumber }),
                 let number = Int(digits), validPorts.contains(number)
             else { return .failure(.port) }
-            port = number == defaultPort ? nil : number
+            let namedDefault =
+                number == defaultPort || (namesPlainHTTP(trimmed) && number == plainDefaultPort)
+            port = namedDefault ? nil : number
         }
         guard isHostName(host) else { return .failure(host.isEmpty ? .empty : .host) }
         return basePath(from: typedPath).map { path in
@@ -149,6 +151,11 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
     /// The port `https` answers on when none is named, which is the same
     /// connection as naming none and must not become a second id for it.
     private static let defaultPort = 443
+    /// The port `http` answers on when none is named. An `http://` address
+    /// that names it is the same address as one that names none, which
+    /// `parse` already asks over https on `defaultPort`, so it must not
+    /// become a TLS dial on the plain-http port.
+    private static let plainDefaultPort = 80
 
     private static func isHostName(_ host: String) -> Bool {
         guard !host.isEmpty, host.count <= maximumHostLength else { return false }
