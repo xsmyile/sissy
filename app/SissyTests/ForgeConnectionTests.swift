@@ -304,9 +304,10 @@ final class ForgeConnectionTests: XCTestCase {
 
     private func connector(
         _ effects: Effects, probe: Result<String, ForgeReadFailure> = .success("davide"),
-        rememberFails: Bool = false
+        recorded: Result<[ForgeConnection], Refusal> = .success([]), rememberFails: Bool = false
     ) -> ForgeConnector {
         ForgeConnector(
+            recorded: { try recorded.get() },
             probe: { connection, _ in
                 effects.record("probe \(connection.id)")
                 return try probe.get()
@@ -324,7 +325,7 @@ final class ForgeConnectionTests: XCTestCase {
     func testARefusedTokenIsNotSaved() async {
         let effects = Effects()
         let outcome = await connector(effects, probe: .failure(.unauthorized))
-            .connect(Self.gitLab, token: "glpat-test", replacing: false)
+            .connect(Self.gitLab, token: "glpat-test")
         XCTAssertEqual(outcome, .refused(.unauthorized))
         XCTAssertEqual(effects.entries, ["probe \(Self.gitLab.id)"])
     }
@@ -332,7 +333,7 @@ final class ForgeConnectionTests: XCTestCase {
     func testAHostThatCannotBeReachedSavesNothing() async {
         let effects = Effects()
         let outcome = await connector(effects, probe: .failure(.unreachable))
-            .connect(Self.gitLab, token: "glpat-test", replacing: false)
+            .connect(Self.gitLab, token: "glpat-test")
         XCTAssertEqual(outcome, .refused(.unreachable))
         XCTAssertEqual(effects.entries, ["probe \(Self.gitLab.id)"])
     }
@@ -340,7 +341,7 @@ final class ForgeConnectionTests: XCTestCase {
     func testAnAcceptedTokenIsSavedThenRecorded() async {
         let effects = Effects()
         let outcome = await connector(effects)
-            .connect(Self.gitLab, token: "glpat-test", replacing: false)
+            .connect(Self.gitLab, token: "glpat-test")
         XCTAssertEqual(outcome, .connected(login: "davide"))
         XCTAssertEqual(
             effects.entries,
@@ -352,7 +353,7 @@ final class ForgeConnectionTests: XCTestCase {
     func testANewTokenWhoseIndexWriteFailedIsTakenBack() async {
         let effects = Effects()
         let outcome = await connector(effects, rememberFails: true)
-            .connect(Self.gitLab, token: "glpat-test", replacing: false)
+            .connect(Self.gitLab, token: "glpat-test")
         XCTAssertEqual(outcome, .notFiled)
         XCTAssertEqual(effects.entries.last, "delete \(Self.gitLab.id)")
     }
@@ -361,16 +362,28 @@ final class ForgeConnectionTests: XCTestCase {
     /// leave the row the index still names with no token at all.
     func testAReplacementTokenSurvivesAFailedIndexWrite() async {
         let effects = Effects()
-        let outcome = await connector(effects, rememberFails: true)
-            .connect(Self.gitLab, token: "glpat-test", replacing: true)
+        let outcome = await connector(effects, recorded: .success([Self.gitLab]), rememberFails: true)
+            .connect(Self.gitLab, token: "glpat-test")
         XCTAssertEqual(outcome, .notFiled)
         XCTAssertFalse(effects.entries.contains("delete \(Self.gitLab.id)"))
     }
 
     func testABlankTokenIsNeverProbed() async {
         let effects = Effects()
-        let outcome = await connector(effects).connect(Self.gitLab, token: "  \n", replacing: false)
+        let outcome = await connector(effects).connect(Self.gitLab, token: "  \n")
         XCTAssertEqual(outcome, .notFiled)
+        XCTAssertEqual(effects.entries, [])
+    }
+
+    /// Whether the token replaces one the index names cannot be told while
+    /// the index will not read. Guessing "replacing" used to keep a new
+    /// token whose index write then failed, with nothing on screen naming
+    /// it, so the connect stops before the token leaves the sheet.
+    func testNothingIsProbedOrSavedWhileTheIndexCannotBeRead() async {
+        let effects = Effects()
+        let outcome = await connector(effects, recorded: .failure(Refusal()))
+            .connect(Self.gitLab, token: "glpat-test")
+        XCTAssertEqual(outcome, .indexUnreadable)
         XCTAssertEqual(effects.entries, [])
     }
 }

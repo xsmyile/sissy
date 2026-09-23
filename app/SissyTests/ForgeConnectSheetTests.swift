@@ -159,6 +159,11 @@ final class ForgeConnectSheetTests: XCTestCase {
         XCTAssertEqual(Set(sentences).count, failures.count)
     }
 
+    func testAnUnreadableIndexSaysNothingWasSaved() throws {
+        let sentence = try XCTUnwrap(ForgeConnectCopy.failure(.indexUnreadable, connection: Self.gitLab))
+        XCTAssertTrue(sentence.contains("nothing was saved"), sentence)
+    }
+
     func testAConnectionThatWorkedSaysNothing() {
         XCTAssertNil(ForgeConnectCopy.failure(.connected(login: "davide"), connection: Self.gitLab))
     }

@@ -1635,13 +1635,13 @@ actor UsageEngine {
     /// both states the poll stops asking about.
     func connectForge(_ connection: ForgeConnection, token: String) async -> ForgeConnector.Outcome {
         let index = forgeIndex
-        let known = (try? index.loadSettingAside()).map { $0.contains { $0.id == connection.id } } ?? true
         let connector = ForgeConnector(
+            recorded: { try index.loadSettingAside() },
             probe: { try await ForgeActivityFeed.probe($0, token: $1) },
             saveToken: { try ForgeTokenStore.save($0, connection: $1) },
             deleteToken: { try ForgeTokenStore.delete(connection: $0) },
             remember: { try index.remember($0) })
-        let outcome = await connector.connect(connection, token: token, replacing: known)
+        let outcome = await connector.connect(connection, token: token)
         guard case .connected = outcome else { return outcome }
         await rebuildForgeMonitor()
         await reemit()
