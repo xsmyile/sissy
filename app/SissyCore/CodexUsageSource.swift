@@ -63,6 +63,12 @@ actor CodexUsageSource: SourceSignals {
     private var firstRequest: Task<Duration, Never>?
     private var generation = 0
     private var lastReported: String?
+    /// The access token a renewal handed over that OpenAI refused as well.
+    /// The next poll reads that same token back from the keychain, and
+    /// renewing it on every refusal rotated the grant once a poll for as long
+    /// as the vendor kept refusing; a different token, from a relink or the
+    /// CLI, is renewed as any other.
+    private var refusedAfterRenewal: String?
 
     init(
         account: String? = nil,
@@ -246,7 +252,9 @@ actor CodexUsageSource: SourceSignals {
             return try await read(with: credential, generation: stamp)
         } catch {
             guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-            guard Self.isRefusal(error), let renewRefused else { return await handle(error) }
+            guard Self.isRefusal(error), let renewRefused,
+                credential.accessToken != refusedAfterRenewal
+            else { return await handle(error) }
             return await renewAndReadAgain(
                 refused: credential, renewing: renewRefused, generation: stamp)
         }
@@ -267,7 +275,9 @@ actor CodexUsageSource: SourceSignals {
 
     /// One renewal and one read, and never a second of either: a renewed
     /// token OpenAI refuses too is a link that has ended, and renewing again
-    /// would spend the grant on every poll.
+    /// would spend the grant on every poll. That token is remembered as
+    /// `refusedAfterRenewal`, so a later poll reading it back does not renew
+    /// it either.
     ///
     /// A renewal that could not reach an answer keeps the row as it was.
     /// It says nothing about the grant, and the next poll asks again once the
@@ -285,6 +295,7 @@ actor CodexUsageSource: SourceSignals {
                 return try await read(with: renewed, generation: stamp)
             } catch {
                 guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+                if Self.isRefusal(error) { refusedAfterRenewal = renewed.accessToken }
                 return await handle(error)
             }
         case .expired:
