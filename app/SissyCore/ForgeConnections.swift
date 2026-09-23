@@ -211,11 +211,15 @@ struct ForgeConnectionIndex: Sendable {
         var connections: [ForgeConnection] = []
     }
 
-    /// Why the index would not answer.
+    /// Why the index would not answer. `reason` is the error's domain and
+    /// code and never the file's bytes.
     enum LoadError: Error, Equatable {
-        /// The file is there and does not decode, or cannot be read. `reason`
-        /// is the error's domain and code and never the file's bytes.
+        /// The file is there and the read itself failed, which says nothing
+        /// about what is in it.
         case unreadable(reason: String)
+        /// The file read and does not decode, which is the one case its
+        /// contents are known to be bad.
+        case undecodable(reason: String)
     }
 
     /// Every connection, in a stable order so two reads agree and the panel's
@@ -242,35 +246,39 @@ struct ForgeConnectionIndex: Sendable {
             return try JSONDecoder().decode(Contents.self, from: data).connections
                 .sorted { $0.id < $1.id }
         } catch {
-            throw LoadError.unreadable(reason: "\(data.count) bytes, \(Self.reason(error))")
+            throw LoadError.undecodable(reason: "\(data.count) bytes, \(Self.reason(error))")
         }
     }
 
-    /// Every connection, with an index that will not read moved out of the
+    /// Every connection, with an index that does not decode moved out of the
     /// way first.
     ///
     /// Moved rather than deleted: it is the only list of which tokens belong
     /// to which host, and a person can still read it. Once it is aside the
     /// tokens it named surface in Settings as tokens without a connection, and
     /// a new connection starts a fresh file instead of writing over the old
-    /// one. Throws only when the file would not read and could not be moved,
-    /// which is the one answer under which nothing may be written.
+    /// one. **Only a file that read and did not decode is moved**: one whose
+    /// read failed may be a sound index behind a lock or a permission, and
+    /// moving it would offer every token it names for removal. That, and a
+    /// file that could not be moved, throw, which is the answer under which
+    /// nothing may be written.
     func loadSettingAside(now: Date = Date()) throws -> [ForgeConnection] {
         do {
             return try load()
-        } catch let unreadable {
+        } catch let unreadable as LoadError {
+            guard case .undecodable = unreadable else { throw unreadable }
             let aside = url.deletingLastPathComponent()
                 .appendingPathComponent("\(Self.setAsidePrefix)\(Int(now.timeIntervalSince1970)).json")
             do {
                 try FileManager.default.moveItem(at: url, to: aside)
             } catch {
                 sissyLog(
-                    "sissy: the forge connection index would not read (\(unreadable)) and could "
+                    "sissy: the forge connection index would not decode (\(unreadable)) and could "
                         + "not be moved (\(Self.reason(error)))")
                 throw unreadable
             }
             sissyLog(
-                "sissy: the forge connection index would not read (\(unreadable)); kept it as "
+                "sissy: the forge connection index would not decode (\(unreadable)); kept it as "
                     + aside.lastPathComponent)
             return []
         }
