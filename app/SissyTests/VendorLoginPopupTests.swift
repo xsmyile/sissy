@@ -1,3 +1,4 @@
+import WebKit
 import XCTest
 
 @testable import Sissy
@@ -46,5 +47,44 @@ final class VendorLoginPopupTests: XCTestCase {
     /// after opening it, which needs the window to exist.
     func testABlankPopupCannotBeFollowed() {
         XCTAssertEqual(route("about:blank", linkActivated: false), .cannotFollow)
+    }
+
+    /// A popup loaded in place has no opener to hand its result to, and
+    /// WebKit ignores its `close()` on a web view Sissy opened and a redirect
+    /// chain has since walked, so the watch is what hears it.
+    func testAPageThatClosesItselfWithNoOpenerIsHeard() async {
+        let heard = expectation(description: "the orphaned close is reported")
+        let recorder = OrphanedCloseRecorder { heard.fulfill() }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let contentController = configuration.userContentController
+        VendorLoginWindow.watchOrphanedClose(in: contentController, handler: recorder)
+        let web = WKWebView(frame: .zero, configuration: configuration)
+        let page = Self.selfClosingPage
+        web.loadHTMLString(page, baseURL: nil)
+
+        await fulfillment(of: [heard], timeout: Self.pageTimeout)
+
+        VendorLoginWindow.stopWatchingOrphanedClose(in: contentController)
+    }
+
+    private static let selfClosingPage = "<html><body><script>window.close()</script></body></html>"
+    private static let pageTimeout: TimeInterval = 10
+}
+
+/// Hears the login window's orphaned-close message and nothing else.
+@MainActor
+private final class OrphanedCloseRecorder: NSObject, WKScriptMessageHandler {
+    private let onClose: () -> Void
+
+    init(onClose: @escaping () -> Void) {
+        self.onClose = onClose
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+    ) {
+        guard message.name == VendorLoginWindow.orphanedCloseMessage else { return }
+        onClose()
     }
 }
