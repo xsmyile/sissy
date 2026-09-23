@@ -748,11 +748,13 @@ final class ForgeActivityTests: XCTestCase {
 
     private static let graphQLEndpoint = "https://gitlab.example.com/api/graphql"
 
-    private func answer(_ status: Int, from url: String) throws -> HTTPURLResponse {
+    private func answer(
+        _ status: Int, from url: String, headers: [String: String] = [:]
+    ) throws -> HTTPURLResponse {
         try XCTUnwrap(
             HTTPURLResponse(
                 url: XCTUnwrap(URL(string: url)), statusCode: status, httpVersion: nil,
-                headerFields: [:]))
+                headerFields: headers))
     }
 
     /// A refusal from the host the request was addressed to is the token.
@@ -772,6 +774,24 @@ final class ForgeActivityTests: XCTestCase {
             addressedTo: URL(string: Self.graphQLEndpoint))
         XCTAssertEqual(failure, .redirected)
         XCTAssertFalse(ForgeReadFailure.redirected.needsTheUser)
+    }
+
+    /// A throttling header from the host a redirect reached is that host's
+    /// quota, not the forge's, so it is a redirect before it is a slow-down.
+    func testARetryDeadlineFromTheHostARedirectReachedIsNotTheForgesLimit() throws {
+        let failure = ForgeActivityFeed.failure(
+            of: try answer(403, from: "https://sso.example.net/login", headers: ["Retry-After": "60"]),
+            addressedTo: URL(string: Self.graphQLEndpoint))
+        XCTAssertEqual(failure, .redirected)
+    }
+
+    /// The same deadline from the forge itself is the forge asking for less
+    /// traffic.
+    func testARetryDeadlineFromTheForgeItselfIsARateLimit() throws {
+        let failure = ForgeActivityFeed.failure(
+            of: try answer(403, from: Self.graphQLEndpoint, headers: ["Retry-After": "60"]),
+            addressedTo: URL(string: Self.graphQLEndpoint))
+        XCTAssertEqual(failure, .rateLimited)
     }
 
     /// A redirect `SissyHTTP` refused to follow reaches the feed as the 3xx

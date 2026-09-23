@@ -248,8 +248,10 @@ enum ForgeActivityFeed {
     /// A refusal is the token's only when the host the request was addressed
     /// to gave it: past a redirect off that origin the token was never sent,
     /// and a redirect the session would not follow comes back as the `3xx`
-    /// itself. Both are `redirected`. Internal so a test can hold it against a
-    /// constructed reply.
+    /// itself. Both are `redirected`, and the origin is read before the
+    /// throttling headers: a deadline another host sent is that host's quota,
+    /// not the forge's. Internal so a test can hold it against a constructed
+    /// reply.
     static func failure(of response: HTTPURLResponse, addressedTo url: URL?) -> ForgeReadFailure? {
         switch response.statusCode {
         case 200:
@@ -257,8 +259,8 @@ enum ForgeActivityFeed {
         case 300..<400:
             return .redirected
         case 401, 403:
-            if askedToSlowDown(response) { return .rateLimited }
-            return SissyHTTP.sameOrigin(url, response.url) ? .unauthorized : .redirected
+            guard SissyHTTP.sameOrigin(url, response.url) else { return .redirected }
+            return askedToSlowDown(response) ? .rateLimited : .unauthorized
         case 429:
             return .rateLimited
         default:
