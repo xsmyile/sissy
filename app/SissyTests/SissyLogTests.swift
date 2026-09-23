@@ -69,6 +69,16 @@ final class SissyLogTests: XCTestCase {
         XCTAssertEqual(try contents(), "kept\n")
     }
 
+    func testAWriteThatFailsPartWayLeavesNoFragmentBehind() throws {
+        let opens = OpenSequence(first: try PartialWriteHandle(url: logURL))
+        let log = SissyLogFile(directory: directory, open: opens.next)
+
+        log.write(Data("lost\n".utf8))
+        log.write(Data("kept\n".utf8))
+
+        XCTAssertEqual(try contents(), "kept\n")
+    }
+
     func testAWrittenLineLandsAndCountsNoFailure() throws {
         let log = SissyLogFile(directory: directory)
 
@@ -103,13 +113,13 @@ final class SissyLogTests: XCTestCase {
 /// An opener that hands out one given handle first and the real file after.
 private final class OpenSequence: @unchecked Sendable {
     private let lock = NSLock()
-    private var first: FileHandle?
+    private var first: (any SissyLogHandle)?
 
-    init(first: FileHandle) {
+    init(first: any SissyLogHandle) {
         self.first = first
     }
 
-    func next(_ url: URL) throws -> FileHandle {
+    func next(_ url: URL) throws -> any SissyLogHandle {
         lock.lock()
         defer { lock.unlock() }
         if let handle = first {
@@ -117,5 +127,32 @@ private final class OpenSequence: @unchecked Sendable {
             return handle
         }
         return try SissyLogFile.openForAppending(url)
+    }
+}
+
+/// A handle that writes the first half of a line to the real file and then
+/// fails, the way a disk that fills mid-line does.
+private final class PartialWriteHandle: SissyLogHandle, @unchecked Sendable {
+    private let file: FileHandle
+
+    init(url: URL) throws {
+        file = try SissyLogFile.openForAppending(url)
+    }
+
+    func append(_ data: Data) throws {
+        try file.write(contentsOf: data.prefix(data.count / 2))
+        throw CocoaError(.fileWriteOutOfSpace)
+    }
+
+    func offset() throws -> UInt64 {
+        try file.offset()
+    }
+
+    func truncate(atOffset offset: UInt64) throws {
+        try file.truncate(atOffset: offset)
+    }
+
+    func close() throws {
+        try file.close()
     }
 }

@@ -63,8 +63,10 @@ final class SissyLogFile: @unchecked Sendable {
     /// a reader has to reassemble.
     ///
     /// A failed write is counted and dropped, and so is the handle, so the
-    /// next line opens the file again. It is never logged: the log is the
-    /// thing that just failed, and `sissyLog` from here would recurse.
+    /// next line opens the file again. What part of the line did reach the
+    /// disk is truncated away first, or the next line would be appended to
+    /// the fragment. It is never logged: the log is the thing that just
+    /// failed, and `sissyLog` from here would recurse.
     func write(_ data: Data) {
         lock.lock()
         defer { lock.unlock() }
@@ -80,11 +82,13 @@ final class SissyLogFile: @unchecked Sendable {
             }
             handle = fresh
         }
+        let start = written
         do {
             try handle.append(data)
             written += UInt64(data.count)
         } catch {
             failed += 1
+            try? handle.truncate(atOffset: start)
             try? handle.close()
             self.handle = nil
         }
