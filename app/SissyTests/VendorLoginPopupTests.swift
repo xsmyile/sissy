@@ -68,8 +68,57 @@ final class VendorLoginPopupTests: XCTestCase {
         VendorLoginWindow.stopWatchingOrphanedClose(in: contentController)
     }
 
+    /// A popup's completion writes to its opener before it closes. With no
+    /// opener that write throws and the close never runs, so the opener the
+    /// popup watch stands in is what reports, and the close after it adds
+    /// nothing. The sentinel is a later script of the same page, posted after
+    /// both, so a second report would have arrived before it.
+    func testAPopupThatPostsToAMissingOpenerIsHeardOnce() async {
+        let heard = expectation(description: "the orphaned completion is reported")
+        let pageDone = expectation(description: "the page ran to its last script")
+        let recorder = OrphanedCloseRecorder { heard.fulfill() }
+        let sentinel = PageDoneRecorder { pageDone.fulfill() }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let contentController = configuration.userContentController
+        VendorLoginWindow.watchOrphanedClose(in: contentController, handler: recorder)
+        VendorLoginWindow.watchOpenerlessPopup(in: contentController)
+        contentController.add(sentinel, name: PageDoneRecorder.message)
+        let web = WKWebView(frame: .zero, configuration: configuration)
+        web.loadHTMLString(Self.openerCompletionPage, baseURL: nil)
+
+        await fulfillment(of: [heard, pageDone], timeout: Self.pageTimeout, enforceOrder: true)
+
+        contentController.removeScriptMessageHandler(forName: PageDoneRecorder.message)
+        VendorLoginWindow.stopWatchingOrphanedClose(in: contentController)
+    }
+
     private static let selfClosingPage = "<html><body><script>window.close()</script></body></html>"
+    private static let openerCompletionPage = """
+        <html><body>
+        <script>window.opener.postMessage({ code: "x" }, "*"); window.close();</script>
+        <script>window.webkit.messageHandlers.\(PageDoneRecorder.message).postMessage(null);</script>
+        </body></html>
+        """
     private static let pageTimeout: TimeInterval = 10
+}
+
+/// Hears the test page's own last script, which says the page has finished.
+@MainActor
+private final class PageDoneRecorder: NSObject, WKScriptMessageHandler {
+    static let message = "sissyTestPageDone"
+    private let onDone: () -> Void
+
+    init(onDone: @escaping () -> Void) {
+        self.onDone = onDone
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+    ) {
+        guard message.name == Self.message else { return }
+        onDone()
+    }
 }
 
 /// Hears the login window's orphaned-close message and nothing else.
