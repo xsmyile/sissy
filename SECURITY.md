@@ -81,7 +81,9 @@ development copy never reads or overwrites what the released app holds.
 **Nothing on the wire is kept.** Every request goes through one ephemeral
 session with no HTTP cache, cookie jar or credential store. A redirect to
 another origin drops its credential headers, and one that would resend a
-request body there is not followed. At each launch Sissy deletes the
+request body there is not followed. A refusal from that other origin is
+reported as a failed request and never as the vendor refusing the credential,
+so it signs nothing out. At each launch Sissy deletes the
 `Cache.db`, `fsCachedData` and `HTTPStorages` cookie files that versions up to
 0.2.3 left under `~/Library` for both bundle ids, and logs any of those
 directories it could not list.
