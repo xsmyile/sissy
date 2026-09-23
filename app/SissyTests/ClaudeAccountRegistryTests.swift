@@ -956,6 +956,36 @@ final class ClaudeAccountRegistryTests: XCTestCase {
 
     // MARK: Reentrancy
 
+    /// The poll's capture is one at a time: a second one that arrives while
+    /// the first waits on the vendor does not identify the same token again
+    /// behind it.
+    func testCapturesDoNotStackBehindOneInFlight() async {
+        let vault = Vault()
+        vault.active = credential("tok-a")
+        let entered = expectation(description: "the first capture is identifying")
+        let gate = Latch()
+        let calls = LockedValue(0)
+        let registry = makeRegistry(vault) { token in
+            calls.update { $0 += 1 }
+            if calls.load() == 1 {
+                entered.fulfill()
+                await gate.wait()
+            }
+            return Self.byToken(token)
+        }
+
+        let first = Task { await registry.captureActive() }
+        await fulfillment(of: [entered], timeout: 5)
+        let second = await registry.captureActive()
+        gate.open()
+        let moved = await first.value
+
+        XCTAssertFalse(second)
+        XCTAssertTrue(moved)
+        XCTAssertEqual(calls.load(), 1)
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-tok-a")
+    }
+
     /// A poll suspended on identifying a rotation must not put the badge back
     /// on the account a switch made while it was away has just left.
     func testACaptureResumingAfterASwitchDoesNotUndoIt() async {
