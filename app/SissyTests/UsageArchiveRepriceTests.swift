@@ -33,6 +33,16 @@ final class UsageArchiveRepriceTests: XCTestCase {
     private static let catalog = PriceCatalog(
         fetchedAt: Date(), anthropic: [newModel: rates], openai: [:])
 
+    private static let newCodexModel = "gpt-lab-9"
+    private static let codexCatalog = PriceCatalog(
+        fetchedAt: Date(), anthropic: [:], openai: [newCodexModel: rates])
+    /// A Codex turn as the adapter archives it: `input_tokens` net of the
+    /// cached part, which is billed on its own channel, and no cache writes.
+    private static let codexTurn = UsageHistoryTotals(
+        inputTokens: 9000, outputTokens: 2000, cacheReadTokens: 1000)
+    /// That turn at `rates`: 9000 × 3 + 2000 × 15 + 1000 × 0.3, per million.
+    private static let codexTurnCost = Decimal(string: "0.0573")!
+
     /// The pricing-oracle fixture's first turn, the one that carries every
     /// counter a cost is made of: fresh input, output, cache reads, and cache
     /// writes split between the 5-minute and the 1-hour tier.
@@ -53,10 +63,10 @@ final class UsageArchiveRepriceTests: XCTestCase {
 
     private func archive(
         _ totals: UsageHistoryTotals, model: String = UsageArchiveRepriceTests.newModel,
-        effort: Bool = false
+        provider: String = ProviderID.claudeCode, effort: Bool = false
     ) throws {
         let day = UsageHistoryDay(
-            day: try pastDay, provider: ProviderID.claudeCode, updatedAt: Date(),
+            day: try pastDay, provider: provider, updatedAt: Date(),
             totals: [UsageHistoryRow(model: model, project: nil): totals],
             effort: effort
                 ? [EffortKey(model: model, effort: "high"): EffortTotals(turns: 1, totals: totals)]
@@ -64,9 +74,8 @@ final class UsageArchiveRepriceTests: XCTestCase {
         try UsageHistoryStore.save(day, in: stateDir)
     }
 
-    private func archived() throws -> UsageHistoryDay {
-        try XCTUnwrap(
-            UsageHistoryStore.load(provider: ProviderID.claudeCode, day: try pastDay, in: stateDir))
+    private func archived(provider: String = ProviderID.claudeCode) throws -> UsageHistoryDay {
+        try XCTUnwrap(UsageHistoryStore.load(provider: provider, day: try pastDay, in: stateDir))
     }
 
     /// A profile file of the test's own, so nothing reads the real
@@ -83,6 +92,16 @@ final class UsageArchiveRepriceTests: XCTestCase {
             persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
             historyRoot: stateDir,
             profile: profile
+        )
+    }
+
+    private func codexTail() -> LocalUsageProvider {
+        LocalUsageProvider.codex(
+            codexDir: logDir,
+            retainDays: 2,
+            pollInterval: .seconds(60),
+            persistenceURL: UsageStatePersistence.forProvider(ProviderID.codex, in: stateDir),
+            historyRoot: stateDir
         )
     }
 
@@ -174,5 +193,46 @@ final class UsageArchiveRepriceTests: XCTestCase {
                 provider: ProviderID.claudeCode,
                 day: UsageReaderShared.dayFormatter.string(from: Date()), in: stateDir))
         XCTAssertEqual(today.totals(forModel: Self.newModel).cost, Self.oracleTurnCost)
+    }
+
+    /// Codex prices through its own table, with no cache-write tiers, so its
+    /// archived days are repriced by that arithmetic and not by Claude's.
+    func testAnArchivedCodexDayIsPricedByTheCodexArithmetic() async throws {
+        try archive(Self.codexTurn, model: Self.newCodexModel, provider: ProviderID.codex)
+
+        await codexTail().applyPriceCatalog(Self.codexCatalog)
+
+        XCTAssertEqual(
+            try archived(provider: ProviderID.codex).totals(forModel: Self.newCodexModel).cost,
+            Self.codexTurnCost)
+    }
+
+    /// The same Codex turn written as a rollout's `token_count` and priced at
+    /// ingest, which pins the figure above to the live path's.
+    func testTheCodexTurnCostsTheSameWhenIngestedLive() async throws {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let now = iso.string(from: Date())
+        let lines = [
+            #"{"type":"session_meta","timestamp":"\#(now)","payload":{"id":"s1"}}"#,
+            #"{"type":"turn_context","timestamp":"\#(now)","payload":{"model":"\#(Self.newCodexModel)"}}"#,
+            #"{"type":"event_msg","timestamp":"\#(now)","payload":{"type":"token_count","info":{"#
+                + #""last_token_usage":{"input_tokens":10000,"cached_input_tokens":1000,"#
+                + #""output_tokens":2000,"total_tokens":12000},"#
+                + #""total_token_usage":{"input_tokens":10000,"cached_input_tokens":1000,"#
+                + #""output_tokens":2000,"total_tokens":12000}}}}"#,
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(
+            to: logDir.appendingPathComponent("rollout.jsonl"), atomically: true, encoding: .utf8)
+        let live = codexTail()
+        await live.applyPriceCatalog(Self.codexCatalog)
+        await live.start { _ in }
+        await live.stop()
+
+        let today = try XCTUnwrap(
+            UsageHistoryStore.load(
+                provider: ProviderID.codex,
+                day: UsageReaderShared.dayFormatter.string(from: Date()), in: stateDir))
+        XCTAssertEqual(today.totals(forModel: Self.newCodexModel).cost, Self.codexTurnCost)
     }
 }
