@@ -336,6 +336,26 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertEqual(reads.load(), 1)
     }
 
+    /// A reader retired while a relink is suspended stays retired: the
+    /// relink resuming after that must not give it a poll loop nothing holds.
+    func testARelinkThatOutlivesItsRetirementReadsNothing() async {
+        let reads = LockedValue(0)
+        let holder = LockedValue<ClaudeWebSource?>(nil)
+        let source = ClaudeWebSource(
+            account: "a1b2c3d4",
+            sessionSource: { _ in Self.found(Self.session) },
+            fetchSource: { _, _ in
+                reads.update { $0 += 1 }
+                return ClaudeWebSource.Reading(organization: "org", windows: [], credits: nil)
+            },
+            backoff: LimitsBackoffSlot(
+                deadline: { nil },
+                record: { _ in await holder.load()?.retire() }))
+        holder.store(source)
+        await source.relink(organization: "team") {}
+        XCTAssertEqual(reads.load(), 0)
+    }
+
     /// Records what each call was handed, so a test can assert on the
     /// sequence rather than on a duration.
     private actor Sent {

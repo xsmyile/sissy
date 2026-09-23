@@ -203,7 +203,12 @@ actor ClaudeWebSource: SourceSignals {
     /// Deliberately not `stop()` first: that drops the published windows, and
     /// a refresh that blanks the gauges it is trying to restore reads as a
     /// failure for as long as the request takes.
+    ///
+    /// A retired reader reads nothing, whoever asks: `relink` suspends before
+    /// it refreshes, and a `retire()` landing there would otherwise be undone
+    /// by the refresh it resumes into.
     func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
+        guard !retired else { return }
         cached = nil
         if case .rateLimited(let until) = published.load().limitsState, until > Date() { return }
         cancelRequests()
