@@ -154,7 +154,7 @@ enum ClaudeAccountProfile {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await SissyHTTP.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw Failure.malformedPayload }
         guard http.statusCode == 200 else { throw Failure.badStatus(http.statusCode) }
         guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {

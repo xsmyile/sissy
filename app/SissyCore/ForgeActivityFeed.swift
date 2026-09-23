@@ -234,7 +234,7 @@ enum ForgeActivityFeed {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await SissyHTTP.data(for: request)
         } catch {
             throw ForgeReadFailure.unreachable
         }
@@ -265,7 +265,7 @@ enum ForgeActivityFeed {
     /// ordinary.
     ///
     /// Internal so a test can hold the distinction against a constructed reply,
-    /// which is the only seam there is: `send` goes straight to `URLSession`.
+    /// which is the only seam there is: `send` goes straight to `SissyHTTP`.
     static func askedToSlowDown(_ response: HTTPURLResponse) -> Bool {
         if response.value(forHTTPHeaderField: retryAfterHeader) != nil { return true }
         guard let remaining = response.value(forHTTPHeaderField: remainingHeader) else {

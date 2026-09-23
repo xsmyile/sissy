@@ -67,7 +67,7 @@ enum CodexAccountLinking {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await SissyHTTP.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw UsageRequestError.malformedPayload
         }

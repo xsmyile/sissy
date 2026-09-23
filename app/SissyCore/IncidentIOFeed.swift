@@ -27,7 +27,7 @@ enum IncidentIOFeed {
         var request = URLRequest(url: url, timeoutInterval: StatuspageFeed.requestTimeout)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await SissyHTTP.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw ProviderStatusError.malformedPayload
         }

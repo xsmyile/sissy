@@ -334,7 +334,7 @@ enum PriceCatalogSource {
         // The whole point of the refresh is freshness; a URLCache hit would hand
         // back the copy we already have on disk.
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await SissyHTTP.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw PriceCatalogError.badStatus(http.statusCode)
         }
