@@ -139,24 +139,38 @@ final class VendorLoginWindow: NSObject {
     /// to hand its result to.
     nonisolated static let orphanedCloseMessage = "sissyOrphanedClose"
 
-    /// Wraps `window.close` so a page with no opener says so before closing.
+    /// Wraps `window.close` so a page with no opener says so before closing,
+    /// once per document.
     ///
     /// A popup loaded in place posts its result to `window.opener` and then
     /// closes itself. WebKit honours that close only on a window a script
     /// opened or one with a single history entry, and this web view is
     /// neither by the time a popup reaches it, so `webViewDidClose` alone
     /// would leave the user on a page that stopped without a word.
-    nonisolated private static let orphanedCloseScript = """
+    ///
+    /// With `stubbingOpener`, a page with no opener is given one whose
+    /// `postMessage` reports instead. A popup's completion writes to the
+    /// opener before it closes, and on a null opener that write throws, so
+    /// the close it was on its way to never runs.
+    nonisolated private static func orphanedCloseScript(stubbingOpener: Bool) -> String {
+        """
         (() => {
+            let reported = false;
+            const report = () => {
+                if (reported) { return; }
+                reported = true;
+                window.webkit.messageHandlers.\(orphanedCloseMessage).postMessage(null);
+            };
+            const stub = Object.freeze({ postMessage: report });
+            if (\(stubbingOpener) && window.opener === null) { window.opener = stub; }
             const close = window.close.bind(window);
             window.close = function () {
-                if (window.opener === null) {
-                    window.webkit.messageHandlers.\(orphanedCloseMessage).postMessage(null);
-                }
+                if (window.opener === null || window.opener === stub) { report(); }
                 return close();
             };
         })();
         """
+    }
 
     /// WebKit's code for a load it abandoned because the navigation delegate
     /// cancelled it, which is every redirect this window takes a code from.
@@ -382,11 +396,22 @@ final class VendorLoginWindow: NSObject {
     static func watchOrphanedClose(
         in contentController: WKUserContentController, handler: WKScriptMessageHandler
     ) {
-        contentController.addUserScript(
-            WKUserScript(
-                source: orphanedCloseScript, injectionTime: .atDocumentStart,
-                forMainFrameOnly: true))
+        contentController.addUserScript(orphanedCloseUserScript(stubbingOpener: false))
         contentController.add(handler, name: orphanedCloseMessage)
+    }
+
+    /// Widens the watch `watchOrphanedClose(in:handler:)` installed to a
+    /// popup loaded in place, whose completion reaches for an opener first.
+    /// Applies from the next document the web view loads.
+    static func watchOpenerlessPopup(in contentController: WKUserContentController) {
+        contentController.removeAllUserScripts()
+        contentController.addUserScript(orphanedCloseUserScript(stubbingOpener: true))
+    }
+
+    private static func orphanedCloseUserScript(stubbingOpener: Bool) -> WKUserScript {
+        WKUserScript(
+            source: orphanedCloseScript(stubbingOpener: stubbingOpener),
+            injectionTime: .atDocumentStart, forMainFrameOnly: true)
     }
 
     /// Takes down what `watchOrphanedClose(in:handler:)` installed.
@@ -490,6 +515,7 @@ extension VendorLoginWindow: WKUIDelegate {
         case .load:
             sissyLog("sissy: the \(vendor.logName) login opened a popup, loaded in place")
             popupLoadedInPlace = true
+            Self.watchOpenerlessPopup(in: webView.configuration.userContentController)
             webView.load(navigationAction.request)
         case .openInBrowser(let url):
             NSWorkspace.shared.open(url)
