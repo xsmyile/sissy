@@ -24,12 +24,18 @@ struct ProviderPricing: Sendable {
     /// prices at.
     static let seed = Self(override: [:], catalog: nil)
 
+    /// Nil for a provider id this has no vendor table for, rather than the
+    /// Anthropic one: a third provider's models priced at Claude's rates would
+    /// be a saving nobody was charged against, where nil is the saving of zero
+    /// every unpriced model already reads.
     func price(provider: String, model: String) -> ModelPricing? {
         switch provider {
+        case ProviderID.claudeCode:
+            Pricing.price(for: model, override: override, catalog: anthropic)
         case ProviderID.codex:
             OpenAIPricing.price(for: model, override: override, catalog: openai)
         default:
-            Pricing.price(for: model, override: override, catalog: anthropic)
+            nil
         }
     }
 
