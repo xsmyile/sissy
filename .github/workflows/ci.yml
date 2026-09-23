@@ -65,6 +65,23 @@ jobs:
             | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
           "$DD/sissy-cli" --self-test
 
+      # The configuration that ships: its own bundle id, and with it the
+      # release paths and keychain namespace, and whole-module optimisation.
+      # Debug alone never compiles the binary a user runs.
+      - name: Build the CLI (Release)
+        run: |
+          set -o pipefail
+          xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
+            -configuration Release build CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: CLI self-test (Release)
+        run: |
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
+            -configuration Release -showBuildSettings 2>/dev/null \
+            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
+          "$DD/sissy-cli" --self-test
+
       - name: Codex parser smoke (--scan against fixture)
         timeout-minutes: 3
         run: |
@@ -103,6 +120,13 @@ jobs:
           set -o pipefail
           xcodebuild -project Sissy.xcodeproj -scheme Sissy \
             -configuration Debug build CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Build app (Release)
+        run: |
+          set -o pipefail
+          xcodebuild -project Sissy.xcodeproj -scheme Sissy \
+            -configuration Release build CODE_SIGNING_ALLOWED=NO \
             | xcbeautify --renderer github-actions
 
       - name: Unit tests

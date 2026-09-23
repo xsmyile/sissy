@@ -128,6 +128,25 @@ jobs:
             | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
           "$DD/sissy-cli" --self-test
 
+      # The Release build of the app is the artifact itself, further down;
+      # the CLI is built Release here so the configuration that ships runs
+      # the self-test too, not only the Debug one.
+      - name: Build the CLI (Release)
+        working-directory: app
+        run: |
+          set -o pipefail
+          xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
+            -configuration Release build CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: CLI self-test (Release)
+        working-directory: app
+        run: |
+          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
+            -configuration Release -showBuildSettings 2>/dev/null \
+            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
+          "$DD/sissy-cli" --self-test
+
       - name: Codex parser smoke (--scan against fixture)
         working-directory: app
         timeout-minutes: 3
