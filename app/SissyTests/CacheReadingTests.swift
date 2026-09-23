@@ -45,6 +45,14 @@ final class CacheReadingTests: XCTestCase {
             Decimal(string: "1.125"))
     }
 
+    /// A provider id with no vendor table of its own is not priced at
+    /// Anthropic's, even for a model name that table carries.
+    func testAnUnknownProviderSavesNothing() {
+        XCTAssertEqual(
+            pricing.cacheSaving(provider: "unknown-cli", model: Self.model, cacheReadTokens: 1_000_000),
+            0)
+    }
+
     /// The reader billed an unpriced model at $0, so the cache saved it $0
     /// too; anything else would be a saving on money nobody was charged.
     func testAModelNoSourcePricesSavesNothing() {
