@@ -242,7 +242,10 @@ self-test, and what Sissy will and will not take.
 
 ## Credits
 
-Nothing third-party links into Sissy. Its reading of the Claude Code and Codex
+One third-party project ships inside Sissy:
+[Sparkle](https://github.com/sparkle-project/Sparkle), which installs its
+updates; [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) carries its licence.
+Sissy's reading of the Claude Code and Codex
 log formats, and its pricing, follow
 [`ccusage`](https://github.com/ccusage/ccusage); the rates come from
 [LiteLLM](https://github.com/BerriAI/litellm). [CREDITS.md](CREDITS.md) says it

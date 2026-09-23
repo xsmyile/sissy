@@ -10,13 +10,17 @@ final class AboutTests: XCTestCase {
         )
     }
 
-    /// The acknowledgements sheet used to render a bundled copy of the
-    /// licence text, because SwiftNIO shipped inside the app. Nothing
-    /// third-party ships now, so nothing should be bundled for it either —
-    /// a stray copy would be a file claiming an obligation Sissy no longer
-    /// has.
-    func testNoLicenceTextIsBundled() {
-        XCTAssertNil(Bundle.main.url(forResource: "THIRD-PARTY-NOTICES", withExtension: "md"))
+    /// Sparkle ships inside the app, and the BSD terms among its licences ask
+    /// for the notice to travel with the binary, so the sheet renders a
+    /// bundled copy rather than a link. `CREDITS.md` credits what Sissy reads
+    /// and is not an obligation, so it stays out of the bundle.
+    func testSparkleNoticeShipsAsAnAppResource() throws {
+        let text = try XCTUnwrap(
+            ThirdPartyNotices.text(),
+            "THIRD-PARTY-NOTICES.md is missing from the app bundle. Re-run xcodegen generate."
+        )
+        XCTAssertTrue(text.contains("Andy Matuschak"), "Expected Sparkle's copyright to be reproduced")
+        XCTAssertTrue(text.contains("EXTERNAL LICENSES"), "Expected Sparkle's external licences too")
         XCTAssertNil(Bundle.main.url(forResource: "CREDITS", withExtension: "md"))
     }
 }

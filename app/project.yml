@@ -7,6 +7,14 @@ options:
   createIntermediateGroups: true
   groupSortPosition: top
 
+packages:
+  # In-app updates. Pinned exactly: the package is a binary target with a
+  # checksum, so the version is also the lock, and the generated project that
+  # would hold Package.resolved is not tracked.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
+
 settings:
   base:
     DEVELOPMENT_TEAM: AS75YRKL95
@@ -57,7 +65,18 @@ targets:
           copyFiles:
             destination: wrapper
             subpath: Contents/Library/LaunchAgents
-    dependencies: []
+      # Sparkle's licence carries BSD terms, which ask for the notice to
+      # travel with the binary; the Acknowledgements sheet renders it.
+      - path: ../THIRD-PARTY-NOTICES.md
+        buildPhase: resources
+    dependencies:
+      - package: Sparkle
+    postBuildScripts:
+      # Sparkle's XPC services exist for sandboxed hosts, and Sissy is not
+      # one. Archive only, which is the build a release exports.
+      - name: Strip Sparkle XPC services
+        path: ../scripts/strip-sparkle-xpc.sh
+        basedOnDependencyAnalysis: false
     info:
       path: Sissy/Info.plist
       properties:

@@ -1,13 +1,34 @@
 import AppKit
 import SwiftUI
 
-/// About's "Acknowledgements" sheet: what Sissy owes whom.
+/// The bundled copy of the repository's `THIRD-PARTY-NOTICES.md`.
 ///
-/// It used to carry the licence text too, because SwiftNIO shipped compiled
-/// into the binary and Apache-2.0 asks its NOTICE to travel with it.
-/// No third-party code ships in Sissy any more, so there is nothing left to
-/// reproduce — only the projects Sissy reads from, which are owed a credit
-/// whether or not a licence demands one.
+/// It ships as an app resource, not only as a file on GitHub, because Sparkle
+/// is embedded in the app and the BSD terms among its licences ask for the
+/// notice to travel with the binary. A missing resource is a packaging mistake
+/// rather than a runtime condition, so the sheet falls back to the GitHub copy
+/// and `AboutTests` guards the bundling.
+enum ThirdPartyNotices {
+    static let resourceName = "THIRD-PARTY-NOTICES"
+    static let resourceExtension = "md"
+
+    static func text(in bundle: Bundle = .main) -> String? {
+        guard
+            let url = bundle.url(forResource: resourceName, withExtension: resourceExtension),
+            let data = try? Data(contentsOf: url)
+        else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
+/// About's "Acknowledgements" sheet: what Sissy owes whom, then the licence
+/// text of the one thing it embeds. The credits are the short answer and the
+/// notices the long one, which is why the sheet leads with the first and
+/// scrolls the second.
+///
+/// The list mixes the two kinds on purpose: Sparkle ships inside Sissy, the
+/// rest are projects Sissy reads from, and each is owed a credit whether or
+/// not a licence demands one.
 struct AcknowledgementsView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -20,6 +41,11 @@ struct AcknowledgementsView: View {
     }
 
     private static let credits: [Credit] = [
+        Credit(
+            name: "Sparkle",
+            detail: "Checks for, downloads and installs Sissy's updates. Ships inside Sissy under MIT.",
+            url: URL(string: "https://github.com/sparkle-project/Sparkle")!
+        ),
         Credit(
             name: "ccusage",
             detail:
@@ -55,14 +81,23 @@ struct AcknowledgementsView: View {
     private static let creditsURL = URL(
         string: "https://github.com/xsmyile/sissy/blob/master/CREDITS.md")!
 
+    private static let noticesURL = URL(
+        string: "https://github.com/xsmyile/sissy/blob/master/THIRD-PARTY-NOTICES.md")!
+
+    /// Read once per process rather than per body evaluation: the file is a
+    /// fixed app resource that cannot change while the app runs.
+    private static let notices: String? = ThirdPartyNotices.text()
+
     private static let sheetWidth: CGFloat = 520
-    /// Shorter than it was: the licence text it used to scroll is gone, and
-    /// a sheet sized for it would be mostly empty space.
-    private static let sheetHeight: CGFloat = 330
+    /// Tall enough for the credits and a pane of the licence text under them;
+    /// the text scrolls rather than sizing the sheet.
+    private static let sheetHeight: CGFloat = 560
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             creditList
+            Divider()
+            noticeText
             Divider()
             footer
         }
@@ -97,6 +132,27 @@ struct AcknowledgementsView: View {
     }
 
     @ViewBuilder
+    private var noticeText: some View {
+        if let notices = Self.notices {
+            ScrollView {
+                Text(verbatim: notices)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Third-party notices")
+                    .font(.callout.weight(.semibold))
+                Button("Read them on GitHub") { NSWorkspace.shared.open(Self.noticesURL) }
+                    .buttonStyle(.link)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(20)
+        }
+    }
+
     private var footer: some View {
         HStack {
             Button("Open on GitHub") { NSWorkspace.shared.open(Self.creditsURL) }

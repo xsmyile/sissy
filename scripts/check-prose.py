@@ -8,7 +8,8 @@ docs/DECISIONS.md#user-facing-copy-carries-no-em-dash). This mechanizes the
 zero state so a later documentation pass cannot silently reproduce it.
 
 Checked by default: the root docs a user reads (README.md, SECURITY.md,
-CONTRIBUTING.md, CREDITS.md, CODE_OF_CONDUCT.md, NOTICE) and every Swift
+CONTRIBUTING.md, CREDITS.md, CODE_OF_CONDUCT.md, NOTICE,
+THIRD-PARTY-NOTICES.md) and every Swift
 string literal under app/Sissy, app/SissyCore and app/SissyTests. AGENTS.md
 and docs/ are design notes, not product copy, and keep their dashes; inside
 Swift, a `//`/`///` comment, a bare `"—"`/`"–"` literal (the panel's
@@ -35,6 +36,7 @@ MARKDOWN_FILES = (
     "CREDITS.md",
     "CODE_OF_CONDUCT.md",
     "NOTICE",
+    "THIRD-PARTY-NOTICES.md",
 )
 SWIFT_ROOTS = ("app/Sissy", "app/SissyCore", "app/SissyTests")
 

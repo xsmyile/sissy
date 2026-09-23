@@ -619,10 +619,13 @@ a cold scan instead of only a cancelled boot task doing so.
   The one gesture that opens anything is linking a claude.ai account, which puts
   the vendor's own login in a window — from that button and from nothing else,
   never from a poll or a launch.
-- **No third-party code ships.** The last dependency was SwiftNIO, which the
-  WebSocket server needed. `CREDITS.md` credits the projects Sissy *reads*
-  (`ccusage`, LiteLLM), which is courtesy rather than obligation; `AboutTests` fails
-  if a licence file reappears as a bundled resource.
+- **One third-party project ships: Sparkle**, the updater, pinned exactly in
+  `app/project.yml`. Its licence carries BSD terms that ask for the notice to
+  travel with the binary, so `THIRD-PARTY-NOTICES.md` is a bundled resource the
+  Acknowledgements sheet renders, and `AboutTests` fails if it goes missing. The
+  dependency before it was SwiftNIO, which the WebSocket server needed.
+  `CREDITS.md` also credits the projects Sissy *reads* (`ccusage`, LiteLLM), which
+  is courtesy rather than obligation.
 - **Failure modes**:
   - No JSONL for any active provider (empty `~/.claude/projects` and/or empty
     `~/.codex/sessions`) → the panel reads "No session logs found", no frames are built
