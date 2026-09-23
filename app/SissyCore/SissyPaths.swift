@@ -15,6 +15,13 @@ enum SissyPaths {
     /// The id of a Debug `Sissy.app`, which `scripts/dev-build-app.sh` signs.
     static let devBundleIdentifier = releaseBundleIdentifier + devBundleSuffix
 
+    /// The id `project.yml` gives a Release `sissy-cli`, read from the
+    /// binary's embedded Info.plist.
+    static let cliBundleIdentifier = "com.radonforge.sissy.cli"
+
+    /// The id of a Debug `sissy-cli`.
+    static let cliDevBundleIdentifier = cliBundleIdentifier + devBundleSuffix
+
     /// True when the running bundle id ends in `.dev`. False for a bundle with
     /// no identifier at all, so a `swift test` binary cannot pollute a
     /// `Sissy-Dev/` tree nothing else reads.
