@@ -14,7 +14,7 @@ import Sparkle
 ///
 /// Nothing is asked at first launch. `SUEnableAutomaticChecks` is declared in
 /// the Info.plist, which is what stops Sparkle from prompting for permission
-/// on the second one; the switches in General are where it is turned off.
+/// on the second one; the switches in About are where it is turned off.
 ///
 /// A development build never starts it: `scripts/dev-build-app.sh` stamps the
 /// real tag version on a Debug bundle, so the version cannot tell a dev build

@@ -140,7 +140,7 @@ Every request it makes is a reading you asked for, and each has its own switch:
 | `auth.openai.com` | signing a Codex account in, and renewing that credential afterwards | unlink the account |
 | `api.github.com`, or the Enterprise / GitLab host you connected | your own activity counts | disconnect it in Settings ▸ Forge |
 | `status.claude.com`, `status.openai.com` | each vendor's public status page | `statusChecks: false` |
-| `sissy.smyile.com` | the update feed, daily | Settings ▸ General ▸ *Check for updates* |
+| `sissy.smyile.com` | the update feed, daily | Settings ▸ About ▸ *Check for updates automatically* |
 | `github.com` | downloading an update you, or *Install updates automatically*, accepted | decline the update |
 
 **What Sissy keeps** is one day-by-model archive under
