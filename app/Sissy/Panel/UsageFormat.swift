@@ -1675,9 +1675,19 @@ extension UsageFormat {
     /// contributions" is the same as not answering. Four digits is the widest
     /// a year of them reaches — measured 2026-09-17, 4125 and 3673 on the two
     /// forges of one account — so the grouped form still fits the row.
-    static func forgeCount(_ count: Int) -> String {
-        forgeCountFormatter.string(from: NSNumber(value: count)) ?? "\(count)"
+    ///
+    /// A floor is the one figure that is compacted, as `10k+`: it is the
+    /// ceiling GitLab stopped counting at (`GitLabActivityFeed.countCeiling`)
+    /// rather than a count, and printing it in full would read as exactly ten
+    /// thousand.
+    static func forgeCount(_ count: Int, atLeast: Bool = false) -> String {
+        guard atLeast else {
+            return forgeCountFormatter.string(from: NSNumber(value: count)) ?? "\(count)"
+        }
+        return "\(count / thousand)k+"
     }
+
+    private static let thousand = 1_000
 
     private static let forgeCountFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -1846,6 +1856,12 @@ extension UsageFormat {
         lines.append("Right-click to refresh now")
         return lines.joined(separator: "\n")
     }
+
+    /// The hover line for a row carrying a floor, which names the ceiling
+    /// GitLab stopped counting at so `10k+` is not read as a rounding.
+    static let forgeFloorNote =
+        "GitLab stops counting at " + forgeCount(GitLabActivityFeed.countCeiling) + " events, so "
+        + forgeCount(GitLabActivityFeed.countCeiling, atLeast: true) + " is at least that many"
 
     /// The heading over the forge rows, naming the window they are over for
     /// the reason the project section names its own day: the block under a

@@ -329,4 +329,42 @@ final class ForgeRowTests: XCTestCase {
             ).first)
         XCTAssertTrue(row.tooltip.contains("one year"), row.tooltip)
     }
+
+    /// A GitLab reading past the ceiling it stops counting at, on the widest
+    /// window, where an account that has worked for months reaches it.
+    private static func flooredReading() -> ForgeActivityReading {
+        var activity = ForgeActivity(
+            contributions: [.all: GitLabActivityFeed.countCeiling], merged: [.all: 523],
+            issues: [.all: 285], comments: [:], contributionsBoundedToOneYear: false)
+        activity.contributionsAtLeast = [.all]
+        return ForgeActivityReading(
+            id: gitLab.id, kind: .gitLab, host: gitLab.host, login: "davide",
+            activity: activity, readAt: readAt, failure: nil)
+    }
+
+    /// Past its ceiling GitLab sends no total, and the row used to be a dash
+    /// under the window most read. The floor is what the reply still proves.
+    func testAGitLabCountPastItsCeilingReadsAsAFloor() throws {
+        let row = try XCTUnwrap(rows([Self.flooredReading()], period: .all).first)
+        XCTAssertEqual(row.contributions, "10k+")
+    }
+
+    func testTheHoverNamesTheCeilingAFloorStandsFor() throws {
+        let row = try XCTUnwrap(rows([Self.flooredReading()], period: .all).first)
+        XCTAssertTrue(row.tooltip.contains("stops counting at"), row.tooltip)
+    }
+
+    /// Exactly ten thousand counted is a count, printed in full, and not a
+    /// floor that happens to share its value.
+    func testACountAtTheCeilingThatWasCountedIsPrintedInFull() throws {
+        let exact = ForgeActivityReading(
+            id: Self.gitLab.id, kind: .gitLab, host: Self.gitLab.host, login: "davide",
+            activity: ForgeActivity(
+                contributions: [.all: GitLabActivityFeed.countCeiling], merged: [:], issues: [:],
+                comments: [:], contributionsBoundedToOneYear: false),
+            readAt: Self.readAt, failure: nil)
+        let row = try XCTUnwrap(rows([exact], period: .all).first)
+        XCTAssertEqual(row.contributions, UsageFormat.forgeCount(GitLabActivityFeed.countCeiling))
+        XCTAssertFalse(row.tooltip.contains("stops counting at"), row.tooltip)
+    }
 }

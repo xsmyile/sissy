@@ -1240,11 +1240,14 @@ struct UsagePanelSnapshot: Equatable {
             let ended =
                 period == .today && !calendar.isDate(reading.readAt, inSameDayAs: now)
             let current = ended ? nil : reading
+            let contributionsFloor = reading.contributionsAreAFloor(for: period)
+            let floored = contributionsFloor || reading.commentsAreAFloor(for: period)
             let contributions = current.flatMap { $0.contributions(for: period) }
-                .map(UsageFormat.forgeCount)
-            let merged = current.flatMap { $0.merged(for: period) }.map(UsageFormat.forgeCount)
-            let issues = current.flatMap { $0.issues(for: period) }.map(UsageFormat.forgeCount)
-            let comments = current.flatMap { $0.comments(for: period) }.map(UsageFormat.forgeCount)
+                .map { UsageFormat.forgeCount($0, atLeast: contributionsFloor) }
+            let merged = current.flatMap { $0.merged(for: period) }.map { UsageFormat.forgeCount($0) }
+            let issues = current.flatMap { $0.issues(for: period) }.map { UsageFormat.forgeCount($0) }
+            let comments = current.flatMap { $0.comments(for: period) }
+                .map { UsageFormat.forgeCount($0, atLeast: reading.commentsAreAFloor(for: period)) }
             return ForgeRow(
                 id: reading.id,
                 kind: reading.kind,
@@ -1260,7 +1263,8 @@ struct UsagePanelSnapshot: Equatable {
                 tooltip: UsageFormat.forgeTooltip(
                     reading.kind, host: reading.host, login: reading.login, period: period,
                     boundedToOneYear: reading.activity.contributionsBoundedToOneYear,
-                    vendorDayStart: vendorDayStart),
+                    vendorDayStart: vendorDayStart)
+                    + (floored ? "\n" + UsageFormat.forgeFloorNote : ""),
                 mergedHelp: UsageFormat.forgeMergedHelp(reading.kind),
                 issuesHelp: UsageFormat.forgeIssuesHelp(reading.kind),
                 commentsHelp: UsageFormat.forgeCommentsHelp(reading.kind))

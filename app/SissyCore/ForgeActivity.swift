@@ -97,6 +97,16 @@ struct ForgeActivity: Sendable, Equatable {
     /// beside it is every one ever — a difference the row has to be able to
     /// say, since `All` is the one window a user reads as "everything".
     let contributionsBoundedToOneYear: Bool
+    /// The windows whose contribution figure is a floor rather than a count.
+    ///
+    /// GitLab stops counting at `GitLabActivityFeed.countCeiling`: past it the
+    /// events endpoint answers without `x-total`, so the widest window of an
+    /// account that has worked for months used to come back with no figure at
+    /// all. The ceiling is what the reply still proves, and the row says so as
+    /// `10k+` rather than a dash.
+    var contributionsAtLeast: Set<UsagePeriod> = []
+    /// The same, for the comment count, which comes off the same header.
+    var commentsAtLeast: Set<UsagePeriod> = []
 
     static let empty = Self(
         contributions: [:], merged: [:], issues: [:], comments: [:],
@@ -164,6 +174,15 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     }
 
     func contributions(for period: UsagePeriod) -> Int? { activity.contributions[period] }
+    /// Whether `contributions(for:)` is a floor the vendor stopped counting
+    /// at rather than the whole count.
+    func contributionsAreAFloor(for period: UsagePeriod) -> Bool {
+        activity.contributionsAtLeast.contains(period)
+    }
+    /// Whether `comments(for:)` is a floor rather than the whole count.
+    func commentsAreAFloor(for period: UsagePeriod) -> Bool {
+        activity.commentsAtLeast.contains(period)
+    }
     func merged(for period: UsagePeriod) -> Int? { activity.merged[period] }
     func issues(for period: UsagePeriod) -> Int? { activity.issues[period] }
     func comments(for period: UsagePeriod) -> Int? { activity.comments[period] }

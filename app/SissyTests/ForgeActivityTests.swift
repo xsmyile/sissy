@@ -639,6 +639,35 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertFalse(everything.absoluteString.contains("after="))
     }
 
+    private static func eventsReply(_ headers: [String: String]) throws -> HTTPURLResponse {
+        try XCTUnwrap(
+            HTTPURLResponse(
+                url: try XCTUnwrap(URL(string: "https://gitlab.example.com/api/v4/events")),
+                statusCode: 200, httpVersion: nil, headerFields: headers))
+    }
+
+    func testGitLabReadsTheCountOffTheTotalHeader() throws {
+        XCTAssertEqual(
+            GitLabActivityFeed.count(of: try Self.eventsReply(["x-total": "986", "x-next-page": "2"])),
+            .exact(986))
+    }
+
+    /// Past ten thousand GitLab drops `x-total` and keeps paginating, so a
+    /// reply with a next page and no total is the ceiling as a floor rather
+    /// than no figure.
+    func testGitLabPastItsCeilingIsAFloorRatherThanNothing() throws {
+        XCTAssertEqual(
+            GitLabActivityFeed.count(of: try Self.eventsReply(["x-next-page": "2"])),
+            .atLeast(GitLabActivityFeed.countCeiling))
+    }
+
+    /// A reply carrying neither says nothing, and stays absent rather than
+    /// becoming a floor it does not prove.
+    func testGitLabWithNeitherHeaderHasNoCount() throws {
+        XCTAssertNil(GitLabActivityFeed.count(of: try Self.eventsReply([:])))
+        XCTAssertNil(GitLabActivityFeed.count(of: try Self.eventsReply(["x-next-page": ""])))
+    }
+
     /// GitLab files a comment as an event, so the comment count is the very
     /// same header read with one filter on it — same window, same exclusive
     /// `after`, so the figure is a part of the contributions beside it rather

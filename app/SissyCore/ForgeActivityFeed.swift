@@ -607,6 +607,12 @@ enum GitHubActivityFeed {
 /// `x-total: 0` on a day that had 91 events, so a window starting on a day is
 /// asked for by naming the day before it.
 enum GitLabActivityFeed {
+    /// Where GitLab stops counting. Past it the events endpoint drops
+    /// `x-total` and keeps paginating, per GitLab's REST documentation read
+    /// 2026-09-23, so a reply with a next page and no total proves this many
+    /// and no more.
+    static let countCeiling = 10_000
+    private static let nextPageHeader = "x-next-page"
     private static let apiPath = "/api/v4/events"
     private static let graphQLPath = "/api/graphql"
     private static let tokenHeader = "PRIVATE-TOKEN"
@@ -631,6 +637,8 @@ enum GitLabActivityFeed {
         try Task.checkCancellation()
         var contributions: [UsagePeriod: Int] = [:]
         var comments: [UsagePeriod: Int] = [:]
+        var contributionsAtLeast: Set<UsagePeriod> = []
+        var commentsAtLeast: Set<UsagePeriod> = []
         // The two reads of a period go together rather than one after the
         // other: the comment counter doubled the header reads and would
         // otherwise have doubled the wall clock with them, on a self-hosted
@@ -642,15 +650,26 @@ enum GitLabActivityFeed {
             async let commented =
                 counters.contains(.comments)
                 ? commentEvents(connection, token: token, period: period, now: now) : nil
-            contributions[period] = try await total
-            comments[period] = await commented
+            let counted = try await total
+            let commentCount = await commented
+            contributions[period] = counted?.value
+            comments[period] = commentCount?.value
+            if counted?.isFloor == true { contributionsAtLeast.insert(period) }
+            if commentCount?.isFloor == true { commentsAtLeast.insert(period) }
         }
         return ForgeActivityReading(
             id: connection.id, kind: connection.kind, host: connection.host, login: merged.username,
             activity: ForgeActivity(
                 contributions: contributions, merged: merged.counts, issues: issues,
-                comments: comments, contributionsBoundedToOneYear: false),
+                comments: comments, contributionsBoundedToOneYear: false,
+                contributionsAtLeast: contributionsAtLeast, commentsAtLeast: commentsAtLeast),
             readAt: now, failure: nil)
+    }
+
+    /// Who the token belongs to, off the same document the merged counts
+    /// ride on with none of them asked for.
+    static func probe(_ connection: ForgeConnection, token: String) async throws -> String {
+        try await mergedCounts(connection, token: token, counters: [], now: Date()).username
     }
 
     private static func mergedCounts(
@@ -797,7 +816,7 @@ enum GitLabActivityFeed {
     /// counter. A period that could not be read is absent, never zero.
     private static func commentEvents(
         _ connection: ForgeConnection, token: String, period: UsagePeriod, now: Date
-    ) async -> Int? {
+    ) async -> ForgeEventCount? {
         guard
             let count = try? await events(
                 connection, token: token, period: period, now: now, action: commentedAction)
@@ -811,7 +830,7 @@ enum GitLabActivityFeed {
     private static func events(
         _ connection: ForgeConnection, token: String, period: UsagePeriod, now: Date,
         action: String? = nil
-    ) async throws -> Int? {
+    ) async throws -> ForgeEventCount? {
         guard let url = eventsURL(connection, period: period, now: now, action: action) else {
             throw ForgeReadFailure.malformed
         }
@@ -821,6 +840,39 @@ enum GitLabActivityFeed {
         // the GraphQL one does: the count is in a header rather than the body,
         // which is the only thing different about it.
         let (_, response) = try await ForgeActivityFeed.send(request)
-        return response.value(forHTTPHeaderField: totalHeader).flatMap(Int.init)
+        return count(of: response)
+    }
+
+    /// The count a reply's headers carry, nil where they carry none.
+    ///
+    /// `x-total` is the count. A reply without it that still names a next
+    /// page is GitLab past `countCeiling`, which is a floor the row can print;
+    /// one with neither is a reply that says nothing, and stays absent rather
+    /// than zero.
+    static func count(of response: HTTPURLResponse) -> ForgeEventCount? {
+        if let total = response.value(forHTTPHeaderField: totalHeader).flatMap(Int.init) {
+            return .exact(total)
+        }
+        guard let next = response.value(forHTTPHeaderField: nextPageHeader), Int(next) != nil
+        else { return nil }
+        return .atLeast(countCeiling)
+    }
+}
+
+/// One GitLab event count: the whole of it, or the ceiling GitLab stopped
+/// counting at.
+enum ForgeEventCount: Sendable, Equatable {
+    case exact(Int)
+    case atLeast(Int)
+
+    var value: Int {
+        switch self {
+        case .exact(let count), .atLeast(let count): count
+        }
+    }
+
+    var isFloor: Bool {
+        if case .atLeast = self { return true }
+        return false
     }
 }
