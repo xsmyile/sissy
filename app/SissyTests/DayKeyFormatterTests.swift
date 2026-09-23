@@ -11,6 +11,8 @@ final class DayKeyFormatterTests: XCTestCase {
     /// 23:30 UTC, which is already the next day in Rome and still this one in
     /// New York.
     private static let lateEvening = Date(timeIntervalSince1970: 1_790_206_200)
+    private static let romeKey = "2026-09-24"
+    private static let newYorkKey = "2026-09-23"
 
     func testAKeyFollowsTheZoneInForceWhenItIsAsked() {
         let zone = ZoneBox(Self.rome)
@@ -45,6 +47,46 @@ final class DayKeyFormatterTests: XCTestCase {
 
         XCTAssertEqual(parsed, Calendar.current.startOfDay(for: now))
     }
+
+    /// The reaction itself is Foundation's to vouch for: the system zone
+    /// cannot be moved from a test, so what is pinned here is that the
+    /// notification reaches the reset at all.
+    func testTheSystemZoneNotificationResetsTheCachedZone() {
+        let center = NotificationCenter()
+        let resets = ResetCounter()
+        let observer = DayKeyFormatter.observeSystemZone(on: center) { resets.increment() }
+        defer { center.removeObserver(observer) }
+
+        center.post(name: .NSSystemTimeZoneDidChange, object: nil)
+
+        XCTAssertEqual(resets.value, 1)
+    }
+
+    func testTheSharedFormatterFollowsTheCalendarAfterAZoneChange() {
+        let original = NSTimeZone.default
+        defer {
+            NSTimeZone.default = original
+            NotificationCenter.default.post(name: .NSSystemTimeZoneDidChange, object: nil)
+        }
+        let before = UsageReaderShared.dayFormatter.string(from: Self.lateEvening)
+        let (target, expected) =
+            before == Self.romeKey ? (Self.newYork, Self.newYorkKey) : (Self.rome, Self.romeKey)
+
+        NSTimeZone.default = target
+        NotificationCenter.default.post(name: .NSSystemTimeZoneDidChange, object: nil)
+
+        XCTAssertEqual(Calendar.current.timeZone, target)
+        XCTAssertEqual(UsageReaderShared.dayFormatter.string(from: Self.lateEvening), expected)
+    }
+}
+
+private final class ResetCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func increment() { lock.withLock { count += 1 } }
+
+    var value: Int { lock.withLock { count } }
 }
 
 private final class ZoneBox: @unchecked Sendable {

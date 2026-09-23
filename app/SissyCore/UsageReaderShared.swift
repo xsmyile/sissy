@@ -250,11 +250,17 @@ final class DayKeyFormatter: @unchecked Sendable {
     static func followSystemZone() {
         observerLock.withLock {
             guard zoneObserver == nil else { return }
-            zoneObserver = NotificationCenter.default.addObserver(
-                forName: .NSSystemTimeZoneDidChange, object: nil, queue: nil
-            ) { _ in
-                NSTimeZone.resetSystemTimeZone()
-            }
+            zoneObserver = observeSystemZone(on: .default) { NSTimeZone.resetSystemTimeZone() }
+        }
+    }
+
+    /// Runs `reset` on every system zone change `center` reports, and hands
+    /// back the observer for its caller to hold.
+    static func observeSystemZone(
+        on center: NotificationCenter, reset: @escaping @Sendable () -> Void
+    ) -> NSObjectProtocol {
+        center.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: nil) { _ in
+            reset()
         }
     }
 }
