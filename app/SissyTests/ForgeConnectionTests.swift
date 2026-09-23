@@ -191,6 +191,17 @@ final class ForgeConnectionTests: XCTestCase {
         XCTAssertEqual(try index.load(), [ForgeConnection.gitHub()])
     }
 
+    /// A file that would not be read at all, rather than one that read and
+    /// did not decode, may be a perfectly good index behind a passing lock or
+    /// a permission. Moving it aside turned every connection it named into an
+    /// orphaned token Settings offered to remove, so it is left where it is.
+    func testAnIndexThatCannotBeReadIsLeftInPlace() throws {
+        try FileManager.default.createDirectory(at: index.url, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try index.loadSettingAside())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: index.url.path))
+        XCTAssertFalse(index.hasSetAside())
+    }
+
     func testAReadableIndexIsNotSetAside() throws {
         try index.remember(ForgeConnection.gitHub())
         XCTAssertEqual(try index.loadSettingAside(), [ForgeConnection.gitHub()])
