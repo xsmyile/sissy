@@ -11,6 +11,8 @@ import XCTest
 final class HTTPStoragePurgeTests: XCTestCase {
     private static let release = "com.radonforge.sissy"
     private static let dev = "com.radonforge.sissy.dev"
+    private static let cli = "com.radonforge.sissy.cli"
+    private static let cliDev = "com.radonforge.sissy.cli.dev"
     private static let stranger = "com.radonforge.sissyhelper"
 
     private let root = FileManager.default.temporaryDirectory
@@ -47,6 +49,18 @@ final class HTTPStoragePurgeTests: XCTestCase {
         HTTPStoragePurge.run(in: roots)
         for url in planted {
             XCTAssertFalse(exists(url), "\(url.lastPathComponent) survived the purge")
+        }
+    }
+
+    /// `sissy-cli` sent its requests through the default session under its
+    /// own bundle id, so its cache tree holds the same credentials.
+    func testTheCacheDatabaseGoesForBothCLIBuilds() throws {
+        let planted = try [Self.cli, Self.cliDev].map { id in
+            try write(roots.caches.appendingPathComponent(id).appendingPathComponent("Cache.db"))
+        }
+        HTTPStoragePurge.run(in: roots)
+        for url in planted {
+            XCTAssertFalse(exists(url), "\(url.deletingLastPathComponent().lastPathComponent) kept its cache")
         }
     }
 

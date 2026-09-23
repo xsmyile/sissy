@@ -9,15 +9,20 @@ import Foundation
 /// runs on every launch rather than once behind a marker: with nothing
 /// writing there it finds nothing and costs a directory listing, and a marker
 /// would be one more file that could say the job was done when a downgrade
-/// had filled the cache again. Both bundle ids are purged whichever build is
-/// running, because a Mac that ran both keeps both trees.
+/// had filled the cache again. Every bundle id is purged whichever build is
+/// running, because a Mac that ran both keeps both trees, and `sissy-cli`'s
+/// two ids are among them: it sent its requests through the default session
+/// under its own id, so what it fetched was cached in a tree of its own.
 ///
 /// Only named entries are touched, and no symlink is followed: a build's
 /// cache directory that is not a real directory is skipped whole, and a link
 /// among the entries is unlinked rather than traversed, so the purge cannot
 /// reach outside the two trees it was pointed at.
 enum HTTPStoragePurge {
-    static let bundleIdentifiers = [SissyPaths.releaseBundleIdentifier, SissyPaths.devBundleIdentifier]
+    static let bundleIdentifiers = [
+        SissyPaths.releaseBundleIdentifier, SissyPaths.devBundleIdentifier,
+        SissyPaths.cliBundleIdentifier, SissyPaths.cliDevBundleIdentifier,
+    ]
 
     /// The cache database and its `-wal` / `-shm` companions share this prefix.
     static let cacheDatabasePrefix = "Cache.db"
