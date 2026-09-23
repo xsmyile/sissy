@@ -568,6 +568,9 @@ final class UsageEngineHost {
     /// write that failed would leave no row, no explanation and nothing to
     /// retry with.
     private(set) var forgeConnectFailure: String?
+    /// The connection the last attempt could not reach, which the sheet
+    /// offers Connect Anyway for. Nil after any other outcome.
+    private(set) var forgeConnectAnywayID: String?
 
     /// Forgets what the last attempt failed with.
     ///
@@ -577,6 +580,7 @@ final class UsageEngineHost {
     /// another host's failure and no attempt behind it.
     func clearForgeConnectFailure() {
         forgeConnectFailure = nil
+        forgeConnectAnywayID = nil
     }
 
     /// The tokens `gh` and `glab` already hold, read on the click that offers
@@ -596,17 +600,20 @@ final class UsageEngineHost {
     /// Connects a forge with a token the user supplied or accepted.
     ///
     /// The outcome lands on `forgeConnectFailure` rather than being dropped, so
-    /// the sheet can stay open with what was typed still in it.
-    func connectForge(_ connection: ForgeConnection, token: String) {
+    /// the sheet can stay open with what was typed still in it. `probing`
+    /// false is the sheet's Connect Anyway.
+    func connectForge(_ connection: ForgeConnection, token: String, probing: Bool = true) {
         guard let engine, connectingForge == nil else { return }
         connectingForge = connection.id
         forgeConnectFailure = nil
+        forgeConnectAnywayID = nil
         Task { [weak self] in
-            let outcome = await engine.connectForge(connection, token: token)
+            let outcome = await engine.connectForge(connection, token: token, probing: probing)
             guard let self else { return }
             connectingForge = nil
             noteForgeConnections(engine)
             forgeConnectFailure = ForgeConnectCopy.failure(outcome, connection: connection)
+            forgeConnectAnywayID = outcome.offersConnectAnyway ? connection.id : nil
         }
     }
 
