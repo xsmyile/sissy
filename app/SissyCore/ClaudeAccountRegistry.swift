@@ -234,8 +234,12 @@ actor ClaudeAccountRegistry {
     ///
     /// The write reaches several names and cannot be atomic across them, so
     /// each name's previous bytes are held until the last write lands. A
-    /// failure puts every name already written back as it was and reports the
-    /// write that failed; only a put-back that fails too is `partialSwitch`.
+    /// failure puts every name already written back as it was, the one whose
+    /// write failed included, and reports the write that failed; only a
+    /// put-back that fails or cannot be confirmed is `partialSwitch`. The
+    /// failed name is included because a `security` process can commit its
+    /// update and then outlive its budget, and the error alone does not say
+    /// which of the two happened.
     ///
     /// A credential Sissy cannot account for is not written over at all.
     /// Which account a slot holds is what decides whether this is a switch or
@@ -328,8 +332,8 @@ actor ClaudeAccountRegistry {
     }
 
     /// Writes the account half into every target, and on a failure puts back
-    /// what the names already written held. Answers nil when every write
-    /// landed.
+    /// what the names already written held, and what the failed one held.
+    /// Answers nil when every write landed.
     private func write(
         _ credential: Data,
         to targets: [ClaudeCLISlot.Name],
@@ -347,7 +351,7 @@ actor ClaudeAccountRegistry {
             } catch {
                 sissyLog("sissy: a Claude Code credential slot refused the switch: \(error)")
                 let cause = name == .file ? Failure.mirrorWrite : Self.keychainFailure(error)
-                return restore(written, to: before) ? cause : .partialSwitch
+                return restore(written + [name], to: before) ? cause : .partialSwitch
             }
         }
         return nil
@@ -355,17 +359,27 @@ actor ClaudeAccountRegistry {
 
     /// Puts each written name back as it was, the last written first, and
     /// takes away what the switch created where there had been nothing.
-    /// Answers whether every one of them went back.
+    /// Answers whether every one of them was read back holding what it held
+    /// before, which is the only evidence a put-back landed. A name already
+    /// holding that is left alone, so a write that failed without landing
+    /// costs no second one.
     private func restore(
         _ written: [ClaudeCLISlot.Name], to before: Held
     ) -> Bool {
         var intact = true
         for name in written.reversed() {
             do {
-                if let previous = before[name] {
+                let previous = before[name]
+                if try slot.read(name) == previous { continue }
+                if let previous {
                     try slot.write(name, previous)
                 } else {
                     try slot.remove(name)
+                }
+                guard try slot.read(name) == previous else {
+                    sissyLog("sissy: a Claude Code credential slot did not read back as it was")
+                    intact = false
+                    continue
                 }
             } catch {
                 sissyLog("sissy: could not put a Claude Code credential slot back: \(error)")
