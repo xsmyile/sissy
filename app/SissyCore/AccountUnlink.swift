@@ -19,6 +19,27 @@ enum AccountUnlink {
         case nameKept
     }
 
+    /// A failure and the account it was reported for, which is what lets the
+    /// row drop it once it is no longer true. The dialog that started the
+    /// Unlink is gone by then, so nothing else would: a link made again or an
+    /// account removed some other way left the row reporting a refusal that
+    /// no longer described anything.
+    struct Report: Equatable, Sendable {
+        let account: String
+        let failure: Failure
+
+        /// Whether the failure still describes the accounts now listed.
+        /// `credentialKept` says the account is still linked, so it stands
+        /// while the account is listed; `nameKept` says it was unlinked, so
+        /// it stands only while it is not.
+        func stands(amongListed listed: Set<String>) -> Bool {
+            switch failure {
+            case .credentialKept: listed.contains(account)
+            case .nameKept: !listed.contains(account)
+            }
+        }
+    }
+
     /// Runs both halves in order. `what` names the credential in the log,
     /// which is where the underlying error goes: the row has only the case.
     static func run(

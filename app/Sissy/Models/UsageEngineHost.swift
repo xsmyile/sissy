@@ -134,6 +134,7 @@ final class UsageEngineHost {
         self.engine = engine
         linkedClaudeAccounts = engine.linkedClaudeAccounts
         linkedCodexAccounts = engine.linkedCodexAccounts
+        settleUnlinkFailures()
         forgeConnections = engine.forgeConnections
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
@@ -323,10 +324,12 @@ final class UsageEngineHost {
     private(set) var claudeWebLinkFailure: ClaudeWebAccountLink.Failure?
     /// Why the last Unlink of a claude.ai session did not finish, nil once
     /// one has. The confirmation dialog is gone by the time the keychain
-    /// answers, so this row is the only place a refusal can be read.
-    private(set) var claudeWebUnlinkFailure: AccountUnlink.Failure?
+    /// answers, so this row is the only place a refusal can be read. Dropped
+    /// by a link that lands and by any reload of the list it no longer
+    /// describes, through `settleUnlinkFailures()`.
+    private(set) var claudeWebUnlinkFailure: AccountUnlink.Report?
     /// The same, for the last Unlink of a Codex account.
-    private(set) var codexUnlinkFailure: AccountUnlink.Failure?
+    private(set) var codexUnlinkFailure: AccountUnlink.Report?
     /// Keychain items Claude Code filed for config homes Sissy does not read,
     /// by service name. Settings says so, because `CLAUDE_CONFIG_DIR` is not
     /// followed and a user who set it would otherwise meet a missing account
@@ -416,6 +419,8 @@ final class UsageEngineHost {
         window.finish()
         loginWindow = nil
         linkingClaudeAccount = false
+        claudeWebUnlinkFailure = nil
+        codexUnlinkFailure = nil
         noteLinkedAccounts()
     }
 
@@ -426,6 +431,25 @@ final class UsageEngineHost {
         linkedClaudeAccounts = engine?.linkedClaudeAccounts ?? []
         linkedCodexAccounts = engine?.linkedCodexAccounts ?? []
         forgeConnections = engine?.forgeConnections ?? []
+        settleUnlinkFailures()
+    }
+
+    /// Drops an Unlink failure the accounts now listed no longer bear out.
+    /// Called wherever either list is re-read, because nothing else would:
+    /// the dialog is gone, and a row reporting "still linked" for an account
+    /// removed some other way, or "not unlinked" for one linked again, says
+    /// something that has stopped being true.
+    private func settleUnlinkFailures() {
+        if let report = claudeWebUnlinkFailure,
+            !report.stands(amongListed: Set(linkedClaudeAccounts.map(\.id)))
+        {
+            claudeWebUnlinkFailure = nil
+        }
+        if let report = codexUnlinkFailure,
+            !report.stands(amongListed: Set(linkedCodexAccounts.map(\.id)))
+        {
+            codexUnlinkFailure = nil
+        }
     }
 
     /// Opens OpenAI's own login and links whatever account it produces.
@@ -584,7 +608,9 @@ final class UsageEngineHost {
             let outcome = await engine.forgetCodexAccount(id: id)
             guard let self else { return }
             linkedCodexAccounts = engine.linkedCodexAccounts
-            if case .failure(let why) = outcome { codexUnlinkFailure = why }
+            if case .failure(let why) = outcome {
+                codexUnlinkFailure = AccountUnlink.Report(account: id, failure: why)
+            }
         }
     }
 
@@ -600,7 +626,9 @@ final class UsageEngineHost {
             guard let self else { return }
             claudeWebSession = engine.hasClaudeWebSession
             linkedClaudeAccounts = engine.linkedClaudeAccounts
-            if case .failure(let why) = outcome { claudeWebUnlinkFailure = why }
+            if case .failure(let why) = outcome {
+                claudeWebUnlinkFailure = AccountUnlink.Report(account: account, failure: why)
+            }
         }
     }
 
@@ -1008,6 +1036,7 @@ final class UsageEngineHost {
         guard snapshot != claudeAccounts else { return }
         claudeAccounts = snapshot
         linkedClaudeAccounts = engine.linkedClaudeAccounts
+        settleUnlinkFailures()
     }
 
     /// Re-reads which credential Claude's limits came from.

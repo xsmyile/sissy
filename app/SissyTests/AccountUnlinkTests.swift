@@ -53,6 +53,28 @@ final class AccountUnlinkTests: XCTestCase {
             CodexAccountLinkCopy.unlinkFailure(.nameKept))
     }
 
+    /// A credential the keychain kept is reported only while its account is
+    /// still listed: once it is gone some other way, "still linked" is false.
+    func testAKeptCredentialStopsStandingOnceTheAccountIsGone() {
+        let report = AccountUnlink.Report(account: "a1b2c3d4", failure: .credentialKept)
+
+        XCTAssertFalse(report.stands(amongListed: []))
+    }
+
+    func testAKeptCredentialStandsWhileTheAccountIsListed() {
+        let report = AccountUnlink.Report(account: "a1b2c3d4", failure: .credentialKept)
+
+        XCTAssertTrue(report.stands(amongListed: ["a1b2c3d4"]))
+    }
+
+    /// A name the index kept describes an account that was unlinked, so an
+    /// account listed again has been linked again and the report is stale.
+    func testAKeptNameStopsStandingOnceTheAccountIsListedAgain() {
+        let report = AccountUnlink.Report(account: "a1b2c3d4", failure: .nameKept)
+
+        XCTAssertFalse(report.stands(amongListed: ["a1b2c3d4"]))
+    }
+
     func testAKeptCredentialSaysTheAccountIsStillLinked() {
         let message = ClaudeAccountLinkCopy.unlinkFailure(.credentialKept)
         XCTAssertTrue(message.contains("still linked"), message)
