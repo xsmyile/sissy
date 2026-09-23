@@ -85,49 +85,6 @@ enum CodexAccountStore {
         }
     }
 
-    /// The credential a reader should poll with, renewed if it is spent.
-    ///
-    /// Renewal belongs to the store because ownership does: this item is the
-    /// only Codex credential Sissy may redeem a refresh token for, and the
-    /// renewal has to be filed the moment it lands — OpenAI rotates the
-    /// refresh token, so a renewal that is used and not saved leaves the item
-    /// holding one that has already been spent.
-    ///
-    /// A renewal the vendor refuses is the end of this link: the account says
-    /// so on its row rather than polling with a token that can only ever be
-    /// answered 401.
-    static func supply(account: String, allowingInteraction: Bool) async -> CodexCredentialReading {
-        let reading = load(account: account, allowingInteraction: allowingInteraction)
-        guard case .found(let credential) = reading, credential.isExpired() else { return reading }
-        do {
-            let renewed = try await CodexOAuth.refresh(credential)
-            try save(renewed, account: account)
-            return .found(renewed)
-        } catch let error as CodexAccountStoreError {
-            // Renewed and not filed: the item still holds the spent token, so
-            // this reading is used and the next poll renews again rather than
-            // reporting an account that is working as gone.
-            sissyLog("sissy: a renewed Codex credential could not be filed (\(error))")
-            return reading
-        } catch {
-            return Self.reading(afterRenewalFailed: error, holding: reading)
-        }
-    }
-
-    /// What a renewal that threw leaves the row with.
-    ///
-    /// A reply from another host than the token endpoint is not OpenAI's
-    /// verdict on the refresh token, which `SissyHTTP` never sent off the
-    /// origin, so the spent reading stands and the next poll renews again.
-    /// Anything else is the vendor retiring the link.
-    static func reading(afterRenewalFailed error: Error, holding reading: CodexCredentialReading)
-        -> CodexCredentialReading
-    {
-        guard error is SissyHTTP.LeftItsOrigin else { return .expired }
-        sissyLog("sissy: a Codex renewal was answered from another host (\(error)); retrying")
-        return reading
-    }
-
     /// Forgets one account's credential. An item that was not there is not a
     /// failure: the caller asked for it gone and it is gone.
     static func delete(account: String) throws {
