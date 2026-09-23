@@ -255,6 +255,29 @@ final class UsageHistoryStoreTests: XCTestCase {
             "money went through a Double on its way to disk")
     }
 
+    /// The 1-hour cache writes are what a row needs to be priced again from
+    /// its counters, so they have to come back from disk as they went in.
+    func testADayKeepsItsOneHourCacheWritesApart() throws {
+        let written = UsageHistoryTotals(
+            inputTokens: 10, outputTokens: 20, cacheReadTokens: 30, cacheCreationTokens: 40,
+            cacheCreation1hTokens: 25, cost: 0)
+        try write(provider: "claude-code", day: day(0), models: ["claude-opus-5-5": written])
+
+        let loaded = UsageHistoryStore.load(provider: "claude-code", day: day(0), in: root)
+
+        XCTAssertEqual(loaded?.totals(forModel: "claude-opus-5-5"), written)
+    }
+
+    /// A day with no 1-hour writes, which is every Codex day, is written
+    /// exactly as it was before the field existed.
+    func testADayWithNoOneHourCacheWritesOmitsTheField() {
+        let stored = UsageHistoryDay(
+            day: day(0), provider: "codex", updatedAt: Date(),
+            totals: [UsageHistoryRow(model: "gpt-6-sol", project: nil): totals(input: 5, cost: "0")])
+
+        XCTAssertNil(stored.models.first?.cacheCreation1hTokens)
+    }
+
     /// The property the whole design rests on: a cold scan re-derives a day it
     /// has already written, and the second write has to land on the same
     /// number rather than on twice it.

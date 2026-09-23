@@ -15,6 +15,11 @@ struct UsageEvent: Sendable, Equatable {
     let outputTokens: Int
     let cacheReadTokens: Int
     let cacheCreationTokens: Int
+    /// The part of `cacheCreationTokens` written to the 1-hour cache, which
+    /// bills at a different rate from the 5-minute remainder. Carried so a
+    /// row can be priced again from its counters alone, when the catalog
+    /// that priced it at ingest had no rate for its model.
+    let cacheCreation1hTokens: Int
     let cost: Decimal
     /// Whether a sub-agent spent this turn rather than the session itself.
     ///
@@ -48,8 +53,8 @@ struct UsageEvent: Sendable, Equatable {
 
     init(
         timestamp: Date, model: String, project: String?, inputTokens: Int, outputTokens: Int,
-        cacheReadTokens: Int, cacheCreationTokens: Int, cost: Decimal, delegated: Bool = false,
-        effort: String? = nil, startsTurn: Bool = true
+        cacheReadTokens: Int, cacheCreationTokens: Int, cacheCreation1hTokens: Int = 0,
+        cost: Decimal, delegated: Bool = false, effort: String? = nil, startsTurn: Bool = true
     ) {
         self.timestamp = timestamp
         self.model = model
@@ -58,6 +63,7 @@ struct UsageEvent: Sendable, Equatable {
         self.outputTokens = outputTokens
         self.cacheReadTokens = cacheReadTokens
         self.cacheCreationTokens = cacheCreationTokens
+        self.cacheCreation1hTokens = cacheCreation1hTokens
         self.cost = cost
         self.delegated = delegated
         self.effort = effort
@@ -1241,6 +1247,7 @@ actor LocalUsageProvider: UsageProvider {
                         outputTokens: row.outputTokens,
                         cacheReadTokens: row.cacheReadTokens,
                         cacheCreationTokens: row.cacheCreationTokens,
+                        cacheCreation1hTokens: row.cacheCreation1hTokens ?? 0,
                         cost: Decimal(string: row.cost) ?? 0)))
         }
         var restored: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
@@ -1258,6 +1265,7 @@ actor LocalUsageProvider: UsageProvider {
                     outputTokens: row.outputTokens,
                     cacheReadTokens: row.cacheReadTokens,
                     cacheCreationTokens: row.cacheCreationTokens,
+                    cacheCreation1hTokens: row.cacheCreation1hTokens ?? 0,
                     cost: Decimal(string: row.cost) ?? 0
                 ))
         }
@@ -1521,6 +1529,8 @@ actor LocalUsageProvider: UsageProvider {
                         outputTokens: totals.outputTokens,
                         cacheReadTokens: totals.cacheReadTokens,
                         cacheCreationTokens: totals.cacheCreationTokens,
+                        cacheCreation1hTokens: UsageHistoryDay.present(
+                            totals.cacheCreation1hTokens),
                         cost: NSDecimalNumber(decimal: totals.cost).stringValue
                     ))
             }
@@ -1552,6 +1562,8 @@ actor LocalUsageProvider: UsageProvider {
                         outputTokens: totals.totals.outputTokens,
                         cacheReadTokens: totals.totals.cacheReadTokens,
                         cacheCreationTokens: totals.totals.cacheCreationTokens,
+                        cacheCreation1hTokens: UsageHistoryDay.present(
+                            totals.totals.cacheCreation1hTokens),
                         cost: NSDecimalNumber(decimal: totals.totals.cost).stringValue))
             }
         }
