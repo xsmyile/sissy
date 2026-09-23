@@ -79,6 +79,38 @@ final class ForgeConnectSheetTests: XCTestCase {
         XCTAssertNotEqual(ForgeConnectRequest.new.id, ForgeConnectRequest(replacing: Self.gitHub).id)
     }
 
+    // MARK: The fields
+
+    func testAHostThatCannotBeConnectedSaysWhyUnderTheFields() {
+        var draft = ForgeConnectDraft()
+        draft.kind = .gitLab
+        draft.host = "davide@gitlab.corp.example"
+        XCTAssertEqual(draft.problem, .credentials)
+    }
+
+    /// An empty field is one the user has not reached yet: Connect is already
+    /// disabled, and a red sentence under it would scold an untouched sheet.
+    func testAnEmptyHostSaysNothingUnderTheFields() {
+        var draft = ForgeConnectDraft()
+        draft.host = ""
+        XCTAssertNil(draft.problem)
+    }
+
+    /// A sheet opened to replace a connection's token holds that connection's
+    /// own address, and reads back as that very connection.
+    func testAReplacementDraftReadsBackAsItsConnection() throws {
+        let offDefault = ForgeConnection(
+            kind: .gitLab, host: "gitlab.corp.example", port: 8443, basePath: "/gitlab")
+        XCTAssertEqual(try ForgeConnectDraft(replacing: offDefault).connection.get(), offDefault)
+    }
+
+    // MARK: What the sheet says
+
+    func testEveryAddressProblemHasItsOwnSentence() {
+        let sentences = ForgeAddressProblem.allCases.map(ForgeConnectCopy.addressProblem)
+        XCTAssertEqual(Set(sentences).count, ForgeAddressProblem.allCases.count)
+    }
+
     func testAnOrphanedTokenIsTitledByItsForgeAndAddress() {
         XCTAssertEqual(ForgeConnectCopy.orphanTitle(Self.gitLab.id), "GitLab · gitlab.example.com")
     }

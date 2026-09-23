@@ -10,6 +10,15 @@ import Foundation
 enum ForgeKind: String, Sendable, Codable, Equatable, CaseIterable {
     case gitHub = "github"
     case gitLab = "gitlab"
+
+    /// The vendor's own hosted instance, the one connection that answers on
+    /// an API host of its own rather than under the host the user named.
+    var defaultHost: String {
+        switch self {
+        case .gitHub: GitHubActivityFeed.dotComHost
+        case .gitLab: GitLabActivityFeed.dotComHost
+        }
+    }
 }
 
 /// One of the counters a forge row carries beside its contribution total.
@@ -126,6 +135,8 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     /// The connection this answers for, which is its `ForgeConnection.id`.
     let id: String
     let kind: ForgeKind
+    /// The connection's `ForgeConnection.address`: the host, with the port
+    /// and path an instance off the default needs to be told apart by.
     let host: String
     /// Who the token turned out to belong to, nil for a connection that has
     /// never answered.
@@ -150,7 +161,7 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
         _ connection: ForgeConnection, failure: ForgeReadFailure, at when: Date = Date()
     ) -> Self {
         Self(
-            id: connection.id, kind: connection.kind, host: connection.host, login: nil,
+            id: connection.id, kind: connection.kind, host: connection.address, login: nil,
             activity: .empty, readAt: when, failure: failure)
     }
 

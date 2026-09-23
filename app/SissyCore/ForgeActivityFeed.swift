@@ -377,19 +377,15 @@ enum GitHubActivityFeed {
     private static let authorizationHeader = "Authorization"
     private static let authorizationScheme = "Bearer"
 
-    static func endpoint(host: String) -> URL? {
-        guard host != dotComHost else { return dotComEndpoint }
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = host
-        components.path = enterprisePath
-        return components.url
+    static func endpoint(_ connection: ForgeConnection) -> URL? {
+        guard !connection.isVendorHosted else { return dotComEndpoint }
+        return connection.root?.appendingPathComponent(enterprisePath)
     }
 
     static func read(
         _ connection: ForgeConnection, token: String, counters: Set<ForgeCounter>, now: Date
     ) async throws -> ForgeActivityReading {
-        guard let endpoint = endpoint(host: connection.host) else {
+        guard let endpoint = endpoint(connection) else {
             throw ForgeReadFailure.malformed
         }
         let payload = try await ForgeActivityFeed.graphQL(
@@ -584,7 +580,7 @@ enum GitHubActivityFeed {
             throw ForgeReadFailure.malformed
         }
         return ForgeActivityReading(
-            id: connection.id, kind: connection.kind, host: connection.host, login: login,
+            id: connection.id, kind: connection.kind, host: connection.address, login: login,
             activity: ForgeActivity(
                 contributions: contributions, merged: merged, issues: issues, comments: comments,
                 contributionsBoundedToOneYear: true),
@@ -607,6 +603,8 @@ enum GitHubActivityFeed {
 /// `x-total: 0` on a day that had 91 events, so a window starting on a day is
 /// asked for by naming the day before it.
 enum GitLabActivityFeed {
+    /// GitLab's own hosted instance.
+    static let dotComHost = "gitlab.com"
     /// Where GitLab stops counting. Past it the events endpoint drops
     /// `x-total` and keeps paginating, per GitLab's REST documentation read
     /// 2026-09-23, so a reply with a next page and no total proves this many
@@ -658,18 +656,12 @@ enum GitLabActivityFeed {
             if commentCount?.isFloor == true { commentsAtLeast.insert(period) }
         }
         return ForgeActivityReading(
-            id: connection.id, kind: connection.kind, host: connection.host, login: merged.username,
+            id: connection.id, kind: connection.kind, host: connection.address, login: merged.username,
             activity: ForgeActivity(
                 contributions: contributions, merged: merged.counts, issues: issues,
                 comments: comments, contributionsBoundedToOneYear: false,
                 contributionsAtLeast: contributionsAtLeast, commentsAtLeast: commentsAtLeast),
             readAt: now, failure: nil)
-    }
-
-    /// Who the token belongs to, off the same document the merged counts
-    /// ride on with none of them asked for.
-    static func probe(_ connection: ForgeConnection, token: String) async throws -> String {
-        try await mergedCounts(connection, token: token, counters: [], now: Date()).username
     }
 
     private static func mergedCounts(

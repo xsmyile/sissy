@@ -16,10 +16,37 @@ import Security
 /// asking the user to arm the same thing twice.
 struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
     let kind: ForgeKind
-    /// The bare host, no scheme and no path: `github.com`, `gitlab.example.com`.
+    /// The bare host, no scheme, no port and no path: `github.com`,
+    /// `gitlab.example.com`.
     let host: String
+    /// The port the instance answers on, nil for the scheme's own. A
+    /// self-hosted forge on `8443` is the case it exists for.
+    let port: Int?
+    /// The path the instance is served under, with a leading slash and no
+    /// trailing one, nil for an instance at the root of its host.
+    let basePath: String?
 
-    var id: String { "\(kind.rawValue):\(host)" }
+    init(kind: ForgeKind, host: String, port: Int? = nil, basePath: String? = nil) {
+        self.kind = kind
+        self.host = host
+        self.port = port
+        self.basePath = basePath
+    }
+
+    /// The host with its port and path, which is how the connection is named
+    /// wherever the user reads it. For a connection with neither it is the
+    /// host alone, so a file written before either existed keeps its ids.
+    var address: String {
+        host + (port.map { ":\($0)" } ?? "") + (basePath ?? "")
+    }
+
+    var id: String { "\(kind.rawValue):\(address)" }
+
+    /// Whether this is the vendor's own hosted instance, which is the one
+    /// case that answers on an API host of its own.
+    var isVendorHosted: Bool {
+        host == kind.defaultHost && port == nil && basePath == nil
+    }
 
     /// The API root every request for this connection hangs off.
     ///
@@ -28,32 +55,127 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
     /// endpoint shape does not have to migrate a file.
     var root: URL? {
         var components = URLComponents()
-        components.scheme = "https"
+        components.scheme = Self.scheme
         components.host = host
+        components.port = port
+        components.path = basePath ?? ""
         return components.url
     }
 
-    static func gitHub(host: String = "github.com") -> Self {
+    static func gitHub(host: String = GitHubActivityFeed.dotComHost) -> Self {
         Self(kind: .gitHub, host: host)
     }
 
-    /// A host out of whatever was typed or pasted.
+    static let scheme = "https"
+    private static let acceptedSchemes = ["https", "http"]
+    private static let schemeSeparator = "://"
+    private static let validPorts = 1...65_535
+    private static let maximumHostLength = 253
+    private static let maximumLabelLength = 63
+    private static let hostCharacters = CharacterSet(
+        charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
+    private static let pathCharacters = CharacterSet(
+        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+
+    /// A connection out of whatever was typed or pasted into the two fields,
+    /// or the reason it cannot be one.
     ///
-    /// Someone copying it out of a browser brings a scheme, a path and a
-    /// trailing slash with it, and a connection keyed by
-    /// `https://gitlab.example.com/` is one no reader can reach and no row can
-    /// be removed by name. Lowercased because a host is case-insensitive and
-    /// the id is not.
-    static func host(from typed: String) -> String {
+    /// Someone copying a host out of a browser brings a scheme, a path and a
+    /// trailing slash with it, and those are taken off: the path of a page the
+    /// user was looking at is not where the API lives, so a sub-path install
+    /// is named in a field of its own. What is **refused** rather than
+    /// guessed at is anything that cannot reach the API or would send the
+    /// token somewhere the user did not name: a `user@` prefix, a query, a
+    /// fragment, a scheme that is neither `https` nor `http`, and a port out of
+    /// range. Each used to be accepted, filed with its token, and then read as
+    /// "answered something Sissy could not read" on every poll without a
+    /// request ever being made. Lowercased because a host is case-insensitive
+    /// and the id is not; the path keeps its case, because a path does not.
+    static func parse(kind: ForgeKind, host typed: String, path typedPath: String = "")
+        -> Result<Self, ForgeAddressProblem>
+    {
         var value = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        for scheme in ["https://", "http://"] where value.hasPrefix(scheme) {
-            value = String(value.dropFirst(scheme.count))
+        guard !value.isEmpty else { return .failure(.empty) }
+        if let separator = value.range(of: schemeSeparator) {
+            let scheme = String(value[value.startIndex..<separator.lowerBound])
+            guard acceptedSchemes.contains(scheme) else { return .failure(.scheme) }
+            value = String(value[separator.upperBound...])
         }
-        if let slash = value.firstIndex(of: "/") {
-            value = String(value[value.startIndex..<slash])
+        if value.contains("?") { return .failure(.query) }
+        if value.contains("#") { return .failure(.fragment) }
+        let authority = value.prefix { $0 != "/" }
+        if authority.contains("@") { return .failure(.credentials) }
+        let bare = String(authority.hasSuffix(":") ? authority.dropLast() : authority)
+        if acceptedSchemes.contains(bare) || value.contains(schemeSeparator) {
+            return .failure(.scheme)
         }
-        return value
+        var host = String(authority)
+        var port: Int?
+        if let colon = authority.lastIndex(of: ":") {
+            host = String(authority[authority.startIndex..<colon])
+            let digits = authority[authority.index(after: colon)...]
+            guard !digits.isEmpty, digits.allSatisfy({ $0.isASCII && $0.isNumber }),
+                let number = Int(digits), validPorts.contains(number)
+            else { return .failure(.port) }
+            port = number == defaultPort ? nil : number
+        }
+        guard isHostName(host) else { return .failure(host.isEmpty ? .empty : .host) }
+        return basePath(from: typedPath).map { path in
+            Self(kind: kind, host: host, port: port, basePath: path)
+        }
     }
+
+    /// The port `https` answers on when none is named, which is the same
+    /// connection as naming none and must not become a second id for it.
+    private static let defaultPort = 443
+
+    private static func isHostName(_ host: String) -> Bool {
+        guard !host.isEmpty, host.count <= maximumHostLength else { return false }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        return labels.allSatisfy { label in
+            !label.isEmpty && label.count <= maximumLabelLength
+                && !label.hasPrefix("-") && !label.hasSuffix("-")
+                && label.unicodeScalars.allSatisfy(hostCharacters.contains)
+        }
+    }
+
+    /// The sub-path an instance is served under, nil for none. Slashes either
+    /// side are the user's to leave off or put on, and a segment that could
+    /// climb out of the path or smuggle a query in is refused.
+    private static func basePath(from typed: String) -> Result<String?, ForgeAddressProblem> {
+        let value = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.contains("?") { return .failure(.query) }
+        if value.contains("#") { return .failure(.fragment) }
+        let segments = value.split(separator: "/")
+        guard !segments.isEmpty else { return .success(nil) }
+        let valid = segments.allSatisfy { segment in
+            segment != "." && segment != ".."
+                && segment.unicodeScalars.allSatisfy(pathCharacters.contains)
+        }
+        guard valid else { return .failure(.path) }
+        return .success("/" + segments.joined(separator: "/"))
+    }
+}
+
+/// Why what was typed cannot name a forge, one case per thing the user would
+/// change. Worded by `ForgeConnectCopy.addressProblem`.
+enum ForgeAddressProblem: Error, Sendable, Equatable, CaseIterable {
+    /// Nothing was typed.
+    case empty
+    /// A scheme other than `https` or `http`, or one typed wrong.
+    case scheme
+    /// A `user@` or `user:password@` in front of the host.
+    case credentials
+    /// A `?` and whatever follows it.
+    case query
+    /// A `#` and whatever follows it.
+    case fragment
+    /// A port that is not a number from 1 to 65535.
+    case port
+    /// A host with characters no host name can carry.
+    case host
+    /// A base path with characters a path segment cannot carry.
+    case path
 }
 
 /// The connections, in a file of Sissy's own beside the tokens they describe.
