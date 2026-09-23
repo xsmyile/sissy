@@ -109,8 +109,26 @@ enum CodexAccountLinkCopy {
             return "That sign-in came back without naming an account, so there is nothing to link."
         case .interrupted:
             return "The sign-in did not finish. Try again."
+        case .notFiled:
+            return "You signed in, but the keychain would not save it, so nothing was linked. "
+                + "Unlock your login keychain and try again."
         }
     }
+
+    static let linkedToDefaultTitle = "Linked to the default workspace"
+
+    /// What the window says when a link was filed on the workspace OpenAI
+    /// defaults the login to, because the list of workspaces could not be
+    /// read and so nobody was asked.
+    static func linkedToDefault(email: String?, workspace: String?) -> String {
+        let account = email ?? "this account"
+        let which =
+            workspace.map { "the one OpenAI signs it into by default, \($0)" }
+            ?? "the one OpenAI signs it into by default"
+        return "Sissy could not read which workspaces \(account) belongs to, so it linked "
+            + "\(which). To read another, unlink it and link it again."
+    }
+
 }
 
 enum ClaudeAccountLinkCopy {
@@ -170,6 +188,7 @@ enum ClaudeAccountLinkCopy {
     static let cancel = "Cancel"
     static let link = "Link"
     static let retry = "Try again"
+    static let done = "Done"
     static let failureTitle = "Sissy could not link that account"
     static let working = "Linking…"
 
