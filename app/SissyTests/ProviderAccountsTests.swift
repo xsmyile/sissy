@@ -41,4 +41,3 @@ final class ProviderHomeTests: XCTestCase {
             URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude.json").path)
     }
 }
-

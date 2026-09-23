@@ -37,8 +37,9 @@ final class ClaudeCLISlotTests: XCTestCase {
     }
 
     func testTheTokenAndItsExpiryAreRead() {
-        guard case .found(let found) = ClaudeCodeCredentials.load(
-            slot: slot([.file: credential("sk-ant-oat01-x")]))
+        guard
+            case .found(let found) = ClaudeCodeCredentials.load(
+                slot: slot([.file: credential("sk-ant-oat01-x")]))
         else { return XCTFail("a well-formed credential is found") }
         XCTAssertEqual(found.accessToken, "sk-ant-oat01-x")
         XCTAssertEqual(
