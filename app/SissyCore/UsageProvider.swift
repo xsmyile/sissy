@@ -92,7 +92,8 @@ protocol UsageProvider: AnyObject, SourceSignals {
     /// the cold backfill and again on every successful refresh; a refresh
     /// applies to subsequently ingested events and does not reprice what was
     /// already priced. What it does price is a row counted while no source
-    /// carried its model, which a free row would otherwise stay for good.
+    /// carried its model, in the tail and in the archived days alike, which a
+    /// free row would otherwise stay for good.
     func applyPriceCatalog(_ catalog: PriceCatalog) async
 }
 

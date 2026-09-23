@@ -599,7 +599,10 @@ a cold scan instead of only a cancelled boot task doing so.
   rate sets. The one thing it does price is a row the tail counted while no source
   carried its model, in the same actor turn the rates arrive in: the next event of
   that model lands on the same row, and a row that has a cost can no longer say
-  which of its tokens were free. `remotePricing: false` pins Sissy to the seed and stops all outbound
+  which of its tokens were free. Archived days the tail no longer holds get the
+  same pass, from the token counts each row and effort entry kept, written back
+  whole; the backfill never writes a day with an unpriced model, so the two
+  cannot collide on one. `remotePricing: false` pins Sissy to the seed and stops all outbound
   requests. Regenerate the seed when cutting a release:
   `sissy-cli --dump-seed > app/SissyCore/PricingSeed.swift`. The `pricing-oracle` CI
   job asserts exact agreement with `ccusage`, which prices from the same LiteLLM data.
