@@ -49,6 +49,16 @@ entitlement, no TCC prompt, and any process running as you can ask the same.
 | `/usr/bin/xcode-select` | that one check |
 | `/bin/sh -n` | **parses** the hook line before it is written, executing none of it. Runs when hooks are installed or reaffirmed, including at launch while the switch is on |
 
+**Updates.** Sparkle, embedded in the app, reads
+`https://sissy.smyile.com/appcast.xml` once a day while *Check for updates* is
+on, and downloads an update from the GitHub release it names. The feed and
+every archive are verified against an EdDSA public key in the app's Info.plist
+before anything is extracted; the private key lives only in the release
+workflow's secrets. Installing runs Sparkle's own `Autoupdate` helper, from
+inside the bundle, once Sissy has quit, to replace the app in place. It is
+signed and notarized with the app. Sparkle's XPC services, which exist for
+sandboxed apps, are not shipped.
+
 The `git` child's environment is replaced, not inherited: an inherited `GIT_DIR`
 would answer for a repository the reader was never pointed at, and
 `GIT_AUTHOR_EMAIL` would substitute itself for the reading. Those calls have a
