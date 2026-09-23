@@ -285,6 +285,16 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertTrue(blocked.message.hasPrefix("OpenAI"), blocked.message)
     }
 
+    /// The fix for a refused CLI credential is in the terminal, so the notice
+    /// names the command and offers no button that opens a second login.
+    func testARefusedCodexCredentialSendsYouToTheTerminal() throws {
+        let notice = try XCTUnwrap(
+            UsageFormat.limitsNotice(.credentialRefused, provider: ProviderID.codex))
+        XCTAssertTrue(notice.message.contains("codex login"), notice.message)
+        XCTAssertNil(notice.action)
+        XCTAssertNotEqual(notice.kind, .link)
+    }
+
     // MARK: An empty limits block
 
     /// Nothing to switch on any more, so an empty block is a reading that has

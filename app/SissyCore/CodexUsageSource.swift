@@ -289,6 +289,11 @@ actor CodexUsageSource: SourceSignals {
     /// rather than spending a token OpenAI has retired. The windows stay,
     /// because the last reading and its age are still true and this row's
     /// other source — the CLI's own turns — is still writing them.
+    ///
+    /// Who acts on it depends on whose credential it is. A linked account's
+    /// is Sissy's, and linking again replaces it. The CLI's is `codex
+    /// login`'s, so its refusal is `credentialRefused`: linking would add a
+    /// second account and leave this row refused.
     private func handle(_ error: Error) async -> Duration {
         if case UsageRequestError.rateLimited(let retryAfter) = error {
             let seconds = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
@@ -299,7 +304,8 @@ actor CodexUsageSource: SourceSignals {
             return .seconds(seconds)
         }
         if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
-            published.update { $0.limitsState = .sessionExpired }
+            let refused: ProviderLimitsState = account == nil ? .credentialRefused : .sessionExpired
+            published.update { $0.limitsState = refused }
             report("the Codex credential was refused (status \(code)); sign in again")
             return Self.refreshInterval
         }
