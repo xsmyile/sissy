@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// The parts of a Claude Code credential blob Sissy reads, merges and keeps.
@@ -39,6 +40,14 @@ enum ClaudeCredentialBlob {
             return nil
         }
         return ClaudeCredentials(accessToken: token, expiresAt: date(oauth[expiryKey]))
+    }
+
+    /// A stand-in for an access token that says which token it is and cannot
+    /// be spent: the hex SHA-256 of it. What two readers of the slot compare
+    /// to know they read the same credential, without either holding the
+    /// other's secret.
+    static func fingerprint(of accessToken: String) -> String {
+        SHA256.hash(data: Data(accessToken.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// When the refresh token dies, where the CLI records it.

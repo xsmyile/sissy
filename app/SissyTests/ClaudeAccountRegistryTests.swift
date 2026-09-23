@@ -1064,6 +1064,61 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         }
         XCTAssertEqual(token(vault.active), "tok-a")
     }
+
+    // MARK: One credential for the row
+
+    private func probe(spending token: String) async -> ClaudeLimitsProbe {
+        let probe = ClaudeLimitsProbe(
+            credentials: { _ in
+                .found(ClaudeCredentials(accessToken: token, expiresAt: .distantFuture))
+            },
+            fetch: { _ in
+                ClaudeLimitsProbe.Reading(
+                    windows: [UsageWindow(minutes: 300, usedPercent: 40, resetsAt: .distantFuture)!],
+                    credits: nil)
+            })
+        _ = await probe.refreshOnce {}
+        return probe
+    }
+
+    private func signals(
+        _ registry: ClaudeAccountRegistry, _ probe: ClaudeLimitsProbe
+    ) -> ProviderSignals {
+        ClaudeCodeSignals(
+            limitsProbe: probe, webSources: LockedValue([]), webLinks: LockedValue([:]),
+            profile: ClaudeProfileSource(url: tempDir.appendingPathComponent("absent.json")),
+            accounts: registry
+        ).currentSignals()
+    }
+
+    /// A `/login` between the registry's poll and the probe's: the probe has
+    /// already spent the new account's token while the registry still names
+    /// the old one. The reading must not go under that name.
+    func testLimitsReadWithAnotherAccountsTokenAreNotLaidUnderTheSignedInName() async {
+        let vault = Vault()
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await registry.captureActive()
+        vault.active = credential("tok-b")
+
+        let reading = signals(registry, await probe(spending: "tok-b"))
+
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-tok-a")
+        XCTAssertTrue(reading.windows.isEmpty)
+    }
+
+    /// The same credential on both sides is the ordinary case, and the probe
+    /// answers for the row.
+    func testLimitsReadWithTheIdentifiedTokenAreLaidOnTheRow() async {
+        let vault = Vault()
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await registry.captureActive()
+
+        let reading = signals(registry, await probe(spending: "tok-a"))
+
+        XCTAssertEqual(reading.windows.map(\.usedPercent), [40])
+    }
 }
 
 /// Holds an async caller until the test lets it go.

@@ -21,7 +21,23 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// Windows, why they are missing when they are, and when the last
     /// successful reading landed — published together so the row that draws
     /// the gauges and the row that explains their absence come off one value.
-    nonisolated private let published = LockedValue(ProviderSignals())
+    ///
+    /// The token they were read with rides in the same value, so a reader
+    /// can never pair one token's windows with another token's fingerprint.
+    nonisolated private let published = LockedValue(AttributedReading())
+
+    /// What the probe published, and which credential it was read with.
+    struct AttributedReading: Sendable, Equatable {
+        var signals = ProviderSignals()
+        /// `ClaudeCredentialBlob.fingerprint(of:)` of the access token the
+        /// windows and credits were fetched with, nil while there are none.
+        ///
+        /// The probe cannot name the account a token belongs to, and the
+        /// registry that can reads the slot on a clock of its own. This is
+        /// what `ClaudeCodeSignals` matches against the registry's
+        /// `activeCredential` before laying the reading under its name.
+        var credential: String?
+    }
     /// Where the CLI's token comes from, under the budget the caller sets.
     ///
     /// Injectable for the same reason `ClaudeCredentialsStore.loadOffPool`
@@ -88,7 +104,14 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// Live windows, expired buckets dropped — a window past its reset
     /// describes a period that no longer exists, same rule the Codex reader
     /// applies to its own.
-    nonisolated func currentSignals() -> ProviderSignals { published.load().live() }
+    nonisolated func currentSignals() -> ProviderSignals { published.load().signals.live() }
+
+    /// The live signals with the credential they were read with.
+    nonisolated func currentReading() -> AttributedReading {
+        var reading = published.load()
+        reading.signals = reading.signals.live()
+        return reading
+    }
 
     /// Starts the poll loop. `onRefresh` fires whenever the published reading
     /// changes — a new set of windows, or a new reason they are missing — so a
@@ -143,9 +166,10 @@ actor ClaudeLimitsProbe: SourceSignals {
     func stop(clearingState: Bool = true) {
         cancelRequests()
         published.update {
-            $0.windows = []
-            $0.credits = nil
-            if clearingState { $0.limitsState = .quiet }
+            $0.signals.windows = []
+            $0.signals.credits = nil
+            $0.credential = nil
+            if clearingState { $0.signals.limitsState = .quiet }
         }
         lastReported = nil
     }
@@ -173,7 +197,7 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// a refresh that blanks the gauges it is trying to restore reads as a
     /// failure for as long as the request takes.
     func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
-        if case .rateLimited(let until) = published.load().limitsState, until > Date() { return }
+        if case .rateLimited(let until) = published.load().signals.limitsState, until > Date() { return }
         cancelRequests()
         lastReported = nil
         let request = begin(onRefresh: onRefresh)
@@ -209,7 +233,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         let before = published.load()
         let delay = await readAndFetch(generation: stamp)
         guard stamp == generation else { return delay }
-        if Task.isCancelled && published.load().limitsState != .refused { return delay }
+        if Task.isCancelled && published.load().signals.limitsState != .refused { return delay }
         if published.load() != before { await onRefresh() }
         return delay
     }
@@ -248,7 +272,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         switch outcome {
         case .found(let found):
             published.update {
-                if $0.limitsState.isAnsweredByACredentialRead { $0.limitsState = .quiet }
+                if $0.signals.limitsState.isAnsweredByACredentialRead { $0.signals.limitsState = .quiet }
             }
             if let expiresAt = found.expiresAt, expiresAt <= Date() {
                 report(
@@ -301,7 +325,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
         let remaining = until.timeIntervalSinceNow
         guard remaining > 0 else { return nil }
-        published.update { $0.limitsState = .rateLimited(until: until) }
+        published.update { $0.signals.limitsState = .rateLimited(until: until) }
         report("still refused by the Claude usage endpoint until \(until); waiting rather than asking")
         return .seconds(remaining)
     }
@@ -316,7 +340,7 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// record on disk, past the relaunch too.
     func clearBackoff() async {
         published.update {
-            if case .rateLimited = $0.limitsState { $0.limitsState = .quiet }
+            if case .rateLimited = $0.signals.limitsState { $0.signals.limitsState = .quiet }
         }
         await backoff?.record(nil)
     }
@@ -347,10 +371,11 @@ actor ClaudeLimitsProbe: SourceSignals {
             let reading = try await fetchSource(credentials.accessToken)
             guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
             published.update {
-                $0.windows = reading.windows
-                $0.credits = reading.credits
-                $0.limitsState = .quiet
-                $0.limitsObservedAt = Date()
+                $0.signals.windows = reading.windows
+                $0.signals.credits = reading.credits
+                $0.signals.limitsState = .quiet
+                $0.signals.limitsObservedAt = Date()
+                $0.credential = ClaudeCredentialBlob.fingerprint(of: credentials.accessToken)
             }
             await backoff?.record(nil)
             return Self.refreshInterval
@@ -359,7 +384,7 @@ actor ClaudeLimitsProbe: SourceSignals {
             if case UsageRequestError.rateLimited(let retryAfter) = error {
                 let seconds = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
                 let until = Date().addingTimeInterval(seconds)
-                published.update { $0.limitsState = .rateLimited(until: until) }
+                published.update { $0.signals.limitsState = .rateLimited(until: until) }
                 await backoff?.record(until)
                 report(
                     "the Claude usage endpoint answered 429; backing off until \(until)")
@@ -396,10 +421,11 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// the last true one and its age is the point.
     private func publishFailure(_ state: ProviderLimitsState) {
         published.update {
-            $0.limitsState = state
-            $0.windows = []
-            $0.credits = nil
-            $0.limitsObservedAt = nil
+            $0.signals.limitsState = state
+            $0.signals.windows = []
+            $0.signals.credits = nil
+            $0.signals.limitsObservedAt = nil
+            $0.credential = nil
         }
     }
 

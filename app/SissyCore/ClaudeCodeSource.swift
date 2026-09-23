@@ -46,7 +46,7 @@ struct ClaudeCodeSignals: SourceSignals {
         var reading = Self.merge(
             profile: Self.attributed(file, to: signedIn),
             web: Self.webReading(for: active, among: sources),
-            probe: limitsProbe?.currentSignals())
+            probe: limitsProbe.flatMap { Self.probeReading($0.currentReading(), for: signedIn) })
         reading.accounts = Self.perAccount(
             reading, sources: sources, known: signedIn, active: active, links: webLinks.load())
         return reading
@@ -68,6 +68,33 @@ struct ClaudeCodeSignals: SourceSignals {
         _ signedIn: ClaudeAccountRegistry.Snapshot
     ) -> String? {
         signedIn.activeUUID ?? reading.profileOwner
+    }
+
+    /// The probe's reading, kept only when it was read with the credential
+    /// the registry identified as the signed-in account.
+    ///
+    /// The two read one slot on two clocks, the registry every two minutes
+    /// and the probe every five, so a `claude /login` between them has the
+    /// probe fetching the new account's windows and credits while the
+    /// registry still names the old one. Laying that reading under the
+    /// name was the cross-account row the shared slot was meant to end, and
+    /// the shared slot alone could not: it makes both read the same bytes,
+    /// not read them at the same moment. The fingerprint is what says they
+    /// did. A reading withheld here comes back on the registry's next poll,
+    /// which identifies the new token and re-emits.
+    ///
+    /// Where the registry names nobody there is no name to put the reading
+    /// under wrongly, and it stands as it always has. A reading with no
+    /// fingerprint carries no windows and no credits, only why they are
+    /// missing, and stands too.
+    static func probeReading(
+        _ reading: ClaudeLimitsProbe.AttributedReading,
+        for signedIn: ClaudeAccountRegistry.Snapshot
+    ) -> ProviderSignals? {
+        guard signedIn.activeUUID != nil, let credential = reading.credential else {
+            return reading.signals
+        }
+        return credential == signedIn.activeCredential ? reading.signals : nil
     }
 
     /// The config file's reading, kept only for the account it belongs to.
