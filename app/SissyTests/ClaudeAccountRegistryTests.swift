@@ -1021,6 +1021,30 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         let index = ClaudeAccountStore.defaultURL(in: tempDir)
         XCTAssertFalse(FileManager.default.fileExists(atPath: index.path))
     }
+
+    // MARK: Expiry
+
+    /// Nothing about the active credential changes when an archived refresh
+    /// token dies, so the poll is what has to notice it.
+    func testARefreshTokenThatDiesWhileNothingChangesStopsBeingSwitchable() async {
+        let vault = Vault()
+        let clock = LockedValue(Date(timeIntervalSince1970: 1_800_000_000))
+        let registry = makeRegistry(vault, now: { clock.load() }, identify: Self.byToken)
+        let refreshMillis = Int((1_800_000_000 + 60) * 1000)
+        vault.active = credential(
+            "tok-b", inner: #","refreshTokenExpiresAt":\#(refreshMillis)"#)
+        await registry.captureActive()
+        vault.active = credential("tok-a")
+        await registry.captureActive()
+        XCTAssertTrue(registry.currentSnapshot().switchable.contains("u-tok-b"))
+
+        clock.update { $0 = $0.addingTimeInterval(120) }
+        let moved = await registry.captureActive()
+
+        XCTAssertTrue(moved)
+        XCTAssertFalse(registry.currentSnapshot().switchable.contains("u-tok-b"))
+        XCTAssertEqual(registry.currentSnapshot().needsLogin, ["u-tok-b"])
+    }
 }
 
 /// Holds an async caller until the test lets it go.
