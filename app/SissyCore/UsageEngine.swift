@@ -814,16 +814,23 @@ actor UsageEngine {
     /// could otherwise name its held session as this very account and write it
     /// back after the delete. What that costs is a session still under the
     /// holding key, which the next launch keys.
-    func forgetClaudeWebSession(account: String) async {
-        guard lifecycle == .running else { return }
+    ///
+    /// What the keychain or the index refused comes back to the caller, so
+    /// an Unlink that did nothing says so rather than closing on silence.
+    func forgetClaudeWebSession(account: String) async -> Result<Void, AccountUnlink.Failure> {
+        guard lifecycle == .running else { return .success(()) }
         claudeWebAdoptionTask?.cancel()
         await claudeWebAdoptionTask?.value
         claudeWebAdoptionTask = nil
         if pendingClaudeWebLink?.choice.identity.uuid == account { pendingClaudeWebLink = nil }
-        try? ClaudeWebSessionStore.delete(account: account)
-        try? claudeWebIndex.forget(uuid: account)
+        let index = claudeWebIndex
+        let outcome = await AccountUnlink.run(
+            "claude.ai session",
+            removeCredential: { try ClaudeWebSessionStore.delete(account: account) },
+            forgetName: { try index.forget(uuid: account) })
         claudeWebLinks.store(claudeWebIndex.load())
         await followStoredClaudeWebSessions()
+        return outcome
     }
 
     /// Makes an account the one Claude Code starts as.
@@ -1372,18 +1379,21 @@ actor UsageEngine {
     /// The CLI's own `auth.json` is untouched, which is the whole separation
     /// this feature rests on — linking an account never changed which account
     /// the terminal is on, and unlinking one must not either.
-    func forgetCodexAccount(id: String) async {
-        guard lifecycle == .running else { return }
+    ///
+    /// A credential the keychain would not delete keeps its name, and what
+    /// either half refused comes back to the caller to show.
+    func forgetCodexAccount(id: String) async -> Result<Void, AccountUnlink.Failure> {
+        guard lifecycle == .running else { return .success(()) }
         if pendingCodexLink?.choice.identity.id == id { pendingCodexLink = nil }
-        do {
-            try await CodexRenewal.shared.remove(account: id)
-        } catch {
-            sissyLog("sissy: the Codex credential could not be removed from the keychain (\(error))")
-        }
-        try? codexIndex.forget(id: id)
+        let index = codexIndex
+        let outcome = await AccountUnlink.run(
+            "Codex credential",
+            removeCredential: { try await CodexRenewal.shared.remove(account: id) },
+            forgetName: { try index.forget(id: id) })
         codexLinks.store(codexIndex.load())
         await rebuildCodexSources()
         await reemit()
+        return outcome
     }
 
     /// Every Codex account Sissy holds a credential for, as Settings lists

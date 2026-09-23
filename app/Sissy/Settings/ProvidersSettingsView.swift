@@ -98,6 +98,19 @@ enum CodexAccountLinkCopy {
 
     static let unlinkConfirm = "Forget"
 
+    /// Why an Unlink did not finish. The dialog that asked has closed by the
+    /// time the keychain answers, so this is the only place it is said.
+    static func unlinkFailure(_ why: AccountUnlink.Failure) -> String {
+        switch why {
+        case .credentialKept:
+            return "The keychain would not delete this account's OpenAI sign-in, so it is still "
+                + "linked. Unlock your login keychain and try again."
+        case .nameKept:
+            return "The OpenAI sign-in was deleted, but Sissy could not update its list of "
+                + "linked accounts. The account is unlinked."
+        }
+    }
+
     /// Why a sign-in produced no account. Each names something different to
     /// do: a refusal is worth trying again, and a token naming no login is not
     /// something a retry can fix.
@@ -195,6 +208,18 @@ enum ClaudeAccountLinkCopy {
     /// word shorter — drew both inline. The title already names what is
     /// being forgotten.
     static let unlinkConfirm = "Forget"
+
+    /// Why an Unlink did not finish, for the reason the Codex one says it.
+    static func unlinkFailure(_ why: AccountUnlink.Failure) -> String {
+        switch why {
+        case .credentialKept:
+            return "The keychain would not delete this account's claude.ai session, so it is "
+                + "still linked. Unlock your login keychain and try again."
+        case .nameKept:
+            return "The claude.ai session was deleted, but Sissy could not update its list of "
+                + "linked accounts. The account is unlinked."
+        }
+    }
 
     static let cancel = "Cancel"
     static let link = "Link"
@@ -512,6 +537,9 @@ struct ProvidersSettingsView: View {
             if let why = model.engine.claudeWebLinkFailure {
                 failure(ClaudeAccountLinkCopy.failure(why))
             }
+            if let why = model.engine.claudeWebUnlinkFailure {
+                failure(ClaudeAccountLinkCopy.unlinkFailure(why))
+            }
             ForEach(sortedAccounts) { account in
                 linkedAccount(account)
             }
@@ -614,6 +642,9 @@ struct ProvidersSettingsView: View {
     @ViewBuilder
     private var codexAccounts: some View {
         Group {
+            if let why = model.engine.codexUnlinkFailure {
+                failure(CodexAccountLinkCopy.unlinkFailure(why))
+            }
             ForEach(sortedCodexAccounts) { account in
                 codexAccount(account)
             }
