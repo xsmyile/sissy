@@ -111,6 +111,12 @@ header of `/api/v4/events` with one row requested. Two vendors counting two
 things is two readings; adding them would invent a third belonging to neither,
 which is the rule `ProviderCredits` already holds for money in two currencies.
 
+GitLab stops counting at 10 000 records: past that the reply keeps a next page
+and drops `x-total` (GitLab's REST documentation, read 2026-09-23). The widest
+window of an account that has worked for months crosses it, so such a reply is
+read as `GitLabActivityFeed.countCeiling` held as a floor and the row prints
+`10k+`, where it used to print nothing.
+
 **The comment counter is the one neither vendor will total, and the two stand in
 opposite relations to the figure beside them.** GitLab files a comment as an
 event, so it is the same `x-total` header read with `action=commented` on it and
