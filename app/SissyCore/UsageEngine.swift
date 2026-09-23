@@ -409,7 +409,7 @@ actor UsageEngine {
         self.onFrame = onFrame
         // Settle on one catalog before the cold scan starts, so the backfill
         // prices historical events against the same rates the live tail will
-        // use. A refresh does not reprice what it already counted, so a
+        // use. A refresh does not reprice what it already priced, so a
         // catalog that lands mid-scan would leave the day split across two
         // rate sets.
         if config.remotePricingEnabled {

@@ -90,8 +90,9 @@ protocol UsageProvider: AnyObject, SourceSignals {
     /// matching its upstream vendor and consults it between the user's
     /// `pricingOverride` and the embedded generated seed. Called once before
     /// the cold backfill and again on every successful refresh; a refresh
-    /// applies to subsequently ingested events and does not reprice
-    /// accumulated totals.
+    /// applies to subsequently ingested events and does not reprice what was
+    /// already priced. What it does price is a row counted while no source
+    /// carried its model, which a free row would otherwise stay for good.
     func applyPriceCatalog(_ catalog: PriceCatalog) async
 }
 

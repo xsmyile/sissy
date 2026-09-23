@@ -325,8 +325,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// Anthropic slice of the runtime `PriceCatalog`. Sits between the user's
     /// override and the embedded generated seed, so a model that launched after
     /// this build was cut still prices correctly. Refreshed in place by
-    /// `applyPriceCatalog`; a refresh applies to events ingested from then on
-    /// and does not reprice accumulated totals.
+    /// `applyPriceCatalog`; a refresh applies to events ingested from then on,
+    /// and to the rows the tail counted with no rate at all.
     private var priceCatalog: PricingTable?
     /// Models already reported as unpriced. Keeps the warning to one line per
     /// model per run instead of one per ingested event.
@@ -358,6 +358,23 @@ final class ClaudeCodeAdapter: SourceAdapter {
             signals: ClaudeCodeSignals(
                 limitsProbe: limitsProbe, webSources: webSources, webLinks: webLinks,
                 profile: profile, accounts: accounts)
+        )
+    }
+
+    func cost(of totals: UsageHistoryTotals, model: String) -> Decimal? {
+        guard Pricing.price(for: model, override: pricingOverride, catalog: priceCatalog) != nil
+        else { return nil }
+        return Pricing.cost(
+            model: model,
+            input: totals.inputTokens,
+            output: totals.outputTokens,
+            cacheRead: totals.cacheReadTokens,
+            cacheCreation: (
+                fiveMinute: totals.cacheCreationTokens - totals.cacheCreation1hTokens,
+                oneHour: totals.cacheCreation1hTokens
+            ),
+            override: pricingOverride,
+            catalog: priceCatalog
         )
     }
 

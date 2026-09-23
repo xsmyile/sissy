@@ -352,9 +352,9 @@ enum PriceCatalogSource {
     /// refetch immediately.
     ///
     /// A refreshed catalog applies to events ingested from that point on;
-    /// already-accumulated day totals are not repriced, same as a
-    /// `pricingOverride` edit. Rate changes are logged so that is visible rather
-    /// than implied.
+    /// what was already priced keeps its rate, same as a `pricingOverride`
+    /// edit, and only the tail's rows counted with no rate at all are priced
+    /// again. Rate changes are logged so that is visible rather than implied.
     ///
     /// `initialPrevious` is the catalog the backfill already ran against, so
     /// the very first refresh reports what moved since then. Nil only when no
@@ -379,8 +379,8 @@ enum PriceCatalogSource {
                 if changed > 0 {
                     sissyLog(
                         "sissy: pricing catalog refreshed — \(changed) rate(s) changed; "
-                            + "applies to events ingested from now on, already-counted events "
-                            + "are not repriced")
+                            + "applies to events ingested from now on, already-priced events "
+                            + "keep their rate")
                 } else {
                     sissyLog(
                         "sissy: pricing catalog refreshed — "

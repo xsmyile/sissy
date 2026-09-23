@@ -169,6 +169,11 @@ protocol SourceAdapter: AnyObject {
     /// matching its upstream vendor.
     func applyPriceCatalog(_ catalog: PriceCatalog)
 
+    /// What `totals` spent on `model` cost at the rates the adapter holds
+    /// now, or nil when no source prices the model. The same lookup and the
+    /// same arithmetic an event is priced with, applied to a row's counters.
+    func cost(of totals: UsageHistoryTotals, model: String) -> Decimal?
+
     /// Ran once after any snapshot load and before the first emit, for state
     /// the adapter reads out of band rather than off a log line. True when it
     /// changed something the next snapshot should carry.
@@ -452,8 +457,11 @@ actor LocalUsageProvider: UsageProvider {
         if adapter.refreshOutOfBandState() { persistDirty = true }
     }
 
-    func applyPriceCatalog(_ catalog: PriceCatalog) {
+    /// Takes the new rates, and prices the rows they are the first to cover.
+    func applyPriceCatalog(_ catalog: PriceCatalog) async {
         adapter.applyPriceCatalog(catalog)
+        guard repriceUnpricedRows() else { return }
+        await emitReading()
     }
 
     func start(onChange: @escaping @Sendable (DayTotals) async -> Void) async {
@@ -466,6 +474,9 @@ actor LocalUsageProvider: UsageProvider {
         self.onChange = onChange
         let loaded = loadAndApplyPersistedState()
         if !loaded { suppressTheDayAColdScanCuts() }
+        // Before the first line is read: the catalog was handed over before
+        // the snapshot came back, so a row it prices is still a free one here.
+        if loaded { _ = repriceUnpricedRows() }
         // Ahead of the cold scan the line above may have just forced: the scan
         // is what reads lines naming checkouts that have to be recognised, and
         // the ones still on disk are recognised only if git has been asked
@@ -1465,23 +1476,85 @@ actor LocalUsageProvider: UsageProvider {
     ///
     /// Only a backfill pass may. The tail meters a day that is still running:
     /// a refusal there would keep today out of the archive for the whole of
-    /// it, because `applyPriceCatalog` prices events from the refresh onwards
-    /// and never reprices what is already counted. A backfilled day is past
+    /// it, and `applyPriceCatalog` prices the tail's free rows once a rate
+    /// exists for them. A backfilled day is past
     /// and nothing will grow it back, so writing it short freezes it short —
     /// which is the worse of the two, and the one this guards.
     private var refusesUnpricedDays: Bool { backfill != nil }
 
     /// Whether any row here is a model no pricing source carried.
+    private static func holdsAnUnpricedModel(
+        _ totals: [UsageHistoryRow: UsageHistoryTotals]
+    ) -> Bool {
+        totals.values.contains(where: isUnpriced)
+    }
+
+    /// Whether a row was counted while no pricing source carried its model.
     ///
-    /// Read off the rows rather than carried on the event, because it is
+    /// Read off the row rather than carried on the event, because it is
     /// already there: `Pricing.cost` answers zero only when no rate resolved,
     /// and Claude Code's one legitimately free shape — the `<synthetic>` turn
     /// it writes for its own local notices — carries no tokens either, so
     /// tokens without cost names an unpriced model and nothing else.
-    private static func holdsAnUnpricedModel(
-        _ totals: [UsageHistoryRow: UsageHistoryTotals]
-    ) -> Bool {
-        totals.contains { $0.value.totalTokens > 0 && $0.value.cost == 0 }
+    private static func isUnpriced(_ totals: UsageHistoryTotals) -> Bool {
+        totals.totalTokens > 0 && totals.cost == 0
+    }
+
+    /// Prices every row the tail holds that was counted with no rate, for the
+    /// models the adapter can price now, and answers whether any moved.
+    ///
+    /// **Here, where the rates change, and not where a row is read.** A model
+    /// a catalog carries for the first time goes on being metered, and its
+    /// next event lands on the very row that was free: from then on it is a
+    /// row with a cost, and the tokens counted before the rate existed stay
+    /// free with nothing left to tell them apart. Measured 2026-09-23, a
+    /// `gpt-6-sol` day held 9.5 M tokens at $0 for the hours between OpenAI
+    /// shipping the model and the next daily refresh. Run in the same actor
+    /// turn that swaps the rates in, no event can land between the two.
+    ///
+    /// A model no source prices keeps its zero, the answer a local model
+    /// behind the CLI gets at ingest too. The rows it moves are the tail's
+    /// own, so the days they belong to are rewritten whole on the next flush;
+    /// a day that has already left the window is not revisited.
+    private func repriceUnpricedRows() -> Bool {
+        var priced: Set<String> = []
+        var movedDays: Set<Date> = []
+        for (day, rows) in dailyModelTotals {
+            var added: Decimal = 0
+            for (row, totals) in rows where Self.isUnpriced(totals) {
+                guard let cost = adapter.cost(of: totals, model: row.model), cost > 0 else {
+                    continue
+                }
+                dailyModelTotals[day]?[row]?.cost = cost
+                added += cost
+                priced.insert(row.model)
+            }
+            guard added > 0 else { continue }
+            if let total = dailyTotals[day] {
+                dailyTotals[day] = DayTotals(
+                    totalTokens: total.totalTokens, totalCost: total.totalCost + added)
+            }
+            movedDays.insert(day)
+        }
+        for (day, splits) in dailyEffort {
+            for (key, split) in splits where Self.isUnpriced(split.totals) {
+                guard let cost = adapter.cost(of: split.totals, model: key.model), cost > 0 else {
+                    continue
+                }
+                dailyEffort[day]?[key]?.totals.cost = cost
+                priced.insert(key.model)
+                movedDays.insert(day)
+            }
+        }
+        guard !priced.isEmpty else { return false }
+        persistDirty = true
+        if historyRoot != nil {
+            historyDirtyDays.formUnion(movedDays.subtracting(historySuppressedDays))
+        }
+        sissyLog(
+            "sissy: \(id) priced \(priced.sorted().joined(separator: ", ")) for the tokens "
+                + "counted before a pricing source carried it")
+        return true
     }
 
     /// Throttled atomic save. `force=true` bypasses throttle (used by stop).

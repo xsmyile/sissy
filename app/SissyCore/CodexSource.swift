@@ -154,6 +154,19 @@ final class CodexAdapter: SourceAdapter {
         return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/sessions")
     }
 
+    func cost(of totals: UsageHistoryTotals, model: String) -> Decimal? {
+        guard OpenAIPricing.price(for: model, override: pricingOverride, catalog: priceCatalog) != nil
+        else { return nil }
+        return OpenAIPricing.cost(
+            model: model,
+            input: totals.inputTokens,
+            output: totals.outputTokens,
+            cacheRead: totals.cacheReadTokens,
+            override: pricingOverride,
+            catalog: priceCatalog
+        )
+    }
+
     func applyPriceCatalog(_ catalog: PriceCatalog) {
         priceCatalog = catalog.table(for: .openai)
         loggedUnpricedModels.removeAll()
