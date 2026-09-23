@@ -151,6 +151,32 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertEqual(count, 2)
     }
 
+    /// A refusal from the host claude.ai redirected to was a refusal of a
+    /// request carrying no cookie, so the session, its organization and the
+    /// reading all stand, and the next poll does not read the item again.
+    func testARefusalFromAnotherHostKeepsTheSession() async {
+        let reads = Sent()
+        let refuse = LockedValue(false)
+        let source = source(
+            lookup: { _ in
+                await reads.record(nil)
+                return Self.found(Self.session)
+            },
+            fetch: { _, _ in
+                if refuse.load() { throw SissyHTTP.LeftItsOrigin(status: 401) }
+                return ClaudeWebSource.Reading(
+                    organization: "org", windows: [Self.window(300, 42)], credits: nil)
+            })
+        _ = await source.refreshOnce {}
+        refuse.store(true)
+        _ = await source.refreshOnce {}
+        _ = await source.refreshOnce {}
+        XCTAssertNotEqual(source.currentSignals().limitsState, .sessionExpired)
+        XCTAssertEqual(source.currentSignals().windows.map(\.usedPercent), [42])
+        let count = await reads.organizations.count
+        XCTAssertEqual(count, 1)
+    }
+
     /// A private endpoint punishes hammering, so a 429 with no figure of its
     /// own costs the long wait rather than the ordinary one.
     func testRateLimitingEarnsTheLongBackoff() async {

@@ -340,6 +340,22 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         await probe.stop()
     }
 
+    /// A refusal from the host the usage endpoint redirected to was a refusal
+    /// of a request carrying no bearer token, so the CLI's credential is not
+    /// reported refused.
+    func testARefusalFromAnotherHostIsNotTheCredentials() async {
+        let probe = ClaudeLimitsProbe(
+            credentials: { _ in
+                .found(ClaudeCredentials(accessToken: "token", expiresAt: .distantFuture))
+            },
+            fetch: { _ in throw SissyHTTP.LeftItsOrigin(status: 401) })
+
+        _ = await probe.refreshOnce {}
+
+        XCTAssertNotEqual(probe.currentSignals().limitsState, .credentialRefused)
+        await probe.stop()
+    }
+
     /// A status code nobody can act on is still a status code somebody has to
     /// read: the log used to print `error 1`, which named neither.
     func testTheLogNamesWhatTheVendorAnswered() {

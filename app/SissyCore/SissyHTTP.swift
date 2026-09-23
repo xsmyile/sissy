@@ -18,7 +18,9 @@ import Foundation
 /// but a redirect off the origin the request was addressed to loses every
 /// credential header on the way, which is what a forge behind an SSO proxy
 /// would otherwise hand to the proxy, and a redirect off the origin of a
-/// request with a body is not followed at all.
+/// request with a body is not followed at all. Either way the reply reaches
+/// the caller as `LeftItsOrigin`, never as a status it would read as the
+/// vendor refusing the credential.
 enum SissyHTTP {
     /// The idle bound for any request that sets no timeout of its own. Every
     /// reader sets one, at most this long.
@@ -38,8 +40,65 @@ enum SissyHTTP {
     static let session: URLSession = URLSession(
         configuration: configuration(), delegate: RedirectGuard(), delegateQueue: nil)
 
-    static func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        try await session.data(for: request)
+    /// One reply to `request`, refused with `LeftItsOrigin` when it is not an
+    /// answer to the credential the request carried.
+    ///
+    /// `through` is the seam a test stands a stubbed session in; every source
+    /// takes the default.
+    static func data(
+        for request: URLRequest, through session: URLSession = Self.session
+    ) async throws -> (Data, URLResponse) {
+        let (data, response) = try await session.data(for: request)
+        if let departure = leftItsOrigin(response, answering: request) { throw departure }
+        return (data, response)
+    }
+
+    /// A reply that came from somewhere other than the origin the request was
+    /// addressed to, or a redirect off it that was not followed.
+    ///
+    /// Past a redirect off the origin the credential was stripped, so a `401`
+    /// or `403` there is another host refusing a request that carried none,
+    /// and read as a refusal it would drop a session, a selected organisation
+    /// and a linked account over something the vendor never said. A reader
+    /// that meets this reports a failed request and keeps its credential.
+    /// Carries the status only: the host it came from is not the vendor's and
+    /// is not logged.
+    struct LeftItsOrigin: Error, Equatable, CustomStringConvertible {
+        let status: Int
+
+        var description: String {
+            "the reply came from another host than the one asked (status \(status))"
+        }
+    }
+
+    /// Why a reply is not an answer to `request`, `nil` for one that is.
+    ///
+    /// Two shapes: a `3xx` whose `Location` leaves the origin, which reaches a
+    /// caller only when `redirected(_:from:)` refused to follow it, and any
+    /// reply from another origin to a request carrying one of
+    /// `credentialHeaders`, which is a reply to the stripped copy. A request
+    /// with no credential may be answered from wherever the vendor sends it.
+    static func leftItsOrigin(_ response: URLResponse, answering request: URLRequest)
+        -> LeftItsOrigin?
+    {
+        guard let http = response as? HTTPURLResponse else { return nil }
+        if redirectStatuses.contains(http.statusCode),
+            let location = http.value(forHTTPHeaderField: locationHeader),
+            !sameOrigin(request.url, URL(string: location, relativeTo: http.url ?? request.url))
+        {
+            return LeftItsOrigin(status: http.statusCode)
+        }
+        guard carriesACredential(request), !sameOrigin(request.url, http.url) else { return nil }
+        return LeftItsOrigin(status: http.statusCode)
+    }
+
+    private static let redirectStatuses = 300..<400
+    private static let locationHeader = "Location"
+
+    private static func carriesACredential(_ request: URLRequest) -> Bool {
+        (request.allHTTPHeaderFields ?? [:]).keys.contains {
+            credentialHeaders.contains($0.lowercased())
+        }
     }
 
     static func configuration() -> URLSessionConfiguration {
