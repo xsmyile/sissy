@@ -259,6 +259,16 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertNil(notice?.action)
     }
 
+    /// An API-key, cloud-provider or environment-token user runs Claude Code
+    /// with nothing stored, and is not signed out.
+    func testNoStoredClaudeLoginIsNotWordedAsSignedOut() throws {
+        let notice = try XCTUnwrap(
+            UsageFormat.limitsNotice(.signedOut, provider: ProviderID.claudeCode))
+
+        XCTAssertEqual(
+            notice.message, "No stored Claude login to read limits from")
+    }
+
     /// The common case, and the reason a row that is fine says nothing: one
     /// that explains itself every time is one nobody reads when it matters.
     func testWorkingLimitsSayNothing() {

@@ -602,6 +602,11 @@ enum UsageFormat {
     /// ended. Said in one vendor's vocabulary they are worse than silence — a
     /// Codex row reading "Claude Code is not signed in on this Mac" sends
     /// somebody to fix the wrong terminal.
+    ///
+    /// Claude Code's absent credential is worded as a missing stored login
+    /// rather than a missing sign-in: the CLI runs just as well on an API key,
+    /// a cloud provider or a token in the environment, none of which it
+    /// stores, and telling those users they are signed out is false.
     static func limitsNotice(
         _ state: ProviderLimitsState,
         provider: String
@@ -625,8 +630,11 @@ enum UsageFormat {
                 message: "Keychain access was refused, so the limits stay hidden",
                 action: "Try again", kind: .refresh)
         case .signedOut:
-            return .init(
-                message: "\(cli) is not signed in on this Mac", action: nil, kind: .refresh)
+            let message =
+                isCodex
+                ? "\(cli) is not signed in on this Mac"
+                : "No stored Claude login to read limits from"
+            return .init(message: message, action: nil, kind: .refresh)
         case .sessionExpired:
             let ended = isCodex ? "The OpenAI sign-in" : "The claude.ai session"
             return .init(message: "\(ended) has ended", action: "Link again", kind: .link)
