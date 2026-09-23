@@ -77,6 +77,36 @@ final class ClaudeCLISlotTests: XCTestCase {
         }
     }
 
+    /// Bytes that are not a credential blob are not a place with nothing in
+    /// it: the lookup stops there rather than answering from the file behind.
+    func testAMalformedUnscopedItemStopsTheLookup() {
+        let held = slot([Self.unscoped: Data("not json".utf8), .file: credential("tok-a")])
+
+        guard case .unreadable(let status) = ClaudeCodeCredentials.load(slot: held) else {
+            return XCTFail("expected unreadable")
+        }
+        XCTAssertEqual(status, OSStatus(errSecDecode))
+    }
+
+    /// A malformed file with nothing in front of it is unreadable, not absent.
+    func testAMalformedFileAloneIsUnreadable() {
+        let held = slot([.file: Data(#"{"claudeAiOauth":"#.utf8)])
+
+        guard case .unreadable = ClaudeCodeCredentials.load(slot: held) else {
+            return XCTFail("expected unreadable")
+        }
+    }
+
+    /// An account half that is not an object is a blob that did not decode,
+    /// which is a different claim from a blob that carries no account.
+    func testAnAccountHalfThatIsNotAnObjectIsUnreadable() {
+        let held = slot([Self.unscoped: Data(#"{"claudeAiOauth":"x"}"#.utf8)])
+
+        guard case .unreadable = ClaudeCodeCredentials.load(slot: held) else {
+            return XCTFail("expected unreadable")
+        }
+    }
+
     /// A place that could not be read says nothing about which credential the
     /// CLI is using, so the lookup stops rather than answering from the next.
     func testAnUnreadableItemIsUnreadableRatherThanFallingThrough() {

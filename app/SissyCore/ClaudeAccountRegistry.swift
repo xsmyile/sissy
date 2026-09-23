@@ -283,7 +283,12 @@ actor ClaudeAccountRegistry {
     private func accountForEveryName(
         _ names: [ClaudeCLISlot.Name], holding before: Held
     ) async throws(Failure) {
-        let reading = ClaudeCLISlot.reading(names) { before[$0] }?.name
+        let reading: ClaudeCLISlot.Name?
+        do {
+            reading = try ClaudeCLISlot.reading(names) { before[$0] }?.name
+        } catch {
+            throw .slotUnreadable
+        }
         for name in names {
             guard let bytes = before[name] else { continue }
             guard ClaudeCredentialBlob.object(bytes) != nil else { throw .slotUnreadable }
