@@ -42,7 +42,7 @@ Adding/removing Swift files requires re-running `xcodegen generate` — the proj
 
 ### CI
 
-`.github/workflows/ci.yml` runs shellcheck, actionlint and the docstring-reference check on ubuntu, then `xcodebuild` for both targets, the unit tests and `--self-test` on macos-26. `pricing-oracle.yml` asserts cost agreement with `ccusage` on a synthetic fixture, and `release.yml` builds, notarizes and publishes on a pushed tag.
+`.github/workflows/ci.yml` runs shellcheck, actionlint and the docstring-reference check on ubuntu, then `xcodebuild` for both targets in Debug and in Release, the unit tests and `--self-test` from both CLI builds on macos-26. `pricing-oracle.yml` asserts cost agreement with `ccusage` on a synthetic fixture, and `release.yml` builds, notarizes and staples the app, then the DMG built from it, and publishes on a pushed tag.
 
 ## Architecture
 
