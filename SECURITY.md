@@ -79,10 +79,12 @@ A Debug build files the same four under `com.radonforge.sissy.dev.*`, so a
 development copy never reads or overwrites what the released app holds.
 
 **Nothing on the wire is kept.** Every request goes through one ephemeral
-session with no HTTP cache, cookie jar or credential store, and a redirect to
-another origin drops its credential headers. At each launch Sissy deletes the
+session with no HTTP cache, cookie jar or credential store. A redirect to
+another origin drops its credential headers, and one that would resend a
+request body there is not followed. At each launch Sissy deletes the
 `Cache.db`, `fsCachedData` and `HTTPStorages` cookie files that versions up to
-0.2.3 left under `~/Library` for both bundle ids.
+0.2.3 left under `~/Library` for both bundle ids, and logs any of those
+directories it could not list.
 
 None reaches the frame, the logs, the diagnostics report or the CSV export. No
 type the panel renders carries a token field, and
