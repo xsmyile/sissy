@@ -22,6 +22,14 @@ enum ClaudeCredentialBlob {
         (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
+    /// Whether the bytes are not a credential blob at all: not a JSON object,
+    /// or one whose account half is there and is not an object. A blob that
+    /// decodes and carries no account half is not malformed, it is empty.
+    static func isMalformed(_ data: Data) -> Bool {
+        guard let root = object(data) else { return true }
+        return root[oauthKey].map { !($0 is [String: Any]) } ?? false
+    }
+
     /// The account half, or nil when the blob holds no usable one. Usable
     /// means an access token that is not empty: the one field every reader of
     /// the blob needs, and the same test for every place it can be kept.
@@ -138,8 +146,15 @@ enum ClaudeCredentialBlob {
 /// A place that cannot be read is not a place that is empty, so a failed
 /// lookup throws rather than falling through: reading past it would answer
 /// for a credential the CLI may not be using, and a switch would overwrite a
-/// name it never saw.
+/// name it never saw. Bytes that do not decode are the same claim, and throw
+/// `Failure.malformed` where they sit: a place holding nothing, a blob with
+/// no account half and a blob that is not one are three different answers.
 struct ClaudeCLISlot: Sendable {
+    enum Failure: Error, Equatable {
+        /// The name holds bytes that are not a credential blob.
+        case malformed(Name)
+    }
+
     /// One place the credential can be kept.
     enum Name: Hashable, Sendable {
         case keychain(String)
@@ -170,14 +185,15 @@ struct ClaudeCLISlot: Sendable {
 
     /// The first of `names` whose bytes hold a usable credential, and those
     /// bytes. The one rule for which name the CLI is reading, whether the
-    /// bytes come from the slot itself or from a reading already taken.
+    /// bytes come from the slot itself or from a reading already taken. A
+    /// name ahead of it holding bytes that do not decode stops the lookup.
     static func reading(
         _ names: [Name], _ bytes: (Name) throws -> Data?
-    ) rethrows -> (name: Name, data: Data)? {
+    ) throws -> (name: Name, data: Data)? {
         for name in names {
-            guard let data = try bytes(name), ClaudeCredentialBlob.oauth(in: data) != nil else {
-                continue
-            }
+            guard let data = try bytes(name) else { continue }
+            guard !ClaudeCredentialBlob.isMalformed(data) else { throw Failure.malformed(name) }
+            guard ClaudeCredentialBlob.oauth(in: data) != nil else { continue }
             return (name, data)
         }
         return nil
@@ -250,6 +266,8 @@ enum ClaudeCodeCredentials {
             return .found(parsed)
         } catch ClaudeKeychainCLI.Failure.tool(let status) {
             return .unreadable(OSStatus(status))
+        } catch ClaudeCLISlot.Failure.malformed {
+            return .unreadable(OSStatus(errSecDecode))
         } catch {
             return .unreadable(OSStatus(errSecIO))
         }
