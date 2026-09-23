@@ -75,4 +75,13 @@ final class ClaudeUnsupportedHomesTests: XCTestCase {
         XCTAssertTrue(message.contains("CLAUDE_CONFIG_DIR"), message)
         XCTAssertTrue(message.contains(".claude"), message)
     }
+
+    /// The scan knows a sign-in is filed, not whose it is, so the notice
+    /// says nothing about an account's limits: that account may be signed in
+    /// under the default home too, or linked through claude.ai.
+    func testTheNoticeClaimsNothingAboutAnAccountsLimits() {
+        let message = ClaudeUnsupportedHomesCopy.message(reading: Self.defaultHome)
+        XCTAssertFalse(message.contains("limits"), message)
+        XCTAssertFalse(message.contains("account"), message)
+    }
 }

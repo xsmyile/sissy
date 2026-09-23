@@ -260,11 +260,18 @@ enum ClaudeAccountLinkCopy {
 /// It names the variable, because that is what the user set and will
 /// recognise, and the folder Sissy does read, because that is what they can
 /// do about it: sign in there, or accept that the other home goes unmetered.
+///
+/// It describes the sign-in and never the account. The scan knows an item is
+/// filed, not whose it is, so that account may well be signed in under the
+/// default home or linked through claude.ai with its limits on screen. And a
+/// folder the user abandoned keeps its item, so the notice says where that
+/// goes rather than standing forever unexplained.
 enum ClaudeUnsupportedHomesCopy {
     static func message(reading home: URL) -> String {
         let path = (home.path as NSString).abbreviatingWithTildeInPath
-        return "Claude Code has a sign-in under another config folder. Sissy does not follow "
-            + "CLAUDE_CONFIG_DIR and reads only \(path), so that account's limits are not shown."
+        return "A Claude Code sign-in under another config folder is not read. Sissy does not "
+            + "follow CLAUDE_CONFIG_DIR and reads only \(path). A folder no longer in use leaves "
+            + "its sign-in in Keychain Access, where it can be removed."
     }
 }
 
