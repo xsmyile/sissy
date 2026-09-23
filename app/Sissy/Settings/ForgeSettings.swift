@@ -531,17 +531,13 @@ struct ForgeConnectSheet: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            Picker("Forge", selection: $draft.kind) {
+            Picker("Forge", selection: Binding(get: { draft.kind }, set: { draft.pick($0) })) {
                 ForEach(ForgeKind.allCases, id: \.self) { kind in
                     Text(UsageFormat.forgeName(kind)).tag(kind)
                 }
             }
             .pickerStyle(.segmented)
             .disabled(replacing != nil)
-            .onChange(of: draft.kind) { _, new in
-                guard new == .gitHub else { return }
-                draft.host = GitHubActivityFeed.dotComHost
-            }
             TextField(ForgeConnectCopy.hostPrompt, text: $draft.host)
                 .frame(width: Self.fieldWidth)
                 .disabled(replacing != nil)
@@ -642,10 +638,12 @@ struct ForgeConnectSheet: View {
 
 /// What the connect sheet's fields hold, apart from the token.
 ///
-/// A value rather than three `@State`s so what the fields parse to, and what
-/// the sheet says about them, can be held without a window.
+/// A value rather than three `@State`s so the rule that picking a forge resets
+/// the host can be held without a window: the field used to keep `github.com`
+/// when GitLab was picked, and a GitLab token pasted under it was sent to
+/// GitHub on every poll.
 struct ForgeConnectDraft: Equatable {
-    var kind: ForgeKind
+    private(set) var kind: ForgeKind
     var host: String
     var path: String
 
@@ -656,6 +654,16 @@ struct ForgeConnectDraft: Equatable {
                 connection.host + (connection.port.map { ":\($0)" } ?? "")
             } ?? ForgeKind.gitHub.defaultHost
         path = replacing?.basePath ?? ""
+    }
+
+    /// Picks a forge, putting that forge's own host in the field and clearing
+    /// the path. Picking the forge already picked changes nothing, so a host
+    /// the user typed is not thrown away by a click on the segment it is on.
+    mutating func pick(_ picked: ForgeKind) {
+        guard picked != kind else { return }
+        kind = picked
+        host = picked.defaultHost
+        path = ""
     }
 
     var connection: Result<ForgeConnection, ForgeAddressProblem> {

@@ -11,8 +11,10 @@ enum ForgeKind: String, Sendable, Codable, Equatable, CaseIterable {
     case gitHub = "github"
     case gitLab = "gitlab"
 
-    /// The vendor's own hosted instance, the one connection that answers on
-    /// an API host of its own rather than under the host the user named.
+    /// The vendor's own hosted instance, which is what the connect sheet's
+    /// host field holds until the user types another. Picking a forge resets
+    /// the field to it, so a GitLab token is never sent to `github.com`
+    /// because the field still held the other forge's host.
     var defaultHost: String {
         switch self {
         case .gitHub: GitHubActivityFeed.dotComHost
