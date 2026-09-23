@@ -55,7 +55,7 @@ final class SissyHTTPTests: XCTestCase {
         let target = try XCTUnwrap(URL(string: "https://sso.example.net/login"))
         let followed = try XCTUnwrap(
             SissyHTTP.redirected(Self.credentialed(target), from: URLRequest(url: original)))
-        for header in ["Authorization", "Cookie", "PRIVATE-TOKEN"] {
+        for header in ["Authorization", "Cookie", "PRIVATE-TOKEN", "ChatGPT-Account-Id"] {
             XCTAssertNil(followed.value(forHTTPHeaderField: header), "\(header) reached another host")
         }
         XCTAssertEqual(followed.value(forHTTPHeaderField: "Accept"), "application/json")
@@ -158,6 +158,7 @@ final class SissyHTTPTests: XCTestCase {
         request.setValue("Bearer token", forHTTPHeaderField: "Authorization")
         request.setValue("sessionKey=value", forHTTPHeaderField: "Cookie")
         request.setValue("token", forHTTPHeaderField: "PRIVATE-TOKEN")
+        request.setValue("workspace", forHTTPHeaderField: "ChatGPT-Account-Id")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request
     }

@@ -28,9 +28,12 @@ enum SissyHTTP {
     /// for the LiteLLM catalog, the one reply that is not a few kilobytes.
     static let resourceTimeout: TimeInterval = 120
 
-    /// Headers that carry a credential, lowercased: the bearer token, the
-    /// claude.ai session and GitLab's personal access token.
-    static let credentialHeaders: Set<String> = ["authorization", "cookie", "private-token"]
+    /// Headers that carry a credential or name the account one is for,
+    /// lowercased: the bearer token, the claude.ai session, GitLab's personal
+    /// access token and the ChatGPT workspace a Codex reading is asked for.
+    static let credentialHeaders: Set<String> = [
+        "authorization", "cookie", "private-token", "chatgpt-account-id",
+    ]
 
     static let session: URLSession = URLSession(
         configuration: configuration(), delegate: RedirectGuard(), delegateQueue: nil)
