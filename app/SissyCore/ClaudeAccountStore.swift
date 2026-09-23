@@ -208,19 +208,38 @@ struct ClaudeAccountStore: Sendable {
     /// without a login keychain: writing a real credential is the one piece of
     /// external I/O here, and a test of what the store *decides* must not
     /// depend on it.
+    ///
+    /// `read` answers nil only for an account with nothing archived, and
+    /// throws where the keychain could not be asked. It used to fold both into
+    /// nil, which is how a locked keychain came to be worded as an account
+    /// that had never signed in.
     struct Secrets: Sendable {
-        var read: @Sendable (String) -> Data?
+        var read: @Sendable (String) throws -> Data?
         var write: @Sendable (String, Data) throws -> Void
+        /// Whether an item is archived for the account, asked without reading
+        /// its secret. What decides whether an account is offered for a switch.
+        var contains: @Sendable (String) throws -> Bool
 
         static let keychain = Self(
             read: { uuid in
-                try? ClaudeKeychainCLI.read(
-                    service: ClaudeKeychainCLI.sissyAccountService, account: uuid)
+                do {
+                    return try ClaudeKeychainCLI.read(
+                        service: ClaudeKeychainCLI.sissyAccountService, account: uuid)
+                } catch ClaudeKeychainCLI.Failure.noItem {
+                    return nil
+                }
             },
             write: { uuid, data in
                 try ClaudeKeychainCLI.write(
                     data, service: ClaudeKeychainCLI.sissyAccountService, account: uuid)
+            },
+            contains: { uuid in
+                try ClaudeKeychainCLI.contains(
+                    service: ClaudeKeychainCLI.sissyAccountService, account: uuid)
             })
+
+        /// Holds nothing and keeps nothing.
+        static let none = Self(read: { _ in nil }, write: { _, _ in }, contains: { _ in false })
     }
 
     /// Where the identities are listed. Secrets are never in here.
@@ -233,19 +252,74 @@ struct ClaudeAccountStore: Sendable {
     struct Index: Sendable, Codable, Equatable {
         var accounts: [ClaudeAccountIdentity] = []
         var activeUUID: String?
+        /// When each archived credential's refresh token dies, by account.
+        ///
+        /// A date and never a token, so the index still holds no secret. It is
+        /// here so the switcher can tell an account that needs `/login` from
+        /// one it can switch to without reading every archived secret on each
+        /// publish. Optional so an index written before it decodes as it was.
+        var refreshExpiries: [String: Date]?
+    }
+
+    /// Why the store would not do what it was asked.
+    enum StoreError: Error, Equatable {
+        /// The index file is there and does not decode, or cannot be read.
+        case indexUnreadable
+        /// The credential offered carries no account to archive.
+        case noAccount
     }
 
     static let indexFileName = "claude-accounts.json"
+    /// What an index that would not read is renamed to, with a timestamp
+    /// after it so a second one never replaces the first.
+    static let setAsidePrefix = "claude-accounts.unreadable-"
 
     static func defaultURL(in parent: URL) -> URL {
         parent.appendingPathComponent(indexFileName)
     }
 
-    func loadIndex() -> Index {
-        guard let data = try? Data(contentsOf: indexURL),
-            let decoded = try? JSONDecoder().decode(Index.self, from: data)
-        else { return Index() }
+    /// The index, empty when there is none yet.
+    ///
+    /// Throws for a file that is there and will not read. That used to come
+    /// back as an empty index, and the next `remember` wrote over it: every
+    /// account left the switcher while its secret stayed in the keychain with
+    /// nothing to name it. Every write here follows a load that succeeded, so
+    /// a file this refuses is never overwritten. An empty file holds nothing
+    /// to lose and reads as an empty index.
+    func loadIndex() throws -> Index {
+        let data: Data
+        do {
+            data = try Data(contentsOf: indexURL)
+        } catch CocoaError.fileReadNoSuchFile {
+            return Index()
+        } catch {
+            throw StoreError.indexUnreadable
+        }
+        guard !data.isEmpty else { return Index() }
+        guard let decoded = try? JSONDecoder().decode(Index.self, from: data) else {
+            throw StoreError.indexUnreadable
+        }
         return decoded
+    }
+
+    /// Moves an index that will not read out of the way, and answers where it
+    /// went. Renamed rather than deleted: it is the only list of which
+    /// archived secrets belong to whom, and a person can still read it.
+    func setAsideIndex(now: Date = Date()) throws -> URL {
+        let stamp = Int(now.timeIntervalSince1970)
+        let aside = indexURL.deletingLastPathComponent()
+            .appendingPathComponent("\(Self.setAsidePrefix)\(stamp).json")
+        try FileManager.default.moveItem(at: indexURL, to: aside)
+        return aside
+    }
+
+    /// Whether an index has ever been set aside beside this one. Read off the
+    /// directory rather than remembered, so the switcher keeps saying so
+    /// across a relaunch until the file is dealt with.
+    func hasSetAsideIndex() -> Bool {
+        let parent = indexURL.deletingLastPathComponent()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: parent.path)) ?? []
+        return names.contains { $0.hasPrefix(Self.setAsidePrefix) }
     }
 
     func saveIndex(_ index: Index) throws {
@@ -255,13 +329,11 @@ struct ClaudeAccountStore: Sendable {
     }
 
     /// The credential archived for one account, or nil when none is.
-    func credential(uuid: String) -> Data? { secrets.read(uuid) }
+    func credential(uuid: String) throws -> Data? { try secrets.read(uuid) }
 
-    /// Archives a credential under its account and records the identity.
-    ///
-    /// Called whenever the active credential turns out to be new — a switch,
-    /// a `/login`, or the CLI rotating a token — so the archive tracks the
-    /// live one instead of going stale behind it.
+    /// Whether a credential is archived for one account.
+    func holdsCredential(uuid: String) throws -> Bool { try secrets.contains(uuid) }
+
     /// Whether the archive already holds a later-expiring credential for that
     /// account than the one offered.
     ///
@@ -273,18 +345,33 @@ struct ClaudeAccountStore: Sendable {
     /// refresh token may already have been spent, which signs that account out
     /// of the machine it was archived from. Rotation only ever extends the
     /// expiry, so it is what tells the two apart.
-    private func holdsFresherCredential(than credential: Data, for uuid: String) -> Bool {
-        guard let offered = ClaudeCredentialsStore.parse(credential)?.expiresAt,
-            let held = secrets.read(uuid).flatMap({ ClaudeCredentialsStore.parse($0)?.expiresAt })
+    private func holdsFresherCredential(than credential: Data, for uuid: String) throws -> Bool {
+        guard let offered = ClaudeCredentialBlob.credentials(in: credential)?.expiresAt,
+            let held = try secrets.read(uuid).flatMap({
+                ClaudeCredentialBlob.credentials(in: $0)?.expiresAt
+            })
         else { return false }
         return held > offered
     }
 
+    /// Archives a credential under its account and records the identity.
+    ///
+    /// Called whenever the active credential turns out to be new — a switch,
+    /// a `/login`, or the CLI rotating a token — so the archive tracks the
+    /// live one instead of going stale behind it. Only the account half is
+    /// kept: whatever else the CLI's blob carries is the CLI's as it is now,
+    /// and a copy of it frozen here is what a switch used to roll back.
     func remember(_ identity: ClaudeAccountIdentity, credential: Data) throws {
-        if !holdsFresherCredential(than: credential, for: identity.uuid) {
-            try secrets.write(identity.uuid, credential)
+        var index = try loadIndex()
+        guard let account = ClaudeCredentialBlob.accountOnly(credential) else {
+            throw StoreError.noAccount
         }
-        var index = loadIndex()
+        if try !holdsFresherCredential(than: account, for: identity.uuid) {
+            try secrets.write(identity.uuid, account)
+            var expiries = index.refreshExpiries ?? [:]
+            expiries[identity.uuid] = ClaudeCredentialBlob.refreshExpiresAt(in: account)
+            index.refreshExpiries = expiries.isEmpty ? nil : expiries
+        }
         if let existing = index.accounts.firstIndex(where: { $0.uuid == identity.uuid }) {
             index.accounts[existing] = identity
         } else {

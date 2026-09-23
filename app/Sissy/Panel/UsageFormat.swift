@@ -1612,8 +1612,37 @@ enum ClaudeAccountSwitchCopy {
                 + "credential alone. Try again once it can reach Anthropic"
         case .keychain:
             return "The keychain would not accept the change, so the signed-in account is unchanged"
+        case .keychainUnavailable:
+            return
+                "The keychain could not be reached, so the signed-in account is unchanged. "
+                + "Unlock your Mac's login keychain and try again"
+        case .mirrorWrite:
+            return
+                "Claude Code's .credentials.json would not take the change, so Sissy put the "
+                + "signed-in account back. Check that file's permissions and try again"
+        case .partialSwitch:
+            return
+                "The switch stopped part way and could not be undone, so Claude Code's saved "
+                + "sign-ins disagree. Try the switch again, or sign in with claude /login"
+        case .needsLogin:
+            return needsLogin
+        case .indexUnreadable:
+            return
+                "Sissy could not read its list of saved accounts, so it changed nothing. "
+                + "Check claude-accounts.json in Sissy's folder"
         }
     }
+
+    /// Said under an account whose saved sign-in can no longer be used, in
+    /// place of the control that would try to.
+    static let needsLogin =
+        "That account's saved sign-in has expired. Sign into it again with claude /login"
+
+    /// Said on the Claude Code page when the account index would not read and
+    /// was set aside, which is why accounts it listed may be missing.
+    static let indexSetAside =
+        "Sissy could not read its list of saved accounts and kept it aside, so some may be "
+        + "missing here · they come back as each one signs in"
 }
 
 /// How the panel words a connected forge's two counters.

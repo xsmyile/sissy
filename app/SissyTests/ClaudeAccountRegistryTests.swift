@@ -150,55 +150,141 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         try? FileManager.default.removeItem(at: tempDir)
     }
 
-    /// Stands in for the login keychain, so nothing here reads or writes the
-    /// real one.
+    /// Stands in for the login keychain and the CLI's mirror file, so nothing
+    /// here reads or writes the real ones.
     private final class Vault: @unchecked Sendable {
         private let lock = NSLock()
         private var items: [String: Data] = [:]
+        /// The unscoped item the CLI reads first.
         var active: Data?
         /// The CLI's other names for the same home, which a switch has to
-        /// reach and must not overwrite blind.
+        /// reach and must not overwrite blind. The default home always has
+        /// one such name, holding an item or not.
         var siblings: [Data] = []
         var siblingFailure: Error?
+        /// `.credentials.json` beside the config.
+        var file: Data?
+        var fileReadFailure: Error?
+        /// Writes that throw, by name, and whether a put-back throws too.
+        var writeFailures: [ClaudeCLISlot.Name: Error] = [:]
+        var restoreFails = false
+        var secretReadFailure: Error?
+        var primaryReadFailure: Error?
         private(set) var writes = 0
+        private var failed = false
+
+        static let primary = ClaudeCLISlot.Name.keychain("primary")
+
+        static func sibling(_ index: Int) -> ClaudeCLISlot.Name { .keychain("sibling-\(index)") }
+
+        func secret(_ uuid: String) -> Data? { lock.withLock { items[uuid] } }
+
+        func dropSecret(_ uuid: String) { lock.withLock { items[uuid] = nil } }
 
         func secrets() -> ClaudeAccountStore.Secrets {
             ClaudeAccountStore.Secrets(
-                read: { [self] uuid in lock.withLock { items[uuid] } },
-                write: { [self] uuid, data in lock.withLock { items[uuid] = data } })
+                read: { [self] uuid in
+                    if let secretReadFailure { throw secretReadFailure }
+                    return lock.withLock { items[uuid] }
+                },
+                write: { [self] uuid, data in lock.withLock { items[uuid] = data } },
+                contains: { [self] uuid in lock.withLock { items[uuid] != nil } })
         }
 
-        func slot() -> ClaudeAccountRegistry.ActiveSlot {
-            ClaudeAccountRegistry.ActiveSlot(
-                read: { [self] in lock.withLock { active } },
-                readSiblings: { [self] in
-                    if let siblingFailure { throw siblingFailure }
-                    return lock.withLock { siblings }
+        private func value(_ name: ClaudeCLISlot.Name) -> Data? {
+            switch name {
+            case Self.primary: return active
+            case .file: return file
+            case .keychain(let service):
+                guard let index = Int(service.dropFirst("sibling-".count)),
+                    siblings.indices.contains(index)
+                else { return nil }
+                return siblings[index]
+            }
+        }
+
+        private func store(_ data: Data?, at name: ClaudeCLISlot.Name) {
+            switch name {
+            case Self.primary: active = data
+            case .file: file = data
+            case .keychain(let service):
+                guard let index = Int(service.dropFirst("sibling-".count)), let data else { return }
+                siblings[index] = data
+            }
+        }
+
+        func slot() -> ClaudeCLISlot {
+            ClaudeCLISlot(
+                names: { [self] in
+                    [Self.primary] + (0..<max(siblings.count, 1)).map(Self.sibling) + [.file]
                 },
-                write: { [self] data in
-                    lock.withLock {
-                        active = data
-                        siblings = siblings.map { _ in data }
+                read: { [self] name in
+                    switch name {
+                    case Self.primary: if let primaryReadFailure { throw primaryReadFailure }
+                    case .file: if let fileReadFailure { throw fileReadFailure }
+                    case .keychain: if let siblingFailure { throw siblingFailure }
+                    }
+                    return lock.withLock { value(name) }
+                },
+                write: { [self] name, data in
+                    try lock.withLock {
+                        if let failure = writeFailures[name] {
+                            failed = true
+                            throw failure
+                        }
+                        if restoreFails, failed { throw ClaudeKeychainCLI.Failure.tool(1) }
+                        store(data, at: name)
                         writes += 1
+                    }
+                },
+                remove: { [self] name in
+                    try lock.withLock {
+                        if restoreFails, failed { throw ClaudeKeychainCLI.Failure.tool(1) }
+                        store(nil, at: name)
                     }
                 })
         }
     }
 
-    private func credential(_ token: String, expiresAt: Int = 4_102_444_800_000) -> Data {
+    private func credential(
+        _ token: String, expiresAt: Int = 4_102_444_800_000, inner: String = "",
+        extra: String = ""
+    ) -> Data {
         Data(
             """
-            {"claudeAiOauth":{"accessToken":"\(token)","expiresAt":\(expiresAt)}}
+            {"claudeAiOauth":{"accessToken":"\(token)","expiresAt":\(expiresAt)\(inner)}\(extra)}
             """.utf8)
+    }
+
+    private func token(_ data: Data?) -> String? {
+        data.flatMap { ClaudeCredentialBlob.credentials(in: $0)?.accessToken }
     }
 
     private func makeRegistry(
         _ vault: Vault,
+        now: @escaping @Sendable () -> Date = { Date() },
         identify: @escaping @Sendable (String) async throws -> ClaudeAccountIdentity
     ) -> ClaudeAccountRegistry {
         var store = ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: tempDir))
         store.secrets = vault.secrets()
-        return ClaudeAccountRegistry(store: store, slot: vault.slot(), identify: identify)
+        return ClaudeAccountRegistry(
+            store: store, slot: vault.slot(), identify: identify, now: now)
+    }
+
+    private static func byToken(_ token: String) -> ClaudeAccountIdentity {
+        ClaudeAccountIdentity(
+            uuid: "u-\(token)", email: nil, organization: nil, organizationType: nil,
+            rateLimitTier: nil)
+    }
+
+    /// Archives A and B, leaving the CLI on A.
+    private func archiveTwo(_ vault: Vault, _ registry: ClaudeAccountRegistry) async {
+        vault.active = credential("tok-a")
+        await registry.captureActive()
+        vault.active = credential("tok-b")
+        await registry.captureActive()
+        vault.active = credential("tok-a")
+        await registry.captureActive()
     }
 
     func testCaptureArchivesTheActiveAccount() async {
@@ -427,7 +513,8 @@ final class ClaudeAccountRegistryTests: XCTestCase {
 
     /// A lookup that failed is not a name with no item behind it. Treating the
     /// two alike leaves that slot on the previous account under a switch that
-    /// called itself a success.
+    /// called itself a success. Exit 51 is a keychain that cannot be used right
+    /// now, which is its own sentence rather than a bare status.
     func testASiblingLookupThatFailedStopsTheSwitch() async {
         let vault = Vault()
         vault.active = credential("tok-a")
@@ -445,7 +532,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
 
         let outcome = await registry.activate(uuid: "u-tok-b")
 
-        guard case .failure(.keychain(51)) = outcome else {
+        guard case .failure(.keychainUnavailable) = outcome else {
             return XCTFail("expected the failed lookup to stop the switch")
         }
         XCTAssertEqual(vault.active, credential("tok-a"))
@@ -582,5 +669,339 @@ final class ClaudeAccountRegistryTests: XCTestCase {
 
         XCTAssertTrue(registry.currentSnapshot().accounts.isEmpty)
         XCTAssertNil(registry.currentSnapshot().activeUUID)
+    }
+    // MARK: What is offered
+
+    /// An index entry is a name Sissy has seen. Without the secret behind it
+    /// the click can only fail, so the account is listed and not offered.
+    func testAnIndexEntryWithNoArchivedSecretIsNotSwitchable() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.dropSecret("u-tok-b")
+
+        let relaunched = makeRegistry(vault, identify: Self.byToken)
+        await relaunched.captureActive()
+
+        let snapshot = relaunched.currentSnapshot()
+        XCTAssertEqual(Set(snapshot.accounts.map(\.uuid)), ["u-tok-a", "u-tok-b"])
+        XCTAssertEqual(snapshot.switchable, ["u-tok-a"])
+    }
+
+    /// A refresh token that has expired cannot be renewed by anything but a
+    /// login, so the account is not offered and a switch to it says so.
+    func testAnExpiredRefreshTokenIsNotSwitchable() async {
+        let vault = Vault()
+        let expired = Date(timeIntervalSince1970: 1_700_000_000)
+        let registry = makeRegistry(
+            vault, now: { Date(timeIntervalSince1970: 1_800_000_000) }, identify: Self.byToken)
+        let refreshMillis = Int(expired.timeIntervalSince1970 * 1000)
+        vault.active = credential(
+            "tok-b", inner: #","refreshTokenExpiresAt":\#(refreshMillis)"#)
+        await registry.captureActive()
+        vault.active = credential("tok-a")
+        await registry.captureActive()
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.needsLogin) = outcome else { return XCTFail("expected needsLogin") }
+        XCTAssertEqual(registry.currentSnapshot().needsLogin, ["u-tok-b"])
+        XCTAssertFalse(registry.currentSnapshot().switchable.contains("u-tok-b"))
+        XCTAssertEqual(token(vault.active), "tok-a")
+    }
+
+    // MARK: Where the credential is read from
+
+    /// A CLI that keeps no keychain item writes `.credentials.json`, and that
+    /// is the account it is running as.
+    func testTheFileIsCapturedWhenNoKeychainItemHoldsOne() async {
+        let vault = Vault()
+        vault.file = credential("tok-a")
+        let registry = makeRegistry(vault, identify: Self.byToken)
+
+        await registry.captureActive()
+
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-tok-a")
+    }
+
+    /// Measured 2026-09-23 against Claude Code 2.1.280: a `/login` wrote the
+    /// unscoped item alone, and the scoped item and the file kept the account
+    /// before it. The name on the row and the limits under it both have to be
+    /// the unscoped item's.
+    func testIdentityAndLimitsBothComeFromTheUnscopedItem() async {
+        let vault = Vault()
+        vault.active = credential("tok-b")
+        vault.siblings = [credential("tok-a")]
+        vault.file = credential("tok-a")
+        let registry = makeRegistry(vault, identify: Self.byToken)
+
+        await registry.captureActive()
+        let limits = ClaudeCodeCredentials.load(slot: vault.slot())
+
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-tok-b")
+        guard case .found(let found) = limits else { return XCTFail("expected a credential") }
+        XCTAssertEqual(found.accessToken, "tok-b")
+    }
+
+    /// A signed-out CLI is on no account, whatever the index noted last.
+    func testASlotThatEmptiedClearsTheActiveAccount() async {
+        let vault = Vault()
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await registry.captureActive()
+
+        vault.active = nil
+        let moved = await registry.captureActive()
+
+        XCTAssertTrue(moved)
+        XCTAssertNil(registry.currentSnapshot().activeUUID)
+    }
+
+    // MARK: What a switch reads
+
+    /// A mirror that cannot be read is not a mirror with nothing in it: the
+    /// switch is refused rather than written over a name it never saw.
+    func testAnUnreadableMirrorRefusesTheSwitch() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.fileReadFailure = CocoaError(.fileReadNoPermission)
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.activeAccountUnknown) = outcome else {
+            return XCTFail("expected the unreadable mirror to refuse the switch")
+        }
+        XCTAssertEqual(token(vault.active), "tok-a")
+    }
+
+    /// The mirror is one of the names the switch overwrites, so an account in
+    /// it that nothing archived is archived first.
+    func testAMirrorHoldingAnUnarchivedAccountIsArchivedBeforeTheSwitch() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.file = credential("tok-c")
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .success = outcome else { return XCTFail("expected the switch to succeed") }
+        XCTAssertNotNil(vault.secret("u-tok-c"))
+        XCTAssertEqual(token(vault.file), "tok-b")
+    }
+
+    /// A secret the keychain would not hand over is not an account that was
+    /// never archived, and must not be worded as one.
+    func testAnArchiveTheKeychainWouldNotReadIsNotNotArchived() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.secretReadFailure = ClaudeKeychainCLI.Failure.unavailable
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.keychainUnavailable) = outcome else {
+            return XCTFail("expected keychainUnavailable")
+        }
+    }
+
+    // MARK: What a switch writes
+
+    /// Only the account half is archived; the MCP logins beside it are the
+    /// CLI's as they are now.
+    func testTheArchiveKeepsOnlyTheAccountHalf() async {
+        let vault = Vault()
+        vault.active = credential("tok-a", extra: #","mcpOAuth":{"server":"m1"}"#)
+        let registry = makeRegistry(vault, identify: Self.byToken)
+
+        await registry.captureActive()
+
+        let archived = vault.secret("u-tok-a").flatMap(ClaudeCredentialBlob.object)
+        XCTAssertEqual(archived.map { Set($0.keys) }, [ClaudeCredentialBlob.oauthKey])
+    }
+
+    /// A → B → A with an MCP login made in between: the login stays as it is
+    /// live, and only the account changes.
+    func testMCPLoginsSurviveASwitchAndBack() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        vault.active = credential("tok-b", extra: #","mcpOAuth":{"server":"m0"}"#)
+        await registry.captureActive()
+        vault.active = credential("tok-a", extra: #","mcpOAuth":{"server":"m1"}"#)
+        await registry.captureActive()
+
+        guard case .success = await registry.activate(uuid: "u-tok-b") else {
+            return XCTFail("switching to B failed")
+        }
+        vault.active = vault.active.flatMap {
+            ClaudeCredentialBlob.merging(
+                account: $0, into: Data(#"{"mcpOAuth":{"server":"m2"}}"#.utf8))
+        }
+        guard case .success = await registry.activate(uuid: "u-tok-a") else {
+            return XCTFail("switching back to A failed")
+        }
+
+        let live = vault.active.flatMap(ClaudeCredentialBlob.object)
+        XCTAssertEqual(token(vault.active), "tok-a")
+        XCTAssertEqual((live?["mcpOAuth"] as? [String: String])?["server"], "m2")
+    }
+
+    /// A keychain that is locked or will not answer is one sentence, not a
+    /// status code and not a missing login.
+    func testALockedKeychainOnWriteIsKeychainUnavailable() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.writeFailures[Vault.primary] = ClaudeKeychainCLI.Failure.tool(36)
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.keychainUnavailable) = outcome else {
+            return XCTFail("expected keychainUnavailable")
+        }
+        XCTAssertEqual(token(vault.active), "tok-a")
+    }
+
+    /// Any other refusal keeps its status.
+    func testAnotherKeychainRefusalKeepsItsStatus() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.writeFailures[Vault.primary] = ClaudeKeychainCLI.Failure.tool(25)
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.keychain(25)) = outcome else { return XCTFail("expected keychain(25)") }
+    }
+
+    /// The mirror is written last. When it refuses, the keychain items that
+    /// already took the new account are put back, so the names still agree.
+    func testAMirrorThatRefusesPutsTheKeychainBack() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.file = credential("tok-a")
+        vault.writeFailures[.file] = CocoaError(.fileWriteNoPermission)
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.mirrorWrite) = outcome else { return XCTFail("expected mirrorWrite") }
+        XCTAssertEqual(token(vault.active), "tok-a")
+        XCTAssertEqual(token(vault.file), "tok-a")
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-tok-a")
+    }
+
+    /// Only a put-back that fails too leaves the names disagreeing, and that
+    /// is the one case worded as a switch stopped part way.
+    func testAPutBackThatFailsIsAPartialSwitch() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.file = credential("tok-a")
+        vault.writeFailures[.file] = CocoaError(.fileWriteNoPermission)
+        vault.restoreFails = true
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.partialSwitch) = outcome else { return XCTFail("expected partialSwitch") }
+    }
+
+    // MARK: Reentrancy
+
+    /// A poll suspended on identifying a rotation must not put the badge back
+    /// on the account a switch made while it was away has just left.
+    func testACaptureResumingAfterASwitchDoesNotUndoIt() async {
+        let vault = Vault()
+        let entered = expectation(description: "the poll is identifying")
+        let gate = Latch()
+        let first = LockedValue(true)
+        let registry = makeRegistry(vault) { token in
+            if token == "tok-a1", first.load() {
+                first.update { $0 = false }
+                entered.fulfill()
+                await gate.wait()
+            }
+            return ClaudeAccountIdentity(
+                uuid: token.hasPrefix("tok-a") ? "u-a" : "u-b", email: nil, organization: nil,
+                organizationType: nil, rateLimitTier: nil)
+        }
+        vault.active = credential("tok-b")
+        await registry.captureActive()
+        vault.active = credential("tok-a")
+        await registry.captureActive()
+        vault.active = credential("tok-a1")
+
+        let poll = Task { await registry.captureActive() }
+        await fulfillment(of: [entered], timeout: 5)
+        let outcome = await registry.activate(uuid: "u-b")
+        gate.open()
+        _ = await poll.value
+
+        guard case .success = outcome else { return XCTFail("expected the switch to succeed") }
+        XCTAssertEqual(token(vault.active), "tok-b")
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-b")
+    }
+
+    // MARK: The index
+
+    /// An index that will not read is moved aside, byte for byte, rather than
+    /// read as empty and written over by the next capture.
+    func testACorruptIndexIsSetAsideRatherThanOverwritten() async throws {
+        let vault = Vault()
+        let indexURL = ClaudeAccountStore.defaultURL(in: tempDir)
+        let corrupt = Data("{not json".utf8)
+        try corrupt.write(to: indexURL)
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(vault, identify: Self.byToken)
+
+        await registry.captureActive()
+
+        let aside = try FileManager.default.contentsOfDirectory(atPath: tempDir.path)
+            .filter { $0.hasPrefix(ClaudeAccountStore.setAsidePrefix) }
+        XCTAssertEqual(aside.count, 1)
+        XCTAssertEqual(
+            try Data(contentsOf: tempDir.appendingPathComponent(aside[0])), corrupt)
+        XCTAssertTrue(registry.currentSnapshot().indexSetAside)
+        XCTAssertEqual(registry.currentSnapshot().accounts.map(\.uuid), ["u-tok-a"])
+    }
+
+    /// Absent is not unreadable: a first launch starts an index and says
+    /// nothing about one being set aside.
+    func testAMissingIndexIsAnEmptyOneAndNothingIsSetAside() async {
+        let vault = Vault()
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(vault, identify: Self.byToken)
+
+        await registry.captureActive()
+
+        XCTAssertFalse(registry.currentSnapshot().indexSetAside)
+        XCTAssertEqual(registry.currentSnapshot().accounts.map(\.uuid), ["u-tok-a"])
+    }
+}
+
+/// Holds an async caller until the test lets it go.
+private final class Latch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var opened = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let resumeNow = lock.withLock {
+                if opened { return true }
+                waiter = continuation
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let pending = lock.withLock {
+            opened = true
+            defer { waiter = nil }
+            return waiter
+        }
+        pending?.resume()
     }
 }

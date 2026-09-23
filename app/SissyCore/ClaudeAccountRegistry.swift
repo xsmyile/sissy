@@ -17,116 +17,69 @@ import Foundation
 /// here: there is no credential to archive, and no login flow of Sissy's own.
 /// That first `/login` is the user's, once per account.
 actor ClaudeAccountRegistry {
-    /// What the app reads: who is known, who is active, and whether the last
-    /// switch failed.
+    /// What the app reads: who is known, who is active, and which of them a
+    /// switch can reach.
     struct Snapshot: Sendable, Equatable {
         var accounts: [ClaudeAccountIdentity] = []
         var activeUUID: String?
+        /// Accounts whose archived credential is in the keychain and still
+        /// able to sign the CLI in.
+        ///
+        /// Not the index: an index entry is a name Sissy has seen, and the
+        /// secret behind it can be missing — a different build's namespace, a
+        /// keychain item removed by hand. Offering `Use in CLI` off the index
+        /// alone put the control on an account whose click could only fail.
+        var switchable: Set<String> = []
+        /// Accounts whose archived refresh token has expired, which only a
+        /// `claude /login` as that account can renew.
+        var needsLogin: Set<String> = []
+        /// Whether an index that would not read was set aside, so the switcher
+        /// can say why accounts it used to list are missing.
+        var indexSetAside = false
     }
 
-    /// Why a switch did not happen. Each is a different sentence to the user:
-    /// an account Sissy holds nothing for, a slot whose current owner it
-    /// cannot establish, and the keychain refusing, which only the user can
-    /// resolve.
+    /// Why a switch did not happen. Each is a different sentence to the user,
+    /// because each is a different thing to do: an account Sissy holds
+    /// nothing for, a slot whose owner it cannot establish, a keychain that
+    /// refused or could not be asked, a mirror file it could not write, and
+    /// a switch that could not be undone after one of those.
     enum Failure: Error, Equatable {
         case notArchived
         case activeAccountUnknown
         case keychain(Int32)
+        /// The keychain could not be asked at all: locked, `security` would
+        /// not start, or it did not answer in time.
+        case keychainUnavailable
+        /// The `.credentials.json` beside the keychain items would not take
+        /// the write.
+        case mirrorWrite
+        /// A write failed and putting back what was there before failed too,
+        /// so the CLI's names no longer agree on one account.
+        case partialSwitch
+        /// The archived credential's refresh token has expired.
+        case needsLogin
+        /// The account index would not read and could not be set aside.
+        case indexUnreadable
     }
 
-    /// The CLI's active slot: the keychain item a `claude` started with no
-    /// `CLAUDE_CONFIG_DIR` reads, and the mirror of it in the default config
-    /// home. Behind closures for the same reason the store's secrets are —
-    /// this is the external I/O, and what the registry *decides* has to be
-    /// testable without it.
-    struct ActiveSlot: Sendable {
-        var read: @Sendable () -> Data?
-        /// What each of the CLI's other names for this home currently holds,
-        /// a name with no item of its own simply absent from the answer.
-        ///
-        /// It throws where the lookup itself failed, because the two cases are
-        /// not the same fact: a name Sissy could not read is one it is about
-        /// to overwrite blind, and reporting that as "no such item" is how a
-        /// slot gets left on the previous account with the switch calling
-        /// itself a success.
-        var readSiblings: @Sendable () throws -> [Data]
-        var write: @Sendable (Data) throws -> Void
-
-        /// Reads and writes nothing. What a test gets unless it asks for the
-        /// real keychain, so a suite can never read the machine's own
-        /// credential or identify it over the network.
-        static let inert = ActiveSlot(
-            read: { nil }, readSiblings: { [] }, write: { _ in })
-
-        /// The slot of the config home Sissy actually meters.
-        ///
-        /// Taken from the resolved home rather than assumed to be the default
-        /// one: a `claudeDataDir` pointed elsewhere is metered from that home,
-        /// and its credential is filed under that home's own service name. A
-        /// slot hardcoded to the unscoped item would watch an account nobody
-        /// is metering and write a switch into a home nobody is reading.
-        ///
-        /// Every sibling item the CLI keeps for that home is written too, and
-        /// only the ones it already keeps: a switch that reached one of the
-        /// pair the default home now carries would leave the other naming the
-        /// previous account, and creating an item the CLI never had would put
-        /// a credential somewhere nothing reads it back from. Existence is
-        /// asked by reading rather than by a boolean probe, so a lookup that
-        /// failed cannot pass for a name that is not there.
-        ///
-        /// The mirror beside the keychain items is written on the same terms,
-        /// so this can never create a plaintext credential where the CLI had
-        /// none — and an atomic write onto an existing file keeps its `0600`.
-        /// A write that fails part way fails the whole switch rather than
-        /// being undone: leaving one name on the previous account while
-        /// another names the new one is the ambiguity this type exists to
-        /// avoid, and a retry is what repairs it.
-        static func live(home: ProviderHome) -> ActiveSlot {
-            let service = ClaudeKeychainCLI.claudeService(for: home.home)
-            let siblings = ClaudeKeychainCLI.siblingClaudeServices(for: home.home)
-            let mirror = home.claudeCredentialsURL
-            return ActiveSlot(
-                read: {
-                    try? ClaudeKeychainCLI.read(
-                        service: service, account: ClaudeKeychainCLI.claudeLoginName())
-                },
-                readSiblings: {
-                    let account = ClaudeKeychainCLI.claudeLoginName()
-                    return try siblings.compactMap { sibling in
-                        do {
-                            return try ClaudeKeychainCLI.read(service: sibling, account: account)
-                        } catch ClaudeKeychainCLI.Failure.noItem {
-                            return nil
-                        }
-                    }
-                },
-                write: { data in
-                    let account = ClaudeKeychainCLI.claudeLoginName()
-                    try ClaudeKeychainCLI.write(data, service: service, account: account)
-                    for sibling in siblings {
-                        do {
-                            _ = try ClaudeKeychainCLI.read(service: sibling, account: account)
-                        } catch ClaudeKeychainCLI.Failure.noItem {
-                            continue
-                        }
-                        try ClaudeKeychainCLI.write(data, service: sibling, account: account)
-                    }
-                    guard FileManager.default.fileExists(atPath: mirror.path) else { return }
-                    try data.write(to: mirror, options: .atomic)
-                })
-        }
-    }
+    /// What each of the CLI's names held when it was read, by name.
+    private typealias Held = [ClaudeCLISlot.Name: Data]
 
     private let store: ClaudeAccountStore
-    private let slot: ActiveSlot
+    private let slot: ClaudeCLISlot
     /// Resolves a token to its owner. Injected so a test can exercise the
     /// capture without reaching Anthropic — the network is the only part of
     /// this that cannot be stood in for by the keychain.
     private let identify: @Sendable (String) async throws -> ClaudeAccountIdentity
+    private let now: @Sendable () -> Date
     /// Access token of the credential last seen active, so a poll that finds
     /// it unchanged costs nothing. Only a token Sissy has not already filed
     /// buys a request.
     private var lastSeenToken: String?
+    /// Whether the keychain has been asked which archived accounts it holds.
+    /// Deferred to the first capture rather than asked at construction,
+    /// which runs on whatever thread builds the engine.
+    private var reconciled = false
     nonisolated private let published = LockedValue(Snapshot())
 
     /// A registry that knows nothing and learns nothing: no keychain, no
@@ -134,8 +87,7 @@ actor ClaudeAccountRegistry {
     /// without one.
     static func inert() -> ClaudeAccountRegistry {
         var store = ClaudeAccountStore(indexURL: URL(fileURLWithPath: "/dev/null"))
-        store.secrets = ClaudeAccountStore.Secrets(
-            read: { _ in nil }, write: { _, _ in })
+        store.secrets = .none
         return ClaudeAccountRegistry(store: store, slot: .inert) { _ in
             throw ClaudeAccountProfile.Failure.malformedPayload
         }
@@ -143,16 +95,23 @@ actor ClaudeAccountRegistry {
 
     init(
         store: ClaudeAccountStore,
-        slot: ActiveSlot,
+        slot: ClaudeCLISlot,
         identify: @escaping @Sendable (String) async throws -> ClaudeAccountIdentity = {
             try await ClaudeAccountProfile.resolve(token: $0)
-        }
+        },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.store = store
         self.slot = slot
+        self.now = now
         self.identify = identify
-        let index = store.loadIndex()
-        published.update { $0 = Snapshot(accounts: index.accounts, activeUUID: index.activeUUID) }
+        let index = Self.loadIndex(store) ?? ClaudeAccountStore.Index()
+        published.update {
+            $0 = Snapshot(
+                accounts: index.accounts, activeUUID: index.activeUUID,
+                needsLogin: Self.expired(index, now: now()),
+                indexSetAside: store.hasSetAsideIndex())
+        }
     }
 
     nonisolated func currentSnapshot() -> Snapshot { published.load() }
@@ -163,14 +122,34 @@ actor ClaudeAccountRegistry {
     /// Answers whether the published snapshot moved, so the caller can emit on
     /// the one event that produces no token of its own — someone signing into
     /// a different account in a terminal Sissy is not watching.
+    ///
+    /// A slot that holds nothing clears the active account, because a CLI
+    /// that has been signed out is on no account and a badge saying otherwise
+    /// outlived every `/logout`. A slot that cannot be read changes nothing:
+    /// it says nothing about who is signed in.
     @discardableResult
     func captureActive() async -> Bool {
-        guard let credential = slot.read() else { return false }
-        guard let parsed = ClaudeCredentialsStore.parse(credential),
-            parsed.accessToken != lastSeenToken
-        else { return false }
         let before = published.load()
-        await file(credential: credential, markActive: true)
+        if !reconciled {
+            reconciled = true
+            publishIndex()
+        }
+        let current: Data?
+        do {
+            current = try slot.current()?.data
+        } catch {
+            sissyLog("sissy: could not read Claude Code's credential: \(error)")
+            return published.load() != before
+        }
+        guard let current else {
+            lastSeenToken = nil
+            if published.load().activeUUID != nil { setActive(nil) }
+            return published.load() != before
+        }
+        guard let parsed = ClaudeCredentialBlob.credentials(in: current),
+            parsed.accessToken != lastSeenToken
+        else { return published.load() != before }
+        await file(credential: current, markActive: true)
         return published.load() != before
     }
 
@@ -178,27 +157,32 @@ actor ClaudeAccountRegistry {
     ///
     /// Writes the CLI's own slots and nothing else, which is safe precisely
     /// because they are no longer where the account lives: whatever this
-    /// overwrites, Sissy still holds. Every name the CLI reads that home's
-    /// credential from is written, because which of them it reads first is its
-    /// business and a switch that only reached one would half happen — and
-    /// because a retry after a write that failed part way is what repairs the
-    /// names it did not reach.
+    /// overwrites, Sissy still holds. Only the account half is written, merged
+    /// into what each name holds now, so the MCP logins and every other key
+    /// the CLI keeps beside it stay exactly as live.
     ///
     /// Nothing is overwritten that Sissy has not archived first, and that is
-    /// one rule rather than one per name. The slot's own credential earns it
-    /// by the capture in front of the test: a slot this accepts is one whose
-    /// archive is the same bytes, so the write that follows cannot be a
-    /// downgrade. A sibling holding something else earns it by being archived
-    /// here, because the capture reads only the primary name and a sibling can
-    /// legitimately differ — an earlier build wrote one of the pair and left
-    /// the other on the account it switched away from.
+    /// one rule for every name, the `.credentials.json` mirror included. The
+    /// name the CLI is reading earns it by the capture in front of the test: a
+    /// slot this accepts is one whose archive is the same credential, so the
+    /// write that follows cannot be a downgrade. Any other name holding
+    /// something else earns it by being archived here, because an earlier
+    /// build wrote one of a pair and left the other on the account it
+    /// switched away from. A name that cannot be read is not a name with
+    /// nothing in it, so it refuses the switch rather than being skipped:
+    /// skipping it is how a mirror nobody looked at came to be overwritten
+    /// with an account that was never archived.
     ///
     /// The slots are read once more between the last identification and the
     /// write, because every reading above it sits behind a network round trip
     /// and the CLI rotates on its own schedule. A slot that moved in that
     /// window holds a credential nothing has archived, so the switch is
-    /// abandoned rather than completed over it; the click is the user's to
-    /// make again, and by then the rotation is captured.
+    /// abandoned rather than completed over it.
+    ///
+    /// The write reaches several names and cannot be atomic across them, so
+    /// each name's previous bytes are held until the last write lands. A
+    /// failure puts every name already written back as it was and reports the
+    /// write that failed; only a put-back that fails too is `partialSwitch`.
     ///
     /// A credential Sissy cannot account for is not written over at all.
     /// Which account a slot holds is what decides whether this is a switch or
@@ -208,45 +192,148 @@ actor ClaudeAccountRegistry {
     /// from an account whose rotation nobody saw spends the last copy of it
     /// this Mac has.
     func activate(uuid: String) async -> Result<Void, Failure> {
-        guard store.credential(uuid: uuid) != nil else { return .failure(.notArchived) }
+        do {
+            try await performSwitch(to: uuid)
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func performSwitch(to uuid: String) async throws(Failure) {
+        guard Self.loadIndex(store) != nil else { throw .indexUnreadable }
+        _ = try archived(uuid)
         await captureActive()
-        let live = slot.read()
-        if let live {
-            guard isAccountedFor(live) else { return .failure(.activeAccountUnknown) }
+        let names = slot.names()
+        guard let primary = names.first else { throw .activeAccountUnknown }
+        let before = try readAll(names)
+        guard await accountForEveryName(names, holding: before) else {
+            throw .activeAccountUnknown
         }
-        let siblings: [Data]
-        do {
-            siblings = try slot.readSiblings()
-        } catch {
-            return .failure(Self.failure(from: error))
+        let credential = try archived(uuid)
+        if ClaudeCredentialBlob.refreshHasExpired(credential, now: now()) { throw .needsLogin }
+        guard try readAll(names) == before else { throw .activeAccountUnknown }
+        let targets = names.filter { name in
+            name == primary
+                || (before[name].map { ClaudeCredentialBlob.oauth(in: $0) != nil } ?? false)
         }
-        for sibling in siblings where sibling != live && !isAccountedFor(sibling) {
-            guard await file(credential: sibling, markActive: false) else {
-                return .failure(.activeAccountUnknown)
-            }
-        }
-        guard let credential = store.credential(uuid: uuid) else { return .failure(.notArchived) }
-        do {
-            guard slot.read() == live, try slot.readSiblings() == siblings else {
-                return .failure(.activeAccountUnknown)
-            }
-            try slot.write(credential)
-        } catch {
-            return .failure(Self.failure(from: error))
-        }
-        lastSeenToken = ClaudeCredentialsStore.parse(credential)?.accessToken
+        if let failure = write(credential, to: targets, over: before) { throw failure }
+        lastSeenToken = ClaudeCredentialBlob.credentials(in: credential)?.accessToken
         setActive(uuid)
         sissyLog("sissy: wrote the Claude Code credential for \(uuid) into the CLI's slots")
-        return .success(())
+    }
+
+    /// Makes sure nothing any name holds is lost by the write: every account
+    /// in them is one the archive already has, or is archived now. The name
+    /// the CLI is reading was offered to the capture in front of this, so one
+    /// still unaccounted for there is refused rather than asked about again.
+    /// Bytes that are not a JSON object cannot be merged into, and refuse too.
+    private func accountForEveryName(
+        _ names: [ClaudeCLISlot.Name], holding before: Held
+    ) async -> Bool {
+        let reading = names.first { name in
+            before[name].map { ClaudeCredentialBlob.oauth(in: $0) != nil } ?? false
+        }
+        for name in names {
+            guard let bytes = before[name] else { continue }
+            guard ClaudeCredentialBlob.object(bytes) != nil else { return false }
+            guard ClaudeCredentialBlob.oauth(in: bytes) != nil, !isAccountedFor(bytes) else {
+                continue
+            }
+            guard name != reading, await file(credential: bytes, markActive: false) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// The archived credential for one account, or why there is none to use.
+    private func archived(_ uuid: String) throws(Failure) -> Data {
+        let held: Data?
+        do {
+            held = try store.credential(uuid: uuid)
+        } catch {
+            throw Self.keychainFailure(error)
+        }
+        guard let held, ClaudeCredentialBlob.oauth(in: held) != nil else { throw .notArchived }
+        return held
+    }
+
+    /// What every name holds now. A name that cannot be read stops the switch.
+    private func readAll(_ names: [ClaudeCLISlot.Name]) throws(Failure) -> Held {
+        var read: Held = [:]
+        for name in names {
+            do {
+                if let data = try slot.read(name) { read[name] = data }
+            } catch {
+                sissyLog("sissy: could not read one of Claude Code's credential slots: \(error)")
+                throw name == .file ? .activeAccountUnknown : Self.keychainFailure(error)
+            }
+        }
+        return read
+    }
+
+    /// Writes the account half into every target, and on a failure puts back
+    /// what the names already written held. Answers nil when every write
+    /// landed.
+    private func write(
+        _ credential: Data,
+        to targets: [ClaudeCLISlot.Name],
+        over before: Held
+    ) -> Failure? {
+        var written: [ClaudeCLISlot.Name] = []
+        for name in targets {
+            guard let merged = ClaudeCredentialBlob.merging(account: credential, into: before[name])
+            else {
+                return restore(written, to: before) ? .activeAccountUnknown : .partialSwitch
+            }
+            do {
+                try slot.write(name, merged)
+                written.append(name)
+            } catch {
+                sissyLog("sissy: a Claude Code credential slot refused the switch: \(error)")
+                let cause = name == .file ? Failure.mirrorWrite : Self.keychainFailure(error)
+                return restore(written, to: before) ? cause : .partialSwitch
+            }
+        }
+        return nil
+    }
+
+    /// Puts each written name back as it was, the last written first, and
+    /// takes away what the switch created where there had been nothing.
+    /// Answers whether every one of them went back.
+    private func restore(
+        _ written: [ClaudeCLISlot.Name], to before: Held
+    ) -> Bool {
+        var intact = true
+        for name in written.reversed() {
+            do {
+                if let previous = before[name] {
+                    try slot.write(name, previous)
+                } else {
+                    try slot.remove(name)
+                }
+            } catch {
+                sissyLog("sissy: could not put a Claude Code credential slot back: \(error)")
+                intact = false
+            }
+        }
+        return intact
     }
 
     /// Identifies a credential and archives it. A token the vendor will not
     /// answer for — expired, offline, an account that has been removed — is
     /// left alone rather than filed under a guess, and the next poll tries
     /// again.
+    ///
+    /// Marking it active waits on the slot still holding it once the
+    /// identification is back. That is a network turn, and the actor is free
+    /// for the length of it: a switch that ran in the gap has already written
+    /// another account and marked it, and a capture resuming over it put the
+    /// badge back on the account the user had just left.
     @discardableResult
     private func file(credential: Data, markActive: Bool) async -> Bool {
-        guard let parsed = ClaudeCredentialsStore.parse(credential) else { return false }
+        guard let parsed = ClaudeCredentialBlob.credentials(in: credential) else { return false }
         let identity: ClaudeAccountIdentity
         do {
             identity = try await identify(parsed.accessToken)
@@ -254,18 +341,21 @@ actor ClaudeAccountRegistry {
             sissyLog("sissy: could not identify a Claude credential: \(error)")
             return false
         }
+        guard Self.loadIndex(store) != nil else { return false }
         do {
             try store.remember(identity, credential: credential)
         } catch {
             sissyLog("sissy: could not archive the Claude account \(identity.uuid): \(error)")
             return false
         }
-        if markActive {
-            lastSeenToken = parsed.accessToken
-            setActive(identity.uuid)
-        } else {
+        guard markActive, let still = try? slot.current()?.data,
+            ClaudeCredentialBlob.sameAccountCredential(still, credential)
+        else {
             publishIndex()
+            return true
         }
+        lastSeenToken = parsed.accessToken
+        setActive(identity.uuid)
         return true
     }
 
@@ -273,40 +363,108 @@ actor ClaudeAccountRegistry {
     ///
     /// Two answers, and each is sufficient on its own. This run identified
     /// them, so the archive holds that account at least as fresh; or the
-    /// archive already holds these exact bytes, which is proof that cost no
-    /// network turn and cannot expire. The second is what keeps an archived
+    /// archive already holds this exact credential, which is proof that cost
+    /// no network turn and cannot expire. The second is what keeps an archived
     /// account switchable on a Mac whose CLI has not run for hours: its access
     /// token has expired, the profile endpoint answers 401 to it, and
     /// re-identifying it is the one thing that cannot be done — while the
     /// bytes in question are Sissy's own copy of a credential it identified
     /// when it was young. Without it a relaunch, which forgets the token it
     /// last saw, would refuse every switch until the user went and ran the CLI.
+    ///
+    /// Only the account half is compared, since that is all the archive
+    /// keeps. An archive that cannot be read accounts for nothing.
     private func isAccountedFor(_ credential: Data) -> Bool {
-        if let token = ClaudeCredentialsStore.parse(credential)?.accessToken,
+        if let token = ClaudeCredentialBlob.credentials(in: credential)?.accessToken,
             token == lastSeenToken
         {
             return true
         }
-        return store.loadIndex().accounts
-            .contains { store.credential(uuid: $0.uuid) == credential }
+        guard let index = try? store.loadIndex() else { return false }
+        return index.accounts.contains { account in
+            guard let held = try? store.credential(uuid: account.uuid) else { return false }
+            return ClaudeCredentialBlob.sameAccountCredential(held, credential)
+        }
     }
 
-    /// How the keychain's own refusals reach the user: a status that names the
-    /// tool's exit code, or an item that is simply not there.
-    private static func failure(from error: Error) -> Failure {
-        guard case ClaudeKeychainCLI.Failure.tool(let status) = error else { return .notArchived }
-        return .keychain(status)
+    /// How the keychain's own refusals reach the user. A locked keychain and
+    /// a tool that would not answer are one sentence, and neither may be
+    /// worded as an account that needs a login.
+    private static func keychainFailure(_ error: Error) -> Failure {
+        switch error {
+        case ClaudeKeychainCLI.Failure.tool(let status):
+            return ClaudeKeychainCLI.unavailableStatuses.contains(status)
+                ? .keychainUnavailable : .keychain(status)
+        case ClaudeKeychainCLI.Failure.noItem:
+            return .notArchived
+        default:
+            return .keychainUnavailable
+        }
     }
 
-    private func setActive(_ uuid: String) {
-        var index = store.loadIndex()
+    /// The index, with one that will not read set aside so the captures after
+    /// it can start a new one. Nil when it would not read and could not be
+    /// moved either, which leaves the file where it is and every write here
+    /// refused.
+    private static func loadIndex(_ store: ClaudeAccountStore) -> ClaudeAccountStore.Index? {
+        do {
+            return try store.loadIndex()
+        } catch {
+            do {
+                let aside = try store.setAsideIndex()
+                sissyLog(
+                    "sissy: the Claude account index would not read; kept it as "
+                        + aside.lastPathComponent)
+                return ClaudeAccountStore.Index()
+            } catch {
+                sissyLog("sissy: the Claude account index would not read and could not be moved")
+                return nil
+            }
+        }
+    }
+
+    private static func expired(_ index: ClaudeAccountStore.Index, now: Date) -> Set<String> {
+        Set((index.refreshExpiries ?? [:]).filter { $0.value <= now }.keys)
+    }
+
+    private func setActive(_ uuid: String?) {
+        guard var index = Self.loadIndex(store) else { return }
         index.activeUUID = uuid
-        try? store.saveIndex(index)
-        published.update { $0 = Snapshot(accounts: index.accounts, activeUUID: index.activeUUID) }
+        do {
+            try store.saveIndex(index)
+        } catch {
+            sissyLog("sissy: could not record the active Claude account: \(error)")
+        }
+        publish(index)
     }
 
     private func publishIndex() {
-        let index = store.loadIndex()
-        published.update { $0 = Snapshot(accounts: index.accounts, activeUUID: index.activeUUID) }
+        guard let index = Self.loadIndex(store) else {
+            published.update { $0.indexSetAside = store.hasSetAsideIndex() }
+            return
+        }
+        publish(index)
+    }
+
+    /// Publishes the index with what the keychain says about each account.
+    /// An account whose archive cannot be asked about is not offered, which
+    /// is the only safe reading of a question with no answer.
+    private func publish(_ index: ClaudeAccountStore.Index) {
+        let expired = Self.expired(index, now: now())
+        let held = index.accounts.map(\.uuid).filter { uuid in
+            guard !expired.contains(uuid) else { return false }
+            do {
+                return try store.holdsCredential(uuid: uuid)
+            } catch {
+                sissyLog("sissy: could not ask the keychain about Claude account \(uuid): \(error)")
+                return false
+            }
+        }
+        published.update {
+            $0 = Snapshot(
+                accounts: index.accounts, activeUUID: index.activeUUID,
+                switchable: Set(held), needsLogin: expired,
+                indexSetAside: store.hasSetAsideIndex())
+        }
     }
 }

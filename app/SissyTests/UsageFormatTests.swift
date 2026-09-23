@@ -652,4 +652,25 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertTrue(body.contains("already open"))
         XCTAssertTrue(body.contains("quit it first"))
     }
+
+    /// Every reason a switch can fail is a different thing to do, so each has
+    /// a sentence of its own, and none of them is punctuated with an em dash.
+    func testEverySwitchFailureHasItsOwnSentence() {
+        let failures: [ClaudeAccountRegistry.Failure] = [
+            .notArchived, .activeAccountUnknown, .keychain(25), .keychainUnavailable,
+            .mirrorWrite, .partialSwitch, .needsLogin, .indexUnreadable,
+        ]
+        let sentences = failures.map(ClaudeAccountSwitchCopy.failure)
+
+        XCTAssertEqual(Set(sentences).count, failures.count)
+        for sentence in sentences {
+            XCTAssertFalse(sentence.contains("\u{2014}"), sentence)
+        }
+    }
+
+    /// A locked keychain is not an account that needs a login.
+    func testAKeychainThatCannotBeReachedDoesNotSendTheUserToLogin() {
+        XCTAssertFalse(ClaudeAccountSwitchCopy.failure(.keychainUnavailable).contains("/login"))
+        XCTAssertFalse(ClaudeAccountSwitchCopy.failure(.mirrorWrite).contains("/login"))
+    }
 }
