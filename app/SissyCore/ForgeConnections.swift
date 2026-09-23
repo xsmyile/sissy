@@ -395,9 +395,13 @@ struct ForgeTokenReconciler: Sendable {
 /// written unless it answers.
 ///
 /// The effects are closures so the order can be held without a keychain or a
-/// network: probe, then token, then index, and a token whose index write
-/// failed is taken back out rather than left for nothing to name.
+/// network: the index, then the probe, then the token, then the index again,
+/// and a token whose index write failed is taken back out rather than left for
+/// nothing to name.
 struct ForgeConnector: Sendable {
+    /// The connections the index names now, which says whether this connect
+    /// replaces one. Throws for an index that will not read.
+    let recorded: @Sendable () throws -> [ForgeConnection]
     let probe: @Sendable (ForgeConnection, String) async throws -> String
     let saveToken: @Sendable (String, String) throws -> Void
     let deleteToken: @Sendable (String) throws -> Void
@@ -413,14 +417,25 @@ struct ForgeConnector: Sendable {
         /// The forge answered and a local write failed, so nothing is
         /// connected.
         case notFiled
+        /// The index would not read, so nothing was asked or written.
+        case indexUnreadable
     }
 
-    /// Probes, then files. `replacing` says the index already names this
-    /// connection: a failed index write then leaves the new token in place,
-    /// because deleting it would leave that row with no token at all.
-    func connect(_ connection: ForgeConnection, token: String, replacing: Bool) async -> Outcome {
+    /// Probes, then files. A connection the index already names is a
+    /// replacement: a failed index write then leaves the new token in place,
+    /// because deleting it would leave that row with no token at all. An
+    /// index that will not read cannot say which this is, so nothing is
+    /// probed and nothing written.
+    func connect(_ connection: ForgeConnection, token: String) async -> Outcome {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .notFiled }
+        let replacing: Bool
+        do {
+            replacing = try recorded().contains { $0.id == connection.id }
+        } catch {
+            sissyLog("sissy: did not connect \(connection.id), the forge connection index would not read")
+            return .indexUnreadable
+        }
         let login: String
         do {
             login = try await probe(connection, trimmed)

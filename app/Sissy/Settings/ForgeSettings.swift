@@ -54,6 +54,12 @@ enum ForgeConnectCopy {
     static let connectFailed =
         "Sissy could not save the token or the connection, so nothing was connected. The token is still in the field. Try again."
 
+    /// Said when a connect stops because the connection index would not read:
+    /// whether the token replaces one it names cannot be told, so it is not
+    /// sent anywhere.
+    static let indexUnreadableOnConnect =
+        "Sissy could not read its list of connected forges, so nothing was saved. The token is still in the field."
+
     /// What a connect attempt came to, nil for one that connected.
     ///
     /// A refusal names the address and says nothing was saved, because the
@@ -68,6 +74,8 @@ enum ForgeConnectCopy {
             return nil
         case .notFiled:
             return connectFailed
+        case .indexUnreadable:
+            return indexUnreadableOnConnect
         case .refused(.unauthorized):
             return "\(forge) at \(address) refused the token, so nothing was saved. "
                 + "Check the token and its scopes."
@@ -129,10 +137,10 @@ enum ForgeConnectCopy {
     static let orphanMenuHelp = "Remove this token"
 
     /// Said over the list while the connection index cannot be read. It is
-    /// left in place rather than set aside, so nothing is listed until it
-    /// reads again.
+    /// left in place rather than set aside, so nothing is listed and a
+    /// connect is refused until it reads again.
     static let indexUnreadable =
-        "The list of connected forges is there but could not be read, so none are shown. Sissy has not touched it. Check the permissions on \(ForgeConnectionIndex.fileName)."
+        "The list of connected forges is there but could not be read, so none are shown and none can be added. Sissy has not touched it. Check the permissions on \(ForgeConnectionIndex.fileName)."
 
     /// Said over the list once an unreadable connection index has been set
     /// aside, so the connections that vanished with it are explained.
@@ -286,7 +294,7 @@ struct ForgeSettingsView: View {
                     orphanRow(id)
                 }
                 CredentialAddRow(ForgeConnectCopy.connect) { open(.new) }
-                    .disabled(model.engine.connectingForge != nil)
+                    .disabled(model.engine.connectingForge != nil || model.engine.forgeIndexUnreadable)
             }
             Section(ForgeCounterCopy.section) {
                 ForEach(ForgeCounter.allCases, id: \.self) { counter in
