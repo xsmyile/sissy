@@ -125,6 +125,11 @@ actor UsageEngine {
     /// a forge reader holds resumes from an offset. What it costs is one poll.
     private let forgeIndex: ForgeConnectionIndex
     private let forgeTokens: ForgeTokenReconciler
+    /// The connections a connect is filing right now. `ForgeConnector` runs
+    /// off the actor, so a removal can land between its token and its index
+    /// write, and this is what keeps that token from being taken for an
+    /// orphan and deleted.
+    private var connectingForgeIDs: Set<String> = []
     private var forgeMonitor: ForgeActivityMonitor
     private let identityMonitor: GitIdentityMonitor
     /// What the CLIs on this Mac are holding right now. Beside the monitors
@@ -1603,7 +1608,7 @@ actor UsageEngine {
     /// A delete that fails leaves the row in the list, which is what says so.
     func removeOrphanedForgeToken(id: String) async {
         do {
-            _ = try forgeTokens.removeOrphan(id: id)
+            _ = try forgeTokens.removeOrphan(id: id, sparing: connectingForgeIDs)
         } catch {
             sissyLog("sissy: could not remove the orphaned forge token \(id) (\(error))")
         }
@@ -1641,7 +1646,9 @@ actor UsageEngine {
             saveToken: { try ForgeTokenStore.save($0, connection: $1) },
             deleteToken: { try ForgeTokenStore.delete(connection: $0) },
             remember: { try index.remember($0) })
+        connectingForgeIDs.insert(connection.id)
         let outcome = await connector.connect(connection, token: token)
+        connectingForgeIDs.remove(connection.id)
         guard case .connected = outcome else { return outcome }
         await rebuildForgeMonitor()
         await reemit()

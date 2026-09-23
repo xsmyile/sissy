@@ -377,8 +377,10 @@ struct ForgeTokenReconciler: Sendable {
     /// Re-read rather than taken from the list the user clicked in: one the
     /// index has come to name since is left alone, because removing it is a
     /// disconnect, and so is every token while the index cannot be read.
-    func removeOrphan(id: String) throws -> Bool {
-        guard state().orphanedTokens.contains(id) else { return false }
+    /// `sparing` names the connects in flight, whose token is saved before
+    /// their connection is recorded and reads as an orphan in between.
+    func removeOrphan(id: String, sparing inFlight: Set<String> = []) throws -> Bool {
+        guard !inFlight.contains(id), state().orphanedTokens.contains(id) else { return false }
         try deleteToken(id)
         return true
     }

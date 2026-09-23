@@ -355,6 +355,7 @@ struct ForgeSettingsView: View {
                     removingToken = id
                 }
             }
+            .disabled(model.engine.connectingForge != nil)
         }
     }
 
