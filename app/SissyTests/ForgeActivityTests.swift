@@ -841,4 +841,47 @@ final class ForgeActivityTests: XCTestCase {
     func testAnyOtherErrorFromTheSessionIsAForgeOutOfReach() {
         XCTAssertEqual(ForgeActivityFeed.failure(thrown: URLError(.timedOut)), .unreachable)
     }
+
+    // MARK: What a probe answers
+
+    private func probeFailure(_ read: () throws -> String) -> ForgeReadFailure? {
+        do {
+            _ = try read()
+            return nil
+        } catch {
+            return error as? ForgeReadFailure
+        }
+    }
+
+    func testAGitHubProbeAnswersTheViewersLogin() throws {
+        XCTAssertEqual(
+            try GitHubActivityFeed.login(fromProbe: ["viewer": ["login": "davide"]]), "davide")
+    }
+
+    /// A `currentUser: null` on a 200 is a request GitLab served as nobody.
+    /// That is the token, and the connect sheet has to say so rather than
+    /// that the host is not GitLab.
+    func testAGitLabProbeWithNoCurrentUserIsARefusedToken() {
+        XCTAssertEqual(
+            probeFailure { try GitLabActivityFeed.username(from: ["currentUser": NSNull()]) },
+            .unauthorized)
+    }
+
+    func testAGitHubProbeWithNoViewerIsARefusedToken() {
+        XCTAssertEqual(
+            probeFailure { try GitHubActivityFeed.login(fromProbe: ["viewer": NSNull()]) },
+            .unauthorized)
+    }
+
+    func testAGitLabProbeAnswersTheUsername() throws {
+        XCTAssertEqual(
+            try GitLabActivityFeed.username(from: ["currentUser": ["username": "davide"]]), "davide")
+    }
+
+    /// A reply that names no user field at all is not a forge of this kind
+    /// answering, which is the host or the forge picked, not the token.
+    func testAProbeReplyWithoutTheUserFieldIsMalformed() {
+        XCTAssertEqual(probeFailure { try GitLabActivityFeed.username(from: [:]) }, .malformed)
+        XCTAssertEqual(probeFailure { try GitHubActivityFeed.login(fromProbe: [:]) }, .malformed)
+    }
 }
