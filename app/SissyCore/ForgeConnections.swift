@@ -67,7 +67,8 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
     }
 
     static let scheme = "https"
-    private static let acceptedSchemes = ["https", "http"]
+    private static let insecureScheme = "http"
+    private static let knownSchemes = [scheme, insecureScheme]
     private static let schemeSeparator = "://"
     private static let validPorts = 1...65_535
     private static let maximumHostLength = 253
@@ -86,8 +87,11 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
     /// is named in a field of its own. What is **refused** rather than
     /// guessed at is anything that cannot reach the API or would send the
     /// token somewhere the user did not name: a `user@` prefix, a query, a
-    /// fragment, a scheme that is neither `https` nor `http`, and a port out of
-    /// range. Each used to be accepted, filed with its token, and then read as
+    /// fragment, any scheme but `https`, and a port out of range. `http` is
+    /// refused with a reason of its own rather than quietly upgraded: the root
+    /// is always `https`, so a plain-http instance used to be probed on the
+    /// wrong scheme and reported as unreachable, and a token is not sent in
+    /// the clear to find out. Each used to be accepted, filed with its token, and then read as
     /// "answered something Sissy could not read" on every poll without a
     /// request ever being made. Lowercased because a host is case-insensitive
     /// and the id is not; the path keeps its case, because a path does not.
@@ -98,7 +102,8 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
         guard !value.isEmpty else { return .failure(.empty) }
         if let separator = value.range(of: schemeSeparator) {
             let scheme = String(value[value.startIndex..<separator.lowerBound])
-            guard acceptedSchemes.contains(scheme) else { return .failure(.scheme) }
+            if scheme == insecureScheme { return .failure(.insecureScheme) }
+            guard scheme == Self.scheme else { return .failure(.scheme) }
             value = String(value[separator.upperBound...])
         }
         if value.contains("?") { return .failure(.query) }
@@ -106,7 +111,7 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
         let authority = value.prefix { $0 != "/" }
         if authority.contains("@") { return .failure(.credentials) }
         let bare = String(authority.hasSuffix(":") ? authority.dropLast() : authority)
-        if acceptedSchemes.contains(bare) || value.contains(schemeSeparator) {
+        if knownSchemes.contains(bare) || value.contains(schemeSeparator) {
             return .failure(.scheme)
         }
         var host = String(authority)
@@ -162,8 +167,10 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
 enum ForgeAddressProblem: Error, Sendable, Equatable, CaseIterable {
     /// Nothing was typed.
     case empty
-    /// A scheme other than `https` or `http`, or one typed wrong.
+    /// A scheme other than `https`, or one typed wrong.
     case scheme
+    /// `http`, which would send the token in the clear.
+    case insecureScheme
     /// A `user@` or `user:password@` in front of the host.
     case credentials
     /// A `?` and whatever follows it.

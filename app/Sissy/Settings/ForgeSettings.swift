@@ -92,7 +92,9 @@ enum ForgeConnectCopy {
     static func addressProblem(_ problem: ForgeAddressProblem) -> String {
         switch problem {
         case .empty: "Type the forge's host."
-        case .scheme: "Only https:// or http:// can go in front of the host."
+        case .scheme: "Only https:// can go in front of the host."
+        case .insecureScheme:
+            "Sissy only talks to a forge over https, so the token never travels in the clear."
         case .credentials: "Leave out the user@ part. The token is what signs Sissy in."
         case .query: "Leave out the ? and everything after it."
         case .fragment: "Leave out the # and everything after it."
