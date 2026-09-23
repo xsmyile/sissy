@@ -1199,13 +1199,51 @@ final class ClaudeAccountRegistryTests: XCTestCase {
     }
 
     private func signals(
-        _ registry: ClaudeAccountRegistry, _ probe: ClaudeLimitsProbe
+        _ registry: ClaudeAccountRegistry, _ probe: ClaudeLimitsProbe,
+        profile: ClaudeProfileSource? = nil
     ) -> ProviderSignals {
         ClaudeCodeSignals(
             limitsProbe: probe, webSources: LockedValue([]), webLinks: LockedValue([:]),
-            profile: ClaudeProfileSource(url: tempDir.appendingPathComponent("absent.json")),
+            profile: profile
+                ?? ClaudeProfileSource(url: tempDir.appendingPathComponent("absent.json")),
             accounts: registry
         ).currentSignals()
+    }
+
+    /// A `.claude.json` naming one account, read the way the engine reads it.
+    private func profile(naming uuid: String) throws -> ClaudeProfileSource {
+        let url = tempDir.appendingPathComponent("claude.json")
+        try Data(
+            #"{"oauthAccount":{"accountUuid":"\#(uuid)","organizationType":"claude_max"}}"#.utf8
+        ).write(to: url)
+        let source = ClaudeProfileSource(url: url)
+        source.refresh()
+        return source
+    }
+
+    /// A registry that has identified nobody leaves the config file's owner
+    /// as the name on the row, and a reading nothing matched to that name
+    /// does not go under it: the file can name the account before a
+    /// `/login`, and the probe can have spent the token after it.
+    func testLimitsAreNotLaidUnderTheFilesOwnerWhenNothingVerifiedTheToken() async throws {
+        let registry = makeRegistry(Vault(), identify: Self.byToken)
+
+        let reading = signals(
+            registry, await probe(spending: "tok-b"), profile: try profile(naming: "u-tok-a"))
+
+        XCTAssertNil(registry.currentSnapshot().activeUUID)
+        XCTAssertEqual(reading.plan, "max")
+        XCTAssertTrue(reading.windows.isEmpty)
+    }
+
+    /// Where nothing names an account at all, there is no name to put the
+    /// reading under wrongly, and it stands.
+    func testLimitsStandWhenNothingNamesAnAccount() async {
+        let registry = makeRegistry(Vault(), identify: Self.byToken)
+
+        let reading = signals(registry, await probe(spending: "tok-b"))
+
+        XCTAssertEqual(reading.windows.map(\.usedPercent), [40])
     }
 
     /// A `/login` between the registry's poll and the probe's: the probe has
