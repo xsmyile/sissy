@@ -36,6 +36,15 @@ actor ClaudeAccountRegistry {
         /// Whether an index that would not read was set aside, so the switcher
         /// can say why accounts it used to list are missing.
         var indexSetAside = false
+        /// `ClaudeCredentialBlob.fingerprint(of:)` of the access token that
+        /// was identified as `activeUUID`, and nil when none was this run.
+        ///
+        /// What lets a limits reading be matched to the name on the row. The
+        /// probe and this registry read the same slot on two clocks, so a
+        /// `/login` that lands between them has the probe spending the new
+        /// account's token while this still names the old one; a reading is
+        /// laid under `activeUUID` only when it was read with this token.
+        var activeCredential: String?
     }
 
     /// Why a switch did not happen. Each is a different sentence to the user,
@@ -160,7 +169,8 @@ actor ClaudeAccountRegistry {
         }
         guard let current else {
             lastSeenToken = nil
-            if published.load().activeUUID != nil { setActive(nil) }
+            let shown = published.load()
+            if shown.activeUUID != nil || shown.activeCredential != nil { setActive(nil) }
             return published.load() != before
         }
         guard let parsed = ClaudeCredentialBlob.credentials(in: current),
@@ -494,7 +504,9 @@ actor ClaudeAccountRegistry {
             $0 = Snapshot(
                 accounts: index.accounts, activeUUID: index.activeUUID,
                 switchable: Set(held), needsLogin: expired,
-                indexSetAside: store.hasSetAsideIndex())
+                indexSetAside: store.hasSetAsideIndex(),
+                activeCredential: index.activeUUID == nil
+                    ? nil : lastSeenToken.map(ClaudeCredentialBlob.fingerprint(of:)))
         }
     }
 }
