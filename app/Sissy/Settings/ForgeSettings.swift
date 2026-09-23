@@ -48,11 +48,44 @@ enum ForgeConnectCopy {
     static let confirm = "Connect"
     static let reconnectConfirm = "Reconnect"
     static let connecting = "Connecting…"
-    /// Named for what failed rather than for the status behind it: both halves
-    /// of a connect are local writes, so there is nothing about a forge to
-    /// report and nothing the user can do but try again.
+    /// Named for what failed rather than for the status behind it: the forge
+    /// has already answered by the time this is said, so what failed is a
+    /// local write and there is nothing the user can do but try again.
     static let connectFailed =
-        "The keychain would not accept the token, so nothing was connected. The token is still in the field. Try again."
+        "Sissy could not save the token or the connection, so nothing was connected. The token is still in the field. Try again."
+
+    /// What a connect attempt came to, nil for one that connected.
+    ///
+    /// A refusal names the address and says nothing was saved, because the
+    /// probe runs before anything is written: the token has not left the
+    /// field, and the user is told which of the host, the token or the network
+    /// to look at rather than finding a failure on the row afterwards.
+    static func failure(_ outcome: ForgeConnector.Outcome, connection: ForgeConnection) -> String? {
+        let forge = UsageFormat.forgeName(connection.kind)
+        let address = connection.address
+        switch outcome {
+        case .connected:
+            return nil
+        case .notFiled:
+            return connectFailed
+        case .refused(.unauthorized):
+            return "\(forge) at \(address) refused the token, so nothing was saved. "
+                + "Check the token and its scopes."
+        case .refused(.unreachable):
+            return "\(address) could not be reached, so nothing was saved. "
+                + "Check the host, or try again once it is reachable."
+        case .refused(.malformed):
+            return "\(address) did not answer as \(forge), so nothing was saved. "
+                + "Check the forge, the host, the port and the path."
+        case .refused(.redirected):
+            return "\(address) sent Sissy to another host, so nothing was saved. "
+                + "A sign-in proxy in front of the forge does this."
+        case .refused(.rateLimited):
+            return "\(forge) asked Sissy to slow down, so nothing was saved. Try again in a few minutes."
+        case .refused(let other):
+            return "\(address): \(UsageFormat.forgeFailure(other)), so nothing was saved."
+        }
+    }
 
     /// Why what was typed cannot be connected, said under the fields before
     /// anything is sent anywhere.

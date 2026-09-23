@@ -225,6 +225,15 @@ enum ForgeActivityFeed {
         }
     }
 
+    /// Who the token belongs to, asked of whichever forge the connection
+    /// names. It is what a connect is held on before anything is filed.
+    static func probe(_ connection: ForgeConnection, token: String) async throws -> String {
+        switch connection.kind {
+        case .gitHub: try await GitHubActivityFeed.probe(connection, token: token)
+        case .gitLab: try await GitLabActivityFeed.probe(connection, token: token)
+        }
+    }
+
     /// One JSON reply, or the reason there is not one.
     ///
     /// Every status the vendors answer with is mapped here rather than at each
@@ -381,6 +390,21 @@ enum GitHubActivityFeed {
         guard !connection.isVendorHosted else { return dotComEndpoint }
         return connection.root?.appendingPathComponent(enterprisePath)
     }
+
+    /// Who the token belongs to, and nothing else: the one question every
+    /// read starts with, asked before a connection is filed.
+    static func probe(_ connection: ForgeConnection, token: String) async throws -> String {
+        guard let endpoint = endpoint(connection) else { throw ForgeReadFailure.malformed }
+        let payload = try await ForgeActivityFeed.graphQL(
+            endpoint, query: probeDocument, token: token,
+            header: authorizationHeader, scheme: authorizationScheme)
+        guard let viewer = payload["viewer"] as? [String: Any],
+            let login = viewer["login"] as? String, !login.isEmpty
+        else { throw ForgeReadFailure.malformed }
+        return login
+    }
+
+    static let probeDocument = "query { viewer { login } }"
 
     static func read(
         _ connection: ForgeConnection, token: String, counters: Set<ForgeCounter>, now: Date
@@ -663,6 +687,12 @@ enum GitLabActivityFeed {
                 comments: comments, contributionsBoundedToOneYear: false,
                 contributionsAtLeast: contributionsAtLeast, commentsAtLeast: commentsAtLeast),
             readAt: now, failure: nil)
+    }
+
+    /// Who the token belongs to, off the same document the merged counts
+    /// ride on with none of them asked for.
+    static func probe(_ connection: ForgeConnection, token: String) async throws -> String {
+        try await mergedCounts(connection, token: token, counters: [], now: Date()).username
     }
 
     private static func mergedCounts(

@@ -317,6 +317,71 @@ struct ForgeConnectionIndex: Sendable {
     }
 }
 
+/// Files a forge connection, but only for a token the forge accepts.
+///
+/// **The token is read with before it is kept.** A connect used to file
+/// whatever it was handed and dismiss the sheet as if it had worked, so a typo
+/// in a host sent a token, often a write-scoped one, to whatever answered at
+/// that name on every poll, and a refused token was only discovered on the row
+/// afterwards. The probe asks the forge who the token belongs to, which is one
+/// small request and the same question every poll starts with, and nothing is
+/// written unless it answers.
+///
+/// The effects are closures so the order can be held without a keychain or a
+/// network: probe, then token, then index, and a token whose index write
+/// failed is taken back out rather than left for nothing to name.
+struct ForgeConnector: Sendable {
+    let probe: @Sendable (ForgeConnection, String) async throws -> String
+    let saveToken: @Sendable (String, String) throws -> Void
+    let deleteToken: @Sendable (String) throws -> Void
+    let remember: @Sendable (ForgeConnection) throws -> Void
+
+    /// What an attempt came to.
+    enum Outcome: Sendable, Equatable {
+        /// Filed, and the forge answered as this login.
+        case connected(login: String)
+        /// The forge did not accept the token or could not be asked, so
+        /// nothing was written.
+        case refused(ForgeReadFailure)
+        /// The forge answered and a local write failed, so nothing is
+        /// connected.
+        case notFiled
+    }
+
+    /// Probes, then files. `replacing` says the index already names this
+    /// connection: a failed index write then leaves the new token in place,
+    /// because deleting it would leave that row with no token at all.
+    func connect(_ connection: ForgeConnection, token: String, replacing: Bool) async -> Outcome {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .notFiled }
+        let login: String
+        do {
+            login = try await probe(connection, trimmed)
+        } catch {
+            return .refused(error as? ForgeReadFailure ?? .unreachable)
+        }
+        do {
+            try saveToken(trimmed, connection.id)
+        } catch {
+            sissyLog("sissy: could not file the token for \(connection.id) (\(error))")
+            return .notFiled
+        }
+        do {
+            try remember(connection)
+        } catch {
+            sissyLog("sissy: could not record the forge connection \(connection.id) (\(error))")
+            guard !replacing else { return .notFiled }
+            do {
+                try deleteToken(connection.id)
+            } catch {
+                sissyLog("sissy: the forge token for \(connection.id) outlived a failed connect (\(error))")
+            }
+            return .notFiled
+        }
+        return .connected(login: login)
+    }
+}
+
 /// A forge token, in a keychain item Sissy owns.
 ///
 /// Sissy's own item rather than a reference to the CLI's, for the reason
