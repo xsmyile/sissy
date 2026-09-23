@@ -38,7 +38,16 @@ final class ForgeConnectionTests: XCTestCase {
         XCTAssertEqual(try parse(" GitLab.Example.com ").get().host, "gitlab.example.com")
         XCTAssertEqual(try parse("https://gitlab.example.com/").get().host, "gitlab.example.com")
         XCTAssertEqual(
-            try parse("http://gitlab.example.com/dashboard").get().host, "gitlab.example.com")
+            try parse("https://gitlab.example.com/dashboard").get().host, "gitlab.example.com")
+    }
+
+    /// `http://` used to be taken off and the connection asked over https
+    /// anyway, so a plain-http instance was probed on the wrong scheme and
+    /// reported as unreachable. It is refused with its own reason instead: a
+    /// token, often a write-scoped one, is not sent in the clear.
+    func testPlainHttpIsRefused() {
+        XCTAssertEqual(parse("http://gitlab.lan:8080"), .failure(.insecureScheme))
+        XCTAssertEqual(parse("HTTP://gitlab.example.com/"), .failure(.insecureScheme))
     }
 
     func testAPortIsKeptAndReachesTheRoot() throws {
