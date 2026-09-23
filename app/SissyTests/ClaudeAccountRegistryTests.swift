@@ -588,7 +588,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
 
         let outcome = await registry.activate(uuid: "u-tok-b")
 
-        guard case .failure(.activeAccountUnknown) = outcome else {
+        guard case .failure(.slotChanged) = outcome else {
             return XCTFail("expected the moved slot to abandon the switch")
         }
         XCTAssertEqual(vault.active, credential("rotated-mid-switch"))
@@ -769,7 +769,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
 
         let outcome = await registry.activate(uuid: "u-tok-b")
 
-        guard case .failure(.activeAccountUnknown) = outcome else {
+        guard case .failure(.slotUnreadable) = outcome else {
             return XCTFail("expected the unreadable mirror to refuse the switch")
         }
         XCTAssertEqual(token(vault.active), "tok-a")
@@ -1044,6 +1044,25 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertTrue(moved)
         XCTAssertFalse(registry.currentSnapshot().switchable.contains("u-tok-b"))
         XCTAssertEqual(registry.currentSnapshot().needsLogin, ["u-tok-b"])
+    }
+
+    // MARK: Why a switch was refused
+
+    /// Bytes that are not a credential blob cannot be merged into, and that
+    /// is a slot Sissy could not read rather than an account it could not
+    /// name.
+    func testASlotHoldingSomethingThatIsNotABlobIsUnreadable() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.siblings = [Data("not json".utf8)]
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.slotUnreadable) = outcome else {
+            return XCTFail("expected slotUnreadable")
+        }
+        XCTAssertEqual(token(vault.active), "tok-a")
     }
 }
 
