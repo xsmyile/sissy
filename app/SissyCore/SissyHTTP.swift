@@ -17,7 +17,8 @@ import Foundation
 /// A redirect is followed, because a vendor moving an endpoint is ordinary,
 /// but a redirect off the origin the request was addressed to loses every
 /// credential header on the way, which is what a forge behind an SSO proxy
-/// would otherwise hand to the proxy.
+/// would otherwise hand to the proxy, and a redirect off the origin of a
+/// request with a body is not followed at all.
 enum SissyHTTP {
     /// The idle bound for any request that sets no timeout of its own. Every
     /// reader sets one, at most this long.
@@ -51,21 +52,43 @@ enum SissyHTTP {
         return configuration
     }
 
+    /// Methods whose redirect carries nothing but the URL and the headers.
+    static let bodilessMethods: Set<String> = ["GET", "HEAD"]
+
     /// The request a redirect is followed with: `request` whole when it stays
     /// on the origin of `original`, and without any of `credentialHeaders`
     /// when it does not. An unknown original counts as another origin.
-    static func redirected(_ request: URLRequest, from original: URL?) -> URLRequest {
-        if let from = original.flatMap(Origin.init), let to = request.url.flatMap(Origin.init),
-            from == to
-        {
-            return request
-        }
+    ///
+    /// A request with a body is not followed off its origin at all, `nil`
+    /// handing the redirect itself back to the caller: a `307` or `308`
+    /// resends the body, and the body of an OAuth token exchange is the
+    /// authorization code or the refresh token, which no header strip reaches.
+    /// The method decides as well as the body, because a POST's body can sit
+    /// in a stream the request does not expose.
+    static func redirected(_ request: URLRequest, from original: URLRequest?) -> URLRequest? {
+        if sameOrigin(original?.url, request.url) { return request }
+        if carriesABody(original) || carriesABody(request) { return nil }
         var stripped = request
         for field in (request.allHTTPHeaderFields ?? [:]).keys
         where credentialHeaders.contains(field.lowercased()) {
             stripped.setValue(nil, forHTTPHeaderField: field)
         }
         return stripped
+    }
+
+    /// Whether two URLs name one origin. Either one unknown answers `false`.
+    static func sameOrigin(_ lhs: URL?, _ rhs: URL?) -> Bool {
+        guard let from = lhs.flatMap(Origin.init), let to = rhs.flatMap(Origin.init) else {
+            return false
+        }
+        return from == to
+    }
+
+    private static func carriesABody(_ request: URLRequest?) -> Bool {
+        guard let request else { return false }
+        let method = (request.httpMethod ?? "GET").uppercased()
+        return !bodilessMethods.contains(method) || request.httpBody != nil
+            || request.httpBodyStream != nil
     }
 
     /// Scheme, host and port, the triple a browser calls an origin, with the
@@ -88,13 +111,14 @@ enum SissyHTTP {
     }
 
     /// The session's delegate, which answers every redirect through
-    /// `redirected(_:from:)` against the task's own original request.
+    /// `redirected(_:from:)` against the task's own original request, and
+    /// refuses the ones that answers `nil` for.
     final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
         func urlSession(
             _ session: URLSession, task: URLSessionTask,
             willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest
         ) async -> URLRequest? {
-            SissyHTTP.redirected(request, from: task.originalRequest?.url)
+            SissyHTTP.redirected(request, from: task.originalRequest)
         }
     }
 }
