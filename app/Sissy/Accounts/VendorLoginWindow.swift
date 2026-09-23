@@ -148,11 +148,16 @@ final class VendorLoginWindow: NSObject {
     /// neither by the time a popup reaches it, so `webViewDidClose` alone
     /// would leave the user on a page that stopped without a word.
     ///
-    /// With `stubbingOpener`, a page with no opener is given one whose
-    /// `postMessage` reports instead. A popup's completion writes to the
+    /// With `hearingOpenerErrors`, an uncaught error that reached into the
+    /// missing opener reports as well. A popup's completion writes to the
     /// opener before it closes, and on a null opener that write throws, so
-    /// the close it was on its way to never runs.
-    nonisolated private static func orphanedCloseScript(stubbingOpener: Bool) -> String {
+    /// the close it was on its way to never runs. The page's own view of
+    /// `window.opener` is left alone: a provider that branches on it to pick
+    /// a redirect over a `postMessage` has to see the null it would see in
+    /// any browser. A script from another origin than the page's has its
+    /// errors muted to `Script error.` and is not heard; the close wrapper
+    /// still is, when the page gets that far.
+    nonisolated private static func orphanedCloseScript(hearingOpenerErrors: Bool) -> String {
         """
         (() => {
             let reported = false;
@@ -161,16 +166,38 @@ final class VendorLoginWindow: NSObject {
                 reported = true;
                 window.webkit.messageHandlers.\(orphanedCloseMessage).postMessage(null);
             };
-            const stub = Object.freeze({ postMessage: report });
-            if (\(stubbingOpener) && window.opener === null) { window.opener = stub; }
+            const reachedIntoMissingOpener = (error) =>
+                error instanceof TypeError
+                    && typeof error.message === "string"
+                    && error.message.includes("\(nullObjectMessage)")
+                    && error.message.includes("\(openerMarker)");
+            if (\(hearingOpenerErrors)) {
+                window.addEventListener("error", (event) => {
+                    if (window.opener === null && reachedIntoMissingOpener(event.error)) { report(); }
+                });
+                window.addEventListener("unhandledrejection", (event) => {
+                    if (window.opener === null && reachedIntoMissingOpener(event.reason)) { report(); }
+                });
+            }
             const close = window.close.bind(window);
             window.close = function () {
-                if (window.opener === null || window.opener === stub) { report(); }
+                if (window.opener === null) { report(); }
                 return close();
             };
         })();
         """
     }
+
+    /// The part of WebKit's `TypeError` message that says a property was
+    /// read off null. Measured 2026-09-23 on macOS 27:
+    /// `window.opener.postMessage(1, '*')` with no opener throws
+    /// `null is not an object (evaluating 'window.opener.postMessage')`.
+    nonisolated static let nullObjectMessage = "null is not an object"
+    /// The name the same message carries when the null was the opener. An
+    /// opener first copied into a variable is evaluated under that
+    /// variable's name and is not heard; the close that follows still is,
+    /// if the page reaches it.
+    nonisolated static let openerMarker = "opener"
 
     /// WebKit's code for a load it abandoned because the navigation delegate
     /// cancelled it, which is every redirect this window takes a code from.
@@ -396,7 +423,7 @@ final class VendorLoginWindow: NSObject {
     static func watchOrphanedClose(
         in contentController: WKUserContentController, handler: WKScriptMessageHandler
     ) {
-        contentController.addUserScript(orphanedCloseUserScript(stubbingOpener: false))
+        contentController.addUserScript(orphanedCloseUserScript(hearingOpenerErrors: false))
         contentController.add(handler, name: orphanedCloseMessage)
     }
 
@@ -405,12 +432,12 @@ final class VendorLoginWindow: NSObject {
     /// Applies from the next document the web view loads.
     static func watchOpenerlessPopup(in contentController: WKUserContentController) {
         contentController.removeAllUserScripts()
-        contentController.addUserScript(orphanedCloseUserScript(stubbingOpener: true))
+        contentController.addUserScript(orphanedCloseUserScript(hearingOpenerErrors: true))
     }
 
-    private static func orphanedCloseUserScript(stubbingOpener: Bool) -> WKUserScript {
+    private static func orphanedCloseUserScript(hearingOpenerErrors: Bool) -> WKUserScript {
         WKUserScript(
-            source: orphanedCloseScript(stubbingOpener: stubbingOpener),
+            source: orphanedCloseScript(hearingOpenerErrors: hearingOpenerErrors),
             injectionTime: .atDocumentStart, forMainFrameOnly: true)
     }
 

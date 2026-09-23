@@ -69,26 +69,72 @@ final class VendorLoginPopupTests: XCTestCase {
     }
 
     /// A popup's completion writes to its opener before it closes. With no
-    /// opener that write throws and the close never runs, so the opener the
-    /// popup watch stands in is what reports, and the close after it adds
-    /// nothing. The sentinel is a later script of the same page, posted after
-    /// both, so a second report would have arrived before it.
+    /// opener that write throws and the close never runs, so the error is
+    /// what reports, and the close after it adds nothing. The sentinel is a
+    /// later script of the same page, posted after both, so a second report
+    /// would have arrived before it.
     func testAPopupThatPostsToAMissingOpenerIsHeardOnce() async {
         let heard = expectation(description: "the orphaned completion is reported")
         let pageDone = expectation(description: "the page ran to its last script")
         let recorder = OrphanedCloseRecorder { heard.fulfill() }
-        let sentinel = PageDoneRecorder { pageDone.fulfill() }
+        let sentinel = PageDoneRecorder { _ in pageDone.fulfill() }
+        let (web, contentController) = Self.poppedUpWebView(recorder: recorder, sentinel: sentinel)
+        web.loadHTMLString(Self.openerCompletionPage, baseURL: Self.popupOrigin)
+
+        await fulfillment(of: [heard, pageDone], timeout: Self.pageTimeout, enforceOrder: true)
+
+        Self.tearDown(contentController)
+    }
+
+    /// A provider that completes by redirect when it finds no opener is not
+    /// a dead end, and has to see the null opener any browser would give it.
+    func testAPopupThatChecksForAnOpenerAndRedirectsIsNotHeard() async {
+        let heard = expectation(description: "no orphaned completion is reported")
+        heard.isInverted = true
+        let pageDone = expectation(description: "the page ran to its last script")
+        var sawNullOpener: Bool?
+        let recorder = OrphanedCloseRecorder { heard.fulfill() }
+        let sentinel = PageDoneRecorder { body in
+            sawNullOpener = body as? Bool
+            pageDone.fulfill()
+        }
+        let (web, contentController) = Self.poppedUpWebView(recorder: recorder, sentinel: sentinel)
+        web.loadHTMLString(Self.openerCheckingPage, baseURL: Self.popupOrigin)
+
+        await fulfillment(of: [pageDone], timeout: Self.pageTimeout)
+        await fulfillment(of: [heard], timeout: .zero)
+
+        XCTAssertEqual(sawNullOpener, true)
+        Self.tearDown(contentController)
+    }
+
+    /// The matcher is WebKit's own wording, so the test reads it off WebKit
+    /// rather than off the constant.
+    func testWebKitsNullOpenerErrorCarriesTheMatchedWords() async throws {
+        let web = WKWebView(frame: .zero)
+        web.loadHTMLString("<html></html>", baseURL: nil)
+        let message =
+            try await web.callAsyncJavaScript(
+                Self.nullOpenerErrorProbe, contentWorld: .page) as? String
+
+        let text = try XCTUnwrap(message)
+        XCTAssertTrue(text.contains(VendorLoginWindow.nullObjectMessage), text)
+        XCTAssertTrue(text.contains(VendorLoginWindow.openerMarker), text)
+    }
+
+    private static func poppedUpWebView(
+        recorder: OrphanedCloseRecorder, sentinel: PageDoneRecorder
+    ) -> (WKWebView, WKUserContentController) {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         let contentController = configuration.userContentController
         VendorLoginWindow.watchOrphanedClose(in: contentController, handler: recorder)
         VendorLoginWindow.watchOpenerlessPopup(in: contentController)
         contentController.add(sentinel, name: PageDoneRecorder.message)
-        let web = WKWebView(frame: .zero, configuration: configuration)
-        web.loadHTMLString(Self.openerCompletionPage, baseURL: nil)
+        return (WKWebView(frame: .zero, configuration: configuration), contentController)
+    }
 
-        await fulfillment(of: [heard, pageDone], timeout: Self.pageTimeout, enforceOrder: true)
-
+    private static func tearDown(_ contentController: WKUserContentController) {
         contentController.removeScriptMessageHandler(forName: PageDoneRecorder.message)
         VendorLoginWindow.stopWatchingOrphanedClose(in: contentController)
     }
@@ -100,16 +146,33 @@ final class VendorLoginPopupTests: XCTestCase {
         <script>window.webkit.messageHandlers.\(PageDoneRecorder.message).postMessage(null);</script>
         </body></html>
         """
+    private static let openerCheckingPage = """
+        <html><body>
+        <script>if (window.opener && !window.opener.closed) { window.opener.postMessage("x", "*"); }</script>
+        <script>
+        window.webkit.messageHandlers.\(PageDoneRecorder.message).postMessage(window.opener === null);
+        </script>
+        </body></html>
+        """
+    private static let nullOpenerErrorProbe = """
+        try { window.opener.postMessage(1, "*"); return null; } catch (error) { return error.message; }
+        """
+    /// A popup is a page of an identity provider's origin. With no base URL
+    /// the origin is opaque, and WebKit hands the page's own error listener
+    /// `Script error.` in place of the error, as it does for any script from
+    /// another origin.
+    private static let popupOrigin = URL(string: "https://idp.example")
     private static let pageTimeout: TimeInterval = 10
 }
 
-/// Hears the test page's own last script, which says the page has finished.
+/// Hears the test page's own last script, which says the page has finished
+/// and hands over what it saw.
 @MainActor
 private final class PageDoneRecorder: NSObject, WKScriptMessageHandler {
     static let message = "sissyTestPageDone"
-    private let onDone: () -> Void
+    private let onDone: (Any) -> Void
 
-    init(onDone: @escaping () -> Void) {
+    init(onDone: @escaping (Any) -> Void) {
         self.onDone = onDone
     }
 
@@ -117,7 +180,7 @@ private final class PageDoneRecorder: NSObject, WKScriptMessageHandler {
         _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
     ) {
         guard message.name == Self.message else { return }
-        onDone()
+        onDone(message.body)
     }
 }
 
