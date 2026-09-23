@@ -32,6 +32,7 @@ final class SissyLogFile: @unchecked Sendable {
     private var handle: (any SissyLogHandle)?
     private var written: UInt64 = 0
     private var failed = 0
+    private var lastCompleteLine: UInt64?
 
     /// `open` hands back a handle positioned at the end of the file it was
     /// given; tests pass one that refuses every write.
@@ -65,8 +66,11 @@ final class SissyLogFile: @unchecked Sendable {
     /// A failed write is counted and dropped, and so is the handle, so the
     /// next line opens the file again. What part of the line did reach the
     /// disk is truncated away first, or the next line would be appended to
-    /// the fragment. It is never logged: the log is the thing that just
-    /// failed, and `sissyLog` from here would recurse.
+    /// the fragment. A truncation that fails too keeps the end of the last
+    /// complete line, and the file is not written again until a reopened
+    /// handle truncates back to it; every line until then is counted and
+    /// dropped. It is never logged: the log is the thing that just failed,
+    /// and `sissyLog` from here would recurse.
     func write(_ data: Data) {
         lock.lock()
         defer { lock.unlock() }
@@ -88,7 +92,9 @@ final class SissyLogFile: @unchecked Sendable {
             written += UInt64(data.count)
         } catch {
             failed += 1
-            try? handle.truncate(atOffset: start)
+            if (try? handle.truncate(atOffset: start)) == nil {
+                lastCompleteLine = start
+            }
             try? handle.close()
             self.handle = nil
         }
@@ -110,9 +116,20 @@ final class SissyLogFile: @unchecked Sendable {
     /// The open handle, opening it on first use. `written` starts from what is
     /// already on disk, which is how a log the last run left over the cap is
     /// rotated by the first line of this one rather than grown further.
+    ///
+    /// A fragment a failed write left behind is truncated away before the
+    /// handle is used, and a handle that cannot remove it is closed and not
+    /// used at all.
     private func opened() -> (any SissyLogHandle)? {
         if let handle { return handle }
         guard let opened = try? open(url) else { return nil }
+        if let lastCompleteLine {
+            guard (try? opened.truncate(atOffset: lastCompleteLine)) != nil else {
+                try? opened.close()
+                return nil
+            }
+            self.lastCompleteLine = nil
+        }
         written = (try? opened.offset()) ?? 0
         handle = opened
         return opened

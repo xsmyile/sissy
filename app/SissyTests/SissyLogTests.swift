@@ -79,6 +79,33 @@ final class SissyLogTests: XCTestCase {
         XCTAssertEqual(try contents(), "kept\n")
     }
 
+    func testAFragmentTheLogCouldNotTruncateIsRemovedOnReopen() throws {
+        FileManager.default.createFile(atPath: logURL.path, contents: Data("earlier\n".utf8))
+        let opens = OpenSequence(first: try PartialWriteHandle(url: logURL, truncates: false))
+        let log = SissyLogFile(directory: directory, open: opens.next)
+
+        log.write(Data("lost\n".utf8))
+        log.write(Data("kept\n".utf8))
+
+        XCTAssertEqual(try contents(), "earlier\nkept\n")
+    }
+
+    func testALineIsDroppedWhileTheFragmentCannotBeRemoved() throws {
+        FileManager.default.createFile(atPath: logURL.path, contents: Data("earlier\n".utf8))
+        let opens = OpenSequence(
+            first: try PartialWriteHandle(url: logURL, truncates: false),
+            try UntruncatableHandle(url: logURL)
+        )
+        let log = SissyLogFile(directory: directory, open: opens.next)
+
+        log.write(Data("lost\n".utf8))
+        log.write(Data("dropped\n".utf8))
+        log.write(Data("kept\n".utf8))
+
+        XCTAssertEqual(try contents(), "earlier\nkept\n")
+        XCTAssertEqual(log.failures, 2)
+    }
+
     func testAWrittenLineLandsAndCountsNoFailure() throws {
         let log = SissyLogFile(directory: directory)
 
@@ -110,21 +137,20 @@ final class SissyLogTests: XCTestCase {
     }
 }
 
-/// An opener that hands out one given handle first and the real file after.
+/// An opener that hands out the given handles in order and the real file after.
 private final class OpenSequence: @unchecked Sendable {
     private let lock = NSLock()
-    private var first: (any SissyLogHandle)?
+    private var queued: [any SissyLogHandle]
 
-    init(first: any SissyLogHandle) {
-        self.first = first
+    init(first: any SissyLogHandle, _ rest: any SissyLogHandle...) {
+        queued = [first] + rest
     }
 
     func next(_ url: URL) throws -> any SissyLogHandle {
         lock.lock()
         defer { lock.unlock() }
-        if let handle = first {
-            first = nil
-            return handle
+        if !queued.isEmpty {
+            return queued.removeFirst()
         }
         return try SissyLogFile.openForAppending(url)
     }
@@ -132,11 +158,16 @@ private final class OpenSequence: @unchecked Sendable {
 
 /// A handle that writes the first half of a line to the real file and then
 /// fails, the way a disk that fills mid-line does.
+///
+/// With `truncates` false the truncation that should remove the fragment
+/// fails as well, which a disk refusing every change does.
 private final class PartialWriteHandle: SissyLogHandle, @unchecked Sendable {
     private let file: FileHandle
+    private let truncates: Bool
 
-    init(url: URL) throws {
+    init(url: URL, truncates: Bool = true) throws {
         file = try SissyLogFile.openForAppending(url)
+        self.truncates = truncates
     }
 
     func append(_ data: Data) throws {
@@ -149,7 +180,33 @@ private final class PartialWriteHandle: SissyLogHandle, @unchecked Sendable {
     }
 
     func truncate(atOffset offset: UInt64) throws {
+        guard truncates else { throw CocoaError(.fileWriteNoPermission) }
         try file.truncate(atOffset: offset)
+    }
+
+    func close() throws {
+        try file.close()
+    }
+}
+
+/// A handle on the real file that writes but refuses to truncate it.
+private final class UntruncatableHandle: SissyLogHandle, @unchecked Sendable {
+    private let file: FileHandle
+
+    init(url: URL) throws {
+        file = try SissyLogFile.openForAppending(url)
+    }
+
+    func append(_ data: Data) throws {
+        try file.write(contentsOf: data)
+    }
+
+    func offset() throws -> UInt64 {
+        try file.offset()
+    }
+
+    func truncate(atOffset offset: UInt64) throws {
+        throw CocoaError(.fileWriteNoPermission)
     }
 
     func close() throws {
