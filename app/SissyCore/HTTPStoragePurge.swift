@@ -17,7 +17,7 @@ import Foundation
 /// among the entries is unlinked rather than traversed, so the purge cannot
 /// reach outside the two trees it was pointed at.
 enum HTTPStoragePurge {
-    static let bundleIdentifiers = ["com.radonforge.sissy", "com.radonforge.sissy.dev"]
+    static let bundleIdentifiers = [SissyPaths.releaseBundleIdentifier, SissyPaths.devBundleIdentifier]
 
     /// The cache database and its `-wal` / `-shm` companions share this prefix.
     static let cacheDatabasePrefix = "Cache.db"
