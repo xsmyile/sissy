@@ -358,7 +358,15 @@ struct AgentHookInstaller {
             hooks[Self.event] = wanted.isEmpty ? nil : wanted
             var updated = snapshot.root
             updated[Self.hooksKey] = hooks.isEmpty ? nil : hooks
-            if existed { try backUp(resolved, of: target) }
+            if updated.isEmpty, isOwnCreation(target) {
+                try delete(resolved, expecting: snapshot.identity)
+                return .removed
+            }
+            if existed {
+                try backUp(resolved, of: target)
+            } else {
+                try recordCreation(of: target)
+            }
             try write(updated, to: resolved, expecting: snapshot.identity)
             return wanted.contains(where: Self.isSissys) ? .written : .removed
         } catch {
@@ -377,6 +385,43 @@ struct AgentHookInstaller {
         guard !fileManager.fileExists(atPath: copy.path) else { return }
         try fileManager.copyItem(at: url, to: copy)
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copy.path)
+    }
+
+    /// The note that this target did not exist until Sissy wrote it, beside
+    /// the backups and removed with them.
+    private func creationRecord(of target: AgentHookTarget) -> URL {
+        backupsURL.appendingPathComponent(
+            "\(target.url.deletingPathExtension().lastPathComponent)-\(target.name)"
+                + Self.creationRecordSuffix)
+    }
+
+    private static let creationRecordSuffix = ".created"
+
+    private func recordCreation(of target: AgentHookTarget) throws {
+        try createDirectory(backupsURL)
+        let record = creationRecord(of: target)
+        guard !fileManager.fileExists(atPath: record.path) else { return }
+        try Data().write(to: record, options: [.atomic])
+    }
+
+    /// Whether the file at this target is one Sissy created and nobody has
+    /// since swapped for a link. A removal that empties such a file deletes
+    /// it rather than leaving a `{}` in a folder that had no file before the
+    /// switch was flipped. A link is someone's own arrangement, and deleting
+    /// what it points at is not Sissy's to do.
+    private func isOwnCreation(_ target: AgentHookTarget) -> Bool {
+        guard fileManager.fileExists(atPath: creationRecord(of: target).path),
+            let type = try? fileManager.attributesOfItem(atPath: target.url.path)[.type]
+                as? FileAttributeType
+        else { return false }
+        return type != .typeSymbolicLink
+    }
+
+    /// Deletes the file if it is still the one read, on the terms `write`
+    /// renames over it.
+    private func delete(_ url: URL, expecting: Identity?) throws {
+        guard identity(of: url) == expecting else { throw CocoaError(.fileWriteFileExists) }
+        try fileManager.removeItem(at: url)
     }
 
     private struct Identity: Equatable {
