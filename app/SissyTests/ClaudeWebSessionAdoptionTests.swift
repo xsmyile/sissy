@@ -149,6 +149,22 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
         XCTAssertEqual(vault.contents, ["a1b2c3d4": "sk-ant-sid-linked"])
     }
 
+    /// A keyed session this read could not have may be the one that no longer
+    /// decodes, so the unkeyed copy stays: it can be the only session on the
+    /// Mac that still reads.
+    func testAKeyedSessionThatCannotBeReadKeepsTheUnkeyedCopy() async {
+        let vault = Vault(
+            [
+                ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-old",
+                "a1b2c3d4": "sk-ant-sid-linked",
+            ], unreadable: ["a1b2c3d4"])
+
+        let outcome = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in Self.identity }
+
+        XCTAssertEqual(outcome, .unreadable)
+        XCTAssertEqual(vault.contents[ClaudeWebSessionStore.unkeyedAccount], "sk-ant-sid-old")
+    }
+
     /// The keychain half, in memory. The pass itself is the code under test.
     private final class Vault: @unchecked Sendable {
         private let lock = NSLock()

@@ -33,8 +33,9 @@ enum ClaudeWebSessionAdoption {
         case unidentified
         /// The keychain refused the move. Same treatment, for the same reason.
         case keychainRefused(ClaudeWebSessionStoreError)
-        /// The item is there and this read was not allowed to have it, which
-        /// is what a re-signed build meets. Emphatically not `nothingToAdopt`.
+        /// An item is there, the unkeyed one or the account's own, and this
+        /// read could not have it, which is what a re-signed build meets.
+        /// Both are left where they are. Emphatically not `nothingToAdopt`.
         case unreadable
     }
 
@@ -121,12 +122,12 @@ enum ClaudeWebSessionAdoption {
         switch store.read(identity.uuid) {
         case .absent:
             break
-        case .timedOut:
+        case .interactionRequired, .denied, .unreadable, .timedOut:
             sissyLog(
-                "sissy: the keychain did not say whether the account already has a claude.ai "
-                    + "session; leaving the unkeyed one where it is")
+                "sissy: the account's own claude.ai session could not be read; "
+                    + "leaving the unkeyed one where it is")
             return .unreadable
-        case .found, .interactionRequired, .denied, .unreadable:
+        case .found:
             return dropSuperseded(session, store: store, account: identity.uuid)
         }
 
@@ -156,6 +157,11 @@ enum ClaudeWebSessionAdoption {
     /// Drops the unkeyed copy of a session whose account already has its own,
     /// on the same condition the move drops it: only while the holding key
     /// still holds the session this pass read.
+    ///
+    /// Reached only once the keyed session has been read. One the keychain
+    /// holds and would not release, or no longer decodes, is not known to be
+    /// readable, and dropping the unkeyed copy then could take the only
+    /// session on the Mac that still is.
     ///
     /// A delete the keychain refuses leaves the copy for the next pass, which
     /// meets the same keyed session and tries again; nothing is lost either
