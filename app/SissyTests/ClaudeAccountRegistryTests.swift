@@ -20,6 +20,18 @@ final class ClaudeKeychainServiceTests: XCTestCase {
             ClaudeKeychainCLI.claudeService)
     }
 
+    /// A URL built while `~/.claude` did not exist has no trailing slash, and
+    /// one built after it was created has one. Both are the default home.
+    func testTheDefaultHomeIsRecognisedWhetherOrNotItExistedAtLaunch() {
+        let path = AccountDefaults.claudeHome.standardizedFileURL.path
+        let before = URL(fileURLWithPath: path, isDirectory: false)
+        let after = URL(fileURLWithPath: path + "/", isDirectory: true)
+
+        XCTAssertEqual(ClaudeKeychainCLI.claudeService(for: before), ClaudeKeychainCLI.claudeService)
+        XCTAssertEqual(ClaudeKeychainCLI.claudeService(for: after), ClaudeKeychainCLI.claudeService)
+        XCTAssertEqual(ClaudeKeychainCLI.siblingClaudeServices(for: after).count, 1)
+    }
+
     /// Claude Code 2.1.27x keeps a second, scoped item for the default home
     /// and rewrites the pair together — measured 2026-09-21, both carrying the
     /// same modification date to the second — so a switch has to reach both.

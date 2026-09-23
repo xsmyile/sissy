@@ -106,8 +106,14 @@ enum ClaudeKeychainCLI {
     /// Claude Code 2.1+ scopes the rest by config directory. Verified
     /// 2026-09-15 against the two homes on one Mac: each item existed under
     /// exactly the name this rule produces for its own path.
+    ///
+    /// Which home is the default is decided on standardized paths. A URL
+    /// built for a directory that exists carries a trailing slash and one
+    /// built before it existed does not, so comparing the URLs themselves
+    /// addressed the scoped item for `~/.claude` on a Mac where the directory
+    /// was created after Sissy launched.
     static func claudeService(for home: URL) -> String {
-        guard home != AccountDefaults.claudeHome else { return claudeService }
+        guard !AccountDefaults.isDefaultClaudeHome(home) else { return claudeService }
         return scopedClaudeService(for: home.path)
     }
 
@@ -125,7 +131,7 @@ enum ClaudeKeychainCLI {
     /// `claude` reads first is its business, so a switch reaching only one
     /// leaves the other naming the account the user just left.
     static func siblingClaudeServices(for home: URL) -> [String] {
-        guard home == AccountDefaults.claudeHome else { return [] }
+        guard AccountDefaults.isDefaultClaudeHome(home) else { return [] }
         return [scopedClaudeService(for: home.path)]
     }
 
