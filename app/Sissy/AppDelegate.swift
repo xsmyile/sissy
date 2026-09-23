@@ -125,10 +125,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///
     /// LaunchServices delivers a double-click in Applications, a Spotlight
     /// hit or `open -a Sissy` to the running instance as a reopen, which went
-    /// unanswered before this. The status item is the app's only standing
-    /// surface and it can be out of sight, behind the notch on a full menu
-    /// bar or switched off in the menu bar's settings, so a relaunch that did
-    /// nothing read as an app that would not start while it was counting.
+    /// unanswered before this, so a relaunch read as an app that would not
+    /// start while it was counting.
+    ///
+    /// The panel is anchored to the status item, so this reaches only an item
+    /// in the menu bar. One switched off in the menu bar's settings has no
+    /// window and `UsagePanelController.show(relativeTo:)` declines it; one
+    /// behind the notch opens the panel under an item nobody can see.
     ///
     /// A window already up is left to AppKit, whose own reopen brings it
     /// forward: that is Settings or the login window, and the panel would
