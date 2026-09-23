@@ -277,6 +277,40 @@ final class AgentHookInstallerTests: XCTestCase {
                 home: home, engineState: SissyPaths.appSupportDir(home: elsewhere)))
     }
 
+    func testAFileSissyCreatedIsDeletedWhenRemovalEmptiesIt() throws {
+        let (installer, target) = make("created")
+        installer.install(bundledScript: bundledScript)
+        installer.install(bundledScript: bundledScript)
+
+        XCTAssertEqual(installer.remove()[target], .removed)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.url.path))
+    }
+
+    func testAnEmptyFileTheUserHadIsKept() throws {
+        let (installer, target) = make("theirs")
+        try writeConfiguration([:], to: target.url)
+        installer.install(bundledScript: bundledScript)
+
+        installer.remove()
+
+        XCTAssertEqual(try configuration(of: target.url).count, 0)
+    }
+
+    /// Created by Sissy, and since written into by someone else: the file is
+    /// theirs as much as Sissy's now, and only Sissy's line goes.
+    func testAFileSissyCreatedKeepsWhatOthersAddedToIt() throws {
+        let (installer, target) = make("shared")
+        installer.install(bundledScript: bundledScript)
+        var current = try configuration(of: target.url)
+        current["theme"] = "dark"
+        try writeConfiguration(current, to: target.url)
+
+        installer.remove()
+
+        XCTAssertEqual(try configuration(of: target.url)["theme"] as? String, "dark")
+    }
+
     private func make(_ name: String) -> (AgentHookInstaller, AgentHookTarget) {
         let configuration = root.appendingPathComponent("\(name)/home/.claude/settings.json")
         try? FileManager.default.createDirectory(
