@@ -22,6 +22,11 @@ enum ClaudeWebSessionAdoption {
         /// pass has already run on.
         case nothingToAdopt
         case adopted(uuid: String)
+        /// The session belongs to an account that already has one filed under
+        /// its own key, which was linked through the window after the unkeyed
+        /// item was written and is therefore the newer of the two. That one
+        /// and its recorded link stand; the unkeyed copy is dropped.
+        case alreadyLinked(uuid: String)
         /// claude.ai would not say whose the session is — offline, or a
         /// session that has ended. The item is left exactly where it was and
         /// the next launch tries again.
@@ -54,7 +59,11 @@ enum ClaudeWebSessionAdoption {
             delete: { account in try ClaudeWebSessionStore.delete(account: account) })
     }
 
-    /// Runs the pass. Idempotent, and safe to interrupt: the session is
+    /// Runs the pass. Never writes over a session already filed under the
+    /// account it identifies: that one was linked after the unkeyed item was
+    /// written, so it is the newer, and its link may carry a chosen
+    /// organisation the pass would replace with none. Idempotent, and safe to
+    /// interrupt: the session is
     /// written under its new key before the old one is dropped, so the worst
     /// an interruption leaves is two copies of one session — which the next
     /// pass clears, because the legacy item is still there to be adopted.
@@ -109,6 +118,18 @@ enum ClaudeWebSessionAdoption {
             return .unidentified
         }
 
+        switch store.read(identity.uuid) {
+        case .absent:
+            break
+        case .timedOut:
+            sissyLog(
+                "sissy: the keychain did not say whether the account already has a claude.ai "
+                    + "session; leaving the unkeyed one where it is")
+            return .unreadable
+        case .found, .interactionRequired, .denied, .unreadable:
+            return dropSuperseded(session, store: store, account: identity.uuid)
+        }
+
         do {
             try store.write(identity.uuid, session)
             if case .found(let holding) = store.read(ClaudeWebSessionStore.unkeyedAccount),
@@ -130,5 +151,28 @@ enum ClaudeWebSessionAdoption {
         remember(ClaudeWebLink(identity: identity, organization: nil))
         sissyLog("sissy: adopted the imported claude.ai session under its own account")
         return .adopted(uuid: identity.uuid)
+    }
+
+    /// Drops the unkeyed copy of a session whose account already has its own,
+    /// on the same condition the move drops it: only while the holding key
+    /// still holds the session this pass read.
+    ///
+    /// A delete the keychain refuses leaves the copy for the next pass, which
+    /// meets the same keyed session and tries again; nothing is lost either
+    /// way, because the keyed one is never touched.
+    private static func dropSuperseded(
+        _ session: String, store: Store, account: String
+    ) -> Outcome {
+        if case .found(let holding) = store.read(ClaudeWebSessionStore.unkeyedAccount),
+            holding.accessToken == session
+        {
+            do {
+                try store.delete(ClaudeWebSessionStore.unkeyedAccount)
+            } catch {
+                sissyLog("sissy: could not drop the superseded claude.ai session: \(error)")
+            }
+        }
+        sissyLog("sissy: the account already has a linked claude.ai session; kept that one")
+        return .alreadyLinked(uuid: account)
     }
 }

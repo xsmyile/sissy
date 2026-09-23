@@ -104,6 +104,51 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
         XCTAssertEqual(outcome, .unreadable)
     }
 
+    /// An account already linked through the window keeps the session it was
+    /// linked with. The unkeyed item predates keying, so it is the older of
+    /// the two, and writing it over the keyed one would put an ended session
+    /// back in place of the one the user just signed in with.
+    func testAnAccountAlreadyLinkedKeepsItsSession() async {
+        let vault = Vault([
+            ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-old",
+            "a1b2c3d4": "sk-ant-sid-linked",
+        ])
+
+        let outcome = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in Self.identity }
+
+        XCTAssertEqual(outcome, .alreadyLinked(uuid: "a1b2c3d4"))
+        XCTAssertEqual(vault.contents["a1b2c3d4"], "sk-ant-sid-linked")
+    }
+
+    /// Nor is its link rewritten: the organisation recorded when it was
+    /// linked is an answer, and the pass has only a guess to put over it.
+    func testAnAccountAlreadyLinkedKeepsItsRecordedOrganization() async {
+        let vault = Vault([
+            ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-old",
+            "a1b2c3d4": "sk-ant-sid-linked",
+        ])
+        let remembered = LockedValue<[ClaudeWebLink]>([])
+
+        _ = await ClaudeWebSessionAdoption.run(
+            store: vault.store(), identify: { _ in Self.identity },
+            remember: { link in remembered.update { $0.append(link) } })
+
+        XCTAssertTrue(remembered.load().isEmpty)
+    }
+
+    /// The superseded item is dropped, so the next launch does not spend a
+    /// request on claude.ai to identify it all over again.
+    func testAnAccountAlreadyLinkedDropsTheUnkeyedCopy() async {
+        let vault = Vault([
+            ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-old",
+            "a1b2c3d4": "sk-ant-sid-linked",
+        ])
+
+        _ = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in Self.identity }
+
+        XCTAssertEqual(vault.contents, ["a1b2c3d4": "sk-ant-sid-linked"])
+    }
+
     /// The keychain half, in memory. The pass itself is the code under test.
     private final class Vault: @unchecked Sendable {
         private let lock = NSLock()
