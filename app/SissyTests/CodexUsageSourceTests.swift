@@ -48,10 +48,11 @@ final class CodexUsageSourceTests: XCTestCase {
     }
 
     private static func source(
+        account: String? = nil,
         credential: @escaping @Sendable (Bool) async -> CodexCredentialReading,
         fetch: @escaping @Sendable (CodexCredential) async throws -> CodexUsagePayload.Reading
     ) -> CodexUsageSource {
-        CodexUsageSource(credentialSource: credential, fetchSource: fetch)
+        CodexUsageSource(account: account, credentialSource: credential, fetchSource: fetch)
     }
 
     // MARK: - The payload
@@ -170,12 +171,13 @@ final class CodexUsageSourceTests: XCTestCase {
         XCTAssertEqual(source.observedAccount, "user-1")
     }
 
-    /// A credential the vendor has retired says so on the row, and keeps the
-    /// windows: the last reading and its age are still true, and the turns are
-    /// still writing them.
+    /// A linked credential the vendor has retired says so on the row, and
+    /// keeps the windows: the last reading and its age are still true, and the
+    /// turns are still writing them.
     func testARefusedCredentialSaysSoAndKeepsTheWindows() async {
         let refuse = LockedValue(false)
         let source = Self.source(
+            account: "user-1",
             credential: { _ in .found(Self.credential()) },
             fetch: { _ in
                 if refuse.load() { throw UsageRequestError.badStatus(401) }
@@ -203,6 +205,17 @@ final class CodexUsageSourceTests: XCTestCase {
         _ = await source.refreshOnce {}
         XCTAssertNotEqual(source.currentSignals().limitsState, .sessionExpired)
         XCTAssertFalse(source.currentSignals().windows.isEmpty)
+    }
+
+    /// The CLI's own credential is `codex login`'s to replace, so a refusal
+    /// of it is not a sign-in Sissy can offer to redo: linking would add a
+    /// second account and leave this row refused.
+    func testARefusedCLICredentialIsTheCLIsToRenew() async {
+        let source = Self.source(
+            credential: { _ in .found(Self.credential()) },
+            fetch: { _ in throw UsageRequestError.badStatus(401) })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().limitsState, .credentialRefused)
     }
 
     func testA429BacksOffAndNamesWhen() async {

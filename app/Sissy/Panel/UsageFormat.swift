@@ -631,13 +631,14 @@ enum UsageFormat {
             let ended = isCodex ? "The OpenAI sign-in" : "The claude.ai session"
             return .init(message: "\(ended) has ended", action: "Link again", kind: .link)
         case .credentialRefused:
-            // No action, deliberately. The credential is Claude Code's own and
+            // No action, deliberately. The credential is the CLI's own and
             // the CLI rotates it on its own schedule, so every button this row
             // could carry would either do nothing or send someone to re-link
             // an account that is not linked.
+            let remedy = isCodex ? "until you run codex login" : "until the CLI renews it"
             return .init(
                 message: "\(vendor) refused \(cli)'s sign-in, so the limits stay hidden "
-                    + "until the CLI renews it",
+                    + remedy,
                 action: nil, kind: .refresh)
         case .rateLimited(let until):
             return .init(
