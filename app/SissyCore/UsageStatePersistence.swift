@@ -146,6 +146,9 @@ struct UsageStateSnapshot: Codable, Equatable {
         var outputTokens: Int
         var cacheReadTokens: Int
         var cacheCreationTokens: Int
+        /// The 1-hour part of `cacheCreationTokens`, absent in a snapshot
+        /// written before the split was kept.
+        var cacheCreation1hTokens: Int?
         var cost: String
     }
 
@@ -268,6 +271,9 @@ struct UsageStateSnapshot: Codable, Equatable {
         var outputTokens: Int
         var cacheReadTokens: Int
         var cacheCreationTokens: Int
+        /// The 1-hour part of `cacheCreationTokens`, absent in a snapshot
+        /// written before the split was kept.
+        var cacheCreation1hTokens: Int?
         var cost: String  // Decimal as String — see top-of-file note.
     }
 

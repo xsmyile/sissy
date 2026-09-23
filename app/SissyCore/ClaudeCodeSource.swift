@@ -591,6 +591,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
             outputTokens: output,
             cacheReadTokens: cacheRead,
             cacheCreationTokens: cacheCreation,
+            cacheCreation1hTokens: cacheCreation1h,
             cost: cost,
             delegated: delegated,
             effort: obj["effort"] as? String

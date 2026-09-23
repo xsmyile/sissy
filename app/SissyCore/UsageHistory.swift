@@ -20,6 +20,9 @@ struct UsageHistoryTotals: Equatable, Sendable {
     var outputTokens: Int = 0
     var cacheReadTokens: Int = 0
     var cacheCreationTokens: Int = 0
+    /// The part of `cacheCreationTokens` written to the 1-hour cache. Not a
+    /// fifth counter: `totalTokens` already holds it through the aggregate.
+    var cacheCreation1hTokens: Int = 0
     var cost: Decimal = 0
 
     var totalTokens: Int {
@@ -31,6 +34,7 @@ struct UsageHistoryTotals: Equatable, Sendable {
         outputTokens += event.outputTokens
         cacheReadTokens += event.cacheReadTokens
         cacheCreationTokens += event.cacheCreationTokens
+        cacheCreation1hTokens += event.cacheCreation1hTokens
         cost += event.cost
     }
 
@@ -39,6 +43,7 @@ struct UsageHistoryTotals: Equatable, Sendable {
         outputTokens += other.outputTokens
         cacheReadTokens += other.cacheReadTokens
         cacheCreationTokens += other.cacheCreationTokens
+        cacheCreation1hTokens += other.cacheCreation1hTokens
         cost += other.cost
     }
 }
@@ -130,6 +135,11 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         var outputTokens: Int
         var cacheReadTokens: Int
         var cacheCreationTokens: Int
+        /// The 1-hour part of `cacheCreationTokens`. Absent where there is
+        /// none, which is every Codex row, and on every row written before the
+        /// field existed, where it reads as zero: such a row can only be
+        /// priced again with all of its cache writes at the 5-minute rate.
+        var cacheCreation1hTokens: Int?
         /// Decimal as String: `JSONEncoder` routes `Decimal` through `Double`
         /// and drops sub-cent precision on the way. Same reason
         /// `UsageStateSnapshot` encodes money as text.
@@ -145,6 +155,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
                 outputTokens: outputTokens,
                 cacheReadTokens: cacheReadTokens,
                 cacheCreationTokens: cacheCreationTokens,
+                cacheCreation1hTokens: cacheCreation1hTokens ?? 0,
                 cost: Decimal(string: cost) ?? 0
             )
         }
@@ -165,6 +176,9 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         var outputTokens: Int
         var cacheReadTokens: Int
         var cacheCreationTokens: Int
+        /// The 1-hour part of `cacheCreationTokens`, absent on the terms
+        /// `Entry.cacheCreation1hTokens` is.
+        var cacheCreation1hTokens: Int?
         /// Decimal as String, the reason `Entry.cost` is one.
         var cost: String
 
@@ -178,6 +192,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
                         outputTokens: outputTokens,
                         cacheReadTokens: cacheReadTokens,
                         cacheCreationTokens: cacheCreationTokens,
+                        cacheCreation1hTokens: cacheCreation1hTokens ?? 0,
                         cost: Decimal(string: cost) ?? 0)))
         }
     }
@@ -209,6 +224,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
                         outputTokens: value.totals.outputTokens,
                         cacheReadTokens: value.totals.cacheReadTokens,
                         cacheCreationTokens: value.totals.cacheCreationTokens,
+                        cacheCreation1hTokens: Self.present(value.totals.cacheCreation1hTokens),
                         cost: NSDecimalNumber(decimal: value.totals.cost).stringValue)
                 }
                 .sorted { ($0.model, $0.effort ?? "") < ($1.model, $1.effort ?? "") }
@@ -223,6 +239,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
                     outputTokens: t.outputTokens,
                     cacheReadTokens: t.cacheReadTokens,
                     cacheCreationTokens: t.cacheCreationTokens,
+                    cacheCreation1hTokens: Self.present(t.cacheCreation1hTokens),
                     cost: NSDecimalNumber(decimal: t.cost).stringValue
                 )
             }
@@ -230,6 +247,10 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
                 ($0.model, $0.project ?? "") < ($1.model, $1.project ?? "")
             }
     }
+
+    /// A counter as the file keeps it: absent rather than zero, so a day with
+    /// no 1-hour writes reads exactly as it did before the field existed.
+    static func present(_ count: Int) -> Int? { count > 0 ? count : nil }
 
     /// What the day adds up to across its rows. A writer compares against it
     /// to refuse a reading less complete than the one already on disk.
@@ -358,6 +379,7 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
             out.outputTokens += totals.outputTokens
             out.cacheReadTokens += totals.cacheReadTokens
             out.cacheCreationTokens += totals.cacheCreationTokens
+            out.cacheCreation1hTokens += totals.cacheCreation1hTokens
             out.cost += totals.cost
         }
         return out
