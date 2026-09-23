@@ -994,6 +994,33 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertEqual(aside.count, 1)
         XCTAssertTrue(registry.currentSnapshot().indexSetAside)
     }
+
+    // MARK: Teardown
+
+    /// A watcher cancelled while it waits on the vendor belongs to an engine
+    /// that is going away, and must not write the archive after it.
+    func testACaptureCancelledDuringIdentificationWritesNothing() async {
+        let vault = Vault()
+        vault.active = credential("tok-a")
+        let entered = expectation(description: "the capture is identifying")
+        let gate = Latch()
+        let registry = makeRegistry(vault) { token in
+            entered.fulfill()
+            await gate.wait()
+            return Self.byToken(token)
+        }
+
+        let poll = Task { await registry.captureActive() }
+        await fulfillment(of: [entered], timeout: 5)
+        poll.cancel()
+        gate.open()
+        _ = await poll.value
+
+        XCTAssertNil(vault.secret("u-tok-a"))
+        XCTAssertTrue(registry.currentSnapshot().accounts.isEmpty)
+        let index = ClaudeAccountStore.defaultURL(in: tempDir)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: index.path))
+    }
 }
 
 /// Holds an async caller until the test lets it go.

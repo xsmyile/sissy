@@ -642,6 +642,11 @@ actor UsageEngine {
     /// Tears everything down. Idempotent, and safe to land while `start()` is
     /// still suspended — that is what `lifecycle` is re-read for. Terminal: an
     /// engine that has stopped stays stopped.
+    ///
+    /// The account watcher is waited for, not only cancelled. An engine is
+    /// rebuilt on every provider toggle, and a watcher still identifying a
+    /// token when its engine stopped went on to write the archive and the
+    /// index after the replacement's own watcher had started.
     func stop() async {
         lifecycle = .stopped
         // Cancel the aggregator boot Task first so the cold scan observes
@@ -662,6 +667,7 @@ actor UsageEngine {
         // log records — `lifecycle` is already `stopped`, which is what makes
         // the wanted state false.
         await applyKeepAwake()
+        await claudeAccountsTask?.value
         await stopClaudeLimits()
         await stopCodexLimits()
         await statusMonitor.stop()
