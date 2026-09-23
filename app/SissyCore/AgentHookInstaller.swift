@@ -22,28 +22,25 @@ enum AgentHookOutcome: Equatable, Sendable {
 /// What a launch does about the agent hooks, decided before either CLI's
 /// configuration is opened.
 enum AgentHookLaunchPass: Equatable, Sendable {
-    /// Neither file is read or written.
-    case skip
     /// Installs or removes whatever the files hold.
     case apply
     /// Reads both files and removes only an entry of this install's still
     /// there, which is a removal the record lost.
     case lookFirst
 
-    /// A config that would not parse is a run on defaults with no record of
-    /// the switch at all, so it is skipped rather than read as "off": the
-    /// look would find the user's own entry and take it out, with the script,
-    /// the backups and an inbox not yet folded into the ledger, over a typo
-    /// in a hand-edited file.
-    static func decide(enabled: Bool, removalPending: Bool, configIsWritable: Bool) -> Self {
-        guard configIsWritable else { return .skip }
-        return enabled || removalPending ? .apply : .lookFirst
+    /// A config that would not parse runs on the defaults, which say off, so
+    /// it looks like any other launch with the switch off: an entry of this
+    /// install's still in either file is a removal owed and is taken out,
+    /// whatever `server.json` says. Nothing of that is saved over the
+    /// unreadable file. Once it parses again, a switch that is on installs
+    /// the entry back on that launch.
+    static func decide(enabled: Bool, removalPending: Bool) -> Self {
+        enabled || removalPending ? .apply : .lookFirst
     }
 
     /// Whether the pass goes on to write, given what the look found.
     func proceeds(holdsOwnEntry: Bool) -> Bool {
         switch self {
-        case .skip: false
         case .apply: true
         case .lookFirst: holdsOwnEntry
         }
