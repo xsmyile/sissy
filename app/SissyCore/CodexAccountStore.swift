@@ -110,8 +110,22 @@ enum CodexAccountStore {
             sissyLog("sissy: a renewed Codex credential could not be filed (\(error))")
             return reading
         } catch {
-            return .expired
+            return Self.reading(afterRenewalFailed: error, holding: reading)
         }
+    }
+
+    /// What a renewal that threw leaves the row with.
+    ///
+    /// A reply from another host than the token endpoint is not OpenAI's
+    /// verdict on the refresh token, which `SissyHTTP` never sent off the
+    /// origin, so the spent reading stands and the next poll renews again.
+    /// Anything else is the vendor retiring the link.
+    static func reading(afterRenewalFailed error: Error, holding reading: CodexCredentialReading)
+        -> CodexCredentialReading
+    {
+        guard error is SissyHTTP.LeftItsOrigin else { return .expired }
+        sissyLog("sissy: a Codex renewal was answered from another host (\(error)); retrying")
+        return reading
     }
 
     /// Forgets one account's credential. An item that was not there is not a

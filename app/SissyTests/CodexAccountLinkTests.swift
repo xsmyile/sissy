@@ -345,4 +345,24 @@ final class CodexAccountLinkTests: XCTestCase {
         XCTAssertTrue(written.contains("someone@example.com"))
         assertNoToken(in: index.load(), "the loaded links")
     }
+
+    // MARK: - A renewal that failed
+
+    /// A token endpoint that sent the refresh token's request to another host
+    /// never saw it, so the link stands and the next poll renews again.
+    func testARenewalAnsweredFromAnotherHostKeepsTheLink() {
+        let reading = CodexCredentialReading.found(Self.credential())
+        XCTAssertEqual(
+            CodexAccountStore.reading(
+                afterRenewalFailed: SissyHTTP.LeftItsOrigin(status: 307), holding: reading),
+            reading)
+    }
+
+    func testARenewalTheVendorRefusedEndsTheLink() {
+        XCTAssertEqual(
+            CodexAccountStore.reading(
+                afterRenewalFailed: CodexOAuth.Failure.refused,
+                holding: .found(Self.credential())),
+            .expired)
+    }
 }
