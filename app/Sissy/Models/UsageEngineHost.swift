@@ -144,9 +144,14 @@ final class UsageEngineHost {
         agentHooks = config.agentHooks
         // Re-affirmed at every launch rather than written once: the CLIs
         // rewrite these files themselves, and a line that has gone has to come
-        // back without the user noticing it was missing.
-        if isLaunch, config.agentHooks || config.agentHooksRemovalPending {
-            applyAgentHooks(config.agentHooks)
+        // back without the user noticing it was missing. With the switch off
+        // and nothing pending the pass only looks: an entry of this install's
+        // still in either file is a removal the record lost, which a config
+        // that would not parse is one way to lose.
+        if isLaunch {
+            applyAgentHooks(
+                config.agentHooks,
+                onlyIfRegistered: !config.agentHooks && !config.agentHooksRemovalPending)
         }
         let host = self
         bootTask = Task {
@@ -856,7 +861,11 @@ final class UsageEngineHost {
     /// a removal is retried from `agentHooksRemovalPending` — where a pass
     /// killed between its two targets leaves one CLI registered and the other
     /// not, which nothing goes back for.
-    private func applyAgentHooks(_ enabled: Bool) {
+    ///
+    /// `onlyIfRegistered` makes the pass a look first: it writes nothing, not
+    /// even `server.json`, unless one of the files still carries this
+    /// install's entry, so a launch with the switch off costs two reads.
+    private func applyAgentHooks(_ enabled: Bool, onlyIfRegistered: Bool = false) {
         guard let engine, !isStopped else { return }
         // A test host is not a user launching Sissy. `xcodebuild test` runs the
         // app against this machine's real `Sissy-Dev` tree, so without this the
@@ -864,7 +873,7 @@ final class UsageEngineHost {
         // `~/.codex/hooks.json` every time it runs.
         guard NSClassFromString("XCTestCase") == nil else { return }
         guard let home = AgentHookInstaller.userHome else {
-            agentHooksRefused = [AgentHookCopy.unknownHome]
+            if !onlyIfRegistered { agentHooksRefused = [AgentHookCopy.unknownHome] }
             return
         }
         let script = Bundle.main.url(forResource: "session-start", withExtension: "sh")
@@ -896,9 +905,10 @@ final class UsageEngineHost {
             // refusal is free.
             let stopping = await MainActor.run { host.isStopped }
             guard !stopping else { return }
+            let installer = AgentHookInstaller(stateDirectory: stateDirectory, targets: targets)
+            if onlyIfRegistered, !installer.holdsOwnEntry() { return }
             // Persist the retry before touching either foreign configuration.
             await engine.setAgentHooks(enabled: enabled, removalPending: !enabled)
-            let installer = AgentHookInstaller(stateDirectory: stateDirectory, targets: targets)
             let report: [AgentHookTarget: AgentHookOutcome]
             if enabled, let script {
                 report = installer.install(bundledScript: script)
@@ -910,7 +920,10 @@ final class UsageEngineHost {
                 .filter { _, outcome in outcome == .failed || outcome == .unreadable }
                 .keys.map(\.name)
                 .sorted()
-            await engine.setAgentHooks(enabled: enabled, removalPending: !enabled && !refused.isEmpty)
+            // Read back rather than inferred from the report: an entry still
+            // there is a removal still owed, whatever each target answered.
+            let owed = !enabled && (!refused.isEmpty || installer.holdsOwnEntry())
+            await engine.setAgentHooks(enabled: enabled, removalPending: owed)
             await MainActor.run {
                 guard host.agentHooksGeneration == generation else { return }
                 host.agentHooksRefused = refused
