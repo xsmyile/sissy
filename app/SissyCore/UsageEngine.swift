@@ -1307,6 +1307,10 @@ actor UsageEngine {
     /// A failed `remember` keeps the credential, for the reason the claude.ai
     /// link does: losing a sign-in to a disk error is worse than a row that
     /// reads its account by id until the next link.
+    ///
+    /// Whatever the renewal still holds for this login is dropped first: a
+    /// renewal of the previous link landing after this save would file the
+    /// old workspace over the new one.
     private func store(
         _ credential: CodexCredential, as link: CodexAccountLink
     ) async -> Result<Void, CodexOAuth.Failure> {
@@ -1319,6 +1323,7 @@ actor UsageEngine {
             email: credential.email,
             plan: credential.plan,
             expiresAt: credential.expiresAt)
+        await CodexRenewal.shared.forget(account: link.identity.id)
         do {
             try CodexAccountStore.save(configured, account: link.identity.id)
         } catch {
@@ -1345,6 +1350,7 @@ actor UsageEngine {
     func forgetCodexAccount(id: String) async {
         guard lifecycle == .running else { return }
         if pendingCodexLink?.choice.identity.id == id { pendingCodexLink = nil }
+        await CodexRenewal.shared.forget(account: id)
         try? CodexAccountStore.delete(account: id)
         try? codexIndex.forget(id: id)
         codexLinks.store(codexIndex.load())
@@ -1370,9 +1376,10 @@ actor UsageEngine {
         }
     }
 
-    /// One reader for one linked account. The renewal rides on the store,
-    /// which is what owns the item: a refresh token is redeemed once, so the
-    /// copy that holds it is the copy that may spend it.
+    /// One reader for one linked account. The renewal rides on
+    /// `CodexRenewal`, which is the one place the item's refresh token is
+    /// spent: it is redeemed once, so every reader of an account has to share
+    /// the renewal rather than each start its own.
     static func linkedCodexSource(
         id: String, links: [String: CodexAccountLink], backoff: LimitsBackoffStore? = nil
     ) -> CodexUsageSource {
@@ -1380,7 +1387,7 @@ actor UsageEngine {
             account: id,
             workspace: links[id]?.workspace?.name,
             credentialSource: { allowingInteraction in
-                await CodexAccountStore.supply(
+                await CodexRenewal.shared.supply(
                     account: id, allowingInteraction: allowingInteraction)
             },
             backoff: backoff?.slot(for: LimitsBackoffLedger.codexKey(account: id)))

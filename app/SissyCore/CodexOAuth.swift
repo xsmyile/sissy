@@ -73,6 +73,39 @@ enum CodexOAuth {
         case interrupted
     }
 
+    /// Why a renewal produced no credential, in the two answers a reader can
+    /// act on differently.
+    enum RenewalFailure: Error, Equatable {
+        /// The token endpoint turned the grant down: `invalid_grant` on a 400,
+        /// or a 401. The refresh token is retired and nothing local repairs
+        /// it, so the link has ended.
+        case rejected
+        /// Anything else: no network, a 5xx, a 429, a reply that would not
+        /// parse. The refresh token may still be good, so the reader keeps its
+        /// last reading and the renewal is asked again later. `retryAfter` is
+        /// the vendor's own wait where it named one.
+        case deferred(retryAfter: TimeInterval?)
+    }
+
+    /// A reply from the token endpoint other than 200, kept whole enough to
+    /// be classified by the caller that knows what it asked for.
+    private struct EndpointRefusal: Error {
+        let status: Int
+        let error: String?
+        let retryAfter: TimeInterval?
+
+        /// Whether this is the endpoint saying the grant itself is no good.
+        var rejectsTheGrant: Bool {
+            status == unauthorizedStatus
+                || (status == badRequestStatus && error == invalidGrant)
+        }
+    }
+
+    private static let unauthorizedStatus = 401
+    private static let badRequestStatus = 400
+    private static let rateLimitedStatus = 429
+    private static let invalidGrant = "invalid_grant"
+
     static func begin() -> Flow {
         let verifier = randomToken()
         let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64URLEncoded
@@ -110,7 +143,13 @@ enum CodexOAuth {
             "client_id": clientID,
             "code_verifier": flow.verifier,
         ]
-        return try await exchange(body, send: send)
+        do {
+            let credential = try await exchange(body, send: send)
+            guard credential.userId != nil else { throw Failure.unidentified }
+            return credential
+        } catch is EndpointRefusal {
+            throw Failure.refused
+        }
     }
 
     /// Renews a credential Sissy owns.
@@ -120,27 +159,43 @@ enum CodexOAuth {
     /// has already retired. `CodexCredential.refreshToken` is nil for every
     /// credential read from `auth.json`, which is what makes that a property
     /// of the value rather than a rule each caller has to remember.
+    ///
+    /// Throws only `RenewalFailure`, because the one thing a caller decides
+    /// from a failed renewal is whether the link has ended.
+    ///
+    /// The workspace is the credential's, never the reply's. OpenAI's reply
+    /// carries no `account_id`, so the parse falls back to the
+    /// `chatgpt_account_id` claim, which is the workspace the vendor issued
+    /// the token for rather than the one the user picked when linking; taking
+    /// it switched every renewed link to the vendor's default under the
+    /// chosen workspace's name. What else the reply does not re-issue is
+    /// taken from the credential being renewed.
     static func refresh(
         _ credential: CodexCredential,
         send: @Sendable (URLRequest) async throws -> (Data, URLResponse) = perform
     ) async throws -> CodexCredential {
-        guard let refreshToken = credential.refreshToken else { throw Failure.refused }
-        let renewed = try await exchange(
-            [
-                "grant_type": "refresh_token",
-                "refresh_token": refreshToken,
-                "client_id": clientID,
-                "scope": scope,
-            ],
-            send: send)
-        // OpenAI may answer without re-issuing the parts it did not rotate, and
-        // the workspace is the user's choice rather than the vendor's — so what
-        // the reply does not carry is taken from the credential being renewed.
+        guard let refreshToken = credential.refreshToken else { throw RenewalFailure.rejected }
+        let renewed: CodexCredential
+        do {
+            renewed = try await exchange(
+                [
+                    "grant_type": "refresh_token",
+                    "refresh_token": refreshToken,
+                    "client_id": clientID,
+                    "scope": scope,
+                ],
+                send: send)
+        } catch let refusal as EndpointRefusal {
+            if refusal.rejectsTheGrant { throw RenewalFailure.rejected }
+            throw RenewalFailure.deferred(retryAfter: refusal.retryAfter)
+        } catch {
+            throw RenewalFailure.deferred(retryAfter: nil)
+        }
         return CodexCredential(
             accessToken: renewed.accessToken,
             refreshToken: renewed.refreshToken ?? refreshToken,
             idToken: renewed.idToken ?? credential.idToken,
-            accountId: renewed.accountId ?? credential.accountId,
+            accountId: credential.accountId,
             userId: renewed.userId ?? credential.userId,
             email: renewed.email ?? credential.email,
             plan: renewed.plan ?? credential.plan,
@@ -151,6 +206,10 @@ enum CodexOAuth {
     /// One call to the token endpoint, read through the same parser
     /// `auth.json` is: the reply carries the same three tokens under the same
     /// names, so it is handed over as that shape rather than parsed twice.
+    ///
+    /// A status other than 200 is thrown as an `EndpointRefusal` for the
+    /// caller to word, because the same 400 is a retry for a sign-in and the
+    /// end of a link for a renewal.
     private static func exchange(
         _ body: [String: String],
         send: @Sendable (URLRequest) async throws -> (Data, URLResponse)
@@ -161,15 +220,30 @@ enum CodexOAuth {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await send(request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw Failure.refused
+        guard let http = response as? HTTPURLResponse else { throw Failure.refused }
+        guard http.statusCode == 200 else {
+            throw EndpointRefusal(
+                status: http.statusCode,
+                error: oauthError(in: data),
+                retryAfter: http.statusCode == rateLimitedStatus
+                    ? UsageRequestError.backoffSeconds(retryAfter: UsageRequestError.retryAfter(http))
+                    : nil)
         }
         guard let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let bundle = try? JSONSerialization.data(withJSONObject: ["tokens": reply]),
-            let credential = CodexAuthSource.credential(bundle, renewable: true),
-            credential.userId != nil
+            let credential = CodexAuthSource.credential(bundle, renewable: true)
         else { throw Failure.unidentified }
         return credential
+    }
+
+    /// The OAuth `error` a refusal names, in either shape OpenAI answers with:
+    /// the RFC 6749 string, or an object carrying it as `code`.
+    private static func oauthError(in data: Data) -> String? {
+        guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let error = body["error"] as? String { return error }
+        return (body["error"] as? [String: Any])?["code"] as? String
     }
 
     @Sendable private static func perform(_ request: URLRequest) async throws -> (
