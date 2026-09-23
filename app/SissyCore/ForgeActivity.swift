@@ -187,6 +187,13 @@ enum ForgeReadFailure: Error, Sendable, Equatable {
     case unreachable
     /// It answered, with something this build cannot read.
     case malformed
+    /// The forge sent the request to another host, which either refused it or
+    /// was not followed. `SissyHTTP` drops the token on the way off the
+    /// origin, so a refusal there says nothing about the token, and reported
+    /// as `unauthorized` it would park a connection behind a replacement the
+    /// user does not need. An SSO proxy in front of a self-hosted forge is the
+    /// case this names.
+    case redirected
     /// There is no token filed for this connection.
     case noCredential
     /// There is one and the keychain would not hand it over.
@@ -209,7 +216,7 @@ enum ForgeReadFailure: Error, Sendable, Equatable {
     var needsTheUser: Bool {
         switch self {
         case .unauthorized, .noCredential: true
-        case .rateLimited, .unreachable, .malformed, .credentialUnreadable: false
+        case .rateLimited, .unreachable, .malformed, .redirected, .credentialUnreadable: false
         }
     }
 }

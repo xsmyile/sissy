@@ -239,15 +239,30 @@ enum ForgeActivityFeed {
             throw ForgeReadFailure.unreachable
         }
         guard let http = response as? HTTPURLResponse else { throw ForgeReadFailure.malformed }
-        switch http.statusCode {
+        if let failure = failure(of: http, addressedTo: request.url) { throw failure }
+        return (data, http)
+    }
+
+    /// What a reply means for the row, `nil` for one worth reading.
+    ///
+    /// A refusal is the token's only when the host the request was addressed
+    /// to gave it: past a redirect off that origin the token was never sent,
+    /// and a redirect the session would not follow comes back as the `3xx`
+    /// itself. Both are `redirected`. Internal so a test can hold it against a
+    /// constructed reply.
+    static func failure(of response: HTTPURLResponse, addressedTo url: URL?) -> ForgeReadFailure? {
+        switch response.statusCode {
         case 200:
-            return (data, http)
+            return nil
+        case 300..<400:
+            return .redirected
         case 401, 403:
-            throw askedToSlowDown(http) ? ForgeReadFailure.rateLimited : .unauthorized
+            if askedToSlowDown(response) { return .rateLimited }
+            return SissyHTTP.sameOrigin(url, response.url) ? .unauthorized : .redirected
         case 429:
-            throw ForgeReadFailure.rateLimited
+            return .rateLimited
         default:
-            throw ForgeReadFailure.malformed
+            return .malformed
         }
     }
 

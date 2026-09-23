@@ -1687,6 +1687,7 @@ extension UsageFormat {
         case .rateLimited: "asked to slow down"
         case .unreachable: "could not be reached"
         case .malformed: "answered something Sissy could not read"
+        case .redirected: "sent Sissy to another host"
         case .noCredential: "no token"
         case .credentialUnreadable: "the keychain would not answer"
         }

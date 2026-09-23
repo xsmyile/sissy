@@ -745,4 +745,48 @@ final class ForgeActivityTests: XCTestCase {
             ForgeActivityFeed.askedToSlowDown(try reply(["X-RateLimit-Remaining": "4987"])))
         XCTAssertFalse(ForgeActivityFeed.askedToSlowDown(try reply([:])))
     }
+
+    private static let graphQLEndpoint = "https://gitlab.example.com/api/graphql"
+
+    private func answer(_ status: Int, from url: String) throws -> HTTPURLResponse {
+        try XCTUnwrap(
+            HTTPURLResponse(
+                url: XCTUnwrap(URL(string: url)), statusCode: status, httpVersion: nil,
+                headerFields: [:]))
+    }
+
+    /// A refusal from the host the request was addressed to is the token.
+    func testARefusalFromTheForgeItselfIsTheToken() throws {
+        let failure = ForgeActivityFeed.failure(
+            of: try answer(401, from: Self.graphQLEndpoint),
+            addressedTo: URL(string: Self.graphQLEndpoint))
+        XCTAssertEqual(failure, .unauthorized)
+    }
+
+    /// A refusal from another host came after a redirect that dropped the
+    /// token on the way, so it says nothing about the token and must not park
+    /// the connection behind a replacement the user does not need.
+    func testARefusalFromTheHostARedirectReachedIsNotTheToken() throws {
+        let failure = ForgeActivityFeed.failure(
+            of: try answer(401, from: "https://sso.example.net/login"),
+            addressedTo: URL(string: Self.graphQLEndpoint))
+        XCTAssertEqual(failure, .redirected)
+        XCTAssertFalse(ForgeReadFailure.redirected.needsTheUser)
+    }
+
+    /// A redirect `SissyHTTP` refused to follow reaches the feed as the 3xx
+    /// itself, which is the same answer as a refusal from another host.
+    func testARedirectTheSessionRefusedIsReportedAsOne() throws {
+        let failure = ForgeActivityFeed.failure(
+            of: try answer(307, from: Self.graphQLEndpoint),
+            addressedTo: URL(string: Self.graphQLEndpoint))
+        XCTAssertEqual(failure, .redirected)
+    }
+
+    func testAnAnswerFromTheForgeIsNoFailure() throws {
+        XCTAssertNil(
+            ForgeActivityFeed.failure(
+                of: try answer(200, from: Self.graphQLEndpoint),
+                addressedTo: URL(string: Self.graphQLEndpoint)))
+    }
 }
