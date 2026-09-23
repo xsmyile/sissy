@@ -566,7 +566,9 @@ struct ForgeConnectSheet: View {
     @State private var draft: ForgeConnectDraft
     @State private var token: String = ""
     /// What the last press sent, so Connect Anyway files the attempt that
-    /// could not reach its forge, a detected token's included.
+    /// could not reach its forge, a detected token's included. Dropped on
+    /// any edit to the fields, because Connect Anyway beside an address or a
+    /// token the user has since changed would file the one they replaced.
     @State private var lastAttempt: ForgeConnectAttempt?
 
     private static let fieldWidth: CGFloat = 260
@@ -661,6 +663,9 @@ struct ForgeConnectSheet: View {
         // Dismiss on the attempt *finishing well*, never on the press: the
         // token is only in this window, so a failed write has to leave the
         // window standing with the field still in it.
+        .onChange(of: [draft.host, draft.path, token]) {
+            lastAttempt = nil
+        }
         .onChange(of: model.engine.connectingForge) { previous, current in
             guard previous != nil, current == nil,
                 model.engine.forgeConnectFailure == nil
