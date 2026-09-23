@@ -16,6 +16,16 @@ import Foundation
 /// The one thing it cannot do is offer an account that has never signed in
 /// here: there is no credential to archive, and no login flow of Sissy's own.
 /// That first `/login` is the user's, once per account.
+///
+/// Every keychain read and write is a `/usr/bin/security` process run on this
+/// actor and waited for synchronously, each bounded by `ClaudeKeychainCLI`'s
+/// watchdog at 5 s. That is deliberate. A switch reads every name, reads them
+/// again, and writes; the second read and the write must have no suspension
+/// point between them, or a capture could run in the gap and the write would
+/// land over a credential nothing has archived. So a keychain that stalls
+/// holds the actor for up to 5 s a call, and what queues behind it is
+/// `activate(uuid:)` and the account watch's `captureActive()`. The app never
+/// does: it reads `currentSnapshot()`, which is nonisolated.
 actor ClaudeAccountRegistry {
     /// What the app reads: who is known, who is active, and which of them a
     /// switch can reach.
@@ -96,6 +106,8 @@ actor ClaudeAccountRegistry {
     /// Deferred to the first capture rather than asked at construction,
     /// which runs on whatever thread builds the engine.
     private var reconciled = false
+    /// Whether a `captureActive()` is running, suspended on the vendor or not.
+    private var capturing = false
     nonisolated private let published = LockedValue(Snapshot())
 
     /// A registry that knows nothing and learns nothing: no keychain, no
@@ -151,8 +163,22 @@ actor ClaudeAccountRegistry {
     /// the last publish. Nothing in the slot moves when it does, so returning
     /// on an unchanged token left `Use in CLI` on an account whose click
     /// could only fail.
+    ///
+    /// One at a time. A capture that arrives while another is waiting on the
+    /// vendor answers false at once rather than identifying the same token
+    /// behind it; the one in flight publishes what it finds. A switch does not
+    /// go through this gate, because it must not wait on a poll's network
+    /// turn and must not proceed without having offered the slot to a capture.
     @discardableResult
     func captureActive() async -> Bool {
+        guard !capturing else { return false }
+        capturing = true
+        defer { capturing = false }
+        return await refreshActive()
+    }
+
+    @discardableResult
+    private func refreshActive() async -> Bool {
         let before = published.load()
         if !reconciled {
             reconciled = true
@@ -230,7 +256,7 @@ actor ClaudeAccountRegistry {
     private func performSwitch(to uuid: String) async throws(Failure) {
         guard Self.loadIndex(store) != nil else { throw .indexUnreadable }
         _ = try archived(uuid)
-        await captureActive()
+        await refreshActive()
         let names = slot.names()
         guard let primary = names.first else { throw .activeAccountUnknown }
         let before = try readAll(names)
