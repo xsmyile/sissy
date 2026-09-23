@@ -155,6 +155,50 @@ final class CodexAccountLinkTests: XCTestCase {
         XCTAssertNil(flow.code(fromRedirect: url))
     }
 
+    /// Cancel or Deny on OpenAI's page redirects to the loopback address with
+    /// an error and no code. Followed, it lands on a port nothing here is
+    /// listening on, or on a `codex login` that is.
+    func testADeclinedSignInIsRecognisedAtTheRedirect() throws {
+        let flow = CodexOAuth.begin()
+        let url = try XCTUnwrap(
+            URL(
+                string:
+                    "http://localhost:1455/auth/callback?error=access_denied&state=\(flow.state)"))
+        XCTAssertNil(flow.code(fromRedirect: url))
+        XCTAssertEqual(flow.declined(fromRedirect: url), "access_denied")
+    }
+
+    func testARedirectCarryingACodeIsNotADecline() throws {
+        let flow = CodexOAuth.begin()
+        let url = try XCTUnwrap(
+            URL(string: "http://localhost:1455/auth/callback?code=abc&state=\(flow.state)"))
+        XCTAssertNil(flow.declined(fromRedirect: url))
+    }
+
+    func testAPageOnTheVendorsSiteIsNotADecline() throws {
+        let flow = CodexOAuth.begin()
+        let url = try XCTUnwrap(URL(string: "https://auth.openai.com/log-in?error=x"))
+        XCTAssertNil(flow.declined(fromRedirect: url))
+    }
+
+    // MARK: - A page that does not load
+
+    /// A navigation the window cancelled itself reports an error too, and it
+    /// is not a failure anyone needs telling about.
+    func testANavigationTheWindowCancelledIsNotAFailure() {
+        XCTAssertNil(VendorLoginWindow.pageFailure(for: URLError(.cancelled)))
+        XCTAssertNil(
+            VendorLoginWindow.pageFailure(
+                for: NSError(
+                    domain: "WebKitErrorDomain",
+                    code: VendorLoginWindow.frameLoadInterruptedByPolicyChange)))
+    }
+
+    func testAPageThatCannotBeReachedIsAFailure() {
+        XCTAssertEqual(
+            VendorLoginWindow.pageFailure(for: URLError(.notConnectedToInternet)), .unreachable)
+    }
+
     func testOnlyTheLoopbackRedirectIsRead() throws {
         let flow = CodexOAuth.begin()
         let url = try XCTUnwrap(

@@ -342,6 +342,9 @@ final class UsageEngineHost {
                     }
                 }
             },
+            onFailure: { [weak self] failure in
+                window.report(ClaudeAccountLinkCopy.pageFailure(failure)) { self?.addClaudeAccount() }
+            },
             onCancel: { [weak self] in
                 guard let self else { return }
                 loginWindow = nil
@@ -439,6 +442,9 @@ final class UsageEngineHost {
                         }
                     }
                 }
+            },
+            onFailure: { [weak self] failure in
+                window.report(CodexAccountLinkCopy.pageFailure(failure)) { self?.addCodexAccount() }
             },
             onCancel: { [weak self] in
                 guard let self else { return }

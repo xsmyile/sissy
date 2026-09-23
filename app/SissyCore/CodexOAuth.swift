@@ -52,15 +52,41 @@ enum CodexOAuth {
         /// whole of what says the code belongs to this login, and a caller
         /// that forgets is a caller that accepts somebody else's.
         func code(fromRedirect url: URL) -> String? {
-            guard url.scheme == "http" || url.scheme == "https",
-                url.host == "localhost" || url.host == "127.0.0.1",
-                let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                let items = components.queryItems,
+            let items = Self.queryItems(url)
+            guard Self.isLoopback(url),
                 items.first(where: { $0.name == "state" })?.value == state,
                 let code = items.first(where: { $0.name == "code" })?.value,
                 !code.isEmpty
             else { return nil }
             return code
+        }
+
+        /// Why a redirect to the loopback address carries no code this login
+        /// can redeem, and nil for any navigation that is not that redirect.
+        ///
+        /// Cancel or Deny on OpenAI's page lands here with `error` and no
+        /// code, and a redirect whose state is another login's lands here
+        /// with a code that is not ours. Both are the end of this sign-in, and
+        /// neither may be followed: nothing in Sissy listens on that port, and
+        /// a `codex login` running at the same moment does.
+        func declined(fromRedirect url: URL) -> String? {
+            guard Self.isLoopback(url), code(fromRedirect: url) == nil else { return nil }
+            let reason = Self.queryItems(url).first(where: { $0.name == "error" })?.value
+            return UsageReaderShared.sanitizedDisplayText(reason) ?? Self.unrecognisedRedirect
+        }
+
+        /// What a redirect naming no error is called when it is declined.
+        private static let unrecognisedRedirect = "unrecognised_redirect"
+
+        /// Whether a navigation is to the loopback address the CLI's flow
+        /// redirects to, which is the only place a sign-in ends.
+        private static func isLoopback(_ url: URL) -> Bool {
+            (url.scheme == "http" || url.scheme == "https")
+                && (url.host == "localhost" || url.host == "127.0.0.1")
+        }
+
+        private static func queryItems(_ url: URL) -> [URLQueryItem] {
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         }
     }
 

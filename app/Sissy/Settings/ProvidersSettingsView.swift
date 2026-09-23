@@ -129,6 +129,17 @@ enum CodexAccountLinkCopy {
             + "\(which). To read another, unlink it and link it again."
     }
 
+    /// Why the OpenAI page itself ended the sign-in.
+    static func pageFailure(_ failure: VendorLoginWindow.PageFailure) -> String {
+        switch failure {
+        case .declined(let reason):
+            return "OpenAI did not complete the sign-in (\(reason)), so nothing was linked. "
+                + "Try again, or cancel if you meant to stop."
+        case .unreachable:
+            return "The OpenAI sign-in page could not be loaded. Check the connection and "
+                + "try again."
+        }
+    }
 }
 
 enum ClaudeAccountLinkCopy {
@@ -191,6 +202,20 @@ enum ClaudeAccountLinkCopy {
     static let done = "Done"
     static let failureTitle = "Sissy could not link that account"
     static let working = "Linking…"
+
+    /// Why the claude.ai page itself ended the sign-in. Its login ends in a
+    /// cookie rather than a redirect, so a decline is only reachable if the
+    /// window is ever handed one.
+    static func pageFailure(_ failure: VendorLoginWindow.PageFailure) -> String {
+        switch failure {
+        case .declined(let reason):
+            return "claude.ai did not complete the sign-in (\(reason)), so nothing was linked. "
+                + "Try again, or cancel if you meant to stop."
+        case .unreachable:
+            return "The claude.ai sign-in page could not be loaded. Check the connection and "
+                + "try again."
+        }
+    }
 
     static func failure(_ why: ClaudeWebAccountLink.Failure) -> String {
         switch why {
