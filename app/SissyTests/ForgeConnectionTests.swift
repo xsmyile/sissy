@@ -389,9 +389,10 @@ final class ForgeConnectionTests: XCTestCase {
 
         func disconnect() { wanted = false }
 
-        func connect(_ connector: ForgeConnector) async -> ForgeConnector.Outcome {
+        func connect(_ connector: ForgeConnector, probing: Bool = true) async -> ForgeConnector.Outcome {
             await connector.connect(
-                ForgeConnectionTests.gitLab, token: "glpat-test", stillWanted: { self.wanted })
+                ForgeConnectionTests.gitLab, token: "glpat-test", probing: probing,
+                stillWanted: { self.wanted })
         }
     }
 
@@ -484,6 +485,44 @@ final class ForgeConnectionTests: XCTestCase {
         let outcome = await attempt.value
         XCTAssertEqual(outcome, .withdrawn)
         XCTAssertEqual(effects.entries, ["probe \(Self.gitLab.id)"])
+    }
+
+    /// A forge off the VPN, a name that does not resolve or a handshake that
+    /// failed says nothing against the token, so the sheet offers to file it
+    /// unread, and doing so files the connection without asking again.
+    func testAnUnreachableForgeOffersConnectAnywayAndItFiles() async {
+        let effects = Effects()
+        let refused = await connector(effects, probe: .failure(.unreachable))
+            .connect(Self.gitLab, token: "glpat-test")
+        XCTAssertTrue(refused.offersConnectAnyway)
+        let filed = await connector(effects, probe: .failure(.unreachable))
+            .connect(Self.gitLab, token: "glpat-test", probing: false)
+        XCTAssertEqual(filed, .connected(login: nil))
+        XCTAssertEqual(
+            effects.entries,
+            ["probe \(Self.gitLab.id)", "save \(Self.gitLab.id)", "remember \(Self.gitLab.id)"])
+        XCTAssertEqual(effects.token(Self.gitLab.id), "glpat-test")
+    }
+
+    /// A forge that answered has said the token or the address is wrong, and
+    /// filing it anyway would poll that answer forever.
+    func testAForgeThatAnsweredIsNotOfferedConnectAnyway() {
+        let answered: [ForgeReadFailure] = [.unauthorized, .malformed, .redirected, .rateLimited]
+        for failure in answered {
+            XCTAssertFalse(ForgeConnector.Outcome.refused(failure).offersConnectAnyway, "\(failure)")
+        }
+        XCTAssertFalse(ForgeConnector.Outcome.connected(login: "davide").offersConnectAnyway)
+    }
+
+    /// Connect Anyway takes the same gate as a probed connect: an attempt a
+    /// disconnect has withdrawn writes nothing.
+    func testConnectAnywayIsWithdrawnByADisconnect() async {
+        let effects = Effects()
+        let owner = Owner()
+        await owner.disconnect()
+        let outcome = await owner.connect(connector(effects), probing: false)
+        XCTAssertEqual(outcome, .withdrawn)
+        XCTAssertEqual(effects.entries, [])
     }
 
     func testABlankTokenIsNeverProbed() async {

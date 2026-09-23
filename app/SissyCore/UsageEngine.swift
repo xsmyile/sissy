@@ -1632,13 +1632,16 @@ actor UsageEngine {
     /// the index, so a failure leaves no row promising a reading there is no
     /// credential for. The outcome travels back because the caller has to say
     /// it: the token is only in the sheet, and a sheet dismissed on a failure
-    /// would take it with it.
+    /// would take it with it. `probing` false files it unread, for the sheet's
+    /// Connect Anyway on a forge that could not be reached.
     ///
     /// **Connecting the same host again is how a refused or missing token is
     /// replaced.** The index keys on the host, the monitor is rebuilt from it,
     /// and a fresh monitor has nothing parked — so this is the way back from
     /// both states the poll stops asking about.
-    func connectForge(_ connection: ForgeConnection, token: String) async -> ForgeConnector.Outcome {
+    func connectForge(_ connection: ForgeConnection, token: String, probing: Bool = true) async
+        -> ForgeConnector.Outcome
+    {
         let index = forgeIndex
         let connector = ForgeConnector(
             recorded: { try index.loadSettingAside() },
@@ -1650,7 +1653,8 @@ actor UsageEngine {
         let attempt = UUID()
         connectingForges[connection.id] = attempt
         let outcome = await connector.connect(
-            connection, token: token, stillWanted: { self.connectingForges[connection.id] == attempt })
+            connection, token: token, probing: probing,
+            stillWanted: { self.connectingForges[connection.id] == attempt })
         if connectingForges[connection.id] == attempt {
             connectingForges[connection.id] = nil
         }

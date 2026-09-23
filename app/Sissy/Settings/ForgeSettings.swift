@@ -53,6 +53,7 @@ enum ForgeConnectCopy {
     static let confirm = "Connect"
     static let reconnectConfirm = "Reconnect"
     static let connecting = "Connecting…"
+    static let connectAnyway = "Connect Anyway"
     /// Named for what failed rather than for the status behind it: the forge
     /// has already answered by the time this is said, so what failed is a
     /// local write and there is nothing the user can do but try again.
@@ -87,8 +88,9 @@ enum ForgeConnectCopy {
             return "\(forge) at \(address) refused the token, so nothing was saved. "
                 + "Check the token and its scopes."
         case .refused(.unreachable):
-            return "\(address) could not be reached, so nothing was saved. "
-                + "Check the host, or try again once it is reachable."
+            return "\(address) could not be reached, so nothing was saved · "
+                + "check the host, the network or the VPN. "
+                + "Connect Anyway saves it, and Sissy reads it once it answers."
         case .refused(.malformed):
             return "\(address) did not answer as \(forge), so nothing was saved. "
                 + "Check the forge, the host, the port and the path."
@@ -563,6 +565,9 @@ struct ForgeConnectSheet: View {
     @State private var candidates: [ForgeTokenCandidate] = []
     @State private var draft: ForgeConnectDraft
     @State private var token: String = ""
+    /// What the last press sent, so Connect Anyway files the attempt that
+    /// could not reach its forge, a detected token's included.
+    @State private var lastAttempt: ForgeConnectAttempt?
 
     private static let fieldWidth: CGFloat = 260
     private static let sheetWidth: CGFloat = 420
@@ -582,7 +587,7 @@ struct ForgeConnectSheet: View {
                     .foregroundStyle(.secondary)
                 ForEach(candidates) { candidate in
                     Button(ForgeConnectCopy.candidate(candidate)) {
-                        model.engine.connectForge(candidate.connection, token: candidate.token)
+                        attempt(candidate.connection, token: candidate.token)
                     }
                     .disabled(busy)
                 }
@@ -628,12 +633,19 @@ struct ForgeConnectSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
+                if let lastAttempt, model.engine.forgeConnectAnywayID == lastAttempt.connection.id {
+                    Button(ForgeConnectCopy.connectAnyway) {
+                        model.engine.connectForge(
+                            lastAttempt.connection, token: lastAttempt.token, probing: false)
+                    }
+                    .disabled(busy)
+                }
                 Spacer()
                 Button(ForgeConnectCopy.cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(busy ? ForgeConnectCopy.connecting : confirmTitle) {
                     guard let connection else { return }
-                    model.engine.connectForge(connection, token: token)
+                    attempt(connection, token: token)
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(busy || connection == nil || typedToken.isEmpty)
@@ -682,6 +694,11 @@ struct ForgeConnectSheet: View {
 
     private var replacing: ForgeConnection? { request.replacing }
 
+    private func attempt(_ connection: ForgeConnection, token: String) {
+        lastAttempt = ForgeConnectAttempt(connection: connection, token: token)
+        model.engine.connectForge(connection, token: token)
+    }
+
     private var title: String {
         replacing.map(ForgeConnectCopy.reconnectTitle) ?? ForgeConnectCopy.sheetTitle
     }
@@ -699,6 +716,12 @@ struct ForgeConnectSheet: View {
     private var connection: ForgeConnection? {
         replacing ?? (try? draft.connection.get())
     }
+}
+
+/// One press of Connect in the sheet, held only while the sheet is open.
+struct ForgeConnectAttempt: Equatable {
+    let connection: ForgeConnection
+    let token: String
 }
 
 /// What the connect sheet's fields hold, apart from the token.

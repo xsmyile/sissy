@@ -432,8 +432,9 @@ struct ForgeConnector: Sendable {
 
     /// What an attempt came to.
     enum Outcome: Sendable, Equatable {
-        /// Filed, and the forge answered as this login.
-        case connected(login: String)
+        /// Filed, and the forge answered as this login. No login for one filed
+        /// without a probe, which the monitor's first poll answers for.
+        case connected(login: String?)
         /// The forge did not accept the token or could not be asked, so
         /// nothing was written.
         case refused(ForgeReadFailure)
@@ -445,6 +446,17 @@ struct ForgeConnector: Sendable {
         /// The connection was disconnected while the forge was being asked,
         /// so nothing was written.
         case withdrawn
+
+        /// Whether the sheet offers to file the connection unread.
+        ///
+        /// Only for a forge that could not be reached, which is a fact about
+        /// the network (a VPN that is off, a name that does not resolve, a
+        /// handshake that failed) and says nothing against the token, so the
+        /// monitor's polls can read it once the forge is back. A forge that
+        /// answered and refused, or did not answer as a forge, has said the
+        /// token or the address is wrong, and filing it anyway would poll
+        /// that answer forever.
+        var offersConnectAnyway: Bool { self == .refused(.unreachable) }
     }
 
     /// Probes, then files. An index that will not read cannot say whether
@@ -457,9 +469,13 @@ struct ForgeConnector: Sendable {
     /// again, polling a forge the user had just removed. Held on the caller's
     /// actor, the check and the writes after it cannot be split by another
     /// call to that actor, so a disconnect lands wholly before or wholly after.
+    ///
+    /// `probing` false is Connect Anyway, for a forge `offersConnectAnyway`
+    /// said could not be reached: the probe is skipped and everything else,
+    /// the check, the restore and the index read, is the same path.
     func connect(
-        _ connection: ForgeConnection, token: String, stillWanted: () -> Bool = { true },
-        isolation: isolated (any Actor)? = #isolation
+        _ connection: ForgeConnection, token: String, probing: Bool = true,
+        stillWanted: () -> Bool = { true }, isolation: isolated (any Actor)? = #isolation
     ) async -> Outcome {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .notFiled }
@@ -470,11 +486,13 @@ struct ForgeConnector: Sendable {
             sissyLog("sissy: did not connect \(connection.id), the forge connection index would not read")
             return .indexUnreadable
         }
-        let login: String
-        do {
-            login = try await probe(connection, trimmed)
-        } catch {
-            return .refused(error as? ForgeReadFailure ?? .unreachable)
+        var login: String?
+        if probing {
+            do {
+                login = try await probe(connection, trimmed)
+            } catch {
+                return .refused(error as? ForgeReadFailure ?? .unreachable)
+            }
         }
         guard stillWanted() else { return .withdrawn }
         let prior = storedToken(connection.id)
@@ -500,7 +518,7 @@ struct ForgeConnector: Sendable {
     /// is that row connected with it, and for any other is a token Settings
     /// lists as one no connection names.
     private func restore(
-        _ prior: CredentialLookup<String>, for id: String, replacing: Bool, login: String
+        _ prior: CredentialLookup<String>, for id: String, replacing: Bool, login: String?
     ) -> Outcome {
         do {
             switch prior {
