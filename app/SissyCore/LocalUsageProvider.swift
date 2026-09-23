@@ -480,7 +480,7 @@ actor LocalUsageProvider: UsageProvider {
     /// the tail's own, and the archived days it no longer holds.
     func applyPriceCatalog(_ catalog: PriceCatalog) async {
         adapter.applyPriceCatalog(catalog)
-        repriceArchivedDays()
+        await repriceArchivedDays()
         guard repriceUnpricedRows() else { return }
         await emitReading()
     }
@@ -1597,15 +1597,25 @@ actor LocalUsageProvider: UsageProvider {
     /// with this one: it refuses a day holding a model its catalog does not
     /// price, which is every day this finds something to price in. A file this
     /// build cannot read is left alone, as everywhere else in the archive.
-    private func repriceArchivedDays() {
+    ///
+    /// Every day file is decoded on each catalog, so the walk yields the actor
+    /// every `yieldInterval` files as the scan does, rather than holding it for
+    /// as long as `historyRetentionDays` lets the archive grow. The engine
+    /// re-emits once the catalog is applied, which is what carries a repriced
+    /// day into the windows on an idle Mac.
+    private func repriceArchivedDays() async {
         guard backfill == nil, let historyRoot else { return }
         let dayFmt = UsageReaderShared.dayFormatter
         let held = Set(
             dailyModelTotals.keys.filter { !historySuppressedDays.contains($0) }
                 .map { dayFmt.string(from: $0) })
         var repriced: [String] = []
-        for day in UsageHistoryStore.storedDays(provider: id, in: historyRoot)
-        where !held.contains(day) {
+        let days = UsageHistoryStore.storedDays(provider: id, in: historyRoot)
+            .filter { !held.contains($0) }
+        for (index, day) in days.enumerated() {
+            if index % Self.yieldInterval == Self.yieldInterval - 1 {
+                await Task.yield()
+            }
             guard
                 case .day(let stored) = UsageHistoryStore.stored(
                     provider: id, day: day, in: historyRoot),

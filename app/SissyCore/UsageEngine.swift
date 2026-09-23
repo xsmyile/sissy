@@ -2056,7 +2056,7 @@ actor UsageEngine {
         initialPriceCatalog = resolved
         if let resolved {
             await aggregator.applyPriceCatalog(resolved)
-            applyPricing(resolved)
+            await applyPricing(resolved)
         }
         let aggregator = self.aggregator
         priceCatalogTask = Task.detached { [weak self] in
@@ -2072,9 +2072,13 @@ actor UsageEngine {
 
     /// Reprices the readings taken after the events. The archive's are
     /// dropped rather than left to their TTL, so a window is never priced at
-    /// two catalogs on one page.
-    private func applyPricing(_ catalog: PriceCatalog) {
+    /// two catalogs on one page, and a frame is built from them at once: the
+    /// providers emit while the catalog is still being handed out, against
+    /// rollups taken before it, and an idle Mac would otherwise keep a
+    /// repriced archived day out of the windows until the next turn.
+    private func applyPricing(_ catalog: PriceCatalog) async {
         pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: catalog)
         historyRollups = [:]
+        await reemit()
     }
 }
