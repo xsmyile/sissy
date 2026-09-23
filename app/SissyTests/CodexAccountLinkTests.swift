@@ -61,6 +61,50 @@ final class CodexAccountLinkTests: XCTestCase {
             try CodexAccountLinking.workspaces(in: Self.body(#"{"items": {"id": "a1b2"}}"#)))
     }
 
+    // MARK: - Which readers a relink keeps
+
+    private static func link(workspace: String?) -> CodexAccountLink {
+        CodexAccountLink(
+            identity: CodexAccountIdentity(id: "user-1", email: nil, plan: nil),
+            workspace: workspace.map { CodexWorkspace(id: $0, name: $0, structure: nil) })
+    }
+
+    private static func source(account: String?, workspace: String?) -> CodexUsageSource {
+        CodexUsageSource(
+            account: account, workspace: workspace, credentialSource: { _ in .missing })
+    }
+
+    /// The same login linked again for another workspace keeps its key, and a
+    /// reader kept on the key alone went on naming the old workspace beside
+    /// readings asked for the new one.
+    func testARelinkToAnotherWorkspaceReplacesTheReader() {
+        let stale = Self.source(account: "user-1", workspace: "Personal")
+        let split = UsageEngine.partitionCodexSources(
+            [stale], stored: ["user-1"], links: ["user-1": Self.link(workspace: "Acme")])
+        XCTAssertTrue(split.kept.isEmpty)
+        XCTAssertTrue(split.retired.first === stale)
+    }
+
+    func testAReaderStillNamingItsLinksWorkspaceIsKept() {
+        let current = Self.source(account: "user-1", workspace: "Acme")
+        let split = UsageEngine.partitionCodexSources(
+            [current], stored: ["user-1"], links: ["user-1": Self.link(workspace: "Acme")])
+        XCTAssertTrue(split.kept.first === current)
+        XCTAssertTrue(split.retired.isEmpty)
+    }
+
+    func testTheCLIsOwnReaderIsAlwaysKept() {
+        let own = Self.source(account: nil, workspace: nil)
+        let split = UsageEngine.partitionCodexSources([own], stored: [], links: [:])
+        XCTAssertTrue(split.kept.first === own)
+    }
+
+    func testAReaderWhoseCredentialIsGoneIsRetired() {
+        let gone = Self.source(account: "user-1", workspace: nil)
+        let split = UsageEngine.partitionCodexSources([gone], stored: [], links: [:])
+        XCTAssertTrue(split.retired.first === gone)
+    }
+
     // MARK: - What a link decides
 
     func testALoginWithOneWorkspaceIsLinkedWithoutAsking() async throws {

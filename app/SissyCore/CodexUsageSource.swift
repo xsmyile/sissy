@@ -49,7 +49,7 @@ actor CodexUsageSource: SourceSignals {
     private let fetchSource: @Sendable (CodexCredential) async throws -> CodexUsagePayload.Reading
     /// Workspace name recorded when the account was linked, which the reply
     /// does not carry: OpenAI names the account it answered for by id only.
-    private let workspace: String?
+    let workspace: String?
     /// Where a refusal is written down so the next run honours it, keyed by
     /// this reader's own credential.
     private let backoff: LimitsBackoffSlot?
