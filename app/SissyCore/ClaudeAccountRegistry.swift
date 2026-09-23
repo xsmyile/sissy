@@ -102,6 +102,10 @@ actor ClaudeAccountRegistry {
     /// it unchanged costs nothing. Only a token Sissy has not already filed
     /// buys a request.
     private var lastSeenToken: String?
+    /// Whether the archive has been read for the refresh expiries the index
+    /// lacks. Once a run, deferred to the first capture rather than done at
+    /// construction, which runs on whatever thread builds the engine.
+    private var reconciled = false
     /// Whether a `captureActive()` is running, suspended on the vendor or not.
     private var capturing = false
     nonisolated private let published = LockedValue(Snapshot())
@@ -178,6 +182,10 @@ actor ClaudeAccountRegistry {
     @discardableResult
     private func refreshActive() async -> Bool {
         let before = published.load()
+        if !reconciled {
+            reconciled = true
+            recordMissingRefreshExpiries()
+        }
         publishIndex()
         let current: Data?
         do {
@@ -494,6 +502,37 @@ actor ClaudeAccountRegistry {
 
     private static func expired(_ index: ClaudeAccountStore.Index, now: Date) -> Set<String> {
         Set((index.refreshExpiries ?? [:]).filter { $0.value <= now }.keys)
+    }
+
+    /// Reads the refresh expiry off each archived credential the index holds
+    /// none for, once a run.
+    ///
+    /// `refreshExpiries` is filled by `ClaudeAccountStore.remember`, so an
+    /// index written before it existed has archives and no dates, and an
+    /// account whose refresh token had already died stayed offered until its
+    /// click answered with `needsLogin`. An archive that would not read is
+    /// logged and left without a date rather than recorded as having none.
+    private func recordMissingRefreshExpiries() {
+        guard var index = Self.loadIndex(store) else { return }
+        var expiries = index.refreshExpiries ?? [:]
+        for account in index.accounts where expiries[account.uuid] == nil {
+            do {
+                guard let held = try store.credential(uuid: account.uuid),
+                    let expiry = ClaudeCredentialBlob.refreshExpiresAt(in: held)
+                else { continue }
+                expiries[account.uuid] = expiry
+            } catch {
+                sissyLog(
+                    "sissy: could not read the archived Claude account \(account.uuid): \(error)")
+            }
+        }
+        guard expiries != (index.refreshExpiries ?? [:]) else { return }
+        index.refreshExpiries = expiries
+        do {
+            try store.saveIndex(index)
+        } catch {
+            sissyLog("sissy: could not record the Claude refresh expiries: \(error)")
+        }
     }
 
     private func setActive(_ uuid: String?) {
