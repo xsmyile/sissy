@@ -195,8 +195,15 @@ struct GeneralSettingsView: View {
         .formStyle(.grouped)
         // `SMAppService` is the only record of the login item, so the switch
         // reads it whenever the window appears rather than trusting what it
-        // last set: the user can undo it from System Settings.
+        // last set: the user can undo it from System Settings. Coming back
+        // from there does not make the window appear again, so the switch
+        // also reads it whenever the app becomes active while it is open.
         .task { model.loginItem.refresh() }
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            model.loginItem.refresh()
+        }
     }
 
     private var startAtLogin: some View {
