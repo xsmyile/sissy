@@ -86,6 +86,39 @@ final class VendorLoginPopupTests: XCTestCase {
         Self.tearDown(contentController)
     }
 
+    /// A completion written from inside an async function throws into a
+    /// rejected promise rather than an error event, and is heard all the
+    /// same.
+    func testAPopupThatPostsToAMissingOpenerFromAnAsyncFunctionIsHeard() async {
+        let heard = expectation(description: "the orphaned completion is reported")
+        let recorder = OrphanedCloseRecorder { heard.fulfill() }
+        let sentinel = PageDoneRecorder { _ in }
+        let (web, contentController) = Self.poppedUpWebView(recorder: recorder, sentinel: sentinel)
+        web.loadHTMLString(Self.asyncOpenerCompletionPage, baseURL: Self.popupOrigin)
+
+        await fulfillment(of: [heard], timeout: Self.pageTimeout)
+
+        Self.tearDown(contentController)
+    }
+
+    /// A page with no opener that fails on some other null is not a
+    /// completion that lost its opener, even when the property it read
+    /// starts with the word.
+    func testAnUnrelatedNullErrorOnAPopupIsNotHeard() async {
+        let heard = expectation(description: "no orphaned completion is reported")
+        heard.isInverted = true
+        let pageDone = expectation(description: "the page ran to its last script")
+        let recorder = OrphanedCloseRecorder { heard.fulfill() }
+        let sentinel = PageDoneRecorder { _ in pageDone.fulfill() }
+        let (web, contentController) = Self.poppedUpWebView(recorder: recorder, sentinel: sentinel)
+        web.loadHTMLString(Self.unrelatedNullErrorPage, baseURL: Self.popupOrigin)
+
+        await fulfillment(of: [pageDone], timeout: Self.pageTimeout)
+        await fulfillment(of: [heard], timeout: .zero)
+
+        Self.tearDown(contentController)
+    }
+
     /// A provider that completes by redirect when it finds no opener is not
     /// a dead end, and has to see the null opener any browser would give it.
     func testAPopupThatChecksForAnOpenerAndRedirectsIsNotHeard() async {
@@ -143,6 +176,19 @@ final class VendorLoginPopupTests: XCTestCase {
     private static let openerCompletionPage = """
         <html><body>
         <script>window.opener.postMessage({ code: "x" }, "*"); window.close();</script>
+        <script>window.webkit.messageHandlers.\(PageDoneRecorder.message).postMessage(null);</script>
+        </body></html>
+        """
+    private static let asyncOpenerCompletionPage = """
+        <html><body>
+        <script>
+        (async () => { await null; window.opener.postMessage({ code: "x" }, "*"); window.close(); })();
+        </script>
+        </body></html>
+        """
+    private static let unrelatedNullErrorPage = """
+        <html><body>
+        <script>const config = null; config.openerMode;</script>
         <script>window.webkit.messageHandlers.\(PageDoneRecorder.message).postMessage(null);</script>
         </body></html>
         """

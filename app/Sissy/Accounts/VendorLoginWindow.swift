@@ -193,11 +193,13 @@ final class VendorLoginWindow: NSObject {
     /// `window.opener.postMessage(1, '*')` with no opener throws
     /// `null is not an object (evaluating 'window.opener.postMessage')`.
     nonisolated static let nullObjectMessage = "null is not an object"
-    /// The name the same message carries when the null was the opener. An
-    /// opener first copied into a variable is evaluated under that
-    /// variable's name and is not heard; the close that follows still is,
-    /// if the page reaches it.
-    nonisolated static let openerMarker = "opener"
+    /// The step the same message carries when the null was the opener and
+    /// something was read off it, whatever the window was named, so a
+    /// minified `w.opener.postMessage` is heard and an unrelated
+    /// `config.openerMode` is not. An opener first copied into a variable is
+    /// evaluated under that variable's name and is not heard; the close that
+    /// follows still is, if the page reaches it.
+    nonisolated static let openerMarker = ".opener."
 
     /// WebKit's code for a load it abandoned because the navigation delegate
     /// cancelled it, which is every redirect this window takes a code from.
