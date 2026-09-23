@@ -275,6 +275,33 @@ jobs:
             exit 1
           fi
 
+      # The cask copies Sissy.app out of the DMG, so a ticket stapled to the
+      # DMG alone never reaches /Applications: the first launch then has to
+      # look the ticket up online, and an offline or filtered Mac refuses it.
+      # So the app is notarized and stapled on its own before the DMG is
+      # built from it, and the DMG is still notarized below for a download
+      # opened straight from Releases.
+      - name: Notarize and staple the app
+        if: ${{ inputs.dry_run != 'true' }}
+        working-directory: app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release/Sissy.app"
+          ZIP="$RUNNER_TEMP/Sissy-notarize.zip"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          xcrun notarytool submit "$ZIP" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          rm -f "$ZIP"
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+
       - name: Create DMG
         working-directory: app
         env:
@@ -304,10 +331,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          # Notarizing the DMG submits the nested Sissy.app in the same pass, so
-          # one notary round-trip covers both. The DMG is stapled (verifies
-          # offline); the extracted app validates online via its registered
-          # cdhash on first launch.
+          # The app inside already carries its own stapled ticket; this one is
+          # for the DMG itself, so a download opened straight from Releases
+          # verifies offline too.
           DMG="dist/Sissy-$VERSION.dmg"
           xcrun notarytool submit "$DMG" \
             --apple-id "$APPLE_ID" \

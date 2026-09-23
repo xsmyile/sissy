@@ -130,6 +130,19 @@ if codesign -d --entitlements - "$APP_PATH" 2>/dev/null | grep -q "get-task-allo
   die "get-task-allow present on $APP_PATH"
 fi
 
+# The cask copies Sissy.app out of the DMG, so a ticket stapled to the DMG
+# alone never reaches /Applications and the first launch has to look it up
+# online. Notarize and staple the app itself before the DMG is built from it.
+log "notarize app"
+NOTARY_DIR="$(mktemp -d -t sissy-notary)"
+NOTARY_ZIP="$NOTARY_DIR/Sissy.zip"
+trap 'rm -f "$SIGN_DUMP"; rm -rf "$NOTARY_DIR"' EXIT
+ditto -c -k --keepParent "$APP_PATH" "$NOTARY_ZIP"
+xcrun notarytool submit "$NOTARY_ZIP" \
+  --keychain-profile "$NOTARY_PROFILE" --wait
+xcrun stapler staple "$APP_PATH"
+xcrun stapler validate "$APP_PATH"
+
 # Package DMG
 log "create DMG"
 DMG_PATH="$DIST_DIR/Sissy-$VERSION.dmg"
@@ -145,8 +158,8 @@ create-dmg \
   --no-internet-enable \
   "$DMG_PATH" "$APP_PATH"
 
-# Notarize the DMG: submits the nested Sissy.app in the same pass, so one
-# round-trip covers both (Gatekeeper trusts the downloaded file too).
+# Notarize the DMG too, so a download opened straight from Releases verifies
+# offline as well; the app inside already carries its own ticket.
 log "notarize DMG"
 xcrun notarytool submit "$DMG_PATH" \
   --keychain-profile "$NOTARY_PROFILE" --wait
