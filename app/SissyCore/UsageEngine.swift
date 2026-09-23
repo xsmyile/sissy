@@ -1315,9 +1315,9 @@ actor UsageEngine {
     /// `notFiled` rather than a vendor refusal, because OpenAI completed the
     /// sign-in and the keychain is what would not keep it.
     ///
-    /// Whatever the renewal still holds for this login is dropped first: a
-    /// renewal of the previous link landing after this save would file the
-    /// old workspace over the new one.
+    /// The save goes through `CodexRenewal`, which drops what it still holds
+    /// for this login in the same step: a renewal of the previous link
+    /// landing after this save would file the old workspace over the new one.
     private func store(
         _ credential: CodexCredential, as link: CodexAccountLink
     ) async -> Result<Void, CodexOAuth.Failure> {
@@ -1330,9 +1330,8 @@ actor UsageEngine {
             email: credential.email,
             plan: credential.plan,
             expiresAt: credential.expiresAt)
-        await CodexRenewal.shared.forget(account: link.identity.id)
         do {
-            try CodexAccountStore.save(configured, account: link.identity.id)
+            try await CodexRenewal.shared.replace(account: link.identity.id, with: configured)
         } catch {
             sissyLog("sissy: the Codex credential could not be filed (\(error))")
             return .failure(.notFiled)
@@ -1357,8 +1356,11 @@ actor UsageEngine {
     func forgetCodexAccount(id: String) async {
         guard lifecycle == .running else { return }
         if pendingCodexLink?.choice.identity.id == id { pendingCodexLink = nil }
-        await CodexRenewal.shared.forget(account: id)
-        try? CodexAccountStore.delete(account: id)
+        do {
+            try await CodexRenewal.shared.remove(account: id)
+        } catch {
+            sissyLog("sissy: the Codex credential could not be removed from the keychain (\(error))")
+        }
         try? codexIndex.forget(id: id)
         codexLinks.store(codexIndex.load())
         await rebuildCodexSources()
