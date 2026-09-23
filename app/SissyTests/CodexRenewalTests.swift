@@ -263,8 +263,9 @@ final class CodexRenewalTests: XCTestCase {
             await gate.arrive()
             return Self.renewed
         }
+        let account = Self.account
         let caller = Task {
-            await renewal.supply(account: Self.account, allowingInteraction: false)
+            await renewal.supply(account: account, allowingInteraction: false)
         }
         await gate.waitForArrival()
         caller.cancel()
@@ -287,11 +288,12 @@ final class CodexRenewalTests: XCTestCase {
             return Self.renewed
         }
         var arrivals = loads.makeAsyncIterator()
-        let first = Task { await renewal.supply(account: Self.account, allowingInteraction: false) }
+        let account = Self.account
+        let first = Task { await renewal.supply(account: account, allowingInteraction: false) }
         await gate.waitForArrival()
         _ = await arrivals.next()
         let second = Task {
-            await renewal.supply(account: Self.account, allowingInteraction: false)
+            await renewal.supply(account: account, allowingInteraction: false)
         }
         _ = await arrivals.next()
         await gate.open()
@@ -344,8 +346,9 @@ final class CodexRenewalTests: XCTestCase {
             await gate.arrive()
             return Self.renewed
         }
+        let account = Self.account
         let caller = Task {
-            await renewal.supply(account: Self.account, allowingInteraction: false)
+            await renewal.supply(account: account, allowingInteraction: false)
         }
         await gate.waitForArrival()
         try? await renewal.remove(account: Self.account)
@@ -389,8 +392,9 @@ final class CodexRenewalTests: XCTestCase {
             await gate.arrive()
             throw CodexOAuth.RenewalFailure.rejected
         }
+        let account = Self.account
         let caller = Task {
-            await renewal.supply(account: Self.account, allowingInteraction: false)
+            await renewal.supply(account: account, allowingInteraction: false)
         }
         await gate.waitForArrival()
         try? await renewal.replace(account: Self.account, with: Self.renewed)
@@ -410,8 +414,9 @@ final class CodexRenewalTests: XCTestCase {
             await gate.arrive()
             throw CodexOAuth.RenewalFailure.deferred(retryAfter: nil)
         }
+        let account = Self.account
         let caller = Task {
-            await renewal.supply(account: Self.account, allowingInteraction: false)
+            await renewal.supply(account: account, allowingInteraction: false)
         }
         await gate.waitForArrival()
         try? await renewal.replace(
@@ -567,11 +572,13 @@ final class CodexRenewalTests: XCTestCase {
             await gate.arrive()
             return Self.renewed
         }
+        let account = Self.account
         let caller = Task {
-            await renewal.supply(account: Self.account, allowingInteraction: false)
+            await renewal.supply(account: account, allowingInteraction: false)
         }
         await gate.waitForArrival()
-        let quitting = Task { await renewal.fileBeforeQuitting(within: Self.quitBudget) }
+        let quitBudget = Self.quitBudget
+        let quitting = Task { await renewal.fileBeforeQuitting(within: quitBudget) }
         await gate.open()
         let filed = await quitting.value
         _ = await caller.value
@@ -588,8 +595,9 @@ final class CodexRenewalTests: XCTestCase {
             await gate.arrive()
             return Self.renewed
         }
+        let account = Self.account
         let caller = Task {
-            await renewal.supply(account: Self.account, allowingInteraction: false)
+            await renewal.supply(account: account, allowingInteraction: false)
         }
         await gate.waitForArrival()
         let filed = await renewal.fileBeforeQuitting(within: Self.quitBudget)
