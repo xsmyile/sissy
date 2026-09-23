@@ -201,6 +201,14 @@ final class CodexRenewalTests: XCTestCase {
         XCTAssertEqual(failure, .deferred(retryAfter: 900))
     }
 
+    /// The session throws a reply from another host rather than handing it
+    /// over, and that host never saw the refresh token, so the link stands
+    /// and the renewal is asked again after the backoff.
+    func testAReplyFromAnotherHostDefersTheRenewal() async {
+        let failure = await renewalFailure { _ in throw SissyHTTP.LeftItsOrigin(status: 307) }
+        XCTAssertEqual(failure, .deferred(retryAfter: nil))
+    }
+
     func testANetworkThatIsNotThereDefersTheRenewal() async {
         let failure = await renewalFailure { _ in throw URLError(.notConnectedToInternet) }
         XCTAssertEqual(failure, .deferred(retryAfter: nil))
