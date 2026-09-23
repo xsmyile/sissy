@@ -2,8 +2,9 @@ import XCTest
 
 @testable import Sissy
 
-/// The index a forge connection is recorded in, and the tokens it is
-/// reconciled against.
+/// What a forge connection is made of before anything is filed: the address
+/// parsed out of the sheet's fields, the index it is recorded in, and the
+/// tokens it is reconciled against.
 ///
 /// Pure or on a temporary directory: no keychain and no network.
 final class ForgeConnectionTests: XCTestCase {
@@ -20,6 +21,116 @@ final class ForgeConnectionTests: XCTestCase {
 
     private var index: ForgeConnectionIndex {
         ForgeConnectionIndex(url: ForgeConnectionIndex.defaultURL(in: directory))
+    }
+
+    private func parse(_ host: String, path: String = "", kind: ForgeKind = .gitLab)
+        -> Result<ForgeConnection, ForgeAddressProblem>
+    {
+        ForgeConnection.parse(kind: kind, host: host, path: path)
+    }
+
+    // MARK: The address
+
+    /// What a browser hands over when the host is copied out of its address
+    /// bar: a scheme, a trailing slash, the path of the page, and capitals.
+    func testHostIsTakenOutOfWhateverWasPasted() throws {
+        XCTAssertEqual(try parse(" GitLab.Example.com ").get().host, "gitlab.example.com")
+        XCTAssertEqual(try parse("https://gitlab.example.com/").get().host, "gitlab.example.com")
+        XCTAssertEqual(
+            try parse("http://gitlab.example.com/dashboard").get().host, "gitlab.example.com")
+    }
+
+    func testAPortIsKeptAndReachesTheRoot() throws {
+        let connection = try parse("https://gitlab.corp.example:8443/").get()
+        XCTAssertEqual(connection.host, "gitlab.corp.example")
+        XCTAssertEqual(connection.port, 8443)
+        XCTAssertEqual(connection.root?.absoluteString, "https://gitlab.corp.example:8443")
+    }
+
+    /// `443` is what `https` answers on anyway, and keeping it would make one
+    /// instance two connections with two tokens.
+    func testTheSchemesOwnPortIsTheSameConnectionAsNone() throws {
+        XCTAssertEqual(
+            try parse("gitlab.example.com:443").get(), try parse("gitlab.example.com").get())
+    }
+
+    func testABasePathIsNormalisedAndReachesTheEndpoints() throws {
+        let connection = try parse("corp.example", path: " gitlab/ ").get()
+        XCTAssertEqual(connection.basePath, "/gitlab")
+        XCTAssertEqual(connection.root?.absoluteString, "https://corp.example/gitlab")
+        let events = try XCTUnwrap(
+            GitLabActivityFeed.eventsURL(connection, period: .all, now: Date()))
+        XCTAssertTrue(
+            events.absoluteString.hasPrefix("https://corp.example/gitlab/api/v4/events"),
+            events.absoluteString)
+    }
+
+    func testAUserPrefixIsRefused() {
+        XCTAssertEqual(parse("davide@gitlab.example.com"), .failure(.credentials))
+        XCTAssertEqual(parse("https://davide:secret@gitlab.example.com/"), .failure(.credentials))
+    }
+
+    func testAQueryIsRefused() {
+        XCTAssertEqual(parse("gitlab.example.com?private_token=x"), .failure(.query))
+        XCTAssertEqual(parse("gitlab.example.com", path: "gitlab?x=1"), .failure(.query))
+    }
+
+    func testAFragmentIsRefused() {
+        XCTAssertEqual(parse("gitlab.example.com/#top"), .failure(.fragment))
+    }
+
+    func testASchemeMistakeIsRefused() {
+        XCTAssertEqual(parse("ftp://gitlab.example.com"), .failure(.scheme))
+        XCTAssertEqual(parse("htps://gitlab.example.com"), .failure(.scheme))
+        XCTAssertEqual(parse("https//gitlab.example.com"), .failure(.scheme))
+        XCTAssertEqual(parse("https:/gitlab.example.com"), .failure(.scheme))
+        XCTAssertEqual(parse("https://https://gitlab.example.com"), .failure(.scheme))
+    }
+
+    func testAPortOutOfRangeIsRefused() {
+        XCTAssertEqual(parse("gitlab.example.com:0"), .failure(.port))
+        XCTAssertEqual(parse("gitlab.example.com:65536"), .failure(.port))
+        XCTAssertEqual(parse("gitlab.example.com:https"), .failure(.port))
+        XCTAssertEqual(parse("gitlab.example.com:"), .failure(.port))
+    }
+
+    func testAHostNoNameCanCarryIsRefused() {
+        XCTAssertEqual(parse("gitlab example.com"), .failure(.host))
+        XCTAssertEqual(parse("-gitlab.example.com"), .failure(.host))
+        XCTAssertEqual(parse("gitlab..example.com"), .failure(.host))
+    }
+
+    func testAPathThatClimbsOutIsRefused() {
+        XCTAssertEqual(parse("corp.example", path: "../admin"), .failure(.path))
+    }
+
+    func testNothingTypedIsEmpty() {
+        XCTAssertEqual(parse("   "), .failure(.empty))
+        XCTAssertEqual(parse("https://"), .failure(.empty))
+    }
+
+    /// A connection with neither a port nor a path keeps the id it always had,
+    /// so the tokens filed under it before either existed are still found.
+    func testAnIdWithoutAPortOrPathIsTheOneItAlwaysWas() throws {
+        XCTAssertEqual(try parse("gitlab.example.com").get().id, "gitlab:gitlab.example.com")
+        XCTAssertEqual(
+            try parse("gitlab.example.com:8443", path: "/gitlab").get().id,
+            "gitlab:gitlab.example.com:8443/gitlab")
+    }
+
+    /// An index written before the port and the path existed decodes into
+    /// connections with neither.
+    func testAnIndexFromBeforeThePortDecodes() throws {
+        let old = #"{"connections":[{"host":"gitlab.example.com","kind":"gitlab"}]}"#
+        try Data(old.utf8).write(to: index.url)
+        XCTAssertEqual(try index.load(), [ForgeConnection(kind: .gitLab, host: "gitlab.example.com")])
+    }
+
+    func testAGitHubEnterpriseOnAPortAsksItsOwnEndpoint() throws {
+        let enterprise = try parse("github.corp.example:8443", kind: .gitHub).get()
+        XCTAssertEqual(
+            GitHubActivityFeed.endpoint(enterprise)?.absoluteString,
+            "https://github.corp.example:8443/api/graphql")
     }
 
     // MARK: The index

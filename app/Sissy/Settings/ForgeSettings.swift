@@ -30,7 +30,7 @@ enum ForgeConnectCopy {
     /// What the sheet is called when it was opened to replace one connection's
     /// token rather than to add a connection.
     static func reconnectTitle(_ connection: ForgeConnection) -> String {
-        "Reconnect \(connection.host)"
+        "Reconnect \(connection.address)"
     }
 
     /// The heading over the one candidate a reconnection may offer.
@@ -42,6 +42,7 @@ enum ForgeConnectCopy {
     static let detectedForHost = "What gh or glab holds for this host now"
     static let orPaste = "Or paste one"
     static let hostPrompt = "Host"
+    static let pathPrompt = "Path, if served under one (optional)"
     static let tokenPrompt = "Token"
     static let cancel = "Cancel"
     static let confirm = "Connect"
@@ -52,6 +53,21 @@ enum ForgeConnectCopy {
     /// report and nothing the user can do but try again.
     static let connectFailed =
         "The keychain would not accept the token, so nothing was connected. The token is still in the field. Try again."
+
+    /// Why what was typed cannot be connected, said under the fields before
+    /// anything is sent anywhere.
+    static func addressProblem(_ problem: ForgeAddressProblem) -> String {
+        switch problem {
+        case .empty: "Type the forge's host."
+        case .scheme: "Only https:// or http:// can go in front of the host."
+        case .credentials: "Leave out the user@ part. The token is what signs Sissy in."
+        case .query: "Leave out the ? and everything after it."
+        case .fragment: "Leave out the # and everything after it."
+        case .port: "The port has to be a number from 1 to 65535."
+        case .host: "That is not a host name. Use letters, digits, dots and hyphens."
+        case .path: "The path can hold letters, digits and - . _ ~ between slashes."
+        }
+    }
 
     /// A token Sissy holds for a forge no connection names, titled by the
     /// forge and address its keychain item is filed under.
@@ -108,7 +124,7 @@ enum ForgeConnectCopy {
         """
 
     static func unlinkTitle(_ connection: ForgeConnection) -> String {
-        "Disconnect \(UsageFormat.forgeName(connection.kind)) · \(connection.host)?"
+        "Disconnect \(UsageFormat.forgeName(connection.kind)) · \(connection.address)?"
     }
 
     static let unlinkMessage =
@@ -119,7 +135,7 @@ enum ForgeConnectCopy {
     /// does. It named the disconnect while that was the only verb in it; a
     /// menu that also reconnects and copies cannot be called by one of three.
     static func rowMenu(_ connection: ForgeConnection) -> String {
-        "Actions for \(UsageFormat.forgeName(connection.kind)) on \(connection.host)"
+        "Actions for \(UsageFormat.forgeName(connection.kind)) on \(connection.address)"
     }
 
     static let rowMenuHelp = "Reconnect, copy the host, or disconnect this forge"
@@ -347,7 +363,7 @@ struct ForgeSettingsView: View {
     private func row(_ connection: ForgeConnection) -> some View {
         let reading = model.liveFrame?.frame.forge.first { $0.id == connection.id }
         return CredentialRow(
-            title: connection.host,
+            title: connection.address,
             subtitle: subtitle(connection, reading: reading),
             health: Self.health(of: reading),
             fix: fix(connection, reading: reading)
@@ -363,7 +379,7 @@ struct ForgeSettingsView: View {
                 Button(ForgeConnectCopy.reconnectItem) {
                     open(ForgeConnectRequest(replacing: connection))
                 }
-                CredentialCopyButton(CredentialRowCopy.copyHost, of: connection.host)
+                CredentialCopyButton(CredentialRowCopy.copyHost, of: connection.address)
                 Divider()
                 Button(ForgeConnectCopy.disconnectItem, role: .destructive) {
                     disconnecting = connection
@@ -485,8 +501,7 @@ struct ForgeConnectSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var candidates: [ForgeTokenCandidate] = []
-    @State private var kind: ForgeKind
-    @State private var host: String
+    @State private var draft: ForgeConnectDraft
     @State private var token: String = ""
 
     private static let fieldWidth: CGFloat = 260
@@ -495,8 +510,7 @@ struct ForgeConnectSheet: View {
     init(model: SissyModel, request: ForgeConnectRequest) {
         self.model = model
         self.request = request
-        _kind = State(initialValue: request.replacing?.kind ?? .gitHub)
-        _host = State(initialValue: request.replacing?.host ?? GitHubActivityFeed.dotComHost)
+        _draft = State(initialValue: ForgeConnectDraft(replacing: request.replacing))
     }
 
     var body: some View {
@@ -517,20 +531,29 @@ struct ForgeConnectSheet: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            Picker("Forge", selection: $kind) {
+            Picker("Forge", selection: $draft.kind) {
                 ForEach(ForgeKind.allCases, id: \.self) { kind in
                     Text(UsageFormat.forgeName(kind)).tag(kind)
                 }
             }
             .pickerStyle(.segmented)
             .disabled(replacing != nil)
-            .onChange(of: kind) { _, new in
+            .onChange(of: draft.kind) { _, new in
                 guard new == .gitHub else { return }
-                host = GitHubActivityFeed.dotComHost
+                draft.host = GitHubActivityFeed.dotComHost
             }
-            TextField(ForgeConnectCopy.hostPrompt, text: $host)
+            TextField(ForgeConnectCopy.hostPrompt, text: $draft.host)
                 .frame(width: Self.fieldWidth)
                 .disabled(replacing != nil)
+            TextField(ForgeConnectCopy.pathPrompt, text: $draft.path)
+                .frame(width: Self.fieldWidth)
+                .disabled(replacing != nil)
+            if let problem = draft.problem {
+                Text(ForgeConnectCopy.addressProblem(problem))
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             SecureField(ForgeConnectCopy.tokenPrompt, text: $token)
                 .frame(width: Self.fieldWidth)
             Text(ForgeConnectCopy.scopeWarning)
@@ -548,11 +571,11 @@ struct ForgeConnectSheet: View {
                 Button(ForgeConnectCopy.cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(busy ? ForgeConnectCopy.connecting : confirmTitle) {
-                    model.engine.connectForge(
-                        ForgeConnection(kind: kind, host: trimmedHost), token: token)
+                    guard let connection else { return }
+                    model.engine.connectForge(connection, token: token)
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(busy || trimmedHost.isEmpty || typedToken.isEmpty)
+                .disabled(busy || connection == nil || typedToken.isEmpty)
             }
         }
         .padding(20)
@@ -610,5 +633,40 @@ struct ForgeConnectSheet: View {
 
     private var typedToken: String { token.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    private var trimmedHost: String { ForgeConnection.host(from: host) }
+    /// What Connect files: the connection being replaced as it stands, or
+    /// what the fields parse to. Nil while they do not parse.
+    private var connection: ForgeConnection? {
+        replacing ?? (try? draft.connection.get())
+    }
+}
+
+/// What the connect sheet's fields hold, apart from the token.
+///
+/// A value rather than three `@State`s so what the fields parse to, and what
+/// the sheet says about them, can be held without a window.
+struct ForgeConnectDraft: Equatable {
+    var kind: ForgeKind
+    var host: String
+    var path: String
+
+    init(replacing: ForgeConnection? = nil) {
+        kind = replacing?.kind ?? .gitHub
+        host =
+            replacing.map { connection in
+                connection.host + (connection.port.map { ":\($0)" } ?? "")
+            } ?? ForgeKind.gitHub.defaultHost
+        path = replacing?.basePath ?? ""
+    }
+
+    var connection: Result<ForgeConnection, ForgeAddressProblem> {
+        ForgeConnection.parse(kind: kind, host: host, path: path)
+    }
+
+    /// What to say under the fields, nil while they parse or the host is
+    /// still empty: an empty field is one the user has not reached yet, and
+    /// Connect being disabled already says it.
+    var problem: ForgeAddressProblem? {
+        guard case .failure(let problem) = connection, problem != .empty else { return nil }
+        return problem
+    }
 }

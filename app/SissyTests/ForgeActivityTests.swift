@@ -574,10 +574,10 @@ final class ForgeActivityTests: XCTestCase {
     /// under `/api` on the host itself.
     func testGitHubEndpointFollowsTheHost() throws {
         XCTAssertEqual(
-            GitHubActivityFeed.endpoint(host: "github.com")?.absoluteString,
+            GitHubActivityFeed.endpoint(.gitHub(host: "github.com"))?.absoluteString,
             "https://api.github.com/graphql")
         XCTAssertEqual(
-            GitHubActivityFeed.endpoint(host: "github.example.com")?.absoluteString,
+            GitHubActivityFeed.endpoint(.gitHub(host: "github.example.com"))?.absoluteString,
             "https://github.example.com/api/graphql")
     }
 
@@ -729,15 +729,6 @@ final class ForgeActivityTests: XCTestCase {
     }
 
     // MARK: Connections
-
-    func testHostIsTakenOutOfWhateverWasPasted() {
-        XCTAssertEqual(ForgeConnection.host(from: " GitLab.Example.com "), "gitlab.example.com")
-        XCTAssertEqual(
-            ForgeConnection.host(from: "https://gitlab.example.com/"), "gitlab.example.com")
-        XCTAssertEqual(
-            ForgeConnection.host(from: "http://gitlab.example.com/dashboard"),
-            "gitlab.example.com")
-    }
 
     /// The id carries the kind as well as the host, so one host serving two
     /// forges is two connections and a removal by name cannot take the wrong
