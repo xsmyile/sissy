@@ -337,7 +337,7 @@ actor CodexUsageSource: SourceSignals {
         if let accountId = credential.accountId, !accountId.isEmpty {
             request.setValue(accountId, forHTTPHeaderField: accountHeader)
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await SissyHTTP.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw UsageRequestError.malformedPayload
         }

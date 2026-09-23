@@ -175,7 +175,7 @@ enum CodexOAuth {
     @Sendable private static func perform(_ request: URLRequest) async throws -> (
         Data, URLResponse
     ) {
-        try await URLSession.shared.data(for: request)
+        try await SissyHTTP.data(for: request)
     }
 
     private static func randomToken() -> String {

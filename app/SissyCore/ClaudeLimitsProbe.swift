@@ -411,7 +411,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await SissyHTTP.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw UsageRequestError.malformedPayload }
         if http.statusCode == 429 {
             throw UsageRequestError.rateLimited(retryAfter: UsageRequestError.retryAfter(http))
