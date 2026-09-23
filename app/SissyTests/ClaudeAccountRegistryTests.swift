@@ -171,6 +171,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         /// Writes that land and then throw, once each, the way a `security`
         /// process that commits and then outlives its budget does.
         var landThenFail: [ClaudeCLISlot.Name: Error] = [:]
+        var containsFailure: Error?
         var restoreFails = false
         var secretReadFailure: Error?
         var primaryReadFailure: Error?
@@ -195,7 +196,10 @@ final class ClaudeAccountRegistryTests: XCTestCase {
                     return lock.withLock { items[uuid] }
                 },
                 write: { [self] uuid, data in lock.withLock { items[uuid] = data } },
-                contains: { [self] uuid in lock.withLock { items[uuid] != nil } })
+                contains: { [self] uuid in
+                    if let containsFailure { throw containsFailure }
+                    return lock.withLock { items[uuid] != nil }
+                })
         }
 
         private func value(_ name: ClaudeCLISlot.Name) -> Data? {
@@ -688,6 +692,38 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertNil(registry.currentSnapshot().activeUUID)
     }
     // MARK: What is offered
+
+    /// An archived secret removed while Sissy runs is noticed by the poll
+    /// that follows, not only by a relaunch.
+    func testASecretRemovedWhileRunningStopsBeingSwitchableOnTheNextPoll() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        XCTAssertTrue(registry.currentSnapshot().switchable.contains("u-tok-b"))
+        vault.dropSecret("u-tok-b")
+
+        let moved = await registry.captureActive()
+
+        XCTAssertTrue(moved)
+        XCTAssertEqual(registry.currentSnapshot().switchable, ["u-tok-a"])
+    }
+
+    /// A keychain that would not answer at the first poll is asked again at
+    /// the next, rather than leaving an archived account unoffered all run.
+    func testAPresenceLookupThatFailedOnceIsAskedAgain() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.containsFailure = ClaudeKeychainCLI.Failure.unavailable
+        let relaunched = makeRegistry(vault, identify: Self.byToken)
+        await relaunched.captureActive()
+        XCTAssertTrue(relaunched.currentSnapshot().switchable.isEmpty)
+        vault.containsFailure = nil
+
+        await relaunched.captureActive()
+
+        XCTAssertEqual(relaunched.currentSnapshot().switchable, ["u-tok-a", "u-tok-b"])
+    }
 
     /// An index entry is a name Sissy has seen. Without the secret behind it
     /// the click can only fail, so the account is listed and not offered.
