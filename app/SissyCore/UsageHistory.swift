@@ -371,6 +371,38 @@ struct UsageHistoryDay: Codable, Equatable, Sendable {
         return merged
     }
 
+    /// This day with every row and effort entry that carries tokens and no
+    /// cost priced through `cost`, or nil when `cost` prices none of them.
+    ///
+    /// Tokens without cost names a row counted while no source carried its
+    /// model, on the grounds `LocalUsageProvider` reads it off its own rows.
+    /// A row that has a cost keeps it: what was priced keeps the rate it was
+    /// priced at. `cost` answers nil, or zero, for a model it cannot price,
+    /// and that row keeps its zero.
+    func pricingUnpricedRows(by cost: (UsageHistoryTotals, String) -> Decimal?) -> Self? {
+        var priced = self
+        var moved = false
+        for index in priced.models.indices {
+            let entry = priced.models[index]
+            let totals = entry.totals
+            guard totals.totalTokens > 0, totals.cost == 0,
+                let amount = cost(totals, entry.model), amount > 0
+            else { continue }
+            priced.models[index].cost = NSDecimalNumber(decimal: amount).stringValue
+            moved = true
+        }
+        for index in (priced.effort ?? []).indices {
+            guard let entry = priced.effort?[index] else { continue }
+            let totals = entry.split.totals.totals
+            guard totals.totalTokens > 0, totals.cost == 0,
+                let amount = cost(totals, entry.model), amount > 0
+            else { continue }
+            priced.effort?[index].cost = NSDecimalNumber(decimal: amount).stringValue
+            moved = true
+        }
+        return moved ? priced : nil
+    }
+
     /// What one model spent across every project the day holds for it.
     func totals(forModel model: String) -> UsageHistoryTotals {
         var out = UsageHistoryTotals()
@@ -613,6 +645,14 @@ enum UsageHistoryStore {
     /// schema this build does not know.
     static func load(provider: String, day: String, in parent: URL) -> UsageHistoryDay? {
         decode(at: url(provider: provider, day: day, in: parent))
+    }
+
+    /// The `YYYY-MM-DD` of every day file one provider's directory holds, in
+    /// no particular order. A file whose name is not a day is not one.
+    static func storedDays(provider: String, in parent: URL) -> [String] {
+        dayFiles(provider: provider, in: parent).map {
+            $0.1.deletingPathExtension().lastPathComponent
+        }
     }
 
     /// What the archive holds for a day, with "nothing" told apart from

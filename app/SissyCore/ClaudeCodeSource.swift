@@ -326,7 +326,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// override and the embedded generated seed, so a model that launched after
     /// this build was cut still prices correctly. Refreshed in place by
     /// `applyPriceCatalog`; a refresh applies to events ingested from then on,
-    /// and to the rows the tail counted with no rate at all.
+    /// and to the rows, live or archived, counted with no rate at all.
     private var priceCatalog: PricingTable?
     /// Models already reported as unpriced. Keeps the warning to one line per
     /// model per run instead of one per ingested event.

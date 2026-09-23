@@ -476,9 +476,11 @@ actor LocalUsageProvider: UsageProvider {
         if adapter.refreshOutOfBandState() { persistDirty = true }
     }
 
-    /// Takes the new rates, and prices the rows they are the first to cover.
+    /// Takes the new rates, and prices the rows they are the first to cover:
+    /// the tail's own, and the archived days it no longer holds.
     func applyPriceCatalog(_ catalog: PriceCatalog) async {
         adapter.applyPriceCatalog(catalog)
+        repriceArchivedDays()
         guard repriceUnpricedRows() else { return }
         await emitReading()
     }
@@ -1495,8 +1497,9 @@ actor LocalUsageProvider: UsageProvider {
     ///
     /// Only a backfill pass may. The tail meters a day that is still running:
     /// a refusal there would keep today out of the archive for the whole of
-    /// it, and `applyPriceCatalog` prices the tail's free rows once a rate
-    /// exists for them. A backfilled day is past
+    /// it, and `applyPriceCatalog` prices the tail's free rows, and the
+    /// archived days holding them, once a rate exists for them. A backfilled
+    /// day is past
     /// and nothing will grow it back, so writing it short freezes it short —
     /// which is the worse of the two, and the one this guards.
     private var refusesUnpricedDays: Bool { backfill != nil }
@@ -1574,6 +1577,51 @@ actor LocalUsageProvider: UsageProvider {
             "sissy: \(id) priced \(priced.sorted().joined(separator: ", ")) for the tokens "
                 + "counted before a pricing source carried it")
         return true
+    }
+
+    /// Prices every archived day of this provider's that holds a row counted
+    /// with no rate, for the models the adapter can price now, and writes each
+    /// one back whole through the store's atomic save.
+    ///
+    /// `repriceUnpricedRows` reaches only the days the tail still holds; a day
+    /// that has left its window was frozen at $0 for good, which on a model's
+    /// release day is the whole of that day's spend on it, and the 7-day,
+    /// 30-day and `All` windows read short of `ccusage` by it from then on.
+    /// The rows keep all their token counts, so the cost is the one the event
+    /// would have been priced at, by the adapter's own arithmetic.
+    ///
+    /// The tail's only, never a backfill pass's, so one reader writes these.
+    /// Days the tail holds are left to its own flush, which writes them whole
+    /// from memory; the day it suppresses is not one of those, and is priced
+    /// here. The backfill is the other writer of old days, and cannot collide
+    /// with this one: it refuses a day holding a model its catalog does not
+    /// price, which is every day this finds something to price in. A file this
+    /// build cannot read is left alone, as everywhere else in the archive.
+    private func repriceArchivedDays() {
+        guard backfill == nil, let historyRoot else { return }
+        let dayFmt = UsageReaderShared.dayFormatter
+        let held = Set(
+            dailyModelTotals.keys.filter { !historySuppressedDays.contains($0) }
+                .map { dayFmt.string(from: $0) })
+        var repriced: [String] = []
+        for day in UsageHistoryStore.storedDays(provider: id, in: historyRoot)
+        where !held.contains(day) {
+            guard
+                case .day(let stored) = UsageHistoryStore.stored(
+                    provider: id, day: day, in: historyRoot),
+                let priced = stored.pricingUnpricedRows(by: { adapter.cost(of: $0, model: $1) })
+            else { continue }
+            do {
+                try UsageHistoryStore.save(priced, in: historyRoot)
+                repriced.append(day)
+            } catch {
+                sissyLog("sissy: \(id) could not price the archived day \(day): \(error)")
+            }
+        }
+        guard !repriced.isEmpty else { return }
+        sissyLog(
+            "sissy: \(id) priced \(repriced.count) archived day(s) holding tokens counted "
+                + "before a pricing source carried their model")
     }
 
     /// Throttled atomic save. `force=true` bypasses throttle (used by stop).
