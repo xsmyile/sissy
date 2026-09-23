@@ -45,6 +45,7 @@ actor CodexRenewal {
         @Sendable (_ account: String, _ allowingInteraction: Bool) ->
         CodexCredentialReading
     typealias Save = @Sendable (_ credential: CodexCredential, _ account: String) throws -> Void
+    typealias Delete = @Sendable (_ account: String) throws -> Void
     typealias Renew = @Sendable (CodexCredential) async throws -> CodexCredential
     typealias Pause = @Sendable (Duration) async throws -> Void
 
@@ -63,6 +64,7 @@ actor CodexRenewal {
 
     private let load: Load
     private let save: Save
+    private let delete: Delete
     private let renew: Renew
     private let pause: Pause
     private let deadline: Pause
@@ -76,13 +78,14 @@ actor CodexRenewal {
     private var unsaved: [String: CodexCredential] = [:]
     private var saving: [String: Task<Void, Never>] = [:]
     private var deferrals: [String: (until: Date, count: Int)] = [:]
-    /// Bumped by `forget`, so a renewal or a save retry that began for an
-    /// account since unlinked or linked again files nothing.
+    /// Bumped by `replace` and `remove`, so a renewal or a save retry that
+    /// began for an account since unlinked or linked again files nothing.
     private var generations: [String: Int] = [:]
 
     init(
         load: @escaping Load = { CodexAccountStore.load(account: $0, allowingInteraction: $1) },
         save: @escaping Save = { try CodexAccountStore.save($0, account: $1) },
+        delete: @escaping Delete = { try CodexAccountStore.delete(account: $0) },
         renew: @escaping Renew = { try await CodexOAuth.refresh($0) },
         pause: @escaping Pause = { try await Task.sleep(for: $0) },
         deadline: @escaping Pause = { try await Task.sleep(for: $0) },
@@ -91,6 +94,7 @@ actor CodexRenewal {
     ) {
         self.load = load
         self.save = save
+        self.delete = delete
         self.renew = renew
         self.pause = pause
         self.deadline = deadline
@@ -187,10 +191,31 @@ actor CodexRenewal {
         return await renewal.value
     }
 
-    /// Drops everything held for an account that is being unlinked or linked
-    /// again, so nothing renewed for the old link is filed over the new one or
-    /// re-creates an item the user deleted.
-    func forget(account: String) {
+    /// Files a new link's credential for `account` and drops everything held
+    /// for the old one, as one step no reader can interleave with.
+    ///
+    /// Serialised here rather than done by the caller around a `forget`,
+    /// because a reader asking between the two loaded the old item and renewed
+    /// it under the new generation, and that save then overwrote the new link.
+    /// The save goes first: a relink the keychain refuses leaves the old link
+    /// as it was, including a renewal still waiting to be filed, which holds
+    /// the only refresh token that is still good.
+    func replace(account: String, with credential: CodexCredential) throws {
+        try save(credential, account)
+        forget(account: account)
+    }
+
+    /// Deletes an account's item and drops everything held for it, as one
+    /// step no reader can interleave with, so nothing renewed for it can
+    /// re-create the item. A delete the keychain refuses leaves the item and
+    /// what is held for it as they were, since the reader polling with that
+    /// item is still there.
+    func remove(account: String) throws {
+        try delete(account)
+        forget(account: account)
+    }
+
+    private func forget(account: String) {
         generations[account, default: 0] += 1
         inFlight[account] = nil
         unsaved[account] = nil
@@ -205,7 +230,7 @@ actor CodexRenewal {
         await saving[account]?.value
     }
 
-    /// A reply that lands after `forget` answers for a link that no longer
+    /// A reply that lands after `replace` or `remove` answers for a link that no longer
     /// exists, whether it renewed the grant or refused it, so it touches
     /// nothing the replacement holds: read as `.expired` or as a deferral it
     /// ended or held back a link the user had just made.

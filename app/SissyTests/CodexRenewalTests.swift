@@ -54,6 +54,10 @@ final class CodexRenewalTests: XCTestCase {
             }
             items.update { $0[account] = credential }
         }
+
+        func delete(_ account: String) throws {
+            items.update { $0[account] = nil }
+        }
     }
 
     /// Holds a renewal at the token endpoint until the test lets it answer.
@@ -96,6 +100,7 @@ final class CodexRenewalTests: XCTestCase {
                 return keychain.load(account)
             },
             save: { try keychain.save($0, $1) },
+            delete: { try keychain.delete($0) },
             renew: renew,
             pause: pause,
             deadline: deadline,
@@ -335,8 +340,7 @@ final class CodexRenewalTests: XCTestCase {
             await renewal.supply(account: Self.account, allowingInteraction: false)
         }
         await gate.waitForArrival()
-        await renewal.forget(account: Self.account)
-        keychain.items.store([:])
+        try? await renewal.remove(account: Self.account)
         await gate.open()
         _ = await caller.value
         XCTAssertNil(keychain.items.load()[Self.account])
@@ -381,8 +385,7 @@ final class CodexRenewalTests: XCTestCase {
             await renewal.supply(account: Self.account, allowingInteraction: false)
         }
         await gate.waitForArrival()
-        await renewal.forget(account: Self.account)
-        keychain.items.store([Self.account: Self.renewed])
+        try? await renewal.replace(account: Self.account, with: Self.renewed)
         await gate.open()
         let reading = await caller.value
         XCTAssertNotEqual(reading, .expired)
@@ -403,12 +406,86 @@ final class CodexRenewalTests: XCTestCase {
             await renewal.supply(account: Self.account, allowingInteraction: false)
         }
         await gate.waitForArrival()
-        await renewal.forget(account: Self.account)
-        keychain.items.store([Self.account: Self.credential(access: "access-relinked")])
+        try? await renewal.replace(
+            account: Self.account, with: Self.credential(access: "access-relinked"))
         await gate.open()
         _ = await caller.value
         _ = await renewal.supply(account: Self.account, allowingInteraction: false)
         XCTAssertEqual(requests.load(), 2)
+    }
+
+    /// A relink the keychain refuses leaves the old link as it was, including
+    /// a renewal still waiting to be filed: that renewal holds the only live
+    /// refresh token, and dropping it before the replacement landed left the
+    /// item holding a spent one and nothing usable anywhere.
+    func testARelinkTheKeychainRefusesKeepsTheUnsavedRenewal() async {
+        let keychain = Keychain(holding: Self.credential())
+        let relinked = Self.credential(access: "access-relinked", expiresAt: .distantFuture)
+        keychain.refusing.store([Self.renewed.accessToken, relinked.accessToken])
+        let renewals = LockedValue(0)
+        let renewal = Self.renewal(keychain: keychain, pause: Self.longWait) { _ in
+            renewals.update { $0 += 1 }
+            return Self.renewed
+        }
+        _ = await renewal.supply(account: Self.account, allowingInteraction: false)
+        let replaced: Void? = try? await renewal.replace(account: Self.account, with: relinked)
+        XCTAssertNil(replaced)
+        let later = await renewal.supply(account: Self.account, allowingInteraction: false)
+        XCTAssertEqual(later, .found(Self.renewed))
+        XCTAssertEqual(renewals.load(), 1)
+        try? await renewal.remove(account: Self.account)
+    }
+
+    /// A relink that lands supersedes the old link's unsaved renewal, whose
+    /// retry would otherwise file the old workspace over the new one.
+    func testARelinkThatLandsDropsTheOldUnsavedRenewal() async {
+        let keychain = Keychain(holding: Self.credential())
+        let relinked = Self.credential(access: "access-relinked", expiresAt: .distantFuture)
+        keychain.refusing.store([Self.renewed.accessToken])
+        let renewal = Self.renewal(keychain: keychain, pause: Self.longWait) { _ in Self.renewed }
+        _ = await renewal.supply(account: Self.account, allowingInteraction: false)
+        try? await renewal.replace(account: Self.account, with: relinked)
+        keychain.refusing.store([])
+        await renewal.settle(account: Self.account)
+        let later = await renewal.supply(account: Self.account, allowingInteraction: false)
+        XCTAssertEqual(later, .found(relinked))
+        XCTAssertEqual(keychain.items.load()[Self.account], relinked)
+    }
+
+    /// An unlink the keychain refuses keeps what the renewal holds, for the
+    /// reason a refused relink does: the item is still there and so is the
+    /// reader polling with it.
+    func testAnUnlinkTheKeychainRefusesKeepsTheUnsavedRenewal() async {
+        let keychain = Keychain(holding: Self.credential())
+        keychain.refusing.store([Self.renewed.accessToken])
+        let renewal = CodexRenewal(
+            load: { account, _ in keychain.load(account) },
+            save: { try keychain.save($0, $1) },
+            delete: { _ in throw CodexAccountStoreError.keychain(errSecInteractionNotAllowed) },
+            renew: { _ in Self.renewed },
+            pause: Self.longWait,
+            jitter: { 1 })
+        _ = await renewal.supply(account: Self.account, allowingInteraction: false)
+        let removed: Void? = try? await renewal.remove(account: Self.account)
+        XCTAssertNil(removed)
+        let later = await renewal.supply(account: Self.account, allowingInteraction: false)
+        XCTAssertEqual(later, .found(Self.renewed))
+    }
+
+    /// A reader that asks once the unlink has returned finds nothing to renew,
+    /// so nothing it renews can re-create the item.
+    func testASupplyAfterAnUnlinkRenewsNothing() async {
+        let keychain = Keychain(holding: Self.credential())
+        let renewals = LockedValue(0)
+        let renewal = Self.renewal(keychain: keychain) { _ in
+            renewals.update { $0 += 1 }
+            return Self.renewed
+        }
+        try? await renewal.remove(account: Self.account)
+        let reading = await renewal.supply(account: Self.account, allowingInteraction: false)
+        XCTAssertEqual(reading, .missing)
+        XCTAssertEqual(renewals.load(), 0)
+        XCTAssertNil(keychain.items.load()[Self.account])
     }
 
     // MARK: - A token refused before it expired
@@ -470,7 +547,7 @@ final class CodexRenewalTests: XCTestCase {
         let filed = await renewal.fileBeforeQuitting(within: Self.quitBudget)
         XCTAssertTrue(filed)
         XCTAssertEqual(keychain.items.load()[Self.account], Self.renewed)
-        await renewal.forget(account: Self.account)
+        try? await renewal.remove(account: Self.account)
     }
 
     /// A renewal still at the token endpoint is waited for, so its reply is
