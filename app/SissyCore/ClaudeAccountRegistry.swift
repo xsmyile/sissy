@@ -45,7 +45,14 @@ actor ClaudeAccountRegistry {
     /// a switch that could not be undone after one of those.
     enum Failure: Error, Equatable {
         case notArchived
+        /// The account in one of the CLI's names could not be identified, or
+        /// the CLI has no name to write to.
         case activeAccountUnknown
+        /// One of the CLI's names could not be read, or holds bytes that are
+        /// not a credential blob.
+        case slotUnreadable
+        /// The CLI rewrote its credential while the switch was verifying it.
+        case slotChanged
         case keychain(Int32)
         /// The keychain could not be asked at all: locked, `security` would
         /// not start, or it did not answer in time.
@@ -217,12 +224,10 @@ actor ClaudeAccountRegistry {
         let names = slot.names()
         guard let primary = names.first else { throw .activeAccountUnknown }
         let before = try readAll(names)
-        guard await accountForEveryName(names, holding: before) else {
-            throw .activeAccountUnknown
-        }
+        try await accountForEveryName(names, holding: before)
         let credential = try archived(uuid)
         if ClaudeCredentialBlob.refreshHasExpired(credential, now: now()) { throw .needsLogin }
-        guard try readAll(names) == before else { throw .activeAccountUnknown }
+        guard try readAll(names) == before else { throw .slotChanged }
         let targets = names.filter { name in
             name == primary
                 || (before[name].map { ClaudeCredentialBlob.oauth(in: $0) != nil } ?? false)
@@ -237,24 +242,24 @@ actor ClaudeAccountRegistry {
     /// in them is one the archive already has, or is archived now. The name
     /// the CLI is reading was offered to the capture in front of this, so one
     /// still unaccounted for there is refused rather than asked about again.
-    /// Bytes that are not a JSON object cannot be merged into, and refuse too.
+    /// Bytes that are not a JSON object cannot be merged into, and refuse as
+    /// a slot that would not read.
     private func accountForEveryName(
         _ names: [ClaudeCLISlot.Name], holding before: Held
-    ) async -> Bool {
+    ) async throws(Failure) {
         let reading = names.first { name in
             before[name].map { ClaudeCredentialBlob.oauth(in: $0) != nil } ?? false
         }
         for name in names {
             guard let bytes = before[name] else { continue }
-            guard ClaudeCredentialBlob.object(bytes) != nil else { return false }
+            guard ClaudeCredentialBlob.object(bytes) != nil else { throw .slotUnreadable }
             guard ClaudeCredentialBlob.oauth(in: bytes) != nil, !isAccountedFor(bytes) else {
                 continue
             }
             guard name != reading, await file(credential: bytes, markActive: false) else {
-                return false
+                throw .activeAccountUnknown
             }
         }
-        return true
     }
 
     /// The archived credential for one account, or why there is none to use.
@@ -277,7 +282,7 @@ actor ClaudeAccountRegistry {
                 if let data = try slot.read(name) { read[name] = data }
             } catch {
                 sissyLog("sissy: could not read one of Claude Code's credential slots: \(error)")
-                throw name == .file ? .activeAccountUnknown : Self.keychainFailure(error)
+                throw name == .file ? .slotUnreadable : Self.keychainFailure(error)
             }
         }
         return read
@@ -295,7 +300,7 @@ actor ClaudeAccountRegistry {
         for name in targets {
             guard let merged = ClaudeCredentialBlob.merging(account: credential, into: before[name])
             else {
-                return restore(written, to: before) ? .activeAccountUnknown : .partialSwitch
+                return restore(written, to: before) ? .slotUnreadable : .partialSwitch
             }
             do {
                 try slot.write(name, merged)

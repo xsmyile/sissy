@@ -1610,6 +1610,14 @@ enum ClaudeAccountSwitchCopy {
             return
                 "Sissy could not tell which account Claude Code is signed in as, so it left the "
                 + "credential alone. Try again once it can reach Anthropic"
+        case .slotUnreadable:
+            return
+                "Sissy could not read one of Claude Code's saved sign-ins, so it changed nothing. "
+                + "Check that the .credentials.json beside its config can be read"
+        case .slotChanged:
+            return
+                "Claude Code renewed its sign-in while Sissy was switching, so it changed "
+                + "nothing. Try the switch again"
         case .keychain:
             return "The keychain would not accept the change, so the signed-in account is unchanged"
         case .keychainUnavailable:

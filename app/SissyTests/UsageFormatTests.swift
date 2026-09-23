@@ -658,7 +658,8 @@ final class UsageFormatTests: XCTestCase {
     func testEverySwitchFailureHasItsOwnSentence() {
         let failures: [ClaudeAccountRegistry.Failure] = [
             .notArchived, .activeAccountUnknown, .keychain(25), .keychainUnavailable,
-            .mirrorWrite, .partialSwitch, .needsLogin, .indexUnreadable,
+            .mirrorWrite, .partialSwitch, .needsLogin, .indexUnreadable, .slotUnreadable,
+            .slotChanged,
         ]
         let sentences = failures.map(ClaudeAccountSwitchCopy.failure)
 
@@ -672,5 +673,14 @@ final class UsageFormatTests: XCTestCase {
     func testAKeychainThatCannotBeReachedDoesNotSendTheUserToLogin() {
         XCTAssertFalse(ClaudeAccountSwitchCopy.failure(.keychainUnavailable).contains("/login"))
         XCTAssertFalse(ClaudeAccountSwitchCopy.failure(.mirrorWrite).contains("/login"))
+    }
+
+    /// A slot that would not read and a slot that moved under the switch are
+    /// not a network that is down, so neither names one as the remedy.
+    func testASlotFailureDoesNotBlameTheNetwork() {
+        for failure in [ClaudeAccountRegistry.Failure.slotUnreadable, .slotChanged] {
+            XCTAssertFalse(
+                ClaudeAccountSwitchCopy.failure(failure).contains("Anthropic"), "\(failure)")
+        }
     }
 }
