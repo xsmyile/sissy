@@ -268,6 +268,29 @@ final class CodexUsageSourceTests: XCTestCase {
         XCTAssertEqual(reads.load(), 2)
     }
 
+    /// The next poll reads the renewed token back from the keychain, and a
+    /// renewal keyed on the refused token alone would spend the grant again on
+    /// every poll for as long as OpenAI kept refusing it.
+    func testARenewedTokenRefusedAgainIsNotRenewedOnLaterPolls() async {
+        let held = LockedValue(Self.credential())
+        let renewals = LockedValue(0)
+        let source = CodexUsageSource(
+            account: "user-1", credentialSource: { _ in .found(held.load()) },
+            renewRefused: { _ in
+                renewals.update { $0 += 1 }
+                held.store(Self.renewedCredential())
+                return .found(Self.renewedCredential())
+            },
+            fetchSource: { _ in throw UsageRequestError.badStatus(401) })
+        for _ in 0..<Self.pollsAfterARefusedRenewal {
+            _ = await source.refreshOnce {}
+        }
+        XCTAssertEqual(source.currentSignals().limitsState, .sessionExpired)
+        XCTAssertEqual(renewals.load(), 1)
+    }
+
+    private static let pollsAfterARefusedRenewal = 3
+
     /// A renewal that could not reach OpenAI says nothing about the grant, so
     /// the row keeps its reading rather than asking for a new link.
     func testARefusedLinkedReadWhoseRenewalIsDeferredKeepsTheReading() async {
