@@ -1,5 +1,20 @@
 import Foundation
 
+/// What `SissyLogFile` writes through: a `FileHandle` in the app, and in the
+/// tests a handle that fails the way a real disk does.
+protocol SissyLogHandle: AnyObject {
+    func append(_ data: Data) throws
+    func offset() throws -> UInt64
+    func truncate(atOffset offset: UInt64) throws
+    func close() throws
+}
+
+extension FileHandle: SissyLogHandle {
+    func append(_ data: Data) throws {
+        try write(contentsOf: data)
+    }
+}
+
 /// The stderr log file, capped while it is being written to.
 ///
 /// The cap used to be checked when the handle was opened, which happens once
@@ -12,9 +27,9 @@ final class SissyLogFile: @unchecked Sendable {
     private let url: URL
     private let rotatedURL: URL
     private let maxBytes: UInt64
-    private let open: @Sendable (URL) throws -> FileHandle
+    private let open: @Sendable (URL) throws -> any SissyLogHandle
     private let lock = NSLock()
-    private var handle: FileHandle?
+    private var handle: (any SissyLogHandle)?
     private var written: UInt64 = 0
     private var failed = 0
 
@@ -24,7 +39,7 @@ final class SissyLogFile: @unchecked Sendable {
         directory: URL,
         name: String = "sissy.err.log",
         maxBytes: UInt64 = 2 * 1024 * 1024,
-        open: @escaping @Sendable (URL) throws -> FileHandle = SissyLogFile.openForAppending
+        open: @escaping @Sendable (URL) throws -> any SissyLogHandle = SissyLogFile.openForAppending
     ) {
         let url = directory.appendingPathComponent(name)
         self.url = url
@@ -66,7 +81,7 @@ final class SissyLogFile: @unchecked Sendable {
             handle = fresh
         }
         do {
-            try handle.write(contentsOf: data)
+            try handle.append(data)
             written += UInt64(data.count)
         } catch {
             failed += 1
@@ -91,7 +106,7 @@ final class SissyLogFile: @unchecked Sendable {
     /// The open handle, opening it on first use. `written` starts from what is
     /// already on disk, which is how a log the last run left over the cap is
     /// rotated by the first line of this one rather than grown further.
-    private func opened() -> FileHandle? {
+    private func opened() -> (any SissyLogHandle)? {
         if let handle { return handle }
         guard let opened = try? open(url) else { return nil }
         written = (try? opened.offset()) ?? 0
