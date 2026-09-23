@@ -53,7 +53,8 @@ final class SissyHTTPTests: XCTestCase {
     func testACrossOriginRedirectLosesItsCredentials() throws {
         let original = try XCTUnwrap(URL(string: "https://gitlab.example.com/api/v4/user"))
         let target = try XCTUnwrap(URL(string: "https://sso.example.net/login"))
-        let followed = SissyHTTP.redirected(Self.credentialed(target), from: original)
+        let followed = try XCTUnwrap(
+            SissyHTTP.redirected(Self.credentialed(target), from: URLRequest(url: original)))
         for header in ["Authorization", "Cookie", "PRIVATE-TOKEN"] {
             XCTAssertNil(followed.value(forHTTPHeaderField: header), "\(header) reached another host")
         }
@@ -63,7 +64,8 @@ final class SissyHTTPTests: XCTestCase {
     func testASameOriginRedirectKeepsItsCredentials() throws {
         let original = try XCTUnwrap(URL(string: "https://gitlab.example.com/api/v4/user"))
         let target = try XCTUnwrap(URL(string: "https://GITLAB.example.com:443/api/v4/users/1"))
-        let followed = SissyHTTP.redirected(Self.credentialed(target), from: original)
+        let followed = try XCTUnwrap(
+            SissyHTTP.redirected(Self.credentialed(target), from: URLRequest(url: original)))
         XCTAssertEqual(followed.value(forHTTPHeaderField: "PRIVATE-TOKEN"), "token")
         XCTAssertEqual(followed.value(forHTTPHeaderField: "Authorization"), "Bearer token")
     }
@@ -71,14 +73,16 @@ final class SissyHTTPTests: XCTestCase {
     func testADowngradeToPlainHTTPLosesItsCredentials() throws {
         let original = try XCTUnwrap(URL(string: "https://gitlab.example.com/api/v4/user"))
         let target = try XCTUnwrap(URL(string: "http://gitlab.example.com/api/v4/user"))
-        let followed = SissyHTTP.redirected(Self.credentialed(target), from: original)
+        let followed = try XCTUnwrap(
+            SissyHTTP.redirected(Self.credentialed(target), from: URLRequest(url: original)))
         XCTAssertNil(followed.value(forHTTPHeaderField: "Authorization"))
     }
 
     func testAnotherPortIsAnotherOrigin() throws {
         let original = try XCTUnwrap(URL(string: "https://gitlab.example.com/api/v4/user"))
         let target = try XCTUnwrap(URL(string: "https://gitlab.example.com:8443/api/v4/user"))
-        let followed = SissyHTTP.redirected(Self.credentialed(target), from: original)
+        let followed = try XCTUnwrap(
+            SissyHTTP.redirected(Self.credentialed(target), from: URLRequest(url: original)))
         XCTAssertNil(followed.value(forHTTPHeaderField: "Cookie"))
     }
 
@@ -96,6 +100,57 @@ final class SissyHTTPTests: XCTestCase {
         let request = try XCTUnwrap(followed)
         XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
         XCTAssertEqual(request.url, target)
+    }
+
+    func testACrossOriginRedirectOfARequestWithABodyIsRefused() throws {
+        let original = try XCTUnwrap(URL(string: "https://auth.openai.com/oauth/token"))
+        let target = try XCTUnwrap(URL(string: "https://elsewhere.example.net/oauth/token"))
+        var posted = URLRequest(url: original)
+        posted.httpMethod = "POST"
+        posted.httpBody = Data("grant_type=refresh_token&refresh_token=value".utf8)
+        var forwarded = URLRequest(url: target)
+        forwarded.httpMethod = "POST"
+        forwarded.httpBody = posted.httpBody
+        XCTAssertNil(SissyHTTP.redirected(forwarded, from: posted))
+    }
+
+    func testACrossOriginRedirectOfAPostIsRefusedEvenWhenTheBodyWasDropped() throws {
+        let original = try XCTUnwrap(URL(string: "https://api.github.com/graphql"))
+        let target = try XCTUnwrap(URL(string: "https://proxy.example.net/graphql"))
+        var posted = URLRequest(url: original)
+        posted.httpMethod = "POST"
+        XCTAssertNil(SissyHTTP.redirected(URLRequest(url: target), from: posted))
+    }
+
+    func testASameOriginRedirectOfAPostIsFollowed() throws {
+        let original = try XCTUnwrap(URL(string: "https://auth.openai.com/oauth/token"))
+        let target = try XCTUnwrap(URL(string: "https://auth.openai.com/v2/oauth/token"))
+        var posted = URLRequest(url: original)
+        posted.httpMethod = "POST"
+        posted.httpBody = Data("grant_type=authorization_code".utf8)
+        var forwarded = URLRequest(url: target)
+        forwarded.httpMethod = "POST"
+        forwarded.httpBody = posted.httpBody
+        XCTAssertEqual(SissyHTTP.redirected(forwarded, from: posted)?.url, target)
+    }
+
+    func testTheSessionsDelegateRefusesAPostRedirectedOffItsOrigin() async throws {
+        let original = try XCTUnwrap(URL(string: "https://auth.openai.com/oauth/token"))
+        let target = try XCTUnwrap(URL(string: "https://elsewhere.example.net/oauth/token"))
+        var posted = URLRequest(url: original)
+        posted.httpMethod = "POST"
+        posted.httpBody = Data("code=value".utf8)
+        let task = SissyHTTP.session.dataTask(with: posted)
+        defer { task.cancel() }
+        let response = try XCTUnwrap(
+            HTTPURLResponse(url: original, statusCode: 307, httpVersion: nil, headerFields: nil))
+        let delegate = try XCTUnwrap(SissyHTTP.session.delegate as? SissyHTTP.RedirectGuard)
+        var forwarded = URLRequest(url: target)
+        forwarded.httpMethod = "POST"
+        forwarded.httpBody = posted.httpBody
+        let followed = await delegate.urlSession(
+            SissyHTTP.session, task: task, willPerformHTTPRedirection: response, newRequest: forwarded)
+        XCTAssertNil(followed)
     }
 
     private static func credentialed(_ url: URL) -> URLRequest {
