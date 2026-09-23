@@ -30,7 +30,7 @@ struct ProviderHome: Sendable, Equatable {
     var claudeProfileURL: URL {
         let profile = home.appendingPathComponent(AccountDefaults.claudeProfileName)
         if FileManager.default.fileExists(atPath: profile.path) { return profile }
-        guard home == AccountDefaults.claudeHome else {
+        guard AccountDefaults.isDefaultClaudeHome(home) else {
             return home.appendingPathComponent(AccountDefaults.claudeLegacyProfileName)
         }
         return URL(fileURLWithPath: NSHomeDirectory())
@@ -69,6 +69,14 @@ enum AccountDefaults {
         let configured = ProcessInfo.processInfo.environment[claudeConfigDirEnvVar]
         if let configured, !configured.isEmpty { return URL(fileURLWithPath: configured) }
         return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude")
+    }
+
+    /// Whether a directory is the Claude Code config home a `claude` started
+    /// with no `CLAUDE_CONFIG_DIR` uses, compared on standardized paths so a
+    /// trailing slash, which a URL gains or not depending on whether the
+    /// directory existed when it was built, cannot change the answer.
+    static func isDefaultClaudeHome(_ url: URL) -> Bool {
+        url.standardizedFileURL.path == claudeHome.standardizedFileURL.path
     }
 
     /// Codex's home, deferring to `CODEX_HOME` on the same grounds.
