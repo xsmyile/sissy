@@ -53,6 +53,35 @@ enum ForgeConnectCopy {
     static let connectFailed =
         "The keychain would not accept the token, so nothing was connected. The token is still in the field. Try again."
 
+    /// A token Sissy holds for a forge no connection names, titled by the
+    /// forge and address its keychain item is filed under.
+    static func orphanTitle(_ id: String) -> String {
+        let parts = id.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let kind = ForgeKind(rawValue: parts[0]) else { return id }
+        return "\(UsageFormat.forgeName(kind)) · \(parts[1])"
+    }
+
+    static let orphanSubtitle = "A token with no connection. Nothing reads it."
+    static let removeTokenItem = "Remove Token…"
+    static let removeTokenConfirm = "Remove Token"
+    static let removeTokenMessage =
+        "Sissy deletes the token it kept for this forge. Nothing about gh, glab or the forge itself changes."
+
+    static func removeTokenTitle(_ id: String) -> String {
+        "Remove the token for \(orphanTitle(id))?"
+    }
+
+    static func orphanMenu(_ id: String) -> String {
+        "Actions for the token kept for \(orphanTitle(id))"
+    }
+
+    static let orphanMenuHelp = "Remove this token"
+
+    /// Said over the list once an unreadable connection index has been set
+    /// aside, so the connections that vanished with it are explained.
+    static let indexSetAside =
+        "The list of connected forges could not be read, so Sissy kept it aside as \(ForgeConnectionIndex.setAsidePrefix)….json. The tokens it named are listed below without a connection."
+
     /// What a detected candidate offers, naming the CLI it came from.
     ///
     /// The CLI is named because the token is that CLI's: someone who signs out
@@ -183,6 +212,9 @@ struct ForgeSettingsView: View {
     /// user cannot read back and never typed, so the click is asked about
     /// first.
     @State private var disconnecting: ForgeConnection?
+    /// The orphaned token `Remove Token…` was chosen for, asked about first
+    /// for the reason a disconnect is.
+    @State private var removingToken: String?
     /// What the connect sheet is up for, and nil while it is not.
     @State private var connecting: ForgeConnectRequest?
 
@@ -192,6 +224,9 @@ struct ForgeSettingsView: View {
                 heading
                 ForEach(model.engine.forgeConnections) { connection in
                     row(connection)
+                }
+                ForEach(model.engine.orphanedForgeTokens, id: \.self) { id in
+                    orphanRow(id)
                 }
                 CredentialAddRow(ForgeConnectCopy.connect) { open(.new) }
                     .disabled(model.engine.connectingForge != nil)
@@ -219,6 +254,43 @@ struct ForgeSettingsView: View {
         } message: { _ in
             Text(ForgeConnectCopy.unlinkMessage)
         }
+        .confirmationDialog(
+            removingToken.map(ForgeConnectCopy.removeTokenTitle) ?? "",
+            isPresented: Binding(
+                get: { removingToken != nil }, set: { if !$0 { removingToken = nil } }),
+            presenting: removingToken
+        ) { id in
+            Button(ForgeConnectCopy.removeTokenConfirm, role: .destructive) {
+                model.engine.removeOrphanedForgeToken(id: id)
+            }
+            Button(ForgeConnectCopy.cancel, role: .cancel) {}
+        } message: { _ in
+            Text(ForgeConnectCopy.removeTokenMessage)
+        }
+    }
+
+    /// A token Sissy holds that no connection names, which an interrupted
+    /// connect or disconnect, or an index set aside, leaves behind. It is on
+    /// the list so it can be removed: before it was, nothing on any surface
+    /// said the keychain still held it.
+    private func orphanRow(_ id: String) -> some View {
+        CredentialRow(
+            title: ForgeConnectCopy.orphanTitle(id),
+            subtitle: ForgeConnectCopy.orphanSubtitle
+        ) {
+            CredentialDisc(tint: .secondary) {
+                ForgeMark(host: id)
+            }
+        } actions: {
+            CredentialRowMenu(
+                label: ForgeConnectCopy.orphanMenu(id),
+                help: ForgeConnectCopy.orphanMenuHelp
+            ) {
+                Button(ForgeConnectCopy.removeTokenItem, role: .destructive) {
+                    removingToken = id
+                }
+            }
+        }
     }
 
     /// Raises the connect sheet, clearing what the last attempt failed with on
@@ -244,6 +316,12 @@ struct ForgeSettingsView: View {
             Text(ForgeConnectCopy.caption)
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            if model.engine.forgeIndexSetAside {
+                Text(ForgeConnectCopy.indexSetAside)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

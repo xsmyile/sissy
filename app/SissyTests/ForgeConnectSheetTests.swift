@@ -78,4 +78,8 @@ final class ForgeConnectSheetTests: XCTestCase {
     func testTheAdditionAndAReplacementAreDifferentSheets() {
         XCTAssertNotEqual(ForgeConnectRequest.new.id, ForgeConnectRequest(replacing: Self.gitHub).id)
     }
+
+    func testAnOrphanedTokenIsTitledByItsForgeAndAddress() {
+        XCTAssertEqual(ForgeConnectCopy.orphanTitle(Self.gitLab.id), "GitLab · gitlab.example.com")
+    }
 }

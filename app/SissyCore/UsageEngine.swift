@@ -1591,6 +1591,34 @@ actor UsageEngine {
         (try? forgeIndex.loadSettingAside()) ?? []
     }
 
+    /// Whether an unreadable connection index has been set aside, which
+    /// Settings says so the connections that vanished with it are explained.
+    nonisolated var forgeIndexSetAside: Bool { forgeIndex.hasSetAside() }
+
+    /// The tokens Sissy holds for a forge the index does not name.
+    ///
+    /// Attributes only, so it raises no dialog. These are what an interrupted
+    /// connect or disconnect, or an index set aside, leaves in the keychain;
+    /// listing them is what gives the user a way to remove a token nothing
+    /// reads any more.
+    nonisolated var orphanedForgeTokens: [String] {
+        guard let connected = try? forgeIndex.loadSettingAside() else { return [] }
+        return ForgeConnectionIndex.orphans(
+            stored: ForgeTokenStore.storedConnections(), connected: connected)
+    }
+
+    /// Deletes a token no connection names. One the index has come to name
+    /// since the list was drawn is left alone: removing it is `Disconnect…`.
+    /// A delete that fails leaves the row in the list, which is what says so.
+    func removeOrphanedForgeToken(id: String) async {
+        guard orphanedForgeTokens.contains(id) else { return }
+        do {
+            try ForgeTokenStore.delete(connection: id)
+        } catch {
+            sissyLog("sissy: could not remove the orphaned forge token \(id) (\(error))")
+        }
+    }
+
     /// The tokens `gh` and `glab` already hold on this Mac.
     ///
     /// Read on demand from the control that offers them and never at launch or
@@ -1629,7 +1657,8 @@ actor UsageEngine {
     /// Forgets a forge: the connection, its token, and the reading on the row.
     ///
     /// The record goes first and the token second, so an interrupted removal
-    /// leaves a token nothing reads rather than a row nothing can answer for.
+    /// leaves a token nothing reads rather than a row nothing can answer for,
+    /// and that token is listed in Settings as one without a connection.
     func disconnectForge(id: String) async {
         do {
             try forgeIndex.forget(id: id)
