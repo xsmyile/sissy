@@ -49,9 +49,10 @@ actor ClaudeWebSource: SourceSignals {
     private let backoff: LimitsBackoffSlot?
 
     private var retired = false
-    /// What the link recorded, which a `stop()` must not drop: the derived one
-    /// is a cache and this is an answer.
-    private let linkedOrganization: String?
+    /// What the link recorded, which neither a `stop()` nor a refusal may
+    /// drop: the derived one is a cache and this is an answer. Only a link
+    /// made again replaces it, through `relink(organization:onRefresh:)`.
+    private var linkedOrganization: String?
     private var cached: String?
     /// Organization the windows belong to, kept so the ordinary poll is one
     /// request rather than two. Dropped whenever the session is.
@@ -172,6 +173,28 @@ actor ClaudeWebSource: SourceSignals {
         firstRequest?.cancel()
         pollTask = nil
         firstRequest = nil
+    }
+
+    /// Points this reader at a link made again, and reads it at once.
+    ///
+    /// Linking an account that already has a reader keeps that reader, which
+    /// is an actor with a poll loop the engine holds, so everything the old
+    /// link decided has to be replaced here: the session it held, the
+    /// organization it recorded, the wait a refusal of the old session
+    /// earned and the notice it left. Without it the new organization never
+    /// took effect, a healthy reader went on spending the old session, and a
+    /// reader whose session had ended stayed ended, because the refresh
+    /// button deliberately skips that state.
+    func relink(
+        organization: String?,
+        onRefresh: @Sendable @escaping () async -> Void
+    ) async {
+        guard !retired else { return }
+        stop()
+        linkedOrganization = organization
+        self.organization = organization
+        await backoff?.record(nil)
+        await refresh(onRefresh: onRefresh)
     }
 
     /// Re-reads the session with the dialog allowed and polls at once,
