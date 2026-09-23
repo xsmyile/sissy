@@ -102,10 +102,6 @@ actor ClaudeAccountRegistry {
     /// it unchanged costs nothing. Only a token Sissy has not already filed
     /// buys a request.
     private var lastSeenToken: String?
-    /// Whether the keychain has been asked which archived accounts it holds.
-    /// Deferred to the first capture rather than asked at construction,
-    /// which runs on whatever thread builds the engine.
-    private var reconciled = false
     /// Whether a `captureActive()` is running, suspended on the vendor or not.
     private var capturing = false
     nonisolated private let published = LockedValue(Snapshot())
@@ -159,10 +155,12 @@ actor ClaudeAccountRegistry {
     /// outlived every `/logout`. A slot that cannot be read changes nothing:
     /// it says nothing about who is signed in.
     ///
-    /// Every poll also asks whether an archived refresh token has died since
-    /// the last publish. Nothing in the slot moves when it does, so returning
-    /// on an unchanged token left `Use in CLI` on an account whose click
-    /// could only fail.
+    /// Every poll also asks the keychain again which archived accounts it
+    /// holds and whether an archived refresh token has died since the last
+    /// publish. Nothing in the slot moves when either changes, so returning
+    /// on an unchanged token left `Use in CLI` on an account whose secret was
+    /// removed or had expired, and kept it off one whose lookup failed once
+    /// at launch. It costs one `security` call per archived account a poll.
     ///
     /// One at a time. A capture that arrives while another is waiting on the
     /// vendor answers false at once rather than identifying the same token
@@ -180,12 +178,7 @@ actor ClaudeAccountRegistry {
     @discardableResult
     private func refreshActive() async -> Bool {
         let before = published.load()
-        if !reconciled {
-            reconciled = true
-            publishIndex()
-        } else {
-            republishIfExpiryPassed()
-        }
+        publishIndex()
         let current: Data?
         do {
             current = try slot.current()?.data
@@ -501,16 +494,6 @@ actor ClaudeAccountRegistry {
 
     private static func expired(_ index: ClaudeAccountStore.Index, now: Date) -> Set<String> {
         Set((index.refreshExpiries ?? [:]).filter { $0.value <= now }.keys)
-    }
-
-    /// Publishes again when an archived refresh token has died since the last
-    /// publish. Costs a read of the index, and the keychain only on the poll
-    /// that finds one.
-    private func republishIfExpiryPassed() {
-        guard let index = Self.loadIndex(store),
-            Self.expired(index, now: now()) != published.load().needsLogin
-        else { return }
-        publish(index)
     }
 
     private func setActive(_ uuid: String?) {
