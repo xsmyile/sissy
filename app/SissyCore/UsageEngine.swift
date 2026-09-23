@@ -1415,18 +1415,41 @@ actor UsageEngine {
         // as the system is concerned, and a linked account polling OpenAI for
         // a row that is not on the panel is exactly that.
         let stored = meteringCodex ? Set(CodexAccountStore.storedAccounts()) : []
-        let existing = codexSources.load()
-        for source in existing where source.account.map({ !stored.contains($0) }) ?? false {
+        let links = codexLinks.load()
+        let split = Self.partitionCodexSources(codexSources.load(), stored: stored, links: links)
+        for source in split.retired {
             await source.retire()
         }
-        let kept = existing.filter { source in
-            source.account.map { stored.contains($0) } ?? true
-        }
-        let links = codexLinks.load()
+        let kept = split.kept
         let added = stored.subtracting(kept.compactMap(\.account))
             .sorted()
             .map { Self.linkedCodexSource(id: $0, links: links, backoff: limitsBackoff) }
         codexSources.store(kept + added)
+    }
+
+    /// Which readers a rebuild keeps and which it retires.
+    ///
+    /// The CLI's own reader is always kept. A linked one is kept while its
+    /// credential is stored and it still names the workspace its link does:
+    /// the same login linked again for another workspace keeps its key, and a
+    /// reader kept on the key alone named the old workspace beside readings
+    /// asked for the new one.
+    static func partitionCodexSources(
+        _ existing: [CodexUsageSource], stored: Set<String>,
+        links: [String: CodexAccountLink]
+    ) -> (kept: [CodexUsageSource], retired: [CodexUsageSource]) {
+        var kept: [CodexUsageSource] = []
+        var retired: [CodexUsageSource] = []
+        for source in existing {
+            guard let account = source.account else {
+                kept.append(source)
+                continue
+            }
+            let current =
+                stored.contains(account) && source.workspace == links[account]?.workspace?.name
+            if current { kept.append(source) } else { retired.append(source) }
+        }
+        return (kept, retired)
     }
 
     /// Starts every Codex usage reader.
