@@ -223,6 +223,8 @@ actor LocalUsageProvider: UsageProvider {
     nonisolated private let signals: SourceSignals
 
     private let adapter: any SourceAdapter
+    /// The adapter's root through `resolvedRoot`, so the walk, the watcher
+    /// and the snapshot's hash all name the tree FSEvents reports.
     private let root: URL
     private let watcherLabel: String
     private let retainDays: Int
@@ -401,6 +403,23 @@ actor LocalUsageProvider: UsageProvider {
 
     private static let secondsPerDay: TimeInterval = 86_400
 
+    /// `root` with every symlink along it resolved, or `root` as configured
+    /// when it does not exist yet.
+    ///
+    /// `realpath(3)` rather than `resolvingSymlinksInPath()`, which strips a
+    /// leading `/private` and so names a path FSEvents never reports. The
+    /// resolution is what the tail walks, watches and hashes: measured
+    /// 2026-09-23, `FileManager.enumerator(at:)` on a root that is itself a
+    /// symlink to a directory yields no entries, with or without a trailing
+    /// slash, while FSEvents reports changes under the link's target. A root
+    /// moved to another disk and linked back therefore read as a tree with no
+    /// session logs in it.
+    static func resolvedRoot(_ root: URL) -> URL {
+        guard let resolved = realpath(root.path, nil) else { return root }
+        defer { free(resolved) }
+        return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
+    }
+
     /// Files consumed between cooperative yields. Without them the actor pins
     /// one Swift concurrency thread for a whole scan, and the check after the
     /// yield is what lets a teardown interrupt one.
@@ -432,7 +451,7 @@ actor LocalUsageProvider: UsageProvider {
         let descriptor = adapter.descriptor
         self.adapter = adapter
         self.id = descriptor.id
-        self.root = descriptor.root
+        self.root = Self.resolvedRoot(descriptor.root)
         self.watcherLabel = descriptor.watcherLabel
         self.signals = descriptor.signals
         self.retainDays = retainDays
