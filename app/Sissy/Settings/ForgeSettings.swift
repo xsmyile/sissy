@@ -128,6 +128,12 @@ enum ForgeConnectCopy {
 
     static let orphanMenuHelp = "Remove this token"
 
+    /// Said over the list while the connection index cannot be read. It is
+    /// left in place rather than set aside, so nothing is listed until it
+    /// reads again.
+    static let indexUnreadable =
+        "The list of connected forges is there but could not be read, so none are shown. Sissy has not touched it. Check the permissions on \(ForgeConnectionIndex.fileName)."
+
     /// Said over the list once an unreadable connection index has been set
     /// aside, so the connections that vanished with it are explained.
     static let indexSetAside =
@@ -367,7 +373,12 @@ struct ForgeSettingsView: View {
             Text(ForgeConnectCopy.caption)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            if model.engine.forgeIndexSetAside {
+            if model.engine.forgeIndexUnreadable {
+                Text(ForgeConnectCopy.indexUnreadable)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if model.engine.forgeIndexSetAside {
                 Text(ForgeConnectCopy.indexSetAside)
                     .font(.callout)
                     .foregroundStyle(.orange)

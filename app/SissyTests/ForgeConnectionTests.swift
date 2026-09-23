@@ -219,6 +219,74 @@ final class ForgeConnectionTests: XCTestCase {
             ["gitlab:old.example.com"])
     }
 
+    /// A keychain standing in for the forge token items: a list of ids and a
+    /// delete that records what it was asked to remove.
+    private final class TokenShelf: @unchecked Sendable {
+        private let lock = NSLock()
+        private var ids: [String]
+        private var removed: [String] = []
+
+        init(_ ids: [String]) { self.ids = ids }
+
+        var stored: [String] { lock.withLock { ids } }
+        var deleted: [String] { lock.withLock { removed } }
+
+        func delete(_ id: String) {
+            lock.withLock {
+                removed.append(id)
+                ids.removeAll { $0 == id }
+            }
+        }
+    }
+
+    private func reconciler(_ shelf: TokenShelf) -> ForgeTokenReconciler {
+        ForgeTokenReconciler(
+            index: index, storedTokens: { shelf.stored }, deleteToken: { shelf.delete($0) })
+    }
+
+    private static let orphanID = "gitlab:old.example.com"
+
+    func testTheStateListsTheConnectionsAndTheTokensNoneOfThemName() throws {
+        try index.remember(ForgeConnection.gitHub())
+        let shelf = TokenShelf([ForgeConnection.gitHub().id, Self.orphanID])
+        let state = reconciler(shelf).state()
+        XCTAssertEqual(state.connections, [ForgeConnection.gitHub()])
+        XCTAssertEqual(state.orphanedTokens, [Self.orphanID])
+        XCTAssertFalse(state.unreadable)
+    }
+
+    /// An index that cannot be read names nothing, so no token can be called
+    /// an orphan against it; the state says it is unreadable instead, which is
+    /// what Settings warns with.
+    func testAnUnreadableIndexListsNoOrphansAndSaysSo() throws {
+        try FileManager.default.createDirectory(at: index.url, withIntermediateDirectories: false)
+        let state = reconciler(TokenShelf([Self.orphanID])).state()
+        XCTAssertTrue(state.unreadable)
+        XCTAssertEqual(state.orphanedTokens, [])
+    }
+
+    func testAnOrphanedTokenIsRemoved() throws {
+        let shelf = TokenShelf([Self.orphanID])
+        XCTAssertTrue(try reconciler(shelf).removeOrphan(id: Self.orphanID))
+        XCTAssertEqual(shelf.deleted, [Self.orphanID])
+    }
+
+    /// The list was drawn before a connect named this id: removing its token
+    /// now is a disconnect, and the row would be left with nothing to read.
+    func testATokenTheIndexHasComeToNameIsLeftAlone() throws {
+        let shelf = TokenShelf([Self.gitLab.id])
+        try index.remember(Self.gitLab)
+        XCTAssertFalse(try reconciler(shelf).removeOrphan(id: Self.gitLab.id))
+        XCTAssertEqual(shelf.deleted, [])
+    }
+
+    func testNothingIsRemovedWhileTheIndexCannotBeRead() throws {
+        try FileManager.default.createDirectory(at: index.url, withIntermediateDirectories: false)
+        let shelf = TokenShelf([Self.orphanID])
+        XCTAssertFalse(try reconciler(shelf).removeOrphan(id: Self.orphanID))
+        XCTAssertEqual(shelf.deleted, [])
+    }
+
     // MARK: The probe
 
     private final class Effects: @unchecked Sendable {

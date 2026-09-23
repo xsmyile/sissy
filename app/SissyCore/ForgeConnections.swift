@@ -332,6 +332,58 @@ struct ForgeConnectionIndex: Sendable {
     }
 }
 
+/// What the Forge tab lists, read in one pass so a token is never called an
+/// orphan against a different reading of the index than the list beside it.
+struct ForgeIndexState: Sendable, Equatable {
+    var connections: [ForgeConnection] = []
+    /// Tokens filed under a connection the index does not name. Empty while
+    /// the index cannot be read, since nothing can be told apart from it.
+    var orphanedTokens: [String] = []
+    /// An index that did not decode has been set aside beside this one.
+    var setAside = false
+    /// The index is there and would not be read, so nothing is listed and
+    /// nothing may be written until it can.
+    var unreadable = false
+}
+
+/// The index held against the tokens filed for it.
+///
+/// It is what gives a token nothing names a way out of the keychain: an
+/// interrupted connect or disconnect, or an index set aside, leaves one, and
+/// before this was listed no surface said the keychain still held it. The
+/// token effects are closures so the rules can be held without a keychain.
+struct ForgeTokenReconciler: Sendable {
+    let index: ForgeConnectionIndex
+    let storedTokens: @Sendable () -> [String]
+    let deleteToken: @Sendable (String) throws -> Void
+
+    /// One load of the index, setting aside one that does not decode, and one
+    /// listing of the tokens against it.
+    func state() -> ForgeIndexState {
+        let connections: [ForgeConnection]
+        do {
+            connections = try index.loadSettingAside()
+        } catch {
+            return ForgeIndexState(setAside: index.hasSetAside(), unreadable: true)
+        }
+        return ForgeIndexState(
+            connections: connections,
+            orphanedTokens: ForgeConnectionIndex.orphans(stored: storedTokens(), connected: connections),
+            setAside: index.hasSetAside())
+    }
+
+    /// Deletes a token no connection names, answering whether it did.
+    ///
+    /// Re-read rather than taken from the list the user clicked in: one the
+    /// index has come to name since is left alone, because removing it is a
+    /// disconnect, and so is every token while the index cannot be read.
+    func removeOrphan(id: String) throws -> Bool {
+        guard state().orphanedTokens.contains(id) else { return false }
+        try deleteToken(id)
+        return true
+    }
+}
+
 /// Files a forge connection, but only for a token the forge accepts.
 ///
 /// **The token is read with before it is kept.** A connect used to file

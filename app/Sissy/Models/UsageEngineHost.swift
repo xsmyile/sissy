@@ -458,9 +458,11 @@ final class UsageEngineHost {
     /// Settings never lists a token as orphaned against a stale list of the
     /// connections that name it.
     private func noteForgeConnections(_ engine: UsageEngine) {
-        forgeConnections = engine.forgeConnections
-        orphanedForgeTokens = engine.orphanedForgeTokens
-        forgeIndexSetAside = engine.forgeIndexSetAside
+        let state = engine.forgeIndexState()
+        forgeConnections = state.connections
+        orphanedForgeTokens = state.orphanedTokens
+        forgeIndexSetAside = state.setAside
+        forgeIndexUnreadable = state.unreadable
     }
 
     /// Opens OpenAI's own login and links whatever account it produces.
@@ -553,6 +555,9 @@ final class UsageEngineHost {
     private(set) var orphanedForgeTokens: [String] = []
     /// Whether an unreadable connection index was set aside.
     private(set) var forgeIndexSetAside = false
+    /// Whether the connection index is there and would not be read, which
+    /// Settings says because it lists nothing and adds nothing meanwhile.
+    private(set) var forgeIndexUnreadable = false
     /// Set while a connection is being filed, so the control that started it
     /// can say so: it is a keychain write plus the first read of two counters.
     private(set) var connectingForge: String?
