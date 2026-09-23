@@ -254,6 +254,20 @@ enum ClaudeAccountLinkCopy {
     }
 }
 
+/// What Settings says when Claude Code has signed in under a config home
+/// Sissy does not read.
+///
+/// It names the variable, because that is what the user set and will
+/// recognise, and the folder Sissy does read, because that is what they can
+/// do about it: sign in there, or accept that the other home goes unmetered.
+enum ClaudeUnsupportedHomesCopy {
+    static func message(reading home: URL) -> String {
+        let path = (home.path as NSString).abbreviatingWithTildeInPath
+        return "Claude Code has a sign-in under another config folder. Sissy does not follow "
+            + "CLAUDE_CONFIG_DIR and reads only \(path), so that account's limits are not shown."
+    }
+}
+
 /// How one linked account is named in the list.
 ///
 /// A pure function of the account, for the reason `ProviderRowSnapshot` is one:
@@ -367,7 +381,10 @@ struct ProvidersSettingsView: View {
         }
         // The readiness poll stops once the scan is warm, so a window opened
         // afterwards would render whatever the last tick left behind.
-        .task { model.engine.refreshProviders() }
+        .task {
+            model.engine.refreshProviders()
+            model.engine.refreshUnsupportedClaudeHomes()
+        }
     }
 
     /// Whether Sissy reads each vendor's own status page.
@@ -534,6 +551,9 @@ struct ProvidersSettingsView: View {
     @ViewBuilder
     private var linkedAccounts: some View {
         Group {
+            if !model.engine.unsupportedClaudeHomes.isEmpty {
+                unsupportedHomes
+            }
             if let why = model.engine.claudeWebLinkFailure {
                 failure(ClaudeAccountLinkCopy.failure(why))
             }
@@ -545,6 +565,18 @@ struct ProvidersSettingsView: View {
             }
             CredentialAddRow(ClaudeAccountLinkCopy.addTitle) { model.engine.addClaudeAccount() }
         }
+    }
+
+    /// The notice that a `claude` is signed in under a home Sissy does not
+    /// read. A warning rather than a failure: nothing Sissy did went wrong,
+    /// and the row is there so a missing account has an explanation.
+    private var unsupportedHomes: some View {
+        Label(
+            ClaudeUnsupportedHomesCopy.message(reading: model.engine.claudeConfigHome),
+            systemImage: "info.circle"
+        )
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// What the last attempt to link failed with, on a row of its own now that

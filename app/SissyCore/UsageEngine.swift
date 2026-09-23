@@ -920,6 +920,17 @@ actor UsageEngine {
             archived: claudeAccounts.currentSnapshot().accounts)
     }
 
+    /// Claude Code credentials filed for config homes this engine does not
+    /// read, by keychain service name. Nonisolated and blocking, because it
+    /// is one keychain query and the caller runs it off the main actor.
+    nonisolated func unsupportedClaudeHomes() -> [String] {
+        ClaudeUnsupportedHomes.scan(reading: claudeHome.home)
+    }
+
+    /// The Claude Code config home this engine reads, for the notice that
+    /// names it.
+    nonisolated var claudeConfigHome: URL { claudeHome.home }
+
     /// What a user pressing refresh on one provider reaches.
     ///
     /// Deliberately one door with two behaviours behind it, because the
