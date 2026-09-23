@@ -126,11 +126,11 @@ final class UsageEngineHost {
     func start(isLaunch: Bool = true) {
         guard engine == nil else { return }
         // A `server.json` that will not parse is not a reason to meter
-        // nothing: `load` overlays what it can read onto the defaults, and
-        // an unreadable file leaves the defaults, which are what a fresh
-        // install runs on anyway.
-        let config = (try? ServerConfig.load()) ?? .defaults
-        let engine = UsageEngine(config: config)
+        // nothing: the run takes the defaults, which are what a fresh install
+        // runs on anyway, and the engine is told not to save them over it.
+        let loaded = ServerConfig.loadForRun()
+        let config = loaded.config
+        let engine = UsageEngine(config: config, configIsWritable: loaded.isWritable)
         self.engine = engine
         linkedClaudeAccounts = engine.linkedClaudeAccounts
         linkedCodexAccounts = engine.linkedCodexAccounts

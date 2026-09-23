@@ -14,6 +14,10 @@ actor UsageEngine {
     let aggregator: UsageAggregator
 
     private let configURL: URL
+    /// False when `server.json` was there at launch and would not parse, so
+    /// this run's changes stay in memory rather than replacing the user's
+    /// file with the defaults they were made on top of.
+    private let configIsWritable: Bool
     /// Where the archive lives, which is beside the config that named the
     /// trees it was read from — the rule the snapshots already follow.
     private let stateDir: URL
@@ -235,6 +239,7 @@ actor UsageEngine {
     init(
         config: ServerConfig,
         configURL: URL = ServerConfig.defaultURL,
+        configIsWritable: Bool = true,
         limitsProbe: ClaudeLimitsProbe? = nil,
         claudeAccounts: ClaudeAccountRegistry? = nil,
         statusMonitor: ProviderStatusMonitor? = nil,
@@ -243,6 +248,7 @@ actor UsageEngine {
         self.config = config
         self.pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: nil)
         self.configURL = configURL
+        self.configIsWritable = configIsWritable
         self.keepAwakePolicy = keepAwakePolicy
 
         // The snapshots live beside the config that named the trees they were
@@ -953,11 +959,7 @@ actor UsageEngine {
     func setKeepAwake(mode raw: String) async {
         guard let mode = KeepAwakeMode(rawValue: raw), mode != config.keepAwake else { return }
         config.keepAwake = mode
-        do {
-            try ServerConfig.save(config, to: configURL)
-        } catch {
-            sissyLog("sissy: failed to persist keepAwake to \(configURL.path): \(error)")
-        }
+        persistConfig("keepAwake")
         await applyKeepAwake()
         await reemit()
     }
@@ -981,11 +983,7 @@ actor UsageEngine {
         else { return }
         config.agentHooks = enabled
         config.agentHooksRemovalPending = removalPending
-        do {
-            try ServerConfig.save(config, to: configURL)
-        } catch {
-            sissyLog("sissy: failed to persist agentHooks to \(configURL.path): \(error)")
-        }
+        persistConfig("agentHooks")
     }
 
     /// Applied through the same path as the mode, so flipping it under a
@@ -994,12 +992,7 @@ actor UsageEngine {
     func setKeepScreenAwake(enabled: Bool) async {
         guard enabled != config.keepScreenAwake else { return }
         config.keepScreenAwake = enabled
-        do {
-            try ServerConfig.save(config, to: configURL)
-        } catch {
-            sissyLog(
-                "sissy: failed to persist keepScreenAwake to \(configURL.path): \(error)")
-        }
+        persistConfig("keepScreenAwake")
         await applyKeepAwake()
         await reemit()
     }
@@ -1645,11 +1638,7 @@ actor UsageEngine {
         guard counters[counter] ?? true != enabled else { return }
         counters[counter] = enabled
         config.forgeCounters = counters
-        do {
-            try ServerConfig.save(config, to: configURL)
-        } catch {
-            sissyLog("sissy: failed to persist forgeCounters to \(configURL.path): \(error)")
-        }
+        persistConfig("forgeCounters")
         await rebuildForgeMonitor()
         await reemit()
     }
@@ -1716,17 +1705,36 @@ actor UsageEngine {
     func setStatusChecks(enabled: Bool) async {
         guard config.statusChecks != enabled else { return }
         config.statusChecks = enabled
-        do {
-            try ServerConfig.save(config, to: configURL)
-        } catch {
-            sissyLog("sissy: failed to persist statusChecks to \(configURL.path): \(error)")
-        }
+        persistConfig("statusChecks")
         if enabled {
             await startStatusChecks()
         } else {
             await statusMonitor.stop()
         }
         await reemit()
+    }
+
+    /// Saves `config` over `server.json`, and answers whether it did.
+    ///
+    /// The one place the file is written from, so the refusal below cannot be
+    /// missed by a setting added later: a run that found the file unreadable
+    /// is running on the defaults, and every save it made would put them over
+    /// the user's own values.
+    @discardableResult
+    private func persistConfig(_ field: String) -> Bool {
+        guard configIsWritable else {
+            sissyLog(
+                "sissy: not saving \(field): \(configURL.path) could not be read at launch and "
+                    + "is left as it was")
+            return false
+        }
+        do {
+            try ServerConfig.save(config, to: configURL)
+            return true
+        } catch {
+            sissyLog("sissy: failed to persist \(field) to \(configURL.path): \(error)")
+            return false
+        }
     }
 
     /// Records that a provider is to be metered, or not, and persists it.
@@ -1760,13 +1768,7 @@ actor UsageEngine {
             sissyLog("sissy: the \(id) toggle has no field in server.json to land in")
             return false
         }
-        do {
-            try ServerConfig.save(config, to: configURL)
-        } catch {
-            sissyLog("sissy: failed to persist the \(id) toggle to \(configURL.path): \(error)")
-            return false
-        }
-        return true
+        return persistConfig("the \(id) toggle")
     }
 
     /// Where one provider's offsets are kept.

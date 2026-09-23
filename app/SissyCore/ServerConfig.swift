@@ -185,6 +185,62 @@ struct ServerConfig: Sendable, Codable {
         }
     }
 
+    /// What a run of the app reads out of `server.json`: the config it runs
+    /// on, and whether it may save over the file.
+    struct LoadedForRun {
+        let config: ServerConfig
+        /// False when the file is there and will not parse. The run carries
+        /// on with the defaults, and saving them would replace the user's
+        /// overrides, data directories and switches for good, so nothing this
+        /// run changes is written back.
+        let isWritable: Bool
+        /// Where the unreadable bytes were copied, or nil when there were
+        /// none to copy or the copy failed.
+        let setAside: URL?
+    }
+
+    /// Suffix of the copy an unreadable `server.json` is kept under, beside
+    /// the file itself.
+    static let unreadableCopySuffix = ".unreadable"
+
+    /// `load`, for a run of the app rather than a tool that can stop on the
+    /// error.
+    ///
+    /// The file is hand-editable, so an unclosed brace is an ordinary way for
+    /// it to stop parsing. Before this the run fell back to the defaults
+    /// silently and the first toggle saved them over the file. Now the bytes
+    /// are copied aside, the failure is logged, and the file stays exactly as
+    /// the user left it for them to fix.
+    static func loadForRun(from url: URL = ServerConfig.defaultURL) -> LoadedForRun {
+        do {
+            return LoadedForRun(config: try load(from: url), isWritable: true, setAside: nil)
+        } catch {
+            let copy = setAside(url)
+            sissyLog(
+                "sissy: \(url.path) could not be read (\(error)); running on the defaults "
+                    + "and leaving the file as it is, a copy is at \(copy?.path ?? "nowhere")")
+            return LoadedForRun(config: .defaults, isWritable: false, setAside: copy)
+        }
+    }
+
+    /// Copies the file beside itself, replacing an earlier copy: the original
+    /// is never written over, so the copy is only ever of the bytes still
+    /// there.
+    private static func setAside(_ url: URL) -> URL? {
+        let copy = url.deletingLastPathComponent()
+            .appendingPathComponent(url.lastPathComponent + unreadableCopySuffix)
+        do {
+            if FileManager.default.fileExists(atPath: copy.path) {
+                try FileManager.default.removeItem(at: copy)
+            }
+            try FileManager.default.copyItem(at: url, to: copy)
+            return copy
+        } catch {
+            sissyLog("sissy: could not copy \(url.path) aside: \(error)")
+            return nil
+        }
+    }
+
     /// The counter switches out of a partly-readable file, key by key.
     ///
     /// This path is what a file with one unreadable field falls through, so a
