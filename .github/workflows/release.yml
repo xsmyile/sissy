@@ -281,7 +281,7 @@ jobs:
           # un-notarized dry run catch a helper the export left ad-hoc before a
           # tag triggers the real notary submission.
           SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
-          for code in "$APP" "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
+          for code in "$APP" "$SPARKLE" "$SPARKLE/Versions/Current/Autoupdate" "$SPARKLE/Versions/Current/Updater.app"; do
             info="$(codesign -dvv "$code" 2>&1)"
             grep -q "Authority=$SIGN_IDENTITY" <<<"$info" \
               || { echo "$code not signed with '$SIGN_IDENTITY' authority" >&2; exit 1; }
@@ -294,7 +294,7 @@ jobs:
           done
           # The app is not sandboxed, so Sparkle's XPC services are stripped
           # at archive time; one left behind is a nested binary nothing checks.
-          [[ ! -e "$SPARKLE/Versions/B/XPCServices" ]] \
+          [[ ! -e "$SPARKLE/Versions/Current/XPCServices" ]] \
             || { echo "Sparkle XPC services still bundled" >&2; exit 1; }
 
       # The cask copies Sissy.app out of the DMG, so a ticket stapled to the

@@ -116,7 +116,7 @@ done
 log "verify codesign"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 SPARKLE="$APP_PATH/Contents/Frameworks/Sparkle.framework"
-for code in "$APP_PATH" "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
+for code in "$APP_PATH" "$SPARKLE" "$SPARKLE/Versions/Current/Autoupdate" "$SPARKLE/Versions/Current/Updater.app"; do
   info="$(codesign -dvv "$code" 2>&1)"
   grep -q "Authority=$SIGN_IDENTITY" <<<"$info" || die "$code not signed with '$SIGN_IDENTITY' authority"
   grep -q "Timestamp=" <<<"$info" || die "no secure timestamp on $code"
@@ -124,7 +124,7 @@ for code in "$APP_PATH" "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Ve
     die "get-task-allow present on $code"
   fi
 done
-[[ ! -e "$SPARKLE/Versions/B/XPCServices" ]] || die "Sparkle XPC services still bundled"
+[[ ! -e "$SPARKLE/Versions/Current/XPCServices" ]] || die "Sparkle XPC services still bundled"
 
 # The cask copies Sissy.app out of the DMG, so a ticket stapled to the DMG
 # alone never reaches /Applications and the first launch has to look it up
