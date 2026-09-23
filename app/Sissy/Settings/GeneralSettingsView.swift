@@ -175,14 +175,6 @@ struct GeneralSettingsView: View {
                 keepScreenAwake
             }
 
-            // A development build runs no updater, so it has nothing to switch.
-            if model.updates.isRunning {
-                Section {
-                    updateChecks
-                    updateInstalls
-                }
-            }
-
             Section {
                 files
                 usageHistory
@@ -230,40 +222,6 @@ struct GeneralSettingsView: View {
                 model.loginItem.location.notice
                     ?? "Sissy counts only while it is running, so this is what keeps a day complete."
             )
-        }
-    }
-
-    /// Sparkle's own setting, read and written through `UpdateController`,
-    /// which keeps no copy of it. On by default and asked about nowhere: the
-    /// Info.plist declares it, which is what keeps the first launches silent.
-    private var updateChecks: some View {
-        LabeledContent {
-            Toggle("Check for updates", isOn: updateChecksBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
-            Text("Check for updates")
-            Text(updateChecksCaption)
-        }
-    }
-
-    private var updateChecksCaption: String {
-        let schedule = model.updates.feedHost.map { "Once a day, from \($0)." } ?? "Once a day."
-        guard let lastCheck = model.updates.lastCheck else { return schedule }
-        return "\(schedule) Last checked \(lastCheck.formatted(.relative(presentation: .named)))."
-    }
-
-    /// Off by default: the update alert offers the same switch, beside the
-    /// version it is about. Sparkle allows it only while checks are on.
-    private var updateInstalls: some View {
-        LabeledContent {
-            Toggle("Install updates automatically", isOn: updateInstallsBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .disabled(!model.updates.allowsAutomaticInstalls)
-        } label: {
-            Text("Install updates automatically")
-            Text("Downloaded in the background and installed the next time Sissy quits.")
         }
     }
 
@@ -407,20 +365,6 @@ struct GeneralSettingsView: View {
         Binding(
             get: { model.engine.keepScreenAwake },
             set: { model.setKeepScreenAwake($0) }
-        )
-    }
-
-    private var updateChecksBinding: Binding<Bool> {
-        Binding(
-            get: { model.updates.automaticallyChecks },
-            set: { model.updates.setAutomaticallyChecks($0) }
-        )
-    }
-
-    private var updateInstallsBinding: Binding<Bool> {
-        Binding(
-            get: { model.updates.automaticallyInstalls },
-            set: { model.updates.setAutomaticallyInstalls($0) }
         )
     }
 

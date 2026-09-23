@@ -34,7 +34,7 @@ struct AboutView: View {
     private static let copiedTitle = "Copied"
 
     /// Smaller than the 104 pt it was, with its halo brought in to match, which
-    /// is what bought the update check under the version its room.
+    /// is what bought the Updates block under the version its room.
     /// Measured 2026-09-18 against a harness reproducing this layout at the
     /// tab's own 560 pt: the page this replaced came to 457.0 pt of
     /// `SettingsRootView.maxContentHeight`'s 600, this one comes to 412.0, and
@@ -71,6 +71,9 @@ struct AboutView: View {
         VStack(spacing: 20) {
             icon
             identity
+            if model.updates.isRunning {
+                updates
+            }
             actions
             credit
         }
@@ -97,14 +100,6 @@ struct AboutView: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
-            if model.updates.isRunning {
-                Button(UpdateController.menuTitle(pendingVersion: model.updates.pendingVersion)) {
-                    model.updates.checkForUpdates()
-                }
-                .buttonStyle(.link)
-                .font(.callout)
-                .disabled(!model.updates.canCheckForUpdates)
-            }
             Text(Self.tagline)
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -112,6 +107,55 @@ struct AboutView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 2)
         }
+    }
+
+    /// Updates sit under the version they would replace, which is where the
+    /// question is asked, and only on a build that runs an updater. The two switches are Sparkle's own settings, read
+    /// and written through `UpdateController`, which keeps no copy of them.
+    /// Checks are on by default and asked about nowhere: the Info.plist
+    /// declares them, which is what keeps the first launches silent.
+    /// Installs are off, and the update alert offers the same switch beside
+    /// the version it is about. Sparkle allows them only while checks are on.
+    private var updates: some View {
+        VStack(spacing: 10) {
+            Button(UpdateController.menuTitle(pendingVersion: model.updates.pendingVersion)) {
+                model.updates.checkForUpdates()
+            }
+            .buttonStyle(.glass)
+            .disabled(!model.updates.canCheckForUpdates)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Check for updates automatically", isOn: updateChecksBinding)
+                Toggle("Install updates automatically", isOn: updateInstallsBinding)
+                    .disabled(!model.updates.allowsAutomaticInstalls)
+            }
+            .toggleStyle(.checkbox)
+
+            Text(updateChecksCaption)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+    }
+
+    private var updateChecksCaption: String {
+        let schedule = model.updates.feedHost.map { "Checks once a day, from \($0)." } ?? "Checks once a day."
+        guard let lastCheck = model.updates.lastCheck else { return schedule }
+        return "\(schedule) Last checked \(lastCheck.formatted(.relative(presentation: .named)))."
+    }
+
+    private var updateChecksBinding: Binding<Bool> {
+        Binding(
+            get: { model.updates.automaticallyChecks },
+            set: { model.updates.setAutomaticallyChecks($0) }
+        )
+    }
+
+    private var updateInstallsBinding: Binding<Bool> {
+        Binding(
+            get: { model.updates.automaticallyInstalls },
+            set: { model.updates.setAutomaticallyInstalls($0) }
+        )
     }
 
     private var actions: some View {
