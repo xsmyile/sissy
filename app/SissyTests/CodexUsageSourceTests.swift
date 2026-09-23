@@ -190,6 +190,112 @@ final class CodexUsageSourceTests: XCTestCase {
         XCTAssertFalse(source.currentSignals().windows.isEmpty)
     }
 
+    // MARK: - A linked token refused early
+
+    private static let renewedToken = "token-renewed"
+
+    private static func renewedCredential() -> CodexCredential {
+        CodexCredential(
+            accessToken: renewedToken, refreshToken: nil, idToken: nil,
+            accountId: "7c31482a-768d-4750-8521-cd39b2669767", userId: "user-1",
+            email: "someone@example.com", plan: "plus", expiresAt: nil)
+    }
+
+    private static func linkedSource(
+        renewal: @escaping @Sendable (CodexCredential) async -> CodexCredentialReading,
+        fetch: @escaping @Sendable (CodexCredential) async throws -> CodexUsagePayload.Reading
+    ) -> CodexUsageSource {
+        CodexUsageSource(
+            account: "user-1", credentialSource: { _ in .found(Self.credential()) },
+            renewRefused: renewal, fetchSource: fetch)
+    }
+
+    /// OpenAI can revoke an access token before its expiry while the refresh
+    /// token behind it is still good, so a refusal is one renewal and one
+    /// read away from a reading rather than from Link again.
+    func testARefusedLinkedReadIsRenewedAndReadAgain() async {
+        let renewals = LockedValue(0)
+        let reads = LockedValue(0)
+        let source = Self.linkedSource(
+            renewal: { _ in
+                renewals.update { $0 += 1 }
+                return .found(Self.renewedCredential())
+            },
+            fetch: { credential in
+                reads.update { $0 += 1 }
+                guard credential.accessToken == Self.renewedToken else {
+                    throw UsageRequestError.badStatus(401)
+                }
+                return CodexUsagePayload.reading(Self.reply(), observedAt: Date())
+            })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().limitsState, .quiet)
+        XCTAssertFalse(source.currentSignals().windows.isEmpty)
+        XCTAssertEqual(renewals.load(), 1)
+        XCTAssertEqual(reads.load(), 2)
+    }
+
+    func testARefusedLinkedReadWhoseRenewalIsRejectedEndsTheLink() async {
+        let reads = LockedValue(0)
+        let source = Self.linkedSource(
+            renewal: { _ in .expired },
+            fetch: { _ in
+                reads.update { $0 += 1 }
+                throw UsageRequestError.badStatus(403)
+            })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().limitsState, .sessionExpired)
+        XCTAssertEqual(reads.load(), 1)
+    }
+
+    /// A renewed token the vendor refuses too is a link that has ended, and
+    /// the poll says so rather than renewing again: one renewal, one retry.
+    func testARenewedTokenRefusedAgainEndsTheLinkWithoutLooping() async {
+        let renewals = LockedValue(0)
+        let reads = LockedValue(0)
+        let source = Self.linkedSource(
+            renewal: { _ in
+                renewals.update { $0 += 1 }
+                return .found(Self.renewedCredential())
+            },
+            fetch: { _ in
+                reads.update { $0 += 1 }
+                throw UsageRequestError.badStatus(401)
+            })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().limitsState, .sessionExpired)
+        XCTAssertEqual(renewals.load(), 1)
+        XCTAssertEqual(reads.load(), 2)
+    }
+
+    /// A renewal that could not reach OpenAI says nothing about the grant, so
+    /// the row keeps its reading rather than asking for a new link.
+    func testARefusedLinkedReadWhoseRenewalIsDeferredKeepsTheReading() async {
+        let refuse = LockedValue(false)
+        let source = Self.linkedSource(
+            renewal: { _ in .unreadable("the Codex renewal did not get an answer") },
+            fetch: { _ in
+                if refuse.load() { throw UsageRequestError.badStatus(401) }
+                return CodexUsagePayload.reading(Self.reply(), observedAt: Date())
+            })
+        _ = await source.refreshOnce {}
+        refuse.store(true)
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().limitsState, .quiet)
+        XCTAssertFalse(source.currentSignals().windows.isEmpty)
+    }
+
+    /// The CLI's own credential is `codex login`'s to replace, so a refusal
+    /// of it is not a sign-in Sissy can offer to redo: linking would add a
+    /// second account and leave this row refused.
+    func testARefusedCLICredentialIsTheCLIsToRenew() async {
+        let source = Self.source(
+            credential: { _ in .found(Self.credential()) },
+            fetch: { _ in throw UsageRequestError.badStatus(401) })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().limitsState, .credentialRefused)
+    }
+
     /// A refusal from the host OpenAI redirected to was a refusal of a
     /// request carrying no token, so the credential is not reported spent.
     func testARefusalFromAnotherHostIsNotASpentCredential() async {
@@ -205,17 +311,6 @@ final class CodexUsageSourceTests: XCTestCase {
         _ = await source.refreshOnce {}
         XCTAssertNotEqual(source.currentSignals().limitsState, .sessionExpired)
         XCTAssertFalse(source.currentSignals().windows.isEmpty)
-    }
-
-    /// The CLI's own credential is `codex login`'s to replace, so a refusal
-    /// of it is not a sign-in Sissy can offer to redo: linking would add a
-    /// second account and leave this row refused.
-    func testARefusedCLICredentialIsTheCLIsToRenew() async {
-        let source = Self.source(
-            credential: { _ in .found(Self.credential()) },
-            fetch: { _ in throw UsageRequestError.badStatus(401) })
-        _ = await source.refreshOnce {}
-        XCTAssertEqual(source.currentSignals().limitsState, .credentialRefused)
     }
 
     func testA429BacksOffAndNamesWhen() async {
