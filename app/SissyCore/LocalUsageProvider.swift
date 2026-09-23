@@ -340,6 +340,10 @@ actor LocalUsageProvider: UsageProvider {
     /// Nil until the first emit so we never fire a synthetic rollover before
     /// the provider has produced a real frame.
     private var lastEmittedDayKey: Date?
+    /// The zone every day key held above is a midnight in. `settleKeyZone`
+    /// moves the keys when `Calendar.current` changes zone, so a day counted
+    /// before a flight keeps the date it was counted under.
+    private var keyZone = Calendar.current.timeZone
     /// False until the initial backfill scan has finished parsing every
     /// in-window JSONL. What `isWarm()` answers, and so what the panel and
     /// the Providers tab read to tell a reader that has found nothing yet
@@ -484,6 +488,7 @@ actor LocalUsageProvider: UsageProvider {
     /// yield is priced at the new rates, and a free row it landed on would
     /// then carry a cost and no longer say which of its tokens were free.
     func applyPriceCatalog(_ catalog: PriceCatalog) async {
+        settleKeyZone()
         adapter.applyPriceCatalog(catalog)
         let repricedLive = repriceUnpricedRows()
         await repriceArchivedDays()
@@ -499,6 +504,7 @@ actor LocalUsageProvider: UsageProvider {
         guard lifecycle == .idle else { return }
         lifecycle = .running
         self.onChange = onChange
+        settleKeyZone()
         let loaded = loadAndApplyPersistedState()
         if !loaded { suppressTheDayAColdScanCuts() }
         // Before the first line is read: the catalog was handed over before
@@ -580,6 +586,7 @@ actor LocalUsageProvider: UsageProvider {
         guard backfill != nil, historyRoot != nil, lifecycle == .idle else { return 0 }
         lifecycle = .running
         defer { lifecycle = .stopped }
+        settleKeyZone()
         adapter.projects.ledger.refreshKnownRepositories()
         let files = enumerateJSONLSortedByMTime()
         watchedCounter.store(files.count)
@@ -620,6 +627,7 @@ actor LocalUsageProvider: UsageProvider {
         // Ahead of the flush, so a `poll()` or an FSEvents batch queued behind
         // this one bails instead of writing after the final snapshot.
         lifecycle = .stopped
+        settleKeyZone()
         // Force a final flush so a clean SIGTERM never loses unsaved offset
         // progress. Best-effort: a save failure is logged where it happens and
         // nothing on the shutdown path can act on it.
@@ -674,6 +682,7 @@ actor LocalUsageProvider: UsageProvider {
         // One carrying `rootChanged` would otherwise build a fresh stream that
         // nothing is left to stop.
         guard lifecycle == .running else { return }
+        settleKeyZone()
         // FSEvents is the primary wake and the poll only the safety net, so
         // re-reading the out-of-band files on the poll alone left every frame a
         // turn produced carrying fresh tokens beside a plan and a credits
@@ -756,6 +765,7 @@ actor LocalUsageProvider: UsageProvider {
     /// project split is republished: recomputing it per emit costs a walk over
     /// today's rows, where doing it per event would cost a lock per line.
     func current() -> DayTotals {
+        settleKeyZone()
         let todayKey = Calendar.current.startOfDay(for: Date())
         publishedProjects.store(projectTotals(on: todayKey))
         publishedModels.store(modelTotals(on: todayKey))
@@ -835,6 +845,7 @@ actor LocalUsageProvider: UsageProvider {
 
     private func poll() async {
         guard lifecycle == .running else { return }
+        settleKeyZone()
         adapter.willRead()
         // Before a byte is read, so a worktree alive right now is answered for
         // whenever its lines are read — which may be after it is deleted.
@@ -994,6 +1005,46 @@ actor LocalUsageProvider: UsageProvider {
         }
         guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
         historyDirtyDays.insert(key)
+    }
+
+    /// Moves every day key to the same date's midnight in the zone
+    /// `Calendar.current` is in now, when that is not the zone they were made
+    /// in.
+    ///
+    /// The keys are midnights, and the formatter names a date in the zone in
+    /// force when it is asked, so after Rome to New York a key made at Rome's
+    /// midnight of 23 Sept reads as 22 Sept, and the next flush writes the
+    /// 23rd's counts over the 22nd's file. Each key keeps the date it was
+    /// counted under; distinct dates stay distinct, so no two keys meet.
+    private func settleKeyZone() {
+        let calendar = Calendar.current
+        guard calendar.timeZone != keyZone else { return }
+        var previous = calendar
+        previous.timeZone = keyZone
+        let move = { (day: Date) -> Date in
+            calendar.date(from: previous.dateComponents([.era, .year, .month, .day], from: day))
+                ?? day
+        }
+        dailyTotals = Self.rekeyed(dailyTotals, by: move)
+        dailyModelTotals = Self.rekeyed(dailyModelTotals, by: move)
+        dailyAgentCounts = Self.rekeyed(dailyAgentCounts, by: move)
+        dailyActivity = Self.rekeyed(dailyActivity, by: move)
+        dailyEffort = Self.rekeyed(dailyEffort, by: move)
+        historyDirtyDays = Set(historyDirtyDays.map(move))
+        historySuppressedDays = Set(historySuppressedDays.map(move))
+        seenEventKeys = seenEventKeys.mapValues { seen in
+            var moved = seen
+            moved.day = move(seen.day)
+            return moved
+        }
+        lastEmittedDayKey = lastEmittedDayKey.map(move)
+        keyZone = calendar.timeZone
+    }
+
+    private static func rekeyed<Value>(
+        _ days: [Date: Value], by move: (Date) -> Date
+    ) -> [Date: Value] {
+        Dictionary(days.map { (move($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
     }
 
     private func trim() {
@@ -1377,6 +1428,7 @@ actor LocalUsageProvider: UsageProvider {
     /// survived the delete unsuppressed, and the next event stamped on it put
     /// its file back carrying a count the user had asked Sissy to forget.
     func forgetArchivedDays() async {
+        settleKeyZone()
         let today = Calendar.current.startOfDay(for: Date())
         let held = Set(dailyModelTotals.keys).union(dailyActivity.keys)
             .union(dailyAgentCounts.keys).union(dailyEffort.keys)
