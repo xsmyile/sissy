@@ -725,6 +725,29 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertEqual(relaunched.currentSnapshot().switchable, ["u-tok-a", "u-tok-b"])
     }
 
+    /// An index written before refresh expiries were recorded still says
+    /// which archived account has lost its refresh token, read once off the
+    /// archive itself.
+    func testAnIndexFromBeforeExpiriesWereRecordedStillFindsAnExpiredAccount() async throws {
+        let vault = Vault()
+        let refreshMillis = 1_700_000_000_000
+        try vault.secrets().write(
+            "u-tok-b",
+            credential("tok-b", inner: #","refreshTokenExpiresAt":\#(refreshMillis)"#))
+        let store = ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: tempDir))
+        try store.saveIndex(
+            ClaudeAccountStore.Index(accounts: [Self.byToken("tok-b")], activeUUID: nil))
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(
+            vault, now: { Date(timeIntervalSince1970: 1_800_000_000) }, identify: Self.byToken)
+
+        await registry.captureActive()
+
+        XCTAssertEqual(registry.currentSnapshot().needsLogin, ["u-tok-b"])
+        XCTAssertFalse(registry.currentSnapshot().switchable.contains("u-tok-b"))
+        XCTAssertNotNil(try store.loadIndex().refreshExpiries?["u-tok-b"])
+    }
+
     /// An index entry is a name Sissy has seen. Without the secret behind it
     /// the click can only fail, so the account is listed and not offered.
     func testAnIndexEntryWithNoArchivedSecretIsNotSwitchable() async {
