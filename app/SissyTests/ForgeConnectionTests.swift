@@ -41,13 +41,22 @@ final class ForgeConnectionTests: XCTestCase {
             try parse("https://gitlab.example.com/dashboard").get().host, "gitlab.example.com")
     }
 
-    /// `http://` used to be taken off and the connection asked over https
-    /// anyway, so a plain-http instance was probed on the wrong scheme and
-    /// reported as unreachable. It is refused with its own reason instead: a
-    /// token, often a write-scoped one, is not sent in the clear.
-    func testPlainHttpIsRefused() {
-        XCTAssertEqual(parse("http://gitlab.lan:8080"), .failure(.insecureScheme))
-        XCTAssertEqual(parse("HTTP://gitlab.example.com/"), .failure(.insecureScheme))
+    /// An `http://` URL pasted from a forge that also serves https connects,
+    /// and is asked over https with its port kept. The token never goes out on
+    /// plain http: the root has no other scheme, and a redirect down to http
+    /// loses the token on the way (`SissyHTTPTests`).
+    func testPlainHttpIsAskedOverHttps() throws {
+        let connection = try parse("HTTP://gitlab.lan:8080/").get()
+        XCTAssertEqual(connection.host, "gitlab.lan")
+        XCTAssertEqual(connection.port, 8080)
+        XCTAssertEqual(connection.root?.scheme, "https")
+        XCTAssertEqual(try parse("http://gitlab.example.com").get(), try parse("gitlab.example.com").get())
+    }
+
+    func testAPlainHttpHostIsNamedSoTheSheetCanSaySo() {
+        XCTAssertTrue(ForgeConnection.namesPlainHTTP(" HTTP://gitlab.lan"))
+        XCTAssertFalse(ForgeConnection.namesPlainHTTP("https://gitlab.lan"))
+        XCTAssertFalse(ForgeConnection.namesPlainHTTP("gitlab.lan"))
     }
 
     func testAPortIsKeptAndReachesTheRoot() throws {

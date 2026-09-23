@@ -87,14 +87,15 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
     /// is named in a field of its own. What is **refused** rather than
     /// guessed at is anything that cannot reach the API or would send the
     /// token somewhere the user did not name: a `user@` prefix, a query, a
-    /// fragment, any scheme but `https`, and a port out of range. `http` is
-    /// refused with a reason of its own rather than quietly upgraded: the root
-    /// is always `https`, so a plain-http instance used to be probed on the
-    /// wrong scheme and reported as unreachable, and a token is not sent in
-    /// the clear to find out. Each used to be accepted, filed with its token, and then read as
+    /// fragment, any scheme but `https` or `http`, and a port out of range.
+    /// Each used to be accepted, filed with its token, and then read as
     /// "answered something Sissy could not read" on every poll without a
-    /// request ever being made. Lowercased because a host is case-insensitive
-    /// and the id is not; the path keeps its case, because a path does not.
+    /// request ever being made. `http://` is taken off like `https://` and
+    /// the connection asked over https, because the root has no other scheme:
+    /// a URL pasted from a forge that serves both still connects, and a
+    /// plain-http instance fails its probe with no token sent in the clear.
+    /// Lowercased because a host is case-insensitive and the id is not; the
+    /// path keeps its case, because a path does not.
     static func parse(kind: ForgeKind, host typed: String, path typedPath: String = "")
         -> Result<Self, ForgeAddressProblem>
     {
@@ -129,12 +130,19 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
         }
     }
 
+    /// Whether `typed` opens with `http://`, which `parse` asks over https
+    /// all the same, so the sheet can say so before a plain-http instance
+    /// fails its probe as unreachable.
+    static func namesPlainHTTP(_ typed: String) -> Bool {
+        typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .hasPrefix(insecureScheme + schemeSeparator)
+    }
+
     /// What follows the scheme, or the whole value when none was typed.
     private static func withoutScheme(_ value: String) -> Result<String, ForgeAddressProblem> {
         guard let separator = value.range(of: schemeSeparator) else { return .success(value) }
         let typedScheme = String(value[value.startIndex..<separator.lowerBound])
-        if typedScheme == insecureScheme { return .failure(.insecureScheme) }
-        guard typedScheme == scheme else { return .failure(.scheme) }
+        guard knownSchemes.contains(typedScheme) else { return .failure(.scheme) }
         return .success(String(value[separator.upperBound...]))
     }
 
@@ -175,10 +183,8 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
 enum ForgeAddressProblem: Error, Sendable, Equatable, CaseIterable {
     /// Nothing was typed.
     case empty
-    /// A scheme other than `https`, or one typed wrong.
+    /// A scheme other than `https` or `http`, or one typed wrong.
     case scheme
-    /// `http`, which would send the token in the clear.
-    case insecureScheme
     /// A `user@` or `user:password@` in front of the host.
     case credentials
     /// A `?` and whatever follows it.
