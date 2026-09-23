@@ -557,8 +557,8 @@ struct ProvidersSettingsView: View {
             if let why = model.engine.claudeWebLinkFailure {
                 failure(ClaudeAccountLinkCopy.failure(why))
             }
-            if let why = model.engine.claudeWebUnlinkFailure {
-                failure(ClaudeAccountLinkCopy.unlinkFailure(why))
+            if let report = model.engine.claudeWebUnlinkFailure {
+                failure(ClaudeAccountLinkCopy.unlinkFailure(report.failure))
             }
             ForEach(sortedAccounts) { account in
                 linkedAccount(account)
@@ -674,8 +674,8 @@ struct ProvidersSettingsView: View {
     @ViewBuilder
     private var codexAccounts: some View {
         Group {
-            if let why = model.engine.codexUnlinkFailure {
-                failure(CodexAccountLinkCopy.unlinkFailure(why))
+            if let report = model.engine.codexUnlinkFailure {
+                failure(CodexAccountLinkCopy.unlinkFailure(report.failure))
             }
             ForEach(sortedCodexAccounts) { account in
                 codexAccount(account)
