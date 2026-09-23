@@ -172,6 +172,29 @@ struct AgentHookInstaller {
         return report
     }
 
+    /// Whether either target still carries this install's entry: Sissy's
+    /// marker on a command naming this installer's own script.
+    ///
+    /// The script is part of the answer because a Debug and a release Sissy
+    /// share both files and the marker, and a build that took the other
+    /// build's line for its own would remove it under a switch it does not
+    /// own. A file that will not parse answers nothing here; the removal that
+    /// would meet it reports it as refused instead.
+    func holdsOwnEntry() -> Bool {
+        guard let quotedScript = Self.quoted(scriptURL.path) else { return false }
+        return targets.contains { target in
+            guard let snapshot = try? read(target.url.resolvingSymlinksInPath()) else {
+                return false
+            }
+            return snapshot.groups.contains { group in
+                (group[Self.hooksKey] as? [[String: Any]] ?? []).contains { command in
+                    Self.isOwnCommand(command)
+                        && (command[Self.commandKey] as? String ?? "").contains(quotedScript)
+                }
+            }
+        }
+    }
+
     /// The line the CLIs run.
     ///
     /// `|| :` on the `then` branch is load-bearing: without it the status of a

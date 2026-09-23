@@ -277,6 +277,33 @@ final class AgentHookInstallerTests: XCTestCase {
                 home: home, engineState: SissyPaths.appSupportDir(home: elsewhere)))
     }
 
+    func testAnInstalledEntryIsFoundAgain() throws {
+        let (installer, _) = make("found")
+        installer.install(bundledScript: bundledScript)
+
+        XCTAssertTrue(installer.holdsOwnEntry())
+    }
+
+    func testARemovedEntryIsNotFound() throws {
+        let (installer, _) = make("gone")
+        installer.install(bundledScript: bundledScript)
+        installer.remove()
+
+        XCTAssertFalse(installer.holdsOwnEntry())
+    }
+
+    /// A Debug and a release Sissy share both files and the marker. The entry
+    /// a build answers for is the one naming its own script, so a build with
+    /// the switch off does not take the other build's line out.
+    func testAnotherInstallsEntryIsNotThisOnes() throws {
+        let (installer, target) = make("other")
+        installer.install(bundledScript: bundledScript)
+        let other = AgentHookInstaller(
+            stateDirectory: root.appendingPathComponent("other/another-state"), targets: [target])
+
+        XCTAssertFalse(other.holdsOwnEntry())
+    }
+
     func testAFileSissyCreatedIsDeletedWhenRemovalEmptiesIt() throws {
         let (installer, target) = make("created")
         installer.install(bundledScript: bundledScript)
