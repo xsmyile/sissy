@@ -159,8 +159,9 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         var active: Data?
         /// The CLI's other names for the same home, which a switch has to
         /// reach and must not overwrite blind. The default home always has
-        /// one such name, holding an item or not.
-        var siblings: [Data] = []
+        /// one such name, holding an item or not, and a name set to nil is
+        /// one whose item was removed.
+        var siblings: [Data?] = []
         var siblingFailure: Error?
         /// `.credentials.json` beside the config.
         var file: Data?
@@ -171,6 +172,9 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         var secretReadFailure: Error?
         var primaryReadFailure: Error?
         private(set) var writes = 0
+        /// Every name a write or a removal reached, in order.
+        private(set) var touched: [ClaudeCLISlot.Name] = []
+        private(set) var removed: [ClaudeCLISlot.Name] = []
         private var failed = false
 
         static let primary = ClaudeCLISlot.Name.keychain("primary")
@@ -208,7 +212,10 @@ final class ClaudeAccountRegistryTests: XCTestCase {
             case Self.primary: active = data
             case .file: file = data
             case .keychain(let service):
-                guard let index = Int(service.dropFirst("sibling-".count)), let data else { return }
+                guard let index = Int(service.dropFirst("sibling-".count)) else { return }
+                if siblings.count <= index {
+                    siblings += Array(repeating: nil, count: index + 1 - siblings.count)
+                }
                 siblings[index] = data
             }
         }
@@ -235,12 +242,15 @@ final class ClaudeAccountRegistryTests: XCTestCase {
                         if restoreFails, failed { throw ClaudeKeychainCLI.Failure.tool(1) }
                         store(data, at: name)
                         writes += 1
+                        touched.append(name)
                     }
                 },
                 remove: { [self] name in
                     try lock.withLock {
                         if restoreFails, failed { throw ClaudeKeychainCLI.Failure.tool(1) }
                         store(nil, at: name)
+                        touched.append(name)
+                        removed.append(name)
                     }
                 })
         }
@@ -904,6 +914,44 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         let outcome = await registry.activate(uuid: "u-tok-b")
 
         guard case .failure(.partialSwitch) = outcome else { return XCTFail("expected partialSwitch") }
+    }
+
+    /// A name that held nothing before the switch and took the account is
+    /// taken away again when a later write fails, rather than left holding an
+    /// account the other names do not.
+    func testANameCreatedByAFailedSwitchIsRemovedAgain() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.file = credential("tok-a")
+        vault.active = nil
+        vault.writeFailures[.file] = CocoaError(.fileWriteNoPermission)
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.mirrorWrite) = outcome else { return XCTFail("expected mirrorWrite") }
+        XCTAssertNil(vault.active)
+        XCTAssertEqual(vault.removed, [Vault.primary])
+        XCTAssertEqual(token(vault.file), "tok-a")
+    }
+
+    /// A sibling that holds nothing is not a name the CLI reads, so a switch
+    /// never writes it, and a rollback has nothing there to take away. The
+    /// removal above is therefore reachable only through the primary name.
+    func testAnEmptySiblingIsNeitherWrittenNorRolledBack() async {
+        let vault = Vault()
+        let registry = makeRegistry(vault, identify: Self.byToken)
+        await archiveTwo(vault, registry)
+        vault.siblings = [nil]
+        vault.file = credential("tok-a")
+        vault.writeFailures[.file] = CocoaError(.fileWriteNoPermission)
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .failure(.mirrorWrite) = outcome else { return XCTFail("expected mirrorWrite") }
+        XCTAssertFalse(vault.touched.contains(Vault.sibling(0)))
+        XCTAssertEqual(vault.siblings, [nil])
+        XCTAssertEqual(token(vault.active), "tok-a")
     }
 
     // MARK: Reentrancy
