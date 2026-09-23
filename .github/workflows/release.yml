@@ -27,6 +27,10 @@ on:
         description: "Skip notarization + release upload (cert import + build + sign only)."
         required: false
         default: "false"
+      feed_url:
+        description: "Update feed the build checks, for testing an update end to end. Empty keeps the production feed."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -230,8 +234,13 @@ jobs:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VERSION: ${{ steps.version.outputs.version }}
           BUILD: ${{ steps.version.outputs.build }}
+          FEED_URL: ${{ inputs.feed_url }}
         run: |
           set -o pipefail
+          # A tag push has no inputs, so a release always keeps the feed
+          # project.yml declares; only a manual run can point a build elsewhere.
+          feed=()
+          if [[ -n "$FEED_URL" ]]; then feed=("SPARKLE_FEED_URL=$FEED_URL"); fi
           xcodebuild \
             -project Sissy.xcodeproj \
             -scheme "$SCHEME" \
@@ -243,6 +252,7 @@ jobs:
             CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD" \
+            ${feed[@]+"${feed[@]}"} \
             archive | xcbeautify --renderer github-actions
           xcodebuild -exportArchive \
             -archivePath build/Sissy.xcarchive \
