@@ -124,6 +124,7 @@ actor UsageEngine {
     /// the same trade the provider list takes, and cheaper here because nothing
     /// a forge reader holds resumes from an offset. What it costs is one poll.
     private let forgeIndex: ForgeConnectionIndex
+    private let forgeTokens: ForgeTokenReconciler
     private var forgeMonitor: ForgeActivityMonitor
     private let identityMonitor: GitIdentityMonitor
     /// What the CLIs on this Mac are holding right now. Beside the monitors
@@ -270,6 +271,9 @@ actor UsageEngine {
         self.limitsBackoff = limitsBackoff
         let forgeIndex = ForgeConnectionIndex(url: ForgeConnectionIndex.defaultURL(in: stateDir))
         self.forgeIndex = forgeIndex
+        self.forgeTokens = ForgeTokenReconciler(
+            index: forgeIndex, storedTokens: { ForgeTokenStore.storedConnections() },
+            deleteToken: { try ForgeTokenStore.delete(connection: $0) })
         self.forgeMonitor = ForgeActivityMonitor(
             connections: (try? forgeIndex.loadSettingAside()) ?? [],
             counters: (config.forgeCounters ?? .defaults).enabled)
@@ -1579,41 +1583,27 @@ actor UsageEngine {
         }
     }
 
-    /// Every forge the user has connected, for the Settings list.
+    /// Every forge the user has connected, the tokens none of them name, and
+    /// whether the index could be read, for the Settings list.
     ///
     /// Read from the index rather than from the monitor, so a build whose
     /// keychain grant has lapsed still lists what is connected and offers the
     /// way to remove it — the rule `linkedCodexAccounts` next door is under.
     /// Nonisolated because Settings reads it while the engine is mid-poll, and
-    /// the index is an immutable value holding no secret. An index that will
-    /// not read is set aside here rather than read as empty and overwritten.
-    nonisolated var forgeConnections: [ForgeConnection] {
-        (try? forgeIndex.loadSettingAside()) ?? []
-    }
-
-    /// Whether an unreadable connection index has been set aside, which
-    /// Settings says so the connections that vanished with it are explained.
-    nonisolated var forgeIndexSetAside: Bool { forgeIndex.hasSetAside() }
-
-    /// The tokens Sissy holds for a forge the index does not name.
-    ///
-    /// Attributes only, so it raises no dialog. These are what an interrupted
-    /// connect or disconnect, or an index set aside, leaves in the keychain;
-    /// listing them is what gives the user a way to remove a token nothing
-    /// reads any more.
-    nonisolated var orphanedForgeTokens: [String] {
-        guard let connected = try? forgeIndex.loadSettingAside() else { return [] }
-        return ForgeConnectionIndex.orphans(
-            stored: ForgeTokenStore.storedConnections(), connected: connected)
+    /// the index is an immutable value holding no secret. One call per
+    /// refresh: each used to be a getter of its own, and each loaded the
+    /// index, so one refresh raced itself setting the same file aside. The
+    /// token listing is attributes only, so it raises no dialog.
+    nonisolated func forgeIndexState() -> ForgeIndexState {
+        forgeTokens.state()
     }
 
     /// Deletes a token no connection names. One the index has come to name
     /// since the list was drawn is left alone: removing it is `Disconnect…`.
     /// A delete that fails leaves the row in the list, which is what says so.
     func removeOrphanedForgeToken(id: String) async {
-        guard orphanedForgeTokens.contains(id) else { return }
         do {
-            try ForgeTokenStore.delete(connection: id)
+            _ = try forgeTokens.removeOrphan(id: id)
         } catch {
             sissyLog("sissy: could not remove the orphaned forge token \(id) (\(error))")
         }
