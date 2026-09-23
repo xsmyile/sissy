@@ -280,6 +280,15 @@ final class ForgeConnectionTests: XCTestCase {
         XCTAssertEqual(shelf.deleted, [])
     }
 
+    /// A connect saves its token before it records the connection, and the
+    /// engine can take another call between the two. The token of a connect
+    /// still in flight looks orphaned there and must not be removed.
+    func testATokenBeingConnectedIsLeftAlone() throws {
+        let shelf = TokenShelf([Self.gitLab.id])
+        XCTAssertFalse(try reconciler(shelf).removeOrphan(id: Self.gitLab.id, sparing: [Self.gitLab.id]))
+        XCTAssertEqual(shelf.deleted, [])
+    }
+
     func testNothingIsRemovedWhileTheIndexCannotBeRead() throws {
         try FileManager.default.createDirectory(at: index.url, withIntermediateDirectories: false)
         let shelf = TokenShelf([Self.orphanID])
