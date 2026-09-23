@@ -356,6 +356,32 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertEqual(reads.load(), 0)
     }
 
+    /// A reader the engine stops while a relink is suspended stays stopped:
+    /// that stop is a provider switched off, and the relink resuming after it
+    /// must neither read the session nor reach claude.ai.
+    func testARelinkThatOutlivesAStopReadsNothing() async {
+        let lookups = LockedValue(0)
+        let reads = LockedValue(0)
+        let holder = LockedValue<ClaudeWebSource?>(nil)
+        let source = ClaudeWebSource(
+            account: "a1b2c3d4",
+            sessionSource: { _ in
+                lookups.update { $0 += 1 }
+                return Self.found(Self.session)
+            },
+            fetchSource: { _, _ in
+                reads.update { $0 += 1 }
+                return ClaudeWebSource.Reading(organization: "org", windows: [], credits: nil)
+            },
+            backoff: LimitsBackoffSlot(
+                deadline: { nil },
+                record: { _ in await holder.load()?.stop() }))
+        holder.store(source)
+        await source.relink(organization: "team") {}
+        XCTAssertEqual(lookups.load(), 0)
+        XCTAssertEqual(reads.load(), 0)
+    }
+
     /// Records what each call was handed, so a test can assert on the
     /// sequence rather than on a duration.
     private actor Sent {

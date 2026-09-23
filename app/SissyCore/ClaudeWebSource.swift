@@ -185,15 +185,21 @@ actor ClaudeWebSource: SourceSignals {
     /// took effect, a healthy reader went on spending the old session, and a
     /// reader whose session had ended stayed ended, because the refresh
     /// button deliberately skips that state.
+    ///
+    /// A `stop()` landing while the wait is being cleared outranks the relink:
+    /// the engine stopping its readers there is a provider switched off, and
+    /// the refresh this resumes into would give it back a poll loop.
     func relink(
         organization: String?,
         onRefresh: @Sendable @escaping () async -> Void
     ) async {
         guard !retired else { return }
         stop()
+        let stamp = generation
         linkedOrganization = organization
         self.organization = organization
         await backoff?.record(nil)
+        guard stamp == generation else { return }
         await refresh(onRefresh: onRefresh)
     }
 
