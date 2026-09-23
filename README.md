@@ -31,7 +31,9 @@ brew install --cask xsmyile/sissy/sissy
 
 Or take the `.dmg` from [Releases](../../releases/latest). It is Developer ID
 signed and notarized, so there is no `xattr` workaround and no right-click →
-Open.
+Open. Either way Sissy updates itself from then on: it checks once a day and
+asks before installing, and *Check for Updates…* in the right-click menu checks
+now.
 
 Sissy lives in the menu bar, not the Dock, and starts reading on launch. **The
 first launch asks for nothing**: no Full Disk Access, no keychain dialog, no
@@ -138,6 +140,8 @@ Every request it makes is a reading you asked for, and each has its own switch:
 | `auth.openai.com` | signing a Codex account in, and renewing that credential afterwards | unlink the account |
 | `api.github.com`, or the Enterprise / GitLab host you connected | your own activity counts | disconnect it in Settings ▸ Forge |
 | `status.claude.com`, `status.openai.com` | each vendor's public status page | `statusChecks: false` |
+| `sissy.smyile.com` | the update feed, daily | Settings ▸ General ▸ *Check for updates* |
+| `github.com` | downloading an update you, or *Install updates automatically*, accepted | decline the update |
 
 **What Sissy keeps** is one day-by-model archive under
 `~/Library/Application Support/Sissy/history/`: totals, repository paths, session
