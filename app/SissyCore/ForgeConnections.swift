@@ -436,11 +436,25 @@ struct ForgeConnector: Sendable {
         case notFiled
         /// The index would not read, so nothing was asked or written.
         case indexUnreadable
+        /// The connection was disconnected while the forge was being asked,
+        /// so nothing was written.
+        case withdrawn
     }
 
     /// Probes, then files. An index that will not read cannot say whether
     /// this replaces a connection, so nothing is probed and nothing written.
-    func connect(_ connection: ForgeConnection, token: String) async -> Outcome {
+    ///
+    /// **Everything after the probe runs on the caller's isolation without
+    /// suspending**, and `stillWanted` is asked there first. The probe is the
+    /// one wait, and a disconnect the caller took during it used to be undone
+    /// when it answered: the token was filed and the connection recorded
+    /// again, polling a forge the user had just removed. Held on the caller's
+    /// actor, the check and the writes after it cannot be split by another
+    /// call to that actor, so a disconnect lands wholly before or wholly after.
+    func connect(
+        _ connection: ForgeConnection, token: String, stillWanted: () -> Bool = { true },
+        isolation: isolated (any Actor)? = #isolation
+    ) async -> Outcome {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .notFiled }
         let replacing: Bool
@@ -456,6 +470,7 @@ struct ForgeConnector: Sendable {
         } catch {
             return .refused(error as? ForgeReadFailure ?? .unreachable)
         }
+        guard stillWanted() else { return .withdrawn }
         let prior = storedToken(connection.id)
         do {
             try saveToken(trimmed, connection.id)
