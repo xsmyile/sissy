@@ -768,6 +768,10 @@ actor UsageEngine {
     /// account with nothing behind it, where a session with no entry is just
     /// one whose organisation is derived, which is what every reader did
     /// before links existed.
+    ///
+    /// An account linked again already has a reader, which the rebuild keeps
+    /// because its account is unchanged, so that reader is pointed at the new
+    /// session and organisation here and read at once.
     private func store(
         session: String,
         as link: ClaudeWebLink
@@ -783,6 +787,12 @@ actor UsageEngine {
             claudeWebLinks.store(claudeWebIndex.load())
         } catch {
             sissyLog("sissy: filed the claude.ai session but not what it is for: \(error)")
+        }
+        if lifecycle == .running,
+            let running = claudeWebSources.load().first(where: { $0.account == link.identity.uuid })
+        {
+            let me = self
+            await running.relink(organization: link.organization) { await me.reemit() }
         }
         await followStoredClaudeWebSessions()
         return .success(())

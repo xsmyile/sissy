@@ -258,6 +258,46 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertEqual(organizations, ["team", "team"])
     }
 
+    // MARK: - Linking again
+
+    /// A link made again reaches the reader already running: the next request
+    /// spends the session just filed, for the organisation just chosen.
+    func testRelinkingReadsTheNewSessionForTheNewOrganization() async {
+        let stored = LockedValue(Self.session)
+        let sent = LockedValue<[String]>([])
+        let source = ClaudeWebSource(
+            account: "a1b2c3d4", organization: "personal",
+            sessionSource: { _ in Self.found(stored.load()) },
+            fetchSource: { session, organization in
+                sent.update { $0.append("\(session)@\(organization ?? "none")") }
+                return ClaudeWebSource.Reading(
+                    organization: organization ?? "derived", windows: [], credits: nil)
+            })
+        _ = await source.refreshOnce {}
+        stored.store("sk-ant-sid01-new")
+        await source.relink(organization: "team") {}
+        XCTAssertEqual(sent.load().last, "sk-ant-sid01-new@team")
+    }
+
+    /// And it lifts the notice an ended session left, which is the state the
+    /// refresh button deliberately skips, so without this nothing but a
+    /// relaunch would read the new session.
+    func testRelinkingLiftsAnEndedSession() async {
+        let refuse = LockedValue(true)
+        let source = source(
+            lookup: { _ in Self.found(Self.session) },
+            fetch: { _, _ in
+                if refuse.load() { throw UsageRequestError.badStatus(401) }
+                return ClaudeWebSource.Reading(
+                    organization: "org", windows: [Self.window(300, 42)], credits: nil)
+            })
+        _ = await source.refreshOnce {}
+        refuse.store(false)
+        await source.relink(organization: nil) {}
+        XCTAssertEqual(source.currentSignals().limitsState, .quiet)
+        XCTAssertEqual(source.currentSignals().windows.map(\.usedPercent), [42])
+    }
+
     /// Switching the source off takes the gauges down with it: the aggregator
     /// rebuilds every slice from what is published, so a reading left behind
     /// would outlive the switch.
@@ -275,6 +315,25 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertTrue(signals.windows.isEmpty)
         XCTAssertNil(signals.credits)
         XCTAssertEqual(signals.limitsState, .quiet)
+    }
+
+    /// A refusal belongs to the session that earned it, so a session filed
+    /// in its place is read at once rather than after the old one's wait.
+    func testRelinkingDropsTheWaitTheOldSessionEarned() async {
+        let deadline = LockedValue<Date?>(Date().addingTimeInterval(900))
+        let reads = LockedValue(0)
+        let source = ClaudeWebSource(
+            account: "a1b2c3d4",
+            sessionSource: { _ in Self.found(Self.session) },
+            fetchSource: { _, _ in
+                reads.update { $0 += 1 }
+                return ClaudeWebSource.Reading(organization: "org", windows: [], credits: nil)
+            },
+            backoff: LimitsBackoffSlot(
+                deadline: { deadline.load() }, record: { deadline.store($0) }))
+        await source.relink(organization: nil) {}
+        XCTAssertNil(deadline.load())
+        XCTAssertEqual(reads.load(), 1)
     }
 
     /// Records what each call was handed, so a test can assert on the
