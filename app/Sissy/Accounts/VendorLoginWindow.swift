@@ -29,6 +29,16 @@ import WebKit
 /// offer is unknown, and a wrong list is a window that dead-ends on the one
 /// account the user came to add.
 ///
+/// **A page that asks for a second window gets this one.** Identity
+/// providers sign in through `window.open` or a link aimed at a new tab, and a
+/// web view with no UI delegate drops that request without a word: a button
+/// that does nothing, on the one account the user came to add. So the popup is
+/// loaded in place, under the same rules as any other navigation here, and a
+/// popup this window cannot follow (one with nothing to load, or a page that
+/// closes itself because it expected an opener) ends the sign-in with a
+/// sentence saying so rather than a blank page. Whether a given provider then
+/// completes is the provider's to decide and has to be measured per provider.
+///
 /// The cookie jar is non-persistent, so it exists for the life of the window
 /// and no longer. That is what makes a second link a fresh login rather than a
 /// silent re-link of the account already there.
@@ -106,7 +116,24 @@ final class VendorLoginWindow: NSObject {
         case declined(String)
         /// A page of the sign-in did not load.
         case unreachable
+        /// The sign-in needed a second window, which this one cannot give.
+        case needsSecondWindow
     }
+
+    /// What a request for a new window becomes, in a window that has only
+    /// the one.
+    enum PopupRoute: Equatable {
+        /// Load the request in this window's web view.
+        case load
+        /// A link off the vendor's own hosts, handed to the default browser
+        /// as the navigation delegate hands every other one.
+        case openInBrowser(URL)
+        /// Nothing this window can load: the opener meant to write into the
+        /// window it asked for, and there is none.
+        case cannotFollow
+    }
+
+    nonisolated private static let webSchemes: Set<String> = ["http", "https"]
 
     /// WebKit's code for a load it abandoned because the navigation delegate
     /// cancelled it, which is every redirect this window takes a code from.
@@ -152,6 +179,7 @@ final class VendorLoginWindow: NSObject {
         configuration.websiteDataStore = .nonPersistent()
         let web = WKWebView(frame: .zero, configuration: configuration)
         web.navigationDelegate = self
+        web.uiDelegate = self
         webView = web
 
         if vendor.session != nil {
@@ -276,6 +304,7 @@ final class VendorLoginWindow: NSObject {
         cookieStore?.remove(self)
         cookieStore = nil
         webView?.navigationDelegate = nil
+        webView?.uiDelegate = nil
         webView?.stopLoading()
         webView = nil
     }
@@ -314,6 +343,21 @@ final class VendorLoginWindow: NSObject {
             return nil
         }
         return .unreachable
+    }
+
+    /// Where a request for a new window goes. A link aimed at a new tab obeys
+    /// the confinement rule a link aimed at this one does; anything else with
+    /// a web address is loaded in place, because a sign-in's popup belongs to
+    /// a provider whose hosts cannot be listed in advance.
+    nonisolated static func popupRoute(
+        for url: URL?, linkActivated: Bool, isInternal: (String) -> Bool
+    ) -> PopupRoute {
+        guard let url, let scheme = url.scheme?.lowercased() else { return .cannotFollow }
+        guard webSchemes.contains(scheme), let host = url.host() else {
+            return linkActivated ? .openInBrowser(url) : .cannotFollow
+        }
+        if linkActivated, !isInternal(host) { return .openInBrowser(url) }
+        return .load
     }
 }
 
@@ -374,6 +418,42 @@ extension VendorLoginWindow: WKNavigationDelegate {
     ) {
         guard let failure = Self.pageFailure(for: error) else { return }
         Task { @MainActor [weak self] in self?.fail(failure) }
+    }
+}
+
+extension VendorLoginWindow: WKUIDelegate {
+    /// Answers every request for a new window with this one, and never hands
+    /// WebKit a second web view: there is no second window to put it in.
+    ///
+    /// The failure is handed over on the next turn for the reason the
+    /// navigation delegate's are: reporting it drops the web view whose own
+    /// callback this is.
+    func webView(
+        _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        let route = Self.popupRoute(
+            for: navigationAction.request.url,
+            linkActivated: navigationAction.navigationType == .linkActivated,
+            isInternal: vendor.isInternal)
+        switch route {
+        case .load:
+            sissyLog("sissy: the \(vendor.logName) login opened a popup, loaded in place")
+            webView.load(navigationAction.request)
+        case .openInBrowser(let url):
+            NSWorkspace.shared.open(url)
+        case .cannotFollow:
+            sissyLog("sissy: the \(vendor.logName) login asked for a window it cannot have")
+            Task { @MainActor [weak self] in self?.fail(.needsSecondWindow) }
+        }
+        return nil
+    }
+
+    /// A page that closes its own window is a popup that has finished and
+    /// expected an opener to hand its result to. Loaded in place, it has
+    /// none, so the sign-in cannot complete from here.
+    func webViewDidClose(_ webView: WKWebView) {
+        Task { @MainActor [weak self] in self?.fail(.needsSecondWindow) }
     }
 }
 
