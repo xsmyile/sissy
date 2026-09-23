@@ -21,12 +21,16 @@ import Foundation
 ///   fresh round.
 ///
 /// The save is the first thing that happens after the reply, with no other
-/// suspension in between. What remains is a crash, a force quit or a power
-/// loss between the vendor's reply and the keychain write, or while a failed
-/// save is still being retried: the renewal lived only in this process, the
-/// item still holds the spent token, and the next launch reads the link as
-/// ended. No ordering can close that without writing the secret somewhere
-/// less protected than the keychain first.
+/// suspension in between, and an ordinary quit waits for it:
+/// `fileBeforeQuitting` lets a renewal still at the token endpoint land and
+/// files any the keychain refused earlier without waiting out their backoff,
+/// bounded by the quit's own budget. What remains is a crash, a force quit or
+/// a power loss between the vendor's reply and the keychain write, a quit
+/// whose budget ran out first, or a keychain that refuses the last save too:
+/// the renewal lived only in this process, the item still holds the spent
+/// token, and the next launch reads the link as ended. No ordering can close
+/// that without writing the secret somewhere less protected than the keychain
+/// first.
 ///
 /// A token OpenAI refused before its expiry is renewed through
 /// `renewRefused`, once per refused token: the vendor can revoke an access
@@ -61,6 +65,7 @@ actor CodexRenewal {
     private let save: Save
     private let renew: Renew
     private let pause: Pause
+    private let deadline: Pause
     private let jitter: @Sendable () -> Double
     private let now: @Sendable () -> Date
 
@@ -80,6 +85,7 @@ actor CodexRenewal {
         save: @escaping Save = { try CodexAccountStore.save($0, account: $1) },
         renew: @escaping Renew = { try await CodexOAuth.refresh($0) },
         pause: @escaping Pause = { try await Task.sleep(for: $0) },
+        deadline: @escaping Pause = { try await Task.sleep(for: $0) },
         jitter: @escaping @Sendable () -> Double = { Double.random(in: CodexRenewal.jitterSpread) },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -87,6 +93,7 @@ actor CodexRenewal {
         self.save = save
         self.renew = renew
         self.pause = pause
+        self.deadline = deadline
         self.jitter = jitter
         self.now = now
     }
@@ -114,6 +121,49 @@ actor CodexRenewal {
             credential.accessToken == refused.accessToken
         else { return current }
         return await renew(credential, account: account)
+    }
+
+    /// Files what this process still holds before it exits, and answers
+    /// whether it all landed within `budget`.
+    ///
+    /// A renewal at the token endpoint is waited for, since its reply is the
+    /// only copy of the rotated refresh token, and one the keychain refused is
+    /// saved once more now rather than after its backoff. The deadline is
+    /// what keeps an endpoint that never answers from holding the quit; the
+    /// work it abandons is uncancellable by design and simply dies with the
+    /// process.
+    func fileBeforeQuitting(within budget: Duration) async -> Bool {
+        let wait = deadline
+        let answer = FirstAnswer()
+        let filed = await withCheckedContinuation { continuation in
+            answer.arm(continuation)
+            answer.own(Task { answer.resume(await self.fileEverythingHeld()) })
+            answer.own(
+                Task {
+                    guard (try? await wait(budget)) != nil else { return }
+                    answer.resume(false)
+                })
+        }
+        answer.cancelAll()
+        if !filed {
+            sissyLog("sissy: quitting with a renewed Codex credential that is not filed yet")
+        }
+        return filed
+    }
+
+    private func fileEverythingHeld() async -> Bool {
+        while let running = inFlight.values.first {
+            _ = await running.value
+        }
+        for (account, credential) in unsaved {
+            do {
+                try save(credential, account)
+                unsaved[account] = nil
+            } catch {
+                sissyLog("sissy: the renewed Codex credential could not be filed before quitting")
+            }
+        }
+        return unsaved.isEmpty
     }
 
     /// A renewal the keychain has not taken yet outranks the item, which
@@ -253,5 +303,34 @@ actor CodexRenewal {
     ) -> TimeInterval {
         let doubled = base * pow(2, Double(max(attempt - 1, 0)))
         return min(doubled, ceiling) * jitter
+    }
+}
+
+/// Whichever of two racing tasks answers first resumes the waiter, and the
+/// loser is cancelled. A task group cannot do this: it awaits every child
+/// before returning, and the renewal it would wait on is uncancellable.
+private final class FirstAnswer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+    private var tasks: [Task<Void, Never>] = []
+
+    func arm(_ continuation: CheckedContinuation<Bool, Never>) {
+        lock.withLock { self.continuation = continuation }
+    }
+
+    func own(_ task: Task<Void, Never>) {
+        lock.withLock { tasks.append(task) }
+    }
+
+    func resume(_ answer: Bool) {
+        let waiting: CheckedContinuation<Bool, Never>? = lock.withLock {
+            defer { continuation = nil }
+            return continuation
+        }
+        waiting?.resume(returning: answer)
+    }
+
+    func cancelAll() {
+        lock.withLock { tasks }.forEach { $0.cancel() }
     }
 }

@@ -86,6 +86,8 @@ final class CodexRenewalTests: XCTestCase {
     private static func renewal(
         keychain: Keychain,
         loads: AsyncStream<Void>.Continuation? = nil,
+        pause: @escaping CodexRenewal.Pause = { _ in },
+        deadline: @escaping CodexRenewal.Pause = { _ in },
         renew: @escaping CodexRenewal.Renew
     ) -> CodexRenewal {
         CodexRenewal(
@@ -95,8 +97,19 @@ final class CodexRenewalTests: XCTestCase {
             },
             save: { try keychain.save($0, $1) },
             renew: renew,
-            pause: { _ in },
+            pause: pause,
+            deadline: deadline,
             jitter: { 1 })
+    }
+
+    private static let quitBudget: Duration = .seconds(2)
+    private static let outlastingWait: Duration = .seconds(3600)
+
+    /// A wait that outlasts the test unless it is cancelled, which is what a
+    /// save retry's backoff or a quit's deadline looks like to one that is not
+    /// about them.
+    private static let longWait: CodexRenewal.Pause = { _ in
+        try await Task.sleep(for: outlastingWait)
     }
 
     // MARK: - The workspace the user chose
@@ -439,5 +452,73 @@ final class CodexRenewalTests: XCTestCase {
         }
         let reading = await renewal.renewRefused(account: Self.account, refused: live)
         XCTAssertEqual(reading, .expired)
+    }
+
+    // MARK: - Quitting
+
+    /// The keychain refused the first save and the retry is still backing
+    /// off. Quitting files it now rather than leaving the only copy of the
+    /// rotated refresh token in a process that is about to exit.
+    func testQuittingFilesARenewalStillWaitingForItsRetry() async {
+        let keychain = Keychain(holding: Self.credential())
+        keychain.failures.store(1)
+        let renewal = Self.renewal(
+            keychain: keychain, pause: Self.longWait, deadline: Self.longWait
+        ) { _ in Self.renewed }
+        _ = await renewal.supply(account: Self.account, allowingInteraction: false)
+        XCTAssertNotEqual(keychain.items.load()[Self.account], Self.renewed)
+        let filed = await renewal.fileBeforeQuitting(within: Self.quitBudget)
+        XCTAssertTrue(filed)
+        XCTAssertEqual(keychain.items.load()[Self.account], Self.renewed)
+        await renewal.forget(account: Self.account)
+    }
+
+    /// A renewal still at the token endpoint is waited for, so its reply is
+    /// filed before the process goes.
+    func testQuittingWaitsForARenewalInFlight() async {
+        let keychain = Keychain(holding: Self.credential())
+        let gate = Gate()
+        let renewal = Self.renewal(keychain: keychain, deadline: Self.longWait) { _ in
+            await gate.arrive()
+            return Self.renewed
+        }
+        let caller = Task {
+            await renewal.supply(account: Self.account, allowingInteraction: false)
+        }
+        await gate.waitForArrival()
+        let quitting = Task { await renewal.fileBeforeQuitting(within: Self.quitBudget) }
+        await gate.open()
+        let filed = await quitting.value
+        _ = await caller.value
+        XCTAssertTrue(filed)
+        XCTAssertEqual(keychain.items.load()[Self.account], Self.renewed)
+    }
+
+    /// A token endpoint that never answers cannot hold the quit: the deadline
+    /// releases it and says the renewal was not filed.
+    func testQuittingGivesUpOnARenewalThatOutlastsTheDeadline() async {
+        let keychain = Keychain(holding: Self.credential())
+        let gate = Gate()
+        let renewal = Self.renewal(keychain: keychain) { _ in
+            await gate.arrive()
+            return Self.renewed
+        }
+        let caller = Task {
+            await renewal.supply(account: Self.account, allowingInteraction: false)
+        }
+        await gate.waitForArrival()
+        let filed = await renewal.fileBeforeQuitting(within: Self.quitBudget)
+        XCTAssertFalse(filed)
+        await gate.open()
+        _ = await caller.value
+    }
+
+    func testQuittingWithNothingPendingIsFiledAtOnce() async {
+        let keychain = Keychain(holding: Self.credential(expiresAt: .distantFuture))
+        let renewal = Self.renewal(keychain: keychain, deadline: Self.longWait) { _ in
+            Self.renewed
+        }
+        let filed = await renewal.fileBeforeQuitting(within: Self.quitBudget)
+        XCTAssertTrue(filed)
     }
 }

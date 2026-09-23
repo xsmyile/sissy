@@ -31,6 +31,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// teardown which will not finish cannot leave a menu bar app that refuses
     /// to quit: `ClaudeCredentials` can be parked behind a keychain dialog
     /// nobody answered, and the process is exiting regardless.
+    ///
+    /// The same budget bounds `CodexRenewal.fileBeforeQuitting`, which runs
+    /// beside the teardown. That wait is not about offsets: a Codex renewal
+    /// the keychain has not taken yet holds the only copy of a rotated refresh
+    /// token, and a quit that drops it reads as an ended link at next launch.
     private static let teardownBudget: Duration = .seconds(2)
 
     override init() {
@@ -107,15 +112,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Lets the engine shut down before the process goes, bounded by
-    /// `teardownBudget`. `.terminateLater` is what buys the await: quitting is
-    /// the only thing that ends a run, so it is the only chance the readers get
-    /// to write their offsets.
+    /// Lets the engine shut down and the Codex renewals file what they hold
+    /// before the process goes, both bounded by `teardownBudget`.
+    /// `.terminateLater` is what buys the await: quitting is the only thing
+    /// that ends a run, so it is the only chance the readers get to write
+    /// their offsets.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !isTerminating else { return .terminateNow }
         isTerminating = true
         Task { @MainActor in
+            async let renewalsFiled = CodexRenewal.shared.fileBeforeQuitting(
+                within: Self.teardownBudget)
             await model.stop()
+            _ = await renewalsFiled
             replyToTerminate()
         }
         Task { @MainActor in
