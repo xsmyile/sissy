@@ -2005,7 +2005,8 @@ actor UsageEngine {
             let age = Date().timeIntervalSince(cached.fetchedAt)
             initialDelay = PriceCatalogSource.refreshDelay(forCacheAge: age)
             sissyLog("sissy: pricing from cached catalog, \(Int(age / 3600))h old")
-        } else if let fetched = await PriceCatalogSource.fetchForColdStart() {
+        } else if let cold = await PriceCatalogSource.fetchForColdStart() {
+            let fetched = PriceCatalogSource.retaining(cold)
             resolved = fetched
             initialDelay = PriceCatalogSource.refreshInterval
             PriceCatalogSource.saveCache(fetched)

@@ -587,8 +587,10 @@ a cold scan instead of only a cancelled boot task doing so.
   `pricingOverride` → the LiteLLM catalog fetched at runtime (`PriceCatalog.swift`,
   refreshed every 24 h, cached in Application Support) → `PricingSeed.swift`, a
   generated snapshot embedded at build time for the offline / first-run case. A new
-  model therefore needs no Sissy release. The cold backfill runs against exactly one
-  catalog: a cache newer than the seed is applied before the scan starts, otherwise
+  model therefore needs no Sissy release, and a model LiteLLM deletes keeps its last
+  published rate, because every adopted catalog is the previous one with the fetch
+  laid over it (`PriceCatalogSource.retaining`). The cold backfill runs against
+  exactly one catalog: a cache, laid over the seed, is applied before the scan starts, otherwise
   the first fetch is awaited under `PriceCatalogSource.coldStartBudget` and the seed
   prices the scan if it doesn't land. A refresh never reprices what it already
   priced, so letting a catalog arrive mid-scan would split a single day across two
