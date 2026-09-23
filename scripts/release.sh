@@ -9,7 +9,7 @@
 #   - notarytool credentials stored:
 #       xcrun notarytool store-credentials "sissy-notary" \
 #         --apple-id "<email>" --team-id "AS75YRKL95" --password "<app-specific-pw>"
-#   - brew install create-dmg xcodegen
+#   - brew install create-dmg xcodegen (xcbeautify optional)
 #   - gh CLI authenticated (only if --publish)
 
 set -euo pipefail
@@ -60,37 +60,44 @@ rm -rf "$BUILD_DIR"
 log "xcodegen generate"
 ( cd "$APP_DIR" && xcodegen generate )
 
-log "xcodebuild Release"
+log "xcodebuild archive"
 # Force Manual signing with the Developer ID identity. Automatic style
 # can fall back to a Mac Development cert when both exist in the
 # keychain — the resulting bundle won't notarize and the failure only
 # surfaces after `notarytool submit` (minutes later). Manual + explicit
 # identity fails fast at build time if the cert is missing.
-xcodebuild \
-  -project "$APP_DIR/Sissy.xcodeproj" \
-  -scheme "$SCHEME" \
-  -configuration Release \
-  -derivedDataPath "$BUILD_DIR" \
-  CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
-  DEVELOPMENT_TEAM="$TEAM_ID" \
-  MARKETING_VERSION="$VERSION" \
-  CURRENT_PROJECT_VERSION="$BUILD" \
-  build | xcbeautify 2>/dev/null || \
-xcodebuild \
-  -project "$APP_DIR/Sissy.xcodeproj" \
-  -scheme "$SCHEME" \
-  -configuration Release \
-  -derivedDataPath "$BUILD_DIR" \
-  CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
-  DEVELOPMENT_TEAM="$TEAM_ID" \
-  MARKETING_VERSION="$VERSION" \
-  CURRENT_PROJECT_VERSION="$BUILD" \
-  build
+ARCHIVE_PATH="$BUILD_DIR/Sissy.xcarchive"
+archive() {
+  xcodebuild \
+    -project "$APP_DIR/Sissy.xcodeproj" \
+    -scheme "$SCHEME" \
+    -configuration Release \
+    -derivedDataPath "$BUILD_DIR" \
+    -archivePath "$ARCHIVE_PATH" \
+    CODE_SIGN_STYLE=Manual \
+    CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
+    DEVELOPMENT_TEAM="$TEAM_ID" \
+    MARKETING_VERSION="$VERSION" \
+    CURRENT_PROJECT_VERSION="$BUILD" \
+    archive
+}
+if command -v xcbeautify >/dev/null; then
+  archive | xcbeautify
+else
+  archive
+fi
 
-APP_PATH="$BUILD_DIR/Build/Products/Release/Sissy.app"
-[[ -d "$APP_PATH" ]] || die "build did not produce $APP_PATH"
+# Archive and export is the path Apple and Sparkle both document for a
+# Developer ID app: the export signs every nested binary with the identity, a
+# secure timestamp and no get-task-allow, Sparkle's helpers included.
+log "xcodebuild -exportArchive"
+xcodebuild -exportArchive \
+  -archivePath "$ARCHIVE_PATH" \
+  -exportPath "$BUILD_DIR/export" \
+  -exportOptionsPlist "$APP_DIR/ExportOptions.plist"
+
+APP_PATH="$BUILD_DIR/export/Sissy.app"
+[[ -d "$APP_PATH" ]] || die "export did not produce $APP_PATH"
 
 # The plists carry only $(MARKETING_VERSION) / $(CURRENT_PROJECT_VERSION), so a
 # literal reintroduced into either one would silently ship a bundle whose About
@@ -103,32 +110,21 @@ for pair in "CFBundleShortVersionString:$VERSION" "CFBundleVersion:$BUILD"; do
   [[ "$got" == "$want" ]] || die "$key is '$got', expected '$want'"
 done
 
-# `xcodebuild build` signs for local run/debug: it injects get-task-allow and
-# omits a secure timestamp, both rejected by notarization. Re-sign inner-to-outer
-# with --timestamp and without the debug entitlement.
-log "re-sign for Developer ID distribution"
-codesign --force --timestamp --options runtime \
-  --sign "$SIGN_IDENTITY" \
-  --entitlements "$APP_DIR/Sissy/Sissy.entitlements" \
-  "$APP_PATH"
-
-# Verify signature. Both --deep verify and authority parse — the
-# previous "grep team id" was satisfied even by a Mac Development cert,
-# which notarizes but doesn't ship.
+# Notarization preflight, on the app and on every binary nested in it: the
+# Developer ID authority (a Mac Development cert also carries the team id but
+# cannot be notarized), a secure timestamp, and no get-task-allow.
 log "verify codesign"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-SIGN_DUMP="$(mktemp -t sissy-sign)"
-trap 'rm -f "$SIGN_DUMP"' EXIT
-codesign -dvvv "$APP_PATH" 2>&1 | tee "$SIGN_DUMP" >/dev/null
-grep -q "Authority=$SIGN_IDENTITY" "$SIGN_DUMP" \
-  || die "app not signed with '$SIGN_IDENTITY' authority"
-# Notarization preflight: secure timestamp present, no get-task-allow. One
-# Mach-O to check since the app stopped shipping a second executable.
-codesign -dvv "$APP_PATH" 2>&1 | grep -q "Timestamp=" \
-  || die "no secure timestamp on $APP_PATH"
-if codesign -d --entitlements - "$APP_PATH" 2>/dev/null | grep -q "get-task-allow"; then
-  die "get-task-allow present on $APP_PATH"
-fi
+SPARKLE="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+for code in "$APP_PATH" "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
+  info="$(codesign -dvv "$code" 2>&1)"
+  grep -q "Authority=$SIGN_IDENTITY" <<<"$info" || die "$code not signed with '$SIGN_IDENTITY' authority"
+  grep -q "Timestamp=" <<<"$info" || die "no secure timestamp on $code"
+  if codesign -d --entitlements - "$code" 2>/dev/null | grep -q "get-task-allow"; then
+    die "get-task-allow present on $code"
+  fi
+done
+[[ ! -e "$SPARKLE/Versions/B/XPCServices" ]] || die "Sparkle XPC services still bundled"
 
 # The cask copies Sissy.app out of the DMG, so a ticket stapled to the DMG
 # alone never reaches /Applications and the first launch has to look it up
@@ -136,7 +132,7 @@ fi
 log "notarize app"
 NOTARY_DIR="$(mktemp -d -t sissy-notary)"
 NOTARY_ZIP="$NOTARY_DIR/Sissy.zip"
-trap 'rm -f "$SIGN_DUMP"; rm -rf "$NOTARY_DIR"' EXIT
+trap 'rm -rf "$NOTARY_DIR"' EXIT
 ditto -c -k --keepParent "$APP_PATH" "$NOTARY_ZIP"
 xcrun notarytool submit "$NOTARY_ZIP" \
   --keychain-profile "$NOTARY_PROFILE" --wait

@@ -40,6 +40,8 @@ jobs:
     env:
       SCHEME: Sissy
       SIGN_IDENTITY: "Developer ID Application"
+      # Relative to app/, where every step that touches it runs.
+      APP: build/export/Sissy.app
 
     steps:
       - uses: actions/checkout@v6
@@ -217,7 +219,12 @@ jobs:
             | grep -q "$SIGN_IDENTITY" \
             || { echo "imported keychain has no Developer ID cert" >&2; exit 1; }
 
-      - name: Build Release
+      # Archive and export, the path Apple and Sparkle both document for a
+      # Developer ID app: the export signs every nested binary with the
+      # identity, a secure timestamp and no get-task-allow. `xcodebuild build`
+      # signs for local debugging instead, and it never re-signs the helpers
+      # inside Sparkle.framework, which ship ad-hoc signed.
+      - name: Archive and export
         working-directory: app
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -230,12 +237,17 @@ jobs:
             -scheme "$SCHEME" \
             -configuration Release \
             -derivedDataPath build \
+            -archivePath build/Sissy.xcarchive \
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD" \
-            build | xcbeautify --renderer github-actions
+            archive | xcbeautify --renderer github-actions
+          xcodebuild -exportArchive \
+            -archivePath build/Sissy.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist
 
       - name: Verify bundle version
         working-directory: app
@@ -248,7 +260,7 @@ jobs:
           # so a literal reintroduced into either one would silently ship a
           # bundle whose About window disagrees with the DMG, the cask and the
           # tag. Assert before notarization, which costs minutes.
-          PLIST="build/Build/Products/Release/Sissy.app/Contents/Info.plist"
+          PLIST="$APP/Contents/Info.plist"
           for pair in "CFBundleShortVersionString:$VERSION" "CFBundleVersion:$BUILD"; do
             key="${pair%%:*}"
             want="${pair#*:}"
@@ -257,42 +269,33 @@ jobs:
               || { echo "$key is '$got', expected '$want'" >&2; exit 1; }
           done
 
-      - name: Re-sign for Developer ID distribution
-        working-directory: app
-        run: |
-          set -euo pipefail
-          APP="build/Build/Products/Release/Sissy.app"
-          # `xcodebuild build` signs products for local run/debug: it injects
-          # com.apple.security.get-task-allow and omits a secure timestamp,
-          # both of which the notary service rejects. Re-sign with --timestamp
-          # and without the debug entitlement. One Mach-O since the app
-          # stopped shipping a second executable.
-          codesign --force --timestamp --options runtime \
-            --sign "$SIGN_IDENTITY" \
-            --entitlements Sissy/Sissy.entitlements \
-            "$APP"
-
       - name: Verify code signature
         working-directory: app
         run: |
           set -euo pipefail
-          APP="build/Build/Products/Release/Sissy.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
-          # Authority check beats team-id alone — a Mac Development cert
-          # also carries the team id but cannot be notarized.
-          codesign -dvvv "$APP" 2>&1 | tee /tmp/sign-app.txt >/dev/null
-          grep -q "Authority=$SIGN_IDENTITY" /tmp/sign-app.txt \
-            || { echo "app not signed with '$SIGN_IDENTITY' authority" >&2; exit 1; }
-          # Notarization preflight: the signed Mach-O must carry a secure
-          # timestamp and must NOT request get-task-allow. Asserting here lets
-          # the un-notarized dry-run catch a non-distributable signature before
-          # a tag triggers the real notary submission.
-          codesign -dvv "$APP" 2>&1 | grep -q "Timestamp=" \
-            || { echo "no secure timestamp on $APP" >&2; exit 1; }
-          if codesign -d --entitlements - "$APP" 2>/dev/null | grep -q "get-task-allow"; then
-            echo "get-task-allow present on $APP" >&2
-            exit 1
-          fi
+          # Notarization preflight, on the app and on every binary nested in
+          # it: signed by the Developer ID authority (a Mac Development cert
+          # also carries the team id but cannot be notarized), with a secure
+          # timestamp, and without get-task-allow. Asserting each one lets the
+          # un-notarized dry run catch a helper the export left ad-hoc before a
+          # tag triggers the real notary submission.
+          SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+          for code in "$APP" "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
+            info="$(codesign -dvv "$code" 2>&1)"
+            grep -q "Authority=$SIGN_IDENTITY" <<<"$info" \
+              || { echo "$code not signed with '$SIGN_IDENTITY' authority" >&2; exit 1; }
+            grep -q "Timestamp=" <<<"$info" \
+              || { echo "no secure timestamp on $code" >&2; exit 1; }
+            if codesign -d --entitlements - "$code" 2>/dev/null | grep -q "get-task-allow"; then
+              echo "get-task-allow present on $code" >&2
+              exit 1
+            fi
+          done
+          # The app is not sandboxed, so Sparkle's XPC services are stripped
+          # at archive time; one left behind is a nested binary nothing checks.
+          [[ ! -e "$SPARKLE/Versions/B/XPCServices" ]] \
+            || { echo "Sparkle XPC services still bundled" >&2; exit 1; }
 
       # The cask copies Sissy.app out of the DMG, so a ticket stapled to the
       # DMG alone never reaches /Applications: the first launch then has to
@@ -309,7 +312,6 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           set -euo pipefail
-          APP="build/Build/Products/Release/Sissy.app"
           ZIP="$RUNNER_TEMP/Sissy-notarize.zip"
           ditto -c -k --keepParent "$APP" "$ZIP"
           xcrun notarytool submit "$ZIP" \
@@ -327,7 +329,6 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          APP="build/Build/Products/Release/Sissy.app"
           mkdir -p ../dist
           DMG="../dist/Sissy-$VERSION.dmg"
           create-dmg \
