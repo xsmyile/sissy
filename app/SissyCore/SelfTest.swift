@@ -1990,19 +1990,32 @@ private func runPriceCatalogTests() {
     PriceCatalogSource.saveCache(withRows(catalog.anthropic, catalog.openai), to: cacheURL)
     expect(
         "catalog cache round-trips",
-        PriceCatalogSource.loadCache(from: cacheURL)?.anthropic.count, 10)
+        PriceCatalogSource.loadCache(from: cacheURL)?.anthropic["claude-test-0"]?.inputPerMTok,
+        Decimal(5))
+    expect(
+        "catalog cache is laid over the seed",
+        PriceCatalogSource.loadCache(from: cacheURL)?.anthropic["claude-opus-4-7"] != nil, true)
     // A cache written by a different schema, or one that is semantically wrong,
     // must be discarded rather than shadowing the embedded seed.
     try? Data(#"{"schemaVersion":99,"fetchedAt":0,"anthropic":{},"openai":{}}"#.utf8)
         .write(to: cacheURL)
     expect(
         "catalog rejects foreign schema", PriceCatalogSource.loadCache(from: cacheURL) == nil, true)
-    // A cache written before this binary's seed is not an upgrade over it.
-    rejects(
-        "catalog rejects cache older than the seed",
+    // A cache written before this binary's seed is not an upgrade over it, but
+    // what only the cache carries is still kept.
+    var staleRows = catalog.anthropic
+    staleRows["claude-opus-4-7"] = ModelPricing(
+        inputPerMTok: 7, outputPerMTok: 25, cacheReadPerMTok: 0, cacheCreationPerMTok: 7)
+    PriceCatalogSource.saveCache(
         PriceCatalog(
-            fetchedAt: Date(timeIntervalSince1970: 0), anthropic: catalog.anthropic,
-            openai: catalog.openai))
+            fetchedAt: Date(timeIntervalSince1970: 0), anthropic: staleRows,
+            openai: catalog.openai),
+        to: cacheURL)
+    let stale = PriceCatalogSource.loadCache(from: cacheURL)
+    expect("seed outranks an older cache", stale?.anthropic["claude-opus-4-7"]?.inputPerMTok, Decimal(5))
+    expect(
+        "older cache keeps what only it carries",
+        stale?.anthropic["claude-test-0"]?.inputPerMTok, Decimal(5))
 
     // The cache is re-validated with the same rules as a fresh download, or a
     // hand-edited file could outrank the seed with inflated rates. Every case
@@ -2058,6 +2071,41 @@ private func runPriceCatalogTests() {
         OpenAIPricing.price(for: "gpt-5.6", catalog: PricingTable(["gpt-5.6": catalogRate])),
         catalogRate)
 
+    // A refresh reprices what it carries and deletes nothing: LiteLLM drops a
+    // model once it is deprecated, and the logs that name it still need a rate.
+    let retiredRate = ModelPricing(
+        inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheCreationPerMTok: 3.75)
+    var previousRows = catalog.anthropic
+    previousRows["claude-retired"] = retiredRate
+    previousRows["claude-test-0"] = retiredRate
+    let retained = PriceCatalogSource.retaining(
+        catalog,
+        over: PriceCatalog(fetchedAt: Date(), anthropic: previousRows, openai: catalog.openai))
+    expect("refresh keeps a model upstream deleted", retained.anthropic["claude-retired"], retiredRate)
+    expect(
+        "refresh reprices a model upstream carries",
+        retained.anthropic["claude-test-0"]?.inputPerMTok, Decimal(5))
+    expect("refresh takes the fetch's date", retained.fetchedAt, catalog.fetchedAt)
+    // Measured 2026-09-23: with `gpt-5.1-codex-mini` gone from LiteLLM, the
+    // catalog's `gpt-5.1` row caught it by prefix before the seed's exact row
+    // was consulted, and billed it at 5× its rate.
+    let withoutMini = PriceCatalog(
+        fetchedAt: Date(), anthropic: catalog.anthropic,
+        openai: catalog.openai.merging(["gpt-5.1": catalogRate]) { $1 })
+    expect(
+        "deleted model keeps its exact rate over a prefix",
+        OpenAIPricing.price(
+            for: "gpt-5.1-codex-mini",
+            catalog: PriceCatalogSource.retaining(withoutMini).table(for: .openai))?.inputPerMTok,
+        Decimal(string: "0.25"))
+    expect(
+        "family override still beats a retained exact row",
+        Pricing.price(
+            for: "claude-opus-4-7",
+            override: PricingTable(["claude-opus-4": overrideRate]),
+            catalog: PriceCatalogSource.retaining(catalog).table(for: .anthropic)),
+        overrideRate)
+
     // A refresh that changes nothing must not be announced as a change, or the
     // log cries wolf every day.
     expect("no change against nil previous", PriceCatalogSource.changedModelCount(from: nil, to: catalog), 0)
@@ -2084,6 +2132,14 @@ private func runPriceCatalogTests() {
     // The embedded seed must be a usable catalog, not the bootstrap stub.
     expect("seed is usable", PricingSeed.anthropic.isEmpty, false)
     expect("seed carries openai rates", PricingSeed.openai.isEmpty, false)
+    // Deleted from LiteLLM by 075536eca1 (2026-09-22) while logs naming them
+    // are on disk; a regenerated seed that lost them would price those at $0.
+    for model in ["claude-opus-4-1", "claude-sonnet-4-20250514"] {
+        expect("seed keeps retired \(model)", PriceCatalogSource.seed?.anthropic[model] != nil, true)
+    }
+    for model in ["gpt-5-codex", "gpt-5.1-codex-mini", "gpt-5.1-codex-max", "codex-mini-latest"] {
+        expect("seed keeps retired \(model)", PriceCatalogSource.seed?.openai[model] != nil, true)
+    }
 }
 
 /// The account each provider is signed in as, and the seat that words a Team

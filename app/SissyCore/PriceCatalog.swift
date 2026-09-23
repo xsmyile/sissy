@@ -48,6 +48,24 @@ struct PriceCatalog: Sendable, Codable {
     func table(for provider: CatalogProvider) -> PricingTable {
         PricingTable(rates(for: provider))
     }
+
+    /// This catalog's rows with `newer`'s laid over them: a model both carry
+    /// takes `newer`'s rate, and a model only this one carries keeps its own.
+    ///
+    /// LiteLLM deletes a model once its vendor deprecates it — measured
+    /// 2026-09-22, 075536eca1 removed 27 bare keys at once, `gpt-5.1-codex-mini`
+    /// and `claude-opus-4-1` among them — while the CLIs' logs that name it
+    /// stay on disk and `ArchiveBackfill` still has to price them. So a row
+    /// only ever leaves Sissy's catalog by being repriced, never by vanishing
+    /// upstream. It is also what `ccusage` does, which overlays its live fetch
+    /// on an embedded snapshot entry by entry and deletes nothing.
+    func merging(_ newer: Self) -> Self {
+        let keepNewer: (ModelPricing, ModelPricing) -> ModelPricing = { $1 }
+        return Self(
+            fetchedAt: newer.fetchedAt,
+            anthropic: anthropic.merging(newer.anthropic, uniquingKeysWith: keepNewer),
+            openai: openai.merging(newer.openai, uniquingKeysWith: keepNewer))
+    }
 }
 
 /// Fetch / cache / validate pipeline for `PriceCatalog`.
@@ -216,41 +234,49 @@ enum PriceCatalogSource {
 
     // MARK: - Cache
 
-    /// Reads the cached catalog, or nil when absent, unreadable, written by a
-    /// different schema version, semantically invalid, or older than the
-    /// embedded seed.
+    /// Reads the cached catalog folded over the embedded seed, or nil when the
+    /// file is absent, unreadable, written by a different schema version or
+    /// semantically invalid.
     ///
     /// The decoded model is re-validated, not just decoded: the cache outranks
     /// the embedded seed, so a hand-edited or truncated file that happens to
     /// satisfy `Codable` would otherwise shadow correct rates.
+    ///
+    /// Whichever of the two was fetched later wins a model both carry. A cache
+    /// written before the seed was generated is not an upgrade over it: an
+    /// install that sat idle across a release would otherwise boot, prefer its
+    /// months-old rates, and never see the ones the new build was cut with —
+    /// permanently so if the machine is offline. It is still merged rather than
+    /// discarded, because it can hold a model the seed was cut too late to see.
     static func loadCache(from url: URL = Self.cacheURL) -> PriceCatalog? {
         guard let data = try? Data(contentsOf: url),
             let decoded = try? JSONDecoder().decode(PriceCatalog.self, from: data),
-            isUsable(decoded),
-            outranksSeed(decoded)
+            isUsable(decoded)
         else { return nil }
-        return decoded
+        guard let seed else { return decoded }
+        return decoded.fetchedAt >= seed.fetchedAt
+            ? retaining(decoded, over: seed) : retaining(seed, over: decoded)
     }
 
-    /// Whether a cache is newer than the snapshot this binary ships.
-    ///
-    /// A cache written before the seed was generated is not an upgrade over it:
-    /// an install that sat idle across a release would otherwise boot, prefer its
-    /// months-old file, and never see the rates the new build was cut with —
-    /// permanently so if the machine is offline.
-    static func outranksSeed(_ catalog: PriceCatalog) -> Bool {
-        guard let seedFetchedAt else { return true }
-        return catalog.fetchedAt >= seedFetchedAt
+    /// A freshly fetched catalog laid over the one it replaces, or over the
+    /// embedded seed when there is none, so a model upstream has since deleted
+    /// keeps its last published rate. Every catalog Sissy adopts or writes —
+    /// the cache, the refresh, the cold-start fetch and `--dump-seed` — goes
+    /// through here; `fresh` has already passed `parse`'s checks.
+    static func retaining(_ fresh: PriceCatalog, over base: PriceCatalog? = nil) -> PriceCatalog {
+        guard let base = base ?? seed else { return fresh }
+        return base.merging(fresh)
     }
 
-    /// When the embedded seed was generated. Read back out of `PricingSeed.json`
+    /// The embedded seed as a catalog. Read back out of `PricingSeed.json`
     /// rather than added as a generated field, so the snapshot stays a plain
     /// dump of the same `PriceCatalog` the runtime fetch produces.
-    private static let seedFetchedAt: Date? = {
+    static let seed: PriceCatalog? = {
         guard let data = PricingSeed.json.data(using: .utf8),
-            let decoded = try? JSONDecoder().decode(PriceCatalog.self, from: data)
+            let decoded = try? JSONDecoder().decode(PriceCatalog.self, from: data),
+            isUsable(decoded)
         else { return nil }
-        return decoded.fetchedAt
+        return decoded
     }()
 
     static func isUsable(_ catalog: PriceCatalog) -> Bool {
@@ -371,7 +397,7 @@ enum PriceCatalogSource {
                 do { try await Task.sleep(for: delay) } catch { return }
             }
             do {
-                let catalog = try await fetch()
+                let catalog = retaining(try await fetch(), over: previous)
                 saveCache(catalog)
                 await publish(catalog)
                 let changed = changedModelCount(from: previous, to: catalog)
@@ -399,7 +425,8 @@ enum PriceCatalogSource {
     }
 
     /// Number of models whose rate differs between two catalogs, counting
-    /// additions and removals. Nil `old` reports 0 so the first refresh of a
+    /// additions and removals. The refresh only ever compares a catalog with
+    /// its own `retaining` result, so there a removal cannot occur. Nil `old` reports 0 so the first refresh of a
     /// process isn't announced as a change.
     static func changedModelCount(from old: PriceCatalog?, to new: PriceCatalog) -> Int {
         guard let old else { return 0 }
@@ -435,8 +462,9 @@ enum PriceCatalogSource {
             //
             // A snapshot of the LiteLLM rate tables, embedded so a first run with
             // no network still prices correctly. `PriceCatalog`'s runtime refresh
-            // supersedes it within a day, so this only needs regenerating when
-            // cutting a release.
+            // is laid over it within a day, so this only needs regenerating when
+            // cutting a release. Rows LiteLLM has since deleted are carried over
+            // from the seed that generated this one, at their last published rate.
 
             import Foundation
 

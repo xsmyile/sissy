@@ -43,14 +43,15 @@ if args.contains("--self-test") {
     exit(0)
 }
 if args.contains("--dump-seed") {
-    // Regenerates `PricingSeed.swift` from a live LiteLLM fetch, using the same
-    // parser that validates the runtime refresh. Release-time tool; see
-    // AGENTS.md. Writes the Swift source to stdout.
+    // Regenerates `PricingSeed.swift` from a live LiteLLM fetch laid over the
+    // seed this binary was built with, using the same parser that validates the
+    // runtime refresh. Release-time tool; see AGENTS.md. Writes the Swift source
+    // to stdout.
     let sem = DispatchSemaphore(value: 0)
     var status: Int32 = 0
     Task.detached {
         do {
-            let catalog = try await PriceCatalogSource.fetch()
+            let catalog = PriceCatalogSource.retaining(try await PriceCatalogSource.fetch())
             print(try PriceCatalogSource.swiftSeedSource(for: catalog))
         } catch {
             sissyLog("sissy: --dump-seed failed: \(error)")
@@ -82,10 +83,12 @@ if args.contains("--refresh-catalog") {
                 status = 1
                 return
             }
-            PriceCatalogSource.saveCache(catalog)
+            let retained = PriceCatalogSource.retaining(
+                catalog, over: PriceCatalogSource.loadCache())
+            PriceCatalogSource.saveCache(retained)
             sissyLog(
                 "sissy: pricing catalog refreshed — "
-                    + "\(catalog.anthropic.count + catalog.openai.count) rates cached at "
+                    + "\(retained.anthropic.count + retained.openai.count) rates cached at "
                     + PriceCatalogSource.cacheURL.path)
         } catch {
             sissyLog("sissy: --refresh-catalog failed: \(error)")
