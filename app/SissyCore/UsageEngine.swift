@@ -359,8 +359,9 @@ actor UsageEngine {
                 // The read goes through `loadOffPool` because it is blocking:
                 // it forks `/usr/bin/security`, and called straight from the
                 // probe that runs on the actor's own executor, parking a
-                // cooperative thread once every five minutes per home. Off-pool is also what gives the timeout
-                // the probe already passes something to bound.
+                // cooperative thread once every five minutes per home.
+                // Off-pool is also what gives the timeout the probe already
+                // passes something to bound.
                 let probe =
                     limitsProbe
                     ?? ClaudeLimitsProbe(
