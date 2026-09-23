@@ -16,6 +16,7 @@ final class SissyModel {
     private let supportDirectory: URL
     let engine: UsageEngineHost
     let loginItem: LoginItemController
+    let updates: UpdateController
 
     /// `loginItem` is injected so a test can pin the lookup to a service that
     /// is definitely not registered, rather than letting whatever is on the
@@ -26,17 +27,19 @@ final class SissyModel {
     /// somewhere else to write.
     init(
         loginItem: LoginItemController = LoginItemController(),
+        updates: UpdateController = UpdateController(),
         supportDirectory: URL = Preferences.appSupportDir()
     ) {
         self.supportDirectory = supportDirectory
         self.preferences = .load(from: supportDirectory)
         self.loginItem = loginItem
+        self.updates = updates
         self.engine = UsageEngineHost()
         self.engine.attach(model: self)
     }
 
     /// Brings the app up: the login item's state, the one-shot retirement of
-    /// the legacy agent, then metering.
+    /// the legacy agent, metering, then the updater.
     ///
     /// The login item is read here rather than left to Settings because
     /// `LoginItemController` starts at `.notRegistered` and Settings' own
@@ -55,6 +58,7 @@ final class SissyModel {
         }
         retireLegacyAgentIfNeeded()
         engine.start()
+        updates.start()
     }
 
     /// Stops metering and waits for it. Reached from termination, which is the

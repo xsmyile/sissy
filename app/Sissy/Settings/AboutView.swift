@@ -34,7 +34,7 @@ struct AboutView: View {
     private static let copiedTitle = "Copied"
 
     /// Smaller than the 104 pt it was, with its halo brought in to match, which
-    /// is what buys the Updates block (#45) its room before it exists.
+    /// is what bought the update check under the version its room.
     /// Measured 2026-09-18 against a harness reproducing this layout at the
     /// tab's own 560 pt: the page this replaced came to 457.0 pt of
     /// `SettingsRootView.maxContentHeight`'s 600, this one comes to 412.0, and
@@ -97,6 +97,14 @@ struct AboutView: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+            if model.updates.isRunning {
+                Button(UpdateController.menuTitle(pendingVersion: model.updates.pendingVersion)) {
+                    model.updates.checkForUpdates()
+                }
+                .buttonStyle(.link)
+                .font(.callout)
+                .disabled(!model.updates.canCheckForUpdates)
+            }
             Text(Self.tagline)
                 .font(.callout)
                 .foregroundStyle(.secondary)

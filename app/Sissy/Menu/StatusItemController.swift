@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Owns the app's status item: the icon, the left-click that opens the usage
 /// panel, and a right-click menu that says whether the Mac is being held awake,
-/// and quits.
+/// checks for updates, and quits.
 @MainActor
 final class StatusItemController: NSObject {
     let statusItem: NSStatusItem
@@ -13,6 +13,9 @@ final class StatusItemController: NSObject {
     /// found by index: both are hidden together whenever nothing is held.
     private let holdItem = NSMenuItem()
     private let holdSeparator = NSMenuItem.separator()
+    /// Kept by reference for the same reason: its title names a pending
+    /// version and its state follows the updater, both read on open.
+    private let updateItem = NSMenuItem()
 
     private let model: SissyModel
     private var sissyAnimator: SissyMenuBarAnimator?
@@ -86,7 +89,8 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// What the Mac is doing about sleep, a re-read of everything, and quit.
+    /// What the Mac is doing about sleep, a re-read of everything, updates, and
+    /// quit.
     ///
     /// The three modes used to hang here as a radio group, on the grounds that
     /// the menu bar is the one surface always present while every other way to
@@ -109,6 +113,10 @@ final class StatusItemController: NSObject {
         refresh.target = self
         refresh.keyEquivalentModifierMask = [.command]
         menu.addItem(refresh)
+
+        updateItem.target = self
+        updateItem.action = #selector(handleCheckForUpdates)
+        menu.addItem(updateItem)
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit Sissy", action: #selector(handleQuit), keyEquivalent: "q")
@@ -132,6 +140,16 @@ final class StatusItemController: NSObject {
         holdItem.title = UsageFormat.keepAwakeHolding(Date().timeIntervalSince(since))
         holdItem.isHidden = false
         holdSeparator.isHidden = false
+    }
+
+    /// A development build runs no updater, so it shows no row for one.
+    /// The row is disabled only while Sparkle is fetching in the background,
+    /// which is when no update window exists to bring back.
+    private func refreshUpdateItem() {
+        let updates = model.updates
+        updateItem.isHidden = !updates.isRunning
+        updateItem.title = UpdateController.menuTitle(pendingVersion: updates.pendingVersion)
+        updateItem.isEnabled = updates.canCheckForUpdates
     }
 
     /// Re-arming observation bridge. `@Observable` exposes no
@@ -233,6 +251,10 @@ final class StatusItemController: NSObject {
         model.refreshAll()
     }
 
+    @objc private func handleCheckForUpdates() {
+        model.updates.checkForUpdates()
+    }
+
     @objc private func handleQuit() {
         NSApp.terminate(nil)
     }
@@ -248,6 +270,7 @@ extension StatusItemController: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
         refreshHoldItem()
+        refreshUpdateItem()
         refreshIcon(model.menuSnapshot.statusIcon)
     }
 
