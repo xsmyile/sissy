@@ -53,6 +53,13 @@ final class ForgeConnectionTests: XCTestCase {
         XCTAssertEqual(try parse("http://gitlab.example.com").get(), try parse("gitlab.example.com").get())
     }
 
+    /// `80` is what `http` answers on anyway, so naming it asks the same
+    /// https address as naming nothing rather than TLS on the plain port.
+    func testThePlainSchemesOwnPortIsTheSameConnectionAsNone() throws {
+        XCTAssertEqual(try parse("http://gitlab.lan:80").get(), try parse("gitlab.lan").get())
+        XCTAssertEqual(try parse("https://gitlab.lan:80").get().port, 80)
+    }
+
     func testAPlainHttpHostIsNamedSoTheSheetCanSaySo() {
         XCTAssertTrue(ForgeConnection.namesPlainHTTP(" HTTP://gitlab.lan"))
         XCTAssertFalse(ForgeConnection.namesPlainHTTP("https://gitlab.lan"))
