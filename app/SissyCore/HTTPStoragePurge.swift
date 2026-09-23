@@ -37,41 +37,61 @@ enum HTTPStoragePurge {
         }
     }
 
-    /// Deletes every matching entry under `roots` and answers what it deleted.
-    /// The release id is a prefix of the dev one, so an entry both name is
-    /// removed once. A removal that fails is logged by entry name and left for the next
-    /// launch; it never stops the others.
+    /// What one run did: the entries it deleted, and the directories it could
+    /// not list, whose credentials may therefore still be on disk.
+    struct Outcome: Equatable {
+        var removed: [URL] = []
+        var unreadable: [URL] = []
+    }
+
+    /// Deletes every matching entry under `roots` and answers what it deleted
+    /// and what it could not look into. The release id is a prefix of the dev
+    /// one, so an entry both name is removed once. A removal that fails, and a
+    /// directory that exists but will not list, is logged by name and left
+    /// for the next launch; neither stops the others. A directory that does
+    /// not exist is nothing to purge rather than a failure.
     @discardableResult
     static func run(
         in roots: Roots, bundleIdentifiers: [String] = bundleIdentifiers,
         fileManager: FileManager = .default
-    ) -> [URL] {
+    ) -> Outcome {
+        var outcome = Outcome()
+        let list = { (directory: URL) -> [String] in
+            do {
+                return try fileManager.contentsOfDirectory(atPath: directory.path)
+            } catch {
+                if !outcome.unreadable.contains(directory) { outcome.unreadable.append(directory) }
+                return []
+            }
+        }
         var seen: Set<URL> = []
         let targets = bundleIdentifiers.flatMap { id in
-            cacheEntries(in: roots.caches.appendingPathComponent(id), fileManager)
-                + storageEntries(for: id, in: roots.httpStorages, fileManager)
+            cacheEntries(in: roots.caches.appendingPathComponent(id), fileManager, list)
+                + storageEntries(for: id, in: roots.httpStorages, fileManager, list)
         }.filter { seen.insert($0).inserted }
-        return targets.filter { remove($0, fileManager) }
+        outcome.removed = targets.filter { remove($0, fileManager) }
+        for directory in outcome.unreadable {
+            sissyLog("sissy: http-purge unlistable dir=\(directory.lastPathComponent)")
+        }
+        return outcome
     }
 
-    private static func cacheEntries(in directory: URL, _ fileManager: FileManager) -> [URL] {
+    private static func cacheEntries(
+        in directory: URL, _ fileManager: FileManager, _ list: (URL) -> [String]
+    ) -> [URL] {
         guard isDirectory(directory, fileManager) else { return [] }
-        return entries(of: directory, fileManager).filter { name in
+        return list(directory).filter { name in
             name.hasPrefix(cacheDatabasePrefix) || name == cacheBodiesDirectory
         }.map { directory.appendingPathComponent($0) }
     }
 
-    private static func storageEntries(for id: String, in directory: URL, _ fileManager: FileManager)
-        -> [URL]
-    {
+    private static func storageEntries(
+        for id: String, in directory: URL, _ fileManager: FileManager, _ list: (URL) -> [String]
+    ) -> [URL] {
         guard isDirectory(directory, fileManager) else { return [] }
-        return entries(of: directory, fileManager).filter { name in
+        return list(directory).filter { name in
             name == id || name.hasPrefix("\(id).")
         }.map { directory.appendingPathComponent($0) }
-    }
-
-    private static func entries(of directory: URL, _ fileManager: FileManager) -> [String] {
-        (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? []
     }
 
     /// `attributesOfItem` does not traverse a final symlink, so a link to a
