@@ -222,6 +222,30 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertEqual(source.currentSignals().limitsState, .signedOut)
     }
 
+    // MARK: - The recorded organisation
+
+    /// A refusal drops the session and never the organisation the link
+    /// recorded: the next poll reads for that organisation rather than for
+    /// whichever one the server happens to list first.
+    func testARefusedSessionKeepsTheLinkedOrganization() async {
+        let seen = Sent()
+        let refuse = LockedValue(true)
+        let source = ClaudeWebSource(
+            account: "a1b2c3d4", organization: "team",
+            sessionSource: { _ in Self.found(Self.session) },
+            fetchSource: { _, organization in
+                await seen.record(organization)
+                if refuse.load() { throw UsageRequestError.badStatus(403) }
+                return ClaudeWebSource.Reading(
+                    organization: organization ?? "derived", windows: [], credits: nil)
+            })
+        _ = await source.refreshOnce {}
+        refuse.store(false)
+        _ = await source.refreshOnce {}
+        let organizations = await seen.organizations
+        XCTAssertEqual(organizations, ["team", "team"])
+    }
+
     /// Switching the source off takes the gauges down with it: the aggregator
     /// rebuilds every slice from what is published, so a reading left behind
     /// would outlive the switch.
