@@ -400,13 +400,27 @@ actor CodexUsageSource: SourceSignals {
     /// separates it from claude.ai's usage route and is why this reader needs
     /// no browser to run.
     static func fetch(_ credential: CodexCredential) async throws -> CodexUsagePayload.Reading {
-        var request = URLRequest(url: usageURL, timeoutInterval: requestTimeout)
+        let body = try await send(request(usageURL, credential: credential))
+        return CodexUsagePayload.reading(body, observedAt: Date())
+    }
+
+    /// A request to one of OpenAI's Codex routes, carrying the credential and
+    /// the workspace it is asked for.
+    static func request(_ url: URL, credential: CodexCredential) -> URLRequest {
+        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let accountId = credential.accountId, !accountId.isEmpty {
             request.setValue(accountId, forHTTPHeaderField: accountHeader)
         }
+        return request
+    }
+
+    /// The JSON object OpenAI answered with, or the error a reader acts on: a
+    /// 429 with its wait, any other status as itself, and anything that is
+    /// not an object as a malformed reply.
+    static func send(_ request: URLRequest) async throws -> [String: Any] {
         let (data, response) = try await SissyHTTP.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw UsageRequestError.malformedPayload
@@ -418,6 +432,6 @@ actor CodexUsageSource: SourceSignals {
         guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw UsageRequestError.malformedPayload
         }
-        return CodexUsagePayload.reading(body, observedAt: Date())
+        return body
     }
 }
