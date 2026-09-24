@@ -439,7 +439,9 @@ jobs:
           GENERATE="app/build/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast"
           mkdir -p "$FEED"
           # The live feed is the base, so every earlier item keeps the
-          # signature it was published with; only this release is added. The
+          # signature it was published with; only this release is added, and
+          # `--maximum-versions 0` keeps Sparkle from pruning to its default
+          # of three. The
           # notes are the tag's annotation, the same text the GitHub Release
           # carries, and Sparkle renders them as markdown.
           if [[ -f "$APPCAST" ]]; then cp "$APPCAST" "$FEED/"; fi
@@ -454,6 +456,7 @@ jobs:
             --embed-release-notes \
             --link "$SITE_URL" \
             --maximum-deltas 0 \
+            --maximum-versions 0 \
             "$FEED"
           # generate_appcast omits signatures without an error when the app
           # declares no public key, and every installed Sissy would then
@@ -471,8 +474,21 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/appcast.xml
+          if git diff --cached --quiet; then
+            echo "appcast already carries sissy $VERSION"
+            exit 0
+          fi
           git commit -m "appcast: sissy $VERSION"
-          git push
+          # A push that loses a race with another commit to the site rebases
+          # onto it and tries again; the release is already public by now, so
+          # a rerun of the job is not the way back.
+          for attempt in 1 2 3; do
+            git push && exit 0
+            sleep $((attempt * 5))
+            git pull --rebase
+          done
+          echo "could not push the appcast to $SITE_REPO" >&2
+          exit 1
 
       - name: Cleanup keychain
         if: always()
