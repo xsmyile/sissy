@@ -154,9 +154,14 @@ struct AboutView: View {
                 }
 
                 if let status = updateStatus {
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        if model.updates.checkStatus == .checking {
+                            ProgressView().controlSize(.mini)
+                        }
+                        Text(status)
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
             }
         }
@@ -164,14 +169,16 @@ struct AboutView: View {
 
     private var updateStatus: String? {
         guard !model.updates.isDevBuild else { return Self.devBuildStatus }
-        return model.updates.lastCheck.map {
-            "Last checked \($0.formatted(.relative(presentation: .named)))"
-        }
+        return UpdateController.statusLine(
+            model.updates.checkStatus, lastCheck: model.updates.lastCheck)
     }
 
     private var checkButton: some View {
-        Button(UpdateController.menuTitle(pendingVersion: model.updates.pendingVersion)) {
-            model.updates.checkForUpdates()
+        Button(
+            UpdateController.menuTitle(
+                pendingVersion: model.updates.pendingVersion ?? model.updates.availableVersion)
+        ) {
+            model.updates.checkInline()
         }
         .buttonStyle(.glass)
         .disabled(!model.updates.canCheckForUpdates)
