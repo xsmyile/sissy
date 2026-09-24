@@ -277,7 +277,7 @@ jobs:
           # Notarization preflight, on the app and on every binary nested in
           # it: signed by the Developer ID authority (a Mac Development cert
           # also carries the team id but cannot be notarized), with a secure
-          # timestamp, and without get-task-allow. Asserting each one lets the
+          # timestamp and the hardened runtime, and without get-task-allow. Asserting each one lets the
           # un-notarized dry run catch a helper the export left ad-hoc before a
           # tag triggers the real notary submission.
           SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
@@ -287,6 +287,8 @@ jobs:
               || { echo "$code not signed with '$SIGN_IDENTITY' authority" >&2; exit 1; }
             grep -q "Timestamp=" <<<"$info" \
               || { echo "no secure timestamp on $code" >&2; exit 1; }
+            grep -q "flags=.*(runtime)" <<<"$info" \
+              || { echo "no hardened runtime on $code" >&2; exit 1; }
             if codesign -d --entitlements - "$code" 2>/dev/null | grep -q "get-task-allow"; then
               echo "get-task-allow present on $code" >&2
               exit 1

@@ -13,5 +13,5 @@ set -euo pipefail
 FRAMEWORK="${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Frameworks/Sparkle.framework"
 [[ -d "$FRAMEWORK" ]] || { echo "error: $FRAMEWORK not found" >&2; exit 1; }
 
-rm -rf "$FRAMEWORK/Versions/B/XPCServices" "$FRAMEWORK/XPCServices"
+rm -rf "$FRAMEWORK/Versions/Current/XPCServices" "$FRAMEWORK/XPCServices"
 codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --preserve-metadata "$FRAMEWORK"
