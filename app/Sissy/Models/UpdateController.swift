@@ -31,6 +31,21 @@ final class UpdateController: NSObject {
     private(set) var allowsAutomaticInstalls = false
     private(set) var lastCheck: Date?
 
+    /// What a check has found, as About words it under its button.
+    enum CheckStatus: Equatable {
+        case idle
+        case checking
+        case upToDate
+        case available(String)
+        case failed
+    }
+
+    /// Set by every check, whoever started it, so the band says what the last
+    /// one found rather than only when it ran. `failed` is set only for the
+    /// check About started, because a scheduled check that failed was never
+    /// the user's to hear about.
+    private(set) var checkStatus: CheckStatus = .idle
+
     /// The version a scheduled check found and put on screen, until that
     /// update session ends. A background app's scheduled alert is presented
     /// behind whatever is frontmost, so the status menu names the version as
@@ -57,7 +72,7 @@ final class UpdateController: NSObject {
     func start() {
         guard !isDevBuild, controller == nil else { return }
         let controller = SPUStandardUpdaterController(
-            startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
+            startingUpdater: true, updaterDelegate: self, userDriverDelegate: self)
         self.controller = controller
         observe(controller.updater)
         isRunning = true
@@ -68,6 +83,31 @@ final class UpdateController: NSObject {
     /// which is why the controls that call this stay enabled while it is up.
     func checkForUpdates() {
         controller?.checkForUpdates(nil)
+    }
+
+    /// Checks without a window and reports in `checkStatus`, which is how
+    /// About shows a check where its button is. A found update is then
+    /// offered by the button, and pressing it is what opens Sparkle's alert.
+    ///
+    /// A probe does nothing while a session is in progress, so with one up,
+    /// or with an update already found, this falls through to
+    /// `checkForUpdates()`, which brings that session's window forward.
+    /// A probe also skips versions the user skipped, which a check they
+    /// start from the alert would still offer.
+    func checkInline() {
+        guard let controller else { return }
+        guard !controller.updater.sessionInProgress, availableVersion == nil else {
+            checkForUpdates()
+            return
+        }
+        checkStatus = .checking
+        controller.updater.checkForUpdateInformation()
+    }
+
+    /// The version the last check found, while nothing has declined it.
+    var availableVersion: String? {
+        guard case .available(let version) = checkStatus else { return nil }
+        return version
     }
 
     func setAutomaticallyChecks(_ enabled: Bool) {
@@ -83,6 +123,24 @@ final class UpdateController: NSObject {
     @ObservationIgnored let feedHost: String? =
         (Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String)
         .flatMap(URL.init(string:))?.host()
+
+    /// The line under About's check button. `lastCheck` is nil on a copy that
+    /// has never checked, which says nothing rather than "never".
+    nonisolated static func statusLine(_ status: CheckStatus, lastCheck: Date?) -> String? {
+        let checked = lastCheck.map { $0.formatted(.relative(presentation: .named)) }
+        switch status {
+        case .checking:
+            return "Checking for updates…"
+        case .available(let version):
+            return "Version \(version) is available"
+        case .failed:
+            return "Could not check for updates"
+        case .upToDate:
+            return checked.map { "Up to date · checked \($0)" } ?? "Up to date"
+        case .idle:
+            return checked.map { "Last checked \($0)" }
+        }
+    }
 
     /// What the status menu's update row reads.
     nonisolated static func menuTitle(pendingVersion: String?) -> String {
@@ -114,6 +172,69 @@ final class UpdateController: NSObject {
                 assign(self, value)
             }
         }
+    }
+}
+
+/// What Sparkle reports about a check, reduced to what `checkStatus` reads.
+enum UpdateCheckEvent: Equatable {
+    case found(String)
+    case notFound
+    /// The cycle ended, `failed` when Sparkle ended it with an error. Read 2026-09-24
+    /// in Sparkle 2.x's basic update driver: a feed that could not be
+    /// fetched aborts the cycle and never reports `notFound`, which Sparkle
+    /// sends only after an appcast was read and held nothing newer.
+    case finished(failed: Bool)
+    case skipped
+}
+
+extension UpdateController {
+    /// The status an event leaves. Only a check still `checking` at the end
+    /// of its cycle found neither answer, so only that one reads as failed.
+    nonisolated static func status(after event: UpdateCheckEvent, from status: CheckStatus)
+        -> CheckStatus
+    {
+        switch event {
+        case .found(let version):
+            return .available(version)
+        case .notFound:
+            return .upToDate
+        case .finished(let failed):
+            guard status == .checking else { return status }
+            return failed ? .failed : .idle
+        case .skipped:
+            return .idle
+        }
+    }
+
+    private func record(_ event: UpdateCheckEvent) {
+        checkStatus = Self.status(after: event, from: checkStatus)
+    }
+}
+
+/// What every check found, whoever started it.
+extension UpdateController: SPUUpdaterDelegate {
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        record(.found(item.displayVersionString))
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
+        record(.notFound)
+    }
+
+    func updater(
+        _ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?
+    ) {
+        record(.finished(failed: error != nil))
+    }
+
+    /// A skipped version is one a probe will not find again, so the band
+    /// stops offering it.
+    func updater(
+        _ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice,
+        forUpdate updateItem: SUAppcastItem, state: SPUUserUpdateState
+    ) {
+        guard choice == .skip else { return }
+        record(.skipped)
     }
 }
 
