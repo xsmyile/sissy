@@ -37,6 +37,10 @@ struct AboutView: View {
     /// that one module's description rather than the app's.
     private static let tagline = "The numbers you keep checking, in the macOS menu bar."
 
+    /// The room above and below the divider, and above the copyright line
+    /// that closes the page.
+    private static let bandSpacing: CGFloat = 24
+
     private static let copyTitle = "Copy diagnostics"
     private static let copiedTitle = "Copied"
 
@@ -77,13 +81,15 @@ struct AboutView: View {
                 icon
                 identity
                 actions
-                credit
+                acknowledgementsLink
             }
             if model.updates.isRunning {
                 Divider()
-                    .padding(.vertical, 24)
+                    .padding(.vertical, Self.bandSpacing)
                 updates
             }
+            copyrightLine
+                .padding(.top, Self.bandSpacing)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 32)
@@ -136,12 +142,11 @@ struct AboutView: View {
             Spacer(minLength: 0)
 
             VStack(alignment: .trailing, spacing: 6) {
-                Button(UpdateController.menuTitle(pendingVersion: model.updates.pendingVersion)) {
-                    model.updates.checkForUpdates()
+                if let feedHost = model.updates.feedHost {
+                    checkButton.help("Reads the update feed at \(feedHost).")
+                } else {
+                    checkButton
                 }
-                .buttonStyle(.glass)
-                .disabled(!model.updates.canCheckForUpdates)
-                .help(model.updates.feedHost.map { "Reads the update feed at \($0)." } ?? "")
 
                 if let lastCheck = model.updates.lastCheck {
                     Text("Last checked \(lastCheck.formatted(.relative(presentation: .named)))")
@@ -150,6 +155,14 @@ struct AboutView: View {
                 }
             }
         }
+    }
+
+    private var checkButton: some View {
+        Button(UpdateController.menuTitle(pendingVersion: model.updates.pendingVersion)) {
+            model.updates.checkForUpdates()
+        }
+        .buttonStyle(.glass)
+        .disabled(!model.updates.canCheckForUpdates)
     }
 
     private var updateChecksBinding: Binding<Bool> {
@@ -217,18 +230,20 @@ struct AboutView: View {
         .accessibilityLabel(Self.copyTitle)
     }
 
-    private var credit: some View {
-        HStack(spacing: 8) {
-            Text(copyright)
-                .help(Self.siteURL.host() ?? "")
+    private var acknowledgementsLink: some View {
+        Button("Acknowledgements") { showsAcknowledgements = true }
+            .buttonStyle(.link)
+            .font(.callout)
+    }
 
-            Text(verbatim: "·")
-
-            Button("Acknowledgements") { showsAcknowledgements = true }
-                .buttonStyle(.link)
-        }
-        .font(.footnote)
-        .foregroundStyle(.tertiary)
+    /// The last line of the page and nothing beside it. The grey is the line's
+    /// own, so the author's name keeps the link colour its run carries; a
+    /// `.link` button in the same row took the grey as well and read as text.
+    private var copyrightLine: some View {
+        Text(copyright)
+            .font(.footnote)
+            .foregroundStyle(.tertiary)
+            .help(Self.siteURL.absoluteString)
     }
 
     private var copyright: AttributedString {
