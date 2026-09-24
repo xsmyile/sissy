@@ -322,7 +322,7 @@ final class AgentCountsArchiveTests: XCTestCase {
     }
 
     func testADayCountedByNeitherReadingCarriesNoCountAtAll() {
-        XCTAssertNil(day(.none).agents)
+        XCTAssertNil(day(AgentCounts.none).agents)
         XCTAssertNil(day(nil).agents)
     }
 

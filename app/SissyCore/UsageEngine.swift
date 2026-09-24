@@ -975,7 +975,7 @@ actor UsageEngine {
             // that can replace one is a fresh sign-in, which the notice beside
             // it offers.
             for source in claudeWebSources.load()
-            where await source.currentSignals().limitsState != .sessionExpired {
+            where source.currentSignals().limitsState != .sessionExpired {
                 await source.refresh { await me.reemit() }
             }
         }

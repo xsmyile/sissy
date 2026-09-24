@@ -30,7 +30,7 @@ struct AboutView: View {
     private static let siteURL = URL(string: "https://smyile.com")!
 
     /// The name in `NSHumanReadableCopyright` that carries `siteURL`.
-    static let copyrightHolder = "Smyile"
+    nonisolated static let copyrightHolder = "Smyile"
 
     /// What the page says Sissy is, in the words the README opens with. It
     /// described the spend of two CLIs until the Forge module landed and made

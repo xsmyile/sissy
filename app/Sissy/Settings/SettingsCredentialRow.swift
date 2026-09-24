@@ -98,7 +98,7 @@ struct CredentialMonogram: View {
     private static let glyphSize: CGFloat = 13
     /// The shortest run of letters that reads as a word rather than as a
     /// fragment of something that is not a name.
-    private static let shortestWord = 2
+    private nonisolated static let shortestWord = 2
 
     var body: some View {
         CredentialDisc(tint: tint, health: health) {
@@ -129,7 +129,7 @@ struct CredentialMonogram: View {
     /// reading the groups whole is what tells the two apart.
     ///
     /// It answers empty for a name that has none, and the view draws a glyph.
-    static func initials(of name: String) -> String {
+    nonisolated static func initials(of name: String) -> String {
         let named = name.split(separator: "@").first.map(String.init) ?? name
         let words = named.split { !$0.isLetter && !$0.isNumber }
             .filter { $0.count >= shortestWord && $0.allSatisfy(\.isLetter) }

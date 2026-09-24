@@ -139,7 +139,7 @@ struct UsagePanelView: View {
     /// A provider can leave the frame while its page is open — the slices are
     /// today's spenders, and a day rolls over — so the page falls back home
     /// rather than rendering a row that no longer exists.
-    static func openRow(_ page: Page, in providers: [UsagePanelSnapshot.ProviderRow])
+    nonisolated static func openRow(_ page: Page, in providers: [UsagePanelSnapshot.ProviderRow])
         -> UsagePanelSnapshot.ProviderRow?
     {
         switch page {
