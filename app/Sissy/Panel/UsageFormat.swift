@@ -1657,6 +1657,62 @@ enum ClaudeAccountSwitchCopy {
         + "missing here · they come back as each one signs in"
 }
 
+/// What spending a Codex reset says, from the count on the page to the answer
+/// OpenAI gave.
+///
+/// Each answer is its own sentence because each asks something different of
+/// the reader: a reset spent needs nothing, one that was not needed needs
+/// patience, and one whose answer never arrived needs the one retry that is
+/// safe to make.
+enum CodexResetCopy {
+    static let section = "Resets"
+    static let use = "Use…"
+    static let useHelp = "Spend one reset to put this account's windows back to zero"
+    static let confirmTitle = "Use a reset now?"
+    static let confirmAction = "Use reset"
+    static let confirmCancel = "Cancel"
+    static let retry = "Try again"
+    static let spending = "Spending a reset…"
+    /// What the vendor calls the only kind of reset measured, when a reset
+    /// arrives without a title of its own.
+    static let defaultTitle = "Full reset"
+    /// Said where the button would be while OpenAI would apply none. A count
+    /// with no button and no reason reads as a control that broke.
+    static let notYet = "Ready once a window is nearly used up"
+
+    static func available(_ count: Int) -> String { "\(count) available" }
+
+    /// The vendor's name for the soonest reset, and the day it lapses.
+    static func caption(title: String?, expiresAt: Date?) -> String {
+        let name = title ?? defaultTitle
+        guard let expiresAt else { return name }
+        return "\(name) · expires \(expiresAt.formatted(.dateTime.day().month(.abbreviated)))"
+    }
+
+    /// The spend, and what waiting instead would cost: `naturalReset` is the
+    /// longest window's own label and countdown, which is the one figure that
+    /// tells a reset worth spending from one that buys an hour.
+    static func confirmBody(available: Int, naturalReset: (label: String, countdown: String)?)
+        -> String
+    {
+        let spend = "Both windows go back to zero. This spends 1 of \(available)."
+        guard let naturalReset else { return spend }
+        return "\(spend) \(naturalReset.label) resets on its own \(naturalReset.countdown)."
+    }
+
+    static func outcome(_ outcome: CodexResetOutcome) -> String {
+        switch outcome {
+        case .reset: return "Done. Both windows are back to zero."
+        case .nothingToReset:
+            return "Nothing was spent: OpenAI applies a reset once a window is nearly used up."
+        case .noCredit: return "No reset left to spend on this account."
+        case .unconfirmed: return "No answer from OpenAI. Trying again cannot spend a second reset."
+        case .refused: return "OpenAI refused the Codex credential. Sign in again, then retry."
+        case .unavailable: return "Sissy has no Codex credential to spend a reset with."
+        }
+    }
+}
+
 /// How the panel words a connected forge's two counters.
 extension UsageFormat {
 

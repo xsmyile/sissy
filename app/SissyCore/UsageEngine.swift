@@ -991,6 +991,22 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// Spends one of a Codex account's resets, for the button on its page.
+    ///
+    /// `account` names a linked account's reader, and nil the CLI's own, which
+    /// is the reader behind the row and behind the signed-in account's entry.
+    /// The frame is rebuilt before this returns, so the answer and the cleared
+    /// windows reach the panel together.
+    func useCodexReset(account: String?, retrying: Bool) async -> CodexResetOutcome {
+        guard lifecycle == .running,
+            let reader = codexSources.load().first(where: { $0.account == account })
+        else { return .unavailable }
+        let me = self
+        let outcome = await reader.useReset(retrying: retrying) { await me.reemit() }
+        await reemit()
+        return outcome
+    }
+
     /// Switch the keep-awake mode and persist it, so the choice survives a
     /// restart.
     func setKeepAwake(mode raw: String) async {

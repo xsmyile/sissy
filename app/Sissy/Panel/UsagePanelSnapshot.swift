@@ -407,6 +407,10 @@ struct UsagePanelSnapshot: Equatable {
         let windows: [WindowRow]
         let windowsCaption: String?
         let credits: CreditsRow?
+        let resets: ResetsRow?
+        /// Which credential a reset press for this account spends, nil for a
+        /// vendor that offers none.
+        let resetTarget: CodexResetTarget?
         let notice: LimitsNotice?
         /// Whether Sissy has a source for this account at all. False is an
         /// invitation to link one rather than a failure to report.
@@ -476,6 +480,14 @@ struct UsagePanelSnapshot: Equatable {
         /// say — no cap set and nothing spent, which is every account that
         /// has never turned credits on.
         let credits: CreditsRow?
+        /// The resets the vendor lets this account spend on its windows. Nil
+        /// for every provider but Codex, and for an account that holds none.
+        let resets: ResetsRow?
+        /// Whose credential a reset press on this row spends, nil for every
+        /// provider but Codex. Beside the row rather than on it, because the
+        /// press that spends the last reset takes the row away, and its answer
+        /// still has to be said somewhere.
+        let resetTarget: CodexResetTarget?
         /// What the vendor's own status page last said. Nil while the readings
         /// are switched off and for a provider with no feed to poll, which is
         /// what leaves the row off the page rather than putting an empty one
@@ -545,6 +557,21 @@ struct UsagePanelSnapshot: Equatable {
         /// worth a colour — it is headroom running out, not a verdict on how
         /// much was spent.
         let capReached: Bool
+    }
+
+    /// The resets block of a provider's page: how many the account holds, when
+    /// the soonest lapses, and whether a press would spend one now.
+    struct ResetsRow: Equatable {
+        /// `1 available`, the vendor's own count.
+        let headline: String
+        /// The vendor's name for the soonest reset and when it lapses.
+        let caption: String
+        /// Whether the vendor would apply one now. False keeps the count on the
+        /// page and the button off it: measured 2026-09-24, an account holding
+        /// one reset with its windows at 29% and 83% was offered none.
+        let usable: Bool
+        /// How many a press is spending from, for the confirmation's arithmetic.
+        let available: Int
     }
 
     /// An account as the provider page prints it: the address on its own
@@ -1412,6 +1439,9 @@ struct UsagePanelSnapshot: Equatable {
                     totalTokens: slice.tokens),
                 effort: slice.effort,
                 credits: makeCredits(slice.credits, now: now),
+                resets: makeResets(slice.resets),
+                resetTarget: slice.id == ProviderID.codex
+                    ? rowResetTarget(slice.signals.accounts) : nil,
                 status: makeStatus(status[slice.id], provider: slice.id)
             )
         }
@@ -1534,6 +1564,9 @@ struct UsagePanelSnapshot: Equatable {
                     UsageFormat.windowsCaption(observedAt: $0, now: now)
                 },
                 credits: makeCredits(reading?.credits, now: now),
+                resets: makeResets(reading?.resets),
+                resetTarget: provider == ProviderID.codex
+                    ? CodexResetTarget(account: reading?.isSignedIn == false ? id : nil) : nil,
                 notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet, provider: provider),
                 isReadable: reading != nil,
                 isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID),
@@ -1543,6 +1576,31 @@ struct UsagePanelSnapshot: Equatable {
         return entries.sorted { lhs, rhs in
             (lhs.isSignedIn ? 0 : 1, lhs.label) < (rhs.isSignedIn ? 0 : 1, rhs.label)
         }
+    }
+
+    /// The resets row, or nil when there is nothing to spend.
+    ///
+    /// A count of zero gets no row, for the reason a credits reading of
+    /// nothing against no cap gets none: it is most accounts, and a block that
+    /// never changes is a block nobody reads. An absent count gets none
+    /// either, because it is a reading nobody took.
+    static func makeResets(_ resets: LimitResets?) -> ResetsRow? {
+        guard let resets, resets.available > 0 else { return nil }
+        return ResetsRow(
+            headline: CodexResetCopy.available(resets.available),
+            caption: CodexResetCopy.caption(title: resets.title, expiresAt: resets.nextExpiry),
+            usable: resets.usable > 0,
+            available: resets.available)
+    }
+
+    /// Whose credential a press on the row itself spends: the CLI's, unless
+    /// the only account Sissy reads is a linked one, which is the reading
+    /// `CodexSignals.row` falls back to on a Mac whose `codex` is signed out.
+    static func rowResetTarget(_ accounts: [AccountSignals]) -> CodexResetTarget {
+        guard accounts.count == 1, let only = accounts.first, !only.isSignedIn else {
+            return CodexResetTarget(account: nil)
+        }
+        return CodexResetTarget(account: only.id)
     }
 
     /// The credits row, or nil when there is nothing a reader would act on.

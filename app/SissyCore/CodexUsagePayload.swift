@@ -36,6 +36,9 @@ enum CodexUsagePayload {
         let plan: String?
         let windows: [UsageWindow]
         let credits: ProviderCredits?
+        /// The count alone. The dates are a second request's, laid on by the
+        /// reader that made it.
+        var resets: LimitResets?
     }
 
     static func reading(_ body: [String: Any], observedAt: Date) -> Reading {
@@ -45,7 +48,8 @@ enum CodexUsagePayload {
                 email: UsageReaderShared.sanitizedDisplayText(body["email"] as? String)),
             plan: UsageReaderShared.sanitizedPlanToken(body["plan_type"] as? String),
             windows: windows(body),
-            credits: CodexAdapter.credits(body["credits"], observedAt: observedAt)
+            credits: CodexAdapter.credits(body["credits"], observedAt: observedAt),
+            resets: CodexResetCredits.summary(body)
         )
     }
 

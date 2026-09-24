@@ -27,6 +27,16 @@ struct PanelProviderPage: View {
     /// The account a switch is running for, or nil when none is. Named rather
     /// than a flag so the page can say which account it is moving to.
     let switchingAccount: String?
+    /// The account a Codex reset is being spent for, nil while none is.
+    let resetSpending: CodexResetTarget?
+    /// How the last reset press ended, which the page words for the account
+    /// it was made for and for no other.
+    let resetReport: CodexResetReport?
+    /// Spends a reset with that account's credential. `true` is the retry of
+    /// an attempt whose answer never arrived, the one press that reuses its
+    /// request id.
+    let useReset: (CodexResetTarget, Bool) -> Void
+    let dismissResetReport: () -> Void
     let refresh: () -> Void
     /// Opens the vendor's services, which are a page of the panel rather than
     /// a surface of this one's: the panel owns which page is on screen, so the
@@ -72,6 +82,10 @@ struct PanelProviderPage: View {
     /// at one it is not already on, which is what stops the reading you asked
     /// for from also being a write to another program's credential.
     @State private var viewedAccount: String?
+    /// The account whose reset the page is asking about, before anything is
+    /// spent. A press proposes and the confirmation commits, because the
+    /// spend cannot be undone and the reset it spends has a date on it.
+    @State private var confirmingReset: CodexResetTarget?
 
     /// The account the page is reading, or nil while there is one account and
     /// the row's own fields are it.
@@ -94,6 +108,14 @@ struct PanelProviderPage: View {
 
     private var shownCredits: UsagePanelSnapshot.CreditsRow? {
         viewed.map(\.credits) ?? row.credits
+    }
+
+    private var shownResets: UsagePanelSnapshot.ResetsRow? {
+        viewed.map(\.resets) ?? row.resets
+    }
+
+    private var shownResetTarget: CodexResetTarget? {
+        viewed.map(\.resetTarget) ?? row.resetTarget
     }
 
     private var shownEmail: String? { viewed.map(\.email) ?? row.account?.email }
@@ -144,6 +166,11 @@ struct PanelProviderPage: View {
             Divider()
             limits
 
+            if let target = shownResetTarget, shownResets != nil || hasResetActivity(target) {
+                Divider()
+                resets(shownResets, target: target)
+            }
+
             if let credits = shownCredits {
                 Divider()
                 self.credits(credits)
@@ -172,6 +199,7 @@ struct PanelProviderPage: View {
         .task(id: row.id) {
             series = await loadHistory(row.id)
         }
+        .onDisappear { dismissResetReport() }
     }
 
     // MARK: Identity
@@ -488,6 +516,146 @@ struct PanelProviderPage: View {
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
+    }
+
+    // MARK: Resets
+
+    /// Whether a press for this account is running or has an answer to say,
+    /// which keeps the block on the page after the last reset is spent and
+    /// the count that drew it has gone.
+    private func hasResetActivity(_ target: CodexResetTarget) -> Bool {
+        resetSpending == target || resetReport?.target == target
+    }
+
+    /// Whether this account's last press got no answer, which leaves `Try
+    /// again` as the only way to spend: a fresh press is a fresh request id,
+    /// and beside an attempt that may have landed it is the one press that
+    /// could spend a second reset.
+    private func awaitsRetry(_ target: CodexResetTarget) -> Bool {
+        resetReport?.target == target && resetReport?.outcome == .unconfirmed
+    }
+
+    /// The resets OpenAI lets this account spend, and the one control on the
+    /// panel that spends something on the user's behalf.
+    ///
+    /// It sits under the limits for the reason credits do: it is what covers
+    /// the work once a window runs out. The button is there only while the
+    /// vendor would apply a reset, and a press only asks. What it asks says
+    /// when the longest window would reset anyway, which is the figure that
+    /// tells a reset worth spending from one that buys an hour.
+    @ViewBuilder
+    private func resets(_ resets: UsagePanelSnapshot.ResetsRow?, target: CodexResetTarget)
+        -> some View
+    {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                SectionLabel(text: CodexResetCopy.section)
+                Spacer(minLength: 0)
+                if let resets {
+                    Text(resets.headline)
+                        .font(.system(size: 12))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+            }
+
+            if let resets {
+                HStack(spacing: 6) {
+                    Text(resets.caption)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if resets.usable, resetSpending == nil, confirmingReset != target,
+                        !awaitsRetry(target)
+                    {
+                        Button(CodexResetCopy.use) { confirmingReset = target }
+                            .controlSize(.small)
+                            .help(CodexResetCopy.useHelp)
+                    }
+                }
+                if !resets.usable {
+                    resetCaption(CodexResetCopy.notYet)
+                }
+                if confirmingReset == target, resetSpending == nil {
+                    resetConfirmation(resets, target: target)
+                }
+            }
+
+            if resetSpending == target {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    resetCaption(CodexResetCopy.spending)
+                }
+                .padding(.top, 4)
+            } else if let report = resetReport, report.target == target {
+                resetOutcome(report)
+            }
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 12)
+    }
+
+    private func resetCaption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The question and the two answers, inside the panel, on the rules the
+    /// account switch already keeps: Escape cancels and nothing is the default
+    /// action, so the spend is reached by aiming at it and never by a return
+    /// key pressed at a panel.
+    private func resetConfirmation(
+        _ resets: UsagePanelSnapshot.ResetsRow, target: CodexResetTarget
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(CodexResetCopy.confirmTitle)
+                .font(.system(size: 12, weight: .medium))
+            resetCaption(
+                CodexResetCopy.confirmBody(
+                    available: resets.available, naturalReset: naturalReset))
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button(CodexResetCopy.confirmCancel) { confirmingReset = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button(CodexResetCopy.confirmAction) {
+                    confirmingReset = nil
+                    useReset(target, false)
+                }
+            }
+            .controlSize(.small)
+        }
+        .padding(.top, 6)
+    }
+
+    /// The longest window the page shows with a reset still ahead, and how
+    /// long until it comes on its own.
+    private var naturalReset: (label: String, countdown: String)? {
+        for window in shownWindows.reversed() {
+            if let resetsAt = window.resetsAt,
+                let countdown = UsageFormat.resetLabel(resetsAt, now: Date())
+            {
+                return (window.label, countdown)
+            }
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private func resetOutcome(_ report: CodexResetReport) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            resetCaption(CodexResetCopy.outcome(report.outcome))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if report.outcome == .unconfirmed {
+                Button(CodexResetCopy.retry) { useReset(report.target, true) }
+                    .controlSize(.small)
+            }
+        }
+        .padding(.top, 4)
     }
 
     // MARK: Credits
