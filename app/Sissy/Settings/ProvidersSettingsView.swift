@@ -265,21 +265,21 @@ enum ClaudeAccountLinkCopy {
 /// What Settings says when Claude Code has signed in under a config home
 /// Sissy does not read.
 ///
-/// It names the variable, because that is what the user set and will
-/// recognise, and the folder Sissy does read, because that is what they can
-/// do about it: sign in there, or accept that the other home goes unmetered.
+/// A title that says what was found and one line under it that says what can
+/// be done: sign in under the folder Sissy reads, or remove a sign-in left by
+/// a folder no longer in use. It names the variable, because that is what the
+/// user set and will recognise.
 ///
 /// It describes the sign-in and never the account. The scan knows an item is
 /// filed, not whose it is, so that account may well be signed in under the
-/// default home or linked through claude.ai with its limits on screen. And a
-/// folder the user abandoned keeps its item, so the notice says where that
-/// goes rather than standing forever unexplained.
+/// default home or linked through claude.ai with its limits on screen.
 enum ClaudeUnsupportedHomesCopy {
+    static let title = "Claude Code sign-in not read"
+
     static func message(reading home: URL) -> String {
         let path = (home.path as NSString).abbreviatingWithTildeInPath
-        return "A Claude Code sign-in under another config folder is not read. Sissy does not "
-            + "follow CLAUDE_CONFIG_DIR and reads only \(path). A folder no longer in use leaves "
-            + "its sign-in in Keychain Access, where it can be removed."
+        return "Sissy reads only \(path) and ignores CLAUDE_CONFIG_DIR. "
+            + "If that folder is gone, remove its sign-in in Keychain Access."
     }
 }
 
@@ -583,15 +583,28 @@ struct ProvidersSettingsView: View {
     }
 
     /// The notice that a `claude` is signed in under a home Sissy does not
-    /// read. A warning rather than a failure: nothing Sissy did went wrong,
-    /// and the row is there so a missing account has an explanation.
+    /// read, drawn as a callout so it reads as a warning rather than as one
+    /// more caption: the orange triangle is the panel's own mark for a
+    /// provider that needs attention. Orange rather than red, because nothing
+    /// Sissy did went wrong; the row is there so a missing account has an
+    /// explanation.
     private var unsupportedHomes: some View {
-        Label(
-            ClaudeUnsupportedHomesCopy.message(reading: model.engine.claudeConfigHome),
-            systemImage: "info.circle"
-        )
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ClaudeUnsupportedHomesCopy.title)
+                    .fontWeight(.semibold)
+                Text(ClaudeUnsupportedHomesCopy.message(reading: model.engine.claudeConfigHome))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(.orange.opacity(0.12), in: .rect(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
     }
 
     /// What the last attempt to link failed with, on a row of its own now that
