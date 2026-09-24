@@ -163,7 +163,7 @@ struct AboutView: View {
     }
 
     private var updateStatus: String? {
-        guard model.updates.isRunning else { return Self.devBuildStatus }
+        guard !model.updates.isDevBuild else { return Self.devBuildStatus }
         return model.updates.lastCheck.map {
             "Last checked \($0.formatted(.relative(presentation: .named)))"
         }

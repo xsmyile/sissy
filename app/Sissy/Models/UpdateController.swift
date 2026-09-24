@@ -40,7 +40,9 @@ final class UpdateController: NSObject {
     @ObservationIgnored private var controller: SPUStandardUpdaterController?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
-    @ObservationIgnored private let isDevBuild: Bool
+    /// A development build never runs the updater, and About says so by this
+    /// rather than by `isRunning`, which is also false before `start()`.
+    @ObservationIgnored let isDevBuild: Bool
 
     /// `isDevBuild` is injected so a test can stand the controller on either
     /// kind of build. Left to its default it asks about the running bundle.
