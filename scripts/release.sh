@@ -112,7 +112,8 @@ done
 
 # Notarization preflight, on the app and on every binary nested in it: the
 # Developer ID authority (a Mac Development cert also carries the team id but
-# cannot be notarized), a secure timestamp, and no get-task-allow.
+# cannot be notarized), a secure timestamp, the hardened runtime, and no
+# get-task-allow.
 log "verify codesign"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 SPARKLE="$APP_PATH/Contents/Frameworks/Sparkle.framework"
@@ -120,6 +121,7 @@ for code in "$APP_PATH" "$SPARKLE" "$SPARKLE/Versions/Current/Autoupdate" "$SPAR
   info="$(codesign -dvv "$code" 2>&1)"
   grep -q "Authority=$SIGN_IDENTITY" <<<"$info" || die "$code not signed with '$SIGN_IDENTITY' authority"
   grep -q "Timestamp=" <<<"$info" || die "no secure timestamp on $code"
+  grep -q "flags=.*(runtime)" <<<"$info" || die "no hardened runtime on $code"
   if codesign -d --entitlements - "$code" 2>/dev/null | grep -q "get-task-allow"; then
     die "get-task-allow present on $code"
   fi
