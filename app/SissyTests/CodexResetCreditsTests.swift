@@ -215,15 +215,15 @@ final class CodexResetCreditsTests: XCTestCase {
         let spends = Spends()
         let source = Self.source(spends: spends)
         _ = await source.refreshOnce {}
-        let outcome = await source.useReset(retrying: false) {}
+        let outcome = await source.useReset {}
         await source.stop()
         XCTAssertEqual(outcome, .reset)
         XCTAssertEqual(spends.creditIDs, ["RateLimitResetCredit_fce6"])
     }
 
     /// An answer that never arrived may still have spent the reset, so the
-    /// retry carries the same request id and the vendor redeems it once.
-    func testARetryAfterNoAnswerSendsTheSameRequest() async {
+    /// next press carries the same request id and the vendor redeems it once.
+    func testAPressAfterNoAnswerSendsTheSameRequest() async {
         let spends = Spends()
         let source = Self.source(
             spends: spends,
@@ -231,8 +231,8 @@ final class CodexResetCreditsTests: XCTestCase {
                 if call == 1 { throw URLError(.timedOut) }
                 return .alreadyRedeemed
             })
-        let first = await source.useReset(retrying: false) {}
-        let retry = await source.useReset(retrying: true) {}
+        let first = await source.useReset {}
+        let retry = await source.useReset {}
         await source.stop()
         XCTAssertEqual(first, .unconfirmed)
         XCTAssertEqual(retry, .reset)
@@ -240,26 +240,38 @@ final class CodexResetCreditsTests: XCTestCase {
         XCTAssertEqual(spends.requestIDs.first, spends.requestIDs.last)
     }
 
-    /// Only the retry reuses the id: a fresh press is a fresh request, and an
-    /// answered one is never sent again.
-    func testAFreshPressIsAFreshRequest() async {
+    /// The attempt is held by the reader, not by whichever button made it: it
+    /// is sent until OpenAI answers it, and an answered one is never sent
+    /// again.
+    func testAnAttemptIsSentUntilItIsAnswered() async {
         let spends = Spends()
         let source = Self.source(
             spends: spends,
             answer: { call in
-                if call == 1 { throw URLError(.timedOut) }
+                if call < 3 { throw URLError(.timedOut) }
                 return .nothingToReset
             })
-        _ = await source.useReset(retrying: false) {}
-        _ = await source.useReset(retrying: false) {}
-        _ = await source.useReset(retrying: true) {}
+        for _ in 0..<4 { _ = await source.useReset {} }
         await source.stop()
-        XCTAssertEqual(Set(spends.requestIDs).count, 3)
+        let ids = spends.requestIDs
+        XCTAssertEqual(ids.count, 4)
+        XCTAssertEqual(Set(ids.prefix(3)).count, 1)
+        XCTAssertNotEqual(ids.last, ids.first)
+    }
+
+    /// A spend that landed takes one off the count before the read after it,
+    /// so the button cannot outlive the reset when that read cannot run.
+    func testASpentResetLeavesTheCountAtOnce() {
+        let spent = LimitResets(
+            available: 2, applicable: 1, nextExpiry: Self.now, title: "Full reset"
+        ).spendingOne()
+        XCTAssertEqual(spent, LimitResets(available: 1, applicable: 0))
+        XCTAssertEqual(LimitResets(available: 0, applicable: nil).spendingOne().available, 0)
     }
 
     func testARefusedCredentialIsNotAnUnconfirmedSpend() async {
         let source = Self.source(answer: { _ in throw UsageRequestError.badStatus(401) })
-        let outcome = await source.useReset(retrying: false) {}
+        let outcome = await source.useReset {}
         await source.stop()
         XCTAssertEqual(outcome, .refused)
     }
@@ -267,7 +279,7 @@ final class CodexResetCreditsTests: XCTestCase {
     func testNoCredentialSpendsNothing() async {
         let spends = Spends()
         let source = Self.source(credential: .signedOut, spends: spends)
-        let outcome = await source.useReset(retrying: false) {}
+        let outcome = await source.useReset {}
         XCTAssertEqual(outcome, .unavailable)
         XCTAssertTrue(spends.requestIDs.isEmpty)
     }
@@ -277,7 +289,7 @@ final class CodexResetCreditsTests: XCTestCase {
     func testAPressNeverAsksForTheKeychain() async {
         let interactions = LockedValue<[Bool]>([])
         let source = Self.source(interactions: interactions)
-        _ = await source.useReset(retrying: false) {}
+        _ = await source.useReset {}
         await source.stop()
         XCTAssertEqual(interactions.load(), [false, false])
     }
@@ -297,7 +309,7 @@ final class CodexResetCreditsTests: XCTestCase {
                 return .reset
             })
         box.store(retiring)
-        let outcome = await retiring.useReset(retrying: false) {}
+        let outcome = await retiring.useReset {}
         XCTAssertEqual(outcome, .reset)
         XCTAssertNil(retiring.currentSignals().limitsObservedAt)
     }
@@ -307,7 +319,7 @@ final class CodexResetCreditsTests: XCTestCase {
     func testAPressReadsTheAccountAgain() async {
         let refreshed = LockedValue(0)
         let source = Self.source()
-        _ = await source.useReset(retrying: false) { refreshed.update { $0 += 1 } }
+        _ = await source.useReset { refreshed.update { $0 += 1 } }
         let observedAt = source.currentSignals().limitsObservedAt
         await source.stop()
         XCTAssertNotNil(observedAt)

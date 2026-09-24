@@ -32,11 +32,10 @@ struct PanelProviderPage: View {
     /// How the last reset press ended, which the page words for the account
     /// it was made for and for no other.
     let resetReport: CodexResetReport?
-    /// Spends a reset with that account's credential. `true` is the retry of
-    /// an attempt whose answer never arrived, the one press that reuses its
-    /// request id.
-    let useReset: (CodexResetTarget, Bool) -> Void
-    let dismissResetReport: () -> Void
+    /// Spends a reset with that account's credential. A press after an
+    /// answer that never arrived sends that same attempt again, which the
+    /// reader decides rather than this page.
+    let useReset: (CodexResetTarget) -> Void
     let refresh: () -> Void
     /// Opens the vendor's services, which are a page of the panel rather than
     /// a surface of this one's: the panel owns which page is on screen, so the
@@ -199,7 +198,6 @@ struct PanelProviderPage: View {
         .task(id: row.id) {
             series = await loadHistory(row.id)
         }
-        .onDisappear { dismissResetReport() }
     }
 
     // MARK: Identity
@@ -528,9 +526,8 @@ struct PanelProviderPage: View {
     }
 
     /// Whether this account's last press got no answer, which leaves `Try
-    /// again` as the only way to spend: a fresh press is a fresh request id,
-    /// and beside an attempt that may have landed it is the one press that
-    /// could spend a second reset.
+    /// again` as the one control: both would send the same attempt, and two
+    /// buttons for one request read as two different things to do.
     private func awaitsRetry(_ target: CodexResetTarget) -> Bool {
         resetReport?.target == target && resetReport?.outcome == .unconfirmed
     }
@@ -624,7 +621,7 @@ struct PanelProviderPage: View {
                     .keyboardShortcut(.cancelAction)
                 Button(CodexResetCopy.confirmAction) {
                     confirmingReset = nil
-                    useReset(target, false)
+                    useReset(target)
                 }
             }
             .controlSize(.small)
@@ -651,7 +648,7 @@ struct PanelProviderPage: View {
             resetCaption(CodexResetCopy.outcome(report.outcome))
                 .frame(maxWidth: .infinity, alignment: .leading)
             if report.outcome == .unconfirmed {
-                Button(CodexResetCopy.retry) { useReset(report.target, true) }
+                Button(CodexResetCopy.retry) { useReset(report.target) }
                     .controlSize(.small)
             }
         }

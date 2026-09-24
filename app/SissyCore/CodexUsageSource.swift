@@ -78,9 +78,11 @@ actor CodexUsageSource: SourceSignals {
     /// The reset a press spends, the soonest to lapse, as the last list named
     /// it. Nil sends none and lets OpenAI pick, which its own CLI also does.
     private var nextCredit: String?
-    /// The spend whose answer never arrived, kept so that trying again sends
-    /// the same request id and cannot spend a second reset. Only a retry
-    /// reuses it: a fresh press is a fresh request, as it is in the CLI.
+    /// The spend whose answer never arrived. Every press sends it again until
+    /// OpenAI answers it, because the vendor redeems one request id once: a
+    /// second press that minted its own could spend a second reset beside an
+    /// attempt that may already have landed. Held here rather than by the
+    /// page, which navigating away from is enough to lose.
     private var unanswered: (requestID: String, creditID: String?)?
 
     init(
@@ -340,18 +342,17 @@ actor CodexUsageSource: SourceSignals {
     ///
     /// The credential is read the way a poll reads it and never with
     /// interaction, because a spend is not the moment to put a dialog up.
-    /// Nothing here moves the row's own state either: a spend that failed is
-    /// the press's answer, and the page words it beside the button rather
-    /// than as a notice about the limits.
-    func useReset(
-        retrying: Bool, onRefresh: @Sendable @escaping () async -> Void
-    ) async -> CodexResetOutcome {
+    /// Nothing here moves the row's limits state either: a spend that failed
+    /// is the press's answer, and the page words it beside the button rather
+    /// than as a notice about the limits. A spend that landed takes one off
+    /// the count at once, as OpenAI's desktop client does, so the button does
+    /// not outlive the reset it spent when the read after it cannot run.
+    func useReset(onRefresh: @Sendable @escaping () async -> Void) async -> CodexResetOutcome {
         guard !retired else { return .unavailable }
         guard case .found(let credential) = await credentialSource(false),
             !credential.isExpired()
         else { return .unavailable }
-        let attempt =
-            (retrying ? unanswered : nil) ?? (requestID: UUID().uuidString, creditID: nextCredit)
+        let attempt = unanswered ?? (requestID: UUID().uuidString, creditID: nextCredit)
         unanswered = attempt
         let outcome: CodexResetOutcome
         do {
@@ -367,6 +368,7 @@ actor CodexUsageSource: SourceSignals {
             }
             report("spending a Codex reset did not get an answer: \(error)")
         }
+        if outcome == .reset { published.update { $0.resets = $0.resets?.spendingOne() } }
         await refresh(userInitiated: false, onRefresh: onRefresh)
         return outcome
     }
