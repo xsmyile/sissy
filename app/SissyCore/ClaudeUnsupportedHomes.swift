@@ -14,10 +14,26 @@ import Security
 /// of the names Sissy reads is a `claude` signed in somewhere Sissy is not
 /// looking, and Settings can say so rather than leave the account missing.
 ///
-/// Only service names are listed. The query asks for attributes and never for
-/// data, which the keychain answers without an ACL check, so it cannot raise a
-/// dialog and reads no secret.
+/// Only service names and modification dates are listed. The query asks for
+/// attributes and never for data, which the keychain answers without an ACL
+/// check, so it cannot raise a dialog and reads no secret.
+///
+/// An item nothing has written for a week is left out. The hash cannot be
+/// turned back into a path, so whether the folder still exists is not
+/// answerable, and a folder the user abandoned keeps its item forever. What
+/// is answerable is whether a `claude` still uses it: the CLI rewrites the
+/// item on every token refresh, measured 2026-09-24 as two minutes old on the
+/// default home against nine days on a folder deleted since.
 enum ClaudeUnsupportedHomes {
+    /// One Claude Code keychain item, as the attributes-only listing names it.
+    struct ListedItem: Equatable {
+        let service: String
+        let modified: Date?
+    }
+
+    /// How long an item may go unwritten before it counts as abandoned.
+    static let staleAfter: TimeInterval = 7 * 24 * 60 * 60
+
     /// Most items the listing takes. The query is already narrowed to the
     /// account name Claude Code files under, where a Mac holds a handful; the
     /// bound is what keeps a keychain with thousands of such items from
@@ -41,22 +57,32 @@ enum ClaudeUnsupportedHomes {
         return Set(foreign).sorted()
     }
 
+    /// The services in `listed` some `claude` has written within
+    /// `staleAfter` of `now`. An item with no date is kept, because the
+    /// absence of a reading is not a reading of abandonment.
+    static func inUse(_ listed: [ListedItem], now: Date) -> [String] {
+        listed
+            .filter { item in item.modified.map { now.timeIntervalSince($0) <= staleAfter } ?? true }
+            .map(\.service)
+    }
+
     /// Lists the keychain and filters it. `listing` is the keychain half,
     /// injectable so the rule is provable without the login keychain.
     static func scan(
         reading home: URL,
-        listing: () -> [String] = keychainServices
+        now: Date = Date(),
+        listing: () -> [ListedItem] = keychainItems
     ) -> [String] {
-        services(in: listing(), reading: home)
+        services(in: inUse(listing(), now: now), reading: home)
     }
 
-    /// Every generic-password service filed under Claude Code's account name,
+    /// Every generic-password item filed under Claude Code's account name,
     /// read as attributes only and with every prompt suppressed.
     ///
     /// A keychain that failed says so in the log rather than passing for one
     /// with no such items, for the reason `ClaudeWebSessionStore.storedAccounts`
     /// gives: both are `[]` to the caller and only one is the user's doing.
-    static func keychainServices() -> [String] {
+    static func keychainItems() -> [ListedItem] {
         var query = ClaudeCredentialsStore.makeQuery(allowingInteraction: false)
         query.removeValue(forKey: kSecAttrService as String)
         query.removeValue(forKey: kSecReturnData as String)
@@ -72,6 +98,10 @@ enum ClaudeUnsupportedHomes {
             return []
         }
         guard let attributes = items as? [[String: Any]] else { return [] }
-        return attributes.compactMap { $0[kSecAttrService as String] as? String }
+        return attributes.compactMap { item in
+            guard let service = item[kSecAttrService as String] as? String else { return nil }
+            return ListedItem(
+                service: service, modified: item[kSecAttrModificationDate as String] as? Date)
+        }
     }
 }

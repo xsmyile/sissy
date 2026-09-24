@@ -7,6 +7,7 @@ import XCTest
 final class ClaudeUnsupportedHomesTests: XCTestCase {
     private static let defaultHome = AccountDefaults.claudeHome
     private static let otherHome = URL(fileURLWithPath: "/tmp/sissy-tests/.claude-work")
+    private static let now = Date(timeIntervalSince1970: 1_790_000_000)
 
     /// A `claude` started with `CLAUDE_CONFIG_DIR` files its credential under
     /// the hash of that directory, which is not a name Sissy ever reads.
@@ -63,7 +64,34 @@ final class ClaudeUnsupportedHomesTests: XCTestCase {
     func testTheScanReadsTheListingItIsGiven() {
         let foreign = ClaudeKeychainCLI.scopedClaudeService(for: Self.otherHome.path)
 
-        let found = ClaudeUnsupportedHomes.scan(reading: Self.defaultHome) { [foreign] }
+        let found = ClaudeUnsupportedHomes.scan(reading: Self.defaultHome, now: Self.now) {
+            [.init(service: foreign, modified: Self.now)]
+        }
+
+        XCTAssertEqual(found, [foreign])
+    }
+
+    /// A folder the user abandoned keeps its item, and nothing rewrites it
+    /// once no `claude` refreshes a token there.
+    func testAnItemNothingHasWrittenForAWeekIsLeftOut() {
+        let foreign = ClaudeKeychainCLI.scopedClaudeService(for: Self.otherHome.path)
+        let written = Self.now.addingTimeInterval(-ClaudeUnsupportedHomes.staleAfter - 1)
+
+        let found = ClaudeUnsupportedHomes.scan(reading: Self.defaultHome, now: Self.now) {
+            [.init(service: foreign, modified: written)]
+        }
+
+        XCTAssertTrue(found.isEmpty)
+    }
+
+    /// An item the keychain gave no date for is kept: no reading is not a
+    /// reading of abandonment.
+    func testAnItemWithNoDateIsKept() {
+        let foreign = ClaudeKeychainCLI.scopedClaudeService(for: Self.otherHome.path)
+
+        let found = ClaudeUnsupportedHomes.scan(reading: Self.defaultHome, now: Self.now) {
+            [.init(service: foreign, modified: nil)]
+        }
 
         XCTAssertEqual(found, [foreign])
     }
