@@ -140,7 +140,7 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
         DispatchQueue.global().async {
             ClaudeCredentialsStore.suppressingInteraction(false, unavailable: ()) {
                 held.fulfill()
-                _ = XCTWaiter().wait(for: [release], timeout: 5)
+                XCTAssertEqual(XCTWaiter().wait(for: [release], timeout: 5), .completed)
             }
         }
         wait(for: [held], timeout: 5)
