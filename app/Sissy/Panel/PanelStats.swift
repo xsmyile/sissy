@@ -445,7 +445,7 @@ struct AgentMemoryChart: View {
     /// Opacity of the accent for each standing band, dearest first: one step
     /// per row the list can draw without folding, which is
     /// `processRowLimit` — six when exactly six agents run.
-    static let bandOpacities: [Double] = [1, 0.78, 0.6, 0.45, 0.33, 0.24]
+    nonisolated static let bandOpacities: [Double] = [1, 0.78, 0.6, 0.45, 0.33, 0.24]
     private static let restOpacity: Double = 0.2
     private static let cursorOpacity: Double = 0.5
     private static let secondsPerMinute: Double = 60

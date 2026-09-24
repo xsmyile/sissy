@@ -148,7 +148,7 @@ struct ProviderMark: View {
     /// Read off the font rather than fixed, because the amount scales with the
     /// text: the same row at another size would need another number, and a
     /// constant would be right once.
-    static func capCentreOffset(forTextSize textSize: CGFloat) -> CGFloat {
+    nonisolated static func capCentreOffset(forTextSize textSize: CGFloat) -> CGFloat {
         let font = NSFont.systemFont(ofSize: textSize)
         return (font.ascender + font.descender - font.capHeight) / 2
     }

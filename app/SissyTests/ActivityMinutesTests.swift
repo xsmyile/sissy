@@ -150,7 +150,7 @@ final class ActivityArchiveTests: XCTestCase {
     /// draw a dash rather than claim nobody worked.
     func testADayNeitherReadingMeasuredCarriesNoShape() {
         XCTAssertNil(day(nil).merging(counts: nil, activity: nil).activity)
-        XCTAssertNil(day(.none).activity)
+        XCTAssertNil(day(AgentActivityDay.none).activity)
     }
 
     func testReattributionKeepsTheShape() {

@@ -978,14 +978,14 @@ struct ForgeMark: View {
     /// GitHub is looked for first, so a host naming both — a mirror called
     /// `github.gitlab.example.com` — answers the one it leads with rather than
     /// whichever the compiler reached first.
-    static func assetName(forHost host: String) -> String? {
+    nonisolated static func assetName(forHost host: String) -> String? {
         let host = host.lowercased()
         if host.contains(Self.gitHubName) { return "ForgeMarkGitHub" }
         if host.contains(Self.gitLabName) { return "ForgeMarkGitLab" }
         return nil
     }
 
-    private static let gitHubName = "github"
-    private static let gitLabName = "gitlab"
+    private nonisolated static let gitHubName = "github"
+    private nonisolated static let gitLabName = "gitlab"
     private static let genericSymbol = "arrow.triangle.branch"
 }

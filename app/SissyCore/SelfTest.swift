@@ -1541,9 +1541,9 @@ func runCodexRateLimitTest() {
             persistenceURL: nil
         )
         await reader.start { _ in }
-        box.value = await reader.currentSignals().windows
-        planBox.value = await reader.currentSignals().plan
-        creditsBox.value = await reader.currentSignals().credits
+        box.value = reader.currentSignals().windows
+        planBox.value = reader.currentSignals().plan
+        creditsBox.value = reader.currentSignals().credits
         await reader.stop()
         sem.signal()
     }

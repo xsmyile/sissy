@@ -686,7 +686,7 @@ struct ForgeConnectSheet: View {
     /// and `ForgeConnection` spell theirs identically — kind and host — so a
     /// `gh` token for `example.com` is not matched against a `glab` connection
     /// on the same machine.
-    static func offered(
+    nonisolated static func offered(
         _ candidates: [ForgeTokenCandidate], for request: ForgeConnectRequest,
         connected: [ForgeConnection]
     ) -> [ForgeTokenCandidate] {

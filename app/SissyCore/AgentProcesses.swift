@@ -305,7 +305,7 @@ enum AgentProcessReader {
                 KernelProcess(
                     pid: pid,
                     parent: entry.kp_eproc.e_ppid,
-                    executablePath: length > 0 ? String(cString: pathBuffer) : "",
+                    executablePath: length > 0 ? utf8(pathBuffer.prefix { $0 != 0 }) ?? "" : "",
                     startedAt: Date(
                         timeIntervalSince1970: Double(started.tv_sec)
                             + Double(started.tv_usec) / 1_000_000)))
@@ -356,6 +356,12 @@ enum AgentProcessReader {
             index += 1
         }
         guard !argument.isEmpty else { return nil }
-        return String(cString: argument + [0])
+        return utf8(argument)
+    }
+
+    /// A C string's bytes, without its terminator, as UTF-8, or nil for
+    /// bytes that are not.
+    private static func utf8(_ characters: some Sequence<CChar>) -> String? {
+        String(bytes: characters.map { UInt8(bitPattern: $0) }, encoding: .utf8)
     }
 }

@@ -35,7 +35,7 @@ final class AgentHookLaunchPassTests: XCTestCase {
         let installer = AgentHookInstaller(
             stateDirectory: root.appendingPathComponent("state"),
             targets: [AgentHookTarget(name: "Claude Code", url: configuration)])
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
         return installer
     }
 

@@ -34,7 +34,7 @@ final class AgentHookInstallerTests: XCTestCase {
     func testTheScriptAndInboxAreLaidDownPrivately() throws {
         let (installer, _) = make("private")
 
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
 
         XCTAssertEqual(try mode(of: installer.scriptURL), 0o700)
         XCTAssertEqual(try mode(of: installer.inboxURL), 0o700)
@@ -45,7 +45,7 @@ final class AgentHookInstallerTests: XCTestCase {
     /// its updates.
     func testReaffirmingWritesNothing() throws {
         let (installer, target) = make("idempotent")
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
         let before = try Data(contentsOf: target.url)
 
         XCTAssertEqual(installer.install(bundledScript: bundledScript)[target], .unchanged)
@@ -67,7 +67,7 @@ final class AgentHookInstallerTests: XCTestCase {
                 ],
             ], to: target.url)
 
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
 
         let root = try configuration(of: target.url)
         XCTAssertTrue(commands(in: target.url).contains("orca-hook.sh"))
@@ -84,7 +84,7 @@ final class AgentHookInstallerTests: XCTestCase {
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o600], ofItemAtPath: target.url.path)
 
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
 
         XCTAssertEqual(try mode(of: target.url), 0o600)
     }
@@ -94,7 +94,7 @@ final class AgentHookInstallerTests: XCTestCase {
         try writeConfiguration(
             ["hooks": ["SessionStart": [["hooks": [["type": "command", "command": "orca-hook.sh"]]]]]],
             to: target.url)
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
 
         XCTAssertEqual(installer.remove()[target], .removed)
 
@@ -203,7 +203,7 @@ final class AgentHookInstallerTests: XCTestCase {
         try "{}".write(to: real, atomically: true, encoding: .utf8)
         try FileManager.default.createSymbolicLink(at: target.url, withDestinationURL: real)
 
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
 
         let attributes = try FileManager.default.attributesOfItem(atPath: target.url.path)
         XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink)
@@ -279,15 +279,15 @@ final class AgentHookInstallerTests: XCTestCase {
 
     func testAnInstalledEntryIsFoundAgain() throws {
         let (installer, _) = make("found")
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
 
         XCTAssertTrue(installer.holdsOwnEntry())
     }
 
     func testARemovedEntryIsNotFound() throws {
         let (installer, _) = make("gone")
-        installer.install(bundledScript: bundledScript)
-        installer.remove()
+        _ = installer.install(bundledScript: bundledScript)
+        _ = installer.remove()
 
         XCTAssertFalse(installer.holdsOwnEntry())
     }
@@ -297,7 +297,7 @@ final class AgentHookInstallerTests: XCTestCase {
     /// the switch off does not take the other build's line out.
     func testAnotherInstallsEntryIsNotThisOnes() throws {
         let (installer, target) = make("other")
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
         let other = AgentHookInstaller(
             stateDirectory: root.appendingPathComponent("other/another-state"), targets: [target])
 
@@ -306,8 +306,8 @@ final class AgentHookInstallerTests: XCTestCase {
 
     func testAFileSissyCreatedIsDeletedWhenRemovalEmptiesIt() throws {
         let (installer, target) = make("created")
-        installer.install(bundledScript: bundledScript)
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
 
         XCTAssertEqual(installer.remove()[target], .removed)
 
@@ -317,9 +317,9 @@ final class AgentHookInstallerTests: XCTestCase {
     func testAnEmptyFileTheUserHadIsKept() throws {
         let (installer, target) = make("theirs")
         try writeConfiguration([:], to: target.url)
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
 
-        installer.remove()
+        _ = installer.remove()
 
         XCTAssertEqual(try configuration(of: target.url).count, 0)
     }
@@ -328,12 +328,12 @@ final class AgentHookInstallerTests: XCTestCase {
     /// theirs as much as Sissy's now, and only Sissy's line goes.
     func testAFileSissyCreatedKeepsWhatOthersAddedToIt() throws {
         let (installer, target) = make("shared")
-        installer.install(bundledScript: bundledScript)
+        _ = installer.install(bundledScript: bundledScript)
         var current = try configuration(of: target.url)
         current["theme"] = "dark"
         try writeConfiguration(current, to: target.url)
 
-        installer.remove()
+        _ = installer.remove()
 
         XCTAssertEqual(try configuration(of: target.url)["theme"] as? String, "dark")
     }
