@@ -41,6 +41,8 @@ struct AboutView: View {
     /// that closes the page.
     private static let bandSpacing: CGFloat = 24
 
+    private static let devBuildStatus = "Off in development builds"
+
     private static let copyTitle = "Copy diagnostics"
     private static let copiedTitle = "Copied"
 
@@ -83,11 +85,9 @@ struct AboutView: View {
                 actions
                 acknowledgementsLink
             }
-            if model.updates.isRunning {
-                Divider()
-                    .padding(.vertical, Self.bandSpacing)
-                updates
-            }
+            Divider()
+                .padding(.vertical, Self.bandSpacing)
+            updates
             copyrightLine
                 .padding(.top, Self.bandSpacing)
         }
@@ -130,10 +130,15 @@ struct AboutView: View {
     /// declares them, which is what keeps the first launches silent.
     /// Installs are off, and the update alert offers the same switch beside
     /// the version it is about. Sparkle allows them only while checks are on.
+    ///
+    /// A development build draws the band with its controls off rather than
+    /// leaving it out: the updater never runs there, and hiding the band made
+    /// a notarized build the only way to see the page as it ships.
     private var updates: some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Check for updates automatically", isOn: updateChecksBinding)
+                    .disabled(!model.updates.isRunning)
                 Toggle("Install updates automatically", isOn: updateInstallsBinding)
                     .disabled(!model.updates.allowsAutomaticInstalls)
             }
@@ -148,12 +153,19 @@ struct AboutView: View {
                     checkButton
                 }
 
-                if let lastCheck = model.updates.lastCheck {
-                    Text("Last checked \(lastCheck.formatted(.relative(presentation: .named)))")
+                if let status = updateStatus {
+                    Text(status)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    private var updateStatus: String? {
+        guard model.updates.isRunning else { return Self.devBuildStatus }
+        return model.updates.lastCheck.map {
+            "Last checked \($0.formatted(.relative(presentation: .named)))"
         }
     }
 
