@@ -332,6 +332,12 @@ final class UsageEngineHost {
     private(set) var claudeWebUnlinkFailure: AccountUnlink.Report?
     /// The same, for the last Unlink of a Codex account.
     private(set) var codexUnlinkFailure: AccountUnlink.Report?
+    /// The account a Codex reset is being spent for, nil while none is. One
+    /// at a time across every account: each press is a request that spends
+    /// something, and two in flight is what the button exists to rule out.
+    private(set) var spendingCodexReset: CodexResetTarget?
+    /// How the last reset press ended, until the page that made it goes away.
+    private(set) var codexResetReport: CodexResetReport?
     /// Keychain items Claude Code filed for config homes Sissy does not read,
     /// by service name. Settings says so, because `CLAUDE_CONFIG_DIR` is not
     /// followed and a user who set it would otherwise meet a missing account
@@ -668,6 +674,32 @@ final class UsageEngineHost {
                 claudeWebUnlinkFailure = AccountUnlink.Report(account: account, failure: why)
             }
         }
+    }
+
+    /// Spends one of a Codex account's resets, after the page has asked.
+    ///
+    /// `retrying` is the page's `Try again` after an answer that never
+    /// arrived, and it is the only press that reuses that attempt's request
+    /// id: OpenAI redeems one id once, so a retry cannot spend a second reset.
+    func useCodexReset(account: String?, retrying: Bool = false) {
+        guard let engine, spendingCodexReset == nil else { return }
+        let target = CodexResetTarget(account: account)
+        spendingCodexReset = target
+        codexResetReport = nil
+        Task { [weak self] in
+            let startedAt = ContinuousClock.now
+            let outcome = await engine.useCodexReset(account: account, retrying: retrying)
+            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
+                try? await Task.sleep(for: rest)
+            }
+            self?.codexResetReport = CodexResetReport(target: target, outcome: outcome)
+            self?.spendingCodexReset = nil
+        }
+    }
+
+    /// Drops the last reset's answer once the page that showed it has gone.
+    func dismissCodexResetReport() {
+        codexResetReport = nil
     }
 
     /// Re-reads one provider's out-of-band state. On Claude Code this is the
@@ -1137,4 +1169,17 @@ final class UsageEngineHost {
             }
         }
     }
+}
+
+/// Which Codex account a reset press is for: a linked account's id, or nil
+/// for the CLI's own credential, which is the reader behind the row.
+struct CodexResetTarget: Equatable {
+    let account: String?
+}
+
+/// How one reset press ended, and for which account, so only the page that
+/// made it words the answer.
+struct CodexResetReport: Equatable {
+    let target: CodexResetTarget
+    let outcome: CodexResetOutcome
 }

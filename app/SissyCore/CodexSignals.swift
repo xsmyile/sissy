@@ -85,14 +85,17 @@ struct CodexSignals: SourceSignals {
     /// The tail's reading with the live one laid over it, or not, by stamp.
     ///
     /// The live reader's `limitsState` is taken whichever reading wins, and it
-    /// is the only field that crosses that line. A state is the answer to "why
-    /// is there nothing newer", which is a question only the reader that tried
-    /// can answer — the tail never fails, it simply has nothing to add until
-    /// the next turn.
+    /// is one of the two fields that cross that line. A state is the answer to
+    /// "why is there nothing newer", which is a question only the reader that
+    /// tried can answer — the tail never fails, it simply has nothing to add
+    /// until the next turn. The resets are the other, because the rollouts do
+    /// not carry them at all: there is no older reading for a newer turn to
+    /// lose to.
     static func merge(rollout: ProviderSignals, live: ProviderSignals?) -> ProviderSignals {
         var reading = rollout
         guard let live else { return reading }
         reading.limitsState = live.limitsState
+        reading.resets = live.resets
         guard let observedAt = live.limitsObservedAt, !live.windows.isEmpty else {
             return reading
         }
@@ -138,6 +141,7 @@ struct CodexSignals: SourceSignals {
                     planTier: own.planTier,
                     windows: own.windows,
                     credits: own.credits,
+                    resets: own.resets,
                     limitsState: own.limitsState,
                     limitsObservedAt: own.limitsObservedAt,
                     isSignedIn: true))
@@ -157,6 +161,7 @@ struct CodexSignals: SourceSignals {
                     planTier: nil,
                     windows: signals.windows,
                     credits: signals.credits,
+                    resets: signals.resets,
                     limitsState: signals.limitsState,
                     limitsObservedAt: signals.limitsObservedAt,
                     isSignedIn: false))

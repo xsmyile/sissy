@@ -381,6 +381,34 @@ struct ProviderCredits: Sendable, Equatable, Codable {
     var balance: Decimal? { balanceMinor.map(amount) }
 }
 
+/// The resets a vendor lets an account spend to put its windows back to zero
+/// ahead of their own reset, as the vendor counted them.
+///
+/// Only Codex publishes any: `wham/usage` carries `rate_limit_reset_credits`,
+/// measured 2026-09-24 as `{"available_count": 1,
+/// "applicable_available_count": 0}` on an account holding one reset with its
+/// windows at 29% and 83%. Nil is not a count of zero: the block is absent on
+/// a reply that predates it, and that is an account nobody knows about, where
+/// a zero is one the vendor has answered for.
+struct LimitResets: Sendable, Equatable {
+    /// Resets the account holds.
+    let available: Int
+    /// How many of those the vendor would apply right now, nil where the reply
+    /// does not say.
+    let applicable: Int?
+    /// When the soonest of them lapses. Nil when it never does, and when the
+    /// list that dates them could not be read — the count is the usage
+    /// reply's, the dates are a second request's.
+    var nextExpiry: Date?
+    /// The vendor's own name for that reset, `Full reset (Weekly + 5 hr)`.
+    var title: String?
+
+    /// How many a press could spend now: the vendor's applicable count, and the
+    /// whole inventory where the reply names none. OpenAI's desktop client
+    /// reads it the same way, measured 2026-09-24 in its bundle.
+    var usable: Int { applicable ?? available }
+}
+
 /// One provider's share of the day, and everything else its own files answer
 /// for. The frame carries these raw so the header total and the per-provider
 /// rows come off a single payload rather than two counts that can disagree.
@@ -419,6 +447,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     var plan: String? { signals.plan }
     var planTier: String? { signals.planTier }
     var credits: ProviderCredits? { signals.credits }
+    var resets: LimitResets? { signals.resets }
     var account: ProviderAccount? { signals.account }
     var limitsState: ProviderLimitsState { signals.limitsState }
     var limitsObservedAt: Date? { signals.limitsObservedAt }

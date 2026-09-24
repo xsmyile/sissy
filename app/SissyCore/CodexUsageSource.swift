@@ -50,6 +50,12 @@ actor CodexUsageSource: SourceSignals {
     /// The network half, injectable so a test of the refresh contract never
     /// reaches OpenAI.
     private let fetchSource: @Sendable (CodexCredential) async throws -> CodexUsagePayload.Reading
+    /// The list that dates this account's resets, injectable for the reason
+    /// the usage fetch is.
+    private let creditsSource: @Sendable (CodexCredential) async throws -> [CodexResetCredits.Credit]
+    /// The spend, injectable so a test of its retry contract never spends one.
+    private let consumeSource:
+        @Sendable (CodexCredential, String, String?) async throws -> CodexResetCredits.Answer
     /// Workspace name recorded when the account was linked, which the reply
     /// does not carry: OpenAI names the account it answered for by id only.
     let workspace: String?
@@ -69,6 +75,13 @@ actor CodexUsageSource: SourceSignals {
     /// as the vendor kept refusing; a different token, from a relink or the
     /// CLI, is renewed as any other.
     private var refusedAfterRenewal: String?
+    /// The reset a press spends, the soonest to lapse, as the last list named
+    /// it. Nil sends none and lets OpenAI pick, which its own CLI also does.
+    private var nextCredit: String?
+    /// The spend whose answer never arrived, kept so that trying again sends
+    /// the same request id and cannot spend a second reset. Only a retry
+    /// reuses it: a fresh press is a fresh request, as it is in the CLI.
+    private var unanswered: (requestID: String, creditID: String?)?
 
     init(
         account: String? = nil,
@@ -78,6 +91,14 @@ actor CodexUsageSource: SourceSignals {
         fetchSource:
             @escaping @Sendable (CodexCredential) async throws ->
             CodexUsagePayload.Reading = fetch,
+        creditsSource:
+            @escaping @Sendable (CodexCredential) async throws -> [CodexResetCredits.Credit] =
+            CodexResetCredits.fetchCredits,
+        consumeSource:
+            @escaping @Sendable (CodexCredential, String, String?) async throws ->
+            CodexResetCredits.Answer = {
+                try await CodexResetCredits.consume($0, requestID: $1, creditID: $2)
+            },
         backoff: LimitsBackoffSlot? = nil
     ) {
         self.account = account
@@ -86,6 +107,8 @@ actor CodexUsageSource: SourceSignals {
         self.credentialSource = credentialSource
         self.renewRefused = renewRefused
         self.fetchSource = fetchSource
+        self.creditsSource = creditsSource
+        self.consumeSource = consumeSource
     }
 
     nonisolated func currentSignals() -> ProviderSignals { published.load().live() }
@@ -129,9 +152,11 @@ actor CodexUsageSource: SourceSignals {
     func stop(clearingState: Bool = true) {
         cancelRequests()
         observed.store(nil)
+        nextCredit = nil
         published.update {
             $0.windows = []
             $0.credits = nil
+            $0.resets = nil
             $0.account = nil
             $0.plan = nil
             $0.limitsObservedAt = nil
@@ -161,11 +186,19 @@ actor CodexUsageSource: SourceSignals {
     /// request has finished. Deliberately not `stop()` first: that drops the
     /// windows, and a refresh that blanks the gauges it is restoring reads as
     /// a failure for as long as the request takes.
-    func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
+    ///
+    /// `userInitiated` is what lets the credential read ask for the keychain.
+    /// A reader retired while a caller was suspended stays retired: this is
+    /// the other place a poll loop is started, and one started here would
+    /// poll for an account nothing holds any more.
+    func refresh(
+        userInitiated: Bool = true, onRefresh: @Sendable @escaping () async -> Void
+    ) async {
+        guard !retired else { return }
         if case .rateLimited(let until) = published.load().limitsState, until > Date() { return }
         cancelRequests()
         lastReported = nil
-        let request = begin(userInitiated: true, onRefresh: onRefresh)
+        let request = begin(userInitiated: userInitiated, onRefresh: onRefresh)
         await withTaskCancellationHandler {
             _ = await request.value
         } onCancel: {
@@ -263,14 +296,79 @@ actor CodexUsageSource: SourceSignals {
     private func read(with credential: CodexCredential, generation stamp: Int) async throws
         -> Duration
     {
-        let reading = try await fetchSource(credential)
+        var reading = try await fetchSource(credential)
         guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
         if let named = reading.accountId, let asked = credential.accountId, named != asked {
             report("OpenAI answered for a different account than the one asked for")
         }
+        let dated = await dated(reading.resets, with: credential)
+        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+        reading.resets = dated.resets
+        nextCredit = dated.nextCredit
         publish(reading)
         await backoff?.record(nil)
         return Self.refreshInterval
+    }
+
+    /// The count with the soonest reset's date and name laid on, and the
+    /// count alone when the list could not be read: the count is the answer
+    /// the row needs, the date is a caption.
+    ///
+    /// Asked only while the account holds one, which is what keeps the second
+    /// request off the poll of every account that never had any. The reset a
+    /// press would spend comes back beside it rather than being set here, so
+    /// a poll a newer one has superseded cannot name it.
+    private func dated(_ resets: LimitResets?, with credential: CodexCredential) async
+        -> (resets: LimitResets?, nextCredit: String?)
+    {
+        guard var resets, resets.available > 0 else { return (resets, nil) }
+        do {
+            let next = try await creditsSource(credential).first
+            resets.nextExpiry = next?.expiresAt
+            resets.title = next?.title
+            return (resets, next?.id)
+        } catch {
+            report("the Codex reset list could not be read: \(error)")
+            return (resets, nil)
+        }
+    }
+
+    // MARK: - Spending a reset
+
+    /// Spends one of this account's resets, then reads the account again so
+    /// the windows the vendor just cleared reach the panel with the answer.
+    ///
+    /// The credential is read the way a poll reads it and never with
+    /// interaction, because a spend is not the moment to put a dialog up.
+    /// Nothing here moves the row's own state either: a spend that failed is
+    /// the press's answer, and the page words it beside the button rather
+    /// than as a notice about the limits.
+    func useReset(
+        retrying: Bool, onRefresh: @Sendable @escaping () async -> Void
+    ) async -> CodexResetOutcome {
+        guard !retired else { return .unavailable }
+        guard case .found(let credential) = await credentialSource(false),
+            !credential.isExpired()
+        else { return .unavailable }
+        let attempt =
+            (retrying ? unanswered : nil) ?? (requestID: UUID().uuidString, creditID: nextCredit)
+        unanswered = attempt
+        let outcome: CodexResetOutcome
+        do {
+            outcome = CodexResetOutcome(
+                try await consumeSource(credential, attempt.requestID, attempt.creditID))
+            unanswered = nil
+        } catch {
+            if Self.isRefusal(error) {
+                unanswered = nil
+                outcome = .refused
+            } else {
+                outcome = .unconfirmed
+            }
+            report("spending a Codex reset did not get an answer: \(error)")
+        }
+        await refresh(userInitiated: false, onRefresh: onRefresh)
+        return outcome
     }
 
     /// One renewal and one read, and never a second of either: a renewed
@@ -336,6 +434,7 @@ actor CodexUsageSource: SourceSignals {
         published.update {
             $0.windows = reading.windows
             $0.credits = reading.credits
+            $0.resets = reading.resets
             $0.plan = reading.plan ?? $0.plan
             $0.account = ProviderAccount(
                 email: reading.account?.email, organization: workspace)
@@ -378,10 +477,12 @@ actor CodexUsageSource: SourceSignals {
     }
 
     private func publishFailure(_ state: ProviderLimitsState) {
+        nextCredit = nil
         published.update {
             $0.limitsState = state
             $0.windows = []
             $0.credits = nil
+            $0.resets = nil
         }
     }
 

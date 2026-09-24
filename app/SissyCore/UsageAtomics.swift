@@ -34,6 +34,7 @@ struct AccountSignals: Sendable, Equatable, Identifiable {
     let planTier: String?
     var windows: [UsageWindow] = []
     var credits: ProviderCredits?
+    var resets: LimitResets?
     var limitsState: ProviderLimitsState = .quiet
     var limitsObservedAt: Date?
     /// Whether this is the account the CLI itself is signed in as, which is
@@ -79,6 +80,10 @@ struct ProviderSignals: Sendable, Equatable {
     /// publish one. Nil for every other, and for an account that has never
     /// enabled the facility.
     var credits: ProviderCredits?
+    /// Resets the vendor lets this account spend on its windows, for the one
+    /// vendor that offers them. Nil for every other, and until a live reader
+    /// has answered: the rollouts do not carry the count.
+    var resets: LimitResets?
     /// Why the windows are missing, when they are and when the user can do
     /// something about it.
     var limitsState: ProviderLimitsState = .quiet
