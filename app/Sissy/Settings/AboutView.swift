@@ -12,6 +12,10 @@ import SwiftUI
 /// the copyright. It was one prominent button over four `.link`s on two rows,
 /// which gave `Copy diagnostics` — the only one of the five that opens nothing
 /// — the same blue as the four that do.
+///
+/// Updates are a band of their own under a divider rather than one more tier
+/// of that stack: the page above is about Sissy, the band about this copy of
+/// it, and stacked in one column the switches read as one more button.
 struct AboutView: View {
     let model: SissyModel
 
@@ -20,10 +24,13 @@ struct AboutView: View {
     /// The author's own site rather than their GitHub profile, which the star
     /// button already reaches: `github.com/xsmyile/sissy` carries its owner in
     /// its own breadcrumb, so a second link to `github.com/xsmyile` was one
-    /// destination spelled twice. The label is the bare domain, because a link
-    /// that leaves the app should say where it goes, and the name it used to
-    /// carry is on the copyright line below it either way.
+    /// destination spelled twice. It rides the author's name on the copyright
+    /// line, which already says who, and the tooltip says where: a bare
+    /// `smyile.com` of its own named a domain and nobody behind it.
     private static let siteURL = URL(string: "https://smyile.com")!
+
+    /// The name in `NSHumanReadableCopyright` that carries `siteURL`.
+    static let copyrightHolder = "Smyile"
 
     /// What the page says Sissy is, in the words the README opens with. It
     /// described the spend of two CLIs until the Forge module landed and made
@@ -34,11 +41,8 @@ struct AboutView: View {
     private static let copiedTitle = "Copied"
 
     /// Smaller than the 104 pt it was, with its halo brought in to match, which
-    /// is what bought the Updates block under the version its room.
-    /// Measured 2026-09-18 against a harness reproducing this layout at the
-    /// tab's own 560 pt: the page this replaced came to 457.0 pt of
-    /// `SettingsRootView.maxContentHeight`'s 600, this one comes to 412.0, and
-    /// the same page carrying an update card to 523.0.
+    /// is what bought the update band its room under
+    /// `SettingsRootView.maxContentHeight`.
     private static let iconSize: CGFloat = 96
     private static let haloSize: CGFloat = 120
 
@@ -68,14 +72,18 @@ struct AboutView: View {
     @State private var showsAcknowledgements = false
 
     var body: some View {
-        VStack(spacing: 20) {
-            icon
-            identity
+        VStack(spacing: 0) {
+            VStack(spacing: 20) {
+                icon
+                identity
+                actions
+                credit
+            }
             if model.updates.isRunning {
+                Divider()
+                    .padding(.vertical, 24)
                 updates
             }
-            actions
-            credit
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 32)
@@ -109,39 +117,39 @@ struct AboutView: View {
         }
     }
 
-    /// Updates sit under the version they would replace, which is where the
-    /// question is asked, and only on a build that runs an updater. The two switches are Sparkle's own settings, read
-    /// and written through `UpdateController`, which keeps no copy of them.
+    /// The switches on the left and the check on the right, with when it last
+    /// ran under it. The two switches are Sparkle's own settings, read and
+    /// written through `UpdateController`, which keeps no copy of them.
     /// Checks are on by default and asked about nowhere: the Info.plist
     /// declares them, which is what keeps the first launches silent.
     /// Installs are off, and the update alert offers the same switch beside
     /// the version it is about. Sparkle allows them only while checks are on.
     private var updates: some View {
-        VStack(spacing: 10) {
-            Button(UpdateController.menuTitle(pendingVersion: model.updates.pendingVersion)) {
-                model.updates.checkForUpdates()
-            }
-            .buttonStyle(.glass)
-            .disabled(!model.updates.canCheckForUpdates)
-
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
                 Toggle("Check for updates automatically", isOn: updateChecksBinding)
                 Toggle("Install updates automatically", isOn: updateInstallsBinding)
                     .disabled(!model.updates.allowsAutomaticInstalls)
             }
             .toggleStyle(.checkbox)
 
-            Text(updateChecksCaption)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-    }
+            Spacer(minLength: 0)
 
-    private var updateChecksCaption: String {
-        let schedule = model.updates.feedHost.map { "Checks once a day, from \($0)." } ?? "Checks once a day."
-        guard let lastCheck = model.updates.lastCheck else { return schedule }
-        return "\(schedule) Last checked \(lastCheck.formatted(.relative(presentation: .named)))."
+            VStack(alignment: .trailing, spacing: 6) {
+                Button(UpdateController.menuTitle(pendingVersion: model.updates.pendingVersion)) {
+                    model.updates.checkForUpdates()
+                }
+                .buttonStyle(.glass)
+                .disabled(!model.updates.canCheckForUpdates)
+                .help(model.updates.feedHost.map { "Reads the update feed at \($0)." } ?? "")
+
+                if let lastCheck = model.updates.lastCheck {
+                    Text("Last checked \(lastCheck.formatted(.relative(presentation: .named)))")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     private var updateChecksBinding: Binding<Bool> {
@@ -210,25 +218,25 @@ struct AboutView: View {
     }
 
     private var credit: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                Button("smyile.com") {
-                    NSWorkspace.shared.open(Self.siteURL)
-                }
+        HStack(spacing: 8) {
+            Text(copyright)
+                .help(Self.siteURL.host() ?? "")
+
+            Text(verbatim: "·")
+
+            Button("Acknowledgements") { showsAcknowledgements = true }
                 .buttonStyle(.link)
-
-                Text(verbatim: "·")
-                    .foregroundStyle(.tertiary)
-
-                Button("Acknowledgements") { showsAcknowledgements = true }
-                    .buttonStyle(.link)
-            }
-            .font(.callout)
-
-            Text(Bundle.main.humanReadableCopyright)
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
         }
+        .font(.footnote)
+        .foregroundStyle(.tertiary)
+    }
+
+    private var copyright: AttributedString {
+        var line = AttributedString(Bundle.main.humanReadableCopyright)
+        if let holder = line.range(of: Self.copyrightHolder) {
+            line[holder].link = Self.siteURL
+        }
+        return line
     }
 
     private var icon: some View {

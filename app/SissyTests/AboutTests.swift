@@ -10,6 +10,13 @@ final class AboutTests: XCTestCase {
         )
     }
 
+    func testCopyrightNamesTheHolderThatCarriesTheSiteLink() {
+        XCTAssertTrue(
+            Bundle.main.humanReadableCopyright.contains(AboutView.copyrightHolder),
+            "About links the author's site from their name on the copyright line; without it the link is gone"
+        )
+    }
+
     /// Sparkle ships inside the app, and the BSD terms among its licences ask
     /// for the notice to travel with the binary, so the sheet renders a
     /// bundled copy rather than a link. `CREDITS.md` credits what Sissy reads
