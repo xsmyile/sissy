@@ -192,5 +192,6 @@ extension UsagePanelController: NSPopoverDelegate {
         guard !popover.isShown else { return }
         stopWatchingForDismissal()
         popover.contentViewController = nil
+        model.engine.dismissCodexResetReport()
     }
 }

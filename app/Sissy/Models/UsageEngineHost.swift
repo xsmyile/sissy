@@ -678,17 +678,17 @@ final class UsageEngineHost {
 
     /// Spends one of a Codex account's resets, after the page has asked.
     ///
-    /// `retrying` is the page's `Try again` after an answer that never
-    /// arrived, and it is the only press that reuses that attempt's request
-    /// id: OpenAI redeems one id once, so a retry cannot spend a second reset.
-    func useCodexReset(account: String?, retrying: Bool = false) {
+    /// A press after an answer that never arrived sends that attempt again,
+    /// whichever button made it: the reader holds the request id, so no
+    /// state here or on the page can mint a second one.
+    func useCodexReset(account: String?) {
         guard let engine, spendingCodexReset == nil else { return }
         let target = CodexResetTarget(account: account)
         spendingCodexReset = target
         codexResetReport = nil
         Task { [weak self] in
             let startedAt = ContinuousClock.now
-            let outcome = await engine.useCodexReset(account: account, retrying: retrying)
+            let outcome = await engine.useCodexReset(account: account)
             if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
                 try? await Task.sleep(for: rest)
             }
@@ -697,7 +697,10 @@ final class UsageEngineHost {
         }
     }
 
-    /// Drops the last reset's answer once the page that showed it has gone.
+    /// Drops the last reset's answer once the panel that showed it has closed.
+    /// Not when the page does: the provider page gives way to its own
+    /// services, projects and effort pages, and a `Done` that vanished on the
+    /// way to one of them read as a press that had never happened.
     func dismissCodexResetReport() {
         codexResetReport = nil
     }

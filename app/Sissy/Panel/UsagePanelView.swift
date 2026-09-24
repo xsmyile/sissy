@@ -269,11 +269,7 @@ struct UsagePanelView: View {
                                 switchingAccount: model.engine.switchingClaudeAccount,
                                 resetSpending: model.engine.spendingCodexReset,
                                 resetReport: model.engine.codexResetReport,
-                                useReset: {
-                                    model.engine.useCodexReset(
-                                        account: $0.account, retrying: $1)
-                                },
-                                dismissResetReport: { model.engine.dismissCodexResetReport() },
+                                useReset: { model.engine.useCodexReset(account: $0.account) },
                                 refresh: { model.refreshProvider(open.id) },
                                 openServices: {
                                     page = .services(open.id, account: $0)

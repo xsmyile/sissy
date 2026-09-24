@@ -407,6 +407,14 @@ struct LimitResets: Sendable, Equatable {
     /// whole inventory where the reply names none. OpenAI's desktop client
     /// reads it the same way, measured 2026-09-24 in its bundle.
     var usable: Int { applicable ?? available }
+
+    /// The same count with the reset a press just spent taken off, until the
+    /// next reading says what the vendor now holds.
+    func spendingOne() -> LimitResets {
+        LimitResets(
+            available: max(0, available - 1), applicable: applicable.map { max(0, $0 - 1) },
+            nextExpiry: nil, title: nil)
+    }
 }
 
 /// One provider's share of the day, and everything else its own files answer

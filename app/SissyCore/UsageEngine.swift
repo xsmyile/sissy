@@ -997,12 +997,12 @@ actor UsageEngine {
     /// is the reader behind the row and behind the signed-in account's entry.
     /// The frame is rebuilt before this returns, so the answer and the cleared
     /// windows reach the panel together.
-    func useCodexReset(account: String?, retrying: Bool) async -> CodexResetOutcome {
+    func useCodexReset(account: String?) async -> CodexResetOutcome {
         guard lifecycle == .running,
             let reader = codexSources.load().first(where: { $0.account == account })
         else { return .unavailable }
         let me = self
-        let outcome = await reader.useReset(retrying: retrying) { await me.reemit() }
+        let outcome = await reader.useReset { await me.reemit() }
         await reemit()
         return outcome
     }
