@@ -6,11 +6,10 @@ import XCTest
 /// What the login window does with a page that asks for a second window.
 ///
 /// An identity provider's sign-in often opens one, through `window.open` or a
-/// link aimed at a new tab. A web view with no UI delegate drops that request
-/// without a word, which is a button that does nothing on the one account the
-/// user came to add. The window has no second window to give, so a popup is
-/// loaded in place, a link off the vendor's hosts still goes to the default
-/// browser, and a popup with nothing to load is said to be a dead end.
+/// link aimed at a new tab, and hands its result back to the page through
+/// `window.opener`. So a popup is a web view of its own over the page, in the
+/// same window, and a link off the vendor's hosts still goes to the default
+/// browser.
 @MainActor
 final class VendorLoginPopupTests: XCTestCase {
     private static let isInternal: (String) -> Bool = { $0 == "claude.ai" }
@@ -21,14 +20,14 @@ final class VendorLoginPopupTests: XCTestCase {
             isInternal: Self.isInternal)
     }
 
-    func testAScriptedPopupToAnIdentityProviderLoadsInPlace() {
+    func testAScriptedPopupToAnIdentityProviderOpensOverThePage() {
         XCTAssertEqual(
-            route("https://appleid.apple.com/auth/authorize?client_id=x", linkActivated: false),
-            .load)
+            route("https://accounts.google.com/o/oauth2/v2/auth?display=popup", linkActivated: false),
+            .open)
     }
 
-    func testANewTabLinkOnTheVendorsOwnHostLoadsInPlace() {
-        XCTAssertEqual(route("https://claude.ai/login/help", linkActivated: true), .load)
+    func testANewTabLinkOnTheVendorsOwnHostOpensOverThePage() {
+        XCTAssertEqual(route("https://claude.ai/login/help", linkActivated: true), .open)
     }
 
     /// The confinement rule the navigation delegate already holds, reached by
@@ -39,210 +38,126 @@ final class VendorLoginPopupTests: XCTestCase {
         XCTAssertEqual(route(url.absoluteString, linkActivated: true), .openInBrowser(url))
     }
 
-    func testAPopupWithNoAddressCannotBeFollowed() {
-        XCTAssertEqual(route(nil, linkActivated: false), .cannotFollow)
+    func testALinkToAnAddressThatIsNotAWebPageGoesToTheDefaultBrowser() throws {
+        let url = try XCTUnwrap(URL(string: "mailto:support@example.com"))
+
+        XCTAssertEqual(route(url.absoluteString, linkActivated: true), .openInBrowser(url))
     }
 
-    /// The shape a popup sign-in takes when the opener writes into the window
-    /// after opening it, which needs the window to exist.
-    func testABlankPopupCannotBeFollowed() {
-        XCTAssertEqual(route("about:blank", linkActivated: false), .cannotFollow)
+    /// The shape a popup sign-in takes when the page opens the window first
+    /// and writes into it or sends it somewhere afterwards.
+    func testABlankPopupOpensOverThePage() {
+        XCTAssertEqual(route("about:blank", linkActivated: false), .open)
+        XCTAssertEqual(route(nil, linkActivated: false), .open)
     }
 
-    /// A popup loaded in place has no opener to hand its result to, and
-    /// WebKit ignores its `close()` on a web view Sissy opened and a redirect
-    /// chain has since walked, so the watch is what hears it.
-    func testAPageThatClosesItselfWithNoOpenerIsHeard() async {
-        let heard = expectation(description: "the orphaned close is reported")
-        let recorder = OrphanedCloseRecorder { heard.fulfill() }
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        let contentController = configuration.userContentController
-        VendorLoginWindow.watchOrphanedClose(in: contentController, handler: recorder)
-        let web = WKWebView(frame: .zero, configuration: configuration)
-        let page = Self.selfClosingPage
-        web.loadHTMLString(page, baseURL: nil)
-
-        await fulfillment(of: [heard], timeout: Self.pageTimeout)
-
-        VendorLoginWindow.stopWatchingOrphanedClose(in: contentController)
-    }
-
-    /// A popup's completion writes to its opener before it closes. With no
-    /// opener that write throws and the close never runs, so the error is
-    /// what reports, and the close after it adds nothing. The sentinel is a
-    /// later script of the same page, posted after both, so a second report
-    /// would have arrived before it.
-    func testAPopupThatPostsToAMissingOpenerIsHeardOnce() async {
-        let heard = expectation(description: "the orphaned completion is reported")
-        let pageDone = expectation(description: "the page ran to its last script")
-        let recorder = OrphanedCloseRecorder { heard.fulfill() }
-        let sentinel = PageDoneRecorder { _ in pageDone.fulfill() }
-        let (web, contentController) = Self.poppedUpWebView(recorder: recorder, sentinel: sentinel)
-        web.loadHTMLString(Self.openerCompletionPage, baseURL: Self.popupOrigin)
-
-        await fulfillment(of: [heard, pageDone], timeout: Self.pageTimeout, enforceOrder: true)
-
-        Self.tearDown(contentController)
-    }
-
-    /// A completion written from inside an async function throws into a
-    /// rejected promise rather than an error event, and is heard all the
-    /// same.
-    func testAPopupThatPostsToAMissingOpenerFromAnAsyncFunctionIsHeard() async {
-        let heard = expectation(description: "the orphaned completion is reported")
-        let recorder = OrphanedCloseRecorder { heard.fulfill() }
-        let sentinel = PageDoneRecorder { _ in }
-        let (web, contentController) = Self.poppedUpWebView(recorder: recorder, sentinel: sentinel)
-        web.loadHTMLString(Self.asyncOpenerCompletionPage, baseURL: Self.popupOrigin)
-
-        await fulfillment(of: [heard], timeout: Self.pageTimeout)
-
-        Self.tearDown(contentController)
-    }
-
-    /// A page with no opener that fails on some other null is not a
-    /// completion that lost its opener, even when the property it read
-    /// starts with the word.
-    func testAnUnrelatedNullErrorOnAPopupIsNotHeard() async {
-        let heard = expectation(description: "no orphaned completion is reported")
-        heard.isInverted = true
-        let pageDone = expectation(description: "the page ran to its last script")
-        let recorder = OrphanedCloseRecorder { heard.fulfill() }
-        let sentinel = PageDoneRecorder { _ in pageDone.fulfill() }
-        let (web, contentController) = Self.poppedUpWebView(recorder: recorder, sentinel: sentinel)
-        web.loadHTMLString(Self.unrelatedNullErrorPage, baseURL: Self.popupOrigin)
-
-        await fulfillment(of: [pageDone], timeout: Self.pageTimeout)
-        await fulfillment(of: [heard], timeout: .zero)
-
-        Self.tearDown(contentController)
-    }
-
-    /// A provider that completes by redirect when it finds no opener is not
-    /// a dead end, and has to see the null opener any browser would give it.
-    func testAPopupThatChecksForAnOpenerAndRedirectsIsNotHeard() async {
-        let heard = expectation(description: "no orphaned completion is reported")
-        heard.isInverted = true
-        let pageDone = expectation(description: "the page ran to its last script")
-        var sawNullOpener: Bool?
-        let recorder = OrphanedCloseRecorder { heard.fulfill() }
-        let sentinel = PageDoneRecorder { body in
-            sawNullOpener = body as? Bool
-            pageDone.fulfill()
+    /// The whole reason a popup is a web view of its own: the page that
+    /// opened it is its opener, and what the popup posts there arrives.
+    func testAPopupHandsItsResultToThePageThatOpenedIt() async {
+        let arrived = expectation(description: "the popup's result reaches the page")
+        var result: String?
+        let harness = PopupHarness { body in
+            result = body as? String
+            arrived.fulfill()
         }
-        let (web, contentController) = Self.poppedUpWebView(recorder: recorder, sentinel: sentinel)
-        web.loadHTMLString(Self.openerCheckingPage, baseURL: Self.popupOrigin)
+        harness.page.loadHTMLString(Self.openingPage(popupScript: Self.postingScript), baseURL: Self.origin)
 
-        await fulfillment(of: [pageDone], timeout: Self.pageTimeout)
-        await fulfillment(of: [heard], timeout: .zero)
+        await fulfillment(of: [arrived], timeout: Self.pageTimeout)
 
-        XCTAssertEqual(sawNullOpener, true)
-        Self.tearDown(contentController)
+        XCTAssertEqual(result, Self.popupResult)
+        XCTAssertEqual(harness.popups.open.count, 1)
+        harness.tearDown()
     }
 
-    /// The matcher is WebKit's own wording, so the test reads it off WebKit
-    /// rather than off the constant.
-    func testWebKitsNullOpenerErrorCarriesTheMatchedWords() async throws {
-        let web = WKWebView(frame: .zero)
-        web.loadHTMLString("<html></html>", baseURL: nil)
-        let message =
-            try await web.callAsyncJavaScript(
-                Self.nullOpenerErrorProbe, contentWorld: .page) as? String
+    /// A popup that has finished closes itself, and the page is what is left.
+    func testAPopupThatClosesItselfLeavesThePage() async {
+        let closed = expectation(description: "the popup closed")
+        let harness = PopupHarness { _ in }
+        harness.onClose = { closed.fulfill() }
+        harness.page.loadHTMLString(
+            Self.openingPage(popupScript: Self.postingScript + Self.closingScript), baseURL: Self.origin)
 
-        let text = try XCTUnwrap(message)
-        XCTAssertTrue(text.contains(VendorLoginWindow.nullObjectMessage), text)
-        XCTAssertTrue(text.contains(VendorLoginWindow.openerMarker), text)
+        await fulfillment(of: [closed], timeout: Self.pageTimeout)
+
+        XCTAssertTrue(harness.popups.open.isEmpty)
+        XCTAssertEqual(harness.popups.view.subviews, [harness.page])
+        harness.tearDown()
     }
 
-    private static func poppedUpWebView(
-        recorder: OrphanedCloseRecorder, sentinel: PageDoneRecorder
-    ) -> (WKWebView, WKUserContentController) {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        let contentController = configuration.userContentController
-        VendorLoginWindow.watchOrphanedClose(in: contentController, handler: recorder)
-        VendorLoginWindow.watchOpenerlessPopup(in: contentController)
-        contentController.add(sentinel, name: PageDoneRecorder.message)
-        return (WKWebView(frame: .zero, configuration: configuration), contentController)
+    func testDismissingAWebViewThatIsNotAPopupLeavesThePage() {
+        let harness = PopupHarness { _ in }
+
+        XCTAssertFalse(harness.popups.dismiss(harness.page))
+        XCTAssertEqual(harness.popups.view.subviews, [harness.page])
+        harness.tearDown()
     }
 
-    private static func tearDown(_ contentController: WKUserContentController) {
-        contentController.removeScriptMessageHandler(forName: PageDoneRecorder.message)
-        VendorLoginWindow.stopWatchingOrphanedClose(in: contentController)
+    /// A page that opens a blank popup and writes the popup's script into
+    /// it, which runs as the popup and posts to `window.opener`. The page
+    /// relays whatever reaches it to the test.
+    private static func openingPage(popupScript: String) -> String {
+        """
+        <html><body><script>
+        window.addEventListener("message", (event) => {
+            window.webkit.messageHandlers.\(PopupHarness.message).postMessage(event.data);
+        });
+        const popup = window.open("", "sissyTestPopup");
+        popup.document.write("<script>\(popupScript)<\\/script>");
+        popup.document.close();
+        </script></body></html>
+        """
     }
 
-    private static let selfClosingPage = "<html><body><script>window.close()</script></body></html>"
-    private static let openerCompletionPage = """
-        <html><body>
-        <script>window.opener.postMessage({ code: "x" }, "*"); window.close();</script>
-        <script>window.webkit.messageHandlers.\(PageDoneRecorder.message).postMessage(null);</script>
-        </body></html>
-        """
-    private static let asyncOpenerCompletionPage = """
-        <html><body>
-        <script>
-        (async () => { await null; window.opener.postMessage({ code: "x" }, "*"); window.close(); })();
-        </script>
-        </body></html>
-        """
-    private static let unrelatedNullErrorPage = """
-        <html><body>
-        <script>const config = null; config.openerMode;</script>
-        <script>window.webkit.messageHandlers.\(PageDoneRecorder.message).postMessage(null);</script>
-        </body></html>
-        """
-    private static let openerCheckingPage = """
-        <html><body>
-        <script>if (window.opener && !window.opener.closed) { window.opener.postMessage("x", "*"); }</script>
-        <script>
-        window.webkit.messageHandlers.\(PageDoneRecorder.message).postMessage(window.opener === null);
-        </script>
-        </body></html>
-        """
-    private static let nullOpenerErrorProbe = """
-        try { window.opener.postMessage(1, "*"); return null; } catch (error) { return error.message; }
-        """
-    /// A popup is a page of an identity provider's origin. With no base URL
-    /// the origin is opaque, and WebKit hands the page's own error listener
-    /// `Script error.` in place of the error, as it does for any script from
-    /// another origin.
-    private static let popupOrigin = URL(string: "https://idp.example")
+    private static let popupResult = "signed in"
+    private static let postingScript = "window.opener.postMessage('\(popupResult)', '*');"
+    private static let closingScript = "window.close();"
+    private static let origin = URL(string: "https://claude.ai")
     private static let pageTimeout: TimeInterval = 10
 }
 
-/// Hears the test page's own last script, which says the page has finished
-/// and hands over what it saw.
+/// A page and its popups, answered the way the login window answers them.
 @MainActor
-private final class PageDoneRecorder: NSObject, WKScriptMessageHandler {
-    static let message = "sissyTestPageDone"
-    private let onDone: (Any) -> Void
+private final class PopupHarness: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
+    static let message = "sissyTestPopupResult"
 
-    init(onDone: @escaping (Any) -> Void) {
-        self.onDone = onDone
+    let page: WKWebView
+    let popups: VendorLoginPopups
+    var onClose: () -> Void = {}
+    private let onResult: (Any) -> Void
+
+    init(onResult: @escaping (Any) -> Void) {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        page = WKWebView(frame: .zero, configuration: configuration)
+        popups = VendorLoginPopups(page: page)
+        self.onResult = onResult
+        super.init()
+        page.uiDelegate = self
+        page.navigationDelegate = self
+        configuration.userContentController.add(self, name: Self.message)
+    }
+
+    func tearDown() {
+        popups.dismissAll()
+        page.configuration.userContentController.removeScriptMessageHandler(forName: Self.message)
+    }
+
+    func webView(
+        _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        popups.present(configuration: configuration, delegate: self)
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        guard popups.dismiss(webView) else { return }
+        onClose()
     }
 
     func userContentController(
         _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
     ) {
         guard message.name == Self.message else { return }
-        onDone(message.body)
-    }
-}
-
-/// Hears the login window's orphaned-close message and nothing else.
-@MainActor
-private final class OrphanedCloseRecorder: NSObject, WKScriptMessageHandler {
-    private let onClose: () -> Void
-
-    init(onClose: @escaping () -> Void) {
-        self.onClose = onClose
-    }
-
-    func userContentController(
-        _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
-    ) {
-        guard message.name == VendorLoginWindow.orphanedCloseMessage else { return }
-        onClose()
+        onResult(message.body)
     }
 }

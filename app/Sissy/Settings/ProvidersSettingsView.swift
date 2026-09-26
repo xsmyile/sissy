@@ -151,10 +151,6 @@ enum CodexAccountLinkCopy {
         case .unreachable:
             return "The OpenAI sign-in page could not be loaded. Check the connection and "
                 + "try again."
-        case .needsSecondWindow:
-            return "That way of signing in needs a second browser window, which this window "
-                + "cannot open, so nothing was linked. Try again and sign in with your email "
-                + "address."
         }
     }
 }
@@ -243,10 +239,6 @@ enum ClaudeAccountLinkCopy {
         case .unreachable:
             return "The claude.ai sign-in page could not be loaded. Check the connection and "
                 + "try again."
-        case .needsSecondWindow:
-            return "That way of signing in needs a second browser window, which this window "
-                + "cannot open, so nothing was linked. Try again and sign in with your email "
-                + "address."
         }
     }
 
