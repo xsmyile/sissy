@@ -84,8 +84,14 @@ enum ClaudeWebAccountLink {
         let found: [ClaudeWebOrganization]
         do {
             identity = try await identityTask
+        } catch {
+            sissyLog("sissy: claude.ai would not say whose the new session is: \(error)")
+            throw Failure.unidentified
+        }
+        do {
             found = try await organizationsTask
         } catch {
+            sissyLog("sissy: claude.ai would not list the new session's organisations: \(error)")
             throw Failure.unidentified
         }
 
