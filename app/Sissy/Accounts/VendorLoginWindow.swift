@@ -225,6 +225,9 @@ final class VendorLoginWindow: NSObject {
     /// Whether a popup has been loaded in place. Only then does a page
     /// closing itself with no opener mean a sign-in that cannot finish.
     private var popupLoadedInPlace = false
+    /// Reads the jar whenever the page's address changes, for as long as a
+    /// vendor that signs in with a cookie has its web view up.
+    private var addressObservation: NSKeyValueObservation?
 
     init(vendor: Vendor) {
         self.vendor = vendor
@@ -256,6 +259,9 @@ final class VendorLoginWindow: NSObject {
             let store = configuration.websiteDataStore.httpCookieStore
             store.add(self)
             cookieStore = store
+            addressObservation = web.observe(\.url) { [weak self] _, _ in
+                Task { @MainActor in self?.lookForSession() }
+            }
         }
 
         let panel = NSWindow(
@@ -387,6 +393,7 @@ final class VendorLoginWindow: NSObject {
     /// a second copy of it buys nothing and keeps a vendor session in memory
     /// for the length of a question.
     private func releaseWeb() {
+        addressObservation = nil
         cookieStore?.remove(self)
         cookieStore = nil
         webView?.navigationDelegate = nil
@@ -396,6 +403,24 @@ final class VendorLoginWindow: NSObject {
         }
         webView?.stopLoading()
         webView = nil
+    }
+
+    /// Reads the jar for the credential this vendor's sign-in ends in.
+    ///
+    /// `cookiesDidChange` is not enough on its own: WebKit can lose that
+    /// registration on a non-persistent store and never make it again
+    /// (WebKit bug 305331), and a sign-in whose cookie had landed then sat on
+    /// the vendor's own app with nothing delivered. So every finished
+    /// navigation and every change of address reads the jar as well — the
+    /// latter because claude.ai's app moves to its first route without
+    /// loading a page.
+    private func lookForSession() {
+        guard onCredential != nil, let session = vendor.session, let cookieStore else { return }
+        Task { @MainActor in
+            let cookies = await cookieStore.allCookies()
+            guard let found = session(cookies) else { return }
+            deliver(found)
+        }
     }
 
     /// Hands the credential over exactly once. The copies that follow a
@@ -485,12 +510,7 @@ extension VendorLoginWindow: WKHTTPCookieStoreObserver {
     /// Fires for every cookie the site sets, so the hand-off is consumed
     /// rather than guarded.
     nonisolated func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
-        Task { @MainActor in
-            guard onCredential != nil, let session = vendor.session else { return }
-            let cookies = await cookieStore.allCookies()
-            guard let found = session(cookies) else { return }
-            deliver(found)
-        }
+        Task { @MainActor in lookForSession() }
     }
 }
 
@@ -523,6 +543,10 @@ extension VendorLoginWindow: WKNavigationDelegate {
         else { return .allow }
         NSWorkspace.shared.open(url)
         return .cancel
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
+        lookForSession()
     }
 
     func webView(
