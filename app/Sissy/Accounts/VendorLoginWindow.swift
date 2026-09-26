@@ -357,12 +357,28 @@ final class VendorLoginWindow: NSObject {
         guard let window else { return }
         let host = NSHostingView(rootView: content)
         host.sizingOptions = []
-        let fitted = NSHostingController(rootView: content).sizeThatFits(
-            in: NSSize(width: size.width, height: .greatestFiniteMagnitude))
         window.contentView = host
-        window.setContentSize(NSSize(width: size.width, height: max(size.height, fitted.height)))
+        window.setContentSize(
+            NSSize(
+                width: size.width,
+                height: Self.promptHeight(of: content, width: size.width, minimum: size.height)))
         window.center()
         bringToFront()
+    }
+
+    /// How tall a prompt's window has to be for its content at `width`, and
+    /// never shorter than `minimum`.
+    ///
+    /// Measured against a height of zero, which a prompt answers with the
+    /// least its content needs. Every prompt fills its window with
+    /// `.frame(maxHeight: .infinity)`, so an unbounded proposal is answered
+    /// with the proposal itself: `.greatestFiniteMagnitude`, which AppKit
+    /// clamps to the screen, and every prompt was drawn as tall as the
+    /// display.
+    static func promptHeight(of content: some View, width: CGFloat, minimum: CGFloat) -> CGFloat {
+        let fitted = NSHostingController(rootView: content).sizeThatFits(
+            in: NSSize(width: width, height: 0))
+        return max(minimum, fitted.height)
     }
 
     /// Drops the web view and its cookie jar as soon as the login is over.
