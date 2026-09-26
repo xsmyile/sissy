@@ -29,15 +29,20 @@ import WebKit
 /// offer is unknown, and a wrong list is a window that dead-ends on the one
 /// account the user came to add.
 ///
-/// **A page that asks for a second window gets this one.** Identity
-/// providers sign in through `window.open` or a link aimed at a new tab, and a
-/// web view with no UI delegate drops that request without a word: a button
-/// that does nothing, on the one account the user came to add. So the popup is
-/// loaded in place, under the same rules as any other navigation here, and a
-/// popup this window cannot follow (one with nothing to load, or a page that
-/// closes itself because it expected an opener) ends the sign-in with a
-/// sentence saying so rather than a blank page. Whether a given provider then
-/// completes is the provider's to decide and has to be measured per provider.
+/// **A page that asks for a second window gets one, inside this one.**
+/// Identity providers sign in through `window.open` or a link aimed at a new
+/// tab, and a web view with no UI delegate drops that request without a word:
+/// a button that does nothing, on the one account the user came to add. The
+/// popup is a web view of its own, made from the configuration WebKit hands
+/// over, drawn over the page in this window until it closes itself, and held
+/// to the same rules as any other navigation here (`VendorLoginPopups`). It
+/// has to be its own web view because the page that opened it is still
+/// listening: claude.ai's Google sign-in hands its result to `window.opener`,
+/// and loading the popup in place, which this window did through 0.2.7,
+/// navigated away from the page holding that callback, so the sign-in could
+/// only end in a sentence saying it could not finish. Whether a given provider
+/// then completes is the provider's to decide and has to be measured per
+/// provider.
 ///
 /// The cookie jar is non-persistent, so it exists for the life of the window
 /// and no longer. That is what makes a second link a fresh login rather than a
@@ -116,90 +121,19 @@ final class VendorLoginWindow: NSObject {
         case declined(String)
         /// A page of the sign-in did not load.
         case unreachable
-        /// The sign-in needed a second window, which this one cannot give.
-        case needsSecondWindow
     }
 
     /// What a request for a new window becomes, in a window that has only
     /// the one.
     enum PopupRoute: Equatable {
-        /// Load the request in this window's web view.
-        case load
+        /// A popup over the page, in this window.
+        case open
         /// A link off the vendor's own hosts, handed to the default browser
         /// as the navigation delegate hands every other one.
         case openInBrowser(URL)
-        /// Nothing this window can load: the opener meant to write into the
-        /// window it asked for, and there is none.
-        case cannotFollow
     }
 
     nonisolated private static let webSchemes: Set<String> = ["http", "https"]
-
-    /// The script message a page posts when it closes itself with no opener
-    /// to hand its result to.
-    nonisolated static let orphanedCloseMessage = "sissyOrphanedClose"
-
-    /// Wraps `window.close` so a page with no opener says so before closing,
-    /// once per document.
-    ///
-    /// A popup loaded in place posts its result to `window.opener` and then
-    /// closes itself. WebKit honours that close only on a window a script
-    /// opened or one with a single history entry, and this web view is
-    /// neither by the time a popup reaches it, so `webViewDidClose` alone
-    /// would leave the user on a page that stopped without a word.
-    ///
-    /// With `hearingOpenerErrors`, an uncaught error that reached into the
-    /// missing opener reports as well. A popup's completion writes to the
-    /// opener before it closes, and on a null opener that write throws, so
-    /// the close it was on its way to never runs. The page's own view of
-    /// `window.opener` is left alone: a provider that branches on it to pick
-    /// a redirect over a `postMessage` has to see the null it would see in
-    /// any browser. A script from another origin than the page's has its
-    /// errors muted to `Script error.` and is not heard; the close wrapper
-    /// still is, when the page gets that far.
-    nonisolated private static func orphanedCloseScript(hearingOpenerErrors: Bool) -> String {
-        """
-        (() => {
-            let reported = false;
-            const report = () => {
-                if (reported) { return; }
-                reported = true;
-                window.webkit.messageHandlers.\(orphanedCloseMessage).postMessage(null);
-            };
-            const reachedIntoMissingOpener = (error) =>
-                error instanceof TypeError
-                    && typeof error.message === "string"
-                    && error.message.includes("\(nullObjectMessage)")
-                    && error.message.includes("\(openerMarker)");
-            if (\(hearingOpenerErrors)) {
-                window.addEventListener("error", (event) => {
-                    if (window.opener === null && reachedIntoMissingOpener(event.error)) { report(); }
-                });
-                window.addEventListener("unhandledrejection", (event) => {
-                    if (window.opener === null && reachedIntoMissingOpener(event.reason)) { report(); }
-                });
-            }
-            const close = window.close.bind(window);
-            window.close = function () {
-                if (window.opener === null) { report(); }
-                return close();
-            };
-        })();
-        """
-    }
-
-    /// The part of WebKit's `TypeError` message that says a property was
-    /// read off null. Measured 2026-09-23 on macOS 27:
-    /// `window.opener.postMessage(1, '*')` with no opener throws
-    /// `null is not an object (evaluating 'window.opener.postMessage')`.
-    nonisolated static let nullObjectMessage = "null is not an object"
-    /// The step the same message carries when the null was the opener and
-    /// something was read off it, whatever the window was named, so a
-    /// minified `w.opener.postMessage` is heard and an unrelated
-    /// `config.openerMode` is not. An opener first copied into a variable is
-    /// evaluated under that variable's name and is not heard; the close that
-    /// follows still is, if the page reaches it.
-    nonisolated static let openerMarker = ".opener."
 
     /// WebKit's code for a load it abandoned because the navigation delegate
     /// cancelled it, which is every redirect this window takes a code from.
@@ -222,9 +156,8 @@ final class VendorLoginWindow: NSObject {
     /// caller can say why and offer the login again.
     private var onFailure: ((PageFailure) -> Void)?
     private var finished = false
-    /// Whether a popup has been loaded in place. Only then does a page
-    /// closing itself with no opener mean a sign-in that cannot finish.
-    private var popupLoadedInPlace = false
+    /// The page and the popups it has opened over it, while the web view is up.
+    private var popups: VendorLoginPopups?
     /// Reads the jar whenever the page's address changes, for as long as a
     /// vendor that signs in with a cookie has its web view up.
     private var addressObservation: NSKeyValueObservation?
@@ -254,11 +187,12 @@ final class VendorLoginWindow: NSObject {
 
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
-        Self.watchOrphanedClose(in: configuration.userContentController, handler: self)
         let web = WKWebView(frame: .zero, configuration: configuration)
         web.navigationDelegate = self
         web.uiDelegate = self
         webView = web
+        let popups = VendorLoginPopups(page: web)
+        self.popups = popups
 
         if vendor.session != nil {
             let store = configuration.websiteDataStore.httpCookieStore
@@ -275,7 +209,7 @@ final class VendorLoginWindow: NSObject {
             backing: .buffered,
             defer: false)
         panel.title = vendor.title
-        panel.contentView = web
+        panel.contentView = popups.view
         panel.isReleasedWhenClosed = false
         panel.delegate = self
         panel.level = .floating
@@ -401,11 +335,10 @@ final class VendorLoginWindow: NSObject {
         addressObservation = nil
         cookieStore?.remove(self)
         cookieStore = nil
+        popups?.dismissAll()
+        popups = nil
         webView?.navigationDelegate = nil
         webView?.uiDelegate = nil
-        if let contentController = webView?.configuration.userContentController {
-            Self.stopWatchingOrphanedClose(in: contentController)
-        }
         webView?.stopLoading()
         webView = nil
     }
@@ -486,50 +419,19 @@ final class VendorLoginWindow: NSObject {
         return .unreachable
     }
 
-    /// Installs the orphaned-close watch on a web view's content controller.
-    ///
-    /// The controller holds `handler` strongly, so the watch has to be taken
-    /// down with `stopWatchingOrphanedClose(in:)` for the handler to go.
-    static func watchOrphanedClose(
-        in contentController: WKUserContentController, handler: WKScriptMessageHandler
-    ) {
-        contentController.addUserScript(orphanedCloseUserScript(hearingOpenerErrors: false))
-        contentController.add(handler, name: orphanedCloseMessage)
-    }
-
-    /// Widens the watch `watchOrphanedClose(in:handler:)` installed to a
-    /// popup loaded in place, whose completion reaches for an opener first.
-    /// Applies from the next document the web view loads.
-    static func watchOpenerlessPopup(in contentController: WKUserContentController) {
-        contentController.removeAllUserScripts()
-        contentController.addUserScript(orphanedCloseUserScript(hearingOpenerErrors: true))
-    }
-
-    private static func orphanedCloseUserScript(hearingOpenerErrors: Bool) -> WKUserScript {
-        WKUserScript(
-            source: orphanedCloseScript(hearingOpenerErrors: hearingOpenerErrors),
-            injectionTime: .atDocumentStart, forMainFrameOnly: true)
-    }
-
-    /// Takes down what `watchOrphanedClose(in:handler:)` installed.
-    static func stopWatchingOrphanedClose(in contentController: WKUserContentController) {
-        contentController.removeScriptMessageHandler(forName: orphanedCloseMessage)
-        contentController.removeAllUserScripts()
-    }
-
     /// Where a request for a new window goes. A link aimed at a new tab obeys
-    /// the confinement rule a link aimed at this one does; anything else with
-    /// a web address is loaded in place, because a sign-in's popup belongs to
-    /// a provider whose hosts cannot be listed in advance.
+    /// the confinement rule a link aimed at this one does; anything else opens
+    /// as a popup over the page, because a sign-in's popup belongs to a
+    /// provider whose hosts cannot be listed in advance, and one that opens
+    /// blank is written into by the page that asked for it.
     nonisolated static func popupRoute(
         for url: URL?, linkActivated: Bool, isInternal: (String) -> Bool
     ) -> PopupRoute {
-        guard let url, let scheme = url.scheme?.lowercased() else { return .cannotFollow }
-        guard webSchemes.contains(scheme), let host = url.host() else {
-            return linkActivated ? .openInBrowser(url) : .cannotFollow
-        }
-        if linkActivated, !isInternal(host) { return .openInBrowser(url) }
-        return .load
+        guard linkActivated, let url else { return .open }
+        guard let scheme = url.scheme?.lowercased(), webSchemes.contains(scheme),
+            let host = url.host()
+        else { return .openInBrowser(url) }
+        return isInternal(host) ? .open : .openInBrowser(url)
     }
 }
 
@@ -580,25 +482,36 @@ extension VendorLoginWindow: WKNavigationDelegate {
         _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation?,
         withError error: Error
     ) {
-        guard let failure = Self.pageFailure(for: error) else { return }
-        Task { @MainActor [weak self] in self?.fail(failure) }
+        failed(webView, with: error)
     }
 
     func webView(
         _ webView: WKWebView, didFail navigation: WKNavigation?, withError error: Error
     ) {
+        failed(webView, with: error)
+    }
+
+    /// A load error ends the sign-in when it is the page's. A popup's is the
+    /// popup's alone: it comes down and the page it covered is what the window
+    /// shows again, which is where the sign-in can still be finished another
+    /// way.
+    private func failed(_ webView: WKWebView, with error: Error) {
         guard let failure = Self.pageFailure(for: error) else { return }
-        Task { @MainActor [weak self] in self?.fail(failure) }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard popups?.dismiss(webView) != true else {
+                sissyLog("sissy: the \(vendor.logName) login popup did not load and was closed")
+                return
+            }
+            fail(failure)
+        }
     }
 }
 
 extension VendorLoginWindow: WKUIDelegate {
-    /// Answers every request for a new window with this one, and never hands
-    /// WebKit a second web view: there is no second window to put it in.
-    ///
-    /// The failure is handed over on the next turn for the reason the
-    /// navigation delegate's are: reporting it drops the web view whose own
-    /// callback this is.
+    /// Answers every request for a new window with a popup over the page, or
+    /// with the default browser for a link off the vendor's hosts. Never with
+    /// a second window: there is only this one.
     func webView(
         _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures
@@ -608,42 +521,25 @@ extension VendorLoginWindow: WKUIDelegate {
             linkActivated: navigationAction.navigationType == .linkActivated,
             isInternal: vendor.isInternal)
         switch route {
-        case .load:
-            sissyLog("sissy: the \(vendor.logName) login opened a popup, loaded in place")
-            popupLoadedInPlace = true
-            Self.watchOpenerlessPopup(in: webView.configuration.userContentController)
-            webView.load(navigationAction.request)
+        case .open:
+            guard let popups else { return nil }
+            sissyLog("sissy: the \(vendor.logName) login opened a popup")
+            return popups.present(configuration: configuration, delegate: self)
         case .openInBrowser(let url):
             NSWorkspace.shared.open(url)
-        case .cannotFollow:
-            sissyLog("sissy: the \(vendor.logName) login asked for a window it cannot have")
-            Task { @MainActor [weak self] in self?.fail(.needsSecondWindow) }
+            return nil
         }
-        return nil
     }
 
-    /// A page that closes its own window is a popup that has finished and
-    /// expected an opener to hand its result to. Loaded in place, it has
-    /// none, so the sign-in cannot complete from here. WebKit seldom lets
-    /// this web view close, which is why the orphaned-close watch exists.
+    /// A popup that has finished closes itself, and the page under it is what
+    /// the window shows again. The page itself closing is ignored, as a
+    /// browser ignores it on a tab no script opened.
     func webViewDidClose(_ webView: WKWebView) {
-        Task { @MainActor [weak self] in self?.fail(.needsSecondWindow) }
-    }
-}
-
-extension VendorLoginWindow: WKScriptMessageHandler {
-    /// A page closed itself with no opener. After a popup was loaded in
-    /// place that is the popup finishing into a window that is not there, so
-    /// the sign-in ends with the sentence `webViewDidClose` would have given.
-    /// Before one, it is a page of the vendor's own and says nothing.
-    ///
-    /// The message body is the page's and is never read.
-    func userContentController(
-        _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
-    ) {
-        guard message.name == Self.orphanedCloseMessage, popupLoadedInPlace else { return }
-        sissyLog("sissy: the \(vendor.logName) login popup closed with no window to report to")
-        Task { @MainActor [weak self] in self?.fail(.needsSecondWindow) }
+        guard popups?.dismiss(webView) == true else {
+            sissyLog("sissy: the \(vendor.logName) login page asked to close itself")
+            return
+        }
+        sissyLog("sissy: the \(vendor.logName) login popup closed")
     }
 }
 
@@ -714,6 +610,62 @@ extension VendorLoginWindow.Vendor {
     /// cookie, which a host called `notclaude.ai` satisfies.
     private static func isHost(_ host: String, in domain: String) -> Bool {
         host == domain || host.hasSuffix(".\(domain)")
+    }
+}
+
+/// The sign-in popups a login page has opened, drawn over it in the login
+/// window, the newest on top.
+///
+/// Each is a web view of its own, made from the configuration WebKit hands
+/// over for it, which is what makes the page its `window.opener` and gives it
+/// the page's cookie jar. Its navigations answer to the login window's
+/// delegates like the page's own.
+@MainActor
+final class VendorLoginPopups {
+    /// The page and every popup over it, which is what the window shows.
+    let view = NSView()
+    private(set) var open: [WKWebView] = []
+
+    init(page: WKWebView) {
+        Self.fill(view, with: page)
+    }
+
+    /// A popup for WebKit to load its request in, over everything open.
+    func present(
+        configuration: WKWebViewConfiguration,
+        delegate: some WKNavigationDelegate & WKUIDelegate
+    ) -> WKWebView {
+        let popup = WKWebView(frame: .zero, configuration: configuration)
+        popup.navigationDelegate = delegate
+        popup.uiDelegate = delegate
+        Self.fill(view, with: popup)
+        open.append(popup)
+        return popup
+    }
+
+    /// Takes a popup down, and says whether it was one of these.
+    func dismiss(_ popup: WKWebView) -> Bool {
+        guard let index = open.firstIndex(of: popup) else { return false }
+        Self.tearDown(open.remove(at: index))
+        return true
+    }
+
+    func dismissAll() {
+        open.forEach(Self.tearDown)
+        open.removeAll()
+    }
+
+    private static func fill(_ container: NSView, with web: WKWebView) {
+        web.frame = container.bounds
+        web.autoresizingMask = [.width, .height]
+        container.addSubview(web)
+    }
+
+    private static func tearDown(_ popup: WKWebView) {
+        popup.navigationDelegate = nil
+        popup.uiDelegate = nil
+        popup.stopLoading()
+        popup.removeFromSuperview()
     }
 }
 
