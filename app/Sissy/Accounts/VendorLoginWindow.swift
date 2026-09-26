@@ -228,6 +228,11 @@ final class VendorLoginWindow: NSObject {
     /// Reads the jar whenever the page's address changes, for as long as a
     /// vendor that signs in with a cookie has its web view up.
     private var addressObservation: NSKeyValueObservation?
+    /// Where the last read of the jar found no credential, and what the jar
+    /// held there, by name and domain alone. Logged if the window then closes
+    /// without one, which is the one trace a sign-in that landed on the
+    /// vendor's own app and never linked leaves behind.
+    private var lastEmptyLook: String?
 
     init(vendor: Vendor) {
         self.vendor = vendor
@@ -418,9 +423,30 @@ final class VendorLoginWindow: NSObject {
         guard onCredential != nil, let session = vendor.session, let cookieStore else { return }
         Task { @MainActor in
             let cookies = await cookieStore.allCookies()
-            guard let found = session(cookies) else { return }
+            guard onCredential != nil else { return }
+            guard let found = session(cookies) else {
+                lastEmptyLook =
+                    "\(Self.pageSummary(webView?.url)) holding \(Self.jarSummary(cookies))"
+                return
+            }
             deliver(found)
         }
+    }
+
+    /// The cookies of a jar by name and domain, never by value: the value of
+    /// the one being looked for is a whole vendor session.
+    nonisolated static func jarSummary(_ cookies: [HTTPCookie]) -> String {
+        let entries = Set(cookies.map { "\($0.name)@\($0.domain)" }).sorted()
+        return entries.isEmpty ? "no cookies" : entries.joined(separator: ", ")
+    }
+
+    /// A page by its host and the first step of its path, which is where in
+    /// a sign-in or an app it is. Nothing past that, and never the query,
+    /// which is where a sign-in carries its codes.
+    nonisolated static func pageSummary(_ url: URL?) -> String {
+        guard let url, let host = url.host() else { return "no page" }
+        guard let step = url.pathComponents.dropFirst().first else { return host }
+        return "\(host)/\(step)"
     }
 
     /// Hands the credential over exactly once. The copies that follow a
@@ -430,6 +456,7 @@ final class VendorLoginWindow: NSObject {
         guard let pending = onCredential else { return }
         onCredential = nil
         onFailure = nil
+        lastEmptyLook = nil
         sissyLog("sissy: the \(vendor.logName) login produced a credential")
         working()
         pending(credential)
@@ -639,6 +666,9 @@ extension VendorLoginWindow: NSWindowDelegate {
             onCancel = nil
             guard !finished else { return }
             sissyLog("sissy: the \(vendor.logName) login was closed before it completed")
+            if let lastEmptyLook {
+                sissyLog("sissy: the \(vendor.logName) login last found no session on \(lastEmptyLook)")
+            }
             cancelled?()
         }
     }
