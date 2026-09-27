@@ -65,13 +65,14 @@ final class SissyAnimatorTests: XCTestCase {
         XCTAssertEqual(button.image?.isTemplate, true)
     }
 
-    private func eyeOverlay(on button: NSButton, line: UInt = #line) throws -> SissyOverlay {
-        try XCTUnwrap(
-            button.subviews.compactMap { $0 as? SissyOverlay }.first,
-            "the animator installed no eye overlay",
-            line: line
-        )
+    private func eyeOverlay(
+        of animator: SissyMenuBarAnimator,
+        line: UInt = #line
+    ) throws -> SissyOverlay {
+        try XCTUnwrap(animator.eyeOverlay, "the animator installed no eye overlay", line: line)
     }
+
+    private let held = SissyMenuBarAnimator.Artwork(eyeLit: true, dot: nil)
 
     /// The silhouette stays the template image in both states: that is what
     /// macOS applies the appearance, the menu highlight and full-strength ink
@@ -81,7 +82,7 @@ final class SissyAnimatorTests: XCTestCase {
         let button = NSButton()
         let animator = try makeAnimator(button)
 
-        animator.setArtwork(.lit(.holding))
+        animator.setArtwork(held)
         XCTAssertEqual(button.image?.isTemplate, true)
 
         animator.setArtwork(.template)
@@ -93,41 +94,126 @@ final class SissyAnimatorTests: XCTestCase {
         let animator = try makeAnimator(button)
 
         XCTAssertEqual(animator.artwork, .template)
-        XCTAssertTrue(try eyeOverlay(on: button).isHidden)
+        XCTAssertTrue(try eyeOverlay(of: animator).isHidden)
     }
 
     func testAHoldLightsTheEyeOverTheSamePose() throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
 
-        animator.setArtwork(.lit(.holding))
+        animator.setArtwork(held)
 
-        let overlay = try eyeOverlay(on: button)
-        XCTAssertEqual(animator.artwork, .lit(.holding))
+        let overlay = try eyeOverlay(of: animator)
+        XCTAssertEqual(animator.artwork, held)
         XCTAssertFalse(overlay.isHidden)
         XCTAssertEqual(overlay.image?.size, NSSize(width: iconSize, height: iconSize))
         XCTAssertEqual(overlay.contentTintColor, SissyArtwork.holdTint)
     }
 
-    /// A Mac under pressure recolours the eye it is already drawing rather
-    /// than swapping the body under it: the pairing is the same, only the tint
-    /// on the overlay moves.
-    func testAPressureRecoloursTheLitEyeOverTheSameBody() throws {
+    /// Pressure lights the dot and leaves the eye to the hold, and moving
+    /// between the two levels recolours the dot over the same body.
+    func testAPressureLightsTheDotAndLeavesTheEyeToTheHold() throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
-        let overlay = try eyeOverlay(on: button)
+        let whole = button.image
 
-        animator.setArtwork(.lit(.holding))
+        animator.setArtwork(.init(eyeLit: false, dot: .critical))
+        let dotted = button.image
+
+        XCTAssertTrue(try eyeOverlay(of: animator).isHidden)
+        XCTAssertFalse(animator.dotOverlay.isHidden)
+        XCTAssertEqual(animator.dotOverlay.contentTintColor, SissyArtwork.criticalTint)
+        XCTAssertNotIdentical(dotted, whole)
+        XCTAssertEqual(dotted?.isTemplate, true)
+
+        animator.setArtwork(.init(eyeLit: false, dot: .warn))
+        XCTAssertEqual(animator.dotOverlay.contentTintColor, SissyArtwork.warnTint)
+        XCTAssertIdentical(button.image, dotted)
+
+        animator.setArtwork(.template)
+        XCTAssertTrue(animator.dotOverlay.isHidden)
+        XCTAssertIdentical(button.image, whole)
+    }
+
+    /// A hold under pressure shows both, each in its own colour, on a body
+    /// that has lost the eye's ink and the dot's corner together.
+    func testAHoldUnderPressureShowsTheEyeAndTheDot() throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        animator.setArtwork(held)
         let eyeless = button.image
-        animator.setArtwork(.lit(.critical))
 
-        XCTAssertEqual(animator.artwork, .lit(.critical))
-        XCTAssertFalse(overlay.isHidden)
-        XCTAssertEqual(overlay.contentTintColor, SissyArtwork.criticalTint)
-        XCTAssertIdentical(button.image, eyeless)
+        animator.setArtwork(.init(eyeLit: true, dot: .warn))
 
-        animator.setArtwork(.lit(.warn))
-        XCTAssertEqual(overlay.contentTintColor, SissyArtwork.warnTint)
+        let eye = try eyeOverlay(of: animator)
+        XCTAssertFalse(eye.isHidden)
+        XCTAssertEqual(eye.contentTintColor, SissyArtwork.holdTint)
+        XCTAssertFalse(animator.dotOverlay.isHidden)
+        XCTAssertEqual(animator.dotOverlay.contentTintColor, SissyArtwork.warnTint)
+        XCTAssertNotIdentical(button.image, eyeless)
+    }
+
+    /// Where the head comes nearest the corner, its ink reaches inside the
+    /// dot's own radius, so the body the dot sits on has to have that ink cut
+    /// out or the colour merges into it.
+    func testTheDotTouchesTheHeadItIsCutOutOf() throws {
+        let body = try SissyArtwork.silhouette(SissyModel.sissyAssetName, size: SissyArtwork.dotCanvas)
+
+        XCTAssertGreaterThan(try inkInside(dotCut, of: body), 0, "the dot no longer touches the head")
+    }
+
+    /// Every body the animator can put under the dot leaves the ring empty:
+    /// both poses and all 24 frames, whole and eyeless.
+    func testEveryBodyUnderTheDotHasTheRingCutOut() throws {
+        let names =
+            [SissyModel.sissyAssetName, SissyModel.sissySleepingAssetName]
+            + SissyMenuBarMotion.frameAssetNames
+        for name in names + names.map(SissyArtwork.eyelessAssetName) {
+            let body = try SissyArtwork.silhouette(name, size: SissyArtwork.dotCanvas)
+            XCTAssertEqual(try inkInside(dotCut, of: SissyArtwork.knockedOut(body)), 0, name)
+        }
+    }
+
+    private var dotCut: NSRect {
+        let canvas = SissyArtwork.dotCanvas
+        return SissyArtwork.dotRect(
+            in: NSRect(x: 0, y: 0, width: canvas, height: canvas),
+            margin: SissyArtwork.dotGap
+        )
+    }
+
+    /// Opaque pixels of `image` inside the circle `oval` bounds, rasterized
+    /// at 4x. A pixel counts only when the whole of it is inside, so the
+    /// antialiased edge the cut itself draws is not read as ink it left.
+    private func inkInside(_ oval: NSRect, of image: NSImage) throws -> Int {
+        let scale: CGFloat = 4
+        let side = Int(image.size.width * scale)
+        let rep = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+            )
+        )
+        rep.size = image.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        image.draw(in: NSRect(origin: .zero, size: image.size))
+        NSGraphicsContext.restoreGraphicsState()
+
+        let radius = oval.width / 2 - 1 / scale
+        var count = 0
+        for row in 0..<side {
+            for column in 0..<side {
+                let x = (CGFloat(column) + 0.5) / scale
+                let y = image.size.height - (CGFloat(row) + 0.5) / scale
+                guard hypot(x - oval.midX, y - oval.midY) < radius else { continue }
+                if let alpha = rep.colorAt(x: column, y: row)?.alphaComponent, alpha > 0.1 {
+                    count += 1
+                }
+            }
+        }
+        return count
     }
 
     /// The blue is laid over the body, so a body that kept its own eye ink
@@ -137,7 +223,7 @@ final class SissyAnimatorTests: XCTestCase {
         let animator = try makeAnimator(button)
         let whole = button.image
 
-        animator.setArtwork(.lit(.holding))
+        animator.setArtwork(held)
         let eyeless = button.image
 
         XCTAssertNotIdentical(eyeless, whole)
@@ -172,12 +258,13 @@ final class SissyAnimatorTests: XCTestCase {
     func testTheEyeIsDrawnIntoTheRectTheCellDrawsTheSilhouetteInto() throws {
         let button = statusShapedButton()
         let animator = try makeAnimator(button)
-        let overlay = try eyeOverlay(on: button)
+        let overlay = try eyeOverlay(of: animator)
         let cell = try XCTUnwrap(button.cell as? NSButtonCell)
 
         XCTAssertEqual(overlay.frame, cell.imageRect(forBounds: button.bounds))
         XCTAssertEqual(overlay.frame.size, NSSize(width: iconSize, height: iconSize))
         XCTAssertNotEqual(overlay.frame, button.bounds)
+        XCTAssertEqual(animator.dotOverlay.frame, overlay.frame)
         withExtendedLifetime(animator) {}
     }
 
@@ -186,7 +273,7 @@ final class SissyAnimatorTests: XCTestCase {
     func testTheEyeFollowsTheButtonWhenItIsResized() throws {
         let button = statusShapedButton()
         let animator = try makeAnimator(button)
-        let overlay = try eyeOverlay(on: button)
+        let overlay = try eyeOverlay(of: animator)
         let before = overlay.frame
 
         button.setFrameSize(NSSize(width: 30, height: 26))
@@ -195,6 +282,7 @@ final class SissyAnimatorTests: XCTestCase {
         let cell = try XCTUnwrap(button.cell as? NSButtonCell)
         XCTAssertNotEqual(overlay.frame, before)
         XCTAssertEqual(overlay.frame, cell.imageRect(forBounds: button.bounds))
+        XCTAssertEqual(animator.dotOverlay.frame, overlay.frame)
     }
 
     /// The overlay is the one view sitting on the status button, so a click
@@ -202,10 +290,11 @@ final class SissyAnimatorTests: XCTestCase {
     func testTheEyeOverlayNeverTakesAClick() throws {
         let button = NSButton(frame: NSRect(x: 0, y: 0, width: 24, height: 22))
         let animator = try makeAnimator(button)
-        let overlay = try eyeOverlay(on: button)
+        let overlay = try eyeOverlay(of: animator)
 
         XCTAssertNil(overlay.hitTest(NSPoint(x: overlay.bounds.midX, y: overlay.bounds.midY)))
-        withExtendedLifetime(animator) {}
+        let dot = animator.dotOverlay
+        XCTAssertNil(dot.hitTest(NSPoint(x: dot.bounds.midX, y: dot.bounds.midY)))
     }
 
     /// The overlay is a subview of a button the animator only borrows, so an
@@ -215,7 +304,7 @@ final class SissyAnimatorTests: XCTestCase {
         let button = NSButton()
         try autoreleasepool {
             let animator = try makeAnimator(button)
-            XCTAssertNotNil(try eyeOverlay(on: button))
+            XCTAssertEqual(button.subviews.compactMap { $0 as? SissyOverlay }.count, 2)
             withExtendedLifetime(animator) {}
         }
 
@@ -246,13 +335,13 @@ final class SissyAnimatorTests: XCTestCase {
     func testAHoldTakenDuringAGestureTracksTheRemainingFrames() async throws {
         let button = NSButton()
         let animator = try makeAnimator(button)
-        let overlay = try eyeOverlay(on: button)
+        let overlay = try eyeOverlay(of: animator)
         let resting = button.image
 
         XCTAssertTrue(animator.blink())
         await waitForFirstFrame(on: button, leaving: resting)
         let bodyBeforeTheFlip = button.image
-        animator.setArtwork(.lit(.holding))
+        animator.setArtwork(held)
 
         // The body has to move to the eyeless set on the flip itself. Left to
         // the gesture it would only move on the next frame index, and the
@@ -400,27 +489,17 @@ final class SissyAnimatorTests: XCTestCase {
         XCTAssertNotIdentical(button.image, awake)
     }
 
-    // MARK: Menu bar eye
+    // MARK: Menu bar dot
 
-    func testANormalMacLeavesTheEyeToTheHold() {
-        XCTAssertEqual(SissyEye(holding: true, level: .normal), .holding)
-        XCTAssertNil(SissyEye(holding: false, level: .normal))
+    func testANormalOrUnreadMacShowsNoDot() {
+        XCTAssertNil(SissyDot(level: .normal))
+        XCTAssertNil(SissyDot(level: nil))
     }
 
-    func testNoReadingLeavesTheEyeAsItWas() {
-        XCTAssertEqual(SissyEye(holding: true, level: nil), .holding)
-        XCTAssertNil(SissyEye(holding: false, level: nil))
-    }
-
-    func testPressureOutranksTheHold() {
-        XCTAssertEqual(SissyEye(holding: true, level: .warn), .warn)
-        XCTAssertEqual(SissyEye(holding: false, level: .warn), .warn)
-        XCTAssertEqual(SissyEye(holding: true, level: .critical), .critical)
-    }
-
-    func testEachEyeHasItsOwnTint() {
-        XCTAssertEqual(SissyEye.holding.tint, SissyArtwork.holdTint)
-        XCTAssertEqual(SissyEye.warn.tint, NSColor.systemOrange)
-        XCTAssertEqual(SissyEye.critical.tint, NSColor.systemRed)
+    func testEachLevelHasItsOwnDot() {
+        XCTAssertEqual(SissyDot(level: .warn), .warn)
+        XCTAssertEqual(SissyDot(level: .critical), .critical)
+        XCTAssertEqual(SissyDot.warn.tint, NSColor.systemOrange)
+        XCTAssertEqual(SissyDot.critical.tint, NSColor.systemRed)
     }
 }
