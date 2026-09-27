@@ -1618,12 +1618,18 @@ actor UsageEngine {
 
     /// Starts the Mac's own reading, under the guard the process sweep carries
     /// and for its reason, and asks that sweep to measure the apps for it.
+    ///
+    /// The switch is checked after the hops as well as the lifecycle: a
+    /// `setMacHealth(enabled: false)` landing in either suspension finds
+    /// nothing started yet to stop, so without the second look this call
+    /// would start a monitor the switch already says is off, and the next
+    /// toggle to off would be a no-op against it.
     private func startMacHealth() async {
-        guard lifecycle == .running else { return }
+        guard lifecycle == .running, config.macHealth else { return }
         let me = self
         await agentMonitor.setMeasuresApps(true)
         await healthMonitor.start { await me.reemit() }
-        guard lifecycle == .running else {
+        guard lifecycle == .running, config.macHealth else {
             await stopMacHealth()
             return
         }
