@@ -119,8 +119,8 @@ enum SissyArtwork {
     /// is drawn on and measured from its lower left: behind the neck, the one
     /// corner the head leaves empty in every pose.
     static let dotCanvas: CGFloat = 22
-    static let dotCentre = CGPoint(x: 2.8, y: 2.8)
-    static let dotRadius: CGFloat = 2.5
+    static let dotCentre = CGPoint(x: 3.1, y: 3.1)
+    static let dotRadius: CGFloat = 2.8
     static let dotGap: CGFloat = 0.9
 
     /// The dot's square in `rect`, grown by `margin` canvas units on every
