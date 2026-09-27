@@ -88,6 +88,7 @@ final class ServerConfigUnreadableTests: XCTestCase {
         config.claudeDataDir = tempDir.appendingPathComponent("claude").path
         config.codexDataDir = tempDir.appendingPathComponent("codex").path
         config.remotePricing = false
+        config.macHealth = false
         config.statusChecks = false
         return UsageEngine(
             config: config,
