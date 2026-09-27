@@ -5,21 +5,38 @@
   Sissy
 </h1>
 
-**The numbers you keep checking, in the macOS menu bar.**
-
-What your coding agents cost, how close you are to a rate limit, where the work
-went, what the sessions running now are holding, and what you pushed: all read
-from the logs already on your Mac and the services you connect. No account of
-its own, no telemetry, nothing to grant at first launch.
+**The menu bar companion for developers who code with agents.**<br />
+**The numbers you keep checking, one click away.**
 
 [![Release](https://img.shields.io/github/v/release/xsmyile/sissy?style=flat-square&color=blue)](../../releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/xsmyile/sissy/ci.yml?branch=master&style=flat-square&label=ci&logo=githubactions&logoColor=white)](../../actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple&logoColor=white)](#install)
 [![License](https://img.shields.io/github/license/xsmyile/sissy?style=flat-square&color=green)](./LICENSE)
 
+<img src="assets/overview.png" width="100%"
+  alt="Sissy's panel under the menu bar: today's cost and tokens, a weekly rate-limit gauge for two Claude accounts and one Codex account, and the day's spend by repository" />
+
 [Install](#install) • [What it shows](#what-it-shows) • [What it reads](#what-it-reads) • [Privacy](#privacy) • [Uninstall](#uninstall) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build](#build-from-source)
 
 </div>
+
+## At a glance
+
+- **Spend**: what your agents cost over Today, 7 days, 30 days or All, priced
+  at published rates.
+- **Rate limits**: a gauge for every account, with a mark showing where even
+  pace would be by now.
+- **Accounts**: several Claude and Codex accounts side by side, each with its
+  own limits.
+- **Agents**: how many are running now, the memory they hold, and the Mac kept
+  awake while they work.
+- **Projects**: where the day went, by repository, with a worktree counted
+  against the repository it was cut from.
+- **Git**: contributions on each connected forge, and a warning before a
+  repository commits under the wrong name.
+
+Everything is read from what is already on your Mac and the services you
+connect. No account of its own, no telemetry, nothing to grant at first launch.
 
 ## Install
 
