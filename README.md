@@ -13,8 +13,8 @@
 [![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple&logoColor=white)](#install)
 [![License](https://img.shields.io/github/license/xsmyile/sissy?style=flat-square&color=green)](./LICENSE)
 
-<img src="assets/overview.png" width="100%"
-  alt="Sissy's panel under the menu bar: today's cost and tokens, a weekly rate-limit gauge for two Claude accounts and one Codex account, and the day's spend by repository" />
+<img src="assets/sissy-demo.gif" width="100%"
+  alt="Sissy's panel opening from the menu bar: the day's cost, a rate-limit gauge per account, the agents running now and the memory they hold, a repository committing under the wrong name, and keep awake" />
 
 [Install](#install) • [What it shows](#what-it-shows) • [What it reads](#what-it-reads) • [Privacy](#privacy) • [Uninstall](#uninstall) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build](#build-from-source)
 
