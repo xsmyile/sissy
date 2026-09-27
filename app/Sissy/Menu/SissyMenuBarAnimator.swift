@@ -19,14 +19,15 @@ final class SissyMenuBarAnimator {
     ///
     /// Orthogonal to the pose because the two answer different questions: the
     /// pose is whether anything is reaching the app, the artwork whether the
-    /// Mac is being held awake. Only three of the four pairs are reachable
-    /// today — `SissyModel.keepAwake` reports `active` off the frame, and no
-    /// frame is exactly what makes the pose shut — so a lit eye is always an
-    /// open one. Keeping them independent here is what stops that becoming a
-    /// rule the drawing relies on.
-    enum Artwork {
+    /// Mac is being held awake or is under pressure, and in which colour.
+    /// Only three of the four pairs are reachable today — the hold and the
+    /// level both come off the frame, and no frame is exactly what makes the
+    /// pose shut — so a lit eye is always an open one. Keeping them
+    /// independent here is what stops that becoming a rule the drawing relies
+    /// on.
+    enum Artwork: Equatable {
         case template
-        case lit
+        case lit(SissyEye)
     }
 
     /// Read before and during playback, so an open menu blocks a new gesture
@@ -74,7 +75,8 @@ final class SissyMenuBarAnimator {
     private let reduceMotion: () -> Bool
 
     private var bodyFrames: Frames {
-        artwork == .lit ? (lit?.eyeless ?? silhouettes) : silhouettes
+        guard case .lit = artwork else { return silhouettes }
+        return lit?.eyeless ?? silhouettes
     }
 
     private var restingImage: NSImage { bodyFrames.resting(pose) }
@@ -148,8 +150,10 @@ final class SissyMenuBarAnimator {
         drawResting()
     }
 
-    /// Lights the eye, or puts it out, and redraws whatever is on screen so
-    /// both layers move together.
+    /// Lights the eye in the colour it is lit for, or puts it out, and
+    /// redraws whatever is on screen so both layers move together. A change of
+    /// colour alone redraws too: it is the same pair of layers with a new tint
+    /// on one of them.
     ///
     /// The frame on screen is redrawn rather than left to the gesture: the
     /// playback loop only writes when the frame index changes, and frames 6-9
@@ -160,7 +164,12 @@ final class SissyMenuBarAnimator {
     func setArtwork(_ newArtwork: Artwork) {
         guard newArtwork != artwork, let eyeOverlay else { return }
         artwork = newArtwork
-        eyeOverlay.isHidden = newArtwork != .lit
+        if case .lit(let eye) = newArtwork {
+            eyeOverlay.contentTintColor = eye.tint
+            eyeOverlay.isHidden = false
+        } else {
+            eyeOverlay.isHidden = true
+        }
         if let drawnFrame { draw(frame: drawnFrame) } else { drawResting() }
     }
 

@@ -184,11 +184,13 @@ final class StatusItemController: NSObject {
     /// a template to white against the highlight and leaves anything else
     /// exactly as it is, which in a light menu bar is a black cat on a filled
     /// row. The menu is also the surface that says the hold in words, so
-    /// nothing is lost by handing the template back for as long as it is up.
+    /// nothing is lost by handing the template back for as long as it is up;
+    /// a Mac under pressure is back in colour the moment the menu closes.
     private func artwork(for icon: SissyModel.StatusIconSnapshot)
         -> SissyMenuBarAnimator.Artwork
     {
-        icon.isHolding && !isMenuOpen ? .lit : .template
+        guard let eye = icon.eye, !isMenuOpen else { return .template }
+        return .lit(eye)
     }
 
     /// A blink when a frame lands is Sissy noticing new numbers.
