@@ -173,6 +173,7 @@ struct GeneralSettingsView: View {
             Section {
                 keepAwake
                 keepScreenAwake
+                macHealth
             }
 
             Section {
@@ -310,6 +311,32 @@ struct GeneralSettingsView: View {
             Text("Keep the screen on too")
             Text("Off lets the display sleep while the Mac stays awake underneath for the agents.")
         }
+    }
+
+    /// Beside the keep-awake rows because all three are about the Mac rather
+    /// than an account, and a row rather than a tab of its own: one switch
+    /// does not earn a tab.
+    ///
+    /// The caption is one line because the tab has no second one to give:
+    /// measured 2026-09-27 against a harness reproducing this form, General
+    /// came to 538 pt without the row, 605 pt with a caption that wrapped, and
+    /// 591 pt with this one.
+    private var macHealth: some View {
+        LabeledContent {
+            Toggle("Mac health", isOn: macHealthBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        } label: {
+            Text("Mac health")
+            Text("Memory, swap and disk in the panel and the menu bar. Asks for nothing.")
+        }
+    }
+
+    private var macHealthBinding: Binding<Bool> {
+        Binding(
+            get: { model.engine.macHealth },
+            set: { model.engine.setMacHealth($0) }
+        )
     }
 
     /// Names both files Sissy writes outside its own folder, which is what the
