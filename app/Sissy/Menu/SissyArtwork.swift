@@ -99,8 +99,8 @@ enum SissyArtwork {
     /// The ring is what keeps the dot a dot: measured 2026-09-27 against every
     /// pose and frame, no point in the corner behind the neck clears the ink
     /// by more than 2.33 of the canvas's 22, so a dot large enough to read
-    /// touches it, and at 5 device pixels a colour touching ink merges into it.
-    /// Drawn rather than rasterized, so the cut is taken at whatever scale the
+    /// touches it, and at a few device pixels a colour touching ink merges
+    /// into it. Drawn rather than rasterized, so the cut is taken at whatever scale the
     /// menu bar renders at.
     static func knockedOut(_ body: NSImage) -> NSImage {
         let image = NSImage(size: body.size, flipped: false) { rect in
@@ -119,8 +119,8 @@ enum SissyArtwork {
     /// is drawn on and measured from its lower left: behind the neck, the one
     /// corner the head leaves empty in every pose.
     static let dotCanvas: CGFloat = 22
-    static let dotCentre = CGPoint(x: 3.0, y: 2.6)
-    static let dotRadius: CGFloat = 1.8
+    static let dotCentre = CGPoint(x: 2.8, y: 2.8)
+    static let dotRadius: CGFloat = 2.5
     static let dotGap: CGFloat = 0.9
 
     /// The dot's square in `rect`, grown by `margin` canvas units on every
