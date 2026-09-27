@@ -1,5 +1,34 @@
 import SwiftUI
 
+/// One section of the Overview below the headline, in the fixed order they
+/// draw. `PanelOverview.body` walks `visible(in:)` rather than listing the
+/// sections by hand, so this is the one place order and presence are decided
+/// — a case added here without a matching `PanelOverview.section` fails to
+/// compile, and a following change that adds a `.mac` case has one place to
+/// touch rather than two.
+enum PanelModule: CaseIterable, Hashable {
+    case providers
+    case projects
+    case identities
+    case forge
+
+    /// The modules this snapshot has anything to draw for, in the enum's own
+    /// order. `providers` and `identities` always answer for something;
+    /// `projects` and `forge` carry a list that can be empty, and an empty
+    /// section costs a `Divider` for nothing.
+    static func visible(in snapshot: UsagePanelSnapshot) -> [Self] {
+        allCases.filter { $0.isVisible(in: snapshot) }
+    }
+
+    private func isVisible(in snapshot: UsagePanelSnapshot) -> Bool {
+        switch self {
+        case .providers, .identities: return true
+        case .projects: return !snapshot.projects.isEmpty
+        case .forge: return !snapshot.forge.isEmpty
+        }
+    }
+}
+
 /// The panel's home: what today costs, whether there is room to keep working,
 /// and where the money went.
 ///
@@ -45,22 +74,26 @@ struct PanelOverview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headline
+            ForEach(PanelModule.visible(in: snapshot), id: \.self) { module in
+                Divider()
+                section(module)
+            }
+        }
+    }
 
-            Divider()
+    /// One block below the headline, exhaustive over every `PanelModule` so a
+    /// case added without a section to match fails to compile.
+    @ViewBuilder
+    private func section(_ module: PanelModule) -> some View {
+        switch module {
+        case .providers:
             providers
-
-            if !snapshot.projects.isEmpty {
-                Divider()
-                projects
-            }
-
-            Divider()
+        case .projects:
+            projects
+        case .identities:
             identityLine(snapshot.identityLine)
-
-            if !snapshot.forge.isEmpty {
-                Divider()
-                forge
-            }
+        case .forge:
+            forge
         }
     }
 
