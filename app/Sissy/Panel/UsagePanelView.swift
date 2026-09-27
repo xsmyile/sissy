@@ -198,29 +198,11 @@ struct UsagePanelView: View {
                 limitsReading: model.preferences.limitsReading)
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
-        let services = servicesReading(of: open)
-        let projects = projectsPage(of: live?.frame)
-        let identityFocus = Self.identityFocus(page)
-        let onEffort: Bool = {
-            if case .effort = page { return true }
-            return false
-        }()
+        let readings = PageReadings(
+            open: open, services: servicesReading(of: open), projects: projectsPage(of: live?.frame))
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                if let projects {
-                    projectsHeader(projects)
-                } else if let open {
-                    providerHeader(
-                        open, live: live,
-                        back: services == nil && !onEffort
-                            ? .overview : .provider(open.id, account: openAccount))
-                } else if case .identities = page {
-                    identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt)
-                } else if case .stats = page {
-                    statsHeader(observedAt: live?.frame.agentMemory?.current.observedAt)
-                } else {
-                    header(live)
-                }
+                header(for: page, live: live, readings: readings)
                 Divider()
             }
             .onGeometryChange(for: CGFloat.self) {
@@ -232,76 +214,7 @@ struct UsagePanelView: View {
             ScrollView(.vertical) {
                 Group {
                     if let snapshot {
-                        if let projects {
-                            PanelProjectsPage(
-                                page: projects,
-                                openIdentities: { page = .identities(focus: $0) })
-                        } else if case .identities = page {
-                            PanelIdentities(rows: snapshot.identities, focus: identityFocus)
-                        } else if case .stats = page {
-                            PanelStats(block: snapshot.agents)
-                        } else if let open, let services {
-                            PanelProviderStatusPage(provider: open.id, row: services)
-                        } else if let open, onEffort {
-                            PanelEffortPage(
-                                provider: open.id, today: open.effort,
-                                loadHistory: {
-                                    await model.engine.usageHistorySeries(provider: $0)
-                                })
-                        } else if let open {
-                            let slice = live?.frame.providers.first { $0.id == open.id }
-                            PanelProviderPage(
-                                row: open,
-                                openOnAccount: openAccount,
-                                onSelectAccount: { selectAccount($0) },
-                                onAddAccount: {
-                                    // Which vendor's login opens is the page's
-                                    // own id: the control sits on that
-                                    // provider's account menu, so it can only
-                                    // ever mean "another of these".
-                                    if open.id == ProviderID.codex {
-                                        model.engine.addCodexAccount()
-                                    } else {
-                                        model.engine.addClaudeAccount()
-                                    }
-                                },
-                                switchFailure: model.engine.accountSwitchFailure,
-                                switchingAccount: model.engine.switchingClaudeAccount,
-                                resetSpending: model.engine.spendingCodexReset,
-                                resetReport: model.engine.codexResetReport,
-                                useReset: { model.engine.useCodexReset(account: $0.account) },
-                                refresh: { model.refreshProvider(open.id) },
-                                openServices: {
-                                    page = .services(open.id, account: $0)
-                                },
-                                openProjects: {
-                                    page = .projects(open.id, account: $0)
-                                },
-                                openEffort: {
-                                    page = .effort(open.id, account: $0)
-                                },
-                                openIdentities: { page = .identities(focus: $0) },
-                                loadHistory: {
-                                    await model.engine.usageHistorySeries(provider: $0)
-                                },
-                                todayTokens: slice?.tokens ?? 0,
-                                todayCost: slice?.cost ?? 0
-                            )
-                        } else {
-                            PanelOverview(
-                                snapshot: snapshot,
-                                meteringProviders: model.engine.providers.count {
-                                    $0.activation.isMetering
-                                },
-                                openProvider: { page = .provider($0, account: $1) },
-                                openProjects: { page = .projects(nil, account: nil) },
-                                openIdentities: { page = .identities(focus: $0) },
-                                selectPeriod: { model.setUsagePeriod($0) },
-                                refreshingForge: model.engine.refreshingForge,
-                                refreshForge: { model.refreshForge($0) },
-                                openStats: { page = .stats }
-                            )
-                        }
+                        content(for: page, snapshot: snapshot, live: live, readings: readings)
                     } else {
                         placeholder
                     }
@@ -324,6 +237,172 @@ struct UsagePanelView: View {
         .onChange(of: open == nil) { _, gone in
             if gone { page = .overview }
         }
+    }
+
+    // MARK: Page routing
+
+    /// A page's own readings, resolved once per frame against the current
+    /// snapshot and handed to both `header(for:live:readings:)` and
+    /// `content(for:snapshot:live:readings:)` so the two agree without
+    /// resolving them twice.
+    private struct PageReadings {
+        let open: UsagePanelSnapshot.ProviderRow?
+        let services: UsagePanelSnapshot.StatusRow?
+        let projects: UsagePanelSnapshot.ProjectsPage?
+    }
+
+    /// The header for `target`, exhaustive over every `Page` case so a case
+    /// added without one fails to compile.
+    @ViewBuilder
+    private func header(
+        for target: Page, live: SissyModel.LiveFrame?, readings: PageReadings
+    ) -> some View {
+        switch target {
+        case .overview:
+            header(live)
+        case .provider:
+            providerOrHomeHeader(readings.open, live: live) { _ in .overview }
+        case .services:
+            providerOrHomeHeader(readings.open, live: live) { row in
+                readings.services == nil ? .overview : .provider(row.id, account: openAccount)
+            }
+        case .effort:
+            providerOrHomeHeader(readings.open, live: live) { row in
+                .provider(row.id, account: openAccount)
+            }
+        case .projects:
+            if let projects = readings.projects {
+                projectsHeader(projects)
+            } else {
+                header(live)
+            }
+        case .identities:
+            identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt)
+        case .stats:
+            statsHeader(observedAt: live?.frame.agentMemory?.current.observedAt)
+        }
+    }
+
+    /// The provider header while its row is still in the frame, and the
+    /// Overview's own header once it is not: the slices are today's
+    /// spenders, and a day rolls over while a provider's page is open.
+    @ViewBuilder
+    private func providerOrHomeHeader(
+        _ open: UsagePanelSnapshot.ProviderRow?, live: SissyModel.LiveFrame?,
+        back: (UsagePanelSnapshot.ProviderRow) -> Page
+    ) -> some View {
+        if let open {
+            providerHeader(open, live: live, back: back(open))
+        } else {
+            header(live)
+        }
+    }
+
+    /// The content for `target`, exhaustive over every `Page` case for the
+    /// same reason the header is. A services page whose reading is gone
+    /// falls back to the provider page, since that is all it has left to
+    /// draw.
+    @ViewBuilder
+    private func content(
+        for target: Page, snapshot: UsagePanelSnapshot, live: SissyModel.LiveFrame?,
+        readings: PageReadings
+    ) -> some View {
+        switch target {
+        case .overview:
+            overview(snapshot)
+        case .provider:
+            if let open = readings.open {
+                providerPage(open, live: live)
+            } else {
+                overview(snapshot)
+            }
+        case .services:
+            if let open = readings.open, let services = readings.services {
+                PanelProviderStatusPage(provider: open.id, row: services)
+            } else if let open = readings.open {
+                providerPage(open, live: live)
+            } else {
+                overview(snapshot)
+            }
+        case .effort:
+            if let open = readings.open {
+                PanelEffortPage(
+                    provider: open.id, today: open.effort,
+                    loadHistory: {
+                        await model.engine.usageHistorySeries(provider: $0)
+                    })
+            } else {
+                overview(snapshot)
+            }
+        case .projects:
+            if let projects = readings.projects {
+                PanelProjectsPage(
+                    page: projects,
+                    openIdentities: { page = .identities(focus: $0) })
+            } else {
+                overview(snapshot)
+            }
+        case .identities:
+            PanelIdentities(rows: snapshot.identities, focus: Self.identityFocus(target))
+        case .stats:
+            PanelStats(block: snapshot.agents)
+        }
+    }
+
+    /// The panel's home, and what every page one level in falls back to once
+    /// its own reading is gone.
+    private func overview(_ snapshot: UsagePanelSnapshot) -> some View {
+        PanelOverview(
+            snapshot: snapshot,
+            meteringProviders: model.engine.providers.count {
+                $0.activation.isMetering
+            },
+            openProvider: { page = .provider($0, account: $1) },
+            openProjects: { page = .projects(nil, account: nil) },
+            openIdentities: { page = .identities(focus: $0) },
+            selectPeriod: { model.setUsagePeriod($0) },
+            refreshingForge: model.engine.refreshingForge,
+            refreshForge: { model.refreshForge($0) },
+            openStats: { page = .stats }
+        )
+    }
+
+    /// That provider's own page: its windows, identity, credits and day.
+    ///
+    /// `onAddAccount` reads the vendor off `row.id` rather than off the
+    /// button that opens it: the control sits on that provider's own account
+    /// menu, so a press can only ever mean "another of this one".
+    private func providerPage(
+        _ row: UsagePanelSnapshot.ProviderRow, live: SissyModel.LiveFrame?
+    ) -> some View {
+        let slice = live?.frame.providers.first { $0.id == row.id }
+        return PanelProviderPage(
+            row: row,
+            openOnAccount: openAccount,
+            onSelectAccount: { selectAccount($0) },
+            onAddAccount: {
+                if row.id == ProviderID.codex {
+                    model.engine.addCodexAccount()
+                } else {
+                    model.engine.addClaudeAccount()
+                }
+            },
+            switchFailure: model.engine.accountSwitchFailure,
+            switchingAccount: model.engine.switchingClaudeAccount,
+            resetSpending: model.engine.spendingCodexReset,
+            resetReport: model.engine.codexResetReport,
+            useReset: { model.engine.useCodexReset(account: $0.account) },
+            refresh: { model.refreshProvider(row.id) },
+            openServices: { page = .services(row.id, account: $0) },
+            openProjects: { page = .projects(row.id, account: $0) },
+            openEffort: { page = .effort(row.id, account: $0) },
+            openIdentities: { page = .identities(focus: $0) },
+            loadHistory: {
+                await model.engine.usageHistorySeries(provider: $0)
+            },
+            todayTokens: slice?.tokens ?? 0,
+            todayCost: slice?.cost ?? 0
+        )
     }
 
     // MARK: Header
