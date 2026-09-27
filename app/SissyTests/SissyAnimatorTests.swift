@@ -81,7 +81,7 @@ final class SissyAnimatorTests: XCTestCase {
         let button = NSButton()
         let animator = try makeAnimator(button)
 
-        animator.setArtwork(.lit)
+        animator.setArtwork(.lit(.holding))
         XCTAssertEqual(button.image?.isTemplate, true)
 
         animator.setArtwork(.template)
@@ -100,13 +100,34 @@ final class SissyAnimatorTests: XCTestCase {
         let button = NSButton()
         let animator = try makeAnimator(button)
 
-        animator.setArtwork(.lit)
+        animator.setArtwork(.lit(.holding))
 
         let overlay = try eyeOverlay(on: button)
-        XCTAssertEqual(animator.artwork, .lit)
+        XCTAssertEqual(animator.artwork, .lit(.holding))
         XCTAssertFalse(overlay.isHidden)
         XCTAssertEqual(overlay.image?.size, NSSize(width: iconSize, height: iconSize))
         XCTAssertEqual(overlay.contentTintColor, SissyArtwork.holdTint)
+    }
+
+    /// A Mac under pressure recolours the eye it is already drawing rather
+    /// than swapping the body under it: the pairing is the same, only the tint
+    /// on the overlay moves.
+    func testAPressureRecoloursTheLitEyeOverTheSameBody() throws {
+        let button = NSButton()
+        let animator = try makeAnimator(button)
+        let overlay = try eyeOverlay(on: button)
+
+        animator.setArtwork(.lit(.holding))
+        let eyeless = button.image
+        animator.setArtwork(.lit(.critical))
+
+        XCTAssertEqual(animator.artwork, .lit(.critical))
+        XCTAssertFalse(overlay.isHidden)
+        XCTAssertEqual(overlay.contentTintColor, SissyArtwork.criticalTint)
+        XCTAssertIdentical(button.image, eyeless)
+
+        animator.setArtwork(.lit(.warn))
+        XCTAssertEqual(overlay.contentTintColor, SissyArtwork.warnTint)
     }
 
     /// The blue is laid over the body, so a body that kept its own eye ink
@@ -116,7 +137,7 @@ final class SissyAnimatorTests: XCTestCase {
         let animator = try makeAnimator(button)
         let whole = button.image
 
-        animator.setArtwork(.lit)
+        animator.setArtwork(.lit(.holding))
         let eyeless = button.image
 
         XCTAssertNotIdentical(eyeless, whole)
@@ -231,7 +252,7 @@ final class SissyAnimatorTests: XCTestCase {
         XCTAssertTrue(animator.blink())
         await waitForFirstFrame(on: button, leaving: resting)
         let bodyBeforeTheFlip = button.image
-        animator.setArtwork(.lit)
+        animator.setArtwork(.lit(.holding))
 
         // The body has to move to the eyeless set on the flip itself. Left to
         // the gesture it would only move on the next frame index, and the
@@ -377,5 +398,29 @@ final class SissyAnimatorTests: XCTestCase {
 
         XCTAssertFalse(animator.isPlaying)
         XCTAssertNotIdentical(button.image, awake)
+    }
+
+    // MARK: Menu bar eye
+
+    func testANormalMacLeavesTheEyeToTheHold() {
+        XCTAssertEqual(SissyEye(holding: true, level: .normal), .holding)
+        XCTAssertNil(SissyEye(holding: false, level: .normal))
+    }
+
+    func testNoReadingLeavesTheEyeAsItWas() {
+        XCTAssertEqual(SissyEye(holding: true, level: nil), .holding)
+        XCTAssertNil(SissyEye(holding: false, level: nil))
+    }
+
+    func testPressureOutranksTheHold() {
+        XCTAssertEqual(SissyEye(holding: true, level: .warn), .warn)
+        XCTAssertEqual(SissyEye(holding: false, level: .warn), .warn)
+        XCTAssertEqual(SissyEye(holding: true, level: .critical), .critical)
+    }
+
+    func testEachEyeHasItsOwnTint() {
+        XCTAssertEqual(SissyEye.holding.tint, SissyArtwork.holdTint)
+        XCTAssertEqual(SissyEye.warn.tint, NSColor.systemOrange)
+        XCTAssertEqual(SissyEye.critical.tint, NSColor.systemRed)
     }
 }

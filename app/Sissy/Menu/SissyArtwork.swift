@@ -1,7 +1,7 @@
 import AppKit
 
 /// Sissy's menu bar artwork: the silhouette, and the eye that is lit over it
-/// while the Mac is being held awake.
+/// while the Mac is being held awake or is short of memory or disk.
 ///
 /// Both stay template images and the eye is a second image drawn above the
 /// first, rather than the two being composited into one. That is not a style
@@ -42,6 +42,18 @@ enum SissyArtwork {
     /// that is engaged. The system's own rather than a literal, so it follows
     /// the appearance and whatever the user has set for colour.
     static let holdTint: NSColor = .systemBlue
+    /// The panel's own warning colour, the one the Mac line on the Overview
+    /// wears at the same level, so the eye and the line it leads to agree.
+    ///
+    /// Orange rather than the system's yellow because the eye sits in a
+    /// cut-out of the silhouette, on the menu bar's own background, and a
+    /// light menu bar is where it has to read: computed 2026-09-27 from the
+    /// light-appearance system colours against a bar at 240 grey, the
+    /// system's yellow stands at a WCAG contrast of 1.33 and its orange at
+    /// 1.93, where the blue the hold has always been lit in stands at 3.52 and
+    /// the red at 3.11. The yellow was an eye that had gone out.
+    static let warnTint: NSColor = .systemOrange
+    static let criticalTint: NSColor = .systemRed
 
     /// The eye cut out of `name`, which every Sissy asset has a counterpart for.
     static func eyeAssetName(for name: String) -> String { name + eyeSuffix }
@@ -81,6 +93,39 @@ enum SissyArtwork {
         }
         image.size = NSSize(width: size, height: size)
         return image
+    }
+}
+
+/// What the lit eye is saying, which decides its colour.
+///
+/// **The Mac's level outranks the hold.** A hold is a switch the user threw
+/// and the panel's cup already says so; a Mac running out of memory is the
+/// one thing on the menu bar a user did not ask for and has to hear about
+/// before opening anything. At normal the level says nothing, and the eye is
+/// the hold's alone, exactly as it was before there was a level.
+enum SissyEye: Equatable {
+    case holding
+    case warn
+    case critical
+
+    /// The eye for a hold and a level together, nil for neither: an unread
+    /// level is not a warning, and a normal one leaves the eye to the hold.
+    init?(holding: Bool, level: MacHealthLevel?) {
+        switch level {
+        case .critical: self = .critical
+        case .warn: self = .warn
+        case .normal, nil:
+            guard holding else { return nil }
+            self = .holding
+        }
+    }
+
+    var tint: NSColor {
+        switch self {
+        case .holding: SissyArtwork.holdTint
+        case .warn: SissyArtwork.warnTint
+        case .critical: SissyArtwork.criticalTint
+        }
     }
 }
 

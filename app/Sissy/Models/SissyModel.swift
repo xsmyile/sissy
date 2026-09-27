@@ -154,16 +154,22 @@ final class SissyModel {
     }
 
     /// The glyph is fixed and drawn at full opacity, so the menu bar icon
-    /// reports two things and both of them with the eye: it is shut while
-    /// nothing is reaching the app, and lit while the Mac is being held awake.
+    /// reports everything it reports with the eye: it is shut while nothing
+    /// is reaching the app, lit blue while the Mac is being held awake, and
+    /// lit orange or red while the Mac is short of memory or disk, which
+    /// outranks the hold.
     ///
     /// The hold is read off `active` rather than off the mode, the way the
     /// status menu's own line is: a mode that is armed and holding nothing has
     /// left the Mac free to sleep, and an icon claiming otherwise is the
-    /// battery complaint this was meant to answer.
+    /// battery complaint this was meant to answer. The level is the frame's
+    /// `MacHealthReading.level`, nil with the module off.
     struct StatusIconSnapshot {
         let isAsleep: Bool
         let isHolding: Bool
+        let macLevel: MacHealthLevel?
+
+        var eye: SissyEye? { SissyEye(holding: isHolding, level: macLevel) }
     }
 
     /// A frame together with when it landed.
@@ -191,7 +197,9 @@ final class SissyModel {
         )
         return MenuSnapshot(
             header: header,
-            statusIcon: StatusIconSnapshot(isAsleep: header.isAsleep, isHolding: hold.active)
+            statusIcon: StatusIconSnapshot(
+                isAsleep: header.isAsleep, isHolding: hold.active,
+                macLevel: currentFrame?.mac?.level)
         )
     }
 
