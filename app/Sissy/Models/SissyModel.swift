@@ -154,10 +154,10 @@ final class SissyModel {
     }
 
     /// The glyph is fixed and drawn at full opacity, so the menu bar icon
-    /// reports everything it reports with the eye: it is shut while nothing
-    /// is reaching the app, lit blue while the Mac is being held awake, and
-    /// lit orange or red while the Mac is short of memory or disk, which
-    /// outranks the hold.
+    /// reports everything it reports with the eye and the dot: the eye is shut
+    /// while nothing is reaching the app and lit blue while the Mac is being
+    /// held awake, and the dot behind the neck is orange or red while the Mac
+    /// is short of memory or disk.
     ///
     /// The hold is read off `active` rather than off the mode, the way the
     /// status menu's own line is: a mode that is armed and holding nothing has
@@ -168,8 +168,6 @@ final class SissyModel {
         let isAsleep: Bool
         let isHolding: Bool
         let macLevel: MacHealthLevel?
-
-        var eye: SissyEye? { SissyEye(holding: isHolding, level: macLevel) }
     }
 
     /// A frame together with when it landed.

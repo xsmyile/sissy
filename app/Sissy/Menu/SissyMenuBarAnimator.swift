@@ -4,7 +4,7 @@ import AppKit
 /// the eye closing or opening as readings stop and start again.
 ///
 /// Once this exists it is the only writer of `button.image`, and the owner of
-/// the eye overlay drawn above it: a refresh that reassigned either
+/// the eye and dot overlays drawn above it: a refresh that reassigned either
 /// mid-gesture would drop the remaining frames and leave whichever one
 /// happened to be showing.
 @MainActor
@@ -19,15 +19,18 @@ final class SissyMenuBarAnimator {
     ///
     /// Orthogonal to the pose because the two answer different questions: the
     /// pose is whether anything is reaching the app, the artwork whether the
-    /// Mac is being held awake or is under pressure, and in which colour.
-    /// Only three of the four pairs are reachable today — the hold and the
-    /// level both come off the frame, and no frame is exactly what makes the
-    /// pose shut — so a lit eye is always an open one. Keeping them
-    /// independent here is what stops that becoming a rule the drawing relies
-    /// on.
-    enum Artwork: Equatable {
-        case template
-        case lit(SissyEye)
+    /// Mac is being held awake and whether it is under pressure. The hold
+    /// and the level both come off the frame, and no frame is exactly what
+    /// makes the pose shut, so a lit eye is always an open one today. Keeping
+    /// them independent here is what stops that becoming a rule the drawing
+    /// relies on.
+    struct Artwork: Equatable {
+        /// The eye lit blue for a hold.
+        var eyeLit: Bool
+        /// The dot behind the neck, nil at normal or with no reading.
+        var dot: SissyDot?
+
+        static let template = Self(eyeLit: false, dot: nil)
     }
 
     /// Read before and during playback, so an open menu blocks a new gesture
@@ -50,20 +53,43 @@ final class SissyMenuBarAnimator {
         func resting(_ pose: Pose) -> NSImage { pose == .awake ? awake : asleep }
     }
 
+    /// One set of body frames with the dot's corner inked and one with it
+    /// cut out, so the dot can come and go without a frame drawn from the
+    /// wrong set.
+    private struct Bodies {
+        let plain: Frames
+        let dotted: Frames
+
+        init(_ plain: Frames) {
+            self.plain = plain
+            dotted = Frames(
+                awake: SissyArtwork.knockedOut(plain.awake),
+                asleep: SissyArtwork.knockedOut(plain.asleep),
+                blink: plain.blink.map(SissyArtwork.knockedOut)
+            )
+        }
+
+        func frames(dotted isDotted: Bool) -> Frames { isDotted ? dotted : plain }
+    }
+
     private weak var button: NSButton?
-    private let silhouettes: Frames
+    private let silhouettes: Bodies
     /// The two halves of the split and the view the eye is drawn in, or nil
     /// where the catalogue has no eye for a frame: Sissy is then exactly what
     /// she was rather than losing the blink with the tint, which is the part
     /// worth keeping of the two.
     private let lit: LitFrames?
-    private let eyeOverlay: SissyOverlay?
+    let eyeOverlay: SissyOverlay?
+    /// The dot is drawn in code rather than cut from the catalogue, so unlike
+    /// the eye it is always there to install.
+    let dotOverlay: SissyOverlay
+    private let dotImage: NSImage
 
     /// The body a lit eye sits on, beside the eye itself. They are one value
     /// because a frame drawn from one and not the other is the fringe the
     /// split exists to remove.
     private struct LitFrames {
-        let eyeless: Frames
+        let eyeless: Bodies
         let eyes: Frames
     }
     private var playbackTask: Task<Void, Never>?
@@ -75,8 +101,8 @@ final class SissyMenuBarAnimator {
     private let reduceMotion: () -> Bool
 
     private var bodyFrames: Frames {
-        guard case .lit = artwork else { return silhouettes }
-        return lit?.eyeless ?? silhouettes
+        let bodies = artwork.eyeLit ? (lit?.eyeless ?? silhouettes) : silhouettes
+        return bodies.frames(dotted: artwork.dot != nil)
     }
 
     private var restingImage: NSImage { bodyFrames.resting(pose) }
@@ -103,25 +129,31 @@ final class SissyMenuBarAnimator {
                 blink: blink
             )
         }
-        silhouettes = try build(SissyArtwork.silhouette)
+        silhouettes = try Bodies(build(SissyArtwork.silhouette))
         do {
-            lit = try LitFrames(eyeless: build(SissyArtwork.eyeless), eyes: build(SissyArtwork.eye))
+            lit = try LitFrames(
+                eyeless: Bodies(build(SissyArtwork.eyeless)),
+                eyes: build(SissyArtwork.eye)
+            )
         } catch {
             lit = nil
             NSLog("sissy: eye tint unavailable: %@", error.localizedDescription)
         }
         eyeOverlay = lit == nil ? nil : SissyOverlay.installed(on: button, tint: SissyArtwork.holdTint)
+        dotImage = SissyArtwork.dot(size: iconSize)
+        dotOverlay = SissyOverlay.installed(on: button, tint: SissyArtwork.warnTint)
         self.button = button
         self.reduceMotion = reduceMotion
         drawResting()
     }
 
-    /// The overlay goes with the animator. It is a subview of a button the
-    /// animator only borrows, so leaving it behind would hand a rebuilt
-    /// animator a second one to draw over.
+    /// The overlays go with the animator. They are subviews of a button the
+    /// animator only borrows, so leaving them behind would hand a rebuilt
+    /// animator a second pair to draw over.
     isolated deinit {
         playbackTask?.cancel()
         eyeOverlay?.removeFromSuperview()
+        dotOverlay.removeFromSuperview()
         button?.image = restingImage
     }
 
@@ -150,10 +182,10 @@ final class SissyMenuBarAnimator {
         drawResting()
     }
 
-    /// Lights the eye in the colour it is lit for, or puts it out, and
-    /// redraws whatever is on screen so both layers move together. A change of
-    /// colour alone redraws too: it is the same pair of layers with a new tint
-    /// on one of them.
+    /// Lights the eye for a hold and the dot in its level's colour, or puts
+    /// either out, and redraws whatever is on screen so the body and the
+    /// layers over it move together. A change of the dot's colour alone
+    /// redraws too: it is the same body with a new tint over it.
     ///
     /// The frame on screen is redrawn rather than left to the gesture: the
     /// playback loop only writes when the frame index changes, and frames 6-9
@@ -162,14 +194,11 @@ final class SissyMenuBarAnimator {
     /// other set — the eye ink fringing through the blue, or no eye at all —
     /// which is the pairing the eyeless split exists to prevent.
     func setArtwork(_ newArtwork: Artwork) {
-        guard newArtwork != artwork, let eyeOverlay else { return }
+        guard newArtwork != artwork else { return }
         artwork = newArtwork
-        if case .lit(let eye) = newArtwork {
-            eyeOverlay.contentTintColor = eye.tint
-            eyeOverlay.isHidden = false
-        } else {
-            eyeOverlay.isHidden = true
-        }
+        eyeOverlay?.isHidden = !newArtwork.eyeLit
+        if let dot = newArtwork.dot { dotOverlay.contentTintColor = dot.tint }
+        dotOverlay.isHidden = newArtwork.dot == nil
         if let drawnFrame { draw(frame: drawnFrame) } else { drawResting() }
     }
 
@@ -223,27 +252,30 @@ final class SissyMenuBarAnimator {
     private func drawResting() {
         drawnFrame = nil
         button?.image = restingImage
-        draw(eye: lit?.eyes.resting(pose))
+        drawLayers(eye: lit?.eyes.resting(pose))
     }
 
     private func draw(frame index: Int) {
         drawnFrame = index
         button?.image = bodyFrames.blink[index]
-        draw(eye: lit?.eyes.blink[index])
+        drawLayers(eye: lit?.eyes.blink[index])
     }
 
-    /// The overlay is re-squared on the button every time it is drawn rather
-    /// than autoresized into place: the button has no bounds yet when the
-    /// animator is built, and a subview that starts at zero is one an
+    /// The overlays are re-squared on the button every time they are drawn
+    /// rather than autoresized into place: the button has no bounds yet when
+    /// the animator is built, and a subview that starts at zero is one an
     /// autoresizing mask keeps at zero however big its superview gets.
-    private func draw(eye image: NSImage?) {
-        guard let eyeOverlay, let button else { return }
-        eyeOverlay.frame = eyeRect(on: button)
-        eyeOverlay.image = image
+    private func drawLayers(eye image: NSImage?) {
+        guard let button else { return }
+        let rect = layerRect(on: button)
+        eyeOverlay?.frame = rect
+        eyeOverlay?.image = image
+        dotOverlay.frame = rect
+        dotOverlay.image = dotImage
     }
 
     /// The rect the button's own cell draws the silhouette into, which is the
-    /// only rect the eye may be drawn into as well.
+    /// only rect the eye and the dot may be drawn into as well.
     ///
     /// Given the button's whole bounds instead, the overlay centres the eye in
     /// them itself — and `NSImageView` rounds that centring offset to a whole
@@ -255,7 +287,7 @@ final class SissyMenuBarAnimator {
     /// the eye is ink inside the cell's own image. Handing over a rect the
     /// size of the image leaves the overlay no centring left to round. The
     /// panel never had this: SwiftUI stacks both layers on one frame.
-    private func eyeRect(on button: NSButton) -> NSRect {
+    private func layerRect(on button: NSButton) -> NSRect {
         guard let cell = button.cell as? NSButtonCell else { return button.bounds }
         return cell.imageRect(forBounds: button.bounds)
     }

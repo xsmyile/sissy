@@ -1,10 +1,11 @@
 import AppKit
 
-/// Sissy's menu bar artwork: the silhouette, and the eye that is lit over it
-/// while the Mac is being held awake or is short of memory or disk.
+/// Sissy's menu bar artwork: the silhouette, the eye that is lit over it while
+/// the Mac is being held awake, and the dot behind her neck while the Mac is
+/// short of memory or disk.
 ///
-/// Both stay template images and the eye is a second image drawn above the
-/// first, rather than the two being composited into one. That is not a style
+/// All of them stay template images and each tinted layer is a second image
+/// drawn above the silhouette, rather than the two being composited into one. That is not a style
 /// choice — **a status item's greyscale is vibrancy-blended with what is
 /// behind the menu bar, and only a template image is exempt.** Measured on
 /// macOS 26 against a dark menu bar: the template's ink peaks at 230, the same
@@ -43,15 +44,15 @@ enum SissyArtwork {
     /// the appearance and whatever the user has set for colour.
     static let holdTint: NSColor = .systemBlue
     /// The panel's own warning colour, the one the Mac line on the Overview
-    /// wears at the same level, so the eye and the line it leads to agree.
+    /// wears at the same level, so the dot and the line it leads to agree.
     ///
-    /// Orange rather than the system's yellow because the eye sits in a
-    /// cut-out of the silhouette, on the menu bar's own background, and a
-    /// light menu bar is where it has to read: computed 2026-09-27 from the
-    /// light-appearance system colours against a bar at 240 grey, the
-    /// system's yellow stands at a WCAG contrast of 1.33 and its orange at
-    /// 1.93, where the blue the hold has always been lit in stands at 3.52 and
-    /// the red at 3.11. The yellow was an eye that had gone out.
+    /// Orange rather than the system's yellow because the dot sits on the
+    /// menu bar's own background, and a light menu bar is where it has to
+    /// read: computed 2026-09-27 from the light-appearance system colours
+    /// against a bar at 240 grey, the system's yellow stands at a WCAG
+    /// contrast of 1.33 and its orange at 1.93, where the blue the hold is lit
+    /// in stands at 3.52 and the red at 3.11. The yellow was a dot that had
+    /// gone out.
     static let warnTint: NSColor = .systemOrange
     static let criticalTint: NSColor = .systemRed
 
@@ -81,6 +82,60 @@ enum SissyArtwork {
         try silhouette(eyelessAssetName(for: name), size: size)
     }
 
+    /// The dot alone, at the silhouette's own size and origin.
+    static func dot(size: CGFloat) -> NSImage {
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: dotRect(in: rect, margin: 0)).fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    /// `body` with the dot and a ring around it cut out of its ink, which is
+    /// what the dot is drawn over.
+    ///
+    /// The ring is what keeps the dot a dot: measured 2026-09-27 against every
+    /// pose and frame, no point in the corner behind the neck clears the ink
+    /// by more than 2.33 of the canvas's 22, so a dot large enough to read
+    /// touches it, and at 5 device pixels a colour touching ink merges into it.
+    /// Drawn rather than rasterized, so the cut is taken at whatever scale the
+    /// menu bar renders at.
+    static func knockedOut(_ body: NSImage) -> NSImage {
+        let image = NSImage(size: body.size, flipped: false) { rect in
+            guard let context = NSGraphicsContext.current else { return false }
+            body.draw(in: rect)
+            context.compositingOperation = .destinationOut
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: dotRect(in: rect, margin: dotGap)).fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    /// Where the dot sits, in the units of the 22 pt canvas every Sissy asset
+    /// is drawn on and measured from its lower left: behind the neck, the one
+    /// corner the head leaves empty in every pose.
+    static let dotCanvas: CGFloat = 22
+    static let dotCentre = CGPoint(x: 3.0, y: 2.6)
+    static let dotRadius: CGFloat = 1.8
+    static let dotGap: CGFloat = 0.9
+
+    /// The dot's square in `rect`, grown by `margin` canvas units on every
+    /// side.
+    static func dotRect(in rect: NSRect, margin: CGFloat) -> NSRect {
+        let scale = rect.width / dotCanvas
+        let radius = (dotRadius + margin) * scale
+        return NSRect(
+            x: rect.minX + dotCentre.x * scale - radius,
+            y: rect.minY + dotCentre.y * scale - radius,
+            width: radius * 2,
+            height: radius * 2
+        )
+    }
+
     private static let eyeSuffix = "Eye"
     private static let eyelessSuffix = "Eyeless"
 
@@ -96,33 +151,26 @@ enum SissyArtwork {
     }
 }
 
-/// What the lit eye is saying, which decides its colour.
+/// What the dot behind Sissy's neck is saying, which decides its colour.
 ///
-/// **The Mac's level outranks the hold.** A hold is a switch the user threw
-/// and the panel's cup already says so; a Mac running out of memory is the
-/// one thing on the menu bar a user did not ask for and has to hear about
-/// before opening anything. At normal the level says nothing, and the eye is
-/// the hold's alone, exactly as it was before there was a level.
-enum SissyEye: Equatable {
-    case holding
+/// It is the Mac's level alone, and the eye stays the hold's: the two are
+/// different questions, and one mark carrying both hid the hold for as long
+/// as the Mac was under pressure. At normal, with the module off or before a
+/// reading there is no dot, because an unread level is not a warning.
+enum SissyDot: Equatable {
     case warn
     case critical
 
-    /// The eye for a hold and a level together, nil for neither: an unread
-    /// level is not a warning, and a normal one leaves the eye to the hold.
-    init?(holding: Bool, level: MacHealthLevel?) {
+    init?(level: MacHealthLevel?) {
         switch level {
         case .critical: self = .critical
         case .warn: self = .warn
-        case .normal, nil:
-            guard holding else { return nil }
-            self = .holding
+        case .normal, nil: return nil
         }
     }
 
     var tint: NSColor {
         switch self {
-        case .holding: SissyArtwork.holdTint
         case .warn: SissyArtwork.warnTint
         case .critical: SissyArtwork.criticalTint
         }
