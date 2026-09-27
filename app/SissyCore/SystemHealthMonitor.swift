@@ -33,6 +33,9 @@ actor SystemHealthMonitor {
     private var lastFrameAt: Date?
     private var pollTask: Task<Void, Never>?
     private var pressureSource: DispatchSourceMemoryPressure?
+    /// Which `start()` a pressure event was delivered under, so an event
+    /// queued behind a `stop()` cannot publish into the `start()` after it.
+    private var generation = 0
     private let read: @Sendable (Date) -> MacHealthReading
     private let diskFree: @Sendable () -> Int64?
     /// The heaviest apps, which the agent sweep measures out of the same pass
@@ -57,10 +60,12 @@ actor SystemHealthMonitor {
     /// change publishes when it happens rather than on the next sample.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
         guard pollTask == nil else { return }
+        generation += 1
+        let started = generation
         let source = DispatchSource.makeMemoryPressureSource(
             eventMask: [.normal, .warning, .critical], queue: .global(qos: .utility))
         source.setEventHandler { @Sendable [weak self] in
-            Task { await self?.pressureChanged(onRefresh: onRefresh) }
+            Task { await self?.pressureChanged(under: started, onRefresh: onRefresh) }
         }
         source.activate()
         pressureSource = source
@@ -85,10 +90,13 @@ actor SystemHealthMonitor {
         published.store(nil)
     }
 
-    /// A transition the kernel delivered. Ignored once stopped: the event can
-    /// be queued behind a `stop()` and must not publish past it.
-    private func pressureChanged(onRefresh: @Sendable @escaping () async -> Void) async {
-        guard pollTask != nil else { return }
+    /// A transition the kernel delivered. Ignored once stopped, and ignored
+    /// when it belongs to an earlier `start()`: the event can be queued behind
+    /// a `stop()`, and a `start()` after that must not take it for its own.
+    private func pressureChanged(
+        under started: Int, onRefresh: @Sendable @escaping () async -> Void
+    ) async {
+        guard pollTask != nil, started == generation else { return }
         await sampleOnce(forcingFrame: true, onRefresh: onRefresh)
     }
 
