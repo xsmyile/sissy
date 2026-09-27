@@ -43,7 +43,9 @@ final class UsageEngineControlTests: XCTestCase {
         codex: Bool? = nil,
         keepAwake: KeepAwakeMode = .off,
         keepAwakePolicy: KeepAwakePolicy = .default,
-        pollIntervalSeconds: Double = 60
+        pollIntervalSeconds: Double = 60,
+        macHealth: Bool = false,
+        healthMonitor: SystemHealthMonitor? = nil
     ) -> UsageEngine {
         var config = ServerConfig.defaults
         config.claudeDataDir = claudeDir.path
@@ -53,13 +55,29 @@ final class UsageEngineControlTests: XCTestCase {
         config.pollIntervalSeconds = pollIntervalSeconds
         config.providers = ProviderToggles(claudeCode: claudeCode, codex: codex)
         config.keepAwake = keepAwake
+        config.macHealth = macHealth
         return UsageEngine(
             config: config,
             configURL: configURL,
             limitsProbe: ClaudeLimitsProbe { _ in .absent },
             claudeAccounts: .inert(),
+            healthMonitor: healthMonitor,
             keepAwakePolicy: keepAwakePolicy
         )
+    }
+
+    /// A monitor that answers one fixed reading and has already published it,
+    /// so the first frame can carry it without racing the monitor's own clock.
+    private func sampledHealthMonitor() async -> SystemHealthMonitor {
+        let monitor = SystemHealthMonitor(
+            read: { now in
+                MacHealthReading(
+                    observedAt: now, pressure: .warn, freeMemoryPercent: 30, swap: nil,
+                    physicalMemory: 1_024, loadAverage: nil, activeCores: 4, uptime: 60)
+            },
+            diskFree: { 4_096 })
+        await monitor.sampleOnce {}
+        return monitor
     }
 
     /// One assistant turn, timestamped now so it lands in today's bucket. It is
@@ -522,6 +540,38 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertEqual(
             replayed?.providers.map(\.tokens), [Self.tokensPerTurn],
             "the breakdown is the turn that was written")
+    }
+
+    /// The Mac's reading rides the frame while its switch is on, and switching
+    /// it off takes it off the next frame and writes the choice down.
+    func testTheMacSwitchPutsTheReadingOnTheFrameAndTakesItOff() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false, macHealth: true, healthMonitor: await sampledHealthMonitor())
+        let firstFrame = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [firstFrame], timeout: 5)
+        addTeardownBlock { await engine.stop() }
+        XCTAssertEqual(frames.all.last?.mac?.pressure, .warn)
+
+        let dropped = frames.expectation("the reading went", forNextFrameMatching: { $0.mac == nil })
+        await engine.setMacHealth(enabled: false)
+        await fulfillment(of: [dropped], timeout: 5)
+        XCTAssertEqual(try ServerConfig.load(from: configURL).macHealth, false)
+    }
+
+    /// Switched off, the frame carries no reading even from a monitor that has
+    /// one: the absence is the switch's, not the monitor's timing.
+    func testASwitchedOffMacModuleCarriesNoReading() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(codex: false, healthMonitor: await sampledHealthMonitor())
+        let firstFrame = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [firstFrame], timeout: 5)
+        await engine.stop()
+        XCTAssertTrue(frames.all.allSatisfy { $0.mac == nil }, "a switched-off module published")
     }
 
     /// With no reading to rebuild, the switch lands on the first real frame

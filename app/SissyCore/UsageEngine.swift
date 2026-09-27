@@ -136,6 +136,10 @@ actor UsageEngine {
     /// above rather than on a provider: a running process belongs to the Mac,
     /// and it is there on a day neither CLI has spent anything.
     private let agentMonitor: AgentProcessMonitor
+    /// What the Mac itself is answering, behind `ServerConfig.macHealth`. It
+    /// takes its heaviest apps from `agentMonitor`'s sweep, which measures them
+    /// only while this is running.
+    private let healthMonitor: SystemHealthMonitor
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
@@ -249,6 +253,7 @@ actor UsageEngine {
         limitsProbe: ClaudeLimitsProbe? = nil,
         claudeAccounts: ClaudeAccountRegistry? = nil,
         statusMonitor: ProviderStatusMonitor? = nil,
+        healthMonitor: SystemHealthMonitor? = nil,
         keepAwakePolicy: KeepAwakePolicy = .default
     ) {
         self.config = config
@@ -270,7 +275,10 @@ actor UsageEngine {
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         self.projectLedger = projectLedger
         self.identityMonitor = GitIdentityMonitor(ledger: projectLedger)
-        self.agentMonitor = AgentProcessMonitor(ledger: projectLedger)
+        let agentMonitor = AgentProcessMonitor(ledger: projectLedger)
+        self.agentMonitor = agentMonitor
+        self.healthMonitor =
+            healthMonitor ?? SystemHealthMonitor(heaviest: { agentMonitor.currentApps() })
         let limitsBackoff = LimitsBackoffStore(
             url: LimitsBackoffLedger.defaultURL(in: stateDir))
         self.limitsBackoff = limitsBackoff
@@ -446,6 +454,9 @@ actor UsageEngine {
         }
         await startForgeActivity()
         await startIdentityChecks()
+        if config.macHealth {
+            await startMacHealth()
+        }
         await startAgentProcessChecks()
         await applyKeepAwake()
         guard lifecycle == .running else { return }
@@ -689,6 +700,7 @@ actor UsageEngine {
         await statusMonitor.stop()
         await forgeMonitor.stop()
         await identityMonitor.stop()
+        await healthMonitor.stop()
         await agentMonitor.stop()
         await aggregator.stop()
         bootTask = nil
@@ -1604,6 +1616,24 @@ actor UsageEngine {
         }
     }
 
+    /// Starts the Mac's own reading, under the guard the process sweep carries
+    /// and for its reason, and asks that sweep to measure the apps for it.
+    private func startMacHealth() async {
+        guard lifecycle == .running else { return }
+        let me = self
+        await agentMonitor.setMeasuresApps(true)
+        await healthMonitor.start { await me.reemit() }
+        guard lifecycle == .running else {
+            await stopMacHealth()
+            return
+        }
+    }
+
+    private func stopMacHealth() async {
+        await healthMonitor.stop()
+        await agentMonitor.setMeasuresApps(false)
+    }
+
     /// Every forge the user has connected, the tokens none of them name, and
     /// whether the index could be read, for the Settings list.
     ///
@@ -1804,6 +1834,23 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// Switches the Mac's own reading on or off at runtime, and persists it.
+    ///
+    /// In place, the way `setStatusChecks` is, rather than by a new engine:
+    /// nothing the reading holds resumes from a snapshot, so stopping the
+    /// monitor drops all of it, and the next frame carries no `mac`.
+    func setMacHealth(enabled: Bool) async {
+        guard config.macHealth != enabled else { return }
+        config.macHealth = enabled
+        persistConfig("macHealth")
+        if enabled {
+            await startMacHealth()
+        } else {
+            await stopMacHealth()
+        }
+        await reemit()
+    }
+
     /// Saves `config` over `server.json`, and answers whether it did.
     ///
     /// The one place the file is written from, so the refusal below cannot be
@@ -1922,6 +1969,7 @@ actor UsageEngine {
             identities: identityMonitor.currentIdentities(),
             identitiesCheckedAt: identityMonitor.currentCheckedAt(),
             agentMemory: agentMonitor.currentMemory(),
+            mac: config.macHealth ? healthMonitor.currentReading() : nil,
             pricing: pricing
         )
         await onFrame?(frame)

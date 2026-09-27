@@ -575,6 +575,14 @@ struct FrameData: Sendable, Equatable {
     /// which the panel draws as a dash — a reading of no agents is a
     /// measurement, and not having measured yet is not.
     let agentMemory: AgentMemoryReading?
+    /// What the Mac itself is answering: the kernel's memory pressure, swap,
+    /// the disk and the apps holding the most besides the agents.
+    ///
+    /// Beside the agents rather than inside their reading, because it is a
+    /// module with a switch of its own and the agents page is not. `nil` while
+    /// that switch is off and before the first sample, which are both the
+    /// absence of a reading rather than a reading of a healthy Mac.
+    let mac: MacHealthReading?
     /// How much of today's input the cache answered across every slice,
     /// priced by the engine because the rates are the engine's.
     ///
@@ -601,6 +609,7 @@ struct FrameData: Sendable, Equatable {
         identities: [RepositoryIdentity] = [],
         identitiesCheckedAt: Date? = nil,
         agentMemory: AgentMemoryReading? = nil,
+        mac: MacHealthReading? = nil,
         cache: CacheReading = .none
     ) {
         self.tokens = tokens
@@ -615,6 +624,7 @@ struct FrameData: Sendable, Equatable {
         self.identities = identities
         self.identitiesCheckedAt = identitiesCheckedAt
         self.agentMemory = agentMemory
+        self.mac = mac
         self.cache = cache
     }
 }
@@ -636,6 +646,7 @@ enum FrameBuilder {
         identities: [RepositoryIdentity] = [],
         identitiesCheckedAt: Date? = nil,
         agentMemory: AgentMemoryReading? = nil,
+        mac: MacHealthReading? = nil,
         pricing: ProviderPricing = .seed
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
@@ -652,6 +663,7 @@ enum FrameBuilder {
             identities: identities,
             identitiesCheckedAt: identitiesCheckedAt,
             agentMemory: agentMemory,
+            mac: mac,
             cache: CacheReading.of(providers, pricing: pricing)
         )
     }

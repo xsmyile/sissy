@@ -99,15 +99,22 @@ private func reading(_ bytes: UInt64, at when: Date = Date()) -> AgentProcessRea
             ])
 }
 
+/// A monitor over a reader that answers for the agents alone.
+private func agentMonitor(
+    _ read: @escaping @Sendable (Date) -> AgentProcessReading
+) -> AgentProcessMonitor {
+    AgentProcessMonitor(sweep: { now, _ in AgentProcessSweep(agents: read(now), apps: nil) })
+}
+
 /// The series behind the chart.
 final class AgentProcessMonitorTests: XCTestCase {
     func testNoSweepYetIsNotAReadingOfNothing() async {
-        let monitor = AgentProcessMonitor { _ in reading(0) }
+        let monitor = agentMonitor { _ in reading(0) }
         XCTAssertNil(monitor.currentMemory(), "a monitor that has not swept claimed a reading")
     }
 
     func testASweepPublishesTheReadingAndItsFirstSample() async {
-        let monitor = AgentProcessMonitor { _ in reading(1024) }
+        let monitor = agentMonitor { _ in reading(1024) }
         await monitor.sampleOnce {}
         let published = monitor.currentMemory()
         XCTAssertEqual(published?.current.footprint, 1024)
@@ -116,7 +123,7 @@ final class AgentProcessMonitorTests: XCTestCase {
 
     func testTheSeriesKeepsItsOrderOldestFirst() async {
         let counter = Counter()
-        let monitor = AgentProcessMonitor { _ in reading(counter.next()) }
+        let monitor = agentMonitor { _ in reading(counter.next()) }
         for _ in 0..<3 { await monitor.sampleOnce {} }
         XCTAssertEqual(monitor.currentMemory()?.samples, [1, 2, 3])
     }
@@ -125,14 +132,14 @@ final class AgentProcessMonitorTests: XCTestCase {
     func testThePeakSurvivesADipInTheCurrentReading() async {
         let values: [UInt64] = [10, 900, 20]
         let counter = Counter(values)
-        let monitor = AgentProcessMonitor { _ in reading(counter.next()) }
+        let monitor = agentMonitor { _ in reading(counter.next()) }
         for _ in values.indices { await monitor.sampleOnce {} }
         XCTAssertEqual(monitor.currentMemory()?.current.footprint, 20)
         XCTAssertEqual(monitor.currentMemory()?.peak, 900)
     }
 
     func testTheSeriesIsBounded() async {
-        let monitor = AgentProcessMonitor { _ in reading(1) }
+        let monitor = agentMonitor { _ in reading(1) }
         for _ in 0..<(AgentProcessMonitor.retainedSamples + 20) { await monitor.sampleOnce {} }
         XCTAssertEqual(monitor.currentMemory()?.samples.count, AgentProcessMonitor.retainedSamples)
     }
@@ -140,7 +147,7 @@ final class AgentProcessMonitorTests: XCTestCase {
     /// Two empty readings say the same thing, and rebuilding the frame for the
     /// second is work nobody asked for.
     func testAQuietMacCostsNoFrameAfterTheFirst() async {
-        let monitor = AgentProcessMonitor { _ in reading(0) }
+        let monitor = agentMonitor { _ in reading(0) }
         let frames = Counter()
         await monitor.sampleOnce { frames.bump() }
         await monitor.sampleOnce { frames.bump() }
@@ -149,7 +156,7 @@ final class AgentProcessMonitorTests: XCTestCase {
 
     func testAnAgentAppearingIsWorthAFrame() async {
         let counter = Counter([0, 512])
-        let monitor = AgentProcessMonitor { _ in reading(counter.next()) }
+        let monitor = agentMonitor { _ in reading(counter.next()) }
         let frames = Counter()
         await monitor.sampleOnce { frames.bump() }
         await monitor.sampleOnce { frames.bump() }
@@ -160,7 +167,7 @@ final class AgentProcessMonitorTests: XCTestCase {
     /// series would hand the next frame an hour of readings taken before the
     /// engine it belongs to was torn down.
     func testStoppingDropsTheSeries() async {
-        let monitor = AgentProcessMonitor { _ in reading(1024) }
+        let monitor = agentMonitor { _ in reading(1024) }
         await monitor.sampleOnce {}
         await monitor.stop()
         XCTAssertNil(monitor.currentMemory())
@@ -172,7 +179,7 @@ final class AgentProcessMonitorTests: XCTestCase {
     func testTheSumsCountOnlyWhatEachSweepAdds() async {
         let started = Date(timeIntervalSince1970: 1_000)
         let cpu = Counter([100, 130, 175])
-        let monitor = AgentProcessMonitor { now in
+        let monitor = agentMonitor { now in
             let seconds = cpu.next()
             return AgentProcessReading(
                 observedAt: now,
@@ -197,7 +204,7 @@ final class AgentProcessMonitorTests: XCTestCase {
     /// stretch being counted, so all of it counts.
     func testAnAgentStartedSinceTheLastSweepCountsWhole() async {
         let sweeps = Counter()
-        let monitor = AgentProcessMonitor { now in
+        let monitor = agentMonitor { now in
             guard sweeps.next() > 1 else { return AgentProcessReading(observedAt: now, agents: []) }
             return AgentProcessReading(
                 observedAt: now,
@@ -218,7 +225,7 @@ final class AgentProcessMonitorTests: XCTestCase {
     /// one's counters going backwards.
     func testAReusedPidDoesNotInheritItsPredecessor() async {
         let sweeps = Counter()
-        let monitor = AgentProcessMonitor { now in
+        let monitor = agentMonitor { now in
             let sweep = sweeps.next()
             return AgentProcessReading(
                 observedAt: now,

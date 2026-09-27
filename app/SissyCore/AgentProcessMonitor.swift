@@ -80,6 +80,10 @@ actor AgentProcessMonitor {
     static let quietFrameInterval: TimeInterval = 60
 
     nonisolated private let published = LockedValue<AgentMemoryReading?>(nil)
+    nonisolated private let publishedApps = LockedValue<MacHeaviestApps?>(nil)
+    /// Whether each sweep also groups the rest of this user's processes by
+    /// app, which only the Mac module reads.
+    private var measuresApps = false
     private var samples: [UInt64] = []
     private var perAgent: [[AgentProcess.Key: AgentSample]] = []
     private var firstSampleAt: Date?
@@ -93,8 +97,8 @@ actor AgentProcessMonitor {
     private var energyTotal: UInt64 = 0
     private var pollTask: Task<Void, Never>?
     /// Injected by a test, so a round can be asserted without the kernel's own
-    /// process table under it.
-    private let read: @Sendable (Date) -> AgentProcessReading
+    /// process table under it. Told whether to measure the apps as well.
+    private let sweep: @Sendable (Date, Bool) -> AgentProcessSweep
     /// Turns each agent's working directory into the repository it belongs to.
     ///
     /// The monitor's rather than the reader's, because it is the same question
@@ -113,10 +117,12 @@ actor AgentProcessMonitor {
     private let projects: ProjectResolver
 
     init(
-        read: @escaping @Sendable (Date) -> AgentProcessReading = AgentProcessReader.read,
+        sweep: @escaping @Sendable (Date, Bool) -> AgentProcessSweep = {
+            AgentProcessReader.sweep(now: $0, measuringApps: $1)
+        },
         ledger: ProjectLedger = ProjectLedger()
     ) {
-        self.read = read
+        self.sweep = sweep
         self.projects = ProjectResolver(ledger: ledger)
     }
 
@@ -126,6 +132,18 @@ actor AgentProcessMonitor {
     /// running" — the panel words them differently, because a dash and a zero
     /// are different claims.
     nonisolated func currentMemory() -> AgentMemoryReading? { published.load() }
+
+    /// The heaviest apps the last sweep found, nil while nothing asked for
+    /// them or before a sweep has.
+    nonisolated func currentApps() -> MacHeaviestApps? { publishedApps.load() }
+
+    /// Asks the sweeps from here on to measure the apps too, or stops them.
+    /// Stopping drops what was published, so a module switched off carries no
+    /// reading into the next frame.
+    func setMeasuresApps(_ enabled: Bool) {
+        measuresApps = enabled
+        if !enabled { publishedApps.store(nil) }
+    }
 
     /// Starts sampling. `onRefresh` fires when the reading is worth a frame,
     /// which a Mac with no agents on it mostly is not: two empty readings in a
@@ -154,14 +172,18 @@ actor AgentProcessMonitor {
         lastSweepAt = nil
         cpuTotal = 0
         energyTotal = 0
+        measuresApps = false
         published.store(nil)
+        publishedApps.store(nil)
     }
 
     /// One sweep. Internal rather than private so a test can run exactly one
     /// and assert on what it published, instead of waiting on the scheduler.
     func sampleOnce(onRefresh: @Sendable @escaping () async -> Void) async {
         let now = Date()
-        var reading = read(now)
+        let result = sweep(now, measuresApps)
+        publishedApps.store(measuresApps ? result.apps : nil)
+        var reading = result.agents
         reading.attributeProjects(by: projects.project(for:))
         accrue(&reading, at: now)
         let previous = published.load()
