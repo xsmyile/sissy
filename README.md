@@ -12,10 +12,10 @@ went, what the sessions running now are holding, and what you pushed: all read
 from the logs already on your Mac and the services you connect. No account of
 its own, no telemetry, nothing to grant at first launch.
 
-[![Release](https://img.shields.io/github/v/release/xsmyile/sissy?style=flat-square&color=black)](../../releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/xsmyile/sissy/ci.yml?branch=master&style=flat-square&color=black&label=ci)](../../actions/workflows/ci.yml)
-[![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square)](#install)
-[![License](https://img.shields.io/github/license/xsmyile/sissy?style=flat-square&color=black)](./LICENSE)
+[![Release](https://img.shields.io/github/v/release/xsmyile/sissy?style=flat-square&color=blue)](../../releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/xsmyile/sissy/ci.yml?branch=master&style=flat-square&label=ci&logo=githubactions&logoColor=white)](../../actions/workflows/ci.yml)
+[![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple&logoColor=white)](#install)
+[![License](https://img.shields.io/github/license/xsmyile/sissy?style=flat-square&color=green)](./LICENSE)
 
 [Install](#install) • [What it shows](#what-it-shows) • [What it reads](#what-it-reads) • [Privacy](#privacy) • [Uninstall](#uninstall) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build](#build-from-source)
 
