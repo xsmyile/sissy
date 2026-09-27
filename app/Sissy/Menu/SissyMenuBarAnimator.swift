@@ -57,7 +57,7 @@ final class SissyMenuBarAnimator {
     /// she was rather than losing the blink with the tint, which is the part
     /// worth keeping of the two.
     private let lit: LitFrames?
-    private let eyeOverlay: SissyEyeOverlay?
+    private let eyeOverlay: SissyOverlay?
 
     /// The body a lit eye sits on, beside the eye itself. They are one value
     /// because a frame drawn from one and not the other is the fringe the
@@ -110,7 +110,7 @@ final class SissyMenuBarAnimator {
             lit = nil
             NSLog("sissy: eye tint unavailable: %@", error.localizedDescription)
         }
-        eyeOverlay = lit == nil ? nil : SissyEyeOverlay.installed(on: button)
+        eyeOverlay = lit == nil ? nil : SissyOverlay.installed(on: button, tint: SissyArtwork.holdTint)
         self.button = button
         self.reduceMotion = reduceMotion
         drawResting()
