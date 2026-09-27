@@ -96,6 +96,9 @@ struct UsagePanelView: View {
         /// level in from the agents door on the Overview's providers label, the
         /// only door to it, drawn whether or not anything is running.
         case stats
+        /// What the Mac itself is answering, one level in from the Overview's
+        /// Mac line, which is drawn only while there is a reading to open.
+        case mac
     }
 
     /// Cadence for both readouts the panel keeps on its own clock: the
@@ -129,7 +132,7 @@ struct UsagePanelView: View {
     /// for a vendor whose Overview row is not per account.
     private var openAccount: String? {
         switch page {
-        case .overview, .identities, .stats: nil
+        case .overview, .identities, .stats, .mac: nil
         case .provider(_, let account), .services(_, let account),
             .effort(_, let account), .projects(_, let account):
             account
@@ -143,7 +146,7 @@ struct UsagePanelView: View {
         -> UsagePanelSnapshot.ProviderRow?
     {
         switch page {
-        case .overview, .identities, .stats: return nil
+        case .overview, .identities, .stats, .mac: return nil
         case .provider(let id, _), .services(let id, _), .effort(let id, _):
             return providers.first { $0.id == id }
         case .projects(let id, _):
@@ -280,6 +283,12 @@ struct UsagePanelView: View {
             identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt)
         case .stats:
             statsHeader(observedAt: live?.frame.agentMemory?.current.observedAt)
+        case .mac:
+            if let observedAt = live?.frame.mac?.observedAt {
+                macHeader(observedAt: observedAt)
+            } else {
+                header(live)
+            }
         }
     }
 
@@ -332,6 +341,8 @@ struct UsagePanelView: View {
             PanelIdentities(rows: snapshot.identities, focus: Self.identityFocus(target))
         case .stats:
             PanelStats(block: snapshot.agents)
+        case .mac:
+            macContent(snapshot: snapshot)
         }
     }
 
@@ -366,6 +377,16 @@ struct UsagePanelView: View {
         }
     }
 
+    /// The Mac page, or home once the module is switched off under it.
+    @ViewBuilder
+    private func macContent(snapshot: UsagePanelSnapshot) -> some View {
+        if let mac = snapshot.mac {
+            PanelMac(block: mac)
+        } else {
+            overview(snapshot)
+        }
+    }
+
     /// The panel's home, and what every page one level in falls back to once
     /// its own reading is gone.
     private func overview(_ snapshot: UsagePanelSnapshot) -> some View {
@@ -380,7 +401,8 @@ struct UsagePanelView: View {
             selectPeriod: { model.setUsagePeriod($0) },
             refreshingForge: model.engine.refreshingForge,
             refreshForge: { model.refreshForge($0) },
-            openStats: { page = .stats }
+            openStats: { page = .stats },
+            openMac: { page = .mac }
         )
     }
 
@@ -481,6 +503,34 @@ struct UsagePanelView: View {
             .foregroundStyle(.secondary)
             .glassEffect(.regular, in: .circle)
             .help("Count the running agents again")
+        }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 12)
+    }
+
+    /// The Mac page's own header: the way back, the title, and when the
+    /// figures were sampled.
+    ///
+    /// No refresh, which is what separates it from the agents header beside
+    /// it: the kernel's pressure publishes the moment it moves, so a press
+    /// could only ever re-read numbers with no colour of their own.
+    private func macHeader(observedAt: Date) -> some View {
+        HStack(spacing: 8) {
+            backButton(to: .overview, help: "Back to today")
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Mac")
+                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
+                    .lineLimit(1)
+                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+                    Text(UsageFormat.macReading(observedAt: observedAt, now: context.date))
+                        .font(.system(size: PanelMetrics.headlineMeta))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)

@@ -119,6 +119,51 @@ struct UsagePanelSnapshot: Equatable {
     /// What is running on this Mac right now, and what the archive has
     /// counted over the window the headline is showing.
     let agents: AgentsBlock
+    /// What the Mac itself is answering, nil with the module off and before
+    /// its first sample: the Overview then draws no line and the page has
+    /// nothing to open on.
+    let mac: MacBlock?
+
+    /// One reading with the level that colours it, nil where the reading
+    /// carries no level of its own.
+    struct MacFigure: Equatable {
+        let text: String
+        let level: MacHealthLevel?
+    }
+
+    /// The Mac's reading, worded for the Overview's line and the page behind
+    /// it.
+    ///
+    /// Only two figures carry a level, and each carries its own: the memory
+    /// the kernel's, the disk Sissy's grade of it against RAM. Swap, load and
+    /// uptime are words with no colour, on the rule `MacHealthReading` already
+    /// holds to, because neither has a threshold that is not a guess.
+    struct MacBlock: Equatable {
+        let observedAt: Date
+        /// `Memory normal`, or the dash where the kernel would not say.
+        let memory: MacFigure
+        /// The kernel's own step, which the page's track is filled up to.
+        let pressure: MacHealthLevel?
+        let freeMemory: String?
+        /// `77 GB free` alone, which is all of the disk the Overview's line
+        /// has room for. Nil until the first disk read.
+        let disk: MacFigure?
+        /// `0 B swap · 77 GB free`, the page's row, coloured by the disk.
+        let storage: MacFigure
+        let load: String
+        let uptime: String
+        /// Empty until the agent sweep has measured them once, and the page
+        /// then leaves the section out rather than heading an empty list.
+        let heaviest: [MacApp]
+    }
+
+    /// One of the heaviest apps, keyed by the path its processes were grouped
+    /// by.
+    struct MacApp: Equatable, Identifiable {
+        let id: String
+        let name: String
+        let footprint: String
+    }
 
     /// What a repository's commit identity is, as one row of the identities
     /// page.
@@ -862,7 +907,29 @@ struct UsagePanelSnapshot: Equatable {
             forge: makeForge(frame.forge, period: resolved, now: now),
             identities: makeIdentities(frame.identities),
             identityLine: makeIdentityLine(frame.identities),
-            agents: makeAgents(frame, now: now)
+            agents: makeAgents(frame, now: now),
+            mac: frame.mac.map(makeMac)
+        )
+    }
+
+    static func makeMac(_ reading: MacHealthReading) -> MacBlock {
+        let diskLevel = reading.diskLevel
+        return MacBlock(
+            observedAt: reading.observedAt,
+            memory: MacFigure(text: UsageFormat.macMemory(reading.pressure), level: reading.pressure),
+            pressure: reading.pressure,
+            freeMemory: reading.freeMemoryPercent.map(UsageFormat.macFreeMemory),
+            disk: reading.diskFree.map {
+                MacFigure(text: UsageFormat.macDiskFree($0), level: diskLevel)
+            },
+            storage: MacFigure(
+                text: UsageFormat.macStorage(swap: reading.swap, diskFree: reading.diskFree),
+                level: diskLevel),
+            load: UsageFormat.macLoad(reading.loadAverage, cores: reading.activeCores),
+            uptime: UsageFormat.uptime(reading.uptime),
+            heaviest: (reading.heaviest?.apps ?? []).map {
+                MacApp(id: $0.path, name: $0.name, footprint: UsageFormat.bytes($0.footprint))
+            }
         )
     }
 
