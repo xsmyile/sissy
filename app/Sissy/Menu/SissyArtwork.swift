@@ -129,19 +129,20 @@ enum SissyEye: Equatable {
     }
 }
 
-/// The lit eye, as a view over the status button's own image.
+/// A tinted layer over the status button's own image, cut from the same
+/// canvas as the silhouette so it lands where that canvas puts it.
 ///
 /// It refuses the hit test outright: a plain `NSImageView` answers for the
 /// pixels it covers, and the one thing sitting on the status button must never
 /// be the thing that swallows a click on it.
-final class SissyEyeOverlay: NSImageView {
+final class SissyOverlay: NSImageView {
     /// Centred and unscaled, which is how the button draws its own image, so
-    /// an eye cut from the same canvas lands on the eye it covers.
-    static func installed(on button: NSButton) -> SissyEyeOverlay {
-        let overlay = SissyEyeOverlay()
+    /// a layer cut from the same canvas lands on the ink it belongs to.
+    static func installed(on button: NSButton, tint: NSColor) -> SissyOverlay {
+        let overlay = SissyOverlay()
         overlay.imageScaling = .scaleNone
         overlay.imageAlignment = .alignCenter
-        overlay.contentTintColor = SissyArtwork.holdTint
+        overlay.contentTintColor = tint
         overlay.isHidden = true
         button.addSubview(overlay)
         return overlay

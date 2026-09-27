@@ -65,9 +65,9 @@ final class SissyAnimatorTests: XCTestCase {
         XCTAssertEqual(button.image?.isTemplate, true)
     }
 
-    private func eyeOverlay(on button: NSButton, line: UInt = #line) throws -> SissyEyeOverlay {
+    private func eyeOverlay(on button: NSButton, line: UInt = #line) throws -> SissyOverlay {
         try XCTUnwrap(
-            button.subviews.compactMap { $0 as? SissyEyeOverlay }.first,
+            button.subviews.compactMap { $0 as? SissyOverlay }.first,
             "the animator installed no eye overlay",
             line: line
         )
@@ -219,7 +219,7 @@ final class SissyAnimatorTests: XCTestCase {
             withExtendedLifetime(animator) {}
         }
 
-        XCTAssertTrue(button.subviews.compactMap { $0 as? SissyEyeOverlay }.isEmpty)
+        XCTAssertTrue(button.subviews.compactMap { $0 as? SissyOverlay }.isEmpty)
     }
 
     /// Both poses and all 24 frames need both halves of the split, and the one
