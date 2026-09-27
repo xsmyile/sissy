@@ -317,23 +317,9 @@ struct UsagePanelView: View {
                 overview(snapshot)
             }
         case .services:
-            if let open = readings.open, let services = readings.services {
-                PanelProviderStatusPage(provider: open.id, row: services)
-            } else if let open = readings.open {
-                providerPage(open, live: live)
-            } else {
-                overview(snapshot)
-            }
+            servicesContent(snapshot: snapshot, live: live, readings: readings)
         case .effort:
-            if let open = readings.open {
-                PanelEffortPage(
-                    provider: open.id, today: open.effort,
-                    loadHistory: {
-                        await model.engine.usageHistorySeries(provider: $0)
-                    })
-            } else {
-                overview(snapshot)
-            }
+            effortContent(snapshot: snapshot, readings: readings)
         case .projects:
             if let projects = readings.projects {
                 PanelProjectsPage(
@@ -346,6 +332,37 @@ struct UsagePanelView: View {
             PanelIdentities(rows: snapshot.identities, focus: Self.identityFocus(target))
         case .stats:
             PanelStats(block: snapshot.agents)
+        }
+    }
+
+    /// The services page, or the provider page once the reading it was
+    /// opened on is gone, or home once the provider is too.
+    @ViewBuilder
+    private func servicesContent(
+        snapshot: UsagePanelSnapshot, live: SissyModel.LiveFrame?, readings: PageReadings
+    ) -> some View {
+        if let open = readings.open, let services = readings.services {
+            PanelProviderStatusPage(provider: open.id, row: services)
+        } else if let open = readings.open {
+            providerPage(open, live: live)
+        } else {
+            overview(snapshot)
+        }
+    }
+
+    /// The effort page, or home once its provider has left the frame.
+    @ViewBuilder
+    private func effortContent(snapshot: UsagePanelSnapshot, readings: PageReadings)
+        -> some View
+    {
+        if let open = readings.open {
+            PanelEffortPage(
+                provider: open.id, today: open.effort,
+                loadHistory: {
+                    await model.engine.usageHistorySeries(provider: $0)
+                })
+        } else {
+            overview(snapshot)
         }
     }
 
