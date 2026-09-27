@@ -452,7 +452,7 @@ an `LSUIElement` app has no Dock icon and no ⌘-Tab entry to come back through 
 and the control that opens it is never disabled, a second press bringing the
 existing window forward rather than opening a second one.
 
-**The panel is six pages behind one popover.** `UsagePanelView.Page` is the
+**The panel is seven pages behind one popover.** `UsagePanelView.Page` is the
 enum, and the `switch` on it is the whole implementation of the rule that only
 the selected page exists — a `TabView` would hold every page's view graph live,
 which is precisely the cost `UsagePanelController` drops its host on close to
@@ -460,9 +460,9 @@ avoid.
 
 `Panel/PanelOverview.swift` answers what the selected window cost and whether
 there is room to keep working: the cost, one row per account carrying the window
-that binds, what the agents running now are holding, the projects, a row per
-connected forge, and — only when there is one — a repository committing under a
-name its forge does not expect. The headline is over a period the user picks
+that binds, what the agents running now are holding, the Mac's own memory and
+disk, the projects, a row per connected forge, and — only when there is one — a
+repository committing under a name its forge does not expect. The headline is over a period the user picks
 (`UsagePeriod`: today, 7d, 30d, all), persisted in `preferences.json` because it
 changes what is rendered and nothing about what is metered; the frame carries
 every window at once so switching costs no round trip to the engine. Today is
@@ -471,7 +471,15 @@ the tail's flush. It replaced a fixed 7-day line at the foot of the Overview,
 which included today without saying so: measured 2026-09-15, 24.7% of that line
 was the headline above it.
 
-Six pages sit one level in from it:
+The sections below the headline are `PanelModule`, walked in its own order, and
+`.mac` sits straight under the providers because it answers their question on
+the other axis that stops work now. It is one row in the identity line's shape
+— `Mac`, then `Memory normal · 77 GB free` and a chevron — drawn exactly while
+the frame carries a `MacHealthReading`, so the module switched off or not yet
+sampled is no line at all. The memory and the disk each wear their own level:
+secondary at normal, orange at warn, red and semibold at critical.
+
+Seven pages sit one level in from it:
 
 | Page | File | Answers |
 |---|---|---|
@@ -481,13 +489,14 @@ Six pages sit one level in from it:
 | `.projects` | `PanelProjectsPage.swift` | every repository the day names rather than the folded three, with the unattributed remainder as a line at the foot rather than a row in the list |
 | `.identities` | `PanelIdentities.swift` | which repositories commit under a name their forge does not expect, findings on the page and the rest behind a disclosure |
 | `.stats` | `PanelStats.swift` | what is running now, and over a window of its own how many sessions and agents have run and how long the day was worked |
+| `.mac` | `PanelMac.swift` | the kernel's memory pressure on its three steps with the free share, swap and disk, load against the cores and uptime, then the three heaviest apps besides the agents; fixed in height, and a dash where the kernel would not say rather than a `normal` nobody measured |
 
 `.provider`, `.services`, `.effort` and `.projects` carry the account they were opened
 from, so the way back lands on the page that was left rather than on that
 vendor's first account. `.identities` carries the repository it was opened
-about instead, and `.stats` carries nothing: its window is its own, local to
-the page, because sharing the headline's moved the money figure behind the
-user's back.
+about instead, and `.stats` and `.mac` carry nothing: the agents page's window
+is its own, local to the page, because sharing the headline's moved the money
+figure behind the user's back, and the Mac page has no choice on it at all.
 
 There is no footer: the age of the reading sits under the header's title, where
 it dates the numbers beside it, and the way into Settings sits beside the

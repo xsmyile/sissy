@@ -1488,7 +1488,13 @@ extension UsageFormat {
     /// which of its minutes were spent on a turn, and an agent left open
     /// overnight has been up for twelve hours and working for none of them.
     static func agentUptime(since started: Date, now: Date = Date()) -> String {
-        let seconds = max(now.timeIntervalSince(started), 0)
+        uptime(now.timeIntervalSince(started))
+    }
+
+    /// A span something has been up for, on `agentUptime`'s grain, which is
+    /// the Mac's own uptime's too: `10d 17h` reads the same on both pages.
+    static func uptime(_ interval: TimeInterval) -> String {
+        let seconds = max(interval, 0)
         let minutes = Int(seconds / 60)
         if minutes < 60 { return "\(minutes)m" }
         let hours = minutes / 60
@@ -1926,4 +1932,85 @@ extension UsageFormat {
         let window = period == .all ? "all time" : periodLabel(period).lowercased()
         return "Contributions · " + window
     }
+}
+
+// MARK: Mac
+
+extension UsageFormat {
+    /// A level as the Mac page and the Overview's line word it, in the
+    /// kernel's own three steps, and the panel's dash where the kernel would
+    /// not say: an unread pressure is not a normal one.
+    static func macLevel(_ level: MacHealthLevel?) -> String {
+        switch level {
+        case .normal: "normal"
+        case .warn: "warn"
+        case .critical: "critical"
+        case nil: "—"
+        }
+    }
+
+    /// `Memory normal`, the lead of the Overview's line and the page's
+    /// headline.
+    static func macMemory(_ pressure: MacHealthLevel?) -> String {
+        "Memory " + macLevel(pressure)
+    }
+
+    /// `75% free`, the kernel's own share, under the headline.
+    static func macFreeMemory(_ percent: Int) -> String {
+        "\(percent)% free"
+    }
+
+    /// Bytes at the grain a disk and a swap file are read at: whole
+    /// gigabytes from ten up, one decimal under it, whole megabytes under
+    /// one, and `0 B` for none at all.
+    ///
+    /// Not `bytes`, whose two decimals are for a footprint sitting beside
+    /// Activity Monitor's: `77.00 GB free` claims a precision a volume that
+    /// moves by the gigabyte as swap grows does not have, and `0 KB swap`
+    /// reads as a small amount rather than none. Base ten for `bytes`'s
+    /// reason, which is also Finder's.
+    static func storage(_ bytes: UInt64) -> String {
+        let value = Double(bytes)
+        if bytes == 0 { return "0 B" }
+        if value >= storageWholeGigabytes * bytesPerGigabyte {
+            return String(format: "%.0f GB", value / bytesPerGigabyte)
+        }
+        if value >= bytesPerGigabyte {
+            return String(format: "%.1f GB", value / bytesPerGigabyte)
+        }
+        return String(format: "%.0f MB", value / bytesPerMegabyte)
+    }
+
+    /// `77 GB free`, what the home volume has left.
+    static func macDiskFree(_ free: Int64) -> String {
+        storage(UInt64(max(free, 0))) + " free"
+    }
+
+    /// `0 B swap · 77 GB free`, the two readings that eat into each other,
+    /// with whichever the kernel answered, and a dash where it answered
+    /// neither.
+    static func macStorage(swap: MacSwapUsage?, diskFree: Int64?) -> String {
+        let parts = [swap.map { storage($0.used) + " swap" }, diskFree.map(macDiskFree)]
+            .compactMap { $0 }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    }
+
+    /// `3.0 on 12 cores`: the one-minute average beside what it is out of,
+    /// because a load means nothing without the cores it is spread over and
+    /// Sissy puts no threshold on it.
+    static func macLoad(_ load: MacLoadAverage?, cores: Int) -> String {
+        guard let load else { return "—" }
+        return String(format: "%.1f", load.one) + " on \(cores) "
+            + (cores == 1 ? "core" : "cores")
+    }
+
+    /// What the Mac page's header says under its title: when the figures on
+    /// it were sampled.
+    static func macReading(observedAt: Date, now: Date) -> String {
+        "sampled " + age(now.timeIntervalSince(observedAt))
+    }
+
+    private static let bytesPerGigabyte: Double = 1_000_000_000
+    private static let bytesPerMegabyte: Double = 1_000_000
+    private static let storageWholeGigabytes: Double = 10
 }

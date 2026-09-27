@@ -4,10 +4,14 @@ import SwiftUI
 /// draw. `PanelOverview.body` walks `visible(in:)` rather than listing the
 /// sections by hand, so this is the one place order and presence are decided
 /// — a case added here without a matching `PanelOverview.section` fails to
-/// compile, and a following change that adds a `.mac` case has one place to
-/// touch rather than two.
+/// compile.
+///
+/// `mac` sits straight under the providers because it answers their question
+/// on the other axis that stops work now: whether there is room to keep
+/// working, in memory and disk rather than in a rate limit.
 enum PanelModule: CaseIterable, Hashable {
     case providers
+    case mac
     case projects
     case identities
     case forge
@@ -15,7 +19,9 @@ enum PanelModule: CaseIterable, Hashable {
     /// The modules this snapshot has anything to draw for, in the enum's own
     /// order. `providers` and `identities` always answer for something;
     /// `projects` and `forge` carry a list that can be empty, and an empty
-    /// section costs a `Divider` for nothing.
+    /// section costs a `Divider` for nothing. `mac` is there exactly while the
+    /// frame carries a reading: switched off, or not sampled yet, there is no
+    /// line rather than a line saying so.
     static func visible(in snapshot: UsagePanelSnapshot) -> [Self] {
         allCases.filter { $0.isVisible(in: snapshot) }
     }
@@ -23,6 +29,7 @@ enum PanelModule: CaseIterable, Hashable {
     private func isVisible(in snapshot: UsagePanelSnapshot) -> Bool {
         switch self {
         case .providers, .identities: return true
+        case .mac: return snapshot.mac != nil
         case .projects: return !snapshot.projects.isEmpty
         case .forge: return !snapshot.forge.isEmpty
         }
@@ -70,6 +77,7 @@ struct PanelOverview: View {
     /// Opens the stats page. The providers label it hangs off is the only way
     /// there, so that label is drawn on every frame, rows or none.
     let openStats: () -> Void
+    let openMac: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -88,6 +96,8 @@ struct PanelOverview: View {
         switch module {
         case .providers:
             providers
+        case .mac:
+            if let mac = snapshot.mac { macLine(mac) }
         case .projects:
             projects
         case .identities:
@@ -95,6 +105,46 @@ struct PanelOverview: View {
         case .forge:
             forge
         }
+    }
+
+    // MARK: Mac
+
+    /// The door to the Mac page, in the identity line's shape: a label, a
+    /// reading at the end of it, and a chevron, one row high whatever the Mac
+    /// is doing.
+    ///
+    /// The memory and the disk each wear their own level, so a full disk
+    /// under a kernel reporting normal reads as exactly that rather than
+    /// turning the word `normal` orange.
+    private func macLine(_ mac: UsagePanelSnapshot.MacBlock) -> some View {
+        Button(action: openMac) {
+            HStack(spacing: 6) {
+                SectionLabel(text: "Mac")
+                Spacer(minLength: 8)
+                Self.macReading(mac)
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help("Show the Mac's memory, swap and disk")
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.vertical, 10)
+    }
+
+    /// The memory and the disk as one `Text`, by interpolation for the reason
+    /// `gaugeReading` gives.
+    private static func macReading(_ mac: UsagePanelSnapshot.MacBlock) -> Text {
+        let memory = MacLevelStyle.text(mac.memory)
+        guard let disk = mac.disk else { return memory }
+        let separator = Text(" · ").foregroundStyle(.secondary)
+        return Text("\(memory)\(separator)\(MacLevelStyle.text(disk))")
     }
 
     // MARK: Identities
