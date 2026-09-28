@@ -65,7 +65,7 @@ struct PanelSessions: View {
     private static let stripHeight: CGFloat = 8
     private static let stripSpacing: CGFloat = 5
     private static let stripCorner: CGFloat = 2
-    /// Where an agent's load is worth the row's one colour: most of a core,
+    /// Where a session's load is worth the row's one colour: most of a core,
     /// held for a whole sweep, which a session waiting on its user never
     /// spends. The figure is written whatever it is; only the colour waits.
     private static let busyLoad: Double = 0.8
@@ -472,14 +472,14 @@ struct PanelSessions: View {
     }
 }
 
-/// The retained hour, split by agent and stacked, the dearest at the axis.
+/// The retained hour, split by session and stacked, the dearest at the axis.
 ///
 /// **Filled, where the single line it replaced was not.** A fill under one
 /// series that hovers near its own peak shades most of the box and reads as a
 /// quantity instead of a shape; here the fill *is* the reading, because what
 /// the chart answers that the line could not is whose the memory was.
 ///
-/// **One hue in steps, never a colour per project.** Eight agents in three
+/// **One hue in steps, never a colour per project.** Eight sessions in three
 /// repositories would repeat a project's colour across bands and read as one
 /// series; a step of the accent per standing row and grey for the rest is the
 /// list's own order drawn, and it is the colour each row's lane carries.
@@ -495,7 +495,7 @@ struct AgentMemoryChart: View {
     private static let axisSize: CGFloat = 9.5
     /// Opacity of the accent for each standing band, dearest first: one step
     /// per row the list can draw without folding, which is
-    /// `processRowLimit` — six when exactly six agents run.
+    /// `processRowLimit` — six when exactly six sessions run.
     nonisolated static let bandOpacities: [Double] = [1, 0.78, 0.6, 0.45, 0.33, 0.24]
     private static let restOpacity: Double = 0.2
     private static let cursorOpacity: Double = 0.5
@@ -590,13 +590,13 @@ struct AgentMemoryChart: View {
     }
 }
 
-/// One agent's hour, as a strip of cells whose depth is its CPU.
+/// One session's hour, as a strip of cells whose depth is its CPU.
 ///
 /// The same hour the chart above draws, compressed into the row, so a row
-/// says whether its agent is working or has sat open and idle for half of
+/// says whether its session is working or has sat open and idle for half of
 /// it: memory says what a session holds, and only the load says whether it
-/// is doing anything with it. A cell before the agent started is not drawn,
-/// because an agent that did not exist yet did not idle.
+/// is doing anything with it. A cell before the session started is not
+/// drawn, because a session that did not exist yet did not idle.
 struct CPULane: View {
     let lane: [Double?]
     let tint: Color
@@ -631,7 +631,7 @@ struct CPULane: View {
         .accessibilityHidden(true)
     }
 
-    /// The mean load over one cell's samples, nil where the agent was not
+    /// The mean load over one cell's samples, nil where the session was not
     /// running in any of them.
     private func load(of cell: Int) -> Double? {
         guard !lane.isEmpty else { return nil }

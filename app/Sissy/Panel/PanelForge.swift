@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Git tab: what was pushed to each connected forge, and whether every
+/// The Forge tab: what was pushed to each connected forge, and whether every
 /// repository commits under the name its forge expects.
 ///
 /// **One tab for both, because both are about repositories and neither is
@@ -66,7 +66,7 @@ struct PanelForge: View {
 /// repository whenever there is only one, because naming it is the whole of
 /// the remaining work.
 ///
-/// **On the Git tab once a forge is connected, under the projects before.**
+/// **On the Forge tab once a forge is connected, under the projects before.**
 /// It answers for every repository Sissy knows whether or not a forge is
 /// connected, so it does not wait for one; and it is not a badge per project
 /// row, which would be the decorative signal on the cost axis the panel
