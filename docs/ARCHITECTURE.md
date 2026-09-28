@@ -458,7 +458,7 @@ and the control that opens it is never disabled, a second press bringing the
 existing window forward rather than opening a second one.
 
 **The panel is a tab per module, and five pages one level in from them.**
-`PanelTab` is Usage, Sessions, Mac and Forge, and `UsagePanelView.Page` is the pages; the
+`PanelTab` is Usage, Sessions, Mac, Disk and Forge, and `UsagePanelView.Page` is the pages; the
 `switch` on each is the whole implementation of the rule that only the
 selected surface exists — a `TabView` would hold every tab's view graph live,
 which is precisely the cost `UsagePanelController` drops its host on close to
