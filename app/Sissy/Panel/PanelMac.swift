@@ -45,8 +45,9 @@ enum MacLevelStyle {
 /// under the pointer as the samples land.
 ///
 /// **A tab rather than a page one level in**, as of the panel's tabs: the
-/// memory headline leads it on the popover itself, the way the day's cost
-/// leads Usage, and the figures under it stand on platters. How old the
+/// memory headline leads the first platter, above the pressure-steps track
+/// it captions, since the steps are the same reading drawn as a bar — no
+/// content sits flat under the tab bar, as of 2026-09-28. How old the
 /// sample is rides the caption under the headline, since the header above
 /// belongs to the whole panel and dates the usage reading.
 ///
@@ -66,29 +67,26 @@ struct PanelMac: View {
     private static let trackOpacity: Double = 0.15
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            headline
-            VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
-                PanelGroup {
-                    VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
-                        track
-                        Divider()
-                        VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                            row(
-                                "Swap and disk",
-                                value: MacLevelStyle.text(block.storage, resting: .primary))
-                            row("Load", value: Text(block.load))
-                            row("Up", value: Text(block.uptime))
-                        }
+        VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
+            PanelGroup {
+                VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
+                    headline
+                    track
+                    Divider()
+                    VStack(alignment: .leading, spacing: Self.rowSpacing) {
+                        row(
+                            "Swap and disk",
+                            value: MacLevelStyle.text(block.storage, resting: .primary))
+                        row("Load", value: Text(block.load))
+                        row("Up", value: Text(block.uptime))
                     }
                 }
-                if !block.heaviest.isEmpty {
-                    heaviestSection(block.heaviest)
-                }
             }
-            .padding(.horizontal, PanelMetrics.platterInset)
-            .padding(.bottom, PanelMetrics.platterInset)
+            if !block.heaviest.isEmpty {
+                heaviestSection(block.heaviest)
+            }
         }
+        .padding(PanelMetrics.platterInset)
     }
 
     // MARK: Memory
@@ -108,9 +106,6 @@ struct PanelMac: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.top, PanelMetrics.headlineTop)
-        .padding(.bottom, PanelMetrics.headlineBottom)
     }
 
     private func caption(now: Date) -> String {
