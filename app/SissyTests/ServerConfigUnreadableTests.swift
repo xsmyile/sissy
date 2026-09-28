@@ -90,6 +90,7 @@ final class ServerConfigUnreadableTests: XCTestCase {
         config.remotePricing = false
         config.macHealth = false
         config.disk = false
+        config.network = false
         config.statusChecks = false
         return UsageEngine(
             config: config,

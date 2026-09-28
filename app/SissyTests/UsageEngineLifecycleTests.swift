@@ -32,6 +32,7 @@ final class UsageEngineLifecycleTests: XCTestCase {
         config.remotePricing = false
         config.macHealth = false
         config.disk = false
+        config.network = false
         return UsageEngine(
             config: config,
             configURL: tempDir.appendingPathComponent("server.json"),

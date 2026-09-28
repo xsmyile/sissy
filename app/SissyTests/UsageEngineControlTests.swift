@@ -59,6 +59,7 @@ final class UsageEngineControlTests: XCTestCase {
         config.keepAwake = keepAwake
         config.macHealth = macHealth
         config.disk = disk
+        config.network = false
         return UsageEngine(
             config: config,
             configURL: configURL,
