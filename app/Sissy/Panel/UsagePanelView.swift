@@ -106,10 +106,6 @@ struct UsagePanelView: View {
         /// repository the Overview's line names — and nil where it was opened
         /// to read the whole list.
         case identities(focus: String?)
-        /// How many agents have run and what the ones running now hold, one
-        /// level in from the agents door on the Overview's providers label, the
-        /// only door to it, drawn whether or not anything is running.
-        case stats
     }
 
     /// Cadence for both readouts the panel keeps on its own clock: the
@@ -143,7 +139,7 @@ struct UsagePanelView: View {
     /// for a vendor whose Overview row is not per account.
     private var openAccount: String? {
         switch page {
-        case .overview, .identities, .stats: nil
+        case .overview, .identities: nil
         case .provider(_, let account), .services(_, let account),
             .effort(_, let account), .projects(_, let account):
             account
@@ -157,7 +153,7 @@ struct UsagePanelView: View {
         -> UsagePanelSnapshot.ProviderRow?
     {
         switch page {
-        case .overview, .identities, .stats: return nil
+        case .overview, .identities: return nil
         case .provider(let id, _), .services(let id, _), .effort(let id, _):
             return providers.first { $0.id == id }
         case .projects(let id, _):
@@ -302,8 +298,6 @@ struct UsagePanelView: View {
             }
         case .identities:
             identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt)
-        case .stats:
-            statsHeader(observedAt: live?.frame.agentMemory?.current.observedAt)
         }
     }
 
@@ -333,7 +327,7 @@ struct UsagePanelView: View {
     ) -> some View {
         switch target {
         case .overview:
-            home(snapshot)
+            home(snapshot, live: live)
         case .provider:
             if let open = readings.open {
                 providerPage(open, live: live)
@@ -354,8 +348,6 @@ struct UsagePanelView: View {
             }
         case .identities:
             PanelIdentities(rows: snapshot.identities, focus: Self.identityFocus(target))
-        case .stats:
-            PanelStats(block: snapshot.agents)
         }
     }
 
@@ -395,17 +387,23 @@ struct UsagePanelView: View {
     /// moves the selection back on the next pass; this is what draws until it
     /// does.
     @ViewBuilder
-    private func home(_ snapshot: UsagePanelSnapshot) -> some View {
+    private func home(_ snapshot: UsagePanelSnapshot, live: SissyModel.LiveFrame?) -> some View {
         switch tab {
         case .usage:
             overview(snapshot)
+        case .sessions:
+            PanelStats(
+                block: snapshot.agents,
+                observedAt: live?.frame.agentMemory?.current.observedAt,
+                refreshing: model.engine.refreshingAgents,
+                refresh: { model.engine.refreshAgentProcesses() })
         case .mac:
             if let mac = snapshot.mac {
                 PanelMac(block: mac)
             } else {
                 overview(snapshot)
             }
-        case .git:
+        case .forge:
             PanelGit(
                 snapshot: snapshot,
                 refreshingForge: model.engine.refreshingForge,
@@ -425,8 +423,7 @@ struct UsagePanelView: View {
             openProvider: { page = .provider($0, account: $1) },
             openProjects: { page = .projects(nil, account: nil) },
             openIdentities: { page = .identities(focus: $0) },
-            selectPeriod: { model.setUsagePeriod($0) },
-            openStats: { page = .stats }
+            selectPeriod: { model.setUsagePeriod($0) }
         )
     }
 
@@ -474,62 +471,6 @@ struct UsagePanelView: View {
     static func identityFocus(_ page: Page) -> String? {
         guard case .identities(let focus) = page else { return nil }
         return focus
-    }
-
-    /// The agents page's own header: the way back, the title, and a re-count.
-    ///
-    /// The button reaches the process sweep and not the counts: those come off
-    /// the tail as turns land, where the sweep is on a 15 s clock and a user
-    /// who has just closed three sessions is looking at a figure that is right
-    /// and reads as wrong.
-    private func statsHeader(observedAt: Date?) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                page = .overview
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: Self.backButtonSize, height: Self.backButtonSize)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help(homeHelp)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Agents")
-                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
-                    .lineLimit(1)
-                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
-                    if let line = UsageFormat.agentsReading(
-                        observedAt: observedAt, refreshing: model.engine.refreshingAgents,
-                        now: context.date)
-                    {
-                        Text(line)
-                            .font(.system(size: PanelMetrics.headlineMeta))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            Button {
-                model.engine.refreshAgentProcesses()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
-                    .contentShape(.circle)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .glassEffect(.regular, in: .circle)
-            .help("Count the running agents again")
-        }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 
     /// The identities page's own header: the way back, the title, when the

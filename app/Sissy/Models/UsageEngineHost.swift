@@ -85,7 +85,7 @@ final class UsageEngineHost {
     private(set) var refreshingForge: Set<String> = []
     /// Whether the identities page's re-read is in flight, for its header.
     private(set) var refreshingIdentities = false
-    /// Whether the agents page's recount is in flight, for its header.
+    /// Whether the Sessions tab's recount is in flight, for its `Now` label.
     private(set) var refreshingAgents = false
 
     /// How long a refresh stays visible at the least.
@@ -771,7 +771,7 @@ final class UsageEngineHost {
 
     @ObservationIgnored private var identityRefresh: Task<Void, Never>?
 
-    /// Counts the running agents again, for the agents page's own button.
+    /// Counts the running agents again, for the Sessions tab's own button.
     ///
     /// One task at a time for the reason above, though the sweep is 1.2 ms
     /// rather than a process per repository: two in flight would publish two

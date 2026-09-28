@@ -32,11 +32,12 @@ enum MacLevelStyle {
 }
 
 /// What the Mac itself is answering: the kernel's memory pressure and what
-/// sits under it, and the apps holding the most besides the agents.
+/// sits under it, and the apps holding the most besides the sessions.
 ///
-/// **A page of its own rather than rows on the agents page**, which answers
+/// **A tab of its own rather than rows on the Sessions tab**, which answers
 /// what the CLIs are holding. This answers whether the Mac can keep up, and a
-/// Mac can be struggling with no agent running at all.
+/// Mac can be struggling with no session running at all. Nothing on it is
+/// about the CLIs, which is why the heaviest apps leave them out.
 ///
 /// **Fixed in height.** Every section has a fixed number of rows — three
 /// figures under the memory, at most three apps — so the page is the same
@@ -184,12 +185,17 @@ struct PanelMac: View {
 
     // MARK: Heaviest
 
-    /// The apps holding the most on this Mac once the agents and everything
-    /// they started are taken out, which the agents page already answers for.
+    /// The apps holding the most on this Mac once the sessions and everything
+    /// they started are taken out, which the Sessions tab already answers for.
     /// Grouped by bundle, so an app's helpers are the app.
+    ///
+    /// The label names the apps and the hover names what is left out: the
+    /// exclusion used to be the label, "Heaviest besides the agents", which
+    /// made a page about the Mac open its last block on the CLIs.
     private func heaviestSection(_ apps: [UsagePanelSnapshot.MacApp]) -> some View {
         PanelGroup {
-            SectionLabel(text: "Heaviest besides the agents")
+            SectionLabel(text: "Heaviest apps")
+                .help("The CLIs and what they started are on the Sessions tab")
         } content: {
             VStack(alignment: .leading, spacing: Self.rowSpacing) {
                 ForEach(apps) { app in

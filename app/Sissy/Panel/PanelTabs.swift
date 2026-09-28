@@ -3,20 +3,25 @@ import SwiftUI
 /// A module of the panel with a page of its own, in the order the tab bar
 /// draws them.
 ///
-/// **A module earns a tab when it has more than a line to say.** The Mac has
-/// a page whenever there is a reading to put on it, and repositories have one
-/// once a forge is connected: without one, what is left of them is the
-/// identity line, which stays under the projects it is about rather than
-/// becoming a tab holding a single row. `usage` is always there, and with
-/// nothing beside it the panel draws no bar at all, since a switcher with one
-/// destination is a control about a feature.
+/// **A module earns a tab when it has more than a line to say.** The sessions
+/// always have one: what ran over a window and what is running now is a page
+/// whichever day it is, and a tab that came and went with the processes
+/// would not be a destination. The Mac has a page whenever there is a reading
+/// to put on it, and repositories have one once a forge is connected: without
+/// one, what is left of them is the identity line, which stays under the
+/// projects it is about rather than becoming a tab holding a single row.
+///
+/// **A tab is named for what it reads.** Usage is the vendors' own word for
+/// spend against a plan's limits, Sessions the CLIs somebody started, Mac the
+/// machine and Forge the accounts Settings connects under that same name.
 ///
 /// Only the selected tab is ever built: the panel switches on it the way it
 /// switches on its pages, so a module nobody is looking at costs nothing.
 enum PanelTab: CaseIterable, Hashable {
     case usage
+    case sessions
     case mac
-    case git
+    case forge
 
     static func visible(in snapshot: UsagePanelSnapshot) -> [Self] {
         allCases.filter { $0.isVisible(in: snapshot) }
@@ -24,35 +29,38 @@ enum PanelTab: CaseIterable, Hashable {
 
     private func isVisible(in snapshot: UsagePanelSnapshot) -> Bool {
         switch self {
-        case .usage: true
+        case .usage, .sessions: true
         case .mac: snapshot.mac != nil
-        case .git: !snapshot.forge.isEmpty
+        case .forge: !snapshot.forge.isEmpty
         }
     }
 
     var title: String {
         switch self {
         case .usage: "Usage"
+        case .sessions: "Sessions"
         case .mac: "Mac"
-        case .git: "Git"
+        case .forge: "Forge"
         }
     }
 
     var symbol: String {
         switch self {
         case .usage: "gauge.with.dots.needle.33percent"
+        case .sessions: "terminal"
         case .mac: "memorychip"
-        case .git: "arrow.triangle.branch"
+        case .forge: "arrow.triangle.branch"
         }
     }
 
-    /// ⌘1, ⌘2 and ⌘3, by position in the full list rather than in the
-    /// visible one, so a key names the same module whichever are switched on.
+    /// ⌘1 to ⌘4, by position in the full list rather than in the visible
+    /// one, so a key names the same module whichever are switched on.
     var shortcut: KeyEquivalent {
         switch self {
         case .usage: "1"
-        case .mac: "2"
-        case .git: "3"
+        case .sessions: "2"
+        case .mac: "3"
+        case .forge: "4"
         }
     }
 
@@ -61,17 +69,19 @@ enum PanelTab: CaseIterable, Hashable {
     /// The one thing on that page worth leaving the current one for: the
     /// Mac's level once it is past normal, the same level the menu bar's dot
     /// wears, and a repository committing under an unexpected name. Usage
-    /// carries none, because it is the page the panel opens on.
+    /// carries none, because it is the page the panel opens on, and Sessions
+    /// none either: a session running is the ordinary state, and what the
+    /// sessions hold becomes worth leaving a page for through the Mac's badge.
     func badge(in snapshot: UsagePanelSnapshot) -> PanelTabBadge? {
         switch self {
-        case .usage:
+        case .usage, .sessions:
             return nil
         case .mac:
             guard let mac = snapshot.mac else { return nil }
             let level = [mac.memory.level, mac.disk?.level].compactMap { $0 }.max()
             guard let level, level > .normal else { return nil }
             return .level(level)
-        case .git:
+        case .forge:
             return snapshot.identityLine.state == .findings ? .findings : nil
         }
     }
@@ -104,8 +114,8 @@ enum PanelTabBadge: Equatable {
 /// The panel's modules, on a row of their own under the header.
 ///
 /// **Its own row rather than the header's**, where it was drawn first: beside
-/// Sissy and the two round controls, three segments on the same glass read
-/// as three more controls, and navigation that looks like a switch is not
+/// Sissy and the two round controls, segments on the same glass read as more
+/// controls, and navigation that looks like a switch is not
 /// found as navigation. A row costs the panel its height and keeps the bar
 /// at the same y on every tab, near where the pointer arrives from the menu
 /// bar. At the bottom it would move under the pointer on every switch, since

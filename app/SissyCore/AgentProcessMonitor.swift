@@ -149,7 +149,7 @@ actor AgentProcessMonitor {
     /// which a Mac with no agents on it mostly is not: two empty readings in a
     /// row say the same thing, so the second earns one only once
     /// `quietFrameInterval` has passed, which is what keeps the age the
-    /// agents page prints true.
+    /// Sessions tab prints true.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in

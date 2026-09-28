@@ -1124,12 +1124,12 @@ struct UsagePanelSnapshot: Equatable {
             }
         }
 
-        /// What the Overview's agents door says. A Mac that has never measured
-        /// and one that measured nothing both get the door, because it is the
-        /// only way to the page and a door that comes and goes is not one.
+        /// What the Sessions tab's live half says while nothing is running:
+        /// a Mac that has never measured and one that measured nothing are two
+        /// different absences, and the dash above this line is both.
         var summary: String {
             guard let live else { return "no reading yet" }
-            guard live.running > 0 else { return "no agents running" }
+            guard live.running > 0 else { return "no sessions running" }
             return UsageFormat.agentsRunning(live.running, footprint: live.footprint)
         }
 

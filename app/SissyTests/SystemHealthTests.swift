@@ -229,7 +229,7 @@ final class AgentSweepAppsTests: XCTestCase {
             pid: pid, parent: parent, executablePath: path, startedAt: Date())
     }
 
-    /// An agent and everything it started are the agents page's, so none of
+    /// An agent and everything it started are the Sessions tab's, so none of
     /// them is counted towards an app.
     func testTheAgentsAndTheirTreesAreLeftOut() {
         let processes = [

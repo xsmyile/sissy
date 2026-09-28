@@ -579,7 +579,7 @@ struct FrameData: Sendable, Equatable {
     /// the disk and the apps holding the most besides the agents.
     ///
     /// Beside the agents rather than inside their reading, because it is a
-    /// module with a switch of its own and the agents page is not. `nil` while
+    /// module with a switch of its own and the Sessions tab is not. `nil` while
     /// that switch is off and before the first sample, which are both the
     /// absence of a reading rather than a reading of a healthy Mac.
     let mac: MacHealthReading?

@@ -1778,7 +1778,7 @@ actor UsageEngine {
         await identityMonitor.sweepOnce { await me.reemit() }
     }
 
-    /// Counts the running agents again now, for the agents page's own button.
+    /// Counts the running agents again now, for the Sessions tab's own button.
     ///
     /// Worth a control where the counts beside it are not: those come off the
     /// tail as turns land, and nothing a press could do would make a turn

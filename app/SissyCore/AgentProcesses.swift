@@ -179,7 +179,7 @@ enum AgentProcessReader {
     }
 
     /// The heaviest apps among the processes that are neither an agent nor
-    /// anything an agent started, which the agents page already answers for.
+    /// anything an agent started, which the Sessions tab already answers for.
     static func heaviestApps(
         processes: [KernelProcess], agents: [pid_t], childrenOf: [pid_t: [pid_t]],
         footprint: (pid_t) -> UInt64
