@@ -329,7 +329,7 @@ enum AgentProcessReader {
     /// rather than truncate its name.
     private static let executablePathBufferSize = 4 * Int(MAXPATHLEN)
 
-    private static func snapshot() -> [KernelProcess] {
+    static func snapshot() -> [KernelProcess] {
         guard let buffer = processTable() else { return [] }
         let uid = getuid()
         var pathBuffer = [CChar](repeating: 0, count: executablePathBufferSize)
@@ -377,7 +377,7 @@ enum AgentProcessReader {
     /// each NUL-terminated. Only the first argument is read: it is what the
     /// CLI sets its own name to, and the rest is a command line that may carry
     /// a prompt.
-    private static func firstArgument(of pid: pid_t) -> String? {
+    static func firstArgument(of pid: pid_t) -> String? {
         var name: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size = 0
         guard sysctl(&name, 3, nil, &size, nil, 0) == 0,

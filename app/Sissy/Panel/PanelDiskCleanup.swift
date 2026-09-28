@@ -164,7 +164,12 @@ enum DiskCleanupCopy {
             "Nothing was removed: \(target.displayPath) could not be opened safely."
         case .walkInProgress:
             "Nothing was removed: Sissy was still reading \(target.displayPath)."
+        case .toolRunning(let tool): toolAtWork(tool)
         }
+    }
+
+    static func toolAtWork(_ tool: CleanupTool) -> String {
+        "\(tool.name) is at work on it · try again once it finishes"
     }
 
     private static func items(_ count: Int) -> String { count == 1 ? "1 item" : "\(count) items" }

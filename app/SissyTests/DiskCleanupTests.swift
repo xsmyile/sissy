@@ -57,7 +57,20 @@ final class DiskCleanupTests: XCTestCase {
         try FileManager.default.contentsOfDirectory(atPath: url.path).sorted()
     }
 
-    private var cleaner: DiskCleaner { DiskCleaner(home: home.path) }
+    private var cleaner: DiskCleaner { makeCleaner() }
+
+    /// A cleaner over the temporary home that reads no process table, with
+    /// the ownership, volume and tool seams a test sets.
+    private func makeCleaner(
+        owns: @escaping @Sendable (stat) -> Bool = { $0.st_uid == getuid() },
+        device: @escaping @Sendable (stat) -> dev_t = { $0.st_dev },
+        running: Set<CleanupTool> = [],
+        directoryOpened: (@Sendable (String) -> Void)? = nil
+    ) -> DiskCleaner {
+        DiskCleaner(
+            home: home.path, owns: owns, device: device, runningTools: { running },
+            directoryOpened: directoryOpened)
+    }
 
     // MARK: Sizing
 
@@ -221,7 +234,7 @@ final class DiskCleanupTests: XCTestCase {
         var status = stat()
         XCTAssertEqual(lstat(foreign.path, &status), 0)
         let foreignInode = status.st_ino
-        let cleaner = DiskCleaner(home: home.path) { $0.st_ino != foreignInode && $0.st_uid == getuid() }
+        let cleaner = makeCleaner(owns: { $0.st_ino != foreignInode && $0.st_uid == getuid() })
         let mine = allocated(root.appendingPathComponent("mine"))
 
         let size = await cleaner.size(of: .npm)
@@ -243,7 +256,7 @@ final class DiskCleanupTests: XCTestCase {
         var status = stat()
         XCTAssertEqual(lstat(foreign.path, &status), 0)
         let foreignInode = status.st_ino
-        let cleaner = DiskCleaner(home: home.path) { $0.st_ino != foreignInode && $0.st_uid == getuid() }
+        let cleaner = makeCleaner(owns: { $0.st_ino != foreignInode && $0.st_uid == getuid() })
 
         let report = try await cleaner.clean(.npm).get()
 
@@ -257,7 +270,7 @@ final class DiskCleanupTests: XCTestCase {
     func testCleanRefusesARootAnotherUserOwns() async throws {
         let root = try root()
         try write(root.appendingPathComponent("entry"))
-        let cleaner = DiskCleaner(home: home.path) { _ in false }
+        let cleaner = makeCleaner(owns: { _ in false })
 
         let result = await cleaner.clean(.npm)
 
@@ -291,8 +304,7 @@ final class DiskCleanupTests: XCTestCase {
         try write(root.appendingPathComponent("moving/inner.bin"))
         try write(root.appendingPathComponent("stays/other.bin"))
         let moved = outside.appendingPathComponent("moved")
-        let cleaner = DiskCleaner(
-            home: home.path,
+        let cleaner = makeCleaner(
             directoryOpened: { path in
                 guard path.hasSuffix("/moving") else { return }
                 try? FileManager.default.moveItem(atPath: path, toPath: moved.path)
@@ -312,8 +324,7 @@ final class DiskCleanupTests: XCTestCase {
         let root = try root()
         try write(root.appendingPathComponent("entry"))
         let rootInode = try inode(root)
-        let cleaner = DiskCleaner(
-            home: home.path,
+        let cleaner = makeCleaner(
             device: { $0.st_ino == rootInode ? $0.st_dev &+ 1 : $0.st_dev })
 
         let result = await cleaner.clean(.npm)
@@ -332,8 +343,7 @@ final class DiskCleanupTests: XCTestCase {
         try write(mounted.appendingPathComponent("inside"))
         try write(root.appendingPathComponent("local"))
         let mountedInode = try inode(mounted)
-        let cleaner = DiskCleaner(
-            home: home.path,
+        let cleaner = makeCleaner(
             device: { $0.st_ino == mountedInode ? $0.st_dev &+ 1 : $0.st_dev })
 
         let report = try await cleaner.clean(.npm).get()
@@ -371,13 +381,13 @@ final class DiskCleanupTests: XCTestCase {
         try write(swapped.appendingPathComponent("inner"))
         let swappedInode = try inode(swapped)
         let outside = outside!
-        let cleaner = DiskCleaner(home: home.path) { status in
+        let cleaner = makeCleaner(owns: { status in
             if status.st_ino == swappedInode {
                 try? FileManager.default.removeItem(at: swapped)
                 try? FileManager.default.createSymbolicLink(at: swapped, withDestinationURL: outside)
             }
             return status.st_uid == getuid()
-        }
+        })
 
         let report = try await cleaner.clean(.npm).get()
 
@@ -395,18 +405,107 @@ final class DiskCleanupTests: XCTestCase {
         try write(other.appendingPathComponent("theirs"))
         let swappedInode = try inode(swapped)
         let aside = outside.appendingPathComponent("aside")
-        let cleaner = DiskCleaner(home: home.path) { status in
+        let cleaner = makeCleaner(owns: { status in
             if status.st_ino == swappedInode {
                 try? FileManager.default.moveItem(at: swapped, to: aside)
                 try? FileManager.default.moveItem(at: other, to: swapped)
             }
             return status.st_uid == getuid()
-        }
+        })
 
         let report = try await cleaner.clean(.npm).get()
 
         XCTAssertEqual(report.failed, 1)
         XCTAssertEqual(try contents(swapped), ["theirs"])
+    }
+
+    // MARK: The tool at work
+
+    /// A cache whose tool is running is refused, and the press says which.
+    func testCleanRefusesWhileTheToolRuns() async throws {
+        let root = try root()
+        try write(root.appendingPathComponent("entry"))
+        let cleaner = makeCleaner(running: [.npm])
+
+        let result = await cleaner.clean(.npm)
+        let atWork = await cleaner.toolAtWork(on: .npm)
+
+        XCTAssertEqual(result, .failure(.toolRunning(.npm)))
+        XCTAssertEqual(atWork, .npm)
+        XCTAssertEqual(try contents(root), ["entry"])
+    }
+
+    /// Another cache's tool running does not hold this one.
+    func testCleanIgnoresAnotherCachesTool() async throws {
+        let root = try root()
+        try write(root.appendingPathComponent("entry"))
+
+        let result = await makeCleaner(running: [.xcode]).clean(.npm)
+
+        XCTAssertEqual(try result.get().removed, 1)
+    }
+
+    /// uv's lock held by a running uv refuses the cleanup, whatever the
+    /// process table says.
+    func testUvCleanRefusesWhileUvHoldsItsLock() async throws {
+        let root = try root(.uv)
+        try write(root.appendingPathComponent("archive-v0/wheel"))
+        try write(root.appendingPathComponent(".lock"), bytes: 0)
+        let held = open(root.appendingPathComponent(".lock").path, O_RDONLY)
+        XCTAssertGreaterThanOrEqual(held, 0)
+        XCTAssertEqual(flock(held, LOCK_SH | LOCK_NB), 0)
+        defer { close(held) }
+
+        let result = await cleaner.clean(.uv)
+
+        XCTAssertEqual(result, .failure(.toolRunning(.uv)))
+        XCTAssertEqual(try contents(root), [".lock", "archive-v0"])
+    }
+
+    /// With the lock free the cleanup holds it and keeps the file, so a uv
+    /// started meanwhile waits on the same lock rather than a new one.
+    func testUvCleanKeepsItsLockFile() async throws {
+        let root = try root(.uv)
+        try write(root.appendingPathComponent("archive-v0/wheel"))
+        try write(root.appendingPathComponent(".lock"), bytes: 0)
+
+        let report = try await makeCleaner(running: [.uv]).clean(.uv).get()
+
+        XCTAssertEqual(report.removed, 2)
+        XCTAssertEqual(try contents(root), [".lock"])
+    }
+
+    /// A uv cache with no lock file falls back to the process table.
+    func testUvCleanWithoutALockReadsTheProcessTable() async throws {
+        let root = try root(.uv)
+        try write(root.appendingPathComponent("archive-v0/wheel"))
+
+        let result = await makeCleaner(running: [.uv]).clean(.uv)
+
+        XCTAssertEqual(result, .failure(.toolRunning(.uv)))
+    }
+
+    /// Which processes are a cache's tool at work.
+    func testToolScanClassifiesProcesses() {
+        func tool(_ path: String, title: String? = nil, children: Bool = false) -> CleanupTool? {
+            CleanupToolScan.tool(
+                of: .init(pid: 1, parent: 0, executablePath: path, startedAt: .distantPast),
+                hasChildren: children, title: { _ in title })
+        }
+        let xcode = "/Applications/Xcode.app/Contents"
+        let node = "/opt/homebrew/bin/node"
+        XCTAssertEqual(tool(xcode + "/MacOS/Xcode"), .xcode)
+        XCTAssertEqual(tool(xcode + "/Developer/usr/bin/xcodebuild"), .xcode)
+        XCTAssertEqual(
+            tool(
+                xcode + "/SharedFrameworks/SwiftBuild.framework/Versions/A/PlugIns/"
+                    + "SWBBuildService.bundle/Contents/MacOS/SWBBuildService"), .xcode)
+        XCTAssertEqual(tool("/opt/homebrew/bin/uv"), .uv)
+        XCTAssertEqual(tool(node, title: "npm install typescript@5"), .npm)
+        XCTAssertEqual(tool(node, title: "npm exec chrome-devtools-mcp@1.9.0"), .npm)
+        XCTAssertNil(tool(node, title: "npm exec chrome-devtools-mcp@1.9.0", children: true))
+        XCTAssertNil(tool(node, title: "node server.js"))
+        XCTAssertNil(tool("/usr/bin/python3"))
     }
 
     /// A walk cancelled before it starts removes nothing and says it stopped.

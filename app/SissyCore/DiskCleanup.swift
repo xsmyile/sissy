@@ -87,6 +87,8 @@ enum CleanupRefusal: Error, Equatable, Sendable {
     case unsafeRoot
     /// Another walk over the same root was still running.
     case walkInProgress
+    /// The tool that writes the cache was at work on it.
+    case toolRunning(CleanupTool)
 }
 
 /// A stop signal a filesystem walk on a dispatch thread polls between entries.
@@ -132,6 +134,12 @@ final class CleanupCancellation: Sendable {
 /// never removed, so the tool that owns the cache finds its directory where it
 /// left it.
 ///
+/// **Never under the tool that writes it**: see `CleanupTool`. A removal
+/// holds uv's lock while it runs and keeps the lock file itself, and refuses a
+/// cache whose tool is running otherwise. A tool that starts after that check
+/// is the one race left, and it meets a cache emptied under it, which each of
+/// these tools already survives as a cache miss.
+///
 /// **One walk per root at a time**, sizing or removal, so two can never race
 /// over one tree and the descriptors held stay bounded: at most `maxDepth`
 /// plus one per walk.
@@ -154,22 +162,26 @@ struct DiskCleaner: Sendable {
     let home: String
     private let owns: @Sendable (stat) -> Bool
     private let device: @Sendable (stat) -> dev_t
+    private let runningTools: @Sendable () -> Set<CleanupTool>
     private let directoryOpened: (@Sendable (String) -> Void)?
 
     /// `owns` is the ownership rule and `device` the volume an entry is on,
     /// seams for tests that cannot make a file another user owns or mount a
-    /// volume; `directoryOpened` hears the path of each directory the removal
-    /// has opened and not yet checked, so a test can move one. Every caller in
-    /// the app takes the defaults.
+    /// volume; `runningTools` reads the process table, which a test must not;
+    /// `directoryOpened` hears the path of each directory the removal has
+    /// opened and not yet checked, so a test can move one. Every caller in the
+    /// app takes the defaults.
     init(
         home: String = NSHomeDirectory(),
         owns: @escaping @Sendable (stat) -> Bool = { $0.st_uid == getuid() },
         device: @escaping @Sendable (stat) -> dev_t = { $0.st_dev },
+        runningTools: @escaping @Sendable () -> Set<CleanupTool> = CleanupToolScan.running,
         directoryOpened: (@Sendable (String) -> Void)? = nil
     ) {
         self.home = home
         self.owns = owns
         self.device = device
+        self.runningTools = runningTools
         self.directoryOpened = directoryOpened
     }
 
@@ -192,6 +204,22 @@ struct DiskCleaner: Sendable {
         await Self.offThread { self.clean(target, cancellation: $0) }
     }
 
+    /// The tool at work on `target` now, which a page asks before it offers
+    /// the removal. The removal asks again, since the answer can change.
+    func toolAtWork(on target: CleanupTarget) async -> CleanupTool? {
+        await Self.offThread { _ in
+            guard let root = openRoot(target) else { return nil }
+            defer { close(root.descriptor) }
+            switch toolGuard(target, root: root.descriptor) {
+            case .success(let lock):
+                lock?.release()
+                return nil
+            case .failure(.toolRunning(let tool)): return tool
+            case .failure: return nil
+            }
+        }
+    }
+
     func size(of target: CleanupTarget, cancellation: CleanupCancellation) -> Int64? {
         guard claim(target) else { return nil }
         defer { release(target) }
@@ -210,11 +238,32 @@ struct DiskCleaner: Sendable {
         defer { release(target) }
         guard let root = openRoot(target) else { return .failure(.unsafeRoot) }
         defer { close(root.descriptor) }
+        let lock: CleanupToolLock?
+        switch toolGuard(target, root: root.descriptor) {
+        case .success(let held): lock = held
+        case .failure(let refusal): return .failure(refusal)
+        }
+        defer { lock?.release() }
         var report = CleanupReport()
+        let kept = lock == nil ? [] : Array(CleanupToolLock.fileName.utf8CString)
         empty(
             Directory(descriptor: root.descriptor, path: root.path), depth: 0, report: &report,
-            Walk(device: root.device, cancellation: cancellation))
+            Walk(device: root.device, cancellation: cancellation, kept: kept))
         return .success(report)
+    }
+
+    /// uv's lock when it keeps one, or the process table otherwise.
+    private func toolGuard(_ target: CleanupTarget, root: Int32) -> Result<
+        CleanupToolLock?, CleanupRefusal
+    > {
+        if target.tool == .uv {
+            switch CleanupToolLock.take(in: root) {
+            case .held(let lock): return .success(lock)
+            case .busy: return .failure(.toolRunning(.uv))
+            case .absent: break
+            }
+        }
+        return runningTools().contains(target.tool) ? .failure(.toolRunning(target.tool)) : .success(nil)
     }
 
     // MARK: Root
@@ -297,11 +346,13 @@ struct DiskCleaner: Sendable {
         }
     }
 
-    /// What every level of one walk shares: the root's volume and the stop
-    /// signal.
+    /// What every level of one walk shares: the root's volume, the stop
+    /// signal, and the one entry of the root a removal keeps, uv's lock file,
+    /// which uv would otherwise recreate beside a lock still held.
     private struct Walk {
         let device: dev_t
         let cancellation: CleanupCancellation
+        var kept: [CChar] = []
     }
 
     /// A directory whose entries could not be read to the end.
@@ -394,6 +445,7 @@ struct DiskCleaner: Sendable {
                 report.cancelled = true
                 return
             }
+            if depth == 0, name == walk.kept { continue }
             var status = stat()
             guard fstatat(directory.descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else {
                 report.failed += 1
