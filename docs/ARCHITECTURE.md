@@ -317,11 +317,14 @@ effect, so "switched on and holding nothing" is readable at a glance rather than
 silent.
 
 `mac` is a `MacHealthReading`: the kernel's memory pressure, the free-memory
-percentage, swap, the disk free on the home volume, RAM, load, active cores,
-uptime and the three apps holding the most outside the agents' trees. `nil`
-while `ServerConfig.macHealth` is off and before the first sample, which are the
-absence of a reading and not a healthy Mac. Its `level` is the worse of the
-kernel's own level and the disk's, and nothing else on it is graded; see
+percentage, swap, RAM, load, active cores, uptime and the three apps holding
+the most outside the agents' trees. `nil` while `ServerConfig.macHealth` is off
+and before the first sample, which are the absence of a reading and not a
+healthy Mac. `disk` is a `DiskReading`: the home volume, its purgeable space,
+swap and every other local volume, `nil` while `ServerConfig.disk` is off and
+before the first read. The pressure and the disk's `level` are the only two
+graded figures, and `FrameData.macLevel` is the worse of whichever are on the
+frame; see
 [the decision](DECISIONS.md#the-macs-colour-is-the-kernels-and-the-only-threshold-sissy-owns-is-the-disk-in-multiples-of-ram).
 
 ## Engine modules (`app/SissyCore/`)
@@ -352,7 +355,9 @@ compiled into the app too.
 | `TurnEffort.swift`              | At what effort each model's turns ran: `EffortKey` is the `(model, effort)` pair, `EffortTotals` the turns and the four token counters and the cost behind it. Both CLIs write the word on a line the tail already parses — Claude Code at the top level of the assistant line it bills, Codex on the `turn_context` payload it names the model in — so it costs no new read. `perTurnEffort` is the field that looks right and is not: measured 2026-09-22, null on 3096 of 3106 assistant lines where `effort` was set on all of them. The pair rather than a third key on `UsageHistoryRow`, which would freeze every re-derived day on `isCoveredBy` and cost `models × projects × efforts` where this costs `models × efforts`. The word is the vendor's, unmapped — measured 2026-09-22, Claude Code wrote `xhigh`, `high`, `medium`, `low` and Codex `ultra`, `xhigh`, `high`, `medium`, and neither publishes what its ladder means against the other's, which is why a provider's page reads this and nothing sums two |
 | `AgentProcesses.swift`          | Reads the agent processes belonging to this user out of the kernel, with what each holds and what its whole tree holds — measured 2026-09-18, 1.94 GB against 4.88 GB, which is why both are carried. Needs no permission: `KERN_PROC_ALL`, `proc_pidpath` and `proc_pid_rusage` all answer for a same-uid process with no entitlement and no prompt, zero refusals across 665 processes. **Identity is the executable's path**, because Claude Code's native build names its executable after the version and the kernel therefore reports `2.1.277` as the process name; `argv[0]` is read only for the handful of processes running under a JS interpreter, since reading it for all of them costs 19.3 ms against 1.2 ms. `sweep(now:measuringApps:)` answers the Mac module's heaviest apps out of the same pass over the table: measured 2026-09-27 across 1,250 processes, the agents alone took 9.8 ms and the apps added 2.6 ms, where a second enumeration would have paid the 2.2 ms table read again |
 | `SystemHealth.swift`            | `MacHealthReading` and what it is built from: `MacHealthLevel` (the kernel's 1/2/4, and the disk graded against RAM, warn under 2x free and critical under 1x), `MacSwapUsage`, `MacLoadAverage`, `MacAppFootprint` / `MacHeaviestApps`, the `SystemHealthReader` that answers them with no permission, and `MacAppGrouping`, which counts a process towards the first `.app` on its path and scans bytes to do it, since measured 2026-09-27 a split into components cost 4.1 ms across 1,248 paths against 1.0 ms |
-| `SystemHealthMonitor.swift`     | Samples that reading on the agent sweep's 15 s clock and the moment a `DispatchSource` memory-pressure event lands. The disk read is reused for 60 s, because measured 2026-09-27 it costs 6.6 ms of CPU against 0.002 ms for `statfs`, which leaves out 9.4 GB of purgeable space on the same volume. A frame on the first sample, on a change of level and on a pressure event, otherwise one a minute. In memory only; `stop()` drops the reading |
+| `SystemHealthMonitor.swift`     | Samples that reading on the agent sweep's 15 s clock and the moment a `DispatchSource` memory-pressure event lands. A frame on the first sample, on a change of pressure and on a pressure event, otherwise one a minute. In memory only; `stop()` drops the reading |
+| `DiskHealth.swift`              | `DiskReading`: the home volume (`volumeAvailableCapacityForImportantUsage`, the figure Finder shows), its purgeable space, swap and every other local, browsable volume, graded against RAM by `MacHealthLevel.disk`; `DiskVolumes`, which decides what is listed; `DiskReader`, which asks the dear important-usage key only of the volumes kept, since measured 2026-09-28 it costs 6.7 ms per volume against 0.07 ms for every other key across the whole mount list; and `FrameData.macLevel`, the worse of memory and disk the menu bar's dot wears |
+| `DiskMonitor.swift`             | Reads that once a minute behind `ServerConfig.disk`, apart from `SystemHealthMonitor` so either switch can be off alone. In memory only; `stop()` drops the reading |
 | `AgentProcessMonitor.swift`     | Samples that reading every 15 s and keeps an hour of it, per agent, for the chart. In memory and nowhere else — a reading from a Mac that was asleep is no reading, so the series starts when Sissy does and the panel says so. Samples whether or not the panel is open, which the *surface that is not on screen costs nothing* rule permits: that rule is about retained view graphs, and a sweep is 1.2 ms. A Mac already known to be quiet costs no frame; the first sweep always does, because that is the step from having no reading to having one |
 | `GitIdentityMonitor.swift`      | Sweeps every repository the ledger names — 10 min while agents are working, an hour once nothing has been seen for one, 30 s budget for the whole round — and publishes the judged readings for the frame. Needs no scan, no configured folder and no permission: the ledger is what the tail already filled. Reads off the cooperative pool, because a `Process` read to end of file blocks. **A repository whose files have not been written since the last round keeps that round's reading**: a process costs ~67 ms whatever it runs — measured 2026-09-17, `/usr/bin/true` costs the same — so 23 repositories cost 5.82 s cold and 0.01 s at rest. `stop` drops what it published, so a warning cannot outlive the engine that took it |
 | `ClaudeLimitsProbe.swift`       | Polls Anthropic's OAuth usage endpoint for every window `limits[]` names — the plan-wide 5-hour and weekly buckets, plus a model-scoped weekly on a plan that meters one separately, which the flat keys do not carry; 5-min refresh, 30-min backoff on 429. Its credential source is injected, so the same probe serves the file, the keychain and a test |
@@ -481,11 +486,17 @@ was the headline above it.
 `Panel/PanelMac.swift` is the Mac tab: the kernel's memory pressure as the
 headline, with the free share and the sample's age under it, on the first
 platter above the three steps it captions — no content sits flat under the
-tab bar, as of 2026-09-28 — then swap and disk, load against the cores and
-uptime, then the three heaviest apps besides the sessions; fixed in height,
-and a dash where the kernel would not say rather than a `normal` nobody
-measured. The memory and the disk each wear their own level: secondary at
-normal, orange at warn, red and semibold at critical. `Panel/PanelForge.swift`
+tab bar, as of 2026-09-28 — then swap, load against the cores and uptime,
+then the three heaviest apps besides the sessions; fixed in height, and a dash
+where the kernel would not say rather than a `normal` nobody measured. The
+memory wears its level: secondary at normal, orange at warn, red at critical.
+`Panel/PanelDisk.swift` is the Disk tab: the home volume's free space as the
+headline, with its total, its name and the read's age under it, above a bar of
+used space carrying a mark where warn and critical begin and a legend naming
+both in the free space's own base-ten bytes; then purgeable space and swap,
+then every other local, browsable volume with a thin bar. The disk's level
+colours the headline and the bar and badges this tab alone, while the menu
+bar's dot wears `FrameData.macLevel`. `Panel/PanelForge.swift`
 is the Forge tab: a row per connected forge, and the identity line under them.
 
 `Panel/PanelSessions.swift` is the Sessions tab: over a window of its own, how
