@@ -47,6 +47,14 @@ struct NetworkInterfaceCounters: Sendable, Equatable {
 /// cannot know is allowed to err on. An interface that detached and has not
 /// come back is not listed at all, and nothing can bound what it took with
 /// it.
+///
+/// **What `Since boot` can still overstate**, and by how much: an interface
+/// that carried traffic in the first `NetworkRates.bootSettling` seconds and
+/// detached and came back inside them restarted its counters, and its date
+/// falls in the window the label ignores. An interface that first appeared
+/// there loses nothing, because a link carries no traffic before it exists;
+/// only a reattach does, and the missing figure is bounded by what the Mac
+/// moved while it was still starting up.
 struct NetworkTotals: Sendable, Equatable {
     let bytes: NetworkByteCounts
     /// Nil for since boot.
