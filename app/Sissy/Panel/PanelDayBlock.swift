@@ -43,8 +43,6 @@ struct PanelDayBlock: View {
                 .padding(.top, PanelMetrics.blockGap - Self.headlineGap)
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 
     /// The day's own figure, which the pointer never moves: a figure a reader

@@ -58,8 +58,6 @@ struct PanelProviderStatus: View {
                 StatusLine(provider: provider, row: row, navigates: false)
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 10)
     }
 }
 
@@ -88,27 +86,22 @@ struct PanelProviderStatusPage: View {
     /// asks the question again rather than answering the one before last.
     @State private var expanded: Set<String> = []
 
-    /// What every other section on the panel puts between its label and its
-    /// rows, so this one cannot read tighter than the block above it.
-    private static let labelSpacing: CGFloat = 10
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             StatusLine(provider: provider, row: row, navigates: false)
                 .padding(.horizontal, PanelMetrics.gutter)
                 .padding(.vertical, 10)
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: Self.labelSpacing) {
+            PanelGroup {
                 SectionLabel(text: "Services")
+            } content: {
                 VStack(alignment: .leading, spacing: StatusTreeGeometry.rowSpacing) {
                     tree
                     pageLink
                 }
             }
-            .padding(.horizontal, PanelMetrics.gutter)
-            .padding(.vertical, 12)
+            .padding(.horizontal, PanelMetrics.platterInset)
+            .padding(.bottom, PanelMetrics.platterInset)
         }
     }
 

@@ -41,30 +41,28 @@ struct PanelEffortPage: View {
         let window = UsagePanelSnapshot.effortWindow(series: series, today: today)
         let rows = UsagePanelSnapshot.makeEffort(window.splits, provider: provider)
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                SectionLabel(text: "By effort")
-                Spacer(minLength: 8)
-                Text(
-                    UsageFormat.effortWindow(
-                        covered: window.covered, of: UsagePanelSnapshot.dayStripDays)
-                )
-                .font(.system(size: 11))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, PanelMetrics.gutter)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
-
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(rows) { row in
-                    model(row)
+            PanelGroup {
+                HStack(spacing: 6) {
+                    SectionLabel(text: "By effort")
+                    Spacer(minLength: 8)
+                    Text(
+                        UsageFormat.effortWindow(
+                            covered: window.covered, of: UsagePanelSnapshot.dayStripDays)
+                    )
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                }
+            } content: {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(rows) { row in
+                        model(row)
+                    }
                 }
             }
-            .padding(.horizontal, PanelMetrics.gutter)
-            .padding(.vertical, 8)
-            .padding(.bottom, 4)
         }
+        .padding(.horizontal, PanelMetrics.platterInset)
+        .padding(.vertical, PanelMetrics.platterInset)
         .task(id: provider) {
             series = await loadHistory(provider)
         }

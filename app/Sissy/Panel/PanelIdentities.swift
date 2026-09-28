@@ -92,7 +92,7 @@ struct PanelIdentities: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Self.labelSpacing) {
+        PanelGroup {
             HStack(spacing: 6) {
                 SectionLabel(text: "Commit identity")
                 Spacer(minLength: 0)
@@ -101,28 +101,33 @@ struct PanelIdentities: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            if !rows.isEmpty {
-                recap
-            }
-            if let unread = UsageFormat.identityUnread(focus: unreadFocus, anyRead: !rows.isEmpty) {
-                Text(unread)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !standing.isEmpty {
-                rowList(standing)
-            }
-            if !rest.isEmpty {
-                disclosure
-                if showsAll {
-                    rowList(rest)
+        } content: {
+            VStack(alignment: .leading, spacing: Self.labelSpacing) {
+                if !rows.isEmpty {
+                    recap
                 }
+                if let unread = UsageFormat.identityUnread(
+                    focus: unreadFocus, anyRead: !rows.isEmpty)
+                {
+                    Text(unread)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !standing.isEmpty {
+                    rowList(standing)
+                }
+                if !rest.isEmpty {
+                    disclosure
+                    if showsAll {
+                        rowList(rest)
+                    }
+                }
+                footer
             }
-            footer
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
+        .padding(.horizontal, PanelMetrics.platterInset)
+        .padding(.vertical, PanelMetrics.platterInset)
     }
 
     /// The sentence, the count per mark and, when the page came from a

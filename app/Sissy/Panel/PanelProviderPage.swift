@@ -162,41 +162,111 @@ struct PanelProviderPage: View {
         return VStack(alignment: .leading, spacing: 0) {
             identity
 
-            Divider()
-            limits
+            VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
+                capacityGroup
 
-            if let target = shownResetTarget, shownResets != nil || hasResetActivity(target) {
-                Divider()
-                resets(shownResets, target: target)
+                dayGroup
+
+                if !row.projects.isEmpty {
+                    projectsGroup
+                }
+
+                doorGroup(effortSummary)
             }
-
-            if let credits = shownCredits {
-                Divider()
-                self.credits(credits)
-            }
-
-            Divider()
-            day
-
-            if !row.projects.isEmpty {
-                Divider()
-                projects
-            }
-
-            if let effortSummary {
-                Divider()
-                effort(effortSummary.summary, window: effortSummary.window)
-            }
-
-            if let status = row.status {
-                Divider()
-                PanelProviderStatus(
-                    provider: row.id, row: status,
-                    openServices: { openServices(viewed?.id) })
-            }
+            .padding(.horizontal, PanelMetrics.platterInset)
+            .padding(.bottom, PanelMetrics.platterInset)
         }
         .task(id: row.id) {
             series = await loadHistory(row.id)
+        }
+    }
+
+    // MARK: Platters
+
+    /// Limits, Codex resets and Credits, on one platter: all three answer how
+    /// much capacity is left, with a hairline between whichever of them are
+    /// showing rather than a divider for the page.
+    private var capacityGroup: some View {
+        PanelGroup {
+            VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
+                limits
+
+                if let target = shownResetTarget, shownResets != nil || hasResetActivity(target) {
+                    Divider()
+                    resets(shownResets, target: target)
+                }
+
+                if let credits = shownCredits {
+                    Divider()
+                    self.credits(credits)
+                }
+            }
+        }
+    }
+
+    /// Today, the day bars and the model pills, on their own platter.
+    private var dayGroup: some View {
+        PanelGroup {
+            day
+        }
+    }
+
+    /// This provider's own day by project, which the slice already carries —
+    /// the Overview's list is the two summed, and a page that repeated it
+    /// would answer a question nobody asked here.
+    ///
+    /// Folded past three rows exactly as the Overview's is, and for the same
+    /// reason: this page has a plan, an account, its windows, its week and its
+    /// vendor's status under it, and a repository per row would push all of
+    /// them below whatever the busiest day happened to be. The label is the
+    /// way to the unfolded list, so nothing is out of reach — which is what
+    /// the fold costs everywhere else on the panel too. It sits off the
+    /// platter, on its own row, the way `PanelOverview.projects` already
+    /// draws it.
+    private var projectsGroup: some View {
+        PanelGroup {
+            Button {
+                openProjects(viewed?.id)
+            } label: {
+                ProjectsSectionLabel(text: "By project", count: row.projectCount)
+            }
+            .buttonStyle(.plain)
+            .help("Show every project")
+        } content: {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(row.projects) { project in
+                    ProjectRowView(
+                        row: project, bar: .behind,
+                        checkIdentity: project.repository == nil
+                            ? nil : { openIdentities(project.id) })
+                }
+            }
+        }
+    }
+
+    /// By effort and the vendor's own status, one platter at the bottom
+    /// holding both as door rows — the two remaining questions this page
+    /// answers once capacity, the day and the projects are said.
+    @ViewBuilder
+    private func doorGroup(
+        _ effortSummary: (summary: UsagePanelSnapshot.EffortSummary, window: String)?
+    ) -> some View {
+        if effortSummary != nil || row.status != nil {
+            PanelGroup {
+                VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
+                    if let effortSummary {
+                        effort(effortSummary.summary, window: effortSummary.window)
+                    }
+                    if effortSummary != nil, row.status != nil {
+                        Divider()
+                    }
+                    if let status = row.status {
+                        PanelProviderStatus(
+                            provider: row.id, row: status,
+                            openServices: { openServices(viewed?.id) })
+                    }
+                }
+            }
         }
     }
 
@@ -512,8 +582,6 @@ struct PanelProviderPage: View {
                 }
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 
     // MARK: Resets
@@ -591,8 +659,6 @@ struct PanelProviderPage: View {
                 resetOutcome(report)
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 
     private func resetCaption(_ text: String) -> some View {
@@ -699,8 +765,6 @@ struct PanelProviderPage: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 
     // MARK: The day
@@ -788,43 +852,7 @@ struct PanelProviderPage: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
-    }
-
-    // MARK: Projects
-
-    /// This provider's own day by project, which the slice already carries —
-    /// the Overview's list is the two summed, and a page that repeated it
-    /// would answer a question nobody asked here.
-    ///
-    /// Folded past three rows exactly as the Overview's is, and for the same
-    /// reason: this page has a plan, an account, its windows, its week and its
-    /// vendor's status under it, and a repository per row would push all of
-    /// them below whatever the busiest day happened to be. The label is the
-    /// way to the unfolded list, so nothing is out of reach — which is what
-    /// the fold costs everywhere else on the panel too.
-    private var projects: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                openProjects(viewed?.id)
-            } label: {
-                ProjectsSectionLabel(text: "By project", count: row.projectCount)
-            }
-            .buttonStyle(.plain)
-            .help("Show every project")
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(row.projects) { project in
-                    ProjectRowView(
-                        row: project, bar: .behind,
-                        checkIdentity: project.repository == nil
-                            ? nil : { openIdentities(project.id) })
-                }
-            }
-        }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 }

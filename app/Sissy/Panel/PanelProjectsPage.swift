@@ -36,24 +36,26 @@ struct PanelProjectsPage: View {
     let openIdentities: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if page.rows.isEmpty {
-                Text(UsageFormat.projectsEmpty)
-                    .font(.system(size: PanelMetrics.rowText))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            ForEach(page.rows) { row in
-                ProjectRowView(
-                    row: row, showsProviders: page.provider == nil,
-                    checkIdentity: row.repository == nil ? nil : { openIdentities(row.id) })
-            }
-            if let residue = page.residue {
-                ProjectsResidueLine(residue: residue)
+        PanelGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                if page.rows.isEmpty {
+                    Text(UsageFormat.projectsEmpty)
+                        .font(.system(size: PanelMetrics.rowText))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(page.rows) { row in
+                    ProjectRowView(
+                        row: row, showsProviders: page.provider == nil,
+                        checkIdentity: row.repository == nil ? nil : { openIdentities(row.id) })
+                }
+                if let residue = page.residue {
+                    ProjectsResidueLine(residue: residue)
+                }
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
+        .padding(.horizontal, PanelMetrics.platterInset)
+        .padding(.vertical, PanelMetrics.platterInset)
     }
 }
 
