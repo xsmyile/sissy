@@ -136,7 +136,7 @@ struct NetworkSparkline: View {
 
     var body: some View {
         RateSparkline(
-            first: rates.map(\.received), second: rates.map(\.sent), firstTint: Self.downTint,
+            points: rates.map { ($0.received, $0.sent) }, firstTint: Self.downTint,
             secondTint: Self.upTint, scaleFloor: Self.scaleFloor,
             label: "Network rate over the last two minutes",
             figures: {

@@ -48,9 +48,9 @@ struct DiskActivityPlatter: View {
                 .lineLimit(1)
                 .foregroundStyle(current == nil ? Color.secondary : .primary)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(accessibilityRate(current))
+                .accessibilityLabel(Self.spokenRate(current))
                 RateSparkline(
-                    first: rates.map(\.read), second: rates.map(\.written), firstTint: Self.readTint,
+                    points: rates.map { ($0.read, $0.written) }, firstTint: Self.readTint,
                     secondTint: Self.writeTint, scaleFloor: Self.scaleFloor,
                     label: "Disk activity over the last two minutes",
                     figures: {
@@ -75,9 +75,8 @@ struct DiskActivityPlatter: View {
         }
     }
 
-    private func accessibilityRate(_ rate: DiskRate?) -> String {
+    static func spokenRate(_ rate: DiskRate?) -> String {
         guard let rate else { return "No rate yet" }
-        return "Reading " + UsageFormat.networkRate(rate.read) + ", writing "
-            + UsageFormat.networkRate(rate.written)
+        return UsageFormat.diskRead(rate.read) + ", " + UsageFormat.diskWrite(rate.written)
     }
 }

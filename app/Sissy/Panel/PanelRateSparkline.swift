@@ -15,8 +15,8 @@ import SwiftUI
 /// nothing but its own keep-alives stays on the baseline rather than drawing
 /// its noise at full height.
 struct RateSparkline: View {
-    let first: [Double]
-    let second: [Double]
+    /// One pair a sample, so the two series cannot differ in length.
+    let points: [(first: Double, second: Double)]
     let firstTint: Color
     let secondTint: Color
     let scaleFloor: Double
@@ -35,7 +35,7 @@ struct RateSparkline: View {
 
     @State private var width: CGFloat = 0
 
-    private var count: Int { first.count }
+    private var count: Int { points.count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -83,7 +83,7 @@ struct RateSparkline: View {
     }
 
     private func index(at x: CGFloat) -> Int? {
-        guard width > 0, !first.isEmpty else { return nil }
+        guard width > 0, !points.isEmpty else { return nil }
         let slot = Int((x / width * CGFloat(Self.slots - 1)).rounded())
         let index = slot - (Self.slots - count)
         return index >= 0 && index < count ? index : nil
@@ -95,12 +95,12 @@ struct RateSparkline: View {
         baseline.addLine(to: CGPoint(x: size.width, y: size.height - 0.5))
         context.stroke(baseline, with: .color(.secondary.opacity(Self.baselineOpacity)), lineWidth: 1)
         guard count > 1 else { return }
-        let peak = max((first + second).max() ?? 0, scaleFloor)
+        let peak = max(points.flatMap { [$0.first, $0.second] }.max() ?? 0, scaleFloor)
         let inset = Self.lineWidth / 2
         let y = { (value: Double) in
             inset + (size.height - 2 * inset) * (1 - CGFloat(value / peak))
         }
-        for (values, tint) in [(second, secondTint), (first, firstTint)] {
+        for (values, tint) in [(points.map(\.second), secondTint), (points.map(\.first), firstTint)] {
             var line = Path()
             line.move(to: CGPoint(x: x(ofSample: 0, in: size.width), y: y(values[0])))
             for index in 1..<values.count {
