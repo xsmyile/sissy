@@ -7,9 +7,9 @@ import SwiftUI
 /// compile.
 ///
 /// The sessions, the Mac and the forge are not here: each is a `PanelTab` of
-/// its own. The
-/// identity line is here only while repositories have no tab, which is while
-/// no forge is connected, and it then sits under the projects it is about.
+/// its own. The identity line is here only while repositories have no tab,
+/// which is while no forge is connected, and it then sits under the projects
+/// it is about.
 enum PanelModule: CaseIterable, Hashable {
     case providers
     case projects
