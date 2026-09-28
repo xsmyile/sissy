@@ -63,6 +63,8 @@ struct UsagePanelSnapshot: Equatable {
         let id: String
         let kind: ForgeKind
         let host: String
+        /// The heading over this forge's section, window included.
+        let title: String
         let login: String?
         /// The three counters, already grouped, each nil where the vendor
         /// answered nothing for this window.
@@ -96,6 +98,13 @@ struct UsagePanelSnapshot: Equatable {
         /// zero — and this is what lets the caption say why instead of leaving
         /// a dash that reads as a vendor which answered nothing.
         let opensAt: Date?
+        /// The newest thing the account did, the event rather than a sentence
+        /// for the reason `readAt` is a date: its age is worded on the view's
+        /// own clock.
+        ///
+        /// Kept across midnight where `Today`'s figures are not: it answers
+        /// no window, so a new day has not ended it.
+        let latest: ForgeEvent?
         let tooltip: String
         /// What each mark means, since a glyph cannot introduce itself.
         let mergedHelp: String
@@ -246,6 +255,8 @@ struct UsagePanelSnapshot: Equatable {
     struct IdentityLine: Equatable {
         let state: IdentityLineState
         let summary: String
+        /// How many repositories were read, for the end of the heading.
+        let count: String?
         /// The repository to open the page on, when exactly one is wrong.
         let repository: String?
     }
@@ -1377,6 +1388,11 @@ struct UsagePanelSnapshot: Equatable {
     /// discount for themselves. The poll caps its own wait at midnight so even
     /// `Today` goes blank for seconds; what this is really for is the Mac that
     /// was asleep or offline across the boundary.
+    ///
+    /// **A section is headed by its vendor, and by its host where the vendor
+    /// is not enough.** Two connections to one vendor, `github.com` beside a
+    /// GitHub Enterprise or two self-hosted GitLabs, would otherwise head two
+    /// sections with the same word.
     private static func makeForge(
         _ readings: [ForgeActivityReading], period: UsagePeriod, now: Date,
         calendar: Calendar = .current
@@ -1385,7 +1401,9 @@ struct UsagePanelSnapshot: Equatable {
         var vendorCalendar = Calendar(identifier: .gregorian)
         vendorCalendar.timeZone = .gmt
         let vendorDayStart = vendorCalendar.startOfDay(for: now)
+        let shared = Set(Dictionary(grouping: readings, by: \.kind).filter { $0.value.count > 1 }.keys)
         return readings.map { reading in
+            let name = shared.contains(reading.kind) ? reading.host : UsageFormat.forgeName(reading.kind)
             let ended =
                 period == .today && !calendar.isDate(reading.readAt, inSameDayAs: now)
             let current = ended ? nil : reading
@@ -1401,6 +1419,7 @@ struct UsagePanelSnapshot: Equatable {
                 id: reading.id,
                 kind: reading.kind,
                 host: reading.host,
+                title: UsageFormat.forgeSectionLabel(name, period: period),
                 login: reading.login,
                 contributions: contributions,
                 merged: merged,
@@ -1409,6 +1428,7 @@ struct UsagePanelSnapshot: Equatable {
                 readAt: reading.hasEverRead ? reading.readAt : nil,
                 failure: reading.failure,
                 opensAt: opensAt,
+                latest: reading.latest,
                 tooltip: UsageFormat.forgeTooltip(
                     reading.kind, host: reading.host, login: reading.login, period: period,
                     boundedToOneYear: reading.activity.contributionsBoundedToOneYear,
@@ -1484,6 +1504,7 @@ struct UsagePanelSnapshot: Equatable {
             state: state,
             summary: UsageFormat.identityLine(
                 unexpected: wrong.map(identityName), checked: identities.count),
+            count: UsageFormat.identityCount(checked: identities.count),
             repository: wrong.count == 1 ? wrong[0].repository : nil)
     }
     /// Which windows the panel's period may be put over: today, which needs no

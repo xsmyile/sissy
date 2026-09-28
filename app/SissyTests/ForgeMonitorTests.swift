@@ -146,6 +146,46 @@ final class ForgeMonitorTests: XCTestCase {
         XCTAssertEqual(row?.readAt, Self.readAt)
     }
 
+    /// The latest event is kept through a failure for the reason the figures
+    /// are: it was true when it was read, and the heading says how long ago.
+    func testAFailureKeepsTheLatestEvent() async {
+        let outcome = LockedValue<Bool>(true)
+        let event = ForgeEvent(action: .pushed, target: "next", repository: "tanuki", at: Self.readAt)
+        let monitor = ForgeActivityMonitor(
+            connections: [Self.gitHub],
+            fetch: { connection, _, _, _ in
+                guard outcome.load() else { throw ForgeReadFailure.unreachable }
+                var reading = Self.reading(connection, login: "gh", contributions: 42, merged: 7)
+                reading.latest = event
+                return reading
+            },
+            token: { _, _ in .found("token") })
+        _ = await monitor.refreshOnce {}
+        outcome.store(false)
+        _ = await monitor.refreshOnce {}
+        XCTAssertEqual(monitor.currentReadings().first?.latest, event)
+    }
+
+    /// A round whose counters arrived and whose feed did not is a success,
+    /// and it replaces the reading whole, so the event is laid over the row's
+    /// own rather than taking the line off.
+    func testARoundWhoseFeedFailedKeepsTheRowsEvent() async {
+        let feed = LockedValue<Bool>(true)
+        let event = ForgeEvent(action: .pushed, target: "next", repository: "tanuki", at: Self.readAt)
+        let monitor = ForgeActivityMonitor(
+            connections: [Self.gitHub],
+            fetch: { connection, _, _, _ in
+                var reading = Self.reading(connection, login: "gh", contributions: 42, merged: 7)
+                reading.latest = feed.load() ? event : nil
+                return reading
+            },
+            token: { _, _ in .found("token") })
+        _ = await monitor.refreshOnce {}
+        feed.store(false)
+        _ = await monitor.refreshOnce {}
+        XCTAssertEqual(monitor.currentReadings().first?.latest, event)
+    }
+
     /// A refused token cannot be fixed by asking again in five minutes, so the
     /// connection is parked and the next round spends no request on it.
     func testARefusedTokenParksTheConnectionUntilTheUserActs() async {

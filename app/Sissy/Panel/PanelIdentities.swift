@@ -94,7 +94,7 @@ struct PanelIdentities: View {
     var body: some View {
         PanelGroup {
             HStack(spacing: 6) {
-                SectionLabel(text: "Commit identity")
+                SectionLabel(text: UsageFormat.identitySectionLabel)
                 Spacer(minLength: 0)
                 Text(UsageFormat.identityFooter(checked: rows.count))
                     .font(.system(size: 10))

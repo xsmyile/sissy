@@ -23,19 +23,22 @@ enum ForgeKind: String, Sendable, Codable, Equatable, CaseIterable {
     }
 }
 
-/// One of the counters a forge row carries beside its contribution total.
+/// One of the readings a forge row carries beside its contribution total.
 ///
-/// The contribution total is deliberately not among them: it is what the
-/// section is called, so a row with it switched off would be a row of nothing
-/// under a heading that names it. These three are the ones a user may not care
+/// The contribution total is deliberately not among them: it is the section's
+/// own figure, so a row with it switched off would be a row of nothing under
+/// a heading that is about it. These are the ones a user may not care
 /// about — and switching one off is not only a rendering choice, because a
-/// counter nobody reads must not be fetched either. On GitHub that changes
-/// nothing but the size of a reply already being made; on GitLab each of these
-/// is four requests a poll.
+/// reading nobody looks at must not be fetched either. On GitHub the three
+/// counters change nothing but the size of a reply already being made; on
+/// GitLab each of them is four requests a poll. `latest` is the one that is not
+/// a count: GitHub answers it with a request of its own, GitLab with one more.
 enum ForgeCounter: String, Sendable, Codable, CaseIterable {
     case merged
     case issues
     case comments
+    /// The newest thing the account did on the forge, as `ForgeEvent`.
+    case latest
 
     /// Every counter, which is what a build with nothing configured reads.
     static let all = Set(allCases)
@@ -124,6 +127,83 @@ struct ForgeActivity: Sendable, Equatable {
         contributionsBoundedToOneYear: false)
 }
 
+/// The newest thing an account did on its forge, out of the vendor's own event
+/// feed.
+///
+/// **A state rather than a count, so it follows no window.** Every figure
+/// beside it is over the period the header names; this is the last push,
+/// request or comment whenever it happened, and the row dates it instead.
+///
+/// **Five verbs for both vendors, in the vendor's own reference.** GitHub files
+/// `PushEvent`, `PullRequestEvent`, `IssuesEvent` and the comment and review
+/// events; GitLab files `pushed to`, `opened`, `accepted`, `commented on` and
+/// `approved`. Both come down to the same five actions, so a row reads the same
+/// whichever forge it is on, while `target` keeps each vendor's own name for the
+/// thing: `#290` for a GitHub pull request, `!41` for a GitLab merge request, a
+/// branch for a push. What neither is taken for is the rest of the feed —
+/// measured 2026-09-28, the newest GitLab event of the day was a branch
+/// `deleted` after its merge, and GitHub files a `CreateEvent` and a
+/// `DeleteEvent` around every pull request, none of which is work.
+struct ForgeEvent: Sendable, Equatable {
+    enum Action: Sendable, Equatable {
+        case pushed
+        case opened
+        case merged
+        case openedIssue
+        case commented
+        case reviewed
+    }
+
+    let action: Action
+    /// The branch a push went to, or the request or issue acted on in the
+    /// vendor's own notation. Nil where the vendor named neither.
+    let target: String?
+    /// The repository's own short name, nil where the vendor did not say.
+    let repository: String?
+    /// When the vendor says it happened.
+    let at: Date
+
+    /// The newest of `events`, by the vendor's own stamp rather than by feed
+    /// order.
+    ///
+    /// **Not the first row.** Measured 2026-09-28 on GitHub's user feed, a
+    /// push stamped 10:34 UTC was listed second, above a merge at 21:08 and a
+    /// push at 21:07: the feed is filed as events are processed, and GitHub
+    /// processes some hours late. The newest stamp is what the row is about.
+    static func newest(_ events: [Self]) -> Self? {
+        events.max { $0.at < $1.at }
+    }
+
+    /// What a fresh reading's event and the one already on the row come to.
+    ///
+    /// **The request that reads it can fail while the counters do not**, and
+    /// a reading that arrives replaces the one before it whole. Taken as it
+    /// came, a feed that answered `5xx` once, or a GitLab project lookup that
+    /// timed out, took the line off the row, or its repository off the line,
+    /// for one poll in every such round. So the newer stamp wins, the row's
+    /// event stands where the fresh one is missing or older, which is also a
+    /// GitHub feed filing late, and a fresh event that is the same one without
+    /// its repository keeps the name the row already had.
+    static func merged(_ fresh: Self?, over previous: Self?) -> Self? {
+        guard let fresh else { return previous }
+        guard let previous else { return fresh }
+        if previous.at > fresh.at { return previous }
+        let same =
+            previous.at == fresh.at && previous.action == fresh.action
+            && previous.target == fresh.target
+        return same && fresh.repository == nil ? fresh.named(previous.repository) : fresh
+    }
+
+    /// A tag as a push target names it, the same on both forges.
+    static func tag(_ name: String) -> String { "tag " + name }
+
+    /// The same event with the repository a later request named, keeping the
+    /// one it had where that request named none.
+    func named(_ name: String?) -> Self {
+        Self(action: action, target: target, repository: name ?? repository, at: at)
+    }
+}
+
 /// One forge connection's last reading, or the fact that there is not one.
 ///
 /// The login is on the reading rather than on the connection, and that is the
@@ -155,6 +235,14 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     /// is the signal — so this sits beside the figures rather than replacing
     /// them, and a row with both says what it knows and how old it is.
     let failure: ForgeReadFailure?
+    /// The newest thing the account did, nil where it is switched off, the
+    /// feed held nothing worth naming, or the feed could not be read.
+    ///
+    /// Absent rather than a failure of the reading: it rides a request of its
+    /// own, and a feed that would not answer must not throw away the counters
+    /// the document before it already carried. A failed round keeps the
+    /// previous one along with the figures, for the reason those are kept.
+    var latest: ForgeEvent?
 
     /// A connection that has answered nothing at all. Distinct from a zero:
     /// a day with no contributions is a reading, and this is the absence of

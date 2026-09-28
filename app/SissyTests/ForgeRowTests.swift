@@ -264,6 +264,32 @@ final class ForgeRowTests: XCTestCase {
         XCTAssertEqual(both.count, 2)
         XCTAssertEqual(both.map(\.contributions), ["128", "123"])
         XCTAssertEqual(both.map(\.merged), ["28", "15"])
+        XCTAssertEqual(both.map(\.title), ["GitHub · today", "GitLab · today"])
+    }
+
+    /// Two connections to one vendor are headed by their hosts, since the
+    /// vendor's name would head both sections with the same word.
+    func testTwoConnectionsToOneVendorAreHeadedByTheirHosts() {
+        let enterprise = ForgeConnection(kind: .gitHub, host: "github.example.com")
+        let both = rows([
+            Self.reading(Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7),
+            Self.reading(enterprise, login: "davide", contributions: 12, merged: 1, issues: 0),
+            Self.reading(Self.gitLab, login: "davide", contributions: 123, merged: 15, issues: 17),
+        ])
+        XCTAssertEqual(
+            both.map(\.title),
+            ["github.com · today", "github.example.com · today", "GitLab · today"])
+    }
+
+    /// The latest event answers no window, so a reading from before midnight
+    /// loses `Today`'s figures and keeps it.
+    func testTheLatestEventOutlivesTheDayItWasReadOn() throws {
+        var reading = Self.yesterdaysReading()
+        let event = ForgeEvent(action: .merged, target: "#41", repository: "sissy", at: reading.readAt)
+        reading.latest = event
+        let row = try XCTUnwrap(rows([reading]).first)
+        XCTAssertNil(row.contributions)
+        XCTAssertEqual(row.latest, event)
     }
 
     /// A reading that never arrived gets a dash and the reason, never a zero.

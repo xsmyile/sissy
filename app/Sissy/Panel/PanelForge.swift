@@ -24,28 +24,71 @@ struct PanelForge: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
-            forge
+            ForEach(snapshot.forge) { row in
+                section(row)
+            }
             PanelIdentityLine(line: snapshot.identityLine, open: openIdentities)
         }
         .padding(PanelMetrics.platterInset)
     }
 
-    /// How much was pushed, per forge account, over the panel's window.
+    /// How much one forge account did over the panel's window, and the last
+    /// thing it did.
     ///
-    /// **The rows are never summed.** Each vendor counts its own thing —
-    /// GitHub its contribution total, GitLab the events it recorded — so a
-    /// total across them would be a third number belonging to neither, which
-    /// is the rule the credits rows are already under.
-    private var forge: some View {
-        PanelGroup {
-            SectionLabel(text: UsageFormat.forgeSectionLabel(snapshot.period))
+    /// **A section each, and never summed.** Each vendor counts its own
+    /// thing — GitHub its contribution total, GitLab the events it recorded —
+    /// so a total across them would be a third number belonging to neither,
+    /// which is the rule the credits rows are already under, and two platters
+    /// say so where one block of rows invited the sum.
+    private func section(_ row: UsagePanelSnapshot.ForgeRow) -> some View {
+        let refreshing = refreshingForge.contains(row.id)
+        return PanelGroup {
+            ForgeSectionLabel(row: row, refreshing: refreshing)
         } content: {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(snapshot.forge) { row in
-                    ForgeRowView(
-                        row: row,
-                        refreshing: refreshingForge.contains(row.id),
-                        refresh: { refreshForge(row.id) })
+            ForgeRowView(row: row, refreshing: refreshing, refresh: { refreshForge(row.id) })
+        }
+    }
+}
+
+/// A forge section's heading: the vendor and the window on the left, and on
+/// the right what the row is doing, what went wrong, or how old it is.
+///
+/// The right-hand end is where `ProjectsSectionLabel` puts its count, and the
+/// age earned the place for the reason `UsageFormat.forgeSectionLabel` gives:
+/// in a caption under the row it cut the latest event short. The title keeps
+/// its width before the notice does, because it is what tells two sections
+/// apart, and the notice shortens at its tail, which a failure's reason
+/// survives.
+///
+/// `TimelineView` rather than a string the snapshot already built: this
+/// block's frame arrives every five to thirty minutes, so an age taken from it
+/// would sit at "read 2m ago" for half an hour under an open panel. It is what
+/// `PanelProviderStatus` does with `checkedAt`, and the two are the same
+/// reading for the same reason.
+struct ForgeSectionLabel: View {
+    let row: UsagePanelSnapshot.ForgeRow
+    let refreshing: Bool
+
+    /// Matches the panel header's, for the reason that one is a second rather
+    /// than a minute: the first minute of an age is worded in seconds.
+    private static let clockTick: TimeInterval = 1
+
+    var body: some View {
+        HStack(spacing: 6) {
+            SectionLabel(text: row.title)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: 8)
+            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+                if let notice = UsageFormat.forgeNotice(
+                    row.kind, failure: row.failure, readAt: row.readAt, opensAt: row.opensAt,
+                    refreshing: refreshing, now: context.date)
+                {
+                    Text(notice)
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
         }
@@ -70,12 +113,29 @@ struct PanelForge: View {
 /// connected, so it does not wait for one; and it is not a badge per project
 /// row, which would be the decorative signal on the cost axis the panel
 /// refuses, since that list is ordered by spend.
+///
+/// **Headed like every other block, as of 2026-09-28.** It was the one platter
+/// on the page with no label above it, so the line spent its own width saying
+/// what it was, `Commit identity · no findings in 14 repositories`. The name
+/// and the count are the heading's now, the count at the end where the
+/// projects' sits, and the line is left saying the verdict.
 struct PanelIdentityLine: View {
     let line: UsagePanelSnapshot.IdentityLine
     let open: (String?) -> Void
 
     var body: some View {
         PanelGroup {
+            HStack(spacing: 6) {
+                SectionLabel(text: UsageFormat.identitySectionLabel)
+                Spacer(minLength: 8)
+                if let count = line.count {
+                    Text(count)
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } content: {
             Button {
                 open(line.repository)
             } label: {

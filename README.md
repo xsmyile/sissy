@@ -79,6 +79,7 @@ number in the menu bar.
   was cut from, so one project is one row.
 - What you contributed on each connected forge, over the period you picked. On
   `All`, though, each vendor answers over its own range, not the archive's.
+  Under the figures, the last thing you pushed, opened, merged or commented on.
 - Whether any repository commits under a name its forge does not expect. The
   line is always there: quiet with a count when nothing is wrong, and naming
   the repository when something is.

@@ -198,6 +198,11 @@ enum ForgeAlias {
 /// a request on each of the thirty-odd repositories a real day touches, for
 /// four numbers.
 ///
+/// The latest event is the one reading that is not a count, and it costs each
+/// vendor one request more: GitHub's feed is REST where the counts are
+/// GraphQL, and GitLab's feed names its project by number. GitLab's feed itself
+/// is free, riding the widest window's header read.
+///
 /// The failure vocabulary is `ForgeReadFailure` rather than HTTP's, because the
 /// row has to say what the user can do about it and "the VPN is off" and "the
 /// token was refused" are not the same sentence.
@@ -363,7 +368,8 @@ enum ForgeActivityFeed {
     }
 }
 
-/// GitHub's half: one GraphQL document for every figure on the row.
+/// GitHub's half: one GraphQL document for every count on the row, and the
+/// account's event feed for the latest event.
 ///
 /// The contributions figure is `contributionCalendar.totalContributions`, which
 /// is the number on the profile's own squares and therefore the one the user
@@ -423,8 +429,133 @@ enum GitHubActivityFeed {
         let payload = try await ForgeActivityFeed.graphQL(
             endpoint, query: document(now: now, counters: counters), token: token,
             header: authorizationHeader, scheme: authorizationScheme)
-        return try parse(payload, connection: connection, now: now)
+        var reading = try parse(payload, connection: connection, now: now)
+        if counters.contains(.latest), let login = reading.login {
+            reading.latest = await latestEvent(connection, token: token, login: login)
+            try Task.checkCancellation()
+        }
+        return reading
     }
+
+    private static let dotComREST = URL(string: "https://api.github.com")!
+    private static let enterpriseRESTPath = "/api/v3"
+    /// How many events one read of the feed asks for, which is the most a
+    /// page of it carries.
+    static let eventPage = 100
+
+    /// The account's own event feed, which is the one place GitHub says what
+    /// was done last.
+    ///
+    /// **REST, because GraphQL has no feed.** `contributionsCollection` dates a
+    /// commit to its day and nothing finer, so the document above can say how
+    /// much and never when. The feed is a request of its own, on the REST
+    /// quota rather than the GraphQL one, which is 5000 an hour against a poll
+    /// that is at most twelve. Measured 2026-09-28 with a classic token, it
+    /// carries the account's private events as well as its public ones — pushes
+    /// to private repositories of an organisation included.
+    static func eventsURL(_ connection: ForgeConnection, login: String) -> URL? {
+        let base =
+            connection.isVendorHosted
+            ? dotComREST : connection.root?.appendingPathComponent(enterpriseRESTPath)
+        guard let base,
+            var components = URLComponents(
+                url: base.appendingPathComponent("users").appendingPathComponent(login)
+                    .appendingPathComponent("events"),
+                resolvingAgainstBaseURL: false)
+        else { return nil }
+        components.queryItems = [URLQueryItem(name: "per_page", value: String(eventPage))]
+        return components.url
+    }
+
+    /// The newest event worth naming, or nil.
+    ///
+    /// Non-throwing for the reason `GitLabActivityFeed.issueCounts` is: the
+    /// counters have already arrived, and a feed that would not answer must
+    /// not throw them away. What it cannot report is a cancellation, so the
+    /// caller asks the task itself.
+    ///
+    /// **The feed runs late, and the row can only say what it holds.**
+    /// Measured 2026-09-28, a push had not reached it a quarter of an hour
+    /// later, and a push from the morning was filed after the evening's merges.
+    /// The stamp on what is shown is still the vendor's own, so the row is late
+    /// rather than wrong.
+    private static func latestEvent(
+        _ connection: ForgeConnection, token: String, login: String
+    ) async -> ForgeEvent? {
+        guard let url = eventsURL(connection, login: login) else { return nil }
+        let request = ForgeActivityFeed.request(
+            url, token: token, header: authorizationHeader, scheme: authorizationScheme)
+        guard let reply = try? await ForgeActivityFeed.send(request),
+            let rows = try? JSONSerialization.jsonObject(with: reply.data) as? [[String: Any]]
+        else { return nil }
+        return ForgeEvent.newest(rows.compactMap(event))
+    }
+
+    /// One row of the feed as the event the row names, nil for the ones that
+    /// are not work: a branch created or deleted, a star, a label.
+    static func event(_ row: [String: Any]) -> ForgeEvent? {
+        guard let type = row["type"] as? String,
+            let at = (row["created_at"] as? String).flatMap(UsageReaderShared.parseTimestamp),
+            let payload = row["payload"] as? [String: Any],
+            let done = action(type, payload)
+        else { return nil }
+        let repository = ((row["repo"] as? [String: Any])?["name"] as? String)
+            .map { $0.split(separator: "/").last.map(String.init) ?? $0 }
+        return ForgeEvent(action: done.action, target: done.target, repository: repository, at: at)
+    }
+
+    /// Which of the five verbs a feed row is, and what it was done to.
+    ///
+    /// Every verb is the account's own act, so `merged` is a request this
+    /// account merged, whoever opened it: the event line says what was done,
+    /// where the merged figure above it counts the requests it authored.
+    ///
+    /// **A merge is `merged` as well as `closed`.** Measured 2026-09-28, the
+    /// feed filed a pull request merged that day with the action `merged` and
+    /// a `pull_request` trimmed to its number, so the `merged` flag the
+    /// documented `closed` carries is not there to be read; both forms are
+    /// taken, and a `closed` without the flag is a request closed unmerged.
+    private static func action(
+        _ type: String, _ payload: [String: Any]
+    ) -> (action: ForgeEvent.Action, target: String?)? {
+        let verb = payload["action"] as? String
+        let request = payload["pull_request"] as? [String: Any]
+        let requestNumber = reference((payload["number"] as? Int) ?? (request?["number"] as? Int))
+        let issueNumber = reference((payload["issue"] as? [String: Any])?["number"] as? Int)
+        let merged = verb == "merged" || (verb == "closed" && request?["merged"] as? Bool == true)
+        switch type {
+        case "PushEvent":
+            return (.pushed, (payload["ref"] as? String).map(branch))
+        case "PullRequestEvent" where verb == "opened" || verb == "reopened":
+            return (.opened, requestNumber)
+        case "PullRequestEvent" where merged:
+            return (.merged, requestNumber)
+        case "IssuesEvent" where verb == "opened":
+            return (.openedIssue, issueNumber)
+        case "IssueCommentEvent" where verb == "created":
+            return (.commented, issueNumber)
+        case "PullRequestReviewCommentEvent" where verb == "created":
+            return (.commented, requestNumber)
+        case "PullRequestReviewEvent" where verb == "created":
+            return (.reviewed, requestNumber)
+        default:
+            return nil
+        }
+    }
+
+    private static func reference(_ number: Int?) -> String? { number.map { "#\($0)" } }
+
+    /// A ref as the row names it: a branch by its name, a tag as `tag` and its
+    /// name, which is what tells it apart from a branch of the same name and
+    /// is the form `GitLabActivityFeed` gives one too.
+    private static func branch(_ ref: String) -> String {
+        if ref.hasPrefix(branchPrefix) { return String(ref.dropFirst(branchPrefix.count)) }
+        if ref.hasPrefix(tagPrefix) { return ForgeEvent.tag(String(ref.dropFirst(tagPrefix.count))) }
+        return ref
+    }
+
+    private static let branchPrefix = "refs/heads/"
+    private static let tagPrefix = "refs/tags/"
 
     /// Every period aliased into one document, because the cost is per document
     /// rather than per field: measured 2026-09-17, four contribution ranges and
@@ -633,7 +764,8 @@ enum GitHubActivityFeed {
 }
 
 /// GitLab's half: one GraphQL query for the merged counts, and two header reads
-/// per period — the activity total, and the same filtered to comments.
+/// per period — the activity total, and the same filtered to comments — plus
+/// the name of the project the latest event is on.
 ///
 /// **GitLab publishes no contribution total Sissy can read.** Its own profile
 /// squares come from `users/<name>/calendar.json`, which is a web route rather
@@ -660,7 +792,7 @@ enum GitLabActivityFeed {
     private static let graphQLPath = "/api/graphql"
     private static let tokenHeader = "PRIVATE-TOKEN"
     private static let totalHeader = "x-total"
-    private static let onePage = "1"
+    private static let onePage = 1
 
     static func read(
         _ connection: ForgeConnection, token: String, counters: Set<ForgeCounter>, now: Date
@@ -682,6 +814,7 @@ enum GitLabActivityFeed {
         var comments: [UsagePeriod: Int] = [:]
         var contributionsAtLeast: Set<UsagePeriod> = []
         var commentsAtLeast: Set<UsagePeriod> = []
+        var newest: (event: ForgeEvent, project: Int?)?
         // The two reads of a period go together rather than one after the
         // other: the comment counter doubled the header reads and would
         // otherwise have doubled the wall clock with them, on a self-hosted
@@ -689,16 +822,24 @@ enum GitLabActivityFeed {
         // reader already. A period is still awaited before the next starts, so
         // the instance sees two requests at a time rather than eight.
         for period in UsagePeriod.allCases where ForgeWindow.hasOpened(period, now: now) {
-            async let total = events(connection, token: token, period: period, now: now)
+            let feed = period == .all && counters.contains(.latest)
+            async let total = events(
+                connection, token: token, period: period, now: now, rows: feed ? latestPage : onePage)
             async let commented =
                 counters.contains(.comments)
                 ? commentEvents(connection, token: token, period: period, now: now) : nil
             let counted = try await total
             let commentCount = await commented
-            contributions[period] = counted?.value
+            contributions[period] = counted.count?.value
             comments[period] = commentCount?.value
-            if counted?.isFloor == true { contributionsAtLeast.insert(period) }
+            if counted.count?.isFloor == true { contributionsAtLeast.insert(period) }
             if commentCount?.isFloor == true { commentsAtLeast.insert(period) }
+            if feed { newest = latest(in: counted.body) }
+        }
+        var lastEvent = newest?.event
+        if let newest, let project = newest.project {
+            lastEvent = newest.event.named(await projectPath(connection, token: token, id: project))
+            try Task.checkCancellation()
         }
         return ForgeActivityReading(
             id: connection.id, kind: connection.kind, host: connection.address, login: merged.username,
@@ -706,8 +847,113 @@ enum GitLabActivityFeed {
                 contributions: contributions, merged: merged.counts, issues: issues,
                 comments: comments, contributionsBoundedToOneYear: false,
                 contributionsAtLeast: contributionsAtLeast, commentsAtLeast: commentsAtLeast),
-            readAt: now, failure: nil)
+            readAt: now, failure: nil, latest: lastEvent)
     }
+
+    /// How many events the widest window's read carries in its body when the
+    /// latest event is asked for.
+    ///
+    /// **The page is free, which is why this is not a request of its own.**
+    /// The `all` count already asks the feed newest first and throws the rows
+    /// away; asking for twenty instead of one costs the reply a few kilobytes.
+    /// Twenty rather than one because the newest row is often not work:
+    /// measured 2026-09-28, it was a branch `deleted` after its merge, and a
+    /// merge files three rows in the same second.
+    static let latestPage = 20
+
+    /// The newest event worth naming on a page of the feed, with the project
+    /// it names, which the row still has to ask the name of.
+    static func latest(in body: Data) -> (event: ForgeEvent, project: Int?)? {
+        guard let rows = try? JSONSerialization.jsonObject(with: body) as? [[String: Any]] else {
+            return nil
+        }
+        return rows.compactMap(event).max { $0.event.at < $1.event.at }
+    }
+
+    /// One row of the feed as the event the row names, nil for the ones that
+    /// are not work.
+    ///
+    /// **`target_iid` is not always the request.** Measured 2026-09-28 on
+    /// 19.3, a push files the project's own id there and a comment files the
+    /// note's, so a comment is read through `note.noteable_iid` and a push
+    /// takes no number at all.
+    static func event(_ row: [String: Any]) -> (event: ForgeEvent, project: Int?)? {
+        guard let name = row["action_name"] as? String,
+            let at = (row["created_at"] as? String).flatMap(UsageReaderShared.parseTimestamp),
+            let done = action(name, row)
+        else { return nil }
+        let event = ForgeEvent(action: done.action, target: done.target, repository: nil, at: at)
+        return (event, row["project_id"] as? Int)
+    }
+
+    private static func action(
+        _ name: String, _ row: [String: Any]
+    ) -> (action: ForgeEvent.Action, target: String?)? {
+        let type = row["target_type"] as? String
+        let iid = row["target_iid"] as? Int
+        let push = row["push_data"] as? [String: Any]
+        switch name {
+        case "pushed to", "pushed new":
+            let ref = push?["ref"] as? String
+            return (.pushed, push?["ref_type"] as? String == tagRefType ? ref.map(ForgeEvent.tag) : ref)
+        case "opened" where type == mergeRequestType:
+            return (.opened, iid.map(mergeRequest))
+        case "opened" where type == issueType:
+            return (.openedIssue, iid.map(issue))
+        case "accepted":
+            return (.merged, iid.map(mergeRequest))
+        case "approved":
+            return (.reviewed, iid.map(mergeRequest))
+        case "commented on":
+            return (.commented, noteTarget(row))
+        default:
+            return nil
+        }
+    }
+
+    /// What a comment was left on, in the notation GitLab itself writes it
+    /// in: `!` for a merge request, `#` for an issue, nothing for a commit or
+    /// a snippet.
+    private static func noteTarget(_ row: [String: Any]) -> String? {
+        let note = row["note"] as? [String: Any]
+        guard let iid = note?["noteable_iid"] as? Int else { return nil }
+        switch note?["noteable_type"] as? String {
+        case mergeRequestType: return mergeRequest(iid)
+        case issueType: return issue(iid)
+        default: return nil
+        }
+    }
+
+    private static func mergeRequest(_ iid: Int) -> String { "!\(iid)" }
+    private static func issue(_ iid: Int) -> String { "#\(iid)" }
+    private static let mergeRequestType = "MergeRequest"
+    private static let issueType = "Issue"
+    private static let tagRefType = "tag"
+
+    /// The project a feed row names, as the path its own URL ends in.
+    ///
+    /// **One request, because the feed names projects by number.** Measured
+    /// 2026-09-28, a merge request's row carries its own title and the
+    /// project's id and nothing else, so the name is asked for. The path rather
+    /// than the display name, because it is what a GitHub row's repository is:
+    /// the last component of the URL the user would type. Non-throwing for
+    /// the reason `issueCounts` is.
+    static func projectURL(_ connection: ForgeConnection, id: Int) -> URL? {
+        connection.root?.appendingPathComponent(projectsPath).appendingPathComponent(String(id))
+    }
+
+    private static func projectPath(
+        _ connection: ForgeConnection, token: String, id: Int
+    ) async -> String? {
+        guard let url = projectURL(connection, id: id) else { return nil }
+        let request = ForgeActivityFeed.request(url, token: token, header: tokenHeader, scheme: nil)
+        guard let reply = try? await ForgeActivityFeed.send(request),
+            let project = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
+        else { return nil }
+        return project["path"] as? String
+    }
+
+    private static let projectsPath = "/api/v4/projects"
 
     /// Who the token belongs to, off the same document the merged counts
     /// ride on with none of them asked for.
@@ -841,13 +1087,14 @@ enum GitLabActivityFeed {
     /// Measured 2026-09-17, `after=2026-09-17` answered `x-total: 0` on a day
     /// that had 95 events.
     static func eventsURL(
-        _ connection: ForgeConnection, period: UsagePeriod, now: Date, action: String? = nil
+        _ connection: ForgeConnection, period: UsagePeriod, now: Date, action: String? = nil,
+        rows: Int = onePage
     ) -> URL? {
         guard let root = connection.root,
             var components = URLComponents(
                 url: root.appendingPathComponent(apiPath), resolvingAgainstBaseURL: false)
         else { return nil }
-        var query = [URLQueryItem(name: "per_page", value: onePage)]
+        var query = [URLQueryItem(name: "per_page", value: String(rows))]
         if let start = ForgeWindow.start(of: period, now: now),
             let exclusive = Calendar.current.date(byAdding: .day, value: -1, to: start)
         {
@@ -874,20 +1121,22 @@ enum GitLabActivityFeed {
         _ connection: ForgeConnection, token: String, period: UsagePeriod, now: Date
     ) async -> ForgeEventCount? {
         guard
-            let count = try? await events(
+            let read = try? await events(
                 connection, token: token, period: period, now: now, action: commentedAction)
         else { return nil }
-        return count
+        return read.count
     }
 
     /// GitLab's own name for the event a comment files.
     static let commentedAction = "commented"
 
+    /// One period's count, and the page of the feed it came with.
     private static func events(
         _ connection: ForgeConnection, token: String, period: UsagePeriod, now: Date,
-        action: String? = nil
-    ) async throws -> ForgeEventCount? {
-        guard let url = eventsURL(connection, period: period, now: now, action: action) else {
+        action: String? = nil, rows: Int = onePage
+    ) async throws -> (count: ForgeEventCount?, body: Data) {
+        guard let url = eventsURL(connection, period: period, now: now, action: action, rows: rows)
+        else {
             throw ForgeReadFailure.malformed
         }
         let request = ForgeActivityFeed.request(
@@ -895,8 +1144,8 @@ enum GitLabActivityFeed {
         // Through the shared `send` so this path takes the same failure table
         // the GraphQL one does: the count is in a header rather than the body,
         // which is the only thing different about it.
-        let (_, response) = try await ForgeActivityFeed.send(request)
-        return count(of: response)
+        let (body, response) = try await ForgeActivityFeed.send(request)
+        return (count(of: response), body)
     }
 
     /// The count a reply's headers carry, nil where they carry none.
