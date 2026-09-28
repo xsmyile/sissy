@@ -12,7 +12,7 @@ import SwiftUI
 /// The counts follow the period the Usage tab's headline is on, and their
 /// label says which: the control is the money's, and a second one here would
 /// be two answers to the same question.
-struct PanelGit: View {
+struct PanelForge: View {
     let snapshot: UsagePanelSnapshot
     /// Which forge connections are being re-read, so their rows can say so
     /// where they otherwise print an age about to change.

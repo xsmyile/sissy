@@ -392,7 +392,7 @@ struct UsagePanelView: View {
         case .usage:
             overview(snapshot)
         case .sessions:
-            PanelStats(
+            PanelSessions(
                 block: snapshot.agents,
                 observedAt: live?.frame.agentMemory?.current.observedAt,
                 refreshing: model.engine.refreshingAgents,
@@ -404,7 +404,7 @@ struct UsagePanelView: View {
                 overview(snapshot)
             }
         case .forge:
-            PanelGit(
+            PanelForge(
                 snapshot: snapshot,
                 refreshingForge: model.engine.refreshingForge,
                 refreshForge: { model.refreshForge($0) },
