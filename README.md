@@ -5,8 +5,8 @@
   Sissy
 </h1>
 
-**The menu bar companion for developers who code with agents.**<br />
-**The numbers you keep checking, one click away.**
+**The numbers you keep checking, one click away.**<br />
+The menu bar companion for developers: your agents, your Mac, your repositories.
 
 [![Release](https://img.shields.io/github/v/release/xsmyile/sissy?style=flat-square&color=blue)](../../releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/xsmyile/sissy/ci.yml?branch=master&style=flat-square&label=ci&logo=githubactions&logoColor=white)](../../actions/workflows/ci.yml)
@@ -34,6 +34,11 @@
   against the repository it was cut from.
 - **Git**: contributions on each connected forge, and a warning before a
   repository commits under the wrong name.
+- **Mac**: memory pressure as the kernel grades it, swap, load and uptime.
+- **Disk**: free space graded against the Mac's RAM, read and write activity,
+  and the developer caches you can clear, such as Xcode DerivedData.
+- **Network**: what the links carry now and over the last two minutes, what
+  they carried since boot, and the Wi-Fi signal.
 
 Everything is read from what is already on your Mac and the services you
 connect. No account of its own, no telemetry, nothing to grant at first launch.
