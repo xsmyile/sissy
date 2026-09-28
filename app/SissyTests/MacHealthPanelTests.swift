@@ -135,7 +135,7 @@ final class MacHealthPanelTests: XCTestCase {
     func testAReadingGivesTheMacATabOfItsOwn() {
         let snapshot = UsagePanelSnapshot.make(frame: frame(mac: reading()))
 
-        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage, .mac])
+        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage, .sessions, .mac])
     }
 
     /// Switched off or not sampled yet, the frame carries no reading and the
@@ -144,14 +144,15 @@ final class MacHealthPanelTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(frame: frame(mac: nil))
 
         XCTAssertNil(snapshot.mac)
-        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage])
+        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage, .sessions])
     }
 
-    /// The Mac has a tab, so Usage no longer carries a line for it.
+    /// The Mac has a tab, so Usage no longer carries a line for it; and with
+    /// no provider in the frame there is no providers platter to draw either.
     func testUsageLeavesTheMacToItsTab() {
         let snapshot = UsagePanelSnapshot.make(frame: frame(mac: reading()))
 
-        XCTAssertEqual(PanelModule.visible(in: snapshot), [.providers, .identities])
+        XCTAssertEqual(PanelModule.visible(in: snapshot), [.identities])
     }
 
     func testANormalMacPutsNothingOnItsTab() {

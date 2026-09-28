@@ -452,22 +452,22 @@ an `LSUIElement` app has no Dock icon and no ⌘-Tab entry to come back through 
 and the control that opens it is never disabled, a second press bringing the
 existing window forward rather than opening a second one.
 
-**The panel is a tab per module, and six pages one level in from them.**
-`PanelTab` is Usage, Mac and Git, and `UsagePanelView.Page` is the pages; the
+**The panel is a tab per module, and five pages one level in from them.**
+`PanelTab` is Usage, Sessions, Mac and Forge, and `UsagePanelView.Page` is the pages; the
 `switch` on each is the whole implementation of the rule that only the
 selected surface exists — a `TabView` would hold every tab's view graph live,
 which is precisely the cost `UsagePanelController` drops its host on close to
-avoid. A module earns a tab when it has more than a line to say: Mac while the
-frame carries a `MacHealthReading`, Git while a forge is connected. With only
-Usage left the bar is not drawn at all. `PanelTabBar` sits on a row of its own
+avoid. A module earns a tab when it has more than a line to say: Sessions
+always, Mac while the frame carries a `MacHealthReading`, Forge while a forge
+is connected. A tab is named for what it reads, and a switcher with one
+destination is not drawn at all. `PanelTabBar` sits on a row of its own
 under the header, on the level-0 pages only, and a tab carries the one thing
 worth leaving the current page for: the Mac's level past normal, and a
 repository committing under an unexpected name.
 
 `Panel/PanelOverview.swift` is the Usage tab. It answers what the selected
 window cost and whether there is room to keep working: the cost, one row per
-account carrying the window that binds, what the agents running now are
-holding, and the projects. While no forge is connected the identity line is
+account carrying the window that binds, and the projects. While no forge is connected the identity line is
 there too, since it is all repositories have to say without one. The headline is over a period the user picks
 (`UsagePeriod`: today, 7d, 30d, all), persisted in `preferences.json` because it
 changes what is rendered and nothing about what is metered; the frame carries
@@ -480,13 +480,21 @@ was the headline above it.
 `Panel/PanelMac.swift` is the Mac tab: the kernel's memory pressure as the
 headline with the free share and the sample's age under it, then its three
 steps, swap and disk, load against the cores and uptime, then the three
-heaviest apps besides the agents; fixed in height, and a dash where the kernel
+heaviest apps besides the sessions; fixed in height, and a dash where the kernel
 would not say rather than a `normal` nobody measured. The memory and the disk
 each wear their own level: secondary at normal, orange at warn, red and
-semibold at critical. `Panel/PanelGit.swift` is the Git tab: a row per
+semibold at critical. `Panel/PanelGit.swift` is the Forge tab: a row per
 connected forge, and the identity line under them.
 
-Six pages sit one level in from the tabs, and the way back returns to the tab
+`Panel/PanelStats.swift` is the Sessions tab: over a window of its own, how
+many sessions and sub-agents have run and how long the day was worked, then
+what the sessions running now are holding, with the sweep's age and the
+re-count on that block's own label. It was a page behind a door on Usage's
+providers label until 2026-09-28, which put a page as long as the Mac's and the
+Forge's together behind an 11 pt reading. The window is local to the tab,
+because sharing the headline's moved the money figure behind the user's back.
+
+Five pages sit one level in from the tabs, and the way back returns to the tab
 each was opened from:
 
 | Page | File | Answers |
@@ -496,14 +504,11 @@ each was opened from:
 | `.effort` | `PanelEffortPage.swift` | that vendor's week by model and effort, a bar per model, one level in from the `By effort` row on its page, which opens only when the split says more than the row |
 | `.projects` | `PanelProjectsPage.swift` | every repository the day names rather than the folded three, with the unattributed remainder as a line at the foot rather than a row in the list |
 | `.identities` | `PanelIdentities.swift` | which repositories commit under a name their forge does not expect, findings on the page and the rest behind a disclosure |
-| `.stats` | `PanelStats.swift` | what is running now, and over a window of its own how many sessions and agents have run and how long the day was worked |
 
 `.provider`, `.services`, `.effort` and `.projects` carry the account they were opened
 from, so the way back lands on the page that was left rather than on that
 vendor's first account. `.identities` carries the repository it was opened
-about instead, and `.stats` carries nothing: the agents page's window is its
-own, local to the page, because sharing the headline's moved the money figure
-behind the user's back.
+about instead.
 
 There is no footer: the age of the reading sits under the header's title, where
 it dates the numbers beside it, and the way into Settings sits beside the

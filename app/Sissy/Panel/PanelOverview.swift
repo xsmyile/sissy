@@ -6,7 +6,8 @@ import SwiftUI
 /// — a case added here without a matching `PanelOverview.section` fails to
 /// compile.
 ///
-/// The Mac and the forge are not here: each is a `PanelTab` of its own. The
+/// The sessions, the Mac and the forge are not here: each is a `PanelTab` of
+/// its own. The
 /// identity line is here only while repositories have no tab, which is while
 /// no forge is connected, and it then sits under the projects it is about.
 enum PanelModule: CaseIterable, Hashable {
@@ -15,18 +16,19 @@ enum PanelModule: CaseIterable, Hashable {
     case identities
 
     /// The modules this snapshot has anything to draw for, in the enum's own
-    /// order. `providers` always answers for something; `projects` carries a
-    /// list that can be empty, and an empty section would be a platter with
-    /// nothing on it.
+    /// order. `providers` and `projects` both carry a list that can be empty
+    /// (no reading has landed yet, every provider is switched off, nothing was
+    /// spent today) and an empty section would be a platter with nothing on
+    /// it.
     static func visible(in snapshot: UsagePanelSnapshot) -> [Self] {
         allCases.filter { $0.isVisible(in: snapshot) }
     }
 
     private func isVisible(in snapshot: UsagePanelSnapshot) -> Bool {
         switch self {
-        case .providers: return true
+        case .providers: return !snapshot.gaugeRows.isEmpty
         case .projects: return !snapshot.projects.isEmpty
-        case .identities: return !PanelTab.visible(in: snapshot).contains(.git)
+        case .identities: return !PanelTab.visible(in: snapshot).contains(.forge)
         }
     }
 }
@@ -65,9 +67,6 @@ struct PanelOverview: View {
     /// list where none is.
     let openIdentities: (String?) -> Void
     let selectPeriod: (UsagePeriod) -> Void
-    /// Opens the stats page. The providers label it hangs off is the only way
-    /// there, so that label is drawn on every frame, rows or none.
-    let openStats: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -178,91 +177,24 @@ struct PanelOverview: View {
     /// One row per provider, each carrying the window it is closest to running
     /// out of. A row opens that provider's page, which is where its other
     /// windows, its plan, its account, its day and its own projects live.
-    ///
-    /// Drawn with no rows at all before the first reading lands and with every
-    /// provider switched off, because its label carries the agents door.
-    @ViewBuilder
     private var providers: some View {
-        if snapshot.gaugeRows.isEmpty {
-            providersLabel
-                .padding(.horizontal, PanelMetrics.platterPadding)
-        } else {
-            PanelGroup {
-                providersLabel
-            } content: {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(snapshot.gaugeRows) { row in
-                        Button {
-                            openProvider(row.provider, row.account)
-                        } label: {
-                            providerRow(row)
-                        }
-                        .buttonStyle(.plain)
-                        .help(Self.legendHelp(row))
-                    }
-                }
-            }
-        }
-    }
-
-    /// The block's label and the agents door at the end of it. Drawn alone,
-    /// off any platter, before the first reading lands: the door has to be
-    /// there, and a platter with no rows on it would be a surface claiming a
-    /// block that is not.
-    private var providersLabel: some View {
-        HStack(spacing: 6) {
+        PanelGroup {
             SectionLabel(text: providersTitle)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Spacer(minLength: 8)
-            agentsDoor
-        }
-    }
-
-    /// What the CLIs on this Mac are holding, and the way to the page behind
-    /// it, at the end of the providers label.
-    ///
-    /// **On the label rather than a row of its own**, which is where it sat
-    /// until the row was all it cost: a row's height of the Overview for one
-    /// reading and a chevron. It keeps the adjacency the row was placed for —
-    /// it answers the question the gauges under it do, whether there is room
-    /// to keep working, on the other axis that stops work now — and it takes
-    /// the shape `ProjectsSectionLabel` already taught the panel: a reading at
-    /// the end of a label, and a chevron. The reading names *agents* in its
-    /// own words, never a bare count, because a number at the end of this
-    /// label would read as a count of providers. Measured 2026-09-22, the
-    /// longest label and the widest reading need about 298 pt of the 312.
-    ///
-    /// Drawn before the first sweep lands and on a Mac with nothing running,
-    /// because it is the only door to the page and a door that comes and goes
-    /// with the day is not one.
-    ///
-    /// The button's target reaches past the label's line by `doorHitSlop` on
-    /// each side and gives the room back to the layout, so an 11 pt run of
-    /// text is not the only thing a click can land on while the section keeps
-    /// the height it had.
-    private var agentsDoor: some View {
-        Button(action: openStats) {
-            HStack(spacing: 6) {
-                Text(snapshot.agents.summary)
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .foregroundStyle(
-                        snapshot.agents.live?.running ?? 0 > 0 ? .primary : Color.secondary
-                    )
-                    .lineLimit(1)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+        } content: {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(snapshot.gaugeRows) { row in
+                    Button {
+                        openProvider(row.provider, row.account)
+                    } label: {
+                        providerRow(row)
+                    }
+                    .buttonStyle(.plain)
+                    .help(Self.legendHelp(row))
+                }
             }
-            .padding(.vertical, Self.doorHitSlop)
-            .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .padding(.vertical, -Self.doorHitSlop)
-        .layoutPriority(1)
-        .help("How many sessions and agents have run, and what they are holding now")
     }
 
     /// The block's label, with the day's recap folded into it rather than
@@ -289,9 +221,6 @@ struct PanelOverview: View {
     /// mark goes red the moment the fill passes it — and it says it without
     /// spending the row's one colour.
     private static let bindingWarningPercent = 90
-
-    /// How far the agents door's target reaches above and below its text.
-    private static let doorHitSlop: CGFloat = 6
 
     /// The row's tooltip for its gauge: the window named, how full it is, and
     /// the pace sentence the page prints under the same bar.

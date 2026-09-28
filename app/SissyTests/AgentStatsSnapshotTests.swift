@@ -2,7 +2,7 @@ import XCTest
 
 @testable import Sissy
 
-/// What the Overview's agents door and the stats page behind it say.
+/// What the Sessions tab says.
 final class AgentStatsSnapshotTests: XCTestCase {
     private func memory(
         _ agents: [AgentProcess], samples: [UInt64] = [], since: Date = Date(),
@@ -38,12 +38,22 @@ final class AgentStatsSnapshotTests: XCTestCase {
             history: history, agentMemory: memory)
     }
 
-    /// The row is the only way to the page, so it has to say something before
-    /// the first sweep lands rather than disappear until one does.
+    /// The live half has to say something before the first sweep lands rather
+    /// than disappear until one does.
     func testTheRowSpeaksBeforeTheFirstSweep() {
         let snapshot = UsagePanelSnapshot.make(frame: frame())
         XCTAssertNil(snapshot.agents.live)
         XCTAssertEqual(snapshot.agents.summary, "no reading yet")
+    }
+
+    /// The tab is there before the first sweep and on a Mac with nothing
+    /// running, since a tab that came and went with the processes would not
+    /// be a destination; and it carries no badge, a running session being the
+    /// ordinary state.
+    func testTheSessionsTabIsAlwaysThereAndQuiet() {
+        let snapshot = UsagePanelSnapshot.make(frame: frame())
+        XCTAssertTrue(PanelTab.visible(in: snapshot).contains(.sessions))
+        XCTAssertNil(PanelTab.sessions.badge(in: snapshot))
     }
 
     /// A sweep that found nothing is a measurement, and reads differently from
@@ -51,7 +61,7 @@ final class AgentStatsSnapshotTests: XCTestCase {
     func testAQuietMacReadsAsMeasuredRatherThanUnmeasured() {
         let snapshot = UsagePanelSnapshot.make(frame: frame(memory: memory([])))
         XCTAssertNotNil(snapshot.agents.live)
-        XCTAssertEqual(snapshot.agents.summary, "no agents running")
+        XCTAssertEqual(snapshot.agents.summary, "no sessions running")
     }
 
     func testTheRowNamesTheCountAndWhatItHolds() {
@@ -61,7 +71,7 @@ final class AgentStatsSnapshotTests: XCTestCase {
                     agent(ProviderID.claudeCode, bytes: 1_000_000_000, pid: 1),
                     agent(ProviderID.codex, bytes: 940_000_000, pid: 2),
                 ])))
-        XCTAssertEqual(snapshot.agents.summary, "2 agents · 1.94 GB")
+        XCTAssertEqual(snapshot.agents.summary, "2 sessions · 1.94 GB")
     }
 
     /// One sample is not a line, and a chart drawn through it would be a
@@ -282,7 +292,7 @@ final class AgentFormatTests: XCTestCase {
     }
 
     func testOneAgentIsNotPluralised() {
-        XCTAssertEqual(UsageFormat.agentsRunning(1, footprint: 1_000_000_000), "1 agent · 1.00 GB")
+        XCTAssertEqual(UsageFormat.agentsRunning(1, footprint: 1_000_000_000), "1 session · 1.00 GB")
         XCTAssertEqual(
             UsageFormat.agentCount(1, singular: "session", plural: "sessions"), "1 session")
         XCTAssertEqual(

@@ -59,8 +59,8 @@ struct PanelGit: View {
 /// while a repository disagreed with its forge, which left the page behind a
 /// right-click on a project row on every other day — so the check went
 /// unnoticed until it had something to say, and a user who had never seen
-/// the line had no reason to trust its absence. It keeps the agents door's
-/// rule: a door that comes and goes is not one. What stays true of the old
+/// the line had no reason to trust its absence. It keeps the rule every door
+/// on the panel keeps: a door that comes and goes is not one. What stays true of the old
 /// design is the weight. With no finding the line is secondary, a tick and a
 /// count; a finding turns it primary with the warning mark and names the
 /// repository whenever there is only one, because naming it is the whole of

@@ -139,7 +139,7 @@ final class ForgeRowTests: XCTestCase {
             forge: [Self.reading(Self.gitHub, login: "xsmyile", contributions: 3, merged: 1, issues: 0)])
         let snapshot = UsagePanelSnapshot.make(frame: frame, now: Self.readAt)
 
-        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage, .git])
+        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage, .sessions, .forge])
         XCTAssertFalse(PanelModule.visible(in: snapshot).contains(.identities))
     }
 
@@ -150,7 +150,7 @@ final class ForgeRowTests: XCTestCase {
             today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [])
         let snapshot = UsagePanelSnapshot.make(frame: frame, now: Self.readAt)
 
-        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage])
+        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage, .sessions])
         XCTAssertTrue(PanelModule.visible(in: snapshot).contains(.identities))
     }
 

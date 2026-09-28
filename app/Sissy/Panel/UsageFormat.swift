@@ -1302,8 +1302,8 @@ extension UsageFormat {
         return checkedAt.map { statusAge(checkedAt: $0, now: now) }
     }
 
-    /// What the agents page's header says under its title: that a recount is
-    /// running, or when the count on screen was taken.
+    /// What the Sessions tab's `Now` label says at its end: that a recount
+    /// is running, or when the count on screen was taken.
     static func agentsReading(observedAt: Date?, refreshing: Bool, now: Date) -> String? {
         if refreshing { return "counting…" }
         return observedAt.map { "counted " + age(now.timeIntervalSince($0)) }
@@ -1379,13 +1379,14 @@ extension UsageFormat {
         return String(format: "%.0f KB", value / 1_000)
     }
 
-    /// The Overview's agents door, and the Stats page's headline.
+    /// The headline of the Sessions tab's live half.
     ///
-    /// Names what is running rather than what it costs: the door exists to
-    /// answer whether there is room to keep working, which is the same
-    /// question the gauges above it answer on a different axis.
+    /// Names what is running rather than what it costs, and names it as
+    /// sessions: the counted half above it says sub-agents for what a session
+    /// spawned, and one word for both is the collision the tab was renamed
+    /// out of.
     static func agentsRunning(_ count: Int, footprint: UInt64) -> String {
-        "\(count) \(count == 1 ? "agent" : "agents") · \(bytes(footprint))"
+        "\(count) \(count == 1 ? "session" : "sessions") · \(bytes(footprint))"
     }
 
     /// What the agents have started alongside themselves — a build, a dev

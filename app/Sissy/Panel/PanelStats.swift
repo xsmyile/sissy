@@ -1,37 +1,48 @@
 import SwiftUI
 
-/// How many agents have run, and what the ones running now are holding.
+/// The Sessions tab: how many sessions and sub-agents have run, and what the
+/// sessions running now are holding.
 ///
-/// **A page of the panel rather than a tab of Settings**, on the grounds
-/// `PanelIdentities` is: Settings holds switches and this has no lever on it
-/// at all. And **not a tile on the Overview**, which answers whether there is
-/// room to keep working and nothing else — a lifetime count belongs to the
-/// question a person asks at the end of a period, not to the one they ask
-/// while working.
+/// **A tab rather than a page one level in**, decided 2026-09-28. It sat behind a
+/// door at the end of the Usage tab's providers label, an 11 pt reading and a
+/// chevron in front of a page as long as the Mac's and the Forge's together,
+/// and the only reason it lived there was that the sessions are the CLIs' own
+/// processes. What a tab is decided by is the subject of its reading, and
+/// this one reads the sessions: neither money nor the machine.
 ///
-/// The one reading the Overview does carry is the live half, because that *is*
-/// a "can I keep working" reading: a rate limit and the Mac's memory are the
-/// two things that stop work now. It sits at the end of the providers label and
-/// is the only door to this page, so it is drawn whether or not anything is
-/// running.
+/// **Sessions and sub-agents, never "agents".** The word meant two things on
+/// this one page: a running CLI in the live half and a spawned sub-agent in
+/// the counted one. A session is a CLI somebody started, running or counted,
+/// and a sub-agent is what a session spawned, which is how the two counters
+/// were always defined.
 ///
-/// **The window is this page's own.** It used to be the headline's, which was
-/// wrong twice over: the Overview shows none of these figures, so sharing the
+/// **The window is this tab's own.** It used to be the headline's, which was
+/// wrong twice over: Usage shows none of these figures, so sharing the
 /// selection bought nothing, and changing it here moved the money headline
 /// behind the user's back. Local means it resets on the way out, which is the
 /// arrangement `PanelIdentities.showsAll` already has and for the same reason
 /// — a page that opens on the answer to the question before last has to be
 /// read before it can be glanced at.
 ///
-/// **The counted half leads and the live half follows**, although the door
-/// to the page is the live reading. The live half changes length with every
-/// sweep — an agent starting or exiting is a row — and the popover grows from
-/// its top edge, so whatever sits under that list moves. Under it used to be
-/// the page's one control: the window picker slid by a row for every agent
-/// that came or went, on a 15 s sweep, under a pointer on its way to it. With
-/// the list last, nothing that can be clicked sits below a reading that moves.
+/// **The counted half leads and the live half follows.** The live half
+/// changes length with every sweep, a session starting or exiting being a
+/// row, and the popover grows from its top edge, so whatever sits under that
+/// list moves. Under it used to be the page's one control: the window picker
+/// slid by a row for every session that came or went, on a 15 s sweep, under
+/// a pointer on its way to it. With the list last, nothing that can be
+/// clicked sits below a reading that moves, and the re-count sits on the
+/// live half's own label, above the list it re-counts.
 struct PanelStats: View {
     let block: UsagePanelSnapshot.AgentsBlock
+    /// When the sweep behind the live half was taken, which the tab's own
+    /// label dates since the header above belongs to the whole panel.
+    let observedAt: Date?
+    let refreshing: Bool
+    /// Re-runs the process sweep and not the counts: those come off the tail
+    /// as turns land, where the sweep is on a 15 s clock and a user who has
+    /// just closed three sessions is looking at a figure that is right and
+    /// reads as wrong.
+    let refresh: () -> Void
 
     @State private var window = UsagePanelSnapshot.AgentsBlock.defaultPeriod
     /// Local to the page for the reason `window` is: coming back asks the
@@ -41,8 +52,11 @@ struct PanelStats: View {
     /// answer for while it is set.
     @State private var hoveredSample: Int?
 
-    private static let sectionSpacing: CGFloat = 16
-    private static let labelSpacing: CGFloat = 10
+    private static let sectionSpacing: CGFloat = 10
+    /// Matches the panel header's: the first minute of an age is worded in
+    /// seconds.
+    private static let clockTick: TimeInterval = 1
+    private static let refreshSize: CGFloat = 10
     private static let rowSpacing: CGFloat = 7
     private static let headlineSize: CGFloat = 18
     private static let captionSize: CGFloat = 11
@@ -63,29 +77,56 @@ struct PanelStats: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Self.sectionSpacing) {
+        VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
             countedSection
             if let shown, shown.cache.share != nil || shown.activity.longestTurnMilliseconds != nil {
-                Divider()
                 underTheHood(shown)
             }
-            Divider()
             liveSection
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
+        .padding(PanelMetrics.platterInset)
     }
 
     // MARK: Now
 
     private var liveSection: some View {
-        VStack(alignment: .leading, spacing: Self.labelSpacing) {
-            SectionLabel(text: "Now")
+        PanelGroup {
+            liveLabel
+        } content: {
             if let live = block.live, live.running > 0 {
                 running(live)
             } else {
                 idle
             }
+        }
+    }
+
+    /// The live half's label, with when its sweep was taken and the re-count
+    /// at the end of it, on the label rather than in the panel's header,
+    /// which dates the usage reading and carries the app's own switches.
+    private var liveLabel: some View {
+        HStack(spacing: 6) {
+            SectionLabel(text: "Now")
+            Spacer(minLength: 8)
+            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+                if let line = UsageFormat.agentsReading(
+                    observedAt: observedAt, refreshing: refreshing, now: context.date)
+                {
+                    Text(line)
+                        .font(.system(size: Self.captionSize))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Button(action: refresh) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: Self.refreshSize, weight: .semibold))
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .disabled(refreshing)
+            .help("Count the running sessions again")
         }
     }
 
@@ -113,8 +154,8 @@ struct PanelStats: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .help(
-                    "What the agents themselves used since Sissy started counting, "
-                        + "including agents that have since exited. "
+                    "What the sessions themselves used since Sissy started counting, "
+                        + "including sessions that have since exited. "
                         + "What they started, a build or a dev server, is not in it.")
             }
             processes(live)
@@ -140,7 +181,7 @@ struct PanelStats: View {
             })
     }
 
-    /// One row per running agent.
+    /// One row per running session.
     ///
     /// This is what answers "two gigabytes of what", and it is why the reading
     /// names a repository at all: the totals above say how much, and only the
@@ -222,7 +263,7 @@ struct PanelStats: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
-        .help(row.directory ?? "The kernel would not say where this agent is working")
+        .help(row.directory ?? "The kernel would not say where this session is working")
     }
 
     /// A dash and no chart, which is the panel's own rule for a reading
@@ -241,29 +282,35 @@ struct PanelStats: View {
 
     // MARK: Counted
 
+    /// Drawn only once a window has been counted: a platter with nothing on
+    /// it would claim a reading that is not there.
+    @ViewBuilder
     private var countedSection: some View {
-        VStack(alignment: .leading, spacing: Self.labelSpacing) {
-            HStack(spacing: 6) {
-                SectionLabel(text: "Sessions and agents")
-                Spacer(minLength: 0)
-                periodPicker
-            }
-            if let shown {
-                HStack(alignment: .top, spacing: Self.figureSpacing) {
-                    figure(shown.counts.sessions, singular: "session", plural: "sessions")
-                    figure(shown.counts.agents, singular: "agent", plural: "agents")
-                    worked(shown.activity)
+        if let shown {
+            PanelGroup {
+                HStack(spacing: 6) {
+                    SectionLabel(text: "Sessions and sub-agents")
+                    Spacer(minLength: 0)
+                    periodPicker
                 }
-                if shown.activity.activeMinutes > 0 { strip(shown) }
-                if !shown.byProvider.isEmpty {
-                    VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                        ForEach(shown.byProvider) { providerRow($0) }
+            } content: {
+                VStack(alignment: .leading, spacing: Self.sectionSpacing) {
+                    HStack(alignment: .top, spacing: Self.figureSpacing) {
+                        figure(shown.counts.sessions, singular: "session", plural: "sessions")
+                        figure(shown.counts.agents, singular: "sub-agent", plural: "sub-agents")
+                        worked(shown.activity)
                     }
-                }
-                if let coverage = shown.coverage {
-                    Text(coverage)
-                        .font(.system(size: Self.captionSize))
-                        .foregroundStyle(.secondary)
+                    if shown.activity.activeMinutes > 0 { strip(shown) }
+                    if !shown.byProvider.isEmpty {
+                        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+                            ForEach(shown.byProvider) { providerRow($0) }
+                        }
+                    }
+                    if let coverage = shown.coverage {
+                        Text(coverage)
+                            .font(.system(size: Self.captionSize))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -349,7 +396,7 @@ struct PanelStats: View {
                 UsageFormat.agentCount(
                     row.counts.sessions, singular: "session", plural: "sessions") + " · "
                     + UsageFormat.agentCount(
-                        row.counts.agents, singular: "agent", plural: "agents")
+                        row.counts.agents, singular: "sub-agent", plural: "sub-agents")
                     + (row.activity.activeMinutes > 0
                         ? " · " + UsageFormat.workedDuration(minutes: row.activity.activeMinutes)
                         : "")
@@ -378,19 +425,23 @@ struct PanelStats: View {
     /// figures and their captions want the whole 312 pt a page has and a
     /// four-digit saving would push the last one off it.
     private func underTheHood(_ window: UsagePanelSnapshot.AgentsBlock.Window) -> some View {
-        VStack(alignment: .leading, spacing: Self.labelSpacing) {
+        PanelGroup {
             SectionLabel(text: "Under the hood")
-            HStack(alignment: .top, spacing: Self.figureSpacing) {
-                reading(
-                    window.cache.share.map(UsageFormat.cacheShare), caption: "of input from cache")
-                reading(
-                    window.activity.longestTurnMilliseconds.map(UsageFormat.turnDuration),
-                    caption: "longest turn")
-            }
-            if window.cache.share != nil {
-                Text("\(UsageFormat.cost(window.cache.saved)) saved by the cache at list price")
-                    .font(.system(size: Self.captionSize))
-                    .foregroundStyle(.secondary)
+        } content: {
+            VStack(alignment: .leading, spacing: Self.sectionSpacing) {
+                HStack(alignment: .top, spacing: Self.figureSpacing) {
+                    reading(
+                        window.cache.share.map(UsageFormat.cacheShare),
+                        caption: "of input from cache")
+                    reading(
+                        window.activity.longestTurnMilliseconds.map(UsageFormat.turnDuration),
+                        caption: "longest turn")
+                }
+                if window.cache.share != nil {
+                    Text("\(UsageFormat.cost(window.cache.saved)) saved by the cache at list price")
+                        .font(.system(size: Self.captionSize))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -484,7 +535,7 @@ struct AgentMemoryChart: View {
         }
         .accessibilityElement()
         .accessibilityLabel(
-            "Agent memory over the last \(spanMinutes) minutes, peaking at "
+            "Session memory over the last \(spanMinutes) minutes, peaking at "
                 + UsageFormat.bytes(chart.peak))
     }
 
