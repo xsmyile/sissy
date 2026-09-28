@@ -258,27 +258,22 @@ final class AgentStatsSnapshotTests: XCTestCase {
         }
     }
 
-    /// A list at the limit is drawn whole: a fold standing for one row costs
-    /// the row it hides.
-    func testAListAtTheLimitIsNotFolded() {
+    /// A list at the limit hands the chart every row as standing: a fold
+    /// standing for one band would cost the row it hides.
+    func testAListAtTheLimitStandsWhole() {
         let live = UsagePanelSnapshot.make(
             frame: frame(
                 memory: memory(agents(UsagePanelSnapshot.AgentsBlock.Live.processRowLimit)))
         ).agents.live
         XCTAssertEqual(live?.standingProcesses.count, 6)
-        XCTAssertEqual(live?.foldedProcesses, [])
     }
 
-    /// Past it, the dearest five stand and the rest fold, in order, so the
-    /// fold's own figure is what the rows under the headline were missing.
-    func testAListPastTheLimitFoldsAllButTheDearestFive() throws {
+    /// Past it, the dearest five stand for the chart's own bands, in order,
+    /// so a band's colour is always the same session's.
+    func testAListPastTheLimitKeepsTheDearestFiveStanding() throws {
         let live = try XCTUnwrap(
             UsagePanelSnapshot.make(frame: frame(memory: memory(agents(8)))).agents.live)
         XCTAssertEqual(live.standingProcesses.map(\.id), [1, 2, 3, 4, 5])
-        XCTAssertEqual(live.foldedProcesses.map(\.id), [6, 7, 8])
-        XCTAssertEqual(
-            (live.standingProcesses + live.foldedProcesses).reduce(0) { $0 + $1.footprint },
-            live.footprint)
     }
 }
 
@@ -325,8 +320,8 @@ final class AgentFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.chartSpan(minutes: 60), "60m ago")
     }
 
-    /// The fold carries what it hides, so the list still reaches its total.
-    func testTheFoldSaysWhatItHolds() {
-        XCTAssertEqual(UsageFormat.agentsFolded(3, footprint: 829_000_000), "3 more · 829 MB")
+    /// The disclosure names the running sessions behind it, not what they hold.
+    func testTheDisclosureNamesTheCount() {
+        XCTAssertEqual(UsageFormat.agentsByRepository(8), "By repository · 8")
     }
 }

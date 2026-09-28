@@ -1037,26 +1037,23 @@ struct UsagePanelSnapshot: Equatable {
             /// second sample lands: one point is not a line.
             var chart: MemoryChart?
 
-            /// Five agents and the fold, the rule the project list keeps at
-            /// three: a list at or under the limit is drawn whole, because a
-            /// fold standing for one row costs the row it hides.
+            /// How many of the dearest sessions the chart's `AgentMemoryChart`
+            /// colours as their own band, the rest pooled into one grey band
+            /// behind them.
             ///
-            /// The list is the last thing on its page and changes length with
-            /// every sweep, so the bound is not about what sits below it. It is
-            /// about the page being read at a glance: measured 2026-09-22 with
-            /// eight agents running, the three rows past the fifth held 829 MB
-            /// of 2.56 GB, which the fold still says in one line.
+            /// Was also the row list's own fold point before 2026-09-28: the
+            /// list drew this many rows unasked and folded the rest behind
+            /// one line. The list now draws nothing until its disclosure is
+            /// opened, and opened it draws every session at once with no
+            /// fold of its own, so this bound belongs to the chart alone.
             static let processRowLimit = 6
 
-            /// The rows drawn without being asked for.
+            /// The sessions dearest enough to earn the chart's own band
+            /// colour; the disclosed list draws every session, this subset
+            /// included, in the same order.
             var standingProcesses: [Process] {
                 processes.count <= Self.processRowLimit
                     ? processes : Array(processes.prefix(Self.processRowLimit - 1))
-            }
-
-            /// The rows behind the fold, empty where the list is drawn whole.
-            var foldedProcesses: [Process] {
-                Array(processes.dropFirst(standingProcesses.count))
             }
         }
 

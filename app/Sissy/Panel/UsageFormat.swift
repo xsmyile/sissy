@@ -1455,10 +1455,15 @@ extension UsageFormat {
 
     private static let chartLeaders = 2
 
-    /// The fold under the agent rows, carrying what the folded rows hold so
-    /// the list still adds up to the figure at the top of its section.
-    static func agentsFolded(_ count: Int, footprint: UInt64) -> String {
-        "\(count) more · \(bytes(footprint))"
+    /// The disclosure under the live half, shut by default: opens to every
+    /// running session in one list, named after what its rows read by — the
+    /// repository each session is working in.
+    ///
+    /// Dated 2026-09-28: the sweep changes the list's own length every 15 s,
+    /// and the popover grows from its top edge, so a list shut until asked
+    /// for is what gives the tab a height the sweep cannot move.
+    static func agentsByRepository(_ count: Int) -> String {
+        "By repository · \(count)"
     }
 
     /// One count, worded so a reading of none is not mistaken for a reading

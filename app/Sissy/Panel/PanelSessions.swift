@@ -181,46 +181,42 @@ struct PanelSessions: View {
             })
     }
 
-    /// One row per running session.
+    /// One disclosure row, and behind it every running session.
     ///
-    /// This is what answers "two gigabytes of what", and it is why the reading
-    /// names a repository at all: the totals above say how much, and only the
-    /// rows say *where*. The repository rather than the directory, resolved the
-    /// way a project row's is, so two worktrees of one checkout read as the one
-    /// project they are — and the path stays on the hover, because a path is a
-    /// client's name as often as not.
+    /// **Closed by default**, dated 2026-09-28: the list changes length on
+    /// every 15 s sweep and the popover grows from its top edge, so a list
+    /// open by default moved everything under it on every re-count. Closed,
+    /// the tab holds a stable height, and what a closed list gives up the
+    /// chart's hover caption already answers — it names the two sessions
+    /// holding the most.
     ///
-    /// Past `processRowLimit` the rest fold behind one row carrying what they
-    /// hold, and open *under* it, so the control stays where the pointer is —
-    /// the arrangement the identities page's disclosure has.
+    /// Opened, it draws every running session — the rows a row limit used to
+    /// keep standing and the ones it folded, together — as one list with no
+    /// fold of its own. This is what answers "two gigabytes of what", and it
+    /// is why a row names a repository at all: the totals above say how
+    /// much, and only the rows say *where*. The repository rather than the
+    /// directory, resolved the way a project row's is, so two worktrees of
+    /// one checkout read as the one project they are — and the path stays on
+    /// the hover, because a path is a client's name as often as not.
     private func processes(_ live: UsagePanelSnapshot.AgentsBlock.Live) -> some View {
-        let folded = live.foldedProcesses
-        return VStack(alignment: .leading, spacing: Self.rowSpacing) {
-            ForEach(live.standingProcesses) { processRow($0) }
-            if !folded.isEmpty {
-                processDisclosure(folded)
-                if showsAllProcesses {
-                    ForEach(folded) { processRow($0) }
-                }
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            processDisclosure(live.running)
+            if showsAllProcesses {
+                ForEach(live.processes) { processRow($0) }
             }
         }
         .padding(.top, 2)
     }
 
-    private func processDisclosure(_ folded: [UsagePanelSnapshot.AgentsBlock.Process])
-        -> some View
-    {
+    private func processDisclosure(_ count: Int) -> some View {
         Button {
             showsAllProcesses.toggle()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: showsAllProcesses ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                Text(
-                    UsageFormat.agentsFolded(
-                        folded.count, footprint: folded.reduce(0) { $0 + $1.footprint })
-                )
-                .monospacedDigit()
+                Text(UsageFormat.agentsByRepository(count))
+                    .monospacedDigit()
                 Spacer(minLength: 0)
             }
             .font(.system(size: 11, weight: .medium))
@@ -494,8 +490,8 @@ struct AgentMemoryChart: View {
     private static let tickHeight: CGFloat = 4
     private static let axisSize: CGFloat = 9.5
     /// Opacity of the accent for each standing band, dearest first: one step
-    /// per row the list can draw without folding, which is
-    /// `processRowLimit` — six when exactly six sessions run.
+    /// per session the chart colours as its own band, which is
+    /// `processRowLimit` sessions before the rest pool into one grey band.
     nonisolated static let bandOpacities: [Double] = [1, 0.78, 0.6, 0.45, 0.33, 0.24]
     private static let restOpacity: Double = 0.2
     private static let cursorOpacity: Double = 0.5
