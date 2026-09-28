@@ -16,7 +16,7 @@ import SwiftUI
 ///
 /// **The header stays, the page scrolls, and only at the screen's edge.** The
 /// popover has no title bar and no way back once its content runs past the
-/// bottom of the screen, so the page below the divider sits in a scroll view
+/// bottom of the screen, so the page below the header sits in a scroll view
 /// bounded by what the screen leaves. A page that fits is untouched — the
 /// scroll view is set to the page's own measured height and scrolling is
 /// disabled — so the popover is the size it has always been on every Mac big
@@ -25,6 +25,12 @@ import SwiftUI
 /// Scrolling the header away instead would take the back chevron and the
 /// controls with it, which is the one row that has to be reachable from
 /// anywhere on the page.
+///
+/// **No divider under the header.** The line it drew said "the page starts
+/// here" on a page that was already starting there, and it was the first of
+/// the hairlines the platters replaced. What is left of its job is the one
+/// case where content runs under the header, and the scroll view's own soft
+/// edge answers that case and only that one.
 struct UsagePanelView: View {
     let model: SissyModel
     /// How tall the panel may be on the screen it is opening on, which the
@@ -204,15 +210,12 @@ struct UsagePanelView: View {
         let readings = PageReadings(
             open: open, services: servicesReading(of: open), projects: projectsPage(of: live?.frame))
         return VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                header(for: page, live: live, readings: readings)
-                Divider()
-            }
-            .onGeometryChange(for: CGFloat.self) {
-                $0.size.height
-            } action: {
-                headerHeight = $0
-            }
+            header(for: page, live: live, readings: readings)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.height
+                } action: {
+                    headerHeight = $0
+                }
 
             ScrollView(.vertical) {
                 Group {
@@ -231,6 +234,7 @@ struct UsagePanelView: View {
             .frame(height: min(pageHeight, availableForPage))
             .scrollDisabled(pageHeight <= availableForPage)
             .scrollBounceBehavior(.basedOnSize)
+            .scrollEdgeEffectStyle(.soft, for: .top)
         }
         .frame(width: PanelMetrics.width)
         .focusable()

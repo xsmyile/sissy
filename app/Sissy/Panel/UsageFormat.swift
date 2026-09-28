@@ -1890,7 +1890,7 @@ extension UsageFormat {
     /// It also names the right-click, where the keep-awake control names its
     /// own and for the same reason: a gesture nothing advertises is a feature
     /// only whoever wrote it can find, and this row has nowhere to put a
-    /// button — 340 pt already has the login truncating before the figures do.
+    /// button: 312 pt already has the login truncating before the figures do.
     ///
     /// **The vendor's day is named by the clock time it starts at here**, which
     /// is what the caption's `GitHub's day starts at 02:00` leans on: "whole

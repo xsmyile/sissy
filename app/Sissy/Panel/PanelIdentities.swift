@@ -208,7 +208,7 @@ struct PanelIdentities: View {
 /// The mark is a column of its own so every name starts at the same x — the
 /// rule the project bars were given a line of their own to keep — and the
 /// detail lines hang under the name rather than beside it, because an address
-/// is longer than any column a 340 pt panel can spare.
+/// is longer than any column a 312 pt row can spare.
 private struct IdentityRowView: View {
     let row: UsagePanelSnapshot.IdentityRow
     let isFocused: Bool
