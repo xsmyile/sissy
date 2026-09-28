@@ -58,7 +58,6 @@ final class MacHealthReadingTests: XCTestCase {
     /// Mac happens to be doing while the suite runs.
     func testTheRealReadingIsInternallyConsistent() {
         let reading = SystemHealthReader.read()
-        XCTAssertGreaterThan(reading.physicalMemory, 0)
         XCTAssertGreaterThan(reading.activeCores, 0)
         if let percent = reading.freeMemoryPercent {
             XCTAssertTrue((0...100).contains(percent), "free memory read as \(percent)%")
@@ -123,7 +122,7 @@ final class SystemHealthMonitorTests: XCTestCase {
                 let index = min(sweep.next() - 1, levels.count - 1)
                 return MacHealthReading(
                     observedAt: now, pressure: levels[index], freeMemoryPercent: 40, swap: nil,
-                    physicalMemory: 10, loadAverage: nil, activeCores: 2, uptime: 1)
+                    loadAverage: nil, activeCores: 2, uptime: 1)
             },
             heaviest: { heaviest })
     }

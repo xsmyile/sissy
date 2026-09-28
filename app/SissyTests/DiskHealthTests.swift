@@ -120,7 +120,7 @@ final class FrameMacLevelTests: XCTestCase {
         let mac = pressure.map {
             MacHealthReading(
                 observedAt: Date(), pressure: $0, freeMemoryPercent: nil, swap: nil,
-                physicalMemory: 100, loadAverage: nil, activeCores: 1, uptime: 0)
+                loadAverage: nil, activeCores: 1, uptime: 0)
         }
         let disk = diskFree.map {
             DiskReading(

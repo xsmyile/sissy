@@ -77,7 +77,7 @@ final class UsageEngineControlTests: XCTestCase {
             read: { now in
                 MacHealthReading(
                     observedAt: now, pressure: .warn, freeMemoryPercent: 30, swap: nil,
-                    physicalMemory: 1_024, loadAverage: nil, activeCores: 4, uptime: 60)
+                    loadAverage: nil, activeCores: 4, uptime: 60)
             })
         await monitor.sampleOnce {}
         return monitor

@@ -13,7 +13,7 @@ final class MacHealthPanelTests: XCTestCase {
     ) -> MacHealthReading {
         MacHealthReading(
             observedAt: Date(timeIntervalSince1970: 1_790_000_000), pressure: pressure,
-            freeMemoryPercent: freeMemoryPercent, swap: swap, physicalMemory: 24 * gigabyte,
+            freeMemoryPercent: freeMemoryPercent, swap: swap,
             loadAverage: MacLoadAverage(one: 3.04, five: 2.5, fifteen: 2), activeCores: 12,
             uptime: 10 * 86_400 + 17 * 3_600 + 5 * 60, heaviest: heaviest)
     }

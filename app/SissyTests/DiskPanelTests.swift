@@ -21,7 +21,7 @@ final class DiskPanelTests: XCTestCase {
     private func memory(_ pressure: MacHealthLevel) -> MacHealthReading {
         MacHealthReading(
             observedAt: Date(timeIntervalSince1970: 1_790_000_000), pressure: pressure,
-            freeMemoryPercent: 75, swap: nil, physicalMemory: Self.ram, loadAverage: nil,
+            freeMemoryPercent: 75, swap: nil, loadAverage: nil,
             activeCores: 12, uptime: 60)
     }
 

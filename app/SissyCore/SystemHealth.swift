@@ -110,7 +110,6 @@ struct MacHealthReading: Sendable, Equatable {
     /// The share of memory the kernel counts as free, `kern.memorystatus_level`.
     let freeMemoryPercent: Int?
     let swap: MacSwapUsage?
-    let physicalMemory: UInt64
     let loadAverage: MacLoadAverage?
     let activeCores: Int
     /// Seconds since the Mac booted.
@@ -133,8 +132,7 @@ enum SystemHealthReader {
             pressure: sysctlValue("kern.memorystatus_vm_pressure_level", as: Int32.self)
                 .flatMap(MacHealthLevel.init(kernelPressure:)),
             freeMemoryPercent: sysctlValue("kern.memorystatus_level", as: Int32.self).map(Int.init),
-            swap: swap(),
-            physicalMemory: info.physicalMemory,
+            swap: sysctlValue("vm.swapusage", as: xsw_usage.self).map(MacSwapUsage.init),
             loadAverage: loadAverage(),
             activeCores: info.activeProcessorCount,
             uptime: info.systemUptime)
