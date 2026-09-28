@@ -87,7 +87,7 @@ final class DiskReadingTests: XCTestCase {
         DiskReading(
             observedAt: Date(),
             home: free.map { DiskVolume(id: "H", name: "Macintosh HD", total: 1_000, free: $0) },
-            purgeable: nil, swap: nil, physicalMemory: physicalMemory, volumes: [])
+            purgeable: nil, physicalMemory: physicalMemory, volumes: [])
     }
 
     func testTheHomeVolumeIsGradedInMultiplesOfRAM() {
@@ -125,7 +125,7 @@ final class FrameMacLevelTests: XCTestCase {
         let disk = diskFree.map {
             DiskReading(
                 observedAt: Date(), home: DiskVolume(id: "H", name: "HD", total: 1_000, free: $0),
-                purgeable: nil, swap: nil, physicalMemory: 100, volumes: [])
+                purgeable: nil, physicalMemory: 100, volumes: [])
         }
         return FrameData(
             tokens: 0, cost: 0, burn: nil, providers: [], keepAwake: .off, mac: mac, disk: disk)
@@ -156,7 +156,7 @@ final class DiskMonitorTests: XCTestCase {
         DiskMonitor(read: { now in
             reads.bump()
             return DiskReading(
-                observedAt: now, home: nil, purgeable: nil, swap: nil, physicalMemory: 1,
+                observedAt: now, home: nil, purgeable: nil, physicalMemory: 1,
                 volumes: [])
         })
     }

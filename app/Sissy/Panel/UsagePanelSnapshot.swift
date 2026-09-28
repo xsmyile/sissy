@@ -177,8 +177,10 @@ struct UsagePanelSnapshot: Equatable {
         let criticalMark: Double?
         /// `warn under 52 GB · critical under 26 GB`.
         let thresholds: String
+        /// `9.4 GB`. Swap stays on the Mac tab, which samples it with the
+        /// memory, so the panel never shows two swap figures read a minute
+        /// apart.
         let purgeable: String
-        let swap: String
         /// Empty with no volume but the home one, and the page then leaves
         /// the section out rather than heading an empty list.
         let volumes: [DiskVolumeRow]
@@ -980,7 +982,6 @@ struct UsagePanelSnapshot: Equatable {
             },
             thresholds: UsageFormat.diskThresholds(physicalMemory: memory),
             purgeable: UsageFormat.diskPurgeable(reading.purgeable),
-            swap: UsageFormat.macSwap(reading.swap),
             volumes: reading.volumes.map {
                 DiskVolumeRow(
                     id: $0.id, name: $0.name, free: UsageFormat.diskVolumeFree($0),

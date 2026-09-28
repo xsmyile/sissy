@@ -9,8 +9,9 @@ import SwiftUI
 /// disk's alone, while the menu bar's dot still wears the worse of the two.
 ///
 /// Laid out like `PanelMac`: the headline leads the first platter above the
-/// bar it captions, the rows sit under a divider, and the volumes stand on a
-/// platter of their own. The host goes with the popover when it closes, so
+/// bar it captions, the purgeable space sits under a divider, and the volumes
+/// stand on a platter of their own. Swap is the Mac tab's, which samples it
+/// with the memory. The host goes with the popover when it closes, so
 /// the caption's clock costs nothing while nobody is looking.
 struct PanelDisk: View {
     let block: UsagePanelSnapshot.DiskBlock
@@ -45,10 +46,7 @@ struct PanelDisk: View {
                     .accessibilityLabel(block.free.text)
                     .accessibilityValue(block.thresholds)
                     Divider()
-                    VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                        row("Purgeable", value: block.purgeable)
-                        row("Swap", value: block.swap)
-                    }
+                    row("Purgeable", value: block.purgeable)
                 }
             }
             if !block.volumes.isEmpty {

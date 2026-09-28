@@ -138,11 +138,6 @@ enum SystemHealthReader {
             uptime: info.systemUptime)
     }
 
-    /// Swap in use, which the Disk tab reads beside the memory's own sample.
-    static func swap() -> MacSwapUsage? {
-        sysctlValue("vm.swapusage", as: xsw_usage.self).map(MacSwapUsage.init)
-    }
-
     private static func loadAverage() -> MacLoadAverage? {
         var loads = [Double](repeating: 0, count: 3)
         guard getloadavg(&loads, Int32(loads.count)) == Int32(loads.count) else { return nil }

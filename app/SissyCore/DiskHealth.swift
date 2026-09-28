@@ -45,9 +45,6 @@ struct DiskReading: Sendable, Equatable {
     /// the important-usage figure less the plain available one. Measured
     /// 2026-09-28 on a 494 GB volume, 9.5 GB.
     let purgeable: Int64?
-    /// On the disk's reading as well as the Mac's, because swap is the file
-    /// that eats the free space the level grades.
-    let swap: MacSwapUsage?
     /// What the level is graded against.
     let physicalMemory: UInt64
     /// Every other local, browsable volume, by name. The home volume is left
@@ -129,7 +126,6 @@ enum DiskReader {
             purgeable: home.flatMap {
                 DiskVolumes.purgeable(important: $0.important, available: $0.attributes.available)
             },
-            swap: SystemHealthReader.swap(),
             physicalMemory: ProcessInfo.processInfo.physicalMemory,
             volumes: DiskVolumes.ordered(volumes))
     }

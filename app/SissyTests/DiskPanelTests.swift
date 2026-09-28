@@ -14,7 +14,7 @@ final class DiskPanelTests: XCTestCase {
         DiskReading(
             observedAt: Date(timeIntervalSince1970: 1_790_000_000),
             home: free.map { DiskVolume(id: "H", name: "Macintosh HD", total: total, free: $0) },
-            purgeable: purgeable, swap: MacSwapUsage(used: 1_200_000_000, total: 2_000_000_000),
+            purgeable: purgeable,
             physicalMemory: Self.ram, volumes: volumes)
     }
 
@@ -67,7 +67,6 @@ final class DiskPanelTests: XCTestCase {
         XCTAssertEqual(disk.volume, "of 494 GB · Macintosh HD")
         XCTAssertEqual(disk.thresholds, "warn under 52 GB · critical under 26 GB")
         XCTAssertEqual(disk.purgeable, "9.4 GB")
-        XCTAssertEqual(disk.swap, "1.2 GB")
         XCTAssertEqual(disk.used, 417.0 / 494.0, accuracy: 1e-9)
         XCTAssertEqual(disk.volumes, [])
     }

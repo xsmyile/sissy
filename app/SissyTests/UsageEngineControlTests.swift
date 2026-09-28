@@ -90,7 +90,7 @@ final class UsageEngineControlTests: XCTestCase {
             DiskReading(
                 observedAt: now,
                 home: DiskVolume(id: "home", name: "Macintosh HD", total: 10_000, free: 512),
-                purgeable: 0, swap: nil, physicalMemory: 1_024, volumes: [])
+                purgeable: 0, physicalMemory: 1_024, volumes: [])
         })
         await monitor.sampleOnce {}
         return monitor
