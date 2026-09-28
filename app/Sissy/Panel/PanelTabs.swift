@@ -80,6 +80,25 @@ enum PanelTab: CaseIterable, Hashable {
 enum PanelTabBadge: Equatable {
     case level(MacHealthLevel)
     case findings
+
+    /// One mark for every badge, told apart by colour alone: the Mac's
+    /// level in the colour it wears everywhere else, a finding in the orange
+    /// the identity line warns in.
+    var tint: Color {
+        switch self {
+        case .level(let level): MacLevelStyle.tint(level)
+        case .findings: .orange
+        }
+    }
+
+    /// What the mark stands for, on the hover and to VoiceOver, since a dot
+    /// has no words of its own.
+    var reason: String {
+        switch self {
+        case .level(let level): "Memory or disk at \(UsageFormat.macLevel(level))"
+        case .findings: "A repository commits under an unexpected name"
+        }
+    }
 }
 
 /// The panel's modules, on a row of their own under the header.
@@ -100,6 +119,12 @@ enum PanelTabBadge: Equatable {
 /// A plain row of buttons rather than a segmented `Picker`: a segment cannot
 /// carry the badge, and the badge is the only thing a tab says about the page
 /// it is not showing.
+///
+/// **The badge is a dot after the title, on its line.** A triangle hung off
+/// the title's corner was the first drawing, and it read as an alert detached
+/// from the tab and pressed against the bar's edge. A dot in line belongs to
+/// the word it follows, costs the segment no height, and is the same mark the
+/// menu bar already uses for the Mac.
 struct PanelTabBar: View {
     let tabs: [PanelTab]
     @Binding var selection: PanelTab
@@ -113,8 +138,6 @@ struct PanelTabBar: View {
     private static let symbolSize: CGFloat = 11
     private static let titleSize: CGFloat = 12
     private static let dotSize: CGFloat = 6
-    private static let triangleSize: CGFloat = 8
-    private static let badgeGap: CGFloat = 2
 
     var body: some View {
         HStack(spacing: 0) {
@@ -140,11 +163,11 @@ struct PanelTabBar: View {
                 Text(tab.title)
                     .font(.system(size: Self.titleSize, weight: .medium))
                     .lineLimit(1)
-            }
-            .overlay(alignment: .topTrailing) {
-                badgeMark(badge(tab))
-                    .alignmentGuide(.trailing) { $0[.leading] - Self.badgeGap }
-                    .alignmentGuide(.top) { $0[.bottom] - Self.badgeGap }
+                if let badge = badge(tab) {
+                    Circle()
+                        .fill(badge.tint)
+                        .frame(width: Self.dotSize, height: Self.dotSize)
+                }
             }
             .foregroundStyle(isSelected ? .primary : .secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -159,24 +182,14 @@ struct PanelTabBar: View {
         }
         .buttonStyle(.plain)
         .keyboardShortcut(tab.shortcut, modifiers: .command)
-        .help("\(tab.title) (⌘\(tab.shortcut.character))")
+        .help(help(tab))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    @ViewBuilder
-    private func badgeMark(_ badge: PanelTabBadge?) -> some View {
-        switch badge {
-        case .level(let level):
-            Circle()
-                .fill(MacLevelStyle.tint(level))
-                .frame(width: Self.dotSize, height: Self.dotSize)
-        case .findings:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: Self.triangleSize))
-                .foregroundStyle(.orange)
-        case nil:
-            EmptyView()
-        }
+    private func help(_ tab: PanelTab) -> String {
+        let name = "\(tab.title) (⌘\(tab.shortcut.character))"
+        guard let badge = badge(tab) else { return name }
+        return name + "\n" + badge.reason
     }
 
     private static let indicatorID = "selection"
