@@ -90,6 +90,31 @@ enum DiskVolumes {
         mount.isLocal && mount.isBrowsable
     }
 
+    /// The mount a path lives on, by the longest mount point that holds it
+    /// as a whole path component, so `/Users` does not claim `/Users2`.
+    ///
+    /// Out of the table rather than a `statfs` of the path, which is itself a
+    /// request to the path's filesystem and blocks on a stuck network mount
+    /// the way a resource value does.
+    static func mount(of path: String, in mounts: [DiskMount]) -> DiskMount? {
+        mounts
+            .filter { holds($0.path, path) }
+            .max { $0.path.count < $1.path.count }
+    }
+
+    /// Whether the home directory may be asked for resource values: only when
+    /// the mount it lives on is local. A home the table does not place, or
+    /// places on a network mount, is not read at all, and the Disk tab then
+    /// has no headline rather than a read that can hang the monitor.
+    static func isHomeReadable(_ homePath: String, in mounts: [DiskMount]) -> Bool {
+        mount(of: homePath, in: mounts)?.isLocal ?? false
+    }
+
+    private static func holds(_ mountPoint: String, _ path: String) -> Bool {
+        if mountPoint == "/" || mountPoint == path { return true }
+        return path.hasPrefix(mountPoint.hasSuffix("/") ? mountPoint : mountPoint + "/")
+    }
+
     /// The important-usage figure less the plain available one, and nil
     /// unless both were read: a volume answering only the plain figure has
     /// not said it holds no purgeable space.
@@ -133,10 +158,21 @@ enum DiskReader {
     /// it costs 6.7 ms of CPU per volume where every other key here together
     /// costs 0.07 ms for the whole mount list, so the list is read with the
     /// cheap keys first and the dear one is asked only of the volumes kept.
-    static func read(now: Date = Date()) -> DiskReading {
-        let home = homeVolume()
+    ///
+    /// **The home directory goes through the mount table too.** One table is
+    /// taken per read, and the home volume is asked for resource values only
+    /// when `DiskVolumes.isHomeReadable` places it on a local mount: a network
+    /// home directory yields no home reading, so the headline is absent
+    /// rather than the serialized read blocked on its server. `mounts` and
+    /// `homePath` are injectable so a test can stand in a table that names a
+    /// network home without touching one.
+    static func read(
+        now: Date = Date(), mounts: [DiskMount]? = nil, homePath: String = NSHomeDirectory()
+    ) -> DiskReading {
+        let table = mounts ?? mountTable()
+        let home = DiskVolumes.isHomeReadable(homePath, in: table) ? homeVolume(at: homePath) : nil
         let homeVolume = home.flatMap { DiskVolumes.volume($0.attributes, importantFree: $0.important) }
-        let volumes = mountedVolumes()
+        let volumes = mountedVolumes(in: table)
             .filter { DiskVolumes.isListed($0, homeID: home?.attributes.id) }
             .compactMap {
                 DiskVolumes.volume($0, importantFree: importantFree(at: URL(fileURLWithPath: $0.path)))
@@ -159,8 +195,10 @@ enum DiskReader {
     /// A new `URL` on every call, because a `URL` caches the resource values
     /// it has answered and a reused one would report the first reading for
     /// the life of the process.
-    private static func homeVolume() -> (attributes: DiskVolumeAttributes, important: Int64?)? {
-        let url = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+    private static func homeVolume(
+        at path: String
+    ) -> (attributes: DiskVolumeAttributes, important: Int64?)? {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
         guard let attributes = attributes(at: url) else { return nil }
         return (attributes, importantFree(at: url))
     }
@@ -174,8 +212,8 @@ enum DiskReader {
     /// process. Measured 2026-09-28 the table costs 4 µs, and on this Mac the
     /// filter keeps the same one volume the listing with hidden volumes
     /// skipped did.
-    private static func mountedVolumes() -> [DiskVolumeAttributes] {
-        mountTable()
+    private static func mountedVolumes(in table: [DiskMount]) -> [DiskVolumeAttributes] {
+        table
             .filter(DiskVolumes.isCandidate)
             .compactMap { attributes(at: URL(fileURLWithPath: $0.path, isDirectory: true)) }
     }

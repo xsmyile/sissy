@@ -38,6 +38,45 @@ final class DiskVolumesTests: XCTestCase {
 
     /// `/` and the home directory answer the same UUID through the firmlink,
     /// measured 2026-09-28, and the headline already is that volume.
+    // MARK: Home mount
+
+    private func mount(_ path: String, local: Bool = true) -> DiskMount {
+        DiskMount(path: path, isLocal: local, isBrowsable: true)
+    }
+
+    func testTheHomeLivesOnTheLongestMountHoldingIt() {
+        let table = [mount("/"), mount("/System/Volumes/Data"), mount("/Users/me", local: false)]
+        XCTAssertEqual(DiskVolumes.mount(of: "/Users/me/Documents", in: table)?.path, "/Users/me")
+        XCTAssertEqual(DiskVolumes.mount(of: "/Users/you", in: table)?.path, "/")
+    }
+
+    func testAMountPointHoldsOnlyWholeComponents() {
+        let table = [mount("/"), mount("/Users", local: false)]
+        XCTAssertEqual(DiskVolumes.mount(of: "/Users2/me", in: table)?.path, "/")
+    }
+
+    func testALocalHomeIsReadable() {
+        XCTAssertTrue(DiskVolumes.isHomeReadable("/Users/me", in: [mount("/")]))
+    }
+
+    func testAHomeOnANetworkMountIsNotReadable() {
+        let table = [mount("/"), mount("/Network/Servers/files/me", local: false)]
+        XCTAssertFalse(DiskVolumes.isHomeReadable("/Network/Servers/files/me", in: table))
+    }
+
+    func testAHomeTheTableDoesNotPlaceIsNotReadable() {
+        XCTAssertFalse(DiskVolumes.isHomeReadable("/Users/me", in: []))
+    }
+
+    /// The whole read against a table whose only mount is remote asks no
+    /// volume anything: no home reading, no volumes, and nothing blocked.
+    func testAReadWithANetworkHomeReadsNoHome() {
+        let reading = DiskReader.read(mounts: [mount("/", local: false)], homePath: "/Users/me")
+        XCTAssertNil(reading.home)
+        XCTAssertNil(reading.purgeable)
+        XCTAssertEqual(reading.volumes, [])
+    }
+
     func testTheHomeVolumeIsLeftToTheHeadline() {
         XCTAssertFalse(DiskVolumes.isListed(attributes(path: "/", uuid: "H"), homeID: "H"))
     }

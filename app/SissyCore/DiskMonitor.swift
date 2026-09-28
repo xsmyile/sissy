@@ -35,7 +35,7 @@ actor DiskMonitor {
     private let gate = DiskReadGate()
     private let read: @Sendable (Date) -> DiskReading
 
-    init(read: @escaping @Sendable (Date) -> DiskReading = DiskReader.read) {
+    init(read: @escaping @Sendable (Date) -> DiskReading = { DiskReader.read(now: $0) }) {
         self.read = read
     }
 
