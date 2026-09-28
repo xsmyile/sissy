@@ -1462,9 +1462,11 @@ extension UsageFormat {
     /// Dated 2026-09-28: the sweep changes the list's own length every 15 s,
     /// and the popover grows from its top edge, so a list shut until asked
     /// for is what gives the tab a height the sweep cannot move.
-    static func agentsByRepository(_ count: Int) -> String {
-        "By repository · \(count)"
-    }
+    ///
+    /// No count: the rows are sessions and a repository can hold several, so
+    /// a number beside `By repository` read as repositories, and the headline
+    /// above already says how many sessions are running.
+    static let sessionsDisclosure = "By repository"
 
     /// One count, worded so a reading of none is not mistaken for a reading
     /// that has not happened. The dash is the caller's.

@@ -320,8 +320,9 @@ final class AgentFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.chartSpan(minutes: 60), "60m ago")
     }
 
-    /// The disclosure names the running sessions behind it, not what they hold.
-    func testTheDisclosureNamesTheCount() {
-        XCTAssertEqual(UsageFormat.agentsByRepository(8), "By repository · 8")
+    /// The disclosure carries no count, which beside `By repository` would
+    /// read as repositories when the rows behind it are sessions.
+    func testTheDisclosureCarriesNoCount() {
+        XCTAssertEqual(UsageFormat.sessionsDisclosure, "By repository")
     }
 }
