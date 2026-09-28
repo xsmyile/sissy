@@ -2133,11 +2133,26 @@ extension UsageFormat {
         "\(link.rssi) dBm · " + String(format: "%.0f Mbps", link.transmitRate)
     }
 
-    /// `↓ 1.4 GB · ↑ 3.0 GB`, what the physical links carried since boot,
-    /// and the dash before the first sample.
-    static func networkSinceBoot(_ bytes: NetworkByteCounts?) -> String {
-        guard let bytes else { return "—" }
+    /// `↓ 1.4 GB · ↑ 3.0 GB`, what the physical links carried, and the dash
+    /// before the first sample.
+    static func networkTotals(_ totals: NetworkTotals?) -> String {
+        guard let bytes = totals?.bytes else { return "—" }
         return "↓ " + storage(bytes.received) + " · ↑ " + storage(bytes.sent)
+    }
+
+    /// What that figure is over: `Since boot` only while nothing counted has
+    /// changed since the Mac booted, and otherwise the latest such change,
+    /// `Since 08:43` today and `Since 27 Sept` before it, since a label must
+    /// not claim more than the counters hold. See `NetworkTotals`.
+    static func networkTotalsLabel(
+        _ totals: NetworkTotals?, now: Date = Date(), calendar: Calendar = .current
+    ) -> String {
+        guard let since = totals?.since else { return "Since boot" }
+        let style = Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone)
+        if calendar.isDate(since, inSameDayAs: now) {
+            return "Since " + since.formatted(style.hour().minute())
+        }
+        return "Since " + since.formatted(style.day().month(.abbreviated))
     }
 
     /// The link's own name without its BSD tag, which the caption has no

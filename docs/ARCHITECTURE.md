@@ -507,7 +507,9 @@ is the Forge tab: a row per connected forge, and the identity line under them.
 switch is on: both directions this second as the headline with the link under
 it, two minutes of both on one scale from zero, then the interface, the Wi-Fi
 signal and link rate while Wi-Fi carries the default route, and what the
-physical links carried since boot. It is the one view that reads
+physical links carried, over `Since boot` or, once a counted link has changed
+since, over that moment, because a reattached interface restarts its
+counters (`NetworkTotals`). It is the one view that reads
 `UsageEngineHost.networkReading`, which the engine publishes only while
 `UsagePanelView` asks for `LiveReading.network`: the tab selected in an open
 panel. A tab switch changes the demand, and `UsagePanelController` clears it

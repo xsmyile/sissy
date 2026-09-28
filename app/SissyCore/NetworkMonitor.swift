@@ -26,6 +26,7 @@ actor NetworkMonitor {
     private let readPrimary: @Sendable () -> String?
     private let readDisplayName: @Sendable (String) -> String?
     private let readWiFi: @Sendable (String) -> WiFiLink?
+    private let bootedAt: Date?
 
     private var previous: (counters: [String: NetworkByteCounts], at: Date)?
     private var rates: [NetworkRate] = []
@@ -39,8 +40,10 @@ actor NetworkMonitor {
         readCounters: @escaping @Sendable () -> [NetworkInterfaceCounters] = NetworkReader.counters,
         readPrimary: @escaping @Sendable () -> String? = NetworkReader.primaryInterface,
         readDisplayName: @escaping @Sendable (String) -> String? = NetworkReader.displayName,
-        readWiFi: @escaping @Sendable (String) -> WiFiLink? = NetworkReader.wifi
+        readWiFi: @escaping @Sendable (String) -> WiFiLink? = NetworkReader.wifi,
+        bootedAt: Date? = NetworkReader.bootedAt()
     ) {
+        self.bootedAt = bootedAt
         self.readCounters = readCounters
         self.readPrimary = readPrimary
         self.readDisplayName = readDisplayName
@@ -99,7 +102,7 @@ actor NetworkMonitor {
             observedAt: now,
             interface: named,
             wifi: named.flatMap { readWiFi($0.bsdName) },
-            sinceBoot: NetworkRates.sinceBoot(counters),
+            totals: NetworkRates.totals(counters, bootedAt: bootedAt),
             rates: rates)
     }
 

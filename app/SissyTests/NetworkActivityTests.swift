@@ -7,7 +7,7 @@ final class NetworkCounterParsingTests: XCTestCase {
     /// One `RTM_IFINFO2` message as the kernel lays it out: the header, then
     /// the `sockaddr_dl` naming the interface.
     private func interfaceMessage(
-        _ name: String, received: UInt64, sent: UInt64, flags: Int32 = 0
+        _ name: String, received: UInt64, sent: UInt64, flags: Int32 = 0, lastChange: Int = 0
     ) -> [UInt8] {
         let nameBytes = Array(name.utf8)
         let link: [UInt8] =
@@ -19,6 +19,7 @@ final class NetworkCounterParsingTests: XCTestCase {
         header.ifm_flags = flags
         header.ifm_data.ifi_ibytes = received
         header.ifm_data.ifi_obytes = sent
+        header.ifm_data.ifi_lastchange.tv_sec = Int32(lastChange)
         return withUnsafeBytes(of: header) { Array($0) } + link
     }
 
@@ -53,6 +54,16 @@ final class NetworkCounterParsingTests: XCTestCase {
     func testCountersPastFourGibibytesAreNotTruncated() {
         let parsed = parse(interfaceMessage("en0", received: 5_000_000_000_000, sent: 1 << 40))
         XCTAssertEqual(parsed.first?.bytes, NetworkByteCounts(received: 5_000_000_000_000, sent: 1 << 40))
+    }
+
+    /// Wall-clock seconds, as the kernel wrote them on macOS 27.0.
+    func testReadsWhenTheLinkLastChanged() {
+        let parsed = parse(interfaceMessage("en0", received: 1, sent: 2, lastChange: 1_790_577_837))
+        XCTAssertEqual(parsed.first?.lastChange, Date(timeIntervalSince1970: 1_790_577_837))
+    }
+
+    func testALinkTheKernelNeverDatedHasNoChange() {
+        XCTAssertNil(parse(interfaceMessage("en0", received: 1, sent: 2)).first?.lastChange)
     }
 
     func testAMessageRunningPastTheBufferEndsTheWalk() {
@@ -106,7 +117,59 @@ final class NetworkInterfaceFilterTests: XCTestCase {
             NetworkInterfaceCounters(
                 name: "lo0", bytes: NetworkByteCounts(received: 1_000, sent: 1_000), isLoopback: true),
         ]
-        XCTAssertEqual(NetworkRates.sinceBoot(all), NetworkByteCounts(received: 150, sent: 15))
+        XCTAssertEqual(
+            NetworkRates.totals(all, bootedAt: nil).bytes, NetworkByteCounts(received: 150, sent: 15))
+    }
+}
+
+final class NetworkTotalsTests: XCTestCase {
+    private let boot = Date(timeIntervalSince1970: 1_790_515_911)
+
+    private func counters(
+        _ name: String, received: UInt64 = 1_000, changed after: TimeInterval?
+    ) -> NetworkInterfaceCounters {
+        NetworkInterfaceCounters(
+            name: name, bytes: NetworkByteCounts(received: received, sent: 10), isLoopback: false,
+            lastChange: after.map { boot + $0 })
+    }
+
+    func testLinksThatLastChangedWhileBootingAreSinceBoot() {
+        let totals = NetworkRates.totals(
+            [counters("en0", changed: 14), counters("en4", changed: 65)], bootedAt: boot)
+        XCTAssertNil(totals.since)
+    }
+
+    /// A counter that restarted after boot holds nothing from before its
+    /// restart, so the figure is dated by it rather than by the boot.
+    func testACounterThatRestartedAfterBootDatesTheTotals() {
+        let totals = NetworkRates.totals(
+            [counters("en0", changed: 14), counters("en5", changed: 61_926)], bootedAt: boot)
+        XCTAssertEqual(totals.since, boot + 61_926)
+        XCTAssertEqual(totals.bytes, NetworkByteCounts(received: 2_000, sent: 20))
+    }
+
+    func testTheLatestRestartDatesTheTotals() {
+        let totals = NetworkRates.totals(
+            [counters("en0", changed: 7_200), counters("en5", changed: 3_600)], bootedAt: boot)
+        XCTAssertEqual(totals.since, boot + 7_200)
+    }
+
+    func testALinkThatCarriedNothingDatesNothing() {
+        let idle = NetworkInterfaceCounters(
+            name: "en5", bytes: .zero, isLoopback: false, lastChange: boot + 7_200)
+        let totals = NetworkRates.totals([counters("en0", changed: 14), idle], bootedAt: boot)
+        XCTAssertNil(totals.since)
+    }
+
+    func testATunnelThatChangedDatesNothing() {
+        let totals = NetworkRates.totals(
+            [counters("en0", changed: 14), counters("utun4", changed: 7_200)], bootedAt: boot)
+        XCTAssertNil(totals.since)
+    }
+
+    func testWithNoBootTimeNoChangeCountsAsTheBoots() {
+        let totals = NetworkRates.totals([counters("en0", changed: 14)], bootedAt: nil)
+        XCTAssertEqual(totals.since, boot + 14)
     }
 }
 
@@ -155,7 +218,8 @@ final class NetworkRateTests: XCTestCase {
 final class NetworkMonitorTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_790_000_000)
 
-    /// A monitor whose counters grow by `step` bytes a sample on `en0`.
+    /// A monitor whose counters grow by `step` bytes a sample on `en0`,
+    /// dated as having been up since boot.
     private func monitor(
         step: UInt64 = 1_000, primary: String? = "en0",
         displayNames: LockedValue<[String]> = LockedValue([])
@@ -176,7 +240,8 @@ final class NetworkMonitorTests: XCTestCase {
                 displayNames.store(displayNames.load() + [name])
                 return "Wi-Fi"
             },
-            readWiFi: { name in name == "en0" ? WiFiLink(rssi: -59, transmitRate: 286) : nil })
+            readWiFi: { name in name == "en0" ? WiFiLink(rssi: -59, transmitRate: 286) : nil },
+            bootedAt: start)
     }
 
     func testTheFirstSampleHasTotalsAndNoRate() async throws {
@@ -194,7 +259,7 @@ final class NetworkMonitorTests: XCTestCase {
         let sampled = await monitor.sampleOnce(now: start + 1)
         let reading = try XCTUnwrap(sampled)
         XCTAssertEqual(reading.current, NetworkRate(received: 1_000, sent: 500))
-        XCTAssertEqual(reading.sinceBoot, NetworkByteCounts(received: 1_000, sent: 500))
+        XCTAssertEqual(reading.totals.bytes, NetworkByteCounts(received: 1_000, sent: 500))
     }
 
     func testTheSeriesKeepsTwoMinutes() async throws {
@@ -204,6 +269,33 @@ final class NetworkMonitorTests: XCTestCase {
             last = await monitor.sampleOnce(now: start + TimeInterval(second))
         }
         XCTAssertEqual(last?.rates.count, NetworkMonitor.historyLength)
+    }
+
+    /// A counter that restarts while the tab is open costs that sample its
+    /// rate, and the totals from then on are dated by the restart.
+    func testACounterThatRestartsDatesTheTotals() async throws {
+        let restart = start + 3_600
+        let samples = LockedValue<[NetworkInterfaceCounters]>([
+            NetworkInterfaceCounters(
+                name: "en0", bytes: NetworkByteCounts(received: 9_000, sent: 9_000), isLoopback: false,
+                lastChange: start + 10),
+            NetworkInterfaceCounters(
+                name: "en0", bytes: NetworkByteCounts(received: 500, sent: 100), isLoopback: false,
+                lastChange: restart),
+        ])
+        let monitor = NetworkMonitor(
+            readCounters: {
+                let next = samples.load()
+                samples.store(Array(next.dropFirst()))
+                return [next[0]]
+            },
+            readPrimary: { nil }, readDisplayName: { _ in nil }, readWiFi: { _ in nil },
+            bootedAt: start)
+        let before = await monitor.sampleOnce(now: restart - 1)
+        XCTAssertNil(before?.totals.since)
+        let after = await monitor.sampleOnce(now: restart)
+        XCTAssertEqual(after?.rates, [NetworkRate(received: 0, sent: 0)])
+        XCTAssertEqual(after?.totals.since, restart)
     }
 
     /// The listing behind the display name costs 1.6 ms, so it is asked once
@@ -332,7 +424,7 @@ final class LiveSamplingTests: XCTestCase {
 final class NetworkHostTests: XCTestCase {
     private let reading = NetworkReading(
         observedAt: Date(timeIntervalSince1970: 1_790_000_000), interface: nil, wifi: nil,
-        sinceBoot: .zero, rates: [])
+        totals: NetworkTotals(bytes: .zero, since: nil), rates: [])
 
     func testASampleNobodyAskedForIsDropped() {
         let host = UsageEngineHost()
@@ -419,11 +511,36 @@ final class NetworkFormatTests: XCTestCase {
             "utun4")
     }
 
+    func testTheTotalsClaimBootOnlyWhenTheCountersDo() {
+        let now = Date(timeIntervalSince1970: 1_790_620_338)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Rome") ?? .gmt
+        let style = Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone)
+        let bytes = NetworkByteCounts(received: 1, sent: 1)
+        XCTAssertEqual(UsageFormat.networkTotalsLabel(nil, now: now, calendar: calendar), "Since boot")
+        XCTAssertEqual(
+            UsageFormat.networkTotalsLabel(
+                NetworkTotals(bytes: bytes, since: nil), now: now, calendar: calendar),
+            "Since boot")
+        let today = now - 3_600
+        XCTAssertEqual(
+            UsageFormat.networkTotalsLabel(
+                NetworkTotals(bytes: bytes, since: today), now: now, calendar: calendar),
+            "Since " + today.formatted(style.hour().minute()))
+        let earlier = now - 3 * 86_400
+        XCTAssertEqual(
+            UsageFormat.networkTotalsLabel(
+                NetworkTotals(bytes: bytes, since: earlier), now: now, calendar: calendar),
+            "Since " + earlier.formatted(style.day().month(.abbreviated)))
+    }
+
     func testTheSignalAndSinceBootRows() {
         XCTAssertEqual(
             UsageFormat.networkSignal(WiFiLink(rssi: -59, transmitRate: 286)), "-59 dBm · 286 Mbps")
         XCTAssertEqual(
-            UsageFormat.networkSinceBoot(NetworkByteCounts(received: 1_400_000_000, sent: 3_000_000_000)),
+            UsageFormat.networkTotals(
+                NetworkTotals(
+                    bytes: NetworkByteCounts(received: 1_400_000_000, sent: 3_000_000_000), since: nil)),
             "↓ 1.4 GB · ↑ 3.0 GB")
     }
 }

@@ -11,13 +11,46 @@ struct NetworkByteCounts: Sendable, Equatable {
     static let zero = Self(received: 0, sent: 0)
 }
 
-/// One interface's byte counters, as the kernel has kept them since boot.
+/// One interface's byte counters, as the kernel has kept them since the
+/// interface last attached, which is boot for most of them.
 struct NetworkInterfaceCounters: Sendable, Equatable {
     /// The BSD name, `en0`.
     let name: String
     let bytes: NetworkByteCounts
     /// `IFF_LOOPBACK`, which the kernel sets whatever the interface is named.
     let isLoopback: Bool
+    /// `ifi_lastchange`, the last time the link went up or down, nil where
+    /// the kernel left it at zero. See `NetworkTotals` for what it bounds.
+    var lastChange: Date?
+}
+
+/// What the physical links have carried, and since when the figure can be
+/// vouched for.
+///
+/// **An interface's counters start again when it attaches**, which a USB
+/// adapter plugged back in or a Wi-Fi interface reset both do, so a sum of
+/// today's counters is not a figure since boot unless nothing counted has
+/// attached since. The kernel does not date a reset; it dates the last time
+/// the link changed, `ifi_lastchange`, and a reset only happens on a change,
+/// so a counter holds everything since its interface's last change at the
+/// least. `since` is the latest such change among the interfaces that carried
+/// anything, and nil when every one of them last changed while the Mac was
+/// booting, which is what lets the row say `Since boot` and nothing more.
+///
+/// It is a bound and not a reset: a link that went down and up again without
+/// detaching, which is what a Wi-Fi interface does on every wake, keeps its
+/// counters and still moves the date. Measured 2026-09-28 on a Mac16,8
+/// running macOS 27.0, booted at 15:31:51 the day before: every interface that
+/// had not moved read 8 to 65 s after boot, and `en0` read 08:43:57, 17.2 h
+/// after it, the wake from that night's sleep. So the row names the wake and
+/// claims less than the counters may hold, which is the side a label that
+/// cannot know is allowed to err on. An interface that detached and has not
+/// come back is not listed at all, and nothing can bound what it took with
+/// it.
+struct NetworkTotals: Sendable, Equatable {
+    let bytes: NetworkByteCounts
+    /// Nil for since boot.
+    let since: Date?
 }
 
 /// Bytes a second in each direction, over the gap between two samples.
@@ -49,8 +82,8 @@ struct WiFiLink: Sendable, Equatable {
 /// **Only while that tab is on screen, and in memory only.** The series is
 /// what the monitor saw since the tab was opened, never before: a rate needs
 /// two readings and none were taken while nobody was looking, so a gap would
-/// be a guess drawn as a line. The totals are the kernel's own since boot and
-/// need no history at all.
+/// be a guess drawn as a line. The totals are the kernel's own counters and
+/// need no history at all, see `NetworkTotals` for since when.
 struct NetworkReading: Sendable, Equatable {
     let observedAt: Date
     /// Nil while the Mac has no default route.
@@ -58,7 +91,7 @@ struct NetworkReading: Sendable, Equatable {
     /// Nil unless the interface carrying the default route is the Wi-Fi one.
     let wifi: WiFiLink?
     /// Summed across the physical interfaces, see `NetworkInterfaceFilter`.
-    let sinceBoot: NetworkByteCounts
+    let totals: NetworkTotals
     /// Oldest first, one a sample and at most `NetworkMonitor.historyLength`
     /// of them. Empty on the first sample, which has nothing to measure from.
     let rates: [NetworkRate]
@@ -93,12 +126,30 @@ enum NetworkInterfaceFilter {
 
 /// The arithmetic between two samples of the counters.
 enum NetworkRates {
-    /// What the physical interfaces have carried since boot, summed.
-    static func sinceBoot(_ counters: [NetworkInterfaceCounters]) -> NetworkByteCounts {
-        counters.filter(NetworkInterfaceFilter.isPhysical).reduce(.zero) {
+    /// How long after boot an interface may still come up and count as
+    /// having been there since boot. Measured 2026-09-28, the last interface
+    /// to come up after boot did so 65 s in; five minutes leaves room for a
+    /// slow Wi-Fi join without mistaking a later reattach for the boot.
+    static let bootSettling: TimeInterval = 300
+
+    /// What the physical interfaces have carried, summed, and the moment
+    /// that figure is vouched for since, see `NetworkTotals`. An interface
+    /// that has carried nothing adds no bytes and no date. With no boot time
+    /// to measure against, no change counts as the boot's.
+    static func totals(_ counters: [NetworkInterfaceCounters], bootedAt: Date?) -> NetworkTotals {
+        let counted = counters.filter(NetworkInterfaceFilter.isPhysical)
+        let bytes = counted.reduce(NetworkByteCounts.zero) {
             NetworkByteCounts(
                 received: $0.received &+ $1.bytes.received, sent: $0.sent &+ $1.bytes.sent)
         }
+        let settled = bootedAt?.addingTimeInterval(bootSettling) ?? .distantPast
+        let since =
+            counted
+            .filter { $0.bytes != .zero }
+            .compactMap(\.lastChange)
+            .filter { $0 > settled }
+            .max()
+        return NetworkTotals(bytes: bytes, since: since)
     }
 
     /// The physical interfaces' counters by name, which is what the next
@@ -202,7 +253,15 @@ enum NetworkReader {
             name: name,
             bytes: NetworkByteCounts(
                 received: header.ifm_data.ifi_ibytes, sent: header.ifm_data.ifi_obytes),
-            isLoopback: header.ifm_flags & IFF_LOOPBACK != 0)
+            isLoopback: header.ifm_flags & IFF_LOOPBACK != 0,
+            lastChange: lastChange(header.ifm_data.ifi_lastchange))
+    }
+
+    /// Wall-clock seconds, which is what the field holds on macOS 27.0,
+    /// measured 2026-09-28 against `kern.boottime` on the same clock.
+    private static func lastChange(_ time: timeval32) -> Date? {
+        guard time.tv_sec > 0 else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(time.tv_sec))
     }
 
     /// `ifm_msglen`, `ifm_version` and `ifm_type`: enough to step over a
@@ -251,6 +310,17 @@ enum NetworkReader {
         let rssi = interface.rssiValue()
         guard rssi != 0 else { return nil }
         return WiFiLink(rssi: rssi, transmitRate: interface.transmitRate())
+    }
+
+    /// When the Mac booted, from `kern.boottime`, on the wall clock
+    /// `ifi_lastchange` is read against. Nil where the sysctl would not answer.
+    static func bootedAt() -> Date? {
+        var boot = timeval()
+        var size = MemoryLayout<timeval>.size
+        guard sysctlbyname("kern.boottime", &boot, &size, nil, 0) == 0, boot.tv_sec > 0 else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: TimeInterval(boot.tv_sec))
     }
 
     private static let storeName = "Sissy"

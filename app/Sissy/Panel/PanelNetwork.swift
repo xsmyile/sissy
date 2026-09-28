@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// What the Mac's links are carrying this second, the last two minutes of it,
-/// and what they have carried since boot.
+/// and what they have carried since boot, or since the latest moment the
+/// counters can be vouched for, see `NetworkTotals`.
 ///
 /// **Sampled only while this page is on screen.** `UsagePanelView` asks for
 /// `LiveReading.network` while the tab is selected in an open panel, and the
@@ -55,7 +56,10 @@ struct PanelNetwork: View {
                     if let wifi = reading?.wifi {
                         row("Signal", value: UsageFormat.networkSignal(wifi))
                     }
-                    row("Since boot", value: UsageFormat.networkSinceBoot(reading?.sinceBoot))
+                    row(
+                        UsageFormat.networkTotalsLabel(
+                            reading?.totals, now: reading?.observedAt ?? Date()),
+                        value: UsageFormat.networkTotals(reading?.totals))
                 }
             }
         }
