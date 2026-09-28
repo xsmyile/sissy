@@ -159,10 +159,13 @@ struct ServerConfig: Sendable, Codable {
     /// through the partial-config path below and lands on the default.
     var macHealth: Bool
 
-    /// Whether Sissy reads the disks, for the Disk tab and the menu bar's dot.
+    /// Whether Sissy reads the disks, for the Disk tab and the menu bar's dot,
+    /// and samples their byte counters once a second while the Disk tab is on
+    /// screen and logs them every five seconds otherwise, see `LiveCadence`.
     ///
     /// On by default and apart from `macHealth`, for the same reasons: it asks
-    /// for nothing, and off means no disk is read at all.
+    /// for nothing, and off means no disk is read at all, the counters
+    /// included.
     ///
     /// **A file that predates the key takes `macHealth`'s value**, not the
     /// default: before the split that one switch also stopped the disk reads,
