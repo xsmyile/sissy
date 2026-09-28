@@ -130,11 +130,13 @@ enum PanelTabBadge: Equatable {
 /// carry the badge, and the badge is the only thing a tab says about the page
 /// it is not showing.
 ///
-/// **The badge is a dot after the title, on its line.** A triangle hung off
-/// the title's corner was the first drawing, and it read as an alert detached
-/// from the tab and pressed against the bar's edge. A dot in line belongs to
-/// the word it follows, costs the segment no height, and is the same mark the
-/// menu bar already uses for the Mac.
+/// **The badge tints the tab's own symbol, as of 2026-09-28.** A triangle
+/// hung off the title's corner was the first drawing, and it read as an alert
+/// detached from the tab and pressed against the bar's edge; a dot after the
+/// title followed, in line with the word it followed and costing the segment
+/// no height. The colour moved onto the symbol because it costs the segment
+/// no width either, and because it lands on the module's own mark — the rule
+/// the panel already keeps for a reading, rather than a mark drawn beside one.
 struct PanelTabBar: View {
     let tabs: [PanelTab]
     @Binding var selection: PanelTab
@@ -147,7 +149,6 @@ struct PanelTabBar: View {
     private static let inset: CGFloat = 2
     private static let symbolSize: CGFloat = 11
     private static let titleSize: CGFloat = 12
-    private static let dotSize: CGFloat = 6
 
     var body: some View {
         HStack(spacing: 0) {
@@ -164,22 +165,19 @@ struct PanelTabBar: View {
 
     private func button(_ tab: PanelTab) -> some View {
         let isSelected = tab == selection
+        let badge = badge(tab)
         return Button {
             withAnimation(reduceMotion ? nil : .snappy) { selection = tab }
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: tab.symbol)
                     .font(.system(size: Self.symbolSize, weight: .medium))
+                    .foregroundStyle(badge?.tint ?? (isSelected ? .primary : .secondary))
                 Text(tab.title)
                     .font(.system(size: Self.titleSize, weight: .medium))
                     .lineLimit(1)
-                if let badge = badge(tab) {
-                    Circle()
-                        .fill(badge.tint)
-                        .frame(width: Self.dotSize, height: Self.dotSize)
-                }
+                    .foregroundStyle(isSelected ? .primary : .secondary)
             }
-            .foregroundStyle(isSelected ? .primary : .secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
                 if isSelected {
