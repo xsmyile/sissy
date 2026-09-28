@@ -108,7 +108,7 @@ actor NetworkMonitor {
     /// all a background step does. False when the loop was cancelled while it
     /// waited for this actor, since `stop()` ran ahead of it. Internal so a
     /// test can drive the clock.
-    func record(now: Date = Date(), next: LiveCadence) -> Bool {
+    func record(now: SampleTime = .now, next: LiveCadence) -> Bool {
         guard !Task.isCancelled else { return false }
         log.record(NetworkRates.byName(readCounters()), at: now, next: next, rate: NetworkRates.rate)
         return true
@@ -117,13 +117,13 @@ actor NetworkMonitor {
     /// One watched sample. Internal so a test can drive the clock and assert
     /// on what it answered; nil when the loop was cancelled while it waited
     /// for this actor, since `stop()` ran ahead of it.
-    func sampleOnce(now: Date = Date(), next: LiveCadence = .watched) -> NetworkReading? {
+    func sampleOnce(now: SampleTime = .now, next: LiveCadence = .watched) -> NetworkReading? {
         guard !Task.isCancelled else { return nil }
         let counters = readCounters()
         log.record(NetworkRates.byName(counters), at: now, next: next, rate: NetworkRates.rate)
         let named = name(readPrimary())
         return NetworkReading(
-            observedAt: now,
+            observedAt: now.wall,
             interface: named,
             wifi: named.flatMap { readWiFi($0.bsdName) },
             totals: NetworkRates.totals(counters, bootedAt: bootedAt),

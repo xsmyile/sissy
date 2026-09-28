@@ -216,7 +216,8 @@ final class NetworkRateTests: XCTestCase {
 }
 
 final class NetworkMonitorTests: XCTestCase {
-    private let start = Date(timeIntervalSince1970: 1_790_000_000)
+    private let start = SampleTime(
+        wall: Date(timeIntervalSince1970: 1_790_000_000), instant: .now)
 
     /// A monitor whose counters grow by `step` bytes a sample on `en0`,
     /// dated as having been up since boot.
@@ -241,7 +242,7 @@ final class NetworkMonitorTests: XCTestCase {
                 return "Wi-Fi"
             },
             readWiFi: { name in name == "en0" ? WiFiLink(rssi: -59, transmitRate: 286) : nil },
-            bootedAt: start)
+            bootedAt: start.wall)
     }
 
     func testTheFirstSampleHasTotalsAndNoRate() async throws {
@@ -271,8 +272,8 @@ final class NetworkMonitorTests: XCTestCase {
             last = await monitor.sampleOnce(now: start + TimeInterval(second))
         }
         let rates = try XCTUnwrap(last?.rates)
-        XCTAssertEqual(rates.first?.at, start + 200 - LiveCadence.window)
-        XCTAssertEqual(rates.last?.at, start + 200)
+        XCTAssertEqual(rates.first?.at, (start + 200 - LiveCadence.window).wall)
+        XCTAssertEqual(rates.last?.at, (start + 200).wall)
         XCTAssertEqual(rates.count, 121)
     }
 
@@ -285,7 +286,7 @@ final class NetworkMonitorTests: XCTestCase {
         }
         let sampled = await monitor.sampleOnce(now: start + 305)
         let rates = try XCTUnwrap(sampled?.rates)
-        XCTAssertEqual(rates.first?.at, start + 185)
+        XCTAssertEqual(rates.first?.at, (start + 185).wall)
         XCTAssertEqual(rates.count, 25)
     }
 
@@ -298,7 +299,7 @@ final class NetworkMonitorTests: XCTestCase {
         }
         var last: NetworkReading?
         for second in [12, 13, 14] { last = await monitor.sampleOnce(now: start + TimeInterval(second)) }
-        XCTAssertEqual(last?.rates.map(\.at), [5, 10, 12, 13, 14].map { start + TimeInterval($0) })
+        XCTAssertEqual(last?.rates.map(\.at), [5, 10, 12, 13, 14].map { (start + TimeInterval($0)).wall })
         XCTAssertEqual(last?.rates.first?.rate, NetworkRate(received: 200, sent: 100))
     }
 
@@ -357,10 +358,10 @@ final class NetworkMonitorTests: XCTestCase {
         let samples = LockedValue<[NetworkInterfaceCounters]>([
             NetworkInterfaceCounters(
                 name: "en0", bytes: NetworkByteCounts(received: 9_000, sent: 9_000), isLoopback: false,
-                lastChange: start + 10),
+                lastChange: (start + 10).wall),
             NetworkInterfaceCounters(
                 name: "en0", bytes: NetworkByteCounts(received: 500, sent: 100), isLoopback: false,
-                lastChange: restart),
+                lastChange: restart.wall),
         ])
         let monitor = NetworkMonitor(
             readCounters: {
@@ -369,12 +370,12 @@ final class NetworkMonitorTests: XCTestCase {
                 return [next[0]]
             },
             readPrimary: { nil }, readDisplayName: { _ in nil }, readWiFi: { _ in nil },
-            bootedAt: start)
+            bootedAt: start.wall)
         let before = await monitor.sampleOnce(now: restart - 1)
         XCTAssertNil(before?.totals.since)
         let after = await monitor.sampleOnce(now: restart)
         XCTAssertEqual(after?.rates.map(\.rate), [NetworkRate(received: 0, sent: 0)])
-        XCTAssertEqual(after?.totals.since, restart)
+        XCTAssertEqual(after?.totals.since, restart.wall)
     }
 
     /// The listing behind the display name costs 1.6 ms, so it is asked once
@@ -524,11 +525,11 @@ final class LiveSamplingTests: XCTestCase {
         let network = NetworkMonitor.readingNothing()
         let live = sampling(network: network)
         await live.start()
-        _ = await network.sampleOnce(now: Date() + 1)
-        let before = await network.sampleOnce(now: Date() + 2)
+        _ = await network.sampleOnce(now: SampleTime.now + 1)
+        let before = await network.sampleOnce(now: SampleTime.now + 2)
         XCTAssertFalse(try XCTUnwrap(before).rates.isEmpty)
         await live.setEnabled(.network, false)
-        let after = await network.sampleOnce(now: Date() + 3)
+        let after = await network.sampleOnce(now: SampleTime.now + 3)
         XCTAssertEqual(after?.rates, [])
     }
 

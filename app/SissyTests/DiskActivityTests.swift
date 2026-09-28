@@ -147,7 +147,8 @@ final class DiskRatesTests: XCTestCase {
 }
 
 final class DiskActivityMonitorTests: XCTestCase {
-    private let start = Date(timeIntervalSince1970: 1_790_000_000)
+    private let start = SampleTime(
+        wall: Date(timeIntervalSince1970: 1_790_000_000), instant: .now)
 
     /// A monitor reading `drivers` as they stand at each call, step by step:
     /// `sequence[n]` is what the nth read answers, and the last one repeats.
@@ -198,7 +199,7 @@ final class DiskActivityMonitorTests: XCTestCase {
             last = await monitor.sampleOnce(now: start + TimeInterval(second))
         }
         let rates = try XCTUnwrap(last?.rates)
-        XCTAssertEqual(rates.first?.at, start + 200 - LiveCadence.window)
+        XCTAssertEqual(rates.first?.at, (start + 200 - LiveCadence.window).wall)
         XCTAssertEqual(rates.count, 121)
     }
 
@@ -209,7 +210,7 @@ final class DiskActivityMonitorTests: XCTestCase {
         }
         var last: DiskActivityReading?
         for second in [12, 13] { last = await monitor.sampleOnce(now: start + TimeInterval(second)) }
-        XCTAssertEqual(last?.rates.map(\.at), [5, 10, 12, 13].map { start + TimeInterval($0) })
+        XCTAssertEqual(last?.rates.map(\.at), [5, 10, 12, 13].map { (start + TimeInterval($0)).wall })
     }
 
     func testAGapBeyondTheBoundRestartsTheSeries() async {
@@ -387,11 +388,11 @@ final class DiskLiveSamplingTests: XCTestCase {
         let disk = DiskActivityMonitor(readCounters: { [DiskDriverCounters(id: 1, bytes: .zero)] })
         let live = LiveSampling(network: .readingNothing(), disk: disk, enabled: [.disk])
         await live.start()
-        _ = await disk.sampleOnce(now: Date() + 1)
-        let before = await disk.sampleOnce(now: Date() + 2)
+        _ = await disk.sampleOnce(now: SampleTime.now + 1)
+        let before = await disk.sampleOnce(now: SampleTime.now + 2)
         XCTAssertFalse(try XCTUnwrap(before).rates.isEmpty)
         await live.setEnabled(.disk, false)
-        let after = await disk.sampleOnce(now: Date() + 3)
+        let after = await disk.sampleOnce(now: SampleTime.now + 3)
         XCTAssertEqual(after?.rates, [])
     }
 

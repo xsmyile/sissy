@@ -78,9 +78,9 @@ actor DiskActivityMonitor {
     ///
     /// A step with nothing to measure restarts the series as a gap does, see
     /// `DiskRates.rate` and `RateLog`.
-    func sampleOnce(now: Date = Date(), next: LiveCadence = .watched) -> DiskActivityReading? {
+    func sampleOnce(now: SampleTime = .now, next: LiveCadence = .watched) -> DiskActivityReading? {
         guard !Task.isCancelled else { return nil }
         log.record(DiskRates.byID(readCounters()), at: now, next: next, rate: DiskRates.rate)
-        return DiskActivityReading(observedAt: now, rates: log.points)
+        return DiskActivityReading(observedAt: now.wall, rates: log.points)
     }
 }
