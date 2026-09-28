@@ -30,13 +30,11 @@ enum PanelMetrics {
     ///
     /// One size for every tab, because they are the same rank of answer.
     /// 22 pt rather than the 18 it was while the Overview stacked every
-    /// module: with one module to a tab the headline is the only thing on
-    /// the popover that is not on a platter, and at 18 it read as a caption
-    /// to the first of them.
+    /// module: with one module to a tab it was the only thing on the popover
+    /// not on a platter, and at 18 it read as a caption to the first of them.
+    /// It has stood on a platter of its own since 2026-09-28 and keeps the
+    /// size, which is what still sets it apart from the rows under it.
     static let headlineNumber: CGFloat = 22
-    /// What a tab's headline leaves above and below itself.
-    static let headlineTop: CGFloat = 4
-    static let headlineBottom: CGFloat = 10
     /// Everything that qualifies a headline number rather than being one.
     static let headlineMeta: CGFloat = 11
     /// A provider's mark where it labels a row, and the text it sits beside.
