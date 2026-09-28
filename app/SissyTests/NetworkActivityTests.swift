@@ -271,6 +271,26 @@ final class NetworkMonitorTests: XCTestCase {
         XCTAssertEqual(last?.rates.count, NetworkMonitor.historyLength)
     }
 
+    /// A rate averaged over a sleep would be drawn and dated as one second,
+    /// so the series starts again from the sample after it.
+    func testAGapBeyondTheBoundRestartsTheSeries() async throws {
+        let monitor = monitor()
+        for second in 0..<3 { _ = await monitor.sampleOnce(now: start + TimeInterval(second)) }
+        let afterGap = start + 2 + NetworkMonitor.maximumGap + 1
+        let resumed = await monitor.sampleOnce(now: afterGap)
+        XCTAssertEqual(resumed?.rates, [])
+        let next = await monitor.sampleOnce(now: afterGap + 1)
+        XCTAssertEqual(next?.rates, [NetworkRate(received: 1_000, sent: 500)])
+    }
+
+    func testALateSampleWithinTheBoundStaysInTheSeries() async throws {
+        let monitor = monitor()
+        _ = await monitor.sampleOnce(now: start)
+        _ = await monitor.sampleOnce(now: start + 1)
+        let late = await monitor.sampleOnce(now: start + 1 + NetworkMonitor.maximumGap)
+        XCTAssertEqual(late?.rates.count, 2)
+    }
+
     /// A counter that restarts while the tab is open costs that sample its
     /// rate, and the totals from then on are dated by the restart.
     func testACounterThatRestartsDatesTheTotals() async throws {

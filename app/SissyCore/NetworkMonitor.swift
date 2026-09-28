@@ -21,6 +21,19 @@ actor NetworkMonitor {
     static let sampleInterval: Duration = .seconds(1)
     /// Two minutes at one sample a second.
     static let historyLength = 120
+    /// The longest gap between two samples that still counts as one step of
+    /// the series.
+    ///
+    /// The sparkline lays every rate one `sampleInterval` from the last, and
+    /// its legend and hover age count them that way, so a rate averaged over
+    /// a longer gap would be drawn and dated as one second. A sleep, or a poll
+    /// the cooperative pool held up, empties the series instead and measures
+    /// the next rate from this sample, as a `start()` after `stop()` would.
+    /// Three seconds is two missed samples: a late sample,
+    /// which costs a millisecond and waits 2.8 ms on the Wi-Fi daemon at the
+    /// most, measured 2026-09-28, is not a gap, and a line that has lost two
+    /// points has lost its spacing.
+    static let maximumGap: TimeInterval = 3
 
     private let readCounters: @Sendable () -> [NetworkInterfaceCounters]
     private let readPrimary: @Sendable () -> String?
@@ -89,12 +102,14 @@ actor NetworkMonitor {
         guard !Task.isCancelled else { return nil }
         let counters = readCounters()
         let byName = NetworkRates.byName(counters)
-        if let previous,
-            let rate = NetworkRates.rate(
-                from: previous.counters, to: byName, seconds: now.timeIntervalSince(previous.at))
-        {
-            rates.append(rate)
-            if rates.count > Self.historyLength { rates.removeFirst(rates.count - Self.historyLength) }
+        if let previous {
+            let gap = now.timeIntervalSince(previous.at)
+            if gap > Self.maximumGap {
+                rates = []
+            } else if let rate = NetworkRates.rate(from: previous.counters, to: byName, seconds: gap) {
+                rates.append(rate)
+                if rates.count > Self.historyLength { rates.removeFirst(rates.count - Self.historyLength) }
+            }
         }
         previous = (byName, now)
         let named = name(readPrimary())
