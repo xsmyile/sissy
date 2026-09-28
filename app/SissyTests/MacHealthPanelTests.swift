@@ -130,20 +130,49 @@ final class MacHealthPanelTests: XCTestCase {
             [.init(id: "/Applications/Docker.app", name: "Docker", footprint: "7.40 GB")])
     }
 
-    // MARK: Overview
+    // MARK: Tabs
 
-    func testTheMacLineFollowsTheProvidersWhenThereIsAReading() {
+    func testAReadingGivesTheMacATabOfItsOwn() {
         let snapshot = UsagePanelSnapshot.make(frame: frame(mac: reading()))
 
-        XCTAssertEqual(PanelModule.visible(in: snapshot), [.providers, .mac, .identities])
+        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage, .mac])
     }
 
     /// Switched off or not sampled yet, the frame carries no reading and the
-    /// Overview draws no line rather than one saying so.
-    func testNoReadingDrawsNoMacLine() {
+    /// panel draws no tab rather than one saying so.
+    func testNoReadingDrawsNoMacTab() {
         let snapshot = UsagePanelSnapshot.make(frame: frame(mac: nil))
 
         XCTAssertNil(snapshot.mac)
-        XCTAssertFalse(PanelModule.visible(in: snapshot).contains(.mac))
+        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage])
+    }
+
+    /// The Mac has a tab, so Usage no longer carries a line for it.
+    func testUsageLeavesTheMacToItsTab() {
+        let snapshot = UsagePanelSnapshot.make(frame: frame(mac: reading()))
+
+        XCTAssertEqual(PanelModule.visible(in: snapshot), [.providers, .identities])
+    }
+
+    func testANormalMacPutsNothingOnItsTab() {
+        let snapshot = UsagePanelSnapshot.make(frame: frame(mac: reading()))
+
+        XCTAssertNil(PanelTab.mac.badge(in: snapshot))
+    }
+
+    func testPressureBadgesTheMacTabAtItsLevel() {
+        let snapshot = UsagePanelSnapshot.make(frame: frame(mac: reading(pressure: .warn)))
+
+        XCTAssertEqual(PanelTab.mac.badge(in: snapshot), .level(.warn))
+    }
+
+    /// A full disk under a kernel reporting normal is still a Mac worth
+    /// opening, which is the same worse-of-two the menu bar's dot wears.
+    func testALowDiskBadgesTheMacTabUnderANormalKernel() throws {
+        let snapshot = UsagePanelSnapshot.make(frame: frame(mac: reading(diskFree: 1_000_000_000)))
+        let disk = try XCTUnwrap(snapshot.mac?.disk?.level)
+
+        XCTAssertGreaterThan(disk, .normal)
+        XCTAssertEqual(PanelTab.mac.badge(in: snapshot), .level(disk))
     }
 }

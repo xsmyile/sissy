@@ -1,43 +1,38 @@
 import SwiftUI
 
-/// One section of the Overview below the headline, in the fixed order they
+/// One section of the Usage tab below the headline, in the fixed order they
 /// draw. `PanelOverview.body` walks `visible(in:)` rather than listing the
 /// sections by hand, so this is the one place order and presence are decided
 /// — a case added here without a matching `PanelOverview.section` fails to
 /// compile.
 ///
-/// `mac` sits straight under the providers because it answers their question
-/// on the other axis that stops work now: whether there is room to keep
-/// working, in memory and disk rather than in a rate limit.
+/// The Mac and the forge are not here: each is a `PanelTab` of its own. The
+/// identity line is here only while repositories have no tab, which is while
+/// no forge is connected, and it then sits under the projects it is about.
 enum PanelModule: CaseIterable, Hashable {
     case providers
-    case mac
     case projects
     case identities
-    case forge
 
     /// The modules this snapshot has anything to draw for, in the enum's own
-    /// order. `providers` and `identities` always answer for something;
-    /// `projects` and `forge` carry a list that can be empty, and an empty
-    /// section would be a platter with nothing on it. `mac` is there exactly while the
-    /// frame carries a reading: switched off, or not sampled yet, there is no
-    /// line rather than a line saying so.
+    /// order. `providers` always answers for something; `projects` carries a
+    /// list that can be empty, and an empty section would be a platter with
+    /// nothing on it.
     static func visible(in snapshot: UsagePanelSnapshot) -> [Self] {
         allCases.filter { $0.isVisible(in: snapshot) }
     }
 
     private func isVisible(in snapshot: UsagePanelSnapshot) -> Bool {
         switch self {
-        case .providers, .identities: return true
-        case .mac: return snapshot.mac != nil
+        case .providers: return true
         case .projects: return !snapshot.projects.isEmpty
-        case .forge: return !snapshot.forge.isEmpty
+        case .identities: return !PanelTab.visible(in: snapshot).contains(.git)
         }
     }
 }
 
-/// The panel's home: what today costs, whether there is room to keep working,
-/// and where the money went.
+/// The Usage tab, which is where the panel opens: what today costs, whether
+/// there is room to keep working, and where the money went.
 ///
 /// It answers one question per block and hands the second question — what a
 /// single account is doing — to a page of its own.
@@ -70,14 +65,9 @@ struct PanelOverview: View {
     /// list where none is.
     let openIdentities: (String?) -> Void
     let selectPeriod: (UsagePeriod) -> Void
-    /// Which forge connections are being re-read, so their rows can say so
-    /// where they otherwise print an age about to change.
-    let refreshingForge: Set<String>
-    let refreshForge: (String) -> Void
     /// Opens the stats page. The providers label it hangs off is the only way
     /// there, so that label is drawn on every frame, rows or none.
     let openStats: () -> Void
-    let openMac: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -99,125 +89,10 @@ struct PanelOverview: View {
         switch module {
         case .providers:
             providers
-        case .mac:
-            if let mac = snapshot.mac { macLine(mac) }
         case .projects:
             projects
         case .identities:
-            identityLine(snapshot.identityLine)
-        case .forge:
-            forge
-        }
-    }
-
-    // MARK: Mac
-
-    /// The door to the Mac page, in the identity line's shape: a label, a
-    /// reading at the end of it, and a chevron, one row high whatever the Mac
-    /// is doing.
-    ///
-    /// The memory and the disk each wear their own level, so a full disk
-    /// under a kernel reporting normal reads as exactly that rather than
-    /// turning the word `normal` orange.
-    private func macLine(_ mac: UsagePanelSnapshot.MacBlock) -> some View {
-        PanelGroup {
-            macDoor(mac)
-        }
-    }
-
-    private func macDoor(_ mac: UsagePanelSnapshot.MacBlock) -> some View {
-        Button(action: openMac) {
-            HStack(spacing: 6) {
-                SectionLabel(text: "Mac")
-                Spacer(minLength: 8)
-                Self.macReading(mac)
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help("Show the Mac's memory, swap and disk")
-    }
-
-    /// The memory and the disk as one `Text`, by interpolation for the reason
-    /// `gaugeReading` gives.
-    private static func macReading(_ mac: UsagePanelSnapshot.MacBlock) -> Text {
-        let memory = MacLevelStyle.text(mac.memory)
-        guard let disk = mac.disk else { return memory }
-        let separator = Text(" · ").foregroundStyle(.secondary)
-        return Text("\(memory)\(separator)\(MacLevelStyle.text(disk))")
-    }
-
-    // MARK: Identities
-
-    /// The door to the identities page, drawn on every frame.
-    ///
-    /// **Always there, and quiet unless something is wrong.** It was drawn
-    /// only while a repository disagreed with its forge, which left the page
-    /// behind a right-click on a project row on every other day — so the
-    /// check went unnoticed until it had something to say, and a user who had
-    /// never seen the line had no reason to trust its absence. It now keeps
-    /// the agents door's rule: a door that comes and goes is not one. What
-    /// stays true of the old design is the weight. With no finding
-    /// the line is secondary, a tick and a count; a finding turns it primary
-    /// with the warning mark and names the repository whenever there is only
-    /// one, because naming it is the whole of the remaining work.
-    ///
-    /// **Under the projects, above the forge.** It is about repositories, so it
-    /// sits after the list of them rather than inside it — a badge per project
-    /// row is the decorative signal on the cost axis this panel refuses, since
-    /// that list is ordered by spend — and it answers for every repository
-    /// Sissy knows whether or not a forge is connected, which is why it is not
-    /// part of the forge section.
-    private func identityLine(_ line: UsagePanelSnapshot.IdentityLine) -> some View {
-        PanelGroup {
-            identityDoor(line)
-        }
-    }
-
-    private func identityDoor(_ line: UsagePanelSnapshot.IdentityLine) -> some View {
-        Button {
-            openIdentities(line.repository)
-        } label: {
-            HStack(spacing: 6) {
-                identityMark(line.state)
-                Text(line.summary)
-                    .font(.system(size: PanelMetrics.rowText))
-                    .foregroundStyle(line.state == .findings ? .primary : Color.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help("Show every repository's commit identity")
-    }
-
-    /// The page's own marks, so the line and the rows it leads to read alike.
-    /// Nothing read carries no mark: a tick there would be a verdict.
-    @ViewBuilder
-    private func identityMark(_ state: UsagePanelSnapshot.IdentityLineState) -> some View {
-        switch state {
-        case .findings:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(.orange)
-        case .clean:
-            Image(systemName: "checkmark")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-        case .unread:
-            EmptyView()
+            PanelIdentityLine(line: snapshot.identityLine, open: openIdentities)
         }
     }
 
@@ -255,8 +130,8 @@ struct PanelOverview: View {
             periodPicker
         }
         .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.top, 9)
-        .padding(.bottom, 8)
+        .padding(.top, PanelMetrics.headlineTop)
+        .padding(.bottom, PanelMetrics.headlineBottom)
         .animation(.default, value: snapshot.cost)
     }
 
@@ -617,34 +492,4 @@ struct PanelOverview: View {
         }
     }
 
-    // MARK: Forge
-
-    /// How much was pushed, per forge account, over the window the headline is
-    /// on.
-    ///
-    /// It sits at the foot, below the projects, and the reason is the question
-    /// rather than the height: the projects are what the app is for and nothing
-    /// may push them under the fold — which is what the provider gauges were
-    /// collapsed to one row each to stop — and a contribution count is the
-    /// least urgent reading on the page. It is also the only block here that is
-    /// not about this Mac at all, which is the second reason it is last.
-    ///
-    /// **The two rows are never summed.** Each vendor counts its own thing —
-    /// GitHub its contribution total, GitLab the events it recorded — so a
-    /// total across them would be a third number belonging to neither, which is
-    /// the rule the credits rows are already under.
-    private var forge: some View {
-        PanelGroup {
-            SectionLabel(text: UsageFormat.forgeSectionLabel(snapshot.period))
-        } content: {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(snapshot.forge) { row in
-                    ForgeRowView(
-                        row: row,
-                        refreshing: refreshingForge.contains(row.id),
-                        refresh: { refreshForge(row.id) })
-                }
-            }
-        }
-    }
 }

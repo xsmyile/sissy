@@ -131,6 +131,29 @@ final class ForgeRowTests: XCTestCase {
 
     /// With no archive the control does not appear and every window is today,
     /// which is what the forge rows then answer too.
+    /// A connected forge is what gives repositories a tab, and the identity
+    /// line goes with them off the Usage tab.
+    func testAConnectedForgeGivesRepositoriesATab() {
+        let frame = FrameBuilder.build(
+            today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [],
+            forge: [Self.reading(Self.gitHub, login: "xsmyile", contributions: 3, merged: 1, issues: 0)])
+        let snapshot = UsagePanelSnapshot.make(frame: frame, now: Self.readAt)
+
+        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage, .git])
+        XCTAssertFalse(PanelModule.visible(in: snapshot).contains(.identities))
+    }
+
+    /// Without one, the identity line is all repositories have to say, and it
+    /// stays under the projects rather than becoming a tab of one row.
+    func testWithNoForgeTheIdentityLineStaysOnUsage() {
+        let frame = FrameBuilder.build(
+            today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [])
+        let snapshot = UsagePanelSnapshot.make(frame: frame, now: Self.readAt)
+
+        XCTAssertEqual(PanelTab.visible(in: snapshot), [.usage])
+        XCTAssertTrue(PanelModule.visible(in: snapshot).contains(.identities))
+    }
+
     func testWithNoArchiveTheRowsAnswerToday() {
         let frame = FrameBuilder.build(
             today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [],

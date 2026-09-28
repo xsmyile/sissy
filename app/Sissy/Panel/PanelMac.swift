@@ -43,57 +43,79 @@ enum MacLevelStyle {
 /// size on the day the Mac froze as on a quiet one, and nothing on it moves
 /// under the pointer as the samples land.
 ///
-/// It keeps no clock and observes nothing of its own: the header's age is the
-/// panel's `TimelineView`, and the host goes with the popover when it closes.
+/// **A tab rather than a page one level in**, as of the panel's tabs: the
+/// memory headline leads it on the popover itself, the way the day's cost
+/// leads Usage, and the figures under it stand on platters. How old the
+/// sample is rides the caption under the headline, since the header above
+/// belongs to the whole panel and dates the usage reading.
+///
+/// The host goes with the popover when it closes, so the caption's clock
+/// costs nothing while nobody is looking.
 struct PanelMac: View {
     let block: UsagePanelSnapshot.MacBlock
 
-    private static let sectionSpacing: CGFloat = 16
-    private static let labelSpacing: CGFloat = 10
     private static let rowSpacing: CGFloat = 7
-    private static let headlineSize: CGFloat = 18
     private static let captionSize: CGFloat = 11
+    /// Matches the panel header's: the first minute of an age is worded in
+    /// seconds.
+    private static let clockTick: TimeInterval = 1
     private static let rowSize: CGFloat = 12
     private static let stepSize: CGFloat = 10
     private static let stepGap: CGFloat = 3
     private static let trackOpacity: Double = 0.15
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Self.sectionSpacing) {
-            memory
-            if !block.heaviest.isEmpty {
-                Divider()
-                heaviestSection(block.heaviest)
+        VStack(alignment: .leading, spacing: 0) {
+            headline
+            VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
+                PanelGroup {
+                    VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
+                        track
+                        Divider()
+                        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+                            row(
+                                "Swap and disk",
+                                value: MacLevelStyle.text(block.storage, resting: .primary))
+                            row("Load", value: Text(block.load))
+                            row("Up", value: Text(block.uptime))
+                        }
+                    }
+                }
+                if !block.heaviest.isEmpty {
+                    heaviestSection(block.heaviest)
+                }
             }
+            .padding(.horizontal, PanelMetrics.platterInset)
+            .padding(.bottom, PanelMetrics.platterInset)
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 
     // MARK: Memory
 
-    private var memory: some View {
-        VStack(alignment: .leading, spacing: Self.labelSpacing) {
-            SectionLabel(text: "Memory")
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(block.memory.text)
-                    .font(.system(size: Self.headlineSize, weight: .bold, design: .rounded))
-                    .foregroundStyle(headlineTint)
-                if let free = block.freeMemory {
-                    Text(free)
-                        .font(.system(size: Self.captionSize))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
+    /// The kernel's word as the tab's one number, with the free share and the
+    /// sample's age under it: the same rank and the same place as the day's
+    /// cost on Usage.
+    private var headline: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(block.memory.text)
+                .font(.system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded))
+                .foregroundStyle(headlineTint)
+            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+                Text(caption(now: context.date))
+                    .font(.system(size: Self.captionSize))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
-            track
-            VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                row("Swap and disk", value: MacLevelStyle.text(block.storage, resting: .primary))
-                row("Load", value: Text(block.load))
-                row("Up", value: Text(block.uptime))
-            }
-            .padding(.top, 2)
         }
+        .padding(.horizontal, PanelMetrics.gutter)
+        .padding(.top, PanelMetrics.headlineTop)
+        .padding(.bottom, PanelMetrics.headlineBottom)
+    }
+
+    private func caption(now: Date) -> String {
+        let age = UsageFormat.macReading(observedAt: block.observedAt, now: now)
+        guard let free = block.freeMemory else { return age }
+        return free + " · " + age
     }
 
     /// Primary at normal, where the rest of the panel's headlines are, and
@@ -166,8 +188,9 @@ struct PanelMac: View {
     /// they started are taken out, which the agents page already answers for.
     /// Grouped by bundle, so an app's helpers are the app.
     private func heaviestSection(_ apps: [UsagePanelSnapshot.MacApp]) -> some View {
-        VStack(alignment: .leading, spacing: Self.labelSpacing) {
+        PanelGroup {
             SectionLabel(text: "Heaviest besides the agents")
+        } content: {
             VStack(alignment: .leading, spacing: Self.rowSpacing) {
                 ForEach(apps) { app in
                     HStack(spacing: 6) {

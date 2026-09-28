@@ -44,6 +44,11 @@ struct UsagePanelView: View {
     /// it would reopen on a provider the user last glanced at instead of home.
     @State private var page: Page = .overview
 
+    /// Which module's tab `Page.overview` is showing. Local for the reason the
+    /// page is, and always `usage` on open: a tab that outlived the panel
+    /// would reopen on whatever was glanced at last rather than on the day.
+    @State private var tab: PanelTab = .usage
+
     /// Gives the popover a first responder on open, which is what makes
     /// Escape close it: AppKit routes `cancelOperation:` through the
     /// responder chain, and a panel of buttons has nothing that takes focus
@@ -70,6 +75,9 @@ struct UsagePanelView: View {
     private var availableForPage: CGFloat { max(maxHeight - headerHeight, 0) }
 
     enum Page: Equatable {
+        /// The selected tab's own page, which is the only level the tab bar
+        /// is drawn on: every case below is one level in from one of them,
+        /// and the way back returns to the tab it was opened from.
         case overview
         /// The vendor's page, and which of its accounts to open on — the row
         /// that was clicked, so a gauge per account leads where it reads.
@@ -102,9 +110,6 @@ struct UsagePanelView: View {
         /// level in from the agents door on the Overview's providers label, the
         /// only door to it, drawn whether or not anything is running.
         case stats
-        /// What the Mac itself is answering, one level in from the Overview's
-        /// Mac line, which is drawn only while there is a reading to open.
-        case mac
     }
 
     /// Cadence for both readouts the panel keeps on its own clock: the
@@ -138,7 +143,7 @@ struct UsagePanelView: View {
     /// for a vendor whose Overview row is not per account.
     private var openAccount: String? {
         switch page {
-        case .overview, .identities, .stats, .mac: nil
+        case .overview, .identities, .stats: nil
         case .provider(_, let account), .services(_, let account),
             .effort(_, let account), .projects(_, let account):
             account
@@ -152,7 +157,7 @@ struct UsagePanelView: View {
         -> UsagePanelSnapshot.ProviderRow?
     {
         switch page {
-        case .overview, .identities, .stats, .mac: return nil
+        case .overview, .identities, .stats: return nil
         case .provider(let id, _), .services(let id, _), .effort(let id, _):
             return providers.first { $0.id == id }
         case .projects(let id, _):
@@ -207,15 +212,21 @@ struct UsagePanelView: View {
                 limitsReading: model.preferences.limitsReading)
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
+        let tabs = snapshot.map(PanelTab.visible(in:)) ?? [.usage]
         let readings = PageReadings(
             open: open, services: servicesReading(of: open), projects: projectsPage(of: live?.frame))
         return VStack(alignment: .leading, spacing: 0) {
-            header(for: page, live: live, readings: readings)
-                .onGeometryChange(for: CGFloat.self) {
-                    $0.size.height
-                } action: {
-                    headerHeight = $0
+            VStack(alignment: .leading, spacing: 0) {
+                header(for: page, live: live, readings: readings)
+                if page == .overview, tabs.count > 1, let snapshot {
+                    PanelTabBar(tabs: tabs, selection: $tab) { $0.badge(in: snapshot) }
                 }
+            }
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.height
+            } action: {
+                headerHeight = $0
+            }
 
             ScrollView(.vertical) {
                 Group {
@@ -243,6 +254,12 @@ struct UsagePanelView: View {
         .defaultFocus($panelFocused, true)
         .onChange(of: open == nil) { _, gone in
             if gone { page = .overview }
+        }
+        .onChange(of: tabs.contains(tab)) { _, present in
+            if !present {
+                tab = .usage
+                page = .overview
+            }
         }
     }
 
@@ -287,12 +304,6 @@ struct UsagePanelView: View {
             identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt)
         case .stats:
             statsHeader(observedAt: live?.frame.agentMemory?.current.observedAt)
-        case .mac:
-            if let observedAt = live?.frame.mac?.observedAt {
-                macHeader(observedAt: observedAt)
-            } else {
-                header(live)
-            }
         }
     }
 
@@ -322,7 +333,7 @@ struct UsagePanelView: View {
     ) -> some View {
         switch target {
         case .overview:
-            overview(snapshot)
+            home(snapshot)
         case .provider:
             if let open = readings.open {
                 providerPage(open, live: live)
@@ -345,8 +356,6 @@ struct UsagePanelView: View {
             PanelIdentities(rows: snapshot.identities, focus: Self.identityFocus(target))
         case .stats:
             PanelStats(block: snapshot.agents)
-        case .mac:
-            macContent(snapshot: snapshot)
         }
     }
 
@@ -381,13 +390,27 @@ struct UsagePanelView: View {
         }
     }
 
-    /// The Mac page, or home once the module is switched off under it.
+    /// The selected tab's page, or Usage's for a tab whose module has gone
+    /// in the frame this body was built from. The `onChange` on the tab list
+    /// moves the selection back on the next pass; this is what draws until it
+    /// does.
     @ViewBuilder
-    private func macContent(snapshot: UsagePanelSnapshot) -> some View {
-        if let mac = snapshot.mac {
-            PanelMac(block: mac)
-        } else {
+    private func home(_ snapshot: UsagePanelSnapshot) -> some View {
+        switch tab {
+        case .usage:
             overview(snapshot)
+        case .mac:
+            if let mac = snapshot.mac {
+                PanelMac(block: mac)
+            } else {
+                overview(snapshot)
+            }
+        case .git:
+            PanelGit(
+                snapshot: snapshot,
+                refreshingForge: model.engine.refreshingForge,
+                refreshForge: { model.refreshForge($0) },
+                openIdentities: { page = .identities(focus: $0) })
         }
     }
 
@@ -403,10 +426,7 @@ struct UsagePanelView: View {
             openProjects: { page = .projects(nil, account: nil) },
             openIdentities: { page = .identities(focus: $0) },
             selectPeriod: { model.setUsagePeriod($0) },
-            refreshingForge: model.engine.refreshingForge,
-            refreshForge: { model.refreshForge($0) },
-            openStats: { page = .stats },
-            openMac: { page = .mac }
+            openStats: { page = .stats }
         )
     }
 
@@ -474,7 +494,7 @@ struct UsagePanelView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Back to today")
+            .help(homeHelp)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agents")
@@ -512,34 +532,6 @@ struct UsagePanelView: View {
         .padding(.vertical, 12)
     }
 
-    /// The Mac page's own header: the way back, the title, and when the
-    /// figures were sampled.
-    ///
-    /// No refresh, which is what separates it from the agents header beside
-    /// it: the kernel's pressure publishes the moment it moves, so a press
-    /// could only ever re-read numbers with no colour of their own.
-    private func macHeader(observedAt: Date) -> some View {
-        HStack(spacing: 8) {
-            backButton(to: .overview, help: "Back to today")
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Mac")
-                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
-                    .lineLimit(1)
-                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
-                    Text(UsageFormat.macReading(observedAt: observedAt, now: context.date))
-                        .font(.system(size: PanelMetrics.headlineMeta))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
-    }
-
     /// The identities page's own header: the way back, the title, when the
     /// repositories were last read, and a re-read.
     ///
@@ -560,7 +552,7 @@ struct UsagePanelView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Back to today")
+            .help(homeHelp)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Identities")
@@ -692,7 +684,7 @@ struct UsagePanelView: View {
         HStack(spacing: 8) {
             backButton(
                 to: projects.provider.map { .provider($0, account: openAccount) } ?? .overview,
-                help: Self.projectsBackHelp(projects.provider))
+                help: projectsBackHelp(projects.provider))
 
             if let provider = projects.provider {
                 ProviderMark(id: provider, size: Self.headerMarkSize, textSize: nil)
@@ -732,9 +724,15 @@ struct UsagePanelView: View {
         .help(help)
     }
 
-    private static func projectsBackHelp(_ provider: String?) -> String {
-        guard let provider else { return "Back to today" }
+    private func projectsBackHelp(_ provider: String?) -> String {
+        guard let provider else { return homeHelp }
         return "Back to \(UsageFormat.providerName(provider))"
+    }
+
+    /// Where the way back from a page one level in goes: the tab it was
+    /// opened from, named by what that tab is about.
+    private var homeHelp: String {
+        tab == .usage ? "Back to today" : "Back to \(tab.title)"
     }
 
     /// The header a provider page carries instead: the way back, whose page
@@ -768,7 +766,7 @@ struct UsagePanelView: View {
         HStack(spacing: 8) {
             backButton(
                 to: back,
-                help: back == .overview ? "Back to today" : "Back to \(row.name)")
+                help: back == .overview ? homeHelp : "Back to \(row.name)")
 
             ProviderMark(id: row.id, size: Self.headerMarkSize, textSize: nil)
 
