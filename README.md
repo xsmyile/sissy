@@ -110,7 +110,7 @@ working* (holds the Mac while turns land, lets go ten minutes after they stop),
 or *Always* (eight hours, then off). Neither overrides a closed lid, and the
 hold dies with Sissy. Quit and the Mac sleeps normally, with nothing to undo.
 
-**Settings** is ⌘, or the gear: General, Providers, Forge, About. **Copy
+**Settings** is ⌘, or the gear: General, Providers, Mac, Forge, About. **Copy
 diagnostics** lives in About and is what a bug report needs.
 
 ## What it reads
