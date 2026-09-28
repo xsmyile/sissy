@@ -13,6 +13,17 @@ final class DiskVolumesTests: XCTestCase {
             total: total, available: available)
     }
 
+    /// Only a local mount Finder would show is asked anything: a network one
+    /// can block the call that asks.
+    func testOnlyALocalBrowsableMountIsACandidate() {
+        XCTAssertTrue(DiskVolumes.isCandidate(DiskMount(path: "/", isLocal: true, isBrowsable: true)))
+        XCTAssertFalse(
+            DiskVolumes.isCandidate(DiskMount(path: "/Volumes/nas", isLocal: false, isBrowsable: true)))
+        XCTAssertFalse(
+            DiskVolumes.isCandidate(
+                DiskMount(path: "/System/Volumes/VM", isLocal: true, isBrowsable: false)))
+    }
+
     func testALocalBrowsableVolumeIsListed() {
         XCTAssertTrue(DiskVolumes.isListed(attributes(), homeID: "H"))
     }
@@ -182,6 +193,61 @@ final class DiskMonitorTests: XCTestCase {
         XCTAssertNil(monitor.currentReading())
     }
 
+    /// A read stuck in the filesystem holds its dispatch thread and nothing
+    /// else: `stop()` still completes, and the reading goes.
+    func testStopCompletesWhileAReadIsStuck() async {
+        let stuck = StuckRead()
+        addTeardownBlock { stuck.release() }
+        let monitor = DiskMonitor(read: stuck.read)
+        await monitor.start {}
+        await fulfillment(of: [stuck.entered], timeout: 2)
+
+        let stopped = expectation(description: "stop() returned")
+        Task {
+            await monitor.stop()
+            stopped.fulfill()
+        }
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertNil(monitor.currentReading())
+    }
+
+    /// A read that comes back after `stop()` publishes nothing and costs no
+    /// frame.
+    func testAReadReturningAfterStopPublishesNothing() async throws {
+        let stuck = StuckRead()
+        let frames = FrameCounter()
+        let monitor = DiskMonitor(read: stuck.read)
+        await monitor.start { frames.bump() }
+        await fulfillment(of: [stuck.entered], timeout: 2)
+        await monitor.stop()
+
+        stuck.release()
+        await fulfillment(of: [stuck.returned], timeout: 2)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(monitor.currentReading())
+        XCTAssertEqual(frames.count, 0)
+    }
+
+    /// A restart behind a stuck read waits on that read rather than parking a
+    /// second thread behind the same volume, and is served when it returns.
+    func testARestartBehindAStuckReadJoinsIt() async throws {
+        let stuck = StuckRead()
+        addTeardownBlock { stuck.release() }
+        let monitor = DiskMonitor(read: stuck.read)
+        await monitor.start {}
+        await fulfillment(of: [stuck.entered], timeout: 2)
+        await monitor.stop()
+        let published = expectation(description: "the restart published")
+        await monitor.start { published.fulfill() }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(stuck.calls, 1)
+
+        stuck.release()
+        await fulfillment(of: [published], timeout: 2)
+        XCTAssertNotNil(monitor.currentReading())
+        await monitor.stop()
+    }
+
     /// The dear read is never taken faster than `SystemHealthMonitor`'s disk
     /// read was, once a minute.
     func testTheReadIntervalIsAMinute() {
@@ -212,6 +278,30 @@ final class DiskConfigTests: XCTestCase {
     func testAnExplicitOffSurvivesAPartlyReadableFile() throws {
         XCTAssertFalse(try load(["disk": false, "keepAwake": 7]).disk)
     }
+}
+
+/// A disk read that blocks its thread until released, the way a stuck
+/// volume would.
+private final class StuckRead: @unchecked Sendable {
+    let entered = XCTestExpectation(description: "the read began")
+    let returned = XCTestExpectation(description: "the read returned")
+    private let gate = DispatchSemaphore(value: 0)
+    private let counter = FrameCounter()
+
+    var calls: Int { counter.count }
+
+    var read: @Sendable (Date) -> DiskReading {
+        { [self] now in
+            counter.bump()
+            entered.fulfill()
+            gate.wait()
+            returned.fulfill()
+            return DiskReading(
+                observedAt: now, home: nil, purgeable: nil, physicalMemory: 1, volumes: [])
+        }
+    }
+
+    func release() { gate.signal() }
 }
 
 /// A counter a `@Sendable` closure can advance.

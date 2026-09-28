@@ -8,6 +8,13 @@ import Foundation
 /// menu bar dot still answer for the disk, and a disk read that rode the
 /// memory sampler would stop with it.
 ///
+/// **The read never runs on this actor.** A resource value is a synchronous
+/// filesystem call with no bound, and `stop()` is what the engine awaits on
+/// its way down: a read holding the actor would hold the switch, the engine's
+/// `stop()` and the quit behind it. So the read goes to a dispatch thread
+/// through `DiskReadGate`, one at a time, and a poll that is cancelled leaves
+/// it there rather than waiting for it.
+///
 /// In memory and nowhere else, and needing no permission, no entitlement and
 /// no network, for `SystemHealthMonitor`'s reasons.
 actor DiskMonitor {
@@ -22,6 +29,10 @@ actor DiskMonitor {
 
     nonisolated private let published = LockedValue<DiskReading?>(nil)
     private var pollTask: Task<Void, Never>?
+    /// Which `start()` a read belongs to, so one that returns after a `stop()`
+    /// cannot publish into the `start()` after it.
+    private var generation = 0
+    private let gate = DiskReadGate()
     private let read: @Sendable (Date) -> DiskReading
 
     init(read: @escaping @Sendable (Date) -> DiskReading = DiskReader.read) {
@@ -34,6 +45,7 @@ actor DiskMonitor {
 
     func start(onRefresh: @Sendable @escaping () async -> Void) {
         guard pollTask == nil else { return }
+        generation += 1
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -44,19 +56,91 @@ actor DiskMonitor {
     }
 
     /// Stops reading and drops what was published, so a module switched off
-    /// leaves nothing on the next frame.
+    /// leaves nothing on the next frame. Never waits for a read in flight.
     func stop() {
+        generation += 1
         pollTask?.cancel()
         pollTask = nil
         published.store(nil)
     }
 
     /// One read and the frame after it. Internal so a test can run exactly
-    /// one; a read whose poll was cancelled while it waited for this actor
-    /// publishes nothing, since `stop()` ran ahead of it.
+    /// one. A read that was cancelled, or that returned after a `stop()`,
+    /// publishes nothing.
     func sampleOnce(onRefresh: @Sendable @escaping () async -> Void) async {
         guard !Task.isCancelled else { return }
-        published.store(read(Date()))
+        let started = generation
+        guard let reading = await readOffActor(), !Task.isCancelled, started == generation
+        else { return }
+        published.store(reading)
         await onRefresh()
+    }
+
+    private func readOffActor() async -> DiskReading? {
+        let id = UUID()
+        let gate = gate
+        let read = read
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if gate.join(id, continuation) {
+                    DispatchQueue.global(qos: .utility).async {
+                        gate.finish(read(Date()))
+                    }
+                }
+            }
+        } onCancel: {
+            gate.leave(id)
+        }
+    }
+}
+
+/// The single disk read in flight and everyone waiting on it, on
+/// `KeychainLookupGate`'s terms.
+///
+/// One at a time, because a read stuck in the filesystem parks its dispatch
+/// thread, and a second read behind the same stuck volume would park a
+/// second. A waiter that leaves is answered nil at once, and one that leaves
+/// before it joined is answered nil when it does.
+final class DiskReadGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var inFlight = false
+    private var waiters: [UUID: CheckedContinuation<DiskReading?, Never>] = [:]
+    private var left: Set<UUID> = []
+
+    /// Registers `id` as a waiter and reports whether this caller is the one
+    /// that has to run the read.
+    func join(_ id: UUID, _ continuation: CheckedContinuation<DiskReading?, Never>) -> Bool {
+        lock.lock()
+        if left.remove(id) != nil {
+            lock.unlock()
+            continuation.resume(returning: nil)
+            return false
+        }
+        waiters[id] = continuation
+        let runs = !inFlight
+        inFlight = true
+        lock.unlock()
+        return runs
+    }
+
+    /// The read returned. Hands it to everyone still waiting and reopens the
+    /// slot.
+    func finish(_ reading: DiskReading) {
+        lock.lock()
+        inFlight = false
+        let pending = waiters
+        waiters.removeAll()
+        lock.unlock()
+        for continuation in pending.values { continuation.resume(returning: reading) }
+    }
+
+    /// A waiter was cancelled. It leaves alone, and the read stays in flight
+    /// for anyone else.
+    func leave(_ id: UUID) {
+        lock.lock()
+        let abandoned = waiters.removeValue(forKey: id)
+        if abandoned == nil { left.insert(id) }
+        lock.unlock()
+        abandoned?.resume(returning: nil)
     }
 }

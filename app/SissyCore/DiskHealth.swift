@@ -67,8 +67,29 @@ extension FrameData {
     }
 }
 
+/// One entry of the kernel's mount table, as `getmntinfo_r_np` answers it
+/// without asking the filesystem anything.
+struct DiskMount: Sendable, Equatable {
+    let path: String
+    /// `MNT_LOCAL`: the kernel's word that the filesystem is not remote.
+    let isLocal: Bool
+    /// `MNT_DONTBROWSE` unset, which is what hides the system's own volumes
+    /// from Finder.
+    let isBrowsable: Bool
+}
+
 /// Which volumes the page lists and what it says about each.
 enum DiskVolumes {
+    /// Whether a mount is worth asking for resource values at all.
+    ///
+    /// **Decided from the mount table alone, before any volume is touched.**
+    /// A resource value of a network mount is a request to its server, and a
+    /// stuck SMB, NFS or WebDAV mount blocks it without a bound; the kernel's
+    /// own flags answer locality and visibility with no such request.
+    static func isCandidate(_ mount: DiskMount) -> Bool {
+        mount.isLocal && mount.isBrowsable
+    }
+
     /// The important-usage figure less the plain available one, and nil
     /// unless both were read: a volume answering only the plain figure has
     /// not said it holds no purgeable space.
@@ -144,12 +165,36 @@ enum DiskReader {
         return (attributes, importantFree(at: url))
     }
 
+    /// The local, browsable mounts' attributes, and nothing read of any other.
+    ///
+    /// `getmntinfo_r_np` with `MNT_NOWAIT` rather than the mounted-volume
+    /// listing of `FileManager`, which reads resource values of every mount,
+    /// network ones included, before a caller can filter them. The reentrant
+    /// form, because the plain call answers into one buffer shared by the whole
+    /// process. Measured 2026-09-28 the table costs 4 µs, and on this Mac the
+    /// filter keeps the same one volume the listing with hidden volumes
+    /// skipped did.
     private static func mountedVolumes() -> [DiskVolumeAttributes] {
-        let urls =
-            FileManager.default.mountedVolumeURLs(
-                includingResourceValuesForKeys: Array(cheapKeys), options: [.skipHiddenVolumes])
-            ?? []
-        return urls.compactMap(attributes(at:))
+        mountTable()
+            .filter(DiskVolumes.isCandidate)
+            .compactMap { attributes(at: URL(fileURLWithPath: $0.path, isDirectory: true)) }
+    }
+
+    private static func mountTable() -> [DiskMount] {
+        var table: UnsafeMutablePointer<statfs>?
+        let count = getmntinfo_r_np(&table, MNT_NOWAIT)
+        guard let table else { return [] }
+        defer { free(table) }
+        guard count > 0 else { return [] }
+        return (0..<Int(count)).map { index in
+            var entry = table[index]
+            let path = withUnsafeBytes(of: &entry.f_mntonname) {
+                String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
+            }
+            return DiskMount(
+                path: path, isLocal: entry.f_flags & UInt32(MNT_LOCAL) != 0,
+                isBrowsable: entry.f_flags & UInt32(MNT_DONTBROWSE) == 0)
+        }
     }
 
     private static func attributes(at url: URL) -> DiskVolumeAttributes? {
