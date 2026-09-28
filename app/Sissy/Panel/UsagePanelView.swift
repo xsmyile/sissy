@@ -410,7 +410,7 @@ struct UsagePanelView: View {
             }
         case .disk:
             if let disk = snapshot.disk {
-                PanelDisk(block: disk)
+                PanelDisk(block: disk, engine: model.engine)
             } else {
                 overview(snapshot)
             }

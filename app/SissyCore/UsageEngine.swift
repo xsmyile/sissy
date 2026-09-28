@@ -260,6 +260,7 @@ actor UsageEngine {
         healthMonitor: SystemHealthMonitor? = nil,
         diskMonitor: DiskMonitor? = nil,
         networkMonitor: NetworkMonitor? = nil,
+        diskActivityMonitor: DiskActivityMonitor? = nil,
         keepAwakePolicy: KeepAwakePolicy = .default
     ) {
         self.config = config
@@ -286,8 +287,12 @@ actor UsageEngine {
         self.healthMonitor =
             healthMonitor ?? SystemHealthMonitor(heaviest: { agentMonitor.currentApps() })
         self.diskMonitor = diskMonitor ?? DiskMonitor()
+        var liveEnabled: Set<LiveReading> = []
+        if config.network { liveEnabled.insert(.network) }
+        if config.disk { liveEnabled.insert(.disk) }
         self.live = LiveSampling(
-            network: networkMonitor ?? NetworkMonitor(), enabled: config.network ? [.network] : [])
+            network: networkMonitor ?? NetworkMonitor(),
+            disk: diskActivityMonitor ?? DiskActivityMonitor(), enabled: liveEnabled)
         let limitsBackoff = LimitsBackoffStore(
             url: LimitsBackoffLedger.defaultURL(in: stateDir))
         self.limitsBackoff = limitsBackoff
@@ -1894,6 +1899,7 @@ actor UsageEngine {
         } else {
             await diskMonitor.stop()
         }
+        await live.setEnabled(.disk, enabled)
         await reemit()
     }
 

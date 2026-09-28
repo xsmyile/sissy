@@ -10,11 +10,13 @@ import Foundation
 /// which of these its open page draws, and nothing else starts them.
 enum LiveReading: Hashable, Sendable, CaseIterable {
     case network
+    case disk
 }
 
 /// One sample of a `LiveReading`, as it travels to the page that asked for it.
 enum LiveSample: Sendable, Equatable {
     case network(NetworkReading)
+    case disk(DiskActivityReading)
 }
 
 /// Starts and stops the live readings against what the panel's page on screen
@@ -28,13 +30,15 @@ enum LiveSample: Sendable, Equatable {
 /// gone.
 actor LiveSampling {
     private let network: NetworkMonitor
+    private let disk: DiskActivityMonitor
     private var demand: Set<LiveReading> = []
     private var enabled: Set<LiveReading>
     private var onSample: (@Sendable (LiveSample) async -> Void)?
     private var isStopped = false
 
-    init(network: NetworkMonitor, enabled: Set<LiveReading>) {
+    init(network: NetworkMonitor, disk: DiskActivityMonitor, enabled: Set<LiveReading>) {
         self.network = network
+        self.disk = disk
         self.enabled = enabled
     }
 
@@ -71,6 +75,7 @@ actor LiveSampling {
     private func isRunning(_ reading: LiveReading) async -> Bool {
         switch reading {
         case .network: await network.isRunning
+        case .disk: await disk.isRunning
         }
     }
 
@@ -83,6 +88,12 @@ actor LiveSampling {
                     await network.start { await onSample(.network($0)) }
                 } else {
                     await network.stop()
+                }
+            case .disk:
+                if wanted, let onSample {
+                    await disk.start { await onSample(.disk($0)) }
+                } else {
+                    await disk.stop()
                 }
             }
         }

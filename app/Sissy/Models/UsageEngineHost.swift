@@ -59,6 +59,10 @@ final class UsageEngineHost {
     /// one, only `PanelNetwork` does, whose docstring carries the numbers
     /// measured 2026-09-28.
     private(set) var networkReading: NetworkReading?
+    /// The Disk tab's activity reading, published only while that tab is on
+    /// screen and nil otherwise, on its own property for `networkReading`'s
+    /// reason: only the activity platter reads it.
+    private(set) var diskActivityReading: DiskActivityReading?
     /// What the panel's page on screen asked the engine to sample.
     @ObservationIgnored private var liveDemand: Set<LiveReading> = []
     /// Which demand a sample was asked for under, moved on every change of it
@@ -262,6 +266,7 @@ final class UsageEngineHost {
         allRefresh = nil
         switchingClaudeAccount = nil
         networkReading = nil
+        diskActivityReading = nil
         guard let engine else { return }
         self.engine = nil
         await engine.stop()
@@ -1058,6 +1063,7 @@ final class UsageEngineHost {
     func setDisk(_ enabled: Bool) {
         guard let engine, enabled != disk else { return }
         disk = enabled
+        if !enabled { diskActivityReading = nil }
         Task { await engine.setDisk(enabled: enabled) }
     }
 
@@ -1100,6 +1106,7 @@ final class UsageEngineHost {
         liveDemand = demand
         liveGeneration += 1
         if !demand.contains(.network) { networkReading = nil }
+        if !demand.contains(.disk) { diskActivityReading = nil }
         sendLiveDemand()
     }
 
@@ -1128,6 +1135,9 @@ final class UsageEngineHost {
         case .network(let reading):
             guard network, liveDemand.contains(.network) else { return }
             networkReading = reading
+        case .disk(let reading):
+            guard disk, liveDemand.contains(.disk) else { return }
+            diskActivityReading = reading
         }
     }
 

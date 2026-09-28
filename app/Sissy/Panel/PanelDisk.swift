@@ -15,6 +15,7 @@ import SwiftUI
 /// the caption's clock costs nothing while nobody is looking.
 struct PanelDisk: View {
     let block: UsagePanelSnapshot.DiskBlock
+    let engine: UsageEngineHost
 
     private static let rowSpacing: CGFloat = 7
     private static let volumeSpacing: CGFloat = 4
@@ -49,6 +50,7 @@ struct PanelDisk: View {
                     row("Purgeable", value: block.purgeable)
                 }
             }
+            DiskActivityPlatter(engine: engine)
             if !block.volumes.isEmpty {
                 volumesSection
             }

@@ -47,7 +47,8 @@ enum PanelTab: CaseIterable, Hashable {
     /// What the tab's page samples while it is on screen, and only then.
     var liveReadings: Set<LiveReading> {
         switch self {
-        case .usage, .sessions, .mac, .disk, .forge: []
+        case .usage, .sessions, .mac, .forge: []
+        case .disk: [.disk]
         case .network: [.network]
         }
     }

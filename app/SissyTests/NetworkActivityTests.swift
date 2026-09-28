@@ -359,6 +359,7 @@ final class LiveSamplingTests: XCTestCase {
             network: NetworkMonitor(
                 readCounters: { [] }, readPrimary: { nil }, readDisplayName: { _ in nil },
                 readWiFi: { _ in nil }),
+            disk: DiskActivityMonitor(readCounters: { [] }),
             enabled: enabled)
     }
 
@@ -497,7 +498,7 @@ final class NetworkHostTests: XCTestCase {
 
     func testOnlyTheNetworkTabAsksForTheNetwork() {
         for tab in PanelTab.allCases {
-            XCTAssertEqual(tab.liveReadings, tab == .network ? [.network] : [], "\(tab)")
+            XCTAssertEqual(tab.liveReadings.contains(.network), tab == .network, "\(tab)")
         }
     }
 

@@ -2078,6 +2078,21 @@ extension UsageFormat {
     }
 }
 
+// MARK: Disk activity
+
+extension UsageFormat {
+    /// `Read 42 MB/s`, what came off the disks, in the grain `networkRate`
+    /// keeps every byte rate to.
+    static func diskRead(_ bytesPerSecond: Double?) -> String {
+        "Read " + (bytesPerSecond.map(networkRate) ?? "—")
+    }
+
+    /// `Write 3.1 MB/s`, what went onto them.
+    static func diskWrite(_ bytesPerSecond: Double?) -> String {
+        "Write " + (bytesPerSecond.map(networkRate) ?? "—")
+    }
+}
+
 // MARK: Network
 
 extension UsageFormat {
