@@ -12,10 +12,12 @@ import SwiftUI
 /// bar it captions, the purgeable space sits under a divider, and the volumes
 /// stand on a platter of their own. Swap is the Mac tab's, which samples it
 /// with the memory. The host goes with the popover when it closes, so
-/// the caption's clock costs nothing while nobody is looking.
+/// the caption's clock costs nothing while nobody is looking. The caches the
+/// home volume could hand back close the page, on `DiskCleanupPlatter`.
 struct PanelDisk: View {
     let block: UsagePanelSnapshot.DiskBlock
     let engine: UsageEngineHost
+    let cleanup: DiskCleanupModel
 
     private static let rowSpacing: CGFloat = 7
     private static let volumeSpacing: CGFloat = 4
@@ -54,8 +56,10 @@ struct PanelDisk: View {
             if !block.volumes.isEmpty {
                 volumesSection
             }
+            DiskCleanupPlatter(cleanup: cleanup)
         }
         .padding(PanelMetrics.platterInset)
+        .onAppear { cleanup.measure() }
     }
 
     // MARK: Home volume
