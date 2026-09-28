@@ -172,11 +172,12 @@ struct PanelTabBar: View {
             HStack(spacing: 5) {
                 Image(systemName: tab.symbol)
                     .font(.system(size: Self.symbolSize, weight: .medium))
-                    .foregroundStyle(badge?.tint ?? (isSelected ? .primary : .secondary))
+                    .foregroundStyle(
+                        badge.map { AnyShapeStyle($0.tint) } ?? AnyShapeStyle(titleStyle(isSelected)))
                 Text(tab.title)
                     .font(.system(size: Self.titleSize, weight: .medium))
                     .lineLimit(1)
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .foregroundStyle(titleStyle(isSelected))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
@@ -192,6 +193,13 @@ struct PanelTabBar: View {
         .keyboardShortcut(tab.shortcut, modifiers: .command)
         .help(help(tab))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// The hierarchical style rather than `Color.primary` or `Color.secondary`,
+    /// which are not the vibrant ones the bar's glass draws text in: a symbol
+    /// in one beside a title in the other reads as two greys.
+    private func titleStyle(_ isSelected: Bool) -> HierarchicalShapeStyle {
+        isSelected ? .primary : .secondary
     }
 
     private func help(_ tab: PanelTab) -> String {
