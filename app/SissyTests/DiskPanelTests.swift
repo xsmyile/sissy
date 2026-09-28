@@ -135,7 +135,8 @@ final class DiskPanelTests: XCTestCase {
 
     func testTheDiskTabComesBeforeForgeInTheShortcuts() {
         XCTAssertEqual(PanelTab.disk.shortcut, "4")
-        XCTAssertEqual(PanelTab.forge.shortcut, "5")
+        XCTAssertEqual(PanelTab.network.shortcut, "5")
+        XCTAssertEqual(PanelTab.forge.shortcut, "6")
     }
 
     // MARK: Badges
