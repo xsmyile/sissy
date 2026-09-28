@@ -464,6 +464,28 @@ final class NetworkHostTests: XCTestCase {
         XCTAssertNil(host.networkReading)
     }
 
+    /// A sample already waiting for the main actor when the switch went off
+    /// and on again was taken for a series the switch dropped, and the demand
+    /// reads the same on both sides of the pair.
+    func testASampleAcrossASwitchCycleIsDropped() {
+        let host = UsageEngineHost()
+        host.setLiveDemand([.network])
+        let before = host.liveGeneration
+        host.applyNetworkSwitch(false)
+        host.applyNetworkSwitch(true)
+        host.receive(.network(reading), generation: before)
+        XCTAssertNil(host.networkReading)
+    }
+
+    func testASampleAskedForAfterASwitchCycleIsKept() {
+        let host = UsageEngineHost()
+        host.setLiveDemand([.network])
+        host.applyNetworkSwitch(false)
+        host.applyNetworkSwitch(true)
+        host.receive(.network(reading), generation: host.liveGeneration)
+        XCTAssertEqual(host.networkReading, reading)
+    }
+
     func testTheDemandGoingClearsTheReading() {
         let host = UsageEngineHost()
         host.setLiveDemand([.network])

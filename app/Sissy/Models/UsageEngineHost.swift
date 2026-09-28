@@ -61,10 +61,10 @@ final class UsageEngineHost {
     private(set) var networkReading: NetworkReading?
     /// What the panel's page on screen asked the engine to sample.
     @ObservationIgnored private var liveDemand: Set<LiveReading> = []
-    /// Which demand a sample was asked for under, moved on every change: a
-    /// sample taken for a tab that switched away and back inside one second
-    /// belongs to the series that was dropped, and the demand alone reads the
-    /// same before and after.
+    /// Which demand a sample was asked for under, moved on every change of it
+    /// and of the Network switch: a sample taken for a tab that switched away
+    /// and back inside one second belongs to the series that was dropped, and
+    /// the demand alone reads the same before and after.
     @ObservationIgnored private(set) var liveGeneration = 0
     /// The last demand sent, awaited by the next one so the engine hears
     /// them in the order the panel asked: two unstructured tasks carry no
@@ -1063,9 +1063,29 @@ final class UsageEngineHost {
 
     func setNetwork(_ enabled: Bool) {
         guard let engine, enabled != network else { return }
+        applyNetworkSwitch(enabled)
+        sendLiveDemand()
+        let demandSent = liveDemandTask
+        Task {
+            await demandSent?.value
+            await engine.setNetwork(enabled: enabled)
+        }
+    }
+
+    /// The switch's flip as this object holds it: the state, the reading a
+    /// switch off takes with it, and a new generation.
+    ///
+    /// **The generation moves with the switch, not only with the demand.** A
+    /// sample already waiting for the main actor when the switch went off and
+    /// on again carries the generation it was asked under, and the demand
+    /// reads the same on both sides of that pair, so it would put the series
+    /// the switch dropped back on a page that restarted it. The demand is sent
+    /// again after this so the engine's next samples carry the new one.
+    /// Internal so a test can flip it without an engine.
+    func applyNetworkSwitch(_ enabled: Bool) {
         network = enabled
+        liveGeneration += 1
         if !enabled { networkReading = nil }
-        Task { await engine.setNetwork(enabled: enabled) }
     }
 
     /// Says which live readings the panel's page on screen draws: the
