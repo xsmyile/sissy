@@ -353,9 +353,14 @@ actor ForgeActivityMonitor {
     /// a click made off the VPN, which is this user's ordinary state.
     private func apply(_ outcome: Result<ForgeActivityReading, Error>, for connection: ForgeConnection) {
         switch outcome {
-        case .success(let reading):
+        case .success(var reading):
             parked.remove(connection.id)
-            published.update { $0[connection.id] = reading }
+            published.update { map in
+                if let previous = map[connection.id], previous.login == reading.login {
+                    reading.latest = ForgeEvent.merged(reading.latest, over: previous.latest)
+                }
+                map[connection.id] = reading
+            }
         case .failure(let error):
             let failure = (error as? ForgeReadFailure) ?? .malformed
             if failure.needsTheUser {
@@ -371,7 +376,7 @@ actor ForgeActivityMonitor {
                 map[connection.id] = ForgeActivityReading(
                     id: previous.id, kind: previous.kind, host: previous.host,
                     login: previous.login, activity: previous.activity,
-                    readAt: previous.readAt, failure: failure)
+                    readAt: previous.readAt, failure: failure, latest: previous.latest)
             }
         }
     }

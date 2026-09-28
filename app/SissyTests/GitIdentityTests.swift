@@ -478,7 +478,8 @@ final class GitIdentityPanelTests: XCTestCase {
     func testTheOverviewKeepsItsLineWhenEveryRepositoryAgrees() {
         let clean = snapshot([identity("/repos/a", author: work), identity("/repos/b", author: work)])
         XCTAssertEqual(clean.identityLine.state, .clean)
-        XCTAssertEqual(clean.identityLine.summary, "Commit identity · no findings in 2 repositories")
+        XCTAssertEqual(clean.identityLine.summary, "No findings")
+        XCTAssertEqual(clean.identityLine.count, "2 repositories")
         XCTAssertNil(clean.identityLine.repository)
     }
 
@@ -487,7 +488,8 @@ final class GitIdentityPanelTests: XCTestCase {
     func testTheOverviewLineSaysNothingWasReadBeforeTheFirstSweep() {
         let unread = snapshot([]).identityLine
         XCTAssertEqual(unread.state, .unread)
-        XCTAssertEqual(unread.summary, "Commit identity · nothing read yet")
+        XCTAssertEqual(unread.summary, "Nothing read yet")
+        XCTAssertNil(unread.count, "a heading counting nothing would claim a sweep that never ran")
     }
 
     /// A page whose one wrong repository sorts to the middle has to be read

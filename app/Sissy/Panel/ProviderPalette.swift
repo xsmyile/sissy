@@ -81,16 +81,49 @@ enum ProviderPalette {
         case .merged: "arrow.trianglehead.merge"
         case .issues: "smallcircle.filled.circle"
         case .comments: "bubble.left"
+        case .latest: "clock"
         }
     }
 
     /// What that mark reads as, which is the vendor's colour where there is one
-    /// to copy and a non-collision where there is not.
+    /// to copy and a non-collision where there is not. The latest event is not
+    /// a figure and has no colour of its own: its line wears the mark of what
+    /// was done, through `forgeEventTint`.
     static func forgeTint(_ counter: ForgeCounter) -> Color {
         switch counter {
         case .merged: forgeMerged
         case .issues: forgeIssue
         case .comments: forgeComment
+        case .latest: .secondary
+        }
+    }
+
+    /// The mark a forge's latest event is drawn with.
+    ///
+    /// **The counters' own marks where the event is one of theirs**, so a
+    /// merge on the event line is the glyph and the purple of the merged
+    /// figure above it, and the two read as one thing. The events no counter
+    /// covers take a neutral glyph in the line's own grey: a push is the arrow
+    /// it sends the work up with, an opened request is
+    /// `arrow.trianglehead.pull`, which is `git-pull-request`, and a review is
+    /// the eye both forges review with.
+    static func forgeEventSymbol(_ action: ForgeEvent.Action) -> String {
+        switch action {
+        case .pushed: "arrow.up"
+        case .opened: "arrow.trianglehead.pull"
+        case .merged: forgeSymbol(.merged)
+        case .openedIssue: forgeSymbol(.issues)
+        case .commented: forgeSymbol(.comments)
+        case .reviewed: "eye"
+        }
+    }
+
+    static func forgeEventTint(_ action: ForgeEvent.Action) -> Color {
+        switch action {
+        case .merged: forgeTint(.merged)
+        case .openedIssue: forgeTint(.issues)
+        case .commented: forgeTint(.comments)
+        case .pushed, .opened, .reviewed: .secondary
         }
     }
 

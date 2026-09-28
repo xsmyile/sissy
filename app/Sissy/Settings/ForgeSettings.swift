@@ -204,10 +204,10 @@ enum ForgeConnectCopy {
 /// to GitLab, because it is on a row that belongs to one of them. A switch
 /// governs every row at once, so it has to name the thing both vendors have.
 ///
-/// There is no entry for the contribution total. It is what the section on the
-/// panel is called, so a row with it switched off would be a heading with
-/// nothing under it — and the switch would be asking the user to keep a block
-/// they had just emptied.
+/// There is no entry for the contribution total. It is the figure each forge's
+/// section on the panel is about, so a row with it switched off would be a
+/// heading with nothing under it — and the switch would be asking the user to
+/// keep a block they had just emptied.
 enum ForgeCounterCopy {
     static let section = "Shown on each row"
 
@@ -216,6 +216,7 @@ enum ForgeCounterCopy {
         case .merged: "Merged requests"
         case .issues: "Opened issues"
         case .comments: "Comments"
+        case .latest: "Latest activity"
         }
     }
 
@@ -226,6 +227,7 @@ enum ForgeCounterCopy {
         case .merged: "Pull and merge requests you opened and had merged"
         case .issues: "Issues you opened"
         case .comments: "Comments you wrote on issues and requests"
+        case .latest: "What you last pushed, opened, merged or commented on"
         }
     }
 }

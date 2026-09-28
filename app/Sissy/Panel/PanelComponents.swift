@@ -885,23 +885,27 @@ struct ProjectRowView: View {
 /// this is the absence of one — and here it has a second, measured reason: this
 /// user's own GitLab is reached over a tunnel, so a laptop off the VPN would
 /// otherwise report a day with no work in it. A reading that arrived and has
-/// since gone stale keeps its figures and says so in the caption, because
+/// since gone stale keeps its figures and says so in its heading, because
 /// figures that were true an hour ago plus their age is a better answer than an
 /// error where a number was.
 ///
-/// **Every row is dated, not only the ones that went wrong.** The poll is on a
-/// five- to thirty-minute cadence and these counters move the moment the user
-/// pushes, so a figure with no date on it cannot be told from one taken before
-/// the merge they are looking for. The right-click re-reads that one
-/// connection, which is also the only way back from a token parked on a
-/// refusal that has since passed; the tooltip names the gesture, since nothing
-/// on the row can.
+/// **Every row is dated, not only the ones that went wrong**, and the date is
+/// the section's heading rather than the row's, which `ForgeSectionLabel`
+/// draws. The poll is on a five- to thirty-minute cadence and these counters
+/// move the moment the user pushes, so a figure with no date on it cannot be
+/// told from one taken before the merge they are looking for. The right-click
+/// re-reads that one connection, which is also the only way back from a token
+/// parked on a refusal that has since passed; the tooltip names the gesture,
+/// since nothing on the row can.
+///
+/// **Under the figures, the last thing the account did**, with the platter's
+/// whole width: the verb, what it was done to, the repository, the age.
 struct ForgeRowView: View {
     let row: UsagePanelSnapshot.ForgeRow
     let refreshing: Bool
     let refresh: () -> Void
 
-    private static let noticeSize: CGFloat = 11
+    private static let eventSize: CGFloat = 11
     /// Matches the panel header's, for the reason that one is a second rather
     /// than a minute: the first minute of an age is worded in seconds.
     private static let clockTick: TimeInterval = 1
@@ -937,7 +941,9 @@ struct ForgeRowView: View {
                 Spacer(minLength: 8)
                 figures
             }
-            notice
+            if let event = row.latest {
+                latest(event)
+            }
         }
         .contentShape(.rect)
         .help(row.tooltip)
@@ -948,31 +954,36 @@ struct ForgeRowView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// How old the figures are, on the row's own clock.
+    /// The last thing the account did, aged on the row's own clock for the
+    /// reason `ForgeSectionLabel` ages the reading.
     ///
-    /// `TimelineView` rather than a string the snapshot already built: this
-    /// block's frame arrives every five to thirty minutes, so an age taken
-    /// from it would sit at "read 2m ago" for half an hour under an open
-    /// panel. It is what `PanelProviderStatus` does with `checkedAt`, and the
-    /// two lines are the same reading for the same reason.
-    private var notice: some View {
-        TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
-            if let notice = UsageFormat.forgeNotice(
-                row.kind, failure: row.failure, readAt: row.readAt, opensAt: row.opensAt,
-                refreshing: refreshing, now: context.date)
-            {
-                Text(notice)
-                    .font(.system(size: Self.noticeSize))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+    /// Two texts rather than one, so a long branch shortens in its own middle
+    /// while the repository and the age after it stay whole: one string
+    /// shortened in the middle could cut into either.
+    private func latest(_ event: ForgeEvent) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: ProviderPalette.forgeEventSymbol(event.action))
+                .font(.system(size: Self.markSize, weight: Self.markWeight))
+                .foregroundStyle(ProviderPalette.forgeEventTint(event.action))
+            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+                HStack(spacing: 0) {
+                    Text(UsageFormat.forgeEventDone(event))
+                        .truncationMode(.middle)
+                    Text(UsageFormat.forgeEventTail(event, now: context.date))
+                        .layoutPriority(1)
+                }
+                .font(.system(size: Self.eventSize))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
         }
     }
 
     /// The contributions bare, the other three behind their own mark.
     ///
-    /// Bare because the contribution total is what the section label already
-    /// names, so a mark on it would qualify nothing; the three beside it are
+    /// Bare because the contribution total is the section's own figure, the
+    /// one its heading and the hover are about, so a mark on it would qualify
+    /// nothing; the three beside it are
     /// different readings on the same line and a glyph is what tells them
     /// apart without spending the row a word each — `merged` alone was seven
     /// characters of a 312 pt line that has to fit a login as well.

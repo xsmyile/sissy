@@ -43,7 +43,7 @@ struct ProviderToggles: Sendable, Codable {
 /// `nil` means on, which is what `ProviderToggles` means by it and for the
 /// same reason: a `server.json` written before a counter existed must not read
 /// as that counter being switched off. There is no entry for the contribution
-/// total, because it is what the section is called.
+/// total, because it is the figure the section is about.
 ///
 /// **A counter switched off is not fetched**, so this is not only a rendering
 /// choice — which is why it lives here rather than in a view's own state, and
@@ -52,8 +52,9 @@ struct ForgeCounters: Sendable, Codable, Equatable {
     var merged: Bool?
     var issues: Bool?
     var comments: Bool?
+    var latest: Bool?
 
-    static let defaults = Self(merged: nil, issues: nil, comments: nil)
+    static let defaults = Self(merged: nil, issues: nil, comments: nil, latest: nil)
 
     /// One counter's switch, by the name a Settings row carries, so a surface
     /// listing them needs to know no stored property. The same shape
@@ -64,6 +65,7 @@ struct ForgeCounters: Sendable, Codable, Equatable {
             case .merged: return merged
             case .issues: return issues
             case .comments: return comments
+            case .latest: return latest
             }
         }
         set {
@@ -71,6 +73,7 @@ struct ForgeCounters: Sendable, Codable, Equatable {
             case .merged: merged = newValue
             case .issues: issues = newValue
             case .comments: comments = newValue
+            case .latest: latest = newValue
             }
         }
     }

@@ -1282,21 +1282,35 @@ extension UsageFormat {
     ///
     /// A finding names one repository, because naming it is the whole of the
     /// remaining work, and counts several, because a list does not fit a line
-    /// and the page behind it is where a list belongs. Without one the line
-    /// leads with the feature's name, which is the only place on the Overview
-    /// it is said, and says how many repositories that answer covers. "No
-    /// findings" rather than "commit as expected": a repository with no remote
-    /// or a lone account is read and not judged, and a line claiming it agrees
-    /// would claim a verdict the page does not give.
+    /// and the page behind it is where a list belongs. The feature's name and
+    /// how many repositories the answer covers are the heading's, as of
+    /// 2026-09-28: the line led with both when it was the one block on the page
+    /// without a heading, and a finding naming a repository still truncated
+    /// behind them. "No findings" rather than "commit as expected": a
+    /// repository with no remote or a lone account is read and not judged,
+    /// and a line claiming it agrees would claim a verdict the page does not
+    /// give.
     static func identityLine(unexpected: [String], checked: Int) -> String {
         switch unexpected.count {
         case 1: return "\(unexpected[0]) commits under an unexpected name"
         case 2...: return "\(unexpected.count) repositories commit under an unexpected name"
-        default:
-            guard checked > 0 else { return "Commit identity · nothing read yet" }
-            let repositories = checked == 1 ? "repository" : "repositories"
-            return "Commit identity · no findings in \(checked) \(repositories)"
+        default: return checked > 0 ? "No findings" : "Nothing read yet"
         }
+    }
+
+    /// The heading over the identity line, wherever the line is drawn.
+    ///
+    /// "Commit identity" rather than the page's own "Identities", because on
+    /// the Forge tab it sits under the forges' logins, which are identities
+    /// too: the heading has to name the check, not the noun.
+    static let identitySectionLabel = "Commit identity"
+
+    /// How many repositories the identity line's answer covers, for the end
+    /// of its heading, where the projects' count sits on theirs. Nil before the
+    /// first sweep, which has read none.
+    static func identityCount(checked: Int) -> String? {
+        guard checked > 0 else { return nil }
+        return "\(checked) " + (checked == 1 ? "repository" : "repositories")
     }
 
     /// What the page says for a repository it holds no reading of: the one it
@@ -1835,8 +1849,8 @@ extension UsageFormat {
         }
     }
 
-    /// The line under a forge row: what it is doing, or what went wrong, and
-    /// how old the figures beside it are.
+    /// The end of a forge section's heading: what the row is doing, or what
+    /// went wrong, and how old the figures under it are.
     ///
     /// **A healthy row dates itself**, which is the whole of what it used to be
     /// missing. The poll runs every five to thirty minutes, so a count that is
@@ -1913,11 +1927,11 @@ extension UsageFormat {
     /// button: 312 pt already has the login truncating before the figures do.
     ///
     /// **The vendor's day is named by the clock time it starts at here**, which
-    /// is what the caption's `GitHub's day starts at 02:00` leans on: "whole
+    /// is what the heading's `GitHub's day starts at 02:00` leans on: "whole
     /// UTC days" alone left the reader to work out the offset. It is a fact
     /// about the zone rather than about the moment, so it holds at any hour
     /// the hover is read — the snapshot builds this once per frame while the
-    /// caption beside it re-reads the clock, and a line gated on the day not
+    /// heading above it re-reads the clock, and a line gated on the day not
     /// having started would outlive the start by up to a whole poll.
     static func forgeTooltip(
         _ kind: ForgeKind, host: String, login: String?, period: UsagePeriod,
@@ -1945,11 +1959,58 @@ extension UsageFormat {
         "GitLab stops counting at " + forgeCount(GitLabActivityFeed.countCeiling) + " events, so "
         + forgeCount(GitLabActivityFeed.countCeiling, atLeast: true) + " is at least that many"
 
-    /// The heading over the forge rows, naming the window they are over for
-    /// the reason the project section names its own day: the block under a
-    /// control is the one that has to say which choice it is answering.
-    static func forgeSectionLabel(_ period: UsagePeriod) -> String {
-        "Contributions · " + periodHeading(period).lowercased()
+    /// The heading over one forge's section: whose figures, and the window
+    /// they are over, for the reason the project section names its own day —
+    /// the block under a control is the one that has to say which choice it is
+    /// answering.
+    ///
+    /// **A section a forge rather than one block of rows**, as of 2026-09-28. The
+    /// age sat in a caption under each row and the latest event had to share
+    /// that caption with it: measured 2026-09-28 at 11 pt, `read 2m ago` and
+    /// its gap take about 63 of the 310 pt inside a platter, which cut a push
+    /// to `feat/background-rate-log` short of its repository. The age moved up
+    /// to the heading, where the projects' own count sits, and the event has
+    /// the platter's width. It also draws what the figures already obey: two
+    /// forges count two things and never add, so they are two blocks.
+    ///
+    /// `name` is the vendor's name, or the host where two connections are to
+    /// the same vendor, which `UsagePanelSnapshot.makeForge` decides.
+    static func forgeSectionLabel(_ name: String, period: UsagePeriod) -> String {
+        name + " · " + periodHeading(period).lowercased()
+    }
+
+    /// The latest event as its line reads: what was done, where, and how long
+    /// ago, in the words both forges share.
+    ///
+    /// The age is worded on the row's own clock for the reason `forgeNotice`'s
+    /// is: the frame arrives every five to thirty minutes and the event only
+    /// gets older between them.
+    static func forgeEvent(_ event: ForgeEvent, now: Date = Date()) -> String {
+        forgeEventDone(event) + forgeEventTail(event, now: now)
+    }
+
+    /// Where and when, joined on with its leading separator: the half of the
+    /// line the row keeps whole while the half before it shortens.
+    static func forgeEventTail(_ event: ForgeEvent, now: Date = Date()) -> String {
+        [event.repository, age(now.timeIntervalSince(event.at))]
+            .compactMap { $0 }
+            .map { " · " + $0 }
+            .joined()
+    }
+
+    /// What was done and to what, which is the half of the line a long branch
+    /// is in.
+    static func forgeEventDone(_ event: ForgeEvent) -> String {
+        let hasTarget = event.target != nil
+        let verb: String
+        switch event.action {
+        case .pushed: verb = hasTarget ? "pushed to" : "pushed"
+        case .opened, .openedIssue: verb = "opened"
+        case .merged: verb = "merged"
+        case .commented: verb = hasTarget ? "commented on" : "commented"
+        case .reviewed: verb = "reviewed"
+        }
+        return [verb, event.target].compactMap { $0 }.joined(separator: " ")
     }
 
     /// The heading over the Sessions tab's counted half, for the reason the
