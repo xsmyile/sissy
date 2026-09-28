@@ -6,6 +6,7 @@ import SwiftUI
 enum SettingsTab: Hashable {
     case general
     case providers
+    case mac
     case forge
     case about
 
@@ -13,6 +14,7 @@ enum SettingsTab: Hashable {
         switch self {
         case .general: return "General"
         case .providers: return "Providers"
+        case .mac: return "Mac"
         case .forge: return "Forge"
         case .about: return "About"
         }
@@ -25,10 +27,13 @@ enum SettingsTab: Hashable {
     /// is no robot to reach for — measured 2026-09-18, the 8526 symbols this
     /// SDK ships name exactly one, a robotic vacuum, and the Apple
     /// Intelligence glyph is restricted by the catalogue to referring to it.
+    /// Mac's is the same `memorychip` `PanelTab.mac` draws, since both name
+    /// the machine.
     var symbol: String {
         switch self {
         case .general: return "gearshape"
         case .providers: return "sparkles"
+        case .mac: return "memorychip"
         case .forge: return "arrow.triangle.branch"
         case .about: return "info.circle"
         }
@@ -73,6 +78,7 @@ struct SettingsRootView: View {
         TabView(selection: $model.settingsTab) {
             tab(.general) { GeneralSettingsView(model: model) }
             tab(.providers) { ProvidersSettingsView(model: model) }
+            tab(.mac) { MacSettingsView(model: model) }
             tab(.forge) { ForgeSettingsView(model: model) }
             tab(.about) { AboutView(model: model) }
         }

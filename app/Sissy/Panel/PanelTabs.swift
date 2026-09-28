@@ -54,14 +54,13 @@ enum PanelTab: CaseIterable, Hashable {
     }
 
     /// ⌘1 to ⌘4, by position in the full list rather than in the visible
-    /// one, so a key names the same module whichever are switched on.
+    /// one, so a key names the same module whichever are switched on. Read
+    /// from `allCases` rather than written out per case, so Disk and Network
+    /// landing between Mac and Forge renumber the tabs after them without a
+    /// table to edit.
     var shortcut: KeyEquivalent {
-        switch self {
-        case .usage: "1"
-        case .sessions: "2"
-        case .mac: "3"
-        case .forge: "4"
-        }
+        guard let index = Self.allCases.firstIndex(of: self) else { return "1" }
+        return KeyEquivalent(Character("\(index + 1)"))
     }
 
     /// What a tab says about its page while another one is open.
@@ -137,6 +136,15 @@ enum PanelTabBadge: Equatable {
 /// no height. The colour moved onto the symbol because it costs the segment
 /// no width either, and because it lands on the module's own mark — the rule
 /// the panel already keeps for a reading, rather than a mark drawn beside one.
+///
+/// **Icon only, as of 2026-09-28.** A title beside the symbol is what the bar
+/// drew through Disk and Network landing beside Mac and Forge: measured with
+/// AppKit at the bar's own fonts, an icon-and-title segment fits four tabs in
+/// the panel's 332 pt width — "Sessions" alone needs 72.6 pt, five tabs leave
+/// 66.4 pt each, six leave 55.3 — so the bar had to drop the title before a
+/// fifth tab existed to prove it. The name and the shortcut stay in `.help`,
+/// and the name becomes the accessibility label a sighted title used to give
+/// for free.
 struct PanelTabBar: View {
     let tabs: [PanelTab]
     @Binding var selection: PanelTab
@@ -145,10 +153,9 @@ struct PanelTabBar: View {
     @Namespace private var indicator
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private static let height: CGFloat = 26
+    private static let height: CGFloat = 30
     private static let inset: CGFloat = 2
-    private static let symbolSize: CGFloat = 11
-    private static let titleSize: CGFloat = 12
+    private static let symbolSize: CGFloat = 14
 
     var body: some View {
         HStack(spacing: 0) {
@@ -169,36 +176,31 @@ struct PanelTabBar: View {
         return Button {
             withAnimation(reduceMotion ? nil : .snappy) { selection = tab }
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: tab.symbol)
-                    .font(.system(size: Self.symbolSize, weight: .medium))
-                    .foregroundStyle(
-                        badge.map { AnyShapeStyle($0.tint) } ?? AnyShapeStyle(titleStyle(isSelected)))
-                Text(tab.title)
-                    .font(.system(size: Self.titleSize, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundStyle(titleStyle(isSelected))
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background {
-                if isSelected {
-                    Capsule()
-                        .fill(Self.selectedFill)
-                        .matchedGeometryEffect(id: Self.indicatorID, in: indicator)
+            Image(systemName: tab.symbol)
+                .font(.system(size: Self.symbolSize, weight: .medium))
+                .foregroundStyle(
+                    badge.map { AnyShapeStyle($0.tint) } ?? AnyShapeStyle(symbolStyle(isSelected))
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(Self.selectedFill)
+                            .matchedGeometryEffect(id: Self.indicatorID, in: indicator)
+                    }
                 }
-            }
-            .contentShape(.capsule)
+                .contentShape(.capsule)
         }
         .buttonStyle(.plain)
         .keyboardShortcut(tab.shortcut, modifiers: .command)
         .help(help(tab))
+        .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     /// The hierarchical style rather than `Color.primary` or `Color.secondary`,
-    /// which are not the vibrant ones the bar's glass draws text in: a symbol
-    /// in one beside a title in the other reads as two greys.
-    private func titleStyle(_ isSelected: Bool) -> HierarchicalShapeStyle {
+    /// which are not the vibrant ones the bar's glass draws a symbol in.
+    private func symbolStyle(_ isSelected: Bool) -> HierarchicalShapeStyle {
         isSelected ? .primary : .secondary
     }
 
