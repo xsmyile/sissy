@@ -163,6 +163,11 @@ struct ServerConfig: Sendable, Codable {
     ///
     /// On by default and apart from `macHealth`, for the same reasons: it asks
     /// for nothing, and off means no disk is read at all.
+    ///
+    /// **A file that predates the key takes `macHealth`'s value**, not the
+    /// default: before the split that one switch also stopped the disk reads,
+    /// so a user who had switched it off must not find the disks read after an
+    /// upgrade. A file that names `disk` keeps what it says.
     var disk: Bool
 
     static let defaults = ServerConfig(
@@ -301,7 +306,7 @@ struct ServerConfig: Sendable, Codable {
         }
         merged.forgeCounters = forgeCounters(in: obj) ?? merged.forgeCounters
         merged.macHealth = obj["macHealth"] as? Bool ?? merged.macHealth
-        merged.disk = obj["disk"] as? Bool ?? merged.disk
+        merged.disk = obj["disk"] as? Bool ?? merged.macHealth
         if let raw = obj["pricingOverride"],
             let nested = try? JSONSerialization.data(withJSONObject: raw),
             let decoded = try? JSONDecoder().decode([String: ModelPricing].self, from: nested)

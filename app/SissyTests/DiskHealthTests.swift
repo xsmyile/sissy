@@ -264,15 +264,36 @@ final class DiskConfigTests: XCTestCase {
         return try ServerConfig.load(from: url)
     }
 
-    /// A `server.json` written before the key existed reads as on.
-    func testAConfigWithoutTheKeyReadsAsOn() throws {
+    /// A whole `server.json` written before the key existed, as an upgrade
+    /// finds it.
+    private func configBeforeTheKey(macHealth: Bool) throws -> [String: Any] {
         let data = try JSONEncoder().encode(ServerConfig.defaults)
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         object.removeValue(forKey: "disk")
-        object["macHealth"] = false
-        let config = try load(object)
-        XCTAssertTrue(config.disk)
-        XCTAssertFalse(config.macHealth, "the rest of the file was not read")
+        object["macHealth"] = macHealth
+        return object
+    }
+
+    /// Before the split, Mac health off also stopped the disk reads, so an
+    /// upgrade must not start them.
+    func testAConfigWithoutTheKeyTakesMacHealthOff() throws {
+        let config = try load(configBeforeTheKey(macHealth: false))
+        XCTAssertFalse(config.disk)
+        XCTAssertFalse(config.macHealth, "the rest of the file was read")
+    }
+
+    func testAConfigWithoutTheKeyTakesMacHealthOn() throws {
+        XCTAssertTrue(try load(configBeforeTheKey(macHealth: true)).disk)
+    }
+
+    func testAConfigNamingTheKeyKeepsItWhateverMacHealthSays() throws {
+        var object = try configBeforeTheKey(macHealth: false)
+        object["disk"] = true
+        XCTAssertTrue(try load(object).disk)
+    }
+
+    func testAConfigWithNeitherKeyReadsTheDisks() throws {
+        XCTAssertTrue(try load(["keepAwake": "off"]).disk)
     }
 
     func testAnExplicitOffSurvivesAPartlyReadableFile() throws {
