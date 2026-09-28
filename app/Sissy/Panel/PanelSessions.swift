@@ -200,7 +200,7 @@ struct PanelSessions: View {
     /// the hover, because a path is a client's name as often as not.
     private func processes(_ live: UsagePanelSnapshot.AgentsBlock.Live) -> some View {
         VStack(alignment: .leading, spacing: Self.rowSpacing) {
-            processDisclosure(live.running)
+            processDisclosure
             if showsAllProcesses {
                 ForEach(live.processes) { processRow($0) }
             }
@@ -208,15 +208,14 @@ struct PanelSessions: View {
         .padding(.top, 2)
     }
 
-    private func processDisclosure(_ count: Int) -> some View {
+    private var processDisclosure: some View {
         Button {
             showsAllProcesses.toggle()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: showsAllProcesses ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                Text(UsageFormat.agentsByRepository(count))
-                    .monospacedDigit()
+                Text(UsageFormat.sessionsDisclosure)
                 Spacer(minLength: 0)
             }
             .font(.system(size: 11, weight: .medium))
