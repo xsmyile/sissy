@@ -364,10 +364,11 @@ final class DiskLiveSamplingTests: XCTestCase {
     }
 
     func testDiskSwitchedOffIsNotStartedByDemand() async {
-        let live = await sampling(enabled: [])
+        let live = await sampling(enabled: [.network])
         await live.setDemand([.disk], onSample: ignore)
         let running = await live.running()
-        XCTAssertEqual(running, [:])
+        XCTAssertEqual(running, [.network: .background])
+        await live.stop()
     }
 
     func testSwitchingDiskOffStopsARunningReading() async {
