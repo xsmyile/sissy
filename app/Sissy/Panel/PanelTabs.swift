@@ -59,7 +59,7 @@ enum PanelTab: CaseIterable, Hashable {
         }
     }
 
-    /// ⌘1 onwards, by position in the full list rather than in the visible
+    /// ⌘ and a digit, by position in the full list rather than in the visible
     /// one, so a key names the same module whichever are switched on. Read
     /// from `allCases` rather than written out per case, so Disk and Network
     /// landing between Mac and Forge renumber the tabs after them without a
