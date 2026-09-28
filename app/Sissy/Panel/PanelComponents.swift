@@ -4,8 +4,26 @@ import SwiftUI
 /// Metrics every panel surface shares, so a page cannot drift a point away
 /// from the one beside it.
 enum PanelMetrics {
-    static let width: CGFloat = 340
-    static let gutter: CGFloat = 14
+    /// Wide enough that a platter leaves its rows the 312 pt they were
+    /// measured in: 352 less a `platterInset` and a `platterPadding` on
+    /// each side. The panel was 340 with a 14 pt gutter, which is the same
+    /// 312 with nothing between the rows and the popover's edge.
+    static let width: CGFloat = 352
+    /// Where every page's text starts, flat or on a platter, so a header
+    /// and the rows of the block under it share a left edge.
+    static let gutter: CGFloat = 20
+    /// How far a platter sits inside the popover's edge.
+    static let platterInset: CGFloat = 8
+    /// What a platter leaves around its rows, horizontally the rest of the
+    /// gutter so the text on it lines up with the text off it.
+    static let platterPadding: CGFloat = gutter - platterInset
+    static let platterVerticalPadding: CGFloat = 10
+    static let platterRadius: CGFloat = 12
+    /// Between two platters, and between a platter and the headline above
+    /// the first one.
+    static let platterGap: CGFloat = 10
+    /// Between a platter's label and the platter itself.
+    static let platterLabelGap: CGFloat = 5
     static let barHeight: CGFloat = 5
     /// The one number a headline block is about — the day's cost, and the
     /// headroom left on the window that binds first.
@@ -479,14 +497,91 @@ struct LimitsNoticeView: View {
 
 /// The quiet label over a group of rows. One weight for every section, so the
 /// eye can tell a heading from a row without reading it.
+///
+/// Semibold rather than medium: the readings that share its line, a count,
+/// a period and a figure, a Mac's level, are 11 pt secondary too, and at
+/// that size medium against regular is a difference the eye does not make.
 struct SectionLabel: View {
     let text: String
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.secondary)
     }
+}
+
+/// One block of a page, drawn as a platter: an optional label above it and
+/// the rows on it.
+///
+/// **Depth rather than a divider between blocks.** A hairline under every
+/// section gave a block of gauges and a one-line door the same rank, so a
+/// page read as a stack of equal strata. A platter says which rows answer
+/// one question, and the space between two says they are two.
+///
+/// **A fill, never Liquid Glass.** Apple's materials guidance keeps glass for
+/// the controls and navigation that float above content (*"Don't use Liquid
+/// Glass in the content layer"*), which on this panel are the header's round
+/// buttons. The fill is lighter than the popover in both appearances, so the
+/// platter reads raised in both: the vibrant `.quinary` the rows already use
+/// is black at low opacity in light mode, and a platter in it read sunk.
+///
+/// The label sits off the platter, on the popover itself, with the gutter
+/// the rows keep on it: both start at `PanelMetrics.gutter`.
+struct PanelGroup<Label: View, Content: View>: View {
+    private let label: Label?
+    private let content: Content
+
+    init(@ViewBuilder label: () -> Label, @ViewBuilder content: () -> Content) {
+        self.label = label()
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PanelMetrics.platterLabelGap) {
+            if let label {
+                label.padding(.horizontal, PanelMetrics.platterPadding)
+            }
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, PanelMetrics.platterPadding)
+                .padding(.vertical, PanelMetrics.platterVerticalPadding)
+                .background(PanelPlatter())
+        }
+    }
+}
+
+extension PanelGroup where Label == EmptyView {
+    /// A platter whose rows carry their own label, as a door does.
+    init(@ViewBuilder content: () -> Content) {
+        self.label = nil
+        self.content = content()
+    }
+}
+
+/// The platter's shape and fill, apart from `PanelGroup` so a block that lays
+/// out its own rows can still stand on the same surface.
+struct PanelPlatter: View {
+    var body: some View {
+        let shape = RoundedRectangle(
+            cornerRadius: PanelMetrics.platterRadius, style: .continuous)
+        shape
+            .fill(Self.fill)
+            .overlay(shape.strokeBorder(.separator, lineWidth: Self.edgeWidth))
+    }
+
+    /// Half a point, which is one device pixel at 2x: enough to keep a light
+    /// platter off a light popover without drawing a box around it.
+    private static let edgeWidth: CGFloat = 0.5
+
+    private nonisolated static let darkAlpha: CGFloat = 0.06
+    private nonisolated static let lightAlpha: CGFloat = 0.6
+
+    private static let fill = Color(
+        nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return NSColor(white: 1, alpha: isDark ? darkAlpha : lightAlpha)
+        })
 }
 
 /// One model's share of a provider's day, as a pill under the strip: the name
@@ -879,7 +974,7 @@ struct ForgeRowView: View {
     /// names, so a mark on it would qualify nothing; the three beside it are
     /// different readings on the same line and a glyph is what tells them
     /// apart without spending the row a word each — `merged` alone was seven
-    /// characters of a line 340 pt wide has to fit a login into as well.
+    /// characters of a 312 pt line that has to fit a login as well.
     ///
     /// Four figures still leave the name most of the row: measured 2026-09-18
     /// against the 312 pt inside the gutters, the widest real reading on this

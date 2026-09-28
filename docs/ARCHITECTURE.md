@@ -197,7 +197,7 @@ honest threshold: the interval is chosen after each round, with jitter, and the
 loop keeps it to itself.
 
 The re-read is a **right-click on the row**, named in the hover the way the
-keep-awake control names its own, because 340 pt already has the login
+keep-awake control names its own, because a 312 pt row already has the login
 truncating before the figures do. Three things about it are settled. It
 **joins** a fetch already in flight rather than opening a second — actor
 isolation orders the writes and not the results, so a round that started first

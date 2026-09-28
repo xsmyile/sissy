@@ -19,7 +19,7 @@ enum PanelModule: CaseIterable, Hashable {
     /// The modules this snapshot has anything to draw for, in the enum's own
     /// order. `providers` and `identities` always answer for something;
     /// `projects` and `forge` carry a list that can be empty, and an empty
-    /// section costs a `Divider` for nothing. `mac` is there exactly while the
+    /// section would be a platter with nothing on it. `mac` is there exactly while the
     /// frame carries a reading: switched off, or not sampled yet, there is no
     /// line rather than a line saying so.
     static func visible(in snapshot: UsagePanelSnapshot) -> [Self] {
@@ -82,10 +82,13 @@ struct PanelOverview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headline
-            ForEach(PanelModule.visible(in: snapshot), id: \.self) { module in
-                Divider()
-                section(module)
+            VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
+                ForEach(PanelModule.visible(in: snapshot), id: \.self) { module in
+                    section(module)
+                }
             }
+            .padding(.horizontal, PanelMetrics.platterInset)
+            .padding(.bottom, PanelMetrics.platterInset)
         }
     }
 
@@ -117,6 +120,12 @@ struct PanelOverview: View {
     /// under a kernel reporting normal reads as exactly that rather than
     /// turning the word `normal` orange.
     private func macLine(_ mac: UsagePanelSnapshot.MacBlock) -> some View {
+        PanelGroup {
+            macDoor(mac)
+        }
+    }
+
+    private func macDoor(_ mac: UsagePanelSnapshot.MacBlock) -> some View {
         Button(action: openMac) {
             HStack(spacing: 6) {
                 SectionLabel(text: "Mac")
@@ -134,8 +143,6 @@ struct PanelOverview: View {
         }
         .buttonStyle(.plain)
         .help("Show the Mac's memory, swap and disk")
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 10)
     }
 
     /// The memory and the disk as one `Text`, by interpolation for the reason
@@ -169,6 +176,12 @@ struct PanelOverview: View {
     /// Sissy knows whether or not a forge is connected, which is why it is not
     /// part of the forge section.
     private func identityLine(_ line: UsagePanelSnapshot.IdentityLine) -> some View {
+        PanelGroup {
+            identityDoor(line)
+        }
+    }
+
+    private func identityDoor(_ line: UsagePanelSnapshot.IdentityLine) -> some View {
         Button {
             openIdentities(line.repository)
         } label: {
@@ -188,8 +201,6 @@ struct PanelOverview: View {
         }
         .buttonStyle(.plain)
         .help("Show every repository's commit identity")
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 10)
     }
 
     /// The page's own marks, so the line and the rows it leads to read alike.
@@ -218,7 +229,7 @@ struct PanelOverview: View {
     ///
     /// Tokens and burn sat inline beside the cost for as long as the number was
     /// always today's. Two things changed with the period. Inline, the cost and
-    /// its meta take about two thirds of the 340 pt and leave the control a
+    /// its meta take about two thirds of the 312 pt a row has and leave the control a
     /// cramped remainder — and the meta *grows* with the window, since a period
     /// the archive falls short of has to say so, which is exactly when the
     /// control matters most. They also never sat well: `firstTextBaseline`
@@ -295,27 +306,42 @@ struct PanelOverview: View {
     ///
     /// Drawn with no rows at all before the first reading lands and with every
     /// provider switched off, because its label carries the agents door.
+    @ViewBuilder
     private var providers: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                SectionLabel(text: providersLabel)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 8)
-                agentsDoor
-            }
-            ForEach(snapshot.gaugeRows) { row in
-                Button {
-                    openProvider(row.provider, row.account)
-                } label: {
-                    providerRow(row)
+        if snapshot.gaugeRows.isEmpty {
+            providersLabel
+                .padding(.horizontal, PanelMetrics.platterPadding)
+        } else {
+            PanelGroup {
+                providersLabel
+            } content: {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(snapshot.gaugeRows) { row in
+                        Button {
+                            openProvider(row.provider, row.account)
+                        } label: {
+                            providerRow(row)
+                        }
+                        .buttonStyle(.plain)
+                        .help(Self.legendHelp(row))
+                    }
                 }
-                .buttonStyle(.plain)
-                .help(Self.legendHelp(row))
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
+    }
+
+    /// The block's label and the agents door at the end of it. Drawn alone,
+    /// off any platter, before the first reading lands: the door has to be
+    /// there, and a platter with no rows on it would be a surface claiming a
+    /// block that is not.
+    private var providersLabel: some View {
+        HStack(spacing: 6) {
+            SectionLabel(text: providersTitle)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            agentsDoor
+        }
     }
 
     /// What the CLIs on this Mac are holding, and the way to the page behind
@@ -367,7 +393,7 @@ struct PanelOverview: View {
     /// The block's label, with the day's recap folded into it rather than
     /// given a row: "did I use both of them today" is a question about the
     /// list underneath, not a line that stands on its own.
-    private var providersLabel: String {
+    private var providersTitle: String {
         guard
             let recap = UsageFormat.providersRecap(
                 used: snapshot.usedToday, metering: meteringProviders)
@@ -574,12 +600,13 @@ struct PanelOverview: View {
     /// The fold keeps its figures for the reason it has them: the section is
     /// read against the headline, and it only reaches it if every row counts.
     private var projects: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        PanelGroup {
             Button(action: openProjects) {
                 ProjectsSectionLabel(text: "By project · today", count: snapshot.projectCount)
             }
             .buttonStyle(.plain)
             .help("Show every project")
+        } content: {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(snapshot.projects) { row in
                     ProjectRowView(
@@ -588,8 +615,6 @@ struct PanelOverview: View {
                 }
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 
     // MARK: Forge
@@ -609,16 +634,17 @@ struct PanelOverview: View {
     /// total across them would be a third number belonging to neither, which is
     /// the rule the credits rows are already under.
     private var forge: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        PanelGroup {
             SectionLabel(text: UsageFormat.forgeSectionLabel(snapshot.period))
-            ForEach(snapshot.forge) { row in
-                ForgeRowView(
-                    row: row,
-                    refreshing: refreshingForge.contains(row.id),
-                    refresh: { refreshForge(row.id) })
+        } content: {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(snapshot.forge) { row in
+                    ForgeRowView(
+                        row: row,
+                        refreshing: refreshingForge.contains(row.id),
+                        refresh: { refreshForge(row.id) })
+                }
             }
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 }
