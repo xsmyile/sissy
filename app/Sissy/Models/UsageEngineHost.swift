@@ -66,9 +66,9 @@ final class UsageEngineHost {
     /// What the panel's page on screen asked the engine to sample.
     @ObservationIgnored private var liveDemand: Set<LiveReading> = []
     /// Which demand a sample was asked for under, moved on every change of it
-    /// and of the Network switch: a sample taken for a tab that switched away
-    /// and back inside one second belongs to the series that was dropped, and
-    /// the demand alone reads the same before and after.
+    /// and of the Network and Disk switches: a sample taken for a tab that
+    /// switched away and back inside one second belongs to the series that was
+    /// dropped, and the demand alone reads the same before and after.
     @ObservationIgnored private(set) var liveGeneration = 0
     /// The last demand sent, awaited by the next one so the engine hears
     /// them in the order the panel asked: two unstructured tasks carry no
@@ -1062,9 +1062,24 @@ final class UsageEngineHost {
 
     func setDisk(_ enabled: Bool) {
         guard let engine, enabled != disk else { return }
+        applyDiskSwitch(enabled)
+        sendLiveDemand()
+        let demandSent = liveDemandTask
+        Task {
+            await demandSent?.value
+            await engine.setDisk(enabled: enabled)
+        }
+    }
+
+    /// The Disk switch's flip as this object holds it, for
+    /// `applyNetworkSwitch`'s reason: the activity reading is sampled behind
+    /// this switch too, and a sample waiting across an off and on would
+    /// otherwise pass the generation check. Internal so a test can flip it
+    /// without an engine.
+    func applyDiskSwitch(_ enabled: Bool) {
         disk = enabled
+        liveGeneration += 1
         if !enabled { diskActivityReading = nil }
-        Task { await engine.setDisk(enabled: enabled) }
     }
 
     func setNetwork(_ enabled: Bool) {

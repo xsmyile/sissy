@@ -406,6 +406,25 @@ final class DiskActivityHostTests: XCTestCase {
         XCTAssertNil(host.diskActivityReading)
     }
 
+    func testASampleAcrossASwitchCycleIsDropped() {
+        let host = UsageEngineHost()
+        host.setLiveDemand([.disk])
+        let before = host.liveGeneration
+        host.applyDiskSwitch(false)
+        host.applyDiskSwitch(true)
+        host.receive(.disk(reading), generation: before)
+        XCTAssertNil(host.diskActivityReading)
+    }
+
+    func testASampleAskedForAfterASwitchCycleIsKept() {
+        let host = UsageEngineHost()
+        host.setLiveDemand([.disk])
+        host.applyDiskSwitch(false)
+        host.applyDiskSwitch(true)
+        host.receive(.disk(reading), generation: host.liveGeneration)
+        XCTAssertEqual(host.diskActivityReading, reading)
+    }
+
     func testTheDemandGoingClearsTheReading() {
         let host = UsageEngineHost()
         host.setLiveDemand([.disk])
