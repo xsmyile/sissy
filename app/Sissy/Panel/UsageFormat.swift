@@ -2077,3 +2077,76 @@ extension UsageFormat {
         UInt64(max(bytes, 0))
     }
 }
+
+// MARK: Network
+
+extension UsageFormat {
+    /// A rate at the grain a person reads one at: whole kilobytes under a
+    /// megabyte, one decimal under ten megabytes, whole megabytes to a
+    /// gigabyte and one decimal above. Base ten for `bytes`'s reason, which is
+    /// also Activity Monitor's for its network figures.
+    ///
+    /// Each step is taken on the figure as it will be printed, so a rate
+    /// never reads `1000 KB/s` or `10.0 MB/s`: that keeps every figure to
+    /// three digits and a unit, which is what lets the headline fit without
+    /// shrinking, see `PanelNetwork`.
+    static func networkRate(_ bytesPerSecond: Double) -> String {
+        let value = max(bytesPerSecond, 0)
+        let kilobytes = (value / bytesPerKilobyte).rounded()
+        if kilobytes < rateStepLimit { return String(format: "%.0f KB/s", kilobytes) }
+        let megabytes = value / bytesPerMegabyte
+        if (megabytes * 10).rounded() / 10 < rateWholeMegabytes {
+            return String(format: "%.1f MB/s", megabytes)
+        }
+        if megabytes.rounded() < rateStepLimit { return String(format: "%.0f MB/s", megabytes) }
+        return String(format: "%.1f GB/s", value / bytesPerGigabyte)
+    }
+
+    /// `↓ 2.4 MB/s`, what came in.
+    static func networkDown(_ bytesPerSecond: Double?) -> String {
+        "↓ " + (bytesPerSecond.map(networkRate) ?? "—")
+    }
+
+    /// `↑ 310 KB/s`, what went out.
+    static func networkUp(_ bytesPerSecond: Double?) -> String {
+        "↑ " + (bytesPerSecond.map(networkRate) ?? "—")
+    }
+
+    /// `Wi-Fi · now` under the headline: which link the rate is read on, and
+    /// that it is the current second rather than an average.
+    static func networkCaption(_ interface: NetworkInterfaceName?) -> String {
+        (interface.map(networkLinkName) ?? "Not connected") + " · now"
+    }
+
+    /// `Wi-Fi (en0)`. System Settings already carries the BSD name in some of
+    /// its own names, `Ethernet Adapter (en4)`, and a VPN's interface has no
+    /// name there at all, so the BSD name is added only where it is missing.
+    static func networkInterface(_ interface: NetworkInterfaceName?) -> String {
+        guard let interface else { return "—" }
+        guard let display = interface.displayName else { return interface.bsdName }
+        let tag = "(\(interface.bsdName))"
+        return display.contains(tag) ? display : display + " " + tag
+    }
+
+    /// `-59 dBm · 286 Mbps`, the signal and the rate the link last sent at.
+    static func networkSignal(_ link: WiFiLink) -> String {
+        "\(link.rssi) dBm · " + String(format: "%.0f Mbps", link.transmitRate)
+    }
+
+    /// `↓ 1.4 GB · ↑ 3.0 GB`, what the physical links carried since boot,
+    /// and the dash before the first sample.
+    static func networkSinceBoot(_ bytes: NetworkByteCounts?) -> String {
+        guard let bytes else { return "—" }
+        return "↓ " + storage(bytes.received) + " · ↑ " + storage(bytes.sent)
+    }
+
+    /// The link's own name without its BSD tag, which the caption has no
+    /// room to repeat.
+    private static func networkLinkName(_ interface: NetworkInterfaceName) -> String {
+        interface.displayName ?? interface.bsdName
+    }
+
+    private static let bytesPerKilobyte: Double = 1_000
+    private static let rateWholeMegabytes: Double = 10
+    private static let rateStepLimit: Double = 1_000
+}

@@ -208,7 +208,8 @@ struct UsagePanelView: View {
                 limitsReading: model.preferences.limitsReading)
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
-        let tabs = snapshot.map(PanelTab.visible(in:)) ?? [.usage]
+        let tabs = snapshot.map { PanelTab.visible(in: $0, network: model.engine.network) } ?? [.usage]
+        let liveDemand = page == .overview && tabs.contains(tab) ? tab.liveReadings : []
         let readings = PageReadings(
             open: open, services: servicesReading(of: open), projects: projectsPage(of: live?.frame))
         return VStack(alignment: .leading, spacing: 0) {
@@ -250,6 +251,9 @@ struct UsagePanelView: View {
         .defaultFocus($panelFocused, true)
         .onChange(of: open == nil) { _, gone in
             if gone { page = .overview }
+        }
+        .onChange(of: liveDemand, initial: true) { _, wanted in
+            model.engine.setLiveDemand(wanted)
         }
         .onChange(of: tabs.contains(tab)) { _, present in
             if !present {
@@ -410,6 +414,8 @@ struct UsagePanelView: View {
             } else {
                 overview(snapshot)
             }
+        case .network:
+            PanelNetwork(engine: model.engine)
         case .forge:
             PanelForge(
                 snapshot: snapshot,
@@ -587,11 +593,11 @@ struct UsagePanelView: View {
     /// closed face does not say which window is chosen: the headline's
     /// subline and the Sessions and Forge labels say it instead.
     ///
-    /// Disabled on Mac and Disk, which read the moment and have no window,
-    /// rather than hidden: a header whose controls come and go with the tab moves
-    /// under the pointer. Absent while the archive answers nothing but today,
-    /// since a control whose every option answers the number on screen is a
-    /// control about a feature.
+    /// Disabled on Mac, Disk and Network, which read the moment and have no
+    /// window, rather than hidden: a header whose controls come and go with
+    /// the tab moves under the pointer. Absent while the archive answers
+    /// nothing but today, since a control whose every option answers the
+    /// number on screen is a control about a feature.
     @ViewBuilder
     private func periodButton(_ periods: [UsagePeriod]) -> some View {
         if periods.count > 1 {
@@ -628,7 +634,7 @@ struct UsagePanelView: View {
     }
 
     private var readsTheMoment: Bool {
-        page == .overview && (tab == .mac || tab == .disk)
+        page == .overview && !tab.readsPeriod
     }
 
     private func periodBinding(_ chosen: UsagePeriod) -> Binding<UsagePeriod> {

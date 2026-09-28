@@ -47,6 +47,25 @@ final class UsageEngineHost {
     private(set) var macHealth: Bool = true
     /// Whether Sissy reads the disks, held here for the same reason.
     private(set) var disk: Bool = true
+    /// Whether the panel carries a Network tab, held here for `statusChecks`'s
+    /// reason.
+    private(set) var network: Bool = true
+    /// The Network tab's reading, published only while that tab is on screen
+    /// and nil otherwise.
+    ///
+    /// **Its own property rather than a field of the frame**, so a sample a
+    /// second invalidates the one view that reads it and not the panel:
+    /// Observation tracks per property, and `UsagePanelView` never reads this
+    /// one, only `PanelNetwork` does, whose docstring carries the numbers
+    /// measured 2026-09-28.
+    private(set) var networkReading: NetworkReading?
+    /// What the panel's page on screen asked the engine to sample.
+    @ObservationIgnored private var liveDemand: Set<LiveReading> = []
+    /// The last demand sent, awaited by the next one so the engine hears
+    /// them in the order the panel asked: two unstructured tasks carry no
+    /// ordering of their own, and a close overtaken by the open before it
+    /// would leave the monitor running behind a closed panel.
+    @ObservationIgnored private var liveDemandTask: Task<Void, Never>?
     /// Which counters each forge row carries, for the Forge tab's switches.
     /// Held here the way `statusChecks` is: the engine owns the file, this owns
     /// what the window draws while a write is in flight.
@@ -146,6 +165,7 @@ final class UsageEngineHost {
         statusChecks = config.statusChecks
         macHealth = config.macHealth
         disk = config.disk
+        network = config.network
         forgeCounters = config.forgeCounters ?? .defaults
         keepAwakeMode = config.keepAwake
         agentHooks = config.agentHooks
@@ -164,6 +184,7 @@ final class UsageEngineHost {
             }
         }
         pollReadiness()
+        sendLiveDemand()
     }
 
     /// Stops metering for good and waits for it, so the readers get their
@@ -235,6 +256,7 @@ final class UsageEngineHost {
         allRefresh?.cancel()
         allRefresh = nil
         switchingClaudeAccount = nil
+        networkReading = nil
         guard let engine else { return }
         self.engine = nil
         await engine.stop()
@@ -1032,6 +1054,50 @@ final class UsageEngineHost {
         guard let engine, enabled != disk else { return }
         disk = enabled
         Task { await engine.setDisk(enabled: enabled) }
+    }
+
+    func setNetwork(_ enabled: Bool) {
+        guard let engine, enabled != network else { return }
+        network = enabled
+        if !enabled { networkReading = nil }
+        Task { await engine.setNetwork(enabled: enabled) }
+    }
+
+    /// Says which live readings the panel's page on screen draws: the
+    /// selected tab's, while the panel is open, and none once it closes.
+    ///
+    /// Kept across a rebuild of the engine and sent to the new one from
+    /// `start`, since the page asking has not changed. A reading no longer
+    /// asked for is dropped here at once rather than when the engine answers,
+    /// so the tab opened again does not draw the last series for a second.
+    func setLiveDemand(_ demand: Set<LiveReading>) {
+        guard demand != liveDemand else { return }
+        liveDemand = demand
+        if !demand.contains(.network) { networkReading = nil }
+        sendLiveDemand()
+    }
+
+    private func sendLiveDemand() {
+        guard let engine else { return }
+        let demand = liveDemand
+        let previous = liveDemandTask
+        let host = self
+        liveDemandTask = Task {
+            await previous?.value
+            await engine.setLiveDemand(demand) { sample in await host.receive(sample) }
+        }
+    }
+
+    /// Where a live sample lands. One for a reading the panel has stopped
+    /// asking for is dropped: it was taken before the engine heard the stop,
+    /// and publishing it would put a reading back on a page that has gone.
+    /// Internal so a test can deliver one without an engine.
+    func receive(_ sample: LiveSample) {
+        switch sample {
+        case .network(let reading):
+            guard network, liveDemand.contains(.network) else { return }
+            networkReading = reading
+        }
     }
 
     /// Switches one of a forge row's counters. Off also stops it being read,

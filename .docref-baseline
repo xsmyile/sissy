@@ -2,11 +2,13 @@
 # platform APIs, environment variables, external files, vendor UI.
 AGENTS.md
 CFFIXED_USER_HOME
+CWInterface.ssid()
 Conversations
 CurrentUser
 ENOMEM
 FSEventStreamScheduleWithRunLoop
 GPTs
+IFT_ETHER
 ISSUE_ADVANCED
 ISSUE_HYBRID
 IgnoreSelf
@@ -32,11 +34,15 @@ argv
 caffeinate
 commitComments
 getcwd
+getifaddrs
 gistComments
 json.dumps
 launchd
+minimumScaleFactor
+netstat
 notclaude.ai
 objectWillChange
+onDisappear
 perTurnEffort
 repositoryDiscussionComments
 restrictedContributionsCount

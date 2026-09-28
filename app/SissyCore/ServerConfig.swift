@@ -170,6 +170,14 @@ struct ServerConfig: Sendable, Codable {
     /// upgrade. A file that names `disk` keeps what it says.
     var disk: Bool
 
+    /// Whether the panel carries a Network tab, which samples the Mac's
+    /// interfaces once a second while it is on screen and not at all
+    /// otherwise.
+    ///
+    /// On, for `macHealth`'s reasons: the counters, the default route and the
+    /// Wi-Fi signal all answer with no permission and no request.
+    var network: Bool
+
     static let defaults = ServerConfig(
         claudeDataDir: "~/.claude/projects",
         codexDataDir: "~/.codex/sessions",
@@ -185,7 +193,8 @@ struct ServerConfig: Sendable, Codable {
         agentHooksRemovalPending: false,
         forgeCounters: nil,
         macHealth: true,
-        disk: true
+        disk: true,
+        network: true
     )
 
     static var defaultURL: URL {
@@ -307,6 +316,7 @@ struct ServerConfig: Sendable, Codable {
         merged.forgeCounters = forgeCounters(in: obj) ?? merged.forgeCounters
         merged.macHealth = obj["macHealth"] as? Bool ?? merged.macHealth
         merged.disk = obj["disk"] as? Bool ?? merged.macHealth
+        merged.network = obj["network"] as? Bool ?? merged.network
         if let raw = obj["pricingOverride"],
             let nested = try? JSONSerialization.data(withJSONObject: raw),
             let decoded = try? JSONDecoder().decode([String: ModelPricing].self, from: nested)

@@ -24,18 +24,40 @@ enum PanelTab: CaseIterable, Hashable {
     case sessions
     case mac
     case disk
+    case network
     case forge
 
-    static func visible(in snapshot: UsagePanelSnapshot) -> [Self] {
-        allCases.filter { $0.isVisible(in: snapshot) }
+    /// `network` is the switch rather than a reading: the tab's reading is
+    /// taken only once the tab is on screen, so waiting for one to show the
+    /// tab would never show it.
+    static func visible(in snapshot: UsagePanelSnapshot, network: Bool = false) -> [Self] {
+        allCases.filter { $0.isVisible(in: snapshot, network: network) }
     }
 
-    private func isVisible(in snapshot: UsagePanelSnapshot) -> Bool {
+    private func isVisible(in snapshot: UsagePanelSnapshot, network: Bool) -> Bool {
         switch self {
         case .usage, .sessions: true
         case .mac: snapshot.mac != nil
         case .disk: snapshot.disk != nil
+        case .network: network
         case .forge: !snapshot.forge.isEmpty
+        }
+    }
+
+    /// What the tab's page samples while it is on screen, and only then.
+    var liveReadings: Set<LiveReading> {
+        switch self {
+        case .usage, .sessions, .mac, .disk, .forge: []
+        case .network: [.network]
+        }
+    }
+
+    /// Whether the header's period reaches this tab's page. The Mac, the disk
+    /// and the network read the moment and have no window to pick.
+    var readsPeriod: Bool {
+        switch self {
+        case .usage, .sessions, .forge: true
+        case .mac, .disk, .network: false
         }
     }
 
@@ -45,6 +67,7 @@ enum PanelTab: CaseIterable, Hashable {
         case .sessions: "Sessions"
         case .mac: "Mac"
         case .disk: "Disk"
+        case .network: "Network"
         case .forge: "Forge"
         }
     }
@@ -55,6 +78,7 @@ enum PanelTab: CaseIterable, Hashable {
         case .sessions: "terminal"
         case .mac: "memorychip"
         case .disk: "internaldrive"
+        case .network: "arrow.up.arrow.down"
         case .forge: "arrow.triangle.branch"
         }
     }
@@ -79,10 +103,11 @@ enum PanelTab: CaseIterable, Hashable {
     /// each. Usage carries none, because it is the page the panel opens on,
     /// and Sessions none either: a session running is the ordinary state, and
     /// what the sessions hold becomes worth leaving a page for through the
-    /// Mac's badge.
+    /// Mac's badge. Network none, because it is read only while its own page
+    /// is open.
     func badge(in snapshot: UsagePanelSnapshot) -> PanelTabBadge? {
         switch self {
-        case .usage, .sessions:
+        case .usage, .sessions, .network:
             return nil
         case .mac:
             guard let level = snapshot.mac?.memory.level, level > .normal else { return nil }

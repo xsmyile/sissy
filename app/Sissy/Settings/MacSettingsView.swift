@@ -5,8 +5,9 @@ import SwiftUI
 ///
 /// `macHealth`, moved off General onto a tab of its own as of 2026-09-28 so
 /// Disk and Network land beside it rather than inside General's own height
-/// budget, and `disk` beside it. Every row is a `LabeledContent` whose label carries its
-/// own caption, the shape `docs/DECISIONS.md`'s height-budget entry asks for.
+/// budget, `disk` beside it, and `network`, the Network tab's switch. Every
+/// row is a `LabeledContent` whose label carries its own caption, the shape
+/// `docs/DECISIONS.md`'s height-budget entry asks for.
 struct MacSettingsView: View {
     let model: SissyModel
 
@@ -15,6 +16,7 @@ struct MacSettingsView: View {
             Section {
                 macHealth
                 disk
+                network
             }
         }
         .formStyle(.grouped)
@@ -46,6 +48,24 @@ struct MacSettingsView: View {
         Binding(
             get: { model.engine.disk },
             set: { model.engine.setDisk($0) }
+        )
+    }
+
+    private var network: some View {
+        LabeledContent {
+            Toggle("Network", isOn: networkBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        } label: {
+            Text("Network")
+            Text("A tab with the rate, the link and the Wi-Fi signal, read only while it is open.")
+        }
+    }
+
+    private var networkBinding: Binding<Bool> {
+        Binding(
+            get: { model.engine.network },
+            set: { model.engine.setNetwork($0) }
         )
     }
 

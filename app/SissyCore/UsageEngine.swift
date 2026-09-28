@@ -142,6 +142,8 @@ actor UsageEngine {
     private let healthMonitor: SystemHealthMonitor
     /// What the disks answer, behind `ServerConfig.disk`.
     private let diskMonitor: DiskMonitor
+    /// The readings taken only while a page of the panel asks for them.
+    private let live: LiveSampling
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
@@ -257,6 +259,7 @@ actor UsageEngine {
         statusMonitor: ProviderStatusMonitor? = nil,
         healthMonitor: SystemHealthMonitor? = nil,
         diskMonitor: DiskMonitor? = nil,
+        networkMonitor: NetworkMonitor? = nil,
         keepAwakePolicy: KeepAwakePolicy = .default
     ) {
         self.config = config
@@ -283,6 +286,8 @@ actor UsageEngine {
         self.healthMonitor =
             healthMonitor ?? SystemHealthMonitor(heaviest: { agentMonitor.currentApps() })
         self.diskMonitor = diskMonitor ?? DiskMonitor()
+        self.live = LiveSampling(
+            network: networkMonitor ?? NetworkMonitor(), enabled: config.network ? [.network] : [])
         let limitsBackoff = LimitsBackoffStore(
             url: LimitsBackoffLedger.defaultURL(in: stateDir))
         self.limitsBackoff = limitsBackoff
@@ -709,6 +714,7 @@ actor UsageEngine {
         await identityMonitor.stop()
         await healthMonitor.stop()
         await diskMonitor.stop()
+        await live.stop()
         await agentMonitor.stop()
         await aggregator.stop()
         bootTask = nil
@@ -1889,6 +1895,23 @@ actor UsageEngine {
             await diskMonitor.stop()
         }
         await reemit()
+    }
+
+    /// Samples what the panel's page on screen draws, and nothing else, see
+    /// `LiveSampling`.
+    func setLiveDemand(
+        _ demand: Set<LiveReading>, onSample: @Sendable @escaping (LiveSample) async -> Void
+    ) async {
+        await live.setDemand(demand, onSample: onSample)
+    }
+
+    /// Switches the Network tab on or off at runtime, and persists it. No
+    /// frame follows: the tab's reading never rides one.
+    func setNetwork(enabled: Bool) async {
+        guard config.network != enabled else { return }
+        config.network = enabled
+        persistConfig("network")
+        await live.setEnabled(.network, enabled)
     }
 
     /// Saves `config` over `server.json`, and answers whether it did.

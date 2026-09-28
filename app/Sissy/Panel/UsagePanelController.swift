@@ -177,7 +177,10 @@ final class UsagePanelController: NSObject {
 /// `NSPopoverDelegate` is `@MainActor` on macOS 26's Swift 6 AppKit, so its
 /// methods can be implemented as MainActor-isolated directly.
 extension UsagePanelController: NSPopoverDelegate {
-    /// Drops the host and the monitor the finished showing was built for.
+    /// Drops the host and the monitor the finished showing was built for, and
+    /// tells the engine the page it was sampling for has gone: a host
+    /// dropped from a closed popover is not promised an `onDisappear`, and a
+    /// live reading left running behind it would sample for nobody.
     ///
     /// The guard rests on when `isShown` moves, which `NSPopover.h` pins to
     /// the *call*: a popover is shown "until the popover is closed in response
@@ -192,6 +195,7 @@ extension UsagePanelController: NSPopoverDelegate {
         guard !popover.isShown else { return }
         stopWatchingForDismissal()
         popover.contentViewController = nil
+        model.engine.setLiveDemand([])
         model.engine.dismissCodexResetReport()
     }
 }
