@@ -159,23 +159,20 @@ struct PanelProviderPage: View {
 
     var body: some View {
         let effortSummary = self.effortSummary
-        return VStack(alignment: .leading, spacing: 0) {
+        return VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
             identity
 
-            VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
-                capacityGroup
+            capacityGroup
 
-                dayGroup
+            dayGroup
 
-                if !row.projects.isEmpty {
-                    projectsGroup
-                }
-
-                doorGroup(effortSummary)
+            if !row.projects.isEmpty {
+                projectsGroup
             }
-            .padding(.horizontal, PanelMetrics.platterInset)
-            .padding(.bottom, PanelMetrics.platterInset)
+
+            doorGroup(effortSummary)
         }
+        .padding(PanelMetrics.platterInset)
         .task(id: row.id) {
             series = await loadHistory(row.id)
         }
@@ -287,39 +284,41 @@ struct PanelProviderPage: View {
         if row.account != nil || row.plan != nil || !row.accounts.isEmpty
             || row.accountsNotice != nil
         {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let email = shownEmail {
-                        Text(email)
-                            .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
+            PanelGroup {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let email = shownEmail {
+                                Text(email)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
+                            }
+                            organisation
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        useInCLI
+                        accountPicker
                     }
-                    organisation
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if let pendingAccount, switchingAccount == nil {
+                        switchConfirmation(pendingAccount)
+                    }
+                    if let switchingAccount,
+                        let choice = row.accounts.first(where: { $0.id == switchingAccount })
+                    {
+                        switchProgress(choice)
+                    }
+                    if let switchFailure, pendingAccount == nil, switchingAccount == nil {
+                        identityCaption(switchFailure)
+                    } else if let viewed, !viewed.isSignedIn, viewed.needsLogin {
+                        identityCaption(ClaudeAccountSwitchCopy.needsLogin)
+                    }
+                    if let notice = row.accountsNotice {
+                        identityCaption(notice)
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                useInCLI
-                accountPicker
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, PanelMetrics.gutter)
-            .padding(.vertical, 10)
-            if let pendingAccount, switchingAccount == nil {
-                switchConfirmation(pendingAccount)
-            }
-            if let switchingAccount,
-                let choice = row.accounts.first(where: { $0.id == switchingAccount })
-            {
-                switchProgress(choice)
-            }
-            if let switchFailure, pendingAccount == nil, switchingAccount == nil {
-                identityCaption(switchFailure)
-            } else if let viewed, !viewed.isSignedIn, viewed.needsLogin {
-                identityCaption(ClaudeAccountSwitchCopy.needsLogin)
-            }
-            if let notice = row.accountsNotice {
-                identityCaption(notice)
             }
         }
     }
@@ -331,8 +330,6 @@ struct PanelProviderPage: View {
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, PanelMetrics.gutter)
-            .padding(.bottom, 10)
     }
 
     /// The question, the warning and the two answers, inside the panel.
@@ -368,8 +365,6 @@ struct PanelProviderPage: View {
             }
             .controlSize(.small)
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.bottom, 10)
     }
 
     @ViewBuilder
@@ -381,8 +376,6 @@ struct PanelProviderPage: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.bottom, 10)
     }
 
     /// Switches which of this vendor's accounts is signed in.

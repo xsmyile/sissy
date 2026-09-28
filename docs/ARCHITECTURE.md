@@ -479,13 +479,14 @@ which included today without saying so: measured 2026-09-15, 24.7% of that line
 was the headline above it.
 
 `Panel/PanelMac.swift` is the Mac tab: the kernel's memory pressure as the
-headline with the free share and the sample's age under it, then its three
-steps, swap and disk, load against the cores and uptime, then the three
-heaviest apps besides the sessions; fixed in height, and a dash where the kernel
-would not say rather than a `normal` nobody measured. The memory and the disk
-each wear their own level: secondary at normal, orange at warn, red and
-semibold at critical. `Panel/PanelForge.swift` is the Forge tab: a row per
-connected forge, and the identity line under them.
+headline, with the free share and the sample's age under it, on the first
+platter above the three steps it captions — no content sits flat under the
+tab bar, as of 2026-09-28 — then swap and disk, load against the cores and
+uptime, then the three heaviest apps besides the sessions; fixed in height,
+and a dash where the kernel would not say rather than a `normal` nobody
+measured. The memory and the disk each wear their own level: secondary at
+normal, orange at warn, red and semibold at critical. `Panel/PanelForge.swift`
+is the Forge tab: a row per connected forge, and the identity line under them.
 
 `Panel/PanelSessions.swift` is the Sessions tab: over a window of its own, how
 many sessions and sub-agents have run and how long the day was worked, then
