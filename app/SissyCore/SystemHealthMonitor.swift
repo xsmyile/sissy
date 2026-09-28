@@ -16,20 +16,12 @@ actor SystemHealthMonitor {
     /// The agent sweep's cadence, so the heaviest apps it carries are never
     /// more than one sweep behind the figures beside them.
     static let sampleInterval: Duration = AgentProcessMonitor.sampleInterval
-    /// How long a disk reading is reused before it is taken again.
-    ///
-    /// The read costs 6.6 ms of CPU, measured 2026-09-27, more than the whole
-    /// process sweep; spaced to once a minute it is a quarter of that cost, and
-    /// a disk does not cross a multiple of RAM between two samples unless
-    /// swap is growing into it, which the kernel's own level answers first.
-    static let diskReadInterval: TimeInterval = 60
     /// How long a Mac whose level has not moved goes without a frame at the
     /// most. The colour follows the level on the sample that changes it; the
     /// numbers beside it can wait a minute.
     static let quietFrameInterval: TimeInterval = 60
 
     nonisolated private let published = LockedValue<MacHealthReading?>(nil)
-    private var disk: (free: Int64?, at: Date)?
     private var lastFrameAt: Date?
     private var pollTask: Task<Void, Never>?
     private var pressureSource: DispatchSourceMemoryPressure?
@@ -37,18 +29,15 @@ actor SystemHealthMonitor {
     /// queued behind a `stop()` cannot publish into the `start()` after it.
     private var generation = 0
     private let read: @Sendable (Date) -> MacHealthReading
-    private let diskFree: @Sendable () -> Int64?
     /// The heaviest apps, which the agent sweep measures out of the same pass
     /// over the process table rather than this monitor walking it again.
     private let heaviest: @Sendable () -> MacHeaviestApps?
 
     init(
         read: @escaping @Sendable (Date) -> MacHealthReading = SystemHealthReader.read,
-        diskFree: @escaping @Sendable () -> Int64? = SystemHealthReader.diskFree,
         heaviest: @escaping @Sendable () -> MacHeaviestApps? = { nil }
     ) {
         self.read = read
-        self.diskFree = diskFree
         self.heaviest = heaviest
     }
 
@@ -85,7 +74,6 @@ actor SystemHealthMonitor {
         pollTask = nil
         pressureSource?.cancel()
         pressureSource = nil
-        disk = nil
         lastFrameAt = nil
         published.store(nil)
     }
@@ -103,8 +91,8 @@ actor SystemHealthMonitor {
     /// One sample. Internal so a test can run exactly one and assert on what
     /// it published.
     ///
-    /// A frame follows the first sample, any sample whose level differs from
-    /// the one before, a pressure event, and otherwise one sample in every
+    /// A frame follows the first sample, any sample whose pressure differs
+    /// from the one before, a pressure event, and otherwise one sample in every
     /// `quietFrameInterval`. A sample whose poll was cancelled while it waited
     /// for this actor publishes nothing, since `stop()` ran ahead of it.
     func sampleOnce(
@@ -113,16 +101,10 @@ actor SystemHealthMonitor {
         guard !Task.isCancelled else { return }
         let now = Date()
         var reading = read(now)
-        if forcingFrame || disk.map({ now.timeIntervalSince($0.at) >= Self.diskReadInterval }) ?? true {
-            disk = (diskFree(), now)
-        }
-        reading.diskFree = disk?.free
-        reading.diskObservedAt = disk?.free == nil ? nil : disk?.at
         reading.heaviest = heaviest()
         let previous = published.load()
         published.store(reading)
-        if !forcingFrame, let previous, previous.level == reading.level,
-            previous.pressure == reading.pressure, let lastFrameAt,
+        if !forcingFrame, let previous, previous.pressure == reading.pressure, let lastFrameAt,
             now.timeIntervalSince(lastFrameAt) < Self.quietFrameInterval
         {
             return

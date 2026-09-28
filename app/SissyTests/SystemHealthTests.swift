@@ -2,8 +2,8 @@ import XCTest
 
 @testable import Sissy
 
-/// The Mac's own reading: the kernel's level, the disk graded against RAM, and
-/// the apps holding the most besides the agents.
+/// The Mac's own reading: the kernel's level, the disk's grade against RAM,
+/// and the apps holding the most besides the agents.
 final class MacHealthLevelTests: XCTestCase {
     private static let gigabyte: UInt64 = 1 << 30
 
@@ -54,32 +54,6 @@ final class MacHealthLevelTests: XCTestCase {
 }
 
 final class MacHealthReadingTests: XCTestCase {
-    private func reading(pressure: MacHealthLevel?, diskFree: Int64?) -> MacHealthReading {
-        var reading = MacHealthReading(
-            observedAt: Date(), pressure: pressure, freeMemoryPercent: nil, swap: nil,
-            physicalMemory: 100, loadAverage: nil, activeCores: 1, uptime: 0)
-        reading.diskFree = diskFree
-        return reading
-    }
-
-    func testTheOverallLevelIsTheWorseOfTheKernelAndTheDisk() {
-        XCTAssertEqual(reading(pressure: .normal, diskFree: 150).level, .warn)
-        XCTAssertEqual(reading(pressure: .critical, diskFree: 500).level, .critical)
-        XCTAssertEqual(reading(pressure: .warn, diskFree: 50).level, .critical)
-        XCTAssertEqual(reading(pressure: .normal, diskFree: 500).level, .normal)
-    }
-
-    func testOneSideMissingLeavesTheOther() {
-        XCTAssertEqual(reading(pressure: nil, diskFree: 50).level, .critical)
-        XCTAssertEqual(reading(pressure: .warn, diskFree: nil).level, .warn)
-        XCTAssertNil(reading(pressure: .warn, diskFree: nil).diskLevel)
-    }
-
-    /// Neither side read is not a healthy Mac.
-    func testNothingReadIsNoLevel() {
-        XCTAssertNil(reading(pressure: nil, diskFree: nil).level)
-    }
-
     /// The real kernel, asserted on its invariants rather than on what this
     /// Mac happens to be doing while the suite runs.
     func testTheRealReadingIsInternallyConsistent() {
@@ -141,8 +115,7 @@ final class MacAppGroupingTests: XCTestCase {
 
 final class SystemHealthMonitorTests: XCTestCase {
     private func monitor(
-        levels: [MacHealthLevel] = [.normal], diskReads: Counter = Counter(),
-        heaviest: MacHeaviestApps? = nil
+        levels: [MacHealthLevel] = [.normal], heaviest: MacHeaviestApps? = nil
     ) -> SystemHealthMonitor {
         let sweep = Counter()
         return SystemHealthMonitor(
@@ -152,10 +125,6 @@ final class SystemHealthMonitorTests: XCTestCase {
                     observedAt: now, pressure: levels[index], freeMemoryPercent: 40, swap: nil,
                     physicalMemory: 10, loadAverage: nil, activeCores: 2, uptime: 1)
             },
-            diskFree: {
-                _ = diskReads.next()
-                return 1_000
-            },
             heaviest: { heaviest })
     }
 
@@ -163,28 +132,14 @@ final class SystemHealthMonitorTests: XCTestCase {
         XCTAssertNil(monitor().currentReading())
     }
 
-    func testASampleCarriesTheDiskAndTheHeaviestApps() async {
+    func testASampleCarriesTheHeaviestApps() async {
         let apps = MacHeaviestApps(
             observedAt: Date(), apps: [MacAppFootprint(name: "Mail", path: "/M.app", footprint: 3)])
         let monitor = monitor(heaviest: apps)
         await monitor.sampleOnce {}
         let reading = monitor.currentReading()
-        XCTAssertEqual(reading?.diskFree, 1_000)
-        XCTAssertNotNil(reading?.diskObservedAt)
         XCTAssertEqual(reading?.heaviest, apps)
-        XCTAssertEqual(reading?.level, .normal)
-    }
-
-    /// The disk read is the dear one, so two samples inside its interval read
-    /// it once, and a pressure event reads it again.
-    func testTheDiskIsReadOncePerIntervalAndOnAPressureEvent() async {
-        let reads = Counter()
-        let monitor = monitor(diskReads: reads)
-        await monitor.sampleOnce {}
-        await monitor.sampleOnce {}
-        XCTAssertEqual(reads.count, 1)
-        await monitor.sampleOnce(forcingFrame: true) {}
-        XCTAssertEqual(reads.count, 2)
+        XCTAssertEqual(reading?.pressure, .normal)
     }
 
     func testAQuietMacCostsNoFrameAfterTheFirst() async {

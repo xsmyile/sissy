@@ -163,7 +163,8 @@ final class SissyModel {
     /// status menu's own line is: a mode that is armed and holding nothing has
     /// left the Mac free to sleep, and an icon claiming otherwise is the
     /// battery complaint this was meant to answer. The level is the frame's
-    /// `MacHealthReading.level`, nil with the module off.
+    /// `FrameData.macLevel`: memory and disk while both are on, whichever is on
+    /// alone, and nil with both off.
     struct StatusIconSnapshot {
         let isAsleep: Bool
         let isHolding: Bool
@@ -197,7 +198,7 @@ final class SissyModel {
             header: header,
             statusIcon: StatusIconSnapshot(
                 isAsleep: header.isAsleep, isHolding: hold.active,
-                macLevel: currentFrame?.mac?.level)
+                macLevel: currentFrame?.macLevel)
         )
     }
 

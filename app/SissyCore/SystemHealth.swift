@@ -96,10 +96,11 @@ struct MacHeaviestApps: Sendable, Equatable {
 /// are holding.
 ///
 /// **The colour is the kernel's.** `pressure` is the kernel's own judgement
-/// and the only other level is the disk's, graded against RAM; swap, load and
-/// uptime are carried as numbers and graded by nothing. Measured 2026-09-27 on
-/// the Mac that froze, load stood near 41 on 12 cores and uptime at 10 days:
-/// both are real, and neither has a threshold that is not a guess.
+/// and the only other level is the disk's, graded against RAM on
+/// `DiskReading`; swap, load and uptime are carried as numbers and graded by
+/// nothing. Measured 2026-09-27 on the Mac that froze, load stood near 41 on
+/// 12 cores and uptime at 10 days: both are real, and neither has a threshold
+/// that is not a guess.
 struct MacHealthReading: Sendable, Equatable {
     /// Sissy's clock at the sample, which is what every kernel figure below is
     /// dated by.
@@ -114,36 +115,17 @@ struct MacHealthReading: Sendable, Equatable {
     let activeCores: Int
     /// Seconds since the Mac booted.
     let uptime: TimeInterval
-    /// Free space on the home volume that the system would make available to
-    /// an important write, purgeable space included, which is the figure
-    /// Finder shows.
-    var diskFree: Int64?
-    /// When `diskFree` was read, which lags `observedAt`: the read is dear
-    /// enough to be spaced out, see `SystemHealthMonitor.diskReadInterval`.
-    var diskObservedAt: Date?
     /// Nil until the agent sweep has run once with this module on.
     var heaviest: MacHeaviestApps?
-
-    var diskLevel: MacHealthLevel? {
-        diskFree.map { MacHealthLevel.disk(free: $0, physicalMemory: physicalMemory) }
-    }
-
-    /// The worse of the kernel's level and the disk's, nil only when neither
-    /// could be read: no reading is not a reading of normal.
-    var level: MacHealthLevel? {
-        [pressure, diskLevel].compactMap { $0 }.max()
-    }
 }
 
 /// Reads the Mac's own figures out of the kernel.
 ///
 /// **Nothing here needs a permission**, on the terms `AgentProcessReader`
-/// already holds to: every sysctl below answers an unprivileged process, and
-/// the disk figure is a resource value of the user's own home directory.
+/// already holds to: every sysctl below answers an unprivileged process.
 enum SystemHealthReader {
-    /// Everything but the disk and the heaviest apps, which the monitor reads
-    /// on clocks of their own. Measured 2026-09-27, these sysctls together
-    /// cost 3 µs.
+    /// Everything but the heaviest apps, which the agent sweep measures.
+    /// Measured 2026-09-27, these sysctls together cost 3 µs.
     static func read(now: Date = Date()) -> MacHealthReading {
         let info = ProcessInfo.processInfo
         return MacHealthReading(
@@ -151,26 +133,16 @@ enum SystemHealthReader {
             pressure: sysctlValue("kern.memorystatus_vm_pressure_level", as: Int32.self)
                 .flatMap(MacHealthLevel.init(kernelPressure:)),
             freeMemoryPercent: sysctlValue("kern.memorystatus_level", as: Int32.self).map(Int.init),
-            swap: sysctlValue("vm.swapusage", as: xsw_usage.self).map(MacSwapUsage.init),
+            swap: swap(),
             physicalMemory: info.physicalMemory,
             loadAverage: loadAverage(),
             activeCores: info.activeProcessorCount,
             uptime: info.systemUptime)
     }
 
-    /// Free space on the volume holding the home directory.
-    ///
-    /// A new `URL` on every call, because a `URL` caches the resource values
-    /// it has answered and a reused one would report the first reading for
-    /// the life of the process. Measured 2026-09-27, this costs 6.6 ms of CPU
-    /// a read against 0.002 ms for `statfs`, which answers 9.4 GB less on the
-    /// same volume: it leaves out the purgeable space the system hands back
-    /// under pressure, and a disk graded on it would warn where Finder shows
-    /// room.
-    static func diskFree() -> Int64? {
-        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-        return try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            .volumeAvailableCapacityForImportantUsage
+    /// Swap in use, which the Disk tab reads beside the memory's own sample.
+    static func swap() -> MacSwapUsage? {
+        sysctlValue("vm.swapusage", as: xsw_usage.self).map(MacSwapUsage.init)
     }
 
     private static func loadAverage() -> MacLoadAverage? {

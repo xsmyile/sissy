@@ -576,13 +576,16 @@ struct FrameData: Sendable, Equatable {
     /// measurement, and not having measured yet is not.
     let agentMemory: AgentMemoryReading?
     /// What the Mac itself is answering: the kernel's memory pressure, swap,
-    /// the disk and the apps holding the most besides the agents.
+    /// load and the apps holding the most besides the agents.
     ///
     /// Beside the agents rather than inside their reading, because it is a
     /// module with a switch of its own and the Sessions tab is not. `nil` while
     /// that switch is off and before the first sample, which are both the
     /// absence of a reading rather than a reading of a healthy Mac.
     let mac: MacHealthReading?
+    /// What the disks answer, behind a switch of its own and nil while it is
+    /// off and before the first read, for `mac`'s reasons.
+    let disk: DiskReading?
     /// How much of today's input the cache answered across every slice,
     /// priced by the engine because the rates are the engine's.
     ///
@@ -610,6 +613,7 @@ struct FrameData: Sendable, Equatable {
         identitiesCheckedAt: Date? = nil,
         agentMemory: AgentMemoryReading? = nil,
         mac: MacHealthReading? = nil,
+        disk: DiskReading? = nil,
         cache: CacheReading = .none
     ) {
         self.tokens = tokens
@@ -625,6 +629,7 @@ struct FrameData: Sendable, Equatable {
         self.identitiesCheckedAt = identitiesCheckedAt
         self.agentMemory = agentMemory
         self.mac = mac
+        self.disk = disk
         self.cache = cache
     }
 }
@@ -647,6 +652,7 @@ enum FrameBuilder {
         identitiesCheckedAt: Date? = nil,
         agentMemory: AgentMemoryReading? = nil,
         mac: MacHealthReading? = nil,
+        disk: DiskReading? = nil,
         pricing: ProviderPricing = .seed
     ) -> FrameData {
         let burn = burnRate(tokens: today.totalTokens, hoursElapsed: hoursElapsed)
@@ -664,6 +670,7 @@ enum FrameBuilder {
             identitiesCheckedAt: identitiesCheckedAt,
             agentMemory: agentMemory,
             mac: mac,
+            disk: disk,
             cache: CacheReading.of(providers, pricing: pricing)
         )
     }

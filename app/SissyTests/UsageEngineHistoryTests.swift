@@ -35,6 +35,7 @@ final class UsageEngineHistoryTests: XCTestCase {
         config.codexDataDir = codexDir.path
         config.remotePricing = false
         config.macHealth = false
+        config.disk = false
         config.statusChecks = false
         config.providers = ProviderToggles(claudeCode: true, codex: false)
         config.historyRetentionDays = retentionDays

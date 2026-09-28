@@ -404,6 +404,12 @@ struct UsagePanelView: View {
             } else {
                 overview(snapshot)
             }
+        case .disk:
+            if let disk = snapshot.disk {
+                PanelDisk(block: disk)
+            } else {
+                overview(snapshot)
+            }
         case .forge:
             PanelForge(
                 snapshot: snapshot,
@@ -581,8 +587,8 @@ struct UsagePanelView: View {
     /// closed face does not say which window is chosen: the headline's
     /// subline and the Sessions and Forge labels say it instead.
     ///
-    /// Disabled on the Mac, which reads the moment and has no window, rather
-    /// than hidden: a header whose controls come and go with the tab moves
+    /// Disabled on Mac and Disk, which read the moment and have no window,
+    /// rather than hidden: a header whose controls come and go with the tab moves
     /// under the pointer. Absent while the archive answers nothing but today,
     /// since a control whose every option answers the number on screen is a
     /// control about a feature.
@@ -610,15 +616,19 @@ struct UsagePanelView: View {
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .glassEffect(.regular, in: .circle)
-            .disabled(page == .overview && tab == .mac)
+            .disabled(readsTheMoment)
             .help(
-                page == .overview && tab == .mac
-                    ? "The Mac reads the moment and has no period"
+                readsTheMoment
+                    ? "This tab reads the moment and has no period"
                     : "Period: " + UsageFormat.periodHeading(chosen)
             )
             .accessibilityLabel("Period")
             .accessibilityValue(UsageFormat.periodHeading(chosen))
         }
+    }
+
+    private var readsTheMoment: Bool {
+        page == .overview && (tab == .mac || tab == .disk)
     }
 
     private func periodBinding(_ chosen: UsagePeriod) -> Binding<UsagePeriod> {

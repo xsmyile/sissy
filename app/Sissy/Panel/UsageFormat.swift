@@ -1985,9 +1985,9 @@ extension UsageFormat {
         "\(percent)% free"
     }
 
-    /// Bytes at the grain a disk and a swap file are read at: whole
-    /// gigabytes from ten up, one decimal under it, whole megabytes under
-    /// one, and `0 B` for none at all.
+    /// Bytes at the grain a disk and a swap file are read at: terabytes to
+    /// one decimal from one up, whole gigabytes from ten, one decimal under
+    /// that, whole megabytes under one, and `0 B` for none at all.
     ///
     /// Not `bytes`, whose two decimals are for a footprint sitting beside
     /// Activity Monitor's: `77.00 GB free` claims a precision a volume that
@@ -1997,6 +1997,9 @@ extension UsageFormat {
     static func storage(_ bytes: UInt64) -> String {
         let value = Double(bytes)
         if bytes == 0 { return "0 B" }
+        if value >= bytesPerTerabyte {
+            return String(format: "%.1f TB", value / bytesPerTerabyte)
+        }
         if value >= storageWholeGigabytes * bytesPerGigabyte {
             return String(format: "%.0f GB", value / bytesPerGigabyte)
         }
@@ -2006,18 +2009,9 @@ extension UsageFormat {
         return String(format: "%.0f MB", value / bytesPerMegabyte)
     }
 
-    /// `77 GB free`, what the home volume has left.
-    static func macDiskFree(_ free: Int64) -> String {
-        storage(UInt64(max(free, 0))) + " free"
-    }
-
-    /// `0 B swap · 77 GB free`, the two readings that eat into each other,
-    /// with whichever the kernel answered, and a dash where it answered
-    /// neither.
-    static func macStorage(swap: MacSwapUsage?, diskFree: Int64?) -> String {
-        let parts = [swap.map { storage($0.used) + " swap" }, diskFree.map(macDiskFree)]
-            .compactMap { $0 }
-        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    /// `1.2 GB`, the swap in use, and a dash where the kernel would not say.
+    static func macSwap(_ swap: MacSwapUsage?) -> String {
+        swap.map { storage($0.used) } ?? "—"
     }
 
     /// `3.0 on 12 cores`: the one-minute average beside what it is out of,
@@ -2035,7 +2029,51 @@ extension UsageFormat {
         "sampled " + age(now.timeIntervalSince(observedAt))
     }
 
+    private static let bytesPerTerabyte: Double = 1_000_000_000_000
     private static let bytesPerGigabyte: Double = 1_000_000_000
     private static let bytesPerMegabyte: Double = 1_000_000
     private static let storageWholeGigabytes: Double = 10
+}
+
+// MARK: Disk
+
+extension UsageFormat {
+    /// `77 GB free`, the Disk tab's headline and a volume row's figure.
+    static func diskFree(_ free: Int64) -> String {
+        storage(clampedBytes(free)) + " free"
+    }
+
+    /// `of 494 GB · Macintosh HD`, what the headline's free space is out of.
+    static func diskVolume(total: Int64, name: String) -> String {
+        "of " + storage(clampedBytes(total)) + " · " + name
+    }
+
+    /// `812 GB free of 2.0 TB`, one volume's row.
+    static func diskVolumeFree(_ volume: DiskVolume) -> String {
+        diskFree(volume.free) + " of " + storage(clampedBytes(volume.total))
+    }
+
+    /// `warn under 52 GB · critical under 26 GB`, where the bar's two marks
+    /// are, in the same base-ten bytes as the free space above it: a legend
+    /// in RAM's own gibibytes would read `48 GB` over a volume graded warn at
+    /// `51 GB free`.
+    static func diskThresholds(physicalMemory: UInt64) -> String {
+        "warn under " + storage(physicalMemory * MacHealthLevel.diskWarnMultiple)
+            + " · critical under " + storage(physicalMemory * MacHealthLevel.diskCriticalMultiple)
+    }
+
+    /// `9.4 GB`, the purgeable space, and a dash where it could not be read.
+    static func diskPurgeable(_ purgeable: Int64?) -> String {
+        purgeable.map { storage(clampedBytes($0)) } ?? "—"
+    }
+
+    /// `read 12s ago`: the disk is read once a minute, so its age is its own
+    /// and not the memory's.
+    static func diskReading(observedAt: Date, now: Date) -> String {
+        "read " + age(now.timeIntervalSince(observedAt))
+    }
+
+    private static func clampedBytes(_ bytes: Int64) -> UInt64 {
+        UInt64(max(bytes, 0))
+    }
 }

@@ -150,13 +150,20 @@ struct ServerConfig: Sendable, Codable {
     /// through with every counter on.
     var forgeCounters: ForgeCounters?
 
-    /// Whether Sissy reads the Mac's own memory pressure, swap and disk.
+    /// Whether Sissy reads the Mac's own memory pressure, swap, load and
+    /// uptime.
     ///
     /// On: the reading asks for no permission, holds no entitlement and makes
     /// no request, which is what lets a default switch it on. Like
     /// `statusChecks`, a `server.json` written before this key existed falls
     /// through the partial-config path below and lands on the default.
     var macHealth: Bool
+
+    /// Whether Sissy reads the disks, for the Disk tab and the menu bar's dot.
+    ///
+    /// On by default and apart from `macHealth`, for the same reasons: it asks
+    /// for nothing, and off means no disk is read at all.
+    var disk: Bool
 
     static let defaults = ServerConfig(
         claudeDataDir: "~/.claude/projects",
@@ -172,7 +179,8 @@ struct ServerConfig: Sendable, Codable {
         agentHooks: false,
         agentHooksRemovalPending: false,
         forgeCounters: nil,
-        macHealth: true
+        macHealth: true,
+        disk: true
     )
 
     static var defaultURL: URL {
@@ -293,6 +301,7 @@ struct ServerConfig: Sendable, Codable {
         }
         merged.forgeCounters = forgeCounters(in: obj) ?? merged.forgeCounters
         merged.macHealth = obj["macHealth"] as? Bool ?? merged.macHealth
+        merged.disk = obj["disk"] as? Bool ?? merged.disk
         if let raw = obj["pricingOverride"],
             let nested = try? JSONSerialization.data(withJSONObject: raw),
             let decoded = try? JSONDecoder().decode([String: ModelPricing].self, from: nested)

@@ -42,9 +42,11 @@ final class UsageEngineHost {
     /// file and owns the poll, and a copy kept in the app could say the
     /// readings are on while nothing is fetching them.
     private(set) var statusChecks: Bool = true
-    /// Whether Sissy reads the Mac's own memory, swap and disk, held here for
+    /// Whether Sissy reads the Mac's own memory, swap and load, held here for
     /// `statusChecks`'s reason: the engine owns the file and the monitor.
     private(set) var macHealth: Bool = true
+    /// Whether Sissy reads the disks, held here for the same reason.
+    private(set) var disk: Bool = true
     /// Which counters each forge row carries, for the Forge tab's switches.
     /// Held here the way `statusChecks` is: the engine owns the file, this owns
     /// what the window draws while a write is in flight.
@@ -143,6 +145,7 @@ final class UsageEngineHost {
         keepScreenAwake = config.keepScreenAwake
         statusChecks = config.statusChecks
         macHealth = config.macHealth
+        disk = config.disk
         forgeCounters = config.forgeCounters ?? .defaults
         keepAwakeMode = config.keepAwake
         agentHooks = config.agentHooks
@@ -1023,6 +1026,12 @@ final class UsageEngineHost {
         guard let engine, enabled != macHealth else { return }
         macHealth = enabled
         Task { await engine.setMacHealth(enabled: enabled) }
+    }
+
+    func setDisk(_ enabled: Bool) {
+        guard let engine, enabled != disk else { return }
+        disk = enabled
+        Task { await engine.setDisk(enabled: enabled) }
     }
 
     /// Switches one of a forge row's counters. Off also stops it being read,

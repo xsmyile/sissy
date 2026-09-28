@@ -31,6 +31,7 @@ final class UsageEngineLifecycleTests: XCTestCase {
         config.codexDataDir = tempDir.appendingPathComponent("codex").path
         config.remotePricing = false
         config.macHealth = false
+        config.disk = false
         return UsageEngine(
             config: config,
             configURL: tempDir.appendingPathComponent("server.json"),

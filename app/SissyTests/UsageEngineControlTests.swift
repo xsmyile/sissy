@@ -45,7 +45,9 @@ final class UsageEngineControlTests: XCTestCase {
         keepAwakePolicy: KeepAwakePolicy = .default,
         pollIntervalSeconds: Double = 60,
         macHealth: Bool = false,
-        healthMonitor: SystemHealthMonitor? = nil
+        healthMonitor: SystemHealthMonitor? = nil,
+        disk: Bool = false,
+        diskMonitor: DiskMonitor? = nil
     ) -> UsageEngine {
         var config = ServerConfig.defaults
         config.claudeDataDir = claudeDir.path
@@ -56,12 +58,14 @@ final class UsageEngineControlTests: XCTestCase {
         config.providers = ProviderToggles(claudeCode: claudeCode, codex: codex)
         config.keepAwake = keepAwake
         config.macHealth = macHealth
+        config.disk = disk
         return UsageEngine(
             config: config,
             configURL: configURL,
             limitsProbe: ClaudeLimitsProbe { _ in .absent },
             claudeAccounts: .inert(),
             healthMonitor: healthMonitor,
+            diskMonitor: diskMonitor,
             keepAwakePolicy: keepAwakePolicy
         )
     }
@@ -74,8 +78,20 @@ final class UsageEngineControlTests: XCTestCase {
                 MacHealthReading(
                     observedAt: now, pressure: .warn, freeMemoryPercent: 30, swap: nil,
                     physicalMemory: 1_024, loadAverage: nil, activeCores: 4, uptime: 60)
-            },
-            diskFree: { 4_096 })
+            })
+        await monitor.sampleOnce {}
+        return monitor
+    }
+
+    /// A disk monitor that answers one fixed reading, a home volume under one
+    /// multiple of RAM, and has already published it.
+    private func sampledDiskMonitor() async -> DiskMonitor {
+        let monitor = DiskMonitor(read: { now in
+            DiskReading(
+                observedAt: now,
+                home: DiskVolume(id: "home", name: "Macintosh HD", total: 10_000, free: 512),
+                purgeable: 0, swap: nil, physicalMemory: 1_024, volumes: [])
+        })
         await monitor.sampleOnce {}
         return monitor
     }
@@ -559,6 +575,27 @@ final class UsageEngineControlTests: XCTestCase {
         await engine.setMacHealth(enabled: false)
         await fulfillment(of: [dropped], timeout: 5)
         XCTAssertEqual(try ServerConfig.load(from: configURL).macHealth, false)
+    }
+
+    /// The disk's reading rides the frame while its own switch is on, apart
+    /// from the Mac's, and switching it off takes it off the next frame and
+    /// writes the choice down.
+    func testTheDiskSwitchPutsTheReadingOnTheFrameAndTakesItOff() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(codex: false, disk: true, diskMonitor: await sampledDiskMonitor())
+        let firstFrame = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [firstFrame], timeout: 5)
+        addTeardownBlock { await engine.stop() }
+        XCTAssertNil(frames.all.last?.mac)
+        XCTAssertEqual(frames.all.last?.disk?.level, .critical)
+        XCTAssertEqual(frames.all.last?.macLevel, .critical)
+
+        let dropped = frames.expectation("the reading went", forNextFrameMatching: { $0.disk == nil })
+        await engine.setDisk(enabled: false)
+        await fulfillment(of: [dropped], timeout: 5)
+        XCTAssertEqual(try ServerConfig.load(from: configURL).disk, false)
     }
 
     /// Switched off, the frame carries no reading even from a monitor that has

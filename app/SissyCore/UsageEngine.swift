@@ -140,6 +140,8 @@ actor UsageEngine {
     /// takes its heaviest apps from `agentMonitor`'s sweep, which measures them
     /// only while this is running.
     private let healthMonitor: SystemHealthMonitor
+    /// What the disks answer, behind `ServerConfig.disk`.
+    private let diskMonitor: DiskMonitor
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
@@ -254,6 +256,7 @@ actor UsageEngine {
         claudeAccounts: ClaudeAccountRegistry? = nil,
         statusMonitor: ProviderStatusMonitor? = nil,
         healthMonitor: SystemHealthMonitor? = nil,
+        diskMonitor: DiskMonitor? = nil,
         keepAwakePolicy: KeepAwakePolicy = .default
     ) {
         self.config = config
@@ -279,6 +282,7 @@ actor UsageEngine {
         self.agentMonitor = agentMonitor
         self.healthMonitor =
             healthMonitor ?? SystemHealthMonitor(heaviest: { agentMonitor.currentApps() })
+        self.diskMonitor = diskMonitor ?? DiskMonitor()
         let limitsBackoff = LimitsBackoffStore(
             url: LimitsBackoffLedger.defaultURL(in: stateDir))
         self.limitsBackoff = limitsBackoff
@@ -456,6 +460,9 @@ actor UsageEngine {
         await startIdentityChecks()
         if config.macHealth {
             await startMacHealth()
+        }
+        if config.disk {
+            await startDisk()
         }
         await startAgentProcessChecks()
         await applyKeepAwake()
@@ -701,6 +708,7 @@ actor UsageEngine {
         await forgeMonitor.stop()
         await identityMonitor.stop()
         await healthMonitor.stop()
+        await diskMonitor.stop()
         await agentMonitor.stop()
         await aggregator.stop()
         bootTask = nil
@@ -1640,6 +1648,18 @@ actor UsageEngine {
         await agentMonitor.setMeasuresApps(false)
     }
 
+    /// Starts the disk reads, under `startMacHealth`'s two guards and for its
+    /// reasons.
+    private func startDisk() async {
+        guard lifecycle == .running, config.disk else { return }
+        let me = self
+        await diskMonitor.start { await me.reemit() }
+        guard lifecycle == .running, config.disk else {
+            await diskMonitor.stop()
+            return
+        }
+    }
+
     /// Every forge the user has connected, the tokens none of them name, and
     /// whether the index could be read, for the Settings list.
     ///
@@ -1857,6 +1877,20 @@ actor UsageEngine {
         await reemit()
     }
 
+    /// Switches the disk reads on or off at runtime, and persists it, in place
+    /// for `setMacHealth`'s reason.
+    func setDisk(enabled: Bool) async {
+        guard config.disk != enabled else { return }
+        config.disk = enabled
+        persistConfig("disk")
+        if enabled {
+            await startDisk()
+        } else {
+            await diskMonitor.stop()
+        }
+        await reemit()
+    }
+
     /// Saves `config` over `server.json`, and answers whether it did.
     ///
     /// The one place the file is written from, so the refusal below cannot be
@@ -1976,6 +2010,7 @@ actor UsageEngine {
             identitiesCheckedAt: identityMonitor.currentCheckedAt(),
             agentMemory: agentMonitor.currentMemory(),
             mac: config.macHealth ? healthMonitor.currentReading() : nil,
+            disk: config.disk ? diskMonitor.currentReading() : nil,
             pricing: pricing
         )
         await onFrame?(frame)

@@ -6,14 +6,16 @@ import SwiftUI
 /// **A module earns a tab when it has more than a line to say.** The sessions
 /// always have one: what ran over a window and what is running now is a page
 /// whichever day it is, and a tab that came and went with the processes
-/// would not be a destination. The Mac has a page whenever there is a reading
-/// to put on it, and repositories have one once a forge is connected: without
-/// one, what is left of them is the identity line, which stays under the
-/// projects it is about rather than becoming a tab holding a single row.
+/// would not be a destination. The Mac and the disks each have a page whenever
+/// there is a reading to put on it, and repositories have one once a forge is
+/// connected: without one, what is left of them is the identity line, which
+/// stays under the projects it is about rather than becoming a tab holding a
+/// single row.
 ///
 /// **A tab is named for what it reads.** Usage is the vendors' own word for
 /// spend against a plan's limits, Sessions the CLIs somebody started, Mac the
-/// machine and Forge the accounts Settings connects under that same name.
+/// machine's memory, Disk its volumes and Forge the accounts Settings connects
+/// under that same name.
 ///
 /// Only the selected tab is ever built: the panel switches on it the way it
 /// switches on its pages, so a module nobody is looking at costs nothing.
@@ -21,6 +23,7 @@ enum PanelTab: CaseIterable, Hashable {
     case usage
     case sessions
     case mac
+    case disk
     case forge
 
     static func visible(in snapshot: UsagePanelSnapshot) -> [Self] {
@@ -31,6 +34,7 @@ enum PanelTab: CaseIterable, Hashable {
         switch self {
         case .usage, .sessions: true
         case .mac: snapshot.mac != nil
+        case .disk: snapshot.disk != nil
         case .forge: !snapshot.forge.isEmpty
         }
     }
@@ -40,6 +44,7 @@ enum PanelTab: CaseIterable, Hashable {
         case .usage: "Usage"
         case .sessions: "Sessions"
         case .mac: "Mac"
+        case .disk: "Disk"
         case .forge: "Forge"
         }
     }
@@ -49,11 +54,12 @@ enum PanelTab: CaseIterable, Hashable {
         case .usage: "gauge.with.dots.needle.33percent"
         case .sessions: "terminal"
         case .mac: "memorychip"
+        case .disk: "internaldrive"
         case .forge: "arrow.triangle.branch"
         }
     }
 
-    /// ⌘1 to ⌘4, by position in the full list rather than in the visible
+    /// ⌘1 onwards, by position in the full list rather than in the visible
     /// one, so a key names the same module whichever are switched on. Read
     /// from `allCases` rather than written out per case, so Disk and Network
     /// landing between Mac and Forge renumber the tabs after them without a
@@ -66,20 +72,24 @@ enum PanelTab: CaseIterable, Hashable {
     /// What a tab says about its page while another one is open.
     ///
     /// The one thing on that page worth leaving the current one for: the
-    /// Mac's level once it is past normal, the same level the menu bar's dot
-    /// wears, and a repository committing under an unexpected name. Usage
-    /// carries none, because it is the page the panel opens on, and Sessions
-    /// none either: a session running is the ordinary state, and what the
-    /// sessions hold becomes worth leaving a page for through the Mac's badge.
+    /// kernel's memory pressure once it is past normal on Mac, the disk's
+    /// grade past normal on Disk, and a repository committing under an
+    /// unexpected name. The menu bar's dot wears the worse of the first two,
+    /// since it has one mark for the whole machine and the bar has a tab for
+    /// each. Usage carries none, because it is the page the panel opens on,
+    /// and Sessions none either: a session running is the ordinary state, and
+    /// what the sessions hold becomes worth leaving a page for through the
+    /// Mac's badge.
     func badge(in snapshot: UsagePanelSnapshot) -> PanelTabBadge? {
         switch self {
         case .usage, .sessions:
             return nil
         case .mac:
-            guard let mac = snapshot.mac else { return nil }
-            let level = [mac.memory.level, mac.disk?.level].compactMap { $0 }.max()
-            guard let level, level > .normal else { return nil }
-            return .level(level)
+            guard let level = snapshot.mac?.memory.level, level > .normal else { return nil }
+            return .memory(level)
+        case .disk:
+            guard let level = snapshot.disk?.free.level, level > .normal else { return nil }
+            return .disk(level)
         case .forge:
             return snapshot.identityLine.state == .findings ? .findings : nil
         }
@@ -87,15 +97,16 @@ enum PanelTab: CaseIterable, Hashable {
 }
 
 enum PanelTabBadge: Equatable {
-    case level(MacHealthLevel)
+    case memory(MacHealthLevel)
+    case disk(MacHealthLevel)
     case findings
 
-    /// One mark for every badge, told apart by colour alone: the Mac's
-    /// level in the colour it wears everywhere else, a finding in the orange
-    /// the identity line warns in.
+    /// One mark for every badge, told apart by colour alone: a level in the
+    /// colour it wears everywhere else, a finding in the orange the identity
+    /// line warns in.
     var tint: Color {
         switch self {
-        case .level(let level): MacLevelStyle.tint(level)
+        case .memory(let level), .disk(let level): MacLevelStyle.tint(level)
         case .findings: .orange
         }
     }
@@ -104,7 +115,8 @@ enum PanelTabBadge: Equatable {
     /// has no words of its own.
     var reason: String {
         switch self {
-        case .level(let level): "Memory or disk at \(UsageFormat.macLevel(level))"
+        case .memory(let level): "Memory at \(UsageFormat.macLevel(level))"
+        case .disk(let level): "Disk at \(UsageFormat.macLevel(level))"
         case .findings: "A repository commits under an unexpected name"
         }
     }

@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// How a level colours the reading it belongs to, on the Overview's line and
-/// on the page behind it alike.
+/// How a level colours the reading it belongs to, on the Mac and Disk tabs
+/// and on the tab bar's badges alike.
 ///
 /// Orange rather than the system's yellow for a warning, which is the colour
 /// the rest of the panel already warns in — the identity mark, a gauge past
 /// its threshold — and the one of the two that reads on a light background:
 /// yellow text on the popover's light material is the contrast the platform
-/// itself avoids. Red is the kernel's critical, and it takes the weight up a
-/// step as well, so the one state worth stopping for is not colour alone.
+/// itself avoids. Red is the kernel's critical. Neither is colour alone: the
+/// memory's headline words its level, and the disk's bar has passed a mark.
 enum MacLevelStyle {
     static func tint(_ level: MacHealthLevel?, resting: Color = .secondary) -> Color {
         switch level {
@@ -16,18 +16,6 @@ enum MacLevelStyle {
         case .critical: .red
         case .normal, nil: resting
         }
-    }
-
-    static func weight(_ level: MacHealthLevel?) -> Font.Weight {
-        level == .critical ? .semibold : .regular
-    }
-
-    /// A figure as one styled run, which the Overview interpolates into its
-    /// line and the page sets in a row.
-    static func text(_ figure: UsagePanelSnapshot.MacFigure, resting: Color = .secondary) -> Text {
-        Text(figure.text)
-            .foregroundStyle(tint(figure.level, resting: resting))
-            .fontWeight(weight(figure.level))
     }
 }
 
@@ -74,9 +62,7 @@ struct PanelMac: View {
                     track
                     Divider()
                     VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                        row(
-                            "Swap and disk",
-                            value: MacLevelStyle.text(block.storage, resting: .primary))
+                        row("Swap", value: Text(block.swap))
                         row("Load", value: Text(block.load))
                         row("Up", value: Text(block.uptime))
                     }

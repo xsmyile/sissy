@@ -9,15 +9,13 @@ final class MacHealthPanelTests: XCTestCase {
         pressure: MacHealthLevel? = .normal,
         freeMemoryPercent: Int? = 75,
         swap: MacSwapUsage? = MacSwapUsage(used: 0, total: 0),
-        diskFree: Int64? = 77_000_000_000,
         heaviest: MacHeaviestApps? = nil
     ) -> MacHealthReading {
         MacHealthReading(
             observedAt: Date(timeIntervalSince1970: 1_790_000_000), pressure: pressure,
             freeMemoryPercent: freeMemoryPercent, swap: swap, physicalMemory: 24 * gigabyte,
             loadAverage: MacLoadAverage(one: 3.04, five: 2.5, fifteen: 2), activeCores: 12,
-            uptime: 10 * 86_400 + 17 * 3_600 + 5 * 60, diskFree: diskFree,
-            diskObservedAt: nil, heaviest: heaviest)
+            uptime: 10 * 86_400 + 17 * 3_600 + 5 * 60, heaviest: heaviest)
     }
 
     private func frame(mac: MacHealthReading?) -> FrameData {
@@ -56,16 +54,14 @@ final class MacHealthPanelTests: XCTestCase {
         XCTAssertEqual(UsageFormat.storage(0), "0 B")
     }
 
-    func testSwapAndDiskShareOneLine() {
-        XCTAssertEqual(
-            UsageFormat.macStorage(
-                swap: MacSwapUsage(used: 0, total: 0), diskFree: 77_000_000_000),
-            "0 B swap · 77 GB free")
+    func testStorageReadsTerabytesToOneDecimal() {
+        XCTAssertEqual(UsageFormat.storage(2_000_398_934_016), "2.0 TB")
+        XCTAssertEqual(UsageFormat.storage(999_000_000_000), "999 GB")
     }
 
-    func testSwapAndDiskSayWhicheverWasRead() {
-        XCTAssertEqual(UsageFormat.macStorage(swap: nil, diskFree: 23_000_000_000), "23 GB free")
-        XCTAssertEqual(UsageFormat.macStorage(swap: nil, diskFree: nil), "—")
+    func testSwapIsTheSwapInUseOrTheDash() {
+        XCTAssertEqual(UsageFormat.macSwap(MacSwapUsage(used: 1_200_000_000, total: 2_000_000_000)), "1.2 GB")
+        XCTAssertEqual(UsageFormat.macSwap(nil), "—")
     }
 
     func testLoadIsReadAgainstTheCores() {
@@ -97,22 +93,10 @@ final class MacHealthPanelTests: XCTestCase {
 
         XCTAssertEqual(mac.memory, .init(text: "Memory normal", level: .normal))
         XCTAssertEqual(mac.freeMemory, "75% free")
-        XCTAssertEqual(mac.disk, .init(text: "77 GB free", level: .normal))
-        XCTAssertEqual(mac.storage, .init(text: "0 B swap · 77 GB free", level: .normal))
+        XCTAssertEqual(mac.swap, "0 B")
         XCTAssertEqual(mac.load, "3.0 on 12 cores")
         XCTAssertEqual(mac.uptime, "10d 17h")
         XCTAssertEqual(mac.heaviest, [])
-    }
-
-    /// A disk under two multiples of RAM warns on its own figures, whatever
-    /// the kernel is saying about memory.
-    func testTheDiskWearsItsOwnLevel() throws {
-        let mac = try XCTUnwrap(
-            UsagePanelSnapshot.make(frame: frame(mac: reading(diskFree: 23_000_000_000))).mac)
-
-        XCTAssertEqual(mac.memory.level, .normal)
-        XCTAssertEqual(mac.disk?.level, .critical)
-        XCTAssertEqual(mac.storage.level, .critical)
     }
 
     func testTheHeaviestAppsCarryTheirFootprint() throws {
@@ -164,16 +148,6 @@ final class MacHealthPanelTests: XCTestCase {
     func testPressureBadgesTheMacTabAtItsLevel() {
         let snapshot = UsagePanelSnapshot.make(frame: frame(mac: reading(pressure: .warn)))
 
-        XCTAssertEqual(PanelTab.mac.badge(in: snapshot), .level(.warn))
-    }
-
-    /// A full disk under a kernel reporting normal is still a Mac worth
-    /// opening, which is the same worse-of-two the menu bar's dot wears.
-    func testALowDiskBadgesTheMacTabUnderANormalKernel() throws {
-        let snapshot = UsagePanelSnapshot.make(frame: frame(mac: reading(diskFree: 1_000_000_000)))
-        let disk = try XCTUnwrap(snapshot.mac?.disk?.level)
-
-        XCTAssertGreaterThan(disk, .normal)
-        XCTAssertEqual(PanelTab.mac.badge(in: snapshot), .level(disk))
+        XCTAssertEqual(PanelTab.mac.badge(in: snapshot), .memory(.warn))
     }
 }
