@@ -66,19 +66,15 @@ struct PanelOverview: View {
     /// Opens the identities page, on the repository named or on the whole
     /// list where none is.
     let openIdentities: (String?) -> Void
-    let selectPeriod: (UsagePeriod) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
             headline
-            VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
-                ForEach(PanelModule.visible(in: snapshot), id: \.self) { module in
-                    section(module)
-                }
+            ForEach(PanelModule.visible(in: snapshot), id: \.self) { module in
+                section(module)
             }
-            .padding(.horizontal, PanelMetrics.platterInset)
-            .padding(.bottom, PanelMetrics.platterInset)
         }
+        .padding(PanelMetrics.platterInset)
     }
 
     /// One block below the headline, exhaustive over every `PanelModule` so a
@@ -98,21 +94,24 @@ struct PanelOverview: View {
     // MARK: Headline
 
     /// Cost first, because it is the number the panel is judged by and the one
-    /// a user can compare against a bill, with the window it is over beside it
-    /// and how it was reached under it.
+    /// a user can compare against a bill, with the window it is over and how it
+    /// was reached under it.
     ///
     /// Tokens and burn sat inline beside the cost for as long as the number was
-    /// always today's. Two things changed with the period. Inline, the cost and
-    /// its meta take about two thirds of the 312 pt a row has and leave the control a
-    /// cramped remainder — and the meta *grows* with the window, since a period
-    /// the archive falls short of has to say so, which is exactly when the
-    /// control matters most. They also never sat well: `firstTextBaseline`
-    /// between an 18 pt bold rounded number and an 11 pt caption puts the
-    /// caption high against the number it qualifies. Stacked, the meta is as
-    /// subordinate as it ever was, which was the point of the old arrangement
-    /// rather than the line it happened to be on.
+    /// always today's; they also never sat well there, since
+    /// `firstTextBaseline` between an 18 pt bold rounded number and an 11 pt
+    /// caption puts the caption high against the number it qualifies. Stacked,
+    /// the meta is as subordinate as it ever was.
+    ///
+    /// **On a platter, like every block under the tab bar**, decided
+    /// 2026-09-28. It stood flat on the popover as the page's heading, which
+    /// left the one figure the panel is judged by the only thing on the tab
+    /// without depth. **And with no control beside it.** The period popup sat
+    /// on this row until the period became the whole panel's, one control in
+    /// the header that Sessions and Forge follow too; the subline names the
+    /// window instead, which is what the popup's closed face used to say.
     private var headline: some View {
-        HStack(alignment: .center, spacing: 8) {
+        PanelGroup {
             VStack(alignment: .leading, spacing: 2) {
                 Text(snapshot.cost)
                     .font(
@@ -125,51 +124,17 @@ struct PanelOverview: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            Spacer(minLength: 8)
-            periodPicker
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.top, PanelMetrics.headlineTop)
-        .padding(.bottom, PanelMetrics.headlineBottom)
         .animation(.default, value: snapshot.cost)
     }
 
-    /// Tokens always, the pace only on today, and how far back the archive
-    /// reaches only when it falls short of the window named beside it.
+    /// The window always, tokens always, the pace only on today, and how far
+    /// back the archive reaches only when it falls short of the window.
     private var subline: String {
-        var parts = ["\(snapshot.tokens) tokens"]
+        var parts = [UsageFormat.periodHeading(snapshot.period), "\(snapshot.tokens) tokens"]
         if let burn = snapshot.burn { parts.append("\(burn)/h") }
         if let coverage = snapshot.coverage { parts.append(coverage) }
         return parts.joined(separator: " · ")
-    }
-
-    /// A popup rather than a segmented control: four boxes at full width,
-    /// permanently on screen, is a lot of the panel's scarcest room for a choice
-    /// most people make once. The cost is that a closed menu does not advertise
-    /// the windows behind it — a period with a disclosure chevron says there is
-    /// a choice without saying which, and that is the accepted trade.
-    ///
-    /// Absent entirely while there is no archive behind the other windows, which
-    /// is both a fresh install and the archive switched off. A control whose
-    /// every option answers the number already on screen is a control about a
-    /// feature.
-    @ViewBuilder
-    private var periodPicker: some View {
-        if snapshot.periods.count > 1 {
-            Picker("Period", selection: periodBinding) {
-                ForEach(snapshot.periods, id: \.self) { period in
-                    Text(UsageFormat.periodLabel(period)).tag(period)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .fixedSize()
-            .help("What the numbers above are over")
-        }
-    }
-
-    private var periodBinding: Binding<UsagePeriod> {
-        Binding(get: { snapshot.period }, set: { selectPeriod($0) })
     }
 
     // MARK: Providers

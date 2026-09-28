@@ -208,10 +208,11 @@ final class AgentStatsSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.agents.counted[.sevenDays]?.cache, week)
     }
 
-    /// The page offers only the windows there is something to show for.
-    func testOnlyAnsweredWindowsAreOffered() {
+    /// Only the windows the archive has counted carry an entry, so a period
+    /// it has not answered falls back to today rather than to a zero.
+    func testOnlyAnsweredWindowsAreCounted() {
         let snapshot = UsagePanelSnapshot.make(frame: frame())
-        XCTAssertEqual(snapshot.agents.periods, [.today])
+        XCTAssertEqual(Set(snapshot.agents.counted.keys), [.today])
     }
 
     /// A provider keeps its row whether or not any of its processes is up:

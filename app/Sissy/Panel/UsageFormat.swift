@@ -438,8 +438,7 @@ enum UsageFormat {
         "since \(day.formatted(.dateTime.day().month(.abbreviated)))"
     }
 
-    /// The control's own label for a window, which is the only place the period
-    /// is named now that the line under the number admits coverage instead.
+    /// The period control's own label for a window, in its menu.
     ///
     /// The widest is `All`, meaning everything the archive kept — which
     /// `historyRetentionDays` bounds, at 90 days by default.
@@ -460,6 +459,19 @@ enum UsageFormat {
         case .thirtyDays: "30 days"
         case .all: "All"
         }
+    }
+
+    /// A window as the reading it heads names it: `Today`, `7 days`,
+    /// `30 days`, `All time`.
+    ///
+    /// Every tab that follows the period names it on its own first line,
+    /// because the control is an icon in the header: it answers which window
+    /// is chosen only once it is opened, and a figure that does not say what
+    /// it is over is the stale-looking number the popup on the headline's row
+    /// used to prevent. `All` becomes `All time` here, since a bare `All`
+    /// heading a figure reads as a quantifier rather than a window.
+    static func periodHeading(_ period: UsagePeriod) -> String {
+        period == .all ? "All time" : periodLabel(period)
     }
 
     /// Names the window a strip of day bars covers, and says how much of it
@@ -1930,8 +1942,13 @@ extension UsageFormat {
     /// the reason the project section names its own day: the block under a
     /// control is the one that has to say which choice it is answering.
     static func forgeSectionLabel(_ period: UsagePeriod) -> String {
-        let window = period == .all ? "all time" : periodLabel(period).lowercased()
-        return "Contributions · " + window
+        "Contributions · " + periodHeading(period).lowercased()
+    }
+
+    /// The heading over the Sessions tab's counted half, for the reason the
+    /// forge's names its window.
+    static func sessionsSectionLabel(_ period: UsagePeriod) -> String {
+        "Sessions and sub-agents · " + periodHeading(period).lowercased()
     }
 }
 

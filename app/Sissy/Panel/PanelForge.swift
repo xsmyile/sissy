@@ -9,9 +9,9 @@ import SwiftUI
 /// together they are a page, and a page of their own keeps the projects the
 /// only list the Usage tab has to fold.
 ///
-/// The counts follow the period the Usage tab's headline is on, and their
-/// label says which: the control is the money's, and a second one here would
-/// be two answers to the same question.
+/// The counts follow the panel's period, chosen in the header, and their
+/// label says which: one control above every tab, never a second one here
+/// answering the same question.
 struct PanelForge: View {
     let snapshot: UsagePanelSnapshot
     /// Which forge connections are being re-read, so their rows can say so
@@ -30,8 +30,7 @@ struct PanelForge: View {
         .padding(PanelMetrics.platterInset)
     }
 
-    /// How much was pushed, per forge account, over the window the headline
-    /// is on.
+    /// How much was pushed, per forge account, over the panel's window.
     ///
     /// **The rows are never summed.** Each vendor counts its own thing —
     /// GitHub its contribution total, GitLab the events it recorded — so a
