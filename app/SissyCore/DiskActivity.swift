@@ -19,6 +19,14 @@ struct DiskDriverCounters: Sendable, Equatable {
     let bytes: DiskByteCounts
 }
 
+/// A driver as the registry answers it: its counters, and what its provider
+/// says it is connected through, see `DiskActivityReader`.
+struct DiskDriver: Sendable, Equatable {
+    let counters: DiskDriverCounters
+    /// The provider's `Physical Interconnect`, nil where it has none.
+    let interconnect: String?
+}
+
 /// Bytes a second in each direction, over the gap between two samples.
 struct DiskRate: Sendable, Equatable {
     let read: Double
@@ -88,27 +96,48 @@ enum DiskRates {
 /// since the driver attached. Measured 2026-09-28 on a Mac16,8 running macOS
 /// 27.0, one read of every driver costs 0.046 ms of CPU.
 ///
-/// **Summed over every driver, disk images included.** Measured 2026-09-28 on
-/// that Mac the registry held five: the internal disk, which had read 1.7 TB
-/// and written 497 GB since boot, and four read-only disk images, each its own
-/// driver, of which the busiest had read 139 GB. A read served from an image
-/// is read again from the disk holding its file, so the figure can count such
-/// a byte twice, and only while an image is being read.
+/// **Only drivers backed by physical media are summed.** A disk image is its
+/// own `IOBlockStorageDriver`, and a read it serves is read again from the
+/// disk holding its file, so summing every driver counted such a byte twice.
+/// What tells them apart is the driver's provider, the `IOBlockStorageDevice`
+/// under it, whose `Protocol Characteristics` name a `Physical Interconnect`.
+/// Measured 2026-09-28 on a Mac16,8 running macOS 27.0, the registry held five
+/// drivers: the internal disk (`IOEmbeddedNVMeBlockDevice`, `Apple Fabric`),
+/// the empty SD card reader (`AppleSDXCBlockStorageDevice`, `Secure Digital`,
+/// no bytes moved), and three disk images, `AppleDiskImageDevice` and two
+/// `IODiskImageBlockStorageDeviceInKernel`, all `Virtual Interface`; the
+/// busiest image had read 139 GB since boot against the disk's 1.7 TB. A
+/// driver whose provider says nothing is kept, since an answer that is
+/// missing is not an image.
 enum DiskActivityReader {
     static let driverClass = "IOBlockStorageDriver"
     static let statisticsKey = "Statistics"
     static let readKey = "Bytes (Read)"
     static let writeKey = "Bytes (Write)"
 
-    /// Every driver's counters, or none where the registry would not answer.
+    static let interconnectKey = "Protocol Characteristics"
+    static let interconnectName = "Physical Interconnect"
+    static let virtualInterconnect = "Virtual Interface"
+
+    /// The counters of every driver on physical media, or none where the
+    /// registry would not answer.
     static func counters() -> [DiskDriverCounters] {
+        physical(drivers())
+    }
+
+    /// Drops the drivers whose provider is a disk image, see the type's note.
+    static func physical(_ drivers: [DiskDriver]) -> [DiskDriverCounters] {
+        drivers.filter { $0.interconnect != virtualInterconnect }.map(\.counters)
+    }
+
+    private static func drivers() -> [DiskDriver] {
         var iterator = io_iterator_t()
         guard
             IOServiceGetMatchingServices(
                 kIOMainPortDefault, IOServiceMatching(driverClass), &iterator) == KERN_SUCCESS
         else { return [] }
         defer { IOObjectRelease(iterator) }
-        var drivers: [DiskDriverCounters] = []
+        var drivers: [DiskDriver] = []
         while case let entry = IOIteratorNext(iterator), entry != 0 {
             defer { IOObjectRelease(entry) }
             if let driver = driver(entry) { drivers.append(driver) }
@@ -116,7 +145,7 @@ enum DiskActivityReader {
         return drivers
     }
 
-    private static func driver(_ entry: io_registry_entry_t) -> DiskDriverCounters? {
+    private static func driver(_ entry: io_registry_entry_t) -> DiskDriver? {
         var id: UInt64 = 0
         guard IORegistryEntryGetRegistryEntryID(entry, &id) == KERN_SUCCESS,
             let statistics = IORegistryEntryCreateCFProperty(
@@ -124,7 +153,22 @@ enum DiskActivityReader {
                 as? [String: Any],
             let bytes = parse(statistics: statistics)
         else { return nil }
-        return DiskDriverCounters(id: id, bytes: bytes)
+        return DiskDriver(
+            counters: DiskDriverCounters(id: id, bytes: bytes), interconnect: interconnect(of: entry))
+    }
+
+    /// The `Physical Interconnect` of the driver's provider, nil where the
+    /// driver has none or the registry does not say.
+    private static func interconnect(of driver: io_registry_entry_t) -> String? {
+        var provider = io_registry_entry_t()
+        guard IORegistryEntryGetParentEntry(driver, kIOServicePlane, &provider) == KERN_SUCCESS
+        else { return nil }
+        defer { IOObjectRelease(provider) }
+        let characteristics =
+            IORegistryEntryCreateCFProperty(
+                provider, interconnectKey as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
+            as? [String: Any]
+        return characteristics?[interconnectName] as? String
     }
 
     /// The two counters out of a `Statistics` dictionary, nil unless both are

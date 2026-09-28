@@ -1,6 +1,8 @@
 # Names a docstring may cite that this source does not declare:
 # platform APIs, environment variables, external files, vendor UI.
 AGENTS.md
+AppleDiskImageDevice
+AppleSDXCBlockStorageDevice
 CFFIXED_USER_HOME
 CWInterface.ssid()
 Conversations
@@ -9,6 +11,9 @@ ENOMEM
 FSEventStreamScheduleWithRunLoop
 GPTs
 IFT_ETHER
+IOBlockStorageDevice
+IODiskImageBlockStorageDeviceInKernel
+IOEmbeddedNVMeBlockDevice
 ISSUE_ADVANCED
 ISSUE_HYBRID
 IgnoreSelf

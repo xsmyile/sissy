@@ -26,6 +26,57 @@ final class DiskCounterParsingTests: XCTestCase {
     }
 }
 
+final class DiskPhysicalDriversTests: XCTestCase {
+    private func driver(_ id: UInt64, _ read: UInt64, _ interconnect: String?) -> DiskDriver {
+        DiskDriver(
+            counters: DiskDriverCounters(id: id, bytes: DiskByteCounts(read: read, written: 0)),
+            interconnect: interconnect)
+    }
+
+    /// The five drivers this Mac's registry held on 2026-09-28: the disk, the
+    /// empty SD reader and three images, whose reads the disk serves again.
+    func testDiskImagesAreLeftOutOfTheSum() {
+        let registry = [
+            driver(0x1_0000_0b5d, 0, "Secure Digital"),
+            driver(0x1_0000_0bf0, 1_764_998_504_448, "Apple Fabric"),
+            driver(0x1_0000_d828, 14_291_614_720, "Virtual Interface"),
+            driver(0x1_0000_166e, 139_323_587_584, "Virtual Interface"),
+            driver(0x1_0000_169b, 19_389_440, "Virtual Interface"),
+        ]
+        XCTAssertEqual(
+            DiskActivityReader.physical(registry).map(\.id), [0x1_0000_0b5d, 0x1_0000_0bf0])
+    }
+
+    /// An external disk is physical whatever the bus it is on.
+    func testExternalMediaIsKept() {
+        let kept = DiskActivityReader.physical([
+            driver(1, 10, "USB"), driver(2, 20, "Thunderbolt"), driver(3, 30, "Apple Fabric"),
+        ])
+        XCTAssertEqual(kept.map(\.id), [1, 2, 3])
+    }
+
+    /// A provider that says nothing is not an image.
+    func testADriverWhoseProviderSaysNothingIsKept() {
+        XCTAssertEqual(DiskActivityReader.physical([driver(1, 10, nil)]).map(\.id), [1])
+    }
+
+    func testNoDriversAreNoCounters() {
+        XCTAssertEqual(DiskActivityReader.physical([]), [])
+    }
+
+    /// The image mounting or going while the tab is open is not a change in
+    /// what the disk did, so it leaves the rate at the disk's own.
+    func testMountingAnImageLeavesTheRateAtTheDisksOwn() {
+        let before = DiskActivityReader.physical([driver(1, 1_000, "Apple Fabric")])
+        let after = DiskActivityReader.physical([
+            driver(1, 3_000, "Apple Fabric"), driver(2, 9_000_000, "Virtual Interface"),
+        ])
+        let rate = DiskRates.rate(
+            from: DiskRates.byID(before), to: DiskRates.byID(after), seconds: 1)
+        XCTAssertEqual(rate, DiskRate(read: 2_000, written: 0))
+    }
+}
+
 final class DiskRatesTests: XCTestCase {
     private func counters(_ read: UInt64, _ written: UInt64) -> DiskByteCounts {
         DiskByteCounts(read: read, written: written)
@@ -384,6 +435,14 @@ final class DiskActivityFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.diskRead(42_000_000), "Read 42 MB/s")
         XCTAssertEqual(UsageFormat.diskWrite(3_100_000), "Write 3.1 MB/s")
         XCTAssertEqual(UsageFormat.diskRead(nil), "Read " + UsageFormat.macLevel(nil))
+    }
+
+    /// VoiceOver reads the legend's own wording.
+    func testTheSpokenRateIsTheLegendsWording() {
+        XCTAssertEqual(
+            DiskActivityPlatter.spokenRate(DiskRate(read: 42_000_000, written: 3_100_000)),
+            "Read 42 MB/s, Write 3.1 MB/s")
+        XCTAssertEqual(DiskActivityPlatter.spokenRate(nil), "No rate yet")
     }
 }
 
