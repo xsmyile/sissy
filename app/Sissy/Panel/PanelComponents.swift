@@ -25,15 +25,18 @@ enum PanelMetrics {
     /// Between a platter's label and the platter itself.
     static let platterLabelGap: CGFloat = 5
     static let barHeight: CGFloat = 5
-    /// The one number a headline block is about — the day's cost, and the
-    /// headroom left on the window that binds first.
+    /// The one reading a tab leads on: the cost on Usage, the kernel's word
+    /// on Mac.
     ///
-    /// One size for both, because they are the same rank of answer and a
-    /// panel that drew the second larger than the first said otherwise. Bold
-    /// rather than semibold: it buys back at 18 pt the presence the old 22
-    /// and 26 had, and the points it gives up are the ones the block was
-    /// spending on air.
-    static let headlineNumber: CGFloat = 18
+    /// One size for every tab, because they are the same rank of answer.
+    /// 22 pt rather than the 18 it was while the Overview stacked every
+    /// module: with one module to a tab the headline is the only thing on
+    /// the popover that is not on a platter, and at 18 it read as a caption
+    /// to the first of them.
+    static let headlineNumber: CGFloat = 22
+    /// What a tab's headline leaves above and below itself.
+    static let headlineTop: CGFloat = 4
+    static let headlineBottom: CGFloat = 10
     /// Everything that qualifies a headline number rather than being one.
     static let headlineMeta: CGFloat = 11
     /// A provider's mark where it labels a row, and the text it sits beside.
