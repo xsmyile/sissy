@@ -32,7 +32,7 @@ import SwiftUI
 /// a pointer on its way to it. With the list last, nothing that can be
 /// clicked sits below a reading that moves, and the re-count sits on the
 /// live half's own label, above the list it re-counts.
-struct PanelStats: View {
+struct PanelSessions: View {
     let block: UsagePanelSnapshot.AgentsBlock
     /// When the sweep behind the live half was taken, which the tab's own
     /// label dates since the header above belongs to the whole panel.
