@@ -142,7 +142,8 @@ actor UsageEngine {
     private let healthMonitor: SystemHealthMonitor
     /// What the disks answer, behind `ServerConfig.disk`.
     private let diskMonitor: DiskMonitor
-    /// The readings taken only while a page of the panel asks for them.
+    /// The rates logged in the background and published only while a page of
+    /// the panel asks for them.
     private let live: LiveSampling
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
@@ -444,6 +445,7 @@ actor UsageEngine {
         guard lifecycle == .idle else { return }
         lifecycle = .running
         self.onFrame = onFrame
+        await live.start()
         // Settle on one catalog before the cold scan starts, so the backfill
         // prices historical events against the same rates the live tail will
         // use. A refresh does not reprice what it already priced, so a
@@ -1903,7 +1905,7 @@ actor UsageEngine {
         await reemit()
     }
 
-    /// Samples what the panel's page on screen draws, and nothing else, see
+    /// Publishes what the panel's page on screen draws, and nothing else, see
     /// `LiveSampling`.
     func setLiveDemand(
         _ demand: Set<LiveReading>, onSample: @Sendable @escaping (LiveSample) async -> Void

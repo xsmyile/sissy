@@ -171,8 +171,8 @@ struct ServerConfig: Sendable, Codable {
     var disk: Bool
 
     /// Whether the panel carries a Network tab, which samples the Mac's
-    /// interfaces once a second while it is on screen and not at all
-    /// otherwise.
+    /// interfaces once a second while it is on screen and logs their byte
+    /// counters every five seconds otherwise, see `LiveCadence`.
     ///
     /// On, for `macHealth`'s reasons: the counters, the default route and the
     /// Wi-Fi signal all answer with no permission and no request.

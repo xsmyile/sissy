@@ -87,11 +87,11 @@ struct WiFiLink: Sendable, Equatable {
 
 /// What the Network tab draws, as one sample publishes it.
 ///
-/// **Only while that tab is on screen, and in memory only.** The series is
-/// what the monitor saw since the tab was opened, never before: a rate needs
-/// two readings and none were taken while nobody was looking, so a gap would
-/// be a guess drawn as a line. The totals are the kernel's own counters and
-/// need no history at all, see `NetworkTotals` for since when.
+/// **Published only while that tab is on screen, and in memory only.** The
+/// series is what the monitor logged over the last `LiveCadence.window`, in
+/// the background as well as for the tab, and never across a gap, which
+/// would be a guess drawn as a line. The totals are the kernel's own counters
+/// and need no history at all, see `NetworkTotals` for since when.
 struct NetworkReading: Sendable, Equatable {
     let observedAt: Date
     /// Nil while the Mac has no default route.
@@ -100,11 +100,12 @@ struct NetworkReading: Sendable, Equatable {
     let wifi: WiFiLink?
     /// Summed across the physical interfaces, see `NetworkInterfaceFilter`.
     let totals: NetworkTotals
-    /// Oldest first, one a sample and at most `NetworkMonitor.historyLength`
-    /// of them. Empty on the first sample, which has nothing to measure from.
-    let rates: [NetworkRate]
+    /// Oldest first, dated, and none older than `LiveCadence.window` before
+    /// `observedAt`. Empty on the first sample, which has nothing to measure
+    /// from.
+    let rates: [RatePoint<NetworkRate>]
 
-    var current: NetworkRate? { rates.last }
+    var current: NetworkRate? { rates.last?.rate }
 }
 
 /// Which interfaces are the Mac's own links and which are the system's

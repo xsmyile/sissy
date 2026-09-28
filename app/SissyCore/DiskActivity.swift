@@ -35,16 +35,17 @@ struct DiskRate: Sendable, Equatable {
 
 /// What the Disk tab's activity platter draws, as one sample publishes it.
 ///
-/// **Only while that tab is on screen, and in memory only**, for the reason
-/// `NetworkReading` gives: a rate needs two readings and none were taken while
-/// nobody was looking, so a gap would be a guess drawn as a line.
+/// **Published only while that tab is on screen, and in memory only**, on
+/// `NetworkReading`'s terms: the series is the last `LiveCadence.window` the
+/// monitor logged, never across a gap.
 struct DiskActivityReading: Sendable, Equatable {
     let observedAt: Date
-    /// Oldest first, one a sample and at most `DiskActivityMonitor.historyLength`
-    /// of them. Empty on the first sample, which has nothing to measure from.
-    let rates: [DiskRate]
+    /// Oldest first, dated, and none older than `LiveCadence.window` before
+    /// `observedAt`. Empty on the first sample, which has nothing to measure
+    /// from.
+    let rates: [RatePoint<DiskRate>]
 
-    var current: DiskRate? { rates.last }
+    var current: DiskRate? { rates.last?.rate }
 }
 
 /// The arithmetic between two samples of the counters.

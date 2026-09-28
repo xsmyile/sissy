@@ -262,33 +262,92 @@ final class NetworkMonitorTests: XCTestCase {
         XCTAssertEqual(reading.totals.bytes, NetworkByteCounts(received: 1_000, sent: 500))
     }
 
-    func testTheSeriesKeepsTwoMinutes() async throws {
+    /// Two minutes by time: a point is dropped once it is older than the
+    /// window before the latest sample, whatever the count.
+    func testTheSeriesKeepsTwoMinutesByTime() async throws {
         let monitor = monitor()
         var last: NetworkReading?
-        for second in 0...(NetworkMonitor.historyLength + 10) {
+        for second in 0...200 {
             last = await monitor.sampleOnce(now: start + TimeInterval(second))
         }
-        XCTAssertEqual(last?.rates.count, NetworkMonitor.historyLength)
+        let rates = try XCTUnwrap(last?.rates)
+        XCTAssertEqual(rates.first?.at, start + 200 - LiveCadence.window)
+        XCTAssertEqual(rates.last?.at, start + 200)
+        XCTAssertEqual(rates.count, 121)
     }
 
-    /// A rate averaged over a sleep would be drawn and dated as one second,
-    /// so the series starts again from the sample after it.
-    func testAGapBeyondTheBoundRestartsTheSeries() async throws {
+    /// The background keeps the same two minutes at its own pace, and the
+    /// first watched sample carries them.
+    func testTheBackgroundKeepsTwoMinutesAtItsOwnPace() async throws {
+        let monitor = monitor()
+        for step in 0...60 {
+            _ = await monitor.record(now: start + TimeInterval(step * 5), next: .background)
+        }
+        let sampled = await monitor.sampleOnce(now: start + 305)
+        let rates = try XCTUnwrap(sampled?.rates)
+        XCTAssertEqual(rates.first?.at, start + 185)
+        XCTAssertEqual(rates.count, 25)
+    }
+
+    /// One ring across both cadences: five-second points from the background
+    /// and one-second points from the page, each dated by its own sample.
+    func testBothCadencesFeedOneDatedSeries() async throws {
+        let monitor = monitor()
+        for second in [0, 5, 10] {
+            _ = await monitor.record(now: start + TimeInterval(second), next: .background)
+        }
+        var last: NetworkReading?
+        for second in [12, 13, 14] { last = await monitor.sampleOnce(now: start + TimeInterval(second)) }
+        XCTAssertEqual(last?.rates.map(\.at), [5, 10, 12, 13, 14].map { start + TimeInterval($0) })
+        XCTAssertEqual(last?.rates.first?.rate, NetworkRate(received: 200, sent: 100))
+    }
+
+    /// A rate averaged over a sleep would be drawn as a line across seconds
+    /// nobody measured, so the series starts again from the sample after it.
+    func testAGapBeyondTheWatchedBoundRestartsTheSeries() async throws {
         let monitor = monitor()
         for second in 0..<3 { _ = await monitor.sampleOnce(now: start + TimeInterval(second)) }
-        let afterGap = start + 2 + NetworkMonitor.maximumGap + 1
+        let afterGap = start + 2 + LiveCadence.watched.maximumGap + 1
         let resumed = await monitor.sampleOnce(now: afterGap)
         XCTAssertEqual(resumed?.rates, [])
         let next = await monitor.sampleOnce(now: afterGap + 1)
-        XCTAssertEqual(next?.rates, [NetworkRate(received: 1_000, sent: 500)])
+        XCTAssertEqual(next?.rates.map(\.rate), [NetworkRate(received: 1_000, sent: 500)])
     }
 
     func testALateSampleWithinTheBoundStaysInTheSeries() async throws {
         let monitor = monitor()
         _ = await monitor.sampleOnce(now: start)
         _ = await monitor.sampleOnce(now: start + 1)
-        let late = await monitor.sampleOnce(now: start + 1 + NetworkMonitor.maximumGap)
+        let late = await monitor.sampleOnce(now: start + 1 + LiveCadence.watched.maximumGap)
         XCTAssertEqual(late?.rates.count, 2)
+    }
+
+    /// Five seconds is a gap at the page's pace and one step at the
+    /// background's, so the bound follows the cadence in force.
+    func testTheBoundFollowsTheCadence() async throws {
+        let watched = monitor()
+        _ = await watched.sampleOnce(now: start)
+        let afterWatched = await watched.sampleOnce(now: start + 5)
+        XCTAssertEqual(afterWatched?.rates, [])
+        let background = monitor()
+        _ = await background.record(now: start, next: .background)
+        _ = await background.record(now: start + 5, next: .background)
+        let atBound = await background.sampleOnce(
+            now: start + 5 + LiveCadence.background.maximumGap, next: .background)
+        XCTAssertEqual(atBound?.rates.count, 2)
+        let pastBound = await background.sampleOnce(
+            now: start + 5 + 2 * LiveCadence.background.maximumGap + 1)
+        XCTAssertEqual(pastBound?.rates, [])
+    }
+
+    /// The page's first sample comes up to a background step after the last
+    /// background one, and is judged by the pace that step was waited at.
+    func testThePagesFirstSampleKeepsTheBackgroundSeries() async throws {
+        let monitor = monitor()
+        _ = await monitor.record(now: start, next: .background)
+        _ = await monitor.record(now: start + 5, next: .background)
+        let opened = await monitor.sampleOnce(now: start + 10)
+        XCTAssertEqual(opened?.rates.count, 2)
     }
 
     /// A counter that restarts while the tab is open costs that sample its
@@ -314,7 +373,7 @@ final class NetworkMonitorTests: XCTestCase {
         let before = await monitor.sampleOnce(now: restart - 1)
         XCTAssertNil(before?.totals.since)
         let after = await monitor.sampleOnce(now: restart)
-        XCTAssertEqual(after?.rates, [NetworkRate(received: 0, sent: 0)])
+        XCTAssertEqual(after?.rates.map(\.rate), [NetworkRate(received: 0, sent: 0)])
         XCTAssertEqual(after?.totals.since, restart)
     }
 
@@ -354,71 +413,142 @@ final class NetworkMonitorTests: XCTestCase {
 }
 
 final class LiveSamplingTests: XCTestCase {
-    private func sampling(enabled: Set<LiveReading> = [.network]) -> LiveSampling {
+    private func sampling(
+        enabled: Set<LiveReading> = [.network], network: NetworkMonitor = .readingNothing()
+    ) -> LiveSampling {
         LiveSampling(
-            network: NetworkMonitor(
-                readCounters: { [] }, readPrimary: { nil }, readDisplayName: { _ in nil },
-                readWiFi: { _ in nil }),
-            disk: DiskActivityMonitor(readCounters: { [] }),
-            enabled: enabled)
+            network: network, disk: DiskActivityMonitor(readCounters: { [] }), enabled: enabled)
     }
 
     private let ignore: @Sendable (LiveSample) async -> Void = { _ in }
 
-    func testNothingRunsUntilAPageAsks() async {
-        let running = await sampling().running()
-        XCTAssertEqual(running, [])
-    }
-
-    func testAPageAskingStartsItsReading() async {
+    func testNothingRunsUntilTheEngineStarts() async {
         let live = sampling()
         await live.setDemand([.network], onSample: ignore)
         let running = await live.running()
-        XCTAssertEqual(running, [.network])
+        XCTAssertEqual(running, [:])
     }
 
-    /// A tab switch and a closing panel both say it as the empty demand.
-    func testTheDemandGoingStopsIt() async {
+    /// With the switch on and no page, the counters are logged in the
+    /// background.
+    func testAStartedReadingRunsInTheBackground() async {
         let live = sampling()
+        await live.start()
+        let running = await live.running()
+        XCTAssertEqual(running, [.network: .background])
+        await live.stop()
+    }
+
+    /// The tab on screen moves the monitor to one a second, and a tab switch
+    /// or a closing panel, both the empty demand, moves it back.
+    func testThePageSetsTheCadence() async {
+        let live = sampling()
+        await live.start()
         await live.setDemand([.network], onSample: ignore)
+        let watched = await live.running()
+        XCTAssertEqual(watched, [.network: .watched])
         await live.setDemand([], onSample: ignore)
-        let running = await live.running()
-        XCTAssertEqual(running, [])
+        let background = await live.running()
+        XCTAssertEqual(background, [.network: .background])
+        await live.stop()
     }
 
-    func testASwitchedOffReadingIsNotStartedByDemand() async {
+    /// A page opening does not wait out the background's five seconds.
+    func testAPageArrivingIsServedAtOnce() async {
+        let read = expectation(description: "a background read")
+        read.assertForOverFulfill = false
+        let network = NetworkMonitor.readingNothing(onCounters: { read.fulfill() })
+        let live = sampling(network: network)
+        await live.start()
+        await fulfillment(of: [read], timeout: 5)
+        let delivered = expectation(description: "a sample for the page")
+        delivered.assertForOverFulfill = false
+        await live.setDemand([.network]) { _ in delivered.fulfill() }
+        await fulfillment(of: [delivered], timeout: 3)
+        await live.stop()
+    }
+
+    /// In the background only the counters are read, and nothing is
+    /// published, whatever callback the last page left.
+    func testTheBackgroundReadsTheCountersAndPublishesNothing() async {
+        let read = expectation(description: "a background read")
+        read.assertForOverFulfill = false
+        let asked = LockedValue(0)
+        let network = NetworkMonitor(
+            readCounters: {
+                read.fulfill()
+                return []
+            },
+            readPrimary: {
+                asked.update { $0 += 1 }
+                return nil
+            },
+            readDisplayName: { _ in nil },
+            readWiFi: { _ in
+                asked.update { $0 += 1 }
+                return nil
+            })
+        let live = sampling(network: network)
+        let published = LockedValue(0)
+        await live.setDemand([]) { _ in published.update { $0 += 1 } }
+        await live.start()
+        await fulfillment(of: [read], timeout: 5)
+        await live.stop()
+        XCTAssertEqual(published.load(), 0)
+        XCTAssertEqual(asked.load(), 0)
+    }
+
+    func testASwitchedOffReadingIsNotStarted() async {
         let live = sampling(enabled: [])
+        await live.start()
         await live.setDemand([.network], onSample: ignore)
         let running = await live.running()
-        XCTAssertEqual(running, [])
+        XCTAssertEqual(running, [:])
     }
 
     func testSwitchingOffStopsARunningReading() async {
         let live = sampling()
+        await live.start()
         await live.setDemand([.network], onSample: ignore)
         await live.setEnabled(.network, false)
         let off = await live.running()
-        XCTAssertEqual(off, [])
+        XCTAssertEqual(off, [:])
         await live.setEnabled(.network, true)
         let on = await live.running()
-        XCTAssertEqual(on, [.network])
+        XCTAssertEqual(on, [.network: .watched])
+        await live.stop()
+    }
+
+    /// The switch off drops the ring, so a switch on starts a new series.
+    func testSwitchingOffDropsTheSeries() async throws {
+        let network = NetworkMonitor.readingNothing()
+        let live = sampling(network: network)
+        await live.start()
+        _ = await network.sampleOnce(now: Date() + 1)
+        let before = await network.sampleOnce(now: Date() + 2)
+        XCTAssertFalse(try XCTUnwrap(before).rates.isEmpty)
+        await live.setEnabled(.network, false)
+        let after = await network.sampleOnce(now: Date() + 3)
+        XCTAssertEqual(after?.rates, [])
     }
 
     /// The engine's stop is terminal: a page asking afterwards starts nothing
     /// behind an engine that has gone.
     func testStopIsTerminal() async {
         let live = sampling()
-        await live.setDemand([.network], onSample: ignore)
+        await live.start()
         await live.stop()
+        await live.start()
         await live.setDemand([.network], onSample: ignore)
         let running = await live.running()
-        XCTAssertEqual(running, [])
+        XCTAssertEqual(running, [:])
     }
 
     /// A page asking again while the reading runs is the one its samples go
     /// to from then on.
     func testTheLatestCallerReceivesTheSamples() async {
         let live = sampling()
+        await live.start()
         let first = LockedValue(0)
         let latest = expectation(description: "a sample to the second caller")
         latest.assertForOverFulfill = false
@@ -431,6 +561,7 @@ final class LiveSamplingTests: XCTestCase {
 
     func testARunningReadingDeliversItsSamples() async {
         let live = sampling()
+        await live.start()
         let delivered = expectation(description: "a sample")
         delivered.assertForOverFulfill = false
         await live.setDemand([.network]) { sample in
@@ -438,6 +569,19 @@ final class LiveSamplingTests: XCTestCase {
         }
         await fulfillment(of: [delivered], timeout: 5)
         await live.stop()
+    }
+}
+
+extension NetworkMonitor {
+    /// A monitor reading no hardware, so a suite never samples the Mac;
+    /// `onCounters` runs on every counter read.
+    static func readingNothing(onCounters: @escaping @Sendable () -> Void = {}) -> NetworkMonitor {
+        NetworkMonitor(
+            readCounters: {
+                onCounters()
+                return []
+            },
+            readPrimary: { nil }, readDisplayName: { _ in nil }, readWiFi: { _ in nil })
     }
 }
 
@@ -603,10 +747,7 @@ final class NetworkEngineTests: XCTestCase {
 
     private var configURL: URL { tempDir.appendingPathComponent("server.json") }
 
-    /// A monitor reading no hardware, so the suite never samples the Mac.
-    private let monitor = NetworkMonitor(
-        readCounters: { [] }, readPrimary: { nil }, readDisplayName: { _ in nil },
-        readWiFi: { _ in nil })
+    private let monitor = NetworkMonitor.readingNothing()
 
     private func makeEngine() -> UsageEngine {
         var config = ServerConfig.defaults
@@ -615,30 +756,41 @@ final class NetworkEngineTests: XCTestCase {
         config.remotePricing = false
         config.statusChecks = false
         config.macHealth = false
+        config.disk = false
         return UsageEngine(
             config: config, configURL: configURL, limitsProbe: ClaudeLimitsProbe { _ in .absent },
             claudeAccounts: .inert(), networkMonitor: monitor)
     }
 
-    func testTheEngineSamplesOnlyWhileAPageAsks() async {
+    /// The engine starts the background log, a page moves it to one a
+    /// second, and the page going moves it back.
+    func testTheEngineLogsInTheBackgroundAndSamplesForAPage() async {
         let engine = makeEngine()
-        let idle = await monitor.isRunning
-        XCTAssertFalse(idle)
+        let idle = await monitor.cadence
+        XCTAssertNil(idle)
+        await engine.start { _ in }
+        let started = await monitor.cadence
+        XCTAssertEqual(started, .background)
         await engine.setLiveDemand([.network]) { _ in }
-        let asked = await monitor.isRunning
-        XCTAssertTrue(asked)
+        let asked = await monitor.cadence
+        XCTAssertEqual(asked, .watched)
         await engine.setLiveDemand([]) { _ in }
-        let released = await monitor.isRunning
-        XCTAssertFalse(released)
+        let released = await monitor.cadence
+        XCTAssertEqual(released, .background)
+        await engine.stop()
+        let stopped = await monitor.cadence
+        XCTAssertNil(stopped)
     }
 
     func testTheSwitchStopsTheSamplingAndIsWrittenDown() async throws {
         let engine = makeEngine()
+        await engine.start { _ in }
         await engine.setLiveDemand([.network]) { _ in }
         await engine.setNetwork(enabled: false)
         let running = await monitor.isRunning
         XCTAssertFalse(running)
         XCTAssertEqual(try ServerConfig.load(from: configURL).network, false)
+        await engine.stop()
     }
 
     func testAStoppedEngineStartsNothing() async {
@@ -654,5 +806,51 @@ final class NetworkEngineTests: XCTestCase {
         XCTAssertTrue(try ServerConfig.load(from: configURL).network)
         try Data(#"{"network": false}"#.utf8).write(to: configURL)
         XCTAssertFalse(try ServerConfig.load(from: configURL).network)
+    }
+}
+
+/// Points placed by time, so a series fed at two cadences reads true against
+/// one axis.
+@MainActor
+final class RateSparklineTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_790_000_000)
+    private let width: CGFloat = 240
+
+    private func x(_ age: TimeInterval) -> CGFloat {
+        RateSparkline.x(of: now - age, now: now, width: width)
+    }
+
+    func testTheWindowSpansTheWidth() {
+        XCTAssertEqual(x(0), width)
+        XCTAssertEqual(x(LiveCadence.window), 0)
+        XCTAssertEqual(x(LiveCadence.window / 2), width / 2)
+    }
+
+    /// A five-second step is five times as wide as a one-second one.
+    func testMixedSpacingIsDrawnInProportion() {
+        let second = width / CGFloat(LiveCadence.window)
+        XCTAssertEqual(x(95) - x(100), 5 * second, accuracy: 0.001)
+        XCTAssertEqual(x(0) - x(1), second, accuracy: 0.001)
+    }
+
+    func testAPointOutsideTheWindowIsClampedToThePlot() {
+        XCTAssertEqual(x(-10), width)
+        XCTAssertEqual(x(LiveCadence.window + 30), 0)
+    }
+
+    func testTheHoverPicksThePointNearestInTime() {
+        let times = [100, 95, 90, 2, 1, 0].map { now - TimeInterval($0) }
+        let pointer = x(93)
+        XCTAssertEqual(RateSparkline.index(at: pointer, of: times, now: now, width: width), 1)
+        XCTAssertEqual(RateSparkline.index(at: width, of: times, now: now, width: width), 5)
+    }
+
+    /// Left of the oldest point is minutes the series never saw.
+    func testTheHoverLeftOfTheSeriesPicksNothing() {
+        let times = [100, 95].map { now - TimeInterval($0) }
+        XCTAssertNil(RateSparkline.index(at: 0, of: times, now: now, width: width))
+        XCTAssertEqual(
+            RateSparkline.index(
+                at: x(100 + RateSparkline.hoverSlack / 2), of: times, now: now, width: width), 0)
     }
 }

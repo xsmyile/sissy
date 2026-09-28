@@ -3,11 +3,11 @@ import SwiftUI
 /// What the disks are reading and writing this second, and the last two
 /// minutes of it, on the Disk tab under the home volume.
 ///
-/// **Sampled only while the Disk tab is on screen**, on `PanelNetwork`'s
-/// terms: `UsagePanelView` asks for `LiveReading.disk` while the tab is
-/// selected in an open panel, and the engine samples once a second until the
-/// tab switches or the panel closes, so the line starts empty on every
-/// opening and never spans minutes nobody watched.
+/// **Sampled once a second only while the Disk tab is on screen**, on
+/// `PanelNetwork`'s terms: `UsagePanelView` asks for `LiveReading.disk` while
+/// the tab is selected in an open panel, and with the tab gone the engine
+/// reads the counters every five seconds and publishes nothing, so the line
+/// opens on the last two minutes and never spans a gap nobody sampled.
 ///
 /// **The one view that reads the sample.** `engine.diskActivityReading` is
 /// read in this body and nowhere else, so a sample invalidates this platter
@@ -33,8 +33,9 @@ struct DiskActivityPlatter: View {
     private static let figureGap: CGFloat = 14
 
     var body: some View {
-        let rates = engine.diskActivityReading?.rates ?? []
-        let current = rates.last
+        let reading = engine.diskActivityReading
+        let rates = reading?.rates ?? []
+        let current = reading?.current
         return PanelGroup {
             SectionLabel(text: "Activity")
         } content: {
@@ -50,15 +51,18 @@ struct DiskActivityPlatter: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Self.spokenRate(current))
                 RateSparkline(
-                    points: rates.map { ($0.read, $0.written) }, firstTint: Self.readTint,
+                    points: rates.map {
+                        .init(at: $0.at, first: $0.rate.read, second: $0.rate.written)
+                    },
+                    now: reading?.observedAt ?? Date(), firstTint: Self.readTint,
                     secondTint: Self.writeTint, scaleFloor: Self.scaleFloor,
                     label: "Disk activity over the last two minutes",
                     figures: {
-                        UsageFormat.diskRead(rates[$0].read) + " · "
-                            + UsageFormat.diskWrite(rates[$0].written)
+                        UsageFormat.diskRead(rates[$0].rate.read) + " · "
+                            + UsageFormat.diskWrite(rates[$0].rate.written)
                     },
                     hovered: $hovered)
-                Text("last 2 minutes, only while this tab is open")
+                Text("last 2 minutes")
                     .font(.system(size: Self.captionSize))
                     .foregroundStyle(.tertiary)
             }

@@ -58,7 +58,7 @@ struct MacSettingsView: View {
                 .toggleStyle(.switch)
         } label: {
             Text("Network")
-            Text("A tab with the rate, the link and the Wi-Fi signal, read only while it is open.")
+            Text("A tab with the rate, the link and the Wi-Fi signal. Asks for nothing.")
         }
     }
 

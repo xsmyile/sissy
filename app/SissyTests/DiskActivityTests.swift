@@ -191,38 +191,54 @@ final class DiskActivityMonitorTests: XCTestCase {
         XCTAssertEqual(reading.current, DiskRate(read: 1_000, written: 500))
     }
 
-    func testTheSeriesKeepsTwoMinutes() async {
+    func testTheSeriesKeepsTwoMinutesByTime() async throws {
         let monitor = steady()
         var last: DiskActivityReading?
-        for second in 0...(DiskActivityMonitor.historyLength + 10) {
+        for second in 0...200 {
             last = await monitor.sampleOnce(now: start + TimeInterval(second))
         }
-        XCTAssertEqual(last?.rates.count, DiskActivityMonitor.historyLength)
+        let rates = try XCTUnwrap(last?.rates)
+        XCTAssertEqual(rates.first?.at, start + 200 - LiveCadence.window)
+        XCTAssertEqual(rates.count, 121)
     }
 
-    /// The gap is the network's, so both sparklines lay a second the same way.
-    func testTheGapIsTheNetworksOwn() {
-        XCTAssertEqual(DiskActivityMonitor.maximumGap, NetworkMonitor.maximumGap)
-        XCTAssertEqual(DiskActivityMonitor.historyLength, NetworkMonitor.historyLength)
-        XCTAssertEqual(DiskActivityMonitor.sampleInterval, NetworkMonitor.sampleInterval)
+    func testBothCadencesFeedOneDatedSeries() async {
+        let monitor = steady()
+        for second in [0, 5, 10] {
+            _ = await monitor.sampleOnce(now: start + TimeInterval(second), next: .background)
+        }
+        var last: DiskActivityReading?
+        for second in [12, 13] { last = await monitor.sampleOnce(now: start + TimeInterval(second)) }
+        XCTAssertEqual(last?.rates.map(\.at), [5, 10, 12, 13].map { start + TimeInterval($0) })
     }
 
     func testAGapBeyondTheBoundRestartsTheSeries() async {
         let monitor = steady()
         for second in 0..<3 { _ = await monitor.sampleOnce(now: start + TimeInterval(second)) }
-        let afterGap = start + 2 + DiskActivityMonitor.maximumGap + 1
+        let afterGap = start + 2 + LiveCadence.watched.maximumGap + 1
         let resumed = await monitor.sampleOnce(now: afterGap)
         XCTAssertEqual(resumed?.rates, [])
         let next = await monitor.sampleOnce(now: afterGap + 1)
-        XCTAssertEqual(next?.rates, [DiskRate(read: 1_000, written: 500)])
+        XCTAssertEqual(next?.rates.map(\.rate), [DiskRate(read: 1_000, written: 500)])
     }
 
     func testALateSampleWithinTheBoundStaysInTheSeries() async {
         let monitor = steady()
         _ = await monitor.sampleOnce(now: start)
         _ = await monitor.sampleOnce(now: start + 1)
-        let late = await monitor.sampleOnce(now: start + 1 + DiskActivityMonitor.maximumGap)
+        let late = await monitor.sampleOnce(now: start + 1 + LiveCadence.watched.maximumGap)
         XCTAssertEqual(late?.rates.count, 2)
+    }
+
+    func testTheBackgroundBoundIsItsOwnStep() async {
+        let monitor = steady()
+        _ = await monitor.sampleOnce(now: start, next: .background)
+        let atBound = await monitor.sampleOnce(
+            now: start + LiveCadence.background.maximumGap, next: .background)
+        XCTAssertEqual(atBound?.rates.count, 1)
+        let pastBound = await monitor.sampleOnce(
+            now: start + 2 * LiveCadence.background.maximumGap + 1)
+        XCTAssertEqual(pastBound?.rates, [])
     }
 
     /// An external disk plugged in mid-series adds nothing to the sample it
@@ -237,7 +253,7 @@ final class DiskActivityMonitorTests: XCTestCase {
         var last: DiskActivityReading?
         for second in 0..<4 { last = await monitor.sampleOnce(now: start + TimeInterval(second)) }
         XCTAssertEqual(
-            last?.rates,
+            last?.rates.map(\.rate),
             [
                 DiskRate(read: 100, written: 10), DiskRate(read: 100, written: 10),
                 DiskRate(read: 600, written: 50),
@@ -253,7 +269,8 @@ final class DiskActivityMonitorTests: XCTestCase {
         var last: DiskActivityReading?
         for second in 0..<3 { last = await monitor.sampleOnce(now: start + TimeInterval(second)) }
         XCTAssertEqual(
-            last?.rates, [DiskRate(read: 1_000, written: 100), DiskRate(read: 100, written: 10)])
+            last?.rates.map(\.rate),
+            [DiskRate(read: 1_000, written: 100), DiskRate(read: 100, written: 10)])
     }
 
     /// With no driver in both samples there is nothing to measure, and a
@@ -275,7 +292,7 @@ final class DiskActivityMonitorTests: XCTestCase {
         let monitor = monitor([[driver(1, 9_000, 9_000)], [driver(1, 100, 100)]])
         _ = await monitor.sampleOnce(now: start)
         let sampled = await monitor.sampleOnce(now: start + 1)
-        XCTAssertEqual(sampled?.rates, [DiskRate(read: 0, written: 0)])
+        XCTAssertEqual(sampled?.rates.map(\.rate), [DiskRate(read: 0, written: 0)])
     }
 
     /// A tab opened again starts a new series rather than drawing a line
@@ -296,9 +313,9 @@ final class DiskActivityMonitorTests: XCTestCase {
         XCTAssertFalse(idle)
         let delivered = expectation(description: "a sample")
         delivered.assertForOverFulfill = false
-        await monitor.start { _ in delivered.fulfill() }
-        let running = await monitor.isRunning
-        XCTAssertTrue(running)
+        await monitor.run { _ in delivered.fulfill() }
+        let running = await monitor.cadence
+        XCTAssertEqual(running, .watched)
         await fulfillment(of: [delivered], timeout: 5)
         await monitor.stop()
         let stopped = await monitor.isRunning
@@ -309,71 +326,101 @@ final class DiskActivityMonitorTests: XCTestCase {
 final class DiskLiveSamplingTests: XCTestCase {
     private let disk = DiskActivityMonitor(readCounters: { [] })
 
-    private func sampling(enabled: Set<LiveReading> = [.network, .disk]) -> LiveSampling {
-        LiveSampling(
-            network: NetworkMonitor(
-                readCounters: { [] }, readPrimary: { nil }, readDisplayName: { _ in nil },
-                readWiFi: { _ in nil }),
-            disk: disk, enabled: enabled)
+    private func sampling(enabled: Set<LiveReading> = [.network, .disk]) async -> LiveSampling {
+        let live = LiveSampling(network: .readingNothing(), disk: disk, enabled: enabled)
+        await live.start()
+        return live
     }
 
     private let ignore: @Sendable (LiveSample) async -> Void = { _ in }
 
-    func testTheDiskTabAskingStartsOnlyTheDisk() async {
-        let live = sampling()
+    func testTheDiskTabAskingWatchesOnlyTheDisk() async {
+        let live = await sampling()
         await live.setDemand([.disk], onSample: ignore)
         let running = await live.running()
-        XCTAssertEqual(running, [.disk])
+        XCTAssertEqual(running, [.disk: .watched, .network: .background])
+        await live.stop()
     }
 
-    /// A tab switch and a closing panel both say it as the empty demand.
-    func testTheDemandGoingStopsIt() async {
-        let live = sampling()
+    /// A tab switch and a closing panel both say it as the empty demand,
+    /// which leaves the disk logging in the background.
+    func testTheDemandGoingMovesItToTheBackground() async {
+        let live = await sampling()
         await live.setDemand([.disk], onSample: ignore)
         await live.setDemand([], onSample: ignore)
-        let running = await live.running()
-        XCTAssertEqual(running, [])
-        let sampling = await disk.isRunning
-        XCTAssertFalse(sampling)
+        let cadence = await disk.cadence
+        XCTAssertEqual(cadence, .background)
+        await live.stop()
     }
 
-    func testSwitchingTabsMovesTheSamplingWithoutOverlap() async {
-        let live = sampling()
+    func testSwitchingTabsMovesTheWatchWithoutOverlap() async {
+        let live = await sampling()
         await live.setDemand([.disk], onSample: ignore)
         await live.setDemand([.network], onSample: ignore)
         let running = await live.running()
-        XCTAssertEqual(running, [.network])
+        XCTAssertEqual(running, [.disk: .background, .network: .watched])
+        await live.stop()
     }
 
     func testDiskSwitchedOffIsNotStartedByDemand() async {
-        let live = sampling(enabled: [.network])
+        let live = await sampling(enabled: [])
         await live.setDemand([.disk], onSample: ignore)
         let running = await live.running()
-        XCTAssertEqual(running, [])
+        XCTAssertEqual(running, [:])
     }
 
     func testSwitchingDiskOffStopsARunningReading() async {
-        let live = sampling()
+        let live = await sampling(enabled: [.disk])
         await live.setDemand([.disk], onSample: ignore)
         await live.setEnabled(.disk, false)
         let off = await live.running()
-        XCTAssertEqual(off, [])
+        XCTAssertEqual(off, [:])
         await live.setEnabled(.disk, true)
         let on = await live.running()
-        XCTAssertEqual(on, [.disk])
+        XCTAssertEqual(on, [.disk: .watched])
+        await live.stop()
+    }
+
+    /// Switched off drops the ring: the next sample has nothing to measure
+    /// from.
+    func testSwitchingDiskOffDropsTheSeries() async throws {
+        let disk = DiskActivityMonitor(readCounters: { [DiskDriverCounters(id: 1, bytes: .zero)] })
+        let live = LiveSampling(network: .readingNothing(), disk: disk, enabled: [.disk])
+        await live.start()
+        _ = await disk.sampleOnce(now: Date() + 1)
+        let before = await disk.sampleOnce(now: Date() + 2)
+        XCTAssertFalse(try XCTUnwrap(before).rates.isEmpty)
+        await live.setEnabled(.disk, false)
+        let after = await disk.sampleOnce(now: Date() + 3)
+        XCTAssertEqual(after?.rates, [])
+    }
+
+    func testTheBackgroundPublishesNothing() async {
+        let read = expectation(description: "a background read")
+        read.assertForOverFulfill = false
+        let disk = DiskActivityMonitor(readCounters: {
+            read.fulfill()
+            return []
+        })
+        let live = LiveSampling(network: .readingNothing(), disk: disk, enabled: [.disk])
+        let published = LockedValue(0)
+        await live.setDemand([]) { _ in published.update { $0 += 1 } }
+        await live.start()
+        await fulfillment(of: [read], timeout: 5)
+        await live.stop()
+        XCTAssertEqual(published.load(), 0)
     }
 
     func testStopIsTerminal() async {
-        let live = sampling()
-        await live.setDemand([.disk], onSample: ignore)
+        let live = await sampling()
         await live.stop()
         await live.setDemand([.disk], onSample: ignore)
         let running = await live.running()
-        XCTAssertEqual(running, [])
+        XCTAssertEqual(running, [:])
     }
 
     func testARunningDiskDeliversItsSamples() async {
-        let live = sampling()
+        let live = await sampling()
         let delivered = expectation(description: "a sample")
         delivered.assertForOverFulfill = false
         await live.setDemand([.disk]) { sample in
@@ -388,7 +435,11 @@ final class DiskLiveSamplingTests: XCTestCase {
 final class DiskActivityHostTests: XCTestCase {
     private let reading = DiskActivityReading(
         observedAt: Date(timeIntervalSince1970: 1_790_000_000),
-        rates: [DiskRate(read: 42_000_000, written: 3_100_000)])
+        rates: [
+            RatePoint(
+                at: Date(timeIntervalSince1970: 1_790_000_000),
+                rate: DiskRate(read: 42_000_000, written: 3_100_000))
+        ])
 
     func testASampleNobodyAskedForIsDropped() {
         let host = UsageEngineHost()
@@ -496,41 +547,46 @@ final class DiskActivityEngineTests: XCTestCase {
                 DiskReading(
                     observedAt: now, home: nil, purgeable: 0, physicalMemory: 1_024, volumes: [])
             }),
-            networkMonitor: NetworkMonitor(
-                readCounters: { [] }, readPrimary: { nil }, readDisplayName: { _ in nil },
-                readWiFi: { _ in nil }),
+            networkMonitor: .readingNothing(),
             diskActivityMonitor: disk)
     }
 
-    func testTheEngineSamplesOnlyWhileAPageAsks() async {
+    func testTheEngineLogsInTheBackgroundAndSamplesForAPage() async {
         let engine = makeEngine()
-        let idle = await disk.isRunning
-        XCTAssertFalse(idle)
+        let idle = await disk.cadence
+        XCTAssertNil(idle)
+        await engine.start { _ in }
+        let started = await disk.cadence
+        XCTAssertEqual(started, .background)
         await engine.setLiveDemand([.disk]) { _ in }
-        let asked = await disk.isRunning
-        XCTAssertTrue(asked)
+        let asked = await disk.cadence
+        XCTAssertEqual(asked, .watched)
         await engine.setLiveDemand([]) { _ in }
-        let released = await disk.isRunning
-        XCTAssertFalse(released)
+        let released = await disk.cadence
+        XCTAssertEqual(released, .background)
+        await engine.stop()
     }
 
     /// The disk switch covers the activity: off means no activity either.
     func testDiskOffMeansNoActivity() async {
         let engine = makeEngine(disk: false)
+        await engine.start { _ in }
         await engine.setLiveDemand([.disk]) { _ in }
         let running = await disk.isRunning
         XCTAssertFalse(running)
+        await engine.stop()
     }
 
     func testSwitchingTheDiskOffStopsTheSampling() async {
         let engine = makeEngine()
+        await engine.start { _ in }
         await engine.setLiveDemand([.disk]) { _ in }
         await engine.setDisk(enabled: false)
         let off = await disk.isRunning
         XCTAssertFalse(off)
         await engine.setDisk(enabled: true)
-        let on = await disk.isRunning
-        XCTAssertTrue(on)
+        let on = await disk.cadence
+        XCTAssertEqual(on, .watched)
         await engine.stop()
     }
 

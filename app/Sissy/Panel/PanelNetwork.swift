@@ -4,12 +4,13 @@ import SwiftUI
 /// and what they have carried since boot, or since the latest moment the
 /// counters can be vouched for, see `NetworkTotals`.
 ///
-/// **Sampled only while this page is on screen.** `UsagePanelView` asks for
-/// `LiveReading.network` while the tab is selected in an open panel, and the
-/// engine samples once a second until the tab switches or the panel closes;
-/// with the page gone nothing samples at all. So the page opens on a dash and
-/// a line that starts at its right edge, and a series never spans minutes
-/// nobody watched.
+/// **Sampled once a second only while this page is on screen.**
+/// `UsagePanelView` asks for `LiveReading.network` while the tab is selected
+/// in an open panel, and the engine samples once a second until the tab
+/// switches or the panel closes; with the page gone the engine reads only the
+/// byte counters, every five seconds, and publishes nothing, see
+/// `LiveCadence`. So the page opens on the last two minutes, and the link and
+/// the signal are read only while it is drawn.
 ///
 /// **The one view that reads the sample.** `engine.networkReading` is read in
 /// this body and nowhere else, so a sample invalidates this page and not the
@@ -49,7 +50,8 @@ struct PanelNetwork: View {
         return PanelGroup {
             VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
                 headline(reading)
-                NetworkSparkline(rates: reading?.rates ?? [], hovered: $hovered)
+                NetworkSparkline(
+                    rates: reading?.rates ?? [], now: reading?.observedAt ?? Date(), hovered: $hovered)
                 Divider()
                 VStack(alignment: .leading, spacing: Self.rowSpacing) {
                     row("Interface", value: UsageFormat.networkInterface(reading?.interface))
@@ -126,7 +128,8 @@ struct PanelNetwork: View {
 /// and write in the same pair, so the two tabs colour the same two ideas the
 /// same way.
 struct NetworkSparkline: View {
-    let rates: [NetworkRate]
+    let rates: [RatePoint<NetworkRate>]
+    let now: Date
     @Binding var hovered: Int?
 
     static let downTint = Color.blue
@@ -136,11 +139,14 @@ struct NetworkSparkline: View {
 
     var body: some View {
         RateSparkline(
-            points: rates.map { ($0.received, $0.sent) }, firstTint: Self.downTint,
+            points: rates.map { .init(at: $0.at, first: $0.rate.received, second: $0.rate.sent) },
+            now: now,
+            firstTint: Self.downTint,
             secondTint: Self.upTint, scaleFloor: Self.scaleFloor,
             label: "Network rate over the last two minutes",
             figures: {
-                UsageFormat.networkDown(rates[$0].received) + " · " + UsageFormat.networkUp(rates[$0].sent)
+                UsageFormat.networkDown(rates[$0].rate.received) + " · "
+                    + UsageFormat.networkUp(rates[$0].rate.sent)
             },
             hovered: $hovered)
     }

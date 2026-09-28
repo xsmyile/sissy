@@ -1,16 +1,80 @@
 import Foundation
 
-/// A reading the engine takes only while the page that shows it is on screen.
+/// A reading whose rate the engine logs in the background and publishes only
+/// while the page that shows it is on screen.
 ///
-/// **A page asks, the engine samples.** The rest of the engine's modules are
-/// read whether anybody is looking or not, because each is cheap at the pace
-/// it runs and what it answers is still true when the panel opens. A rate a
-/// second is neither: it is only worth taking while it is being watched, and
-/// what it answered a minute ago is not a reading of now. So the panel says
-/// which of these its open page draws, and nothing else starts them.
+/// **A page asks, the engine publishes.** A rate a second is only worth
+/// taking while it is being watched, so the panel says which of these its open
+/// page draws and only that page is sent samples. What is kept with nobody
+/// looking is the counters' last two minutes at `LiveCadence.background`, so
+/// the page opens on a line rather than on an empty axis, decided 2026-09-28.
 enum LiveReading: Hashable, Sendable, CaseIterable {
     case network
     case disk
+}
+
+/// How often a live monitor reads its counters, and what a gap is at that
+/// pace.
+///
+/// **Two cadences and one series.** While the page that draws a reading is on
+/// screen its monitor reads once a second and publishes each sample; with the
+/// page gone and the switch on it reads every five seconds and publishes
+/// nothing, so the page opens on the last `window` rather than on an empty
+/// axis. The two cadences feed one series, which is why every point carries
+/// its time and the sparklines place it by that time rather than by its index.
+///
+/// **What the background costs.** Measured 2026-09-28 on a Mac16,8 running
+/// macOS 27.0, with `LiveSampling` and both monitors built with `-O` into a
+/// harness reading the real counters for 300 s: 54 wakeups, 5.0 to 6.0 s
+/// apart and 5.7 s on average, so macOS does take the tolerance; the two
+/// counter reads cost 0.52 ms of CPU a wakeup, cold where a read a second is
+/// warm, and the process 0.14 ms a second against 0.001 ms for the same
+/// harness idle. That is about a tenth of the 1.2 to 2.0 ms a second that
+/// reading once a second costs, which is what the user declined.
+enum LiveCadence: Sendable, Equatable {
+    /// The page is on screen, and each sample is published to it.
+    case watched
+    /// The switch is on and no page draws the reading: the counters are read
+    /// and the series kept, and nothing leaves the monitor.
+    case background
+
+    /// How much of the series is kept, which is what the sparklines draw.
+    static let window: TimeInterval = 120
+
+    /// How many steps of the cadence a gap may span before it restarts the
+    /// series.
+    ///
+    /// Three is two missed samples. A sample late by its tolerance, or by a
+    /// cooperative pool that held it up, is inside the bound at either pace;
+    /// one that missed two is a Mac that slept or a process that was not
+    /// scheduled, and the rate averaged over that would be drawn as a line
+    /// across seconds nobody measured. Relative to the cadence rather than
+    /// fixed, because at five seconds a fixed three-second bound would call
+    /// every step a gap, and at one second a fifteen-second bound would draw
+    /// a sleep's first seconds as a measurement.
+    static let gapSteps: Double = 3
+
+    var interval: Duration {
+        switch self {
+        case .watched: .seconds(1)
+        case .background: .seconds(5)
+        }
+    }
+
+    /// The leeway the sleep is given so macOS can coalesce the wakeup with
+    /// others. None while watched, which is the pace the page's figures
+    /// tick at; a fifth of the step in the background, where nobody sees the
+    /// sample land.
+    var tolerance: Duration? {
+        switch self {
+        case .watched: nil
+        case .background: .seconds(1)
+        }
+    }
+
+    /// The longest gap after a sample taken at this cadence that still counts
+    /// as one step of the series.
+    var maximumGap: TimeInterval { Self.gapSteps * (interval / .seconds(1)) }
 }
 
 /// One sample of a `LiveReading`, as it travels to the page that asked for it.
@@ -19,21 +83,22 @@ enum LiveSample: Sendable, Equatable {
     case disk(DiskActivityReading)
 }
 
-/// Starts and stops the live readings against what the panel's page on screen
-/// asks for, and against each reading's own switch in `server.json`.
+/// Runs the live readings against each reading's own switch in `server.json`,
+/// and sets their cadence against what the panel's page on screen asks for.
 ///
-/// The engine holds one and forwards to it, so the rule "sampled only while
-/// wanted and switched on" is written once, here, whatever the reading. A
-/// reading runs exactly while it is in `demand`, in `enabled`, and this has
-/// not been stopped: `stop()` is terminal, because it is the engine's own, and
-/// a page asking afterwards must not start a monitor behind an engine that is
-/// gone.
+/// The engine holds one and forwards to it, so the rule is written once, here,
+/// whatever the reading. A reading runs while it is in `enabled`, this has been
+/// started and not stopped; it runs `LiveCadence.watched` and publishes while
+/// it is also in `demand`, and `LiveCadence.background` otherwise. `stop()` is
+/// terminal, because it is the engine's own, and a page asking afterwards must
+/// not start a monitor behind an engine that is gone.
 actor LiveSampling {
     private let network: NetworkMonitor
     private let disk: DiskActivityMonitor
     private var demand: Set<LiveReading> = []
     private var enabled: Set<LiveReading>
     private var onSample: (@Sendable (LiveSample) async -> Void)?
+    private var isStarted = false
     private var isStopped = false
 
     init(network: NetworkMonitor, disk: DiskActivityMonitor, enabled: Set<LiveReading>) {
@@ -58,42 +123,55 @@ actor LiveSampling {
         await apply()
     }
 
+    /// The engine's start: the switched-on readings begin their background
+    /// log. Before it a demand is held and not acted on.
+    func start() async {
+        isStarted = true
+        await apply()
+    }
+
     func stop() async {
         isStopped = true
         await apply()
     }
 
-    /// Which readings are running, for a test to assert on.
-    func running() async -> Set<LiveReading> {
-        var running: Set<LiveReading> = []
-        for reading in LiveReading.allCases where await isRunning(reading) {
-            running.insert(reading)
+    /// Which readings are running and at what cadence, for a test to assert
+    /// on.
+    func running() async -> [LiveReading: LiveCadence] {
+        var running: [LiveReading: LiveCadence] = [:]
+        for reading in LiveReading.allCases {
+            running[reading] = await cadence(of: reading)
         }
         return running
     }
 
-    private func isRunning(_ reading: LiveReading) async -> Bool {
+    private func cadence(of reading: LiveReading) async -> LiveCadence? {
         switch reading {
-        case .network: await network.isRunning
-        case .disk: await disk.isRunning
+        case .network: await network.cadence
+        case .disk: await disk.cadence
         }
     }
 
     private func apply() async {
         for reading in LiveReading.allCases {
-            let wanted = !isStopped && demand.contains(reading) && enabled.contains(reading)
+            let on = isStarted && !isStopped && enabled.contains(reading)
+            let publish = demand.contains(reading) ? onSample : nil
             switch reading {
             case .network:
-                if wanted, let onSample {
-                    await network.start { await onSample(.network($0)) }
-                } else {
+                if !on {
                     await network.stop()
+                } else if let publish {
+                    await network.run(publishing: { await publish(.network($0)) })
+                } else {
+                    await network.run(publishing: nil)
                 }
             case .disk:
-                if wanted, let onSample {
-                    await disk.start { await onSample(.disk($0)) }
-                } else {
+                if !on {
                     await disk.stop()
+                } else if let publish {
+                    await disk.run(publishing: { await publish(.disk($0)) })
+                } else {
+                    await disk.run(publishing: nil)
                 }
             }
         }
