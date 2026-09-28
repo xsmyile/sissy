@@ -17,6 +17,9 @@ final class SissyModel {
     let engine: UsageEngineHost
     let loginItem: LoginItemController
     let updates: UpdateController
+    /// The Disk tab's confirmed removals, held for the app's lifetime so one
+    /// outlives the transient panel that confirmed it.
+    let diskCleanup = DiskCleanupHost()
 
     /// `loginItem` is injected so a test can pin the lookup to a service that
     /// is definitely not registered, rather than letting whatever is on the

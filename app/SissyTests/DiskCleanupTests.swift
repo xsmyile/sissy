@@ -525,64 +525,131 @@ final class DiskCleanupTests: XCTestCase {
 
     // MARK: Model
 
-    /// Rows are the caches that take room; a clean sizes its row again and
-    /// keeps it, with what it removed, until the panel closes.
+    /// A press sizes the cache again, so the question names what will go now
+    /// rather than what the cache took when the panel opened.
     @MainActor
-    func testModelSizesThenCleansOneRow() async throws {
+    func testConfirmationResizesTheCache() async throws {
         let root = try root(.uv)
         try write(root.appendingPathComponent("archive-v0/wheel"))
-        let model = DiskCleanupModel(cleaner: cleaner)
-
+        let model = DiskCleanupModel(host: DiskCleanupHost(cleaner: cleaner))
         model.measure()
         try await waitUntil { model.measured }
-        XCTAssertEqual(model.rows, [.uv])
-        let file = allocated(root.appendingPathComponent("archive-v0/wheel"))
+        let measured = model.size(of: .uv)
+        try write(root.appendingPathComponent("archive-v0/refilled"), bytes: 200_000)
 
-        model.clean(.uv)
-        XCTAssertEqual(model.cleaning, .uv)
-        try await waitUntil { model.cleaning == nil }
+        model.propose(.uv)
+        try await waitUntil { model.confirmation != nil }
 
-        XCTAssertEqual(model.rows, [.uv])
-        XCTAssertEqual(model.sizes[.uv], 0)
-        let report = try XCTUnwrap(model.outcomes[.uv]?.result.get())
+        XCTAssertEqual(model.confirmation?.target, .uv)
+        XCTAssertGreaterThan(model.confirmation?.bytes ?? 0, measured)
+        XCTAssertEqual(try contents(root.appendingPathComponent("archive-v0")), ["refilled", "wheel"])
+    }
+
+    /// A press on a cache whose tool is at work asks nothing and says so.
+    @MainActor
+    func testPressOnACacheInUseSaysWhichTool() async throws {
+        let root = try root()
+        try write(root.appendingPathComponent("entry"))
+        let model = DiskCleanupModel(host: DiskCleanupHost(cleaner: makeCleaner(running: [.npm])))
+        model.measure()
+        try await waitUntil { model.measured }
+
+        model.propose(.npm)
+        try await waitUntil { model.preparing == nil }
+
+        XCTAssertNil(model.confirmation)
+        XCTAssertEqual(model.atWork[.npm], .npm)
+        XCTAssertEqual(try contents(root), ["entry"])
+    }
+
+    /// A confirmed removal goes on when the panel closes, and the panel opened
+    /// next shows what it did; that panel closing drops the outcome.
+    @MainActor
+    func testRemovalSurvivesThePanelClosing() async throws {
+        let root = try root(.uv)
+        let file = root.appendingPathComponent("archive-v0/wheel")
+        try write(file)
+        let fileBlocks = allocated(file)
+        let host = DiskCleanupHost(cleaner: cleaner)
+        let first = DiskCleanupModel(host: host)
+        first.measure()
+        try await waitUntil { first.measured }
+        first.propose(.uv)
+        try await waitUntil { first.confirmation != nil }
+
+        first.confirm()
+        first.cancel()
+        XCTAssertEqual(host.removals[.uv], .running)
+        try await waitUntil { host.removals[.uv] != .running }
+
+        guard case .finished(let outcome) = host.removals[.uv] else { return XCTFail("no outcome") }
+        let report = try outcome.result.get()
         XCTAssertEqual(report.removed, 2)
-        XCTAssertEqual(report.removedBytes, file)
-        XCTAssertGreaterThan(file, 0)
+        XCTAssertEqual(report.removedBytes, fileBlocks)
+        XCTAssertGreaterThan(fileBlocks, 0)
+        XCTAssertEqual(outcome.remaining, 0)
         XCTAssertEqual(try contents(root), [])
+        let next = DiskCleanupModel(host: host)
+        XCTAssertEqual(next.rows, [.uv])
+        XCTAssertEqual(next.size(of: .uv), 0)
+        next.cancel()
+        XCTAssertNil(host.removals[.uv])
     }
 
     /// A root refused at the press keeps the size it was offered at, rather
     /// than reading as emptied.
     @MainActor
-    func testModelKeepsTheSizeOfARootRefusedAtThePress() async throws {
+    func testRemovalOfARefusedRootKeepsItsSize() async throws {
         let root = try root(.uv)
         try write(root.appendingPathComponent("wheel"))
-        let model = DiskCleanupModel(cleaner: cleaner)
+        let host = DiskCleanupHost(cleaner: cleaner)
+        let model = DiskCleanupModel(host: host)
         model.measure()
         try await waitUntil { model.measured }
-        let before = try XCTUnwrap(model.sizes[.uv])
+        model.propose(.uv)
+        try await waitUntil { model.confirmation != nil }
+        let offered = model.size(of: .uv)
         try FileManager.default.removeItem(at: root)
         try FileManager.default.createSymbolicLink(at: root, withDestinationURL: outside)
 
-        model.clean(.uv)
-        try await waitUntil { model.cleaning == nil }
+        model.confirm()
+        try await waitUntil { host.removals[.uv] != .running }
 
-        XCTAssertEqual(model.sizes[.uv], before)
-        XCTAssertEqual(model.outcomes[.uv], .init(result: .failure(.unsafeRoot)))
+        XCTAssertEqual(host.removals[.uv], .finished(.init(result: .failure(.unsafeRoot), remaining: nil)))
+        XCTAssertEqual(model.size(of: .uv), offered)
         XCTAssertEqual(try contents(outside), ["keep.bin"])
     }
 
-    /// Cancelling for the panel closing leaves no removal marked in flight.
+    /// Closing the panel cancels its sizing: nothing more is measured.
     @MainActor
-    func testModelCancelClearsTheRemovalInFlight() throws {
+    func testClosingThePanelCancelsTheSizing() async throws {
         let root = try root(.uv)
         try write(root.appendingPathComponent("wheel"))
-        let model = DiskCleanupModel(cleaner: cleaner)
+        let model = DiskCleanupModel(host: DiskCleanupHost(cleaner: cleaner))
+
         model.measure()
         model.cancel()
+        try await Task.sleep(for: .milliseconds(200))
 
-        XCTAssertNil(model.cleaning)
         XCTAssertFalse(model.measured)
+        XCTAssertTrue(model.sizes.isEmpty)
+    }
+
+    /// A sizing asked for while a removal of the same root runs waits for it,
+    /// which is what a panel opened again while the last one's walk unwinds
+    /// meets.
+    @MainActor
+    func testSizingWaitsForARemovalOfTheSameRoot() async throws {
+        let root = try root(.uv)
+        for index in 0..<50 { try write(root.appendingPathComponent("archive-v0/wheel-\(index)")) }
+        let host = DiskCleanupHost(cleaner: cleaner)
+
+        host.remove(.uv)
+        let size = await host.size(of: .uv)
+
+        XCTAssertEqual(size, 0)
+        try await waitUntil { host.removals[.uv] != .running }
+        XCTAssertEqual(try contents(root), [])
     }
 
     @MainActor
@@ -608,9 +675,10 @@ final class DiskCleanupCopyTests: XCTestCase {
 
     /// A partial removal says what stayed and why, beside what went.
     func testOutcomeSaysWhatWasLeft() {
-        let outcome = DiskCleanupModel.Outcome(
+        let outcome = DiskCleanupHost.Outcome(
             result: .success(
-                CleanupReport(removed: 40, removedBytes: 2_000_000_000, skipped: 1, failed: 3)))
+                CleanupReport(removed: 40, removedBytes: 2_000_000_000, skipped: 1, failed: 3)),
+            remaining: 0)
         XCTAssertEqual(
             DiskCleanupCopy.outcome(outcome, target: .npm),
             "Freed up to 2.0 GB · 3 items could not be removed · 1 item left as another user's or "

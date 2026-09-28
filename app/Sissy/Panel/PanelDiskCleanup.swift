@@ -11,6 +11,10 @@ import SwiftUI
 /// are caches their tools rebuild, and a Trash holding 9 GB of them frees
 /// nothing until it is emptied.
 ///
+/// A confirmed removal is `DiskCleanupHost`'s and goes on with the panel
+/// closed, so a row can open on `Removing…` or on what a removal did while
+/// nobody was looking.
+///
 /// Sizing takes seconds, so the rows land one at a time under a sizing line
 /// rather than holding the page; a cache that is not there or takes no room
 /// has no row, and a platter with none is not drawn once sizing is done. The
@@ -18,9 +22,6 @@ import SwiftUI
 /// here, since this platter can have no view to appear.
 struct DiskCleanupPlatter: View {
     let cleanup: DiskCleanupModel
-
-    /// The cache whose removal the page is asking about.
-    @State private var confirming: CleanupTarget?
 
     private static let rowSize: CGFloat = 12
     private static let captionSize: CGFloat = 11
@@ -50,40 +51,48 @@ struct DiskCleanupPlatter: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                Text(UsageFormat.storage(UInt64(cleanup.sizes[target] ?? 0)))
+                Text(UsageFormat.storage(UInt64(cleanup.size(of: target))))
                     .monospacedDigit()
                     .lineLimit(1)
-                if cleanup.cleaning == nil, confirming != target, (cleanup.sizes[target] ?? 0) > 0 {
-                    Button(DiskCleanupCopy.clean) { confirming = target }
+                if cleanup.canOffer(target) {
+                    Button(DiskCleanupCopy.clean) { cleanup.propose(target) }
                         .controlSize(.small)
                         .help(DiskCleanupCopy.cleanHelp(target))
                 }
             }
             .font(.system(size: Self.rowSize))
-            if confirming == target, cleanup.cleaning == nil {
-                confirmation(target)
-            }
-            if cleanup.cleaning == target {
-                progress(DiskCleanupCopy.cleaning)
-            } else if let outcome = cleanup.outcomes[target] {
-                caption(DiskCleanupCopy.outcome(outcome, target: target))
-            }
+            status(target)
         }
     }
 
-    private func confirmation(_ target: CleanupTarget) -> some View {
+    /// What the row says under its figure: the question, the removal running
+    /// or what it did, or the tool that held it.
+    @ViewBuilder
+    private func status(_ target: CleanupTarget) -> some View {
+        if cleanup.preparing == target {
+            progress(DiskCleanupCopy.preparing)
+        } else if let confirmation = cleanup.confirmation, confirmation.target == target {
+            confirm(confirmation)
+        } else if let removal = cleanup.host.removals[target] {
+            switch removal {
+            case .running: progress(DiskCleanupCopy.cleaning)
+            case .finished(let outcome): caption(DiskCleanupCopy.outcome(outcome, target: target))
+            }
+        } else if let tool = cleanup.atWork[target] {
+            caption(DiskCleanupCopy.toolAtWork(tool))
+        }
+    }
+
+    private func confirm(_ confirmation: DiskCleanupModel.Confirmation) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(DiskCleanupCopy.confirmTitle(target))
+            Text(DiskCleanupCopy.confirmTitle(confirmation.target))
                 .font(.system(size: 12, weight: .medium))
-            caption(DiskCleanupCopy.confirmBody(target, bytes: cleanup.sizes[target] ?? 0))
+            caption(DiskCleanupCopy.confirmBody(confirmation.target, bytes: confirmation.bytes))
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
-                Button(DiskCleanupCopy.confirmCancel) { confirming = nil }
+                Button(DiskCleanupCopy.confirmCancel) { cleanup.dismissConfirmation() }
                     .keyboardShortcut(.cancelAction)
-                Button(DiskCleanupCopy.confirmAction) {
-                    confirming = nil
-                    cleanup.clean(target)
-                }
+                Button(DiskCleanupCopy.confirmAction) { cleanup.confirm() }
             }
             .controlSize(.small)
         }
@@ -118,6 +127,7 @@ enum DiskCleanupCopy {
     static let sizing = "Sizing caches…"
     static let clean = "Clean…"
     static let cleaning = "Removing…"
+    static let preparing = "Checking…"
     static let confirmAction = "Clean"
     static let confirmCancel = "Cancel"
 
@@ -144,7 +154,7 @@ enum DiskCleanupCopy {
         }
     }
 
-    static func outcome(_ outcome: DiskCleanupModel.Outcome, target: CleanupTarget) -> String {
+    static func outcome(_ outcome: DiskCleanupHost.Outcome, target: CleanupTarget) -> String {
         let report: CleanupReport
         switch outcome.result {
         case .success(let counted): report = counted
