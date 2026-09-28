@@ -19,10 +19,9 @@ import Observation
 @Observable
 final class DiskCleanupModel {
     /// What emptying a cache did, as the removal counted it entry by entry,
-    /// or nil when its root could not be opened safely and nothing was
-    /// touched.
+    /// or why nothing was touched.
     struct Outcome: Equatable {
-        let report: CleanupReport?
+        let result: Result<CleanupReport, CleanupRefusal>
     }
 
     /// What each cache would free, keyed once it has been sized; 0 for one
@@ -74,11 +73,12 @@ final class DiskCleanupModel {
         outcomes[target] = nil
         let cleaner = cleaner
         cleaningTask = Task {
-            let report = await cleaner.clean(target)
-            let remaining = report == nil ? sizes[target] : await cleaner.size(of: target)
+            let result = await cleaner.clean(target)
+            let touched = (try? result.get()) != nil
+            let remaining = touched ? await cleaner.size(of: target) : sizes[target]
             guard !Task.isCancelled, let remaining else { return }
             sizes[target] = remaining
-            outcomes[target] = Outcome(report: report)
+            outcomes[target] = Outcome(result: result)
             cleaning = nil
             cleaningTask = nil
         }

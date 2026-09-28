@@ -145,8 +145,10 @@ enum DiskCleanupCopy {
     }
 
     static func outcome(_ outcome: DiskCleanupModel.Outcome, target: CleanupTarget) -> String {
-        guard let report = outcome.report else {
-            return "Nothing was removed: \(target.displayPath) could not be opened safely."
+        let report: CleanupReport
+        switch outcome.result {
+        case .success(let counted): report = counted
+        case .failure(let refusal): return refused(refusal, target: target)
         }
         var parts = ["Freed up to \(UsageFormat.storage(UInt64(max(0, report.removedBytes))))"]
         if report.failed > 0 { parts.append("\(items(report.failed)) could not be removed") }
@@ -154,6 +156,15 @@ enum DiskCleanupCopy {
             parts.append("\(items(report.skipped)) left as another user's or another volume's")
         }
         return parts.joined(separator: " · ")
+    }
+
+    static func refused(_ refusal: CleanupRefusal, target: CleanupTarget) -> String {
+        switch refusal {
+        case .unsafeRoot:
+            "Nothing was removed: \(target.displayPath) could not be opened safely."
+        case .walkInProgress:
+            "Nothing was removed: Sissy was still reading \(target.displayPath)."
+        }
     }
 
     private static func items(_ count: Int) -> String { count == 1 ? "1 item" : "\(count) items" }

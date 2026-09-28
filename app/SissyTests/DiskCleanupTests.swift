@@ -47,6 +47,12 @@ final class DiskCleanupTests: XCTestCase {
         return Int64(status.st_blocks) * 512
     }
 
+    private func inode(_ url: URL) throws -> ino_t {
+        var status = stat()
+        guard lstat(url.path, &status) == 0 else { throw CocoaError(.fileNoSuchFile) }
+        return status.st_ino
+    }
+
     private func contents(_ url: URL) throws -> [String] {
         try FileManager.default.contentsOfDirectory(atPath: url.path).sorted()
     }
@@ -104,7 +110,7 @@ final class DiskCleanupTests: XCTestCase {
         ]
         .map(allocated).reduce(0, +)
 
-        let report = await cleaner.clean(.npm)
+        let report = try await cleaner.clean(.npm).get()
 
         XCTAssertEqual(report, CleanupReport(removed: 6, removedBytes: freed))
         XCTAssertEqual(try contents(root), [])
@@ -122,9 +128,9 @@ final class DiskCleanupTests: XCTestCase {
             at: root.appendingPathComponent("file-escape"),
             withDestinationURL: outside.appendingPathComponent("keep.bin"))
 
-        let report = await cleaner.clean(.npm)
+        let report = try await cleaner.clean(.npm).get()
 
-        XCTAssertEqual(report?.removed, 2)
+        XCTAssertEqual(report.removed, 2)
         XCTAssertEqual(try contents(root), [])
         XCTAssertEqual(try contents(outside), ["keep.bin"])
     }
@@ -138,11 +144,11 @@ final class DiskCleanupTests: XCTestCase {
             at: nested.appendingPathComponent("escape"), withDestinationURL: outside)
 
         let size = await cleaner.size(of: .npm)
-        let report = await cleaner.clean(.npm)
+        let report = try await cleaner.clean(.npm).get()
 
         XCTAssertLessThan(size ?? .max, allocated(outside.appendingPathComponent("keep.bin")))
-        XCTAssertEqual(report?.removed, 4)
-        XCTAssertEqual(report?.isComplete, true)
+        XCTAssertEqual(report.removed, 4)
+        XCTAssertEqual(report.isComplete, true)
         XCTAssertEqual(try contents(root), [])
         XCTAssertEqual(try contents(outside), ["keep.bin"])
     }
@@ -154,7 +160,7 @@ final class DiskCleanupTests: XCTestCase {
         try FileManager.default.linkItem(
             at: outside.appendingPathComponent("keep.bin"), to: root.appendingPathComponent("shared"))
 
-        let report = await cleaner.clean(.npm)
+        let report = try await cleaner.clean(.npm).get()
 
         XCTAssertEqual(report, CleanupReport(removed: 1))
         XCTAssertEqual(try contents(outside), ["keep.bin"])
@@ -169,9 +175,9 @@ final class DiskCleanupTests: XCTestCase {
         let wrongCase = home.appendingPathComponent(".npm/_CACACHE")
         try write(wrongCase.appendingPathComponent("entry"))
 
-        let report = await cleaner.clean(.npm)
+        let result = await cleaner.clean(.npm)
 
-        XCTAssertNil(report)
+        XCTAssertEqual(result, .failure(.unsafeRoot))
         XCTAssertEqual(try contents(wrongCase), ["entry"])
     }
 
@@ -183,10 +189,10 @@ final class DiskCleanupTests: XCTestCase {
         try FileManager.default.createSymbolicLink(
             at: parent.appendingPathComponent("_cacache"), withDestinationURL: outside)
 
-        let report = await cleaner.clean(.npm)
+        let result = await cleaner.clean(.npm)
         let size = await cleaner.size(of: .npm)
 
-        XCTAssertNil(report)
+        XCTAssertEqual(result, .failure(.unsafeRoot))
         XCTAssertEqual(size, 0)
         XCTAssertEqual(try contents(outside), ["keep.bin"])
     }
@@ -199,9 +205,9 @@ final class DiskCleanupTests: XCTestCase {
         try FileManager.default.createSymbolicLink(
             at: home.appendingPathComponent(".npm"), withDestinationURL: outside)
 
-        let report = await cleaner.clean(.npm)
+        let result = await cleaner.clean(.npm)
 
-        XCTAssertNil(report)
+        XCTAssertEqual(result, .failure(.unsafeRoot))
         XCTAssertEqual(try contents(outside.appendingPathComponent("_cacache")), ["entry"])
     }
 
@@ -219,7 +225,7 @@ final class DiskCleanupTests: XCTestCase {
         let mine = allocated(root.appendingPathComponent("mine"))
 
         let size = await cleaner.size(of: .npm)
-        let report = await cleaner.clean(.npm)
+        let report = try await cleaner.clean(.npm).get()
 
         XCTAssertEqual(size, mine)
         XCTAssertEqual(report, CleanupReport(removed: 1, removedBytes: mine, skipped: 1))
@@ -239,11 +245,11 @@ final class DiskCleanupTests: XCTestCase {
         let foreignInode = status.st_ino
         let cleaner = DiskCleaner(home: home.path) { $0.st_ino != foreignInode && $0.st_uid == getuid() }
 
-        let report = await cleaner.clean(.npm)
+        let report = try await cleaner.clean(.npm).get()
 
-        XCTAssertEqual(report?.removed, 1)
-        XCTAssertEqual(report?.skipped, 1)
-        XCTAssertEqual(report?.failed, 0)
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertEqual(report.skipped, 1)
+        XCTAssertEqual(report.failed, 0)
         XCTAssertEqual(try contents(root.appendingPathComponent("outer")), ["foreign"])
     }
 
@@ -253,9 +259,9 @@ final class DiskCleanupTests: XCTestCase {
         try write(root.appendingPathComponent("entry"))
         let cleaner = DiskCleaner(home: home.path) { _ in false }
 
-        let report = await cleaner.clean(.npm)
+        let result = await cleaner.clean(.npm)
 
-        XCTAssertNil(report)
+        XCTAssertEqual(result, .failure(.unsafeRoot))
         XCTAssertEqual(try contents(root), ["entry"])
     }
 
@@ -269,13 +275,138 @@ final class DiskCleanupTests: XCTestCase {
         try write(root.appendingPathComponent("free"))
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
 
-        let report = await cleaner.clean(.npm)
+        let report = try await cleaner.clean(.npm).get()
 
-        XCTAssertEqual(report?.removed, 1)
-        XCTAssertEqual(report?.failed, 2)
-        XCTAssertEqual(report?.isComplete, false)
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertEqual(report.failed, 2)
+        XCTAssertEqual(report.isComplete, false)
         XCTAssertEqual(try contents(root), ["locked"])
         XCTAssertEqual(try contents(locked), ["one", "two"])
+    }
+
+    /// A directory renamed out of the root after it was opened is left where
+    /// it went, with everything in it, and the rest of the root still goes.
+    func testCleanLeavesADirectoryMovedOutOfTheRoot() async throws {
+        let root = try root()
+        try write(root.appendingPathComponent("moving/inner.bin"))
+        try write(root.appendingPathComponent("stays/other.bin"))
+        let moved = outside.appendingPathComponent("moved")
+        let cleaner = DiskCleaner(
+            home: home.path,
+            directoryOpened: { path in
+                guard path.hasSuffix("/moving") else { return }
+                try? FileManager.default.moveItem(atPath: path, toPath: moved.path)
+            })
+
+        let report = try await cleaner.clean(.npm).get()
+
+        XCTAssertEqual(report.failed, 1)
+        XCTAssertEqual(report.removed, 2)
+        XCTAssertEqual(try contents(moved), ["inner.bin"])
+        XCTAssertEqual(try contents(root), [])
+    }
+
+    /// A root on another device than the home, as a volume mounted at the root
+    /// or above it would be, is refused whole.
+    func testCleanRefusesARootOnAnotherVolume() async throws {
+        let root = try root()
+        try write(root.appendingPathComponent("entry"))
+        let rootInode = try inode(root)
+        let cleaner = DiskCleaner(
+            home: home.path,
+            device: { $0.st_ino == rootInode ? $0.st_dev &+ 1 : $0.st_dev })
+
+        let result = await cleaner.clean(.npm)
+        let size = await cleaner.size(of: .npm)
+
+        XCTAssertEqual(result, .failure(.unsafeRoot))
+        XCTAssertEqual(size, 0)
+        XCTAssertEqual(try contents(root), ["entry"])
+    }
+
+    /// An entry on another device inside a root is skipped with what is under
+    /// it, and counted.
+    func testCleanSkipsAnEntryOnAnotherVolume() async throws {
+        let root = try root()
+        let mounted = root.appendingPathComponent("mounted")
+        try write(mounted.appendingPathComponent("inside"))
+        try write(root.appendingPathComponent("local"))
+        let mountedInode = try inode(mounted)
+        let cleaner = DiskCleaner(
+            home: home.path,
+            device: { $0.st_ino == mountedInode ? $0.st_dev &+ 1 : $0.st_dev })
+
+        let report = try await cleaner.clean(.npm).get()
+
+        XCTAssertEqual(report.skipped, 1)
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertEqual(try contents(root), ["mounted"])
+        XCTAssertEqual(try contents(mounted), ["inside"])
+    }
+
+    /// A tree deeper than `maxDepth` is neither sized nor removed past it, and
+    /// the one directory the walk would not enter is counted once.
+    func testWalkStopsAtMaxDepth() async throws {
+        let root = try root()
+        let deepest = (0...DiskCleaner.maxDepth).reduce(root) { $0.appendingPathComponent("d\($1)") }
+        let file = deepest.appendingPathComponent("bottom.bin")
+        try write(file)
+        let fileBlocks = allocated(file)
+
+        let size = await cleaner.size(of: .npm)
+        let report = try await cleaner.clean(.npm).get()
+
+        XCTAssertEqual(size, 0)
+        XCTAssertGreaterThan(fileBlocks, 0)
+        XCTAssertEqual(report.failed, 1)
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    /// A directory swapped for a symlink between being examined and being
+    /// opened is not entered, and what the link points at is untouched.
+    func testCleanDoesNotEnterADirectorySwappedForASymlink() async throws {
+        let root = try root()
+        let swapped = root.appendingPathComponent("swapped")
+        try write(swapped.appendingPathComponent("inner"))
+        let swappedInode = try inode(swapped)
+        let outside = outside!
+        let cleaner = DiskCleaner(home: home.path) { status in
+            if status.st_ino == swappedInode {
+                try? FileManager.default.removeItem(at: swapped)
+                try? FileManager.default.createSymbolicLink(at: swapped, withDestinationURL: outside)
+            }
+            return status.st_uid == getuid()
+        }
+
+        let report = try await cleaner.clean(.npm).get()
+
+        XCTAssertEqual(report.failed, 1)
+        XCTAssertEqual(try contents(outside), ["keep.bin"])
+    }
+
+    /// A directory swapped for another directory in that moment is not
+    /// entered either: the one opened is not the inode that was examined.
+    func testCleanDoesNotEnterADirectorySwappedForAnother() async throws {
+        let root = try root()
+        let swapped = root.appendingPathComponent("swapped")
+        try write(swapped.appendingPathComponent("inner"))
+        let other = outside.appendingPathComponent("other")
+        try write(other.appendingPathComponent("theirs"))
+        let swappedInode = try inode(swapped)
+        let aside = outside.appendingPathComponent("aside")
+        let cleaner = DiskCleaner(home: home.path) { status in
+            if status.st_ino == swappedInode {
+                try? FileManager.default.moveItem(at: swapped, to: aside)
+                try? FileManager.default.moveItem(at: other, to: swapped)
+            }
+            return status.st_uid == getuid()
+        }
+
+        let report = try await cleaner.clean(.npm).get()
+
+        XCTAssertEqual(report.failed, 1)
+        XCTAssertEqual(try contents(swapped), ["theirs"])
     }
 
     /// A walk cancelled before it starts removes nothing and says it stopped.
@@ -285,7 +416,7 @@ final class DiskCleanupTests: XCTestCase {
         let cancellation = CleanupCancellation()
         cancellation.cancel()
 
-        let report = cleaner.clean(.npm, cancellation: cancellation)
+        let report = try cleaner.clean(.npm, cancellation: cancellation).get()
         let size = cleaner.size(of: .npm, cancellation: cancellation)
 
         XCTAssertEqual(report, CleanupReport(cancelled: true))
@@ -306,7 +437,7 @@ final class DiskCleanupTests: XCTestCase {
         model.measure()
         try await waitUntil { model.measured }
         XCTAssertEqual(model.rows, [.uv])
-        let before = try XCTUnwrap(model.sizes[.uv])
+        let file = allocated(root.appendingPathComponent("archive-v0/wheel"))
 
         model.clean(.uv)
         XCTAssertEqual(model.cleaning, .uv)
@@ -314,8 +445,10 @@ final class DiskCleanupTests: XCTestCase {
 
         XCTAssertEqual(model.rows, [.uv])
         XCTAssertEqual(model.sizes[.uv], 0)
-        XCTAssertEqual(model.outcomes[.uv]?.report?.removed, 2)
-        XCTAssertEqual(model.outcomes[.uv]?.report?.removedBytes, before)
+        let report = try XCTUnwrap(model.outcomes[.uv]?.result.get())
+        XCTAssertEqual(report.removed, 2)
+        XCTAssertEqual(report.removedBytes, file)
+        XCTAssertGreaterThan(file, 0)
         XCTAssertEqual(try contents(root), [])
     }
 
@@ -336,7 +469,7 @@ final class DiskCleanupTests: XCTestCase {
         try await waitUntil { model.cleaning == nil }
 
         XCTAssertEqual(model.sizes[.uv], before)
-        XCTAssertEqual(model.outcomes[.uv], .init(report: nil))
+        XCTAssertEqual(model.outcomes[.uv], .init(result: .failure(.unsafeRoot)))
         XCTAssertEqual(try contents(outside), ["keep.bin"])
     }
 
@@ -377,7 +510,8 @@ final class DiskCleanupCopyTests: XCTestCase {
     /// A partial removal says what stayed and why, beside what went.
     func testOutcomeSaysWhatWasLeft() {
         let outcome = DiskCleanupModel.Outcome(
-            report: CleanupReport(removed: 40, removedBytes: 2_000_000_000, skipped: 1, failed: 3))
+            result: .success(
+                CleanupReport(removed: 40, removedBytes: 2_000_000_000, skipped: 1, failed: 3)))
         XCTAssertEqual(
             DiskCleanupCopy.outcome(outcome, target: .npm),
             "Freed up to 2.0 GB · 3 items could not be removed · 1 item left as another user's or "

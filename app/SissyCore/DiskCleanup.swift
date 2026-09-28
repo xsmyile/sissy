@@ -70,12 +70,23 @@ struct CleanupReport: Sendable, Equatable {
     /// Entries left alone because another user owns them or because they sit
     /// on another volume.
     var skipped = 0
-    /// Entries the filesystem refused to list, open or remove.
+    /// Entries the filesystem refused to list, open or remove, and
+    /// directories left alone because they were no longer where the walk
+    /// found them.
     var failed = 0
-    /// Whether the removal stopped because the page that asked went away.
+    /// Whether the removal stopped because its task was cancelled.
     var cancelled = false
 
     var isComplete: Bool { skipped == 0 && failed == 0 && !cancelled }
+}
+
+/// Why a cleanup touched nothing at all.
+enum CleanupRefusal: Error, Equatable, Sendable {
+    /// The root could not be opened as the directory it names, on the home's
+    /// own volume, owned by this user.
+    case unsafeRoot
+    /// Another walk over the same root was still running.
+    case walkInProgress
 }
 
 /// A stop signal a filesystem walk on a dispatch thread polls between entries.
@@ -99,45 +110,72 @@ final class CleanupCancellation: Sendable {
 /// root is removed as a link, and whatever it points at is never read. A root
 /// that is refused, a symlinked `~/.cache` among them, is sized at 0 and so
 /// has no row: the cleanup fails closed rather than follow a link it cannot
-/// vouch for. What remains between `fstatat` and `unlinkat` is a file swapped
-/// in by someone with write access to a directory this user owns inside the
-/// root, which removes nothing that user could not already remove.
+/// vouch for.
 ///
-/// **Only this user's entries, on the root's own volume.** An entry another
-/// user owns, or one on another device, is skipped with everything under it,
-/// never deleted with elevated rights and never through a shell: `unlinkat` is
-/// the only call that removes anything, and the root itself is never removed,
-/// so the tool that owns the cache finds its directory where it left it.
+/// **A directory is emptied only while it is still inside the root.** A
+/// process of this user can rename a directory out of the root while the walk
+/// holds its descriptor, and every removal after that would land wherever it
+/// went. So before a directory's entries are listed its `F_GETPATH` must still
+/// be the path the walk reached it by, from the root's real path, or the
+/// directory is left and counted as failed. What remains is a rename between
+/// that check and the directory's last entry, which reaches no further than
+/// that one directory's own entries, and a file swapped in between `fstatat`
+/// and `unlinkat` by someone with write access to a directory this user owns
+/// inside the root, which removes nothing that user could not already remove.
+///
+/// **Only this user's entries, on the home's own volume.** A root on another
+/// device than the home, whether a RAM disk, an external drive or a share
+/// mounted at the root or at any component above it, is refused whole, and an
+/// entry another user owns or on another device is skipped with everything
+/// under it. Nothing is deleted with elevated rights or through a shell:
+/// `unlinkat` is the only call that removes anything, and the root itself is
+/// never removed, so the tool that owns the cache finds its directory where it
+/// left it.
+///
+/// **One walk per root at a time**, sizing or removal, so two can never race
+/// over one tree and the descriptors held stay bounded: at most `maxDepth`
+/// plus one per walk.
 ///
 /// **What is counted is the allocated size**, `st_blocks`, once per inode for
 /// a hard-linked file, and only for what a cleanup would reach: a directory
-/// that cannot be listed or entered is not counted, since a removal would
-/// leave it too. It is an upper
-/// bound on what a removal hands back: APFS clones share their blocks, and
-/// measured 2026-09-28 the private part of DerivedData was 5.8 GB of its
-/// 8.7 GB allocated and of the uv cache 3.1 of 6.0, while reading that private
-/// size tripled the walk, 7 s against 2 s for DerivedData.
+/// that cannot be listed or entered is not counted, its own blocks included,
+/// since a removal would leave it too. It is an upper bound on what a removal
+/// hands back: APFS clones share their blocks, and measured 2026-09-28 the
+/// private part of DerivedData was 5.8 GB of its 8.7 GB allocated and of the
+/// uv cache 3.1 of 6.0, while reading that private size tripled the walk, 7 s
+/// against 2 s for DerivedData.
 struct DiskCleaner: Sendable {
-    /// How deep a walk goes below a root. Each level holds one descriptor, so
-    /// the bound is what keeps a pathological tree from exhausting them;
-    /// measured 2026-09-28 the deepest entry under any root was 15 levels down.
-    static let maxDepth = 64
+    /// How deep a walk goes below a root. Each level holds one descriptor
+    /// against a soft limit of 256 for the whole app; measured 2026-09-28 the
+    /// deepest entry under any root was 15 levels down, so 24 leaves room for a
+    /// deeper cache and keeps two walks well inside the limit.
+    static let maxDepth = 24
 
     let home: String
     private let owns: @Sendable (stat) -> Bool
+    private let device: @Sendable (stat) -> dev_t
+    private let directoryOpened: (@Sendable (String) -> Void)?
 
-    /// `owns` is the ownership rule, a seam for tests that cannot make a file
-    /// another user owns; every caller in the app takes the default.
+    /// `owns` is the ownership rule and `device` the volume an entry is on,
+    /// seams for tests that cannot make a file another user owns or mount a
+    /// volume; `directoryOpened` hears the path of each directory the removal
+    /// has opened and not yet checked, so a test can move one. Every caller in
+    /// the app takes the defaults.
     init(
         home: String = NSHomeDirectory(),
-        owns: @escaping @Sendable (stat) -> Bool = { $0.st_uid == getuid() }
+        owns: @escaping @Sendable (stat) -> Bool = { $0.st_uid == getuid() },
+        device: @escaping @Sendable (stat) -> dev_t = { $0.st_dev },
+        directoryOpened: (@Sendable (String) -> Void)? = nil
     ) {
         self.home = home
         self.owns = owns
+        self.device = device
+        self.directoryOpened = directoryOpened
     }
 
     /// The bytes a cleanup of `target` would remove, 0 for a directory that
-    /// is not there or not safe to open, nil if cancelled.
+    /// is not there or not safe to open, nil if cancelled or if another walk
+    /// holds the root.
     ///
     /// Sizing DerivedData took 4.6 s of wall time for 9.2 GB in 156,979
     /// files, measured 2026-09-28 in a release build on a Mac under a build
@@ -148,25 +186,35 @@ struct DiskCleaner: Sendable {
         await Self.offThread { self.size(of: target, cancellation: $0) }
     }
 
-    /// Empties `target`, keeping the directory itself. Nil when its root could
-    /// not be opened safely, in which case nothing was touched.
-    func clean(_ target: CleanupTarget) async -> CleanupReport? {
+    /// Empties `target`, keeping the directory itself, or says why nothing was
+    /// touched.
+    func clean(_ target: CleanupTarget) async -> Result<CleanupReport, CleanupRefusal> {
         await Self.offThread { self.clean(target, cancellation: $0) }
     }
 
     func size(of target: CleanupTarget, cancellation: CleanupCancellation) -> Int64? {
+        guard claim(target) else { return nil }
+        defer { release(target) }
         guard let root = openRoot(target) else { return 0 }
         defer { close(root.descriptor) }
         var seen: Set<ino_t> = []
-        return allocated(in: root.descriptor, device: root.device, depth: 0, seen: &seen, cancellation)
+        return allocated(
+            in: root.descriptor, own: 0, depth: 0, seen: &seen,
+            Walk(device: root.device, cancellation: cancellation))
     }
 
-    func clean(_ target: CleanupTarget, cancellation: CleanupCancellation) -> CleanupReport? {
-        guard let root = openRoot(target) else { return nil }
+    func clean(_ target: CleanupTarget, cancellation: CleanupCancellation) -> Result<
+        CleanupReport, CleanupRefusal
+    > {
+        guard claim(target) else { return .failure(.walkInProgress) }
+        defer { release(target) }
+        guard let root = openRoot(target) else { return .failure(.unsafeRoot) }
         defer { close(root.descriptor) }
         var report = CleanupReport()
-        empty(root.descriptor, device: root.device, depth: 0, report: &report, cancellation)
-        return report
+        empty(
+            Directory(descriptor: root.descriptor, path: root.path), depth: 0, report: &report,
+            Walk(device: root.device, cancellation: cancellation))
+        return .success(report)
     }
 
     // MARK: Root
@@ -174,12 +222,34 @@ struct DiskCleaner: Sendable {
     private struct Root {
         let descriptor: Int32
         let device: dev_t
+        let path: String
+    }
+
+    /// The roots a walk holds, keyed by home and target, across every cleaner
+    /// in the process.
+    private static let walking = LockedValue<Set<String>>([])
+
+    private func walkKey(_ target: CleanupTarget) -> String { home + "\u{0}" + target.rawValue }
+
+    private func claim(_ target: CleanupTarget) -> Bool {
+        var claimed = false
+        Self.walking.update { claimed = $0.insert(walkKey(target)).inserted }
+        return claimed
+    }
+
+    private func release(_ target: CleanupTarget) {
+        Self.walking.update { $0.remove(walkKey(target)) }
     }
 
     private func openRoot(_ target: CleanupTarget) -> Root? {
         guard let realHome = Self.realPath(home) else { return nil }
         var descriptor = open(home, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard descriptor >= 0 else { return nil }
+        var homeStatus = stat()
+        guard fstat(descriptor, &homeStatus) == 0 else {
+            close(descriptor)
+            return nil
+        }
         for component in target.components {
             let next = openat(descriptor, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
             close(descriptor)
@@ -189,12 +259,12 @@ struct DiskCleaner: Sendable {
         var status = stat()
         let expected = ([realHome] + target.components).joined(separator: "/")
         guard fstat(descriptor, &status) == 0, Self.isDirectory(status), owns(status),
-            Self.path(of: descriptor) == expected
+            device(status) == device(homeStatus), Self.path(of: descriptor) == expected
         else {
             close(descriptor)
             return nil
         }
-        return Root(descriptor: descriptor, device: status.st_dev)
+        return Root(descriptor: descriptor, device: device(status), path: expected)
     }
 
     private static func realPath(_ path: String) -> String? {
@@ -215,6 +285,23 @@ struct DiskCleaner: Sendable {
     private struct Entry {
         let name: [CChar]
         let status: stat
+    }
+
+    /// An open directory and the path the walk reached it by.
+    private struct Directory {
+        let descriptor: Int32
+        let path: String
+
+        func child(_ name: [CChar], _ descriptor: Int32) -> Self {
+            Self(descriptor: descriptor, path: path + "/" + String(cString: name))
+        }
+    }
+
+    /// What every level of one walk shares: the root's volume and the stop
+    /// signal.
+    private struct Walk {
+        let device: dev_t
+        let cancellation: CleanupCancellation
     }
 
     /// A directory whose entries could not be read to the end.
@@ -261,65 +348,68 @@ struct DiskCleaner: Sendable {
 
     private static func isDirectory(_ status: stat) -> Bool { status.st_mode & S_IFMT == S_IFDIR }
 
+    private static func blocks(_ status: stat) -> Int64 { Int64(status.st_blocks) * 512 }
+
+    /// What a directory would free, its own blocks `own` included once its
+    /// entries could be read.
     private func allocated(
-        in descriptor: Int32, device: dev_t, depth: Int, seen: inout Set<ino_t>,
-        _ cancellation: CleanupCancellation
+        in descriptor: Int32, own: Int64, depth: Int, seen: inout Set<ino_t>, _ walk: Walk
     ) -> Int64? {
         guard let names = try? Self.names(in: descriptor) else { return 0 }
-        var total: Int64 = 0
+        var total = own
         for name in names {
-            if cancellation.isCancelled { return nil }
+            if walk.cancellation.isCancelled { return nil }
             var status = stat()
             guard fstatat(descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0,
-                status.st_dev == device, owns(status)
+                device(status) == walk.device, owns(status)
             else { continue }
             if Self.isDirectory(status) {
-                total += Int64(status.st_blocks) * 512
                 guard depth < Self.maxDepth,
                     let child = Self.openChild(name, in: descriptor, matching: status)
                 else { continue }
                 defer { close(child) }
                 guard
                     let inner = allocated(
-                        in: child, device: device, depth: depth + 1, seen: &seen, cancellation)
+                        in: child, own: Self.blocks(status), depth: depth + 1, seen: &seen, walk)
                 else { return nil }
                 total += inner
             } else if status.st_nlink <= 1 || seen.insert(status.st_ino).inserted {
-                total += Int64(status.st_blocks) * 512
+                total += Self.blocks(status)
             }
         }
         return total
     }
 
     private func empty(
-        _ descriptor: Int32, device: dev_t, depth: Int, report: inout CleanupReport,
-        _ cancellation: CleanupCancellation
+        _ directory: Directory, depth: Int, report: inout CleanupReport, _ walk: Walk
     ) {
-        guard let names = try? Self.names(in: descriptor) else {
+        guard Self.path(of: directory.descriptor) == directory.path,
+            let names = try? Self.names(in: directory.descriptor)
+        else {
             report.failed += 1
             return
         }
         for name in names {
-            if cancellation.isCancelled {
+            if walk.cancellation.isCancelled {
                 report.cancelled = true
                 return
             }
             var status = stat()
-            guard fstatat(descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else {
+            guard fstatat(directory.descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else {
                 report.failed += 1
                 continue
             }
-            guard status.st_dev == device, owns(status) else {
+            guard device(status) == walk.device, owns(status) else {
                 report.skipped += 1
                 continue
             }
             if Self.isDirectory(status) {
                 removeDirectory(
-                    Entry(name: name, status: status), in: descriptor, depth: depth, &report, cancellation)
+                    Entry(name: name, status: status), in: directory, depth: depth, &report, walk)
                 if report.cancelled { return }
-            } else if unlinkat(descriptor, name, 0) == 0 {
+            } else if unlinkat(directory.descriptor, name, 0) == 0 {
                 report.removed += 1
-                if status.st_nlink <= 1 { report.removedBytes += Int64(status.st_blocks) * 512 }
+                if status.st_nlink <= 1 { report.removedBytes += Self.blocks(status) }
             } else {
                 report.failed += 1
             }
@@ -329,22 +419,24 @@ struct DiskCleaner: Sendable {
     /// Empties a directory below the root, then removes it. One left holding
     /// what was skipped or refused inside it is not counted a second time.
     private func removeDirectory(
-        _ entry: Entry, in parent: Int32, depth: Int, _ report: inout CleanupReport,
-        _ cancellation: CleanupCancellation
+        _ entry: Entry, in parent: Directory, depth: Int, _ report: inout CleanupReport, _ walk: Walk
     ) {
         guard depth < Self.maxDepth,
-            let child = Self.openChild(entry.name, in: parent, matching: entry.status)
+            let descriptor = Self.openChild(entry.name, in: parent.descriptor, matching: entry.status)
         else {
             report.failed += 1
             return
         }
+        let child = parent.child(entry.name, descriptor)
+        directoryOpened?(child.path)
         let before = report
-        empty(child, device: entry.status.st_dev, depth: depth + 1, report: &report, cancellation)
-        close(child)
+        empty(child, depth: depth + 1, report: &report, walk)
+        close(descriptor)
         if report.cancelled { return }
         let leftInside = report.skipped != before.skipped || report.failed != before.failed
-        if unlinkat(parent, entry.name, AT_REMOVEDIR) == 0 {
+        if unlinkat(parent.descriptor, entry.name, AT_REMOVEDIR) == 0 {
             report.removed += 1
+            report.removedBytes += Self.blocks(entry.status)
         } else if !leftInside {
             report.failed += 1
         }
