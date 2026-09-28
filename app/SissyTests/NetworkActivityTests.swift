@@ -302,6 +302,20 @@ final class LiveSamplingTests: XCTestCase {
         XCTAssertEqual(running, [])
     }
 
+    /// A page asking again while the reading runs is the one its samples go
+    /// to from then on.
+    func testTheLatestCallerReceivesTheSamples() async {
+        let live = sampling()
+        let first = LockedValue(0)
+        let latest = expectation(description: "a sample to the second caller")
+        latest.assertForOverFulfill = false
+        await live.setDemand([.network]) { _ in first.update { $0 += 1 } }
+        await live.setDemand([.network]) { _ in latest.fulfill() }
+        await fulfillment(of: [latest], timeout: 5)
+        await live.stop()
+        XCTAssertLessThanOrEqual(first.load(), 1)
+    }
+
     func testARunningReadingDeliversItsSamples() async {
         let live = sampling()
         let delivered = expectation(description: "a sample")
@@ -322,14 +336,26 @@ final class NetworkHostTests: XCTestCase {
 
     func testASampleNobodyAskedForIsDropped() {
         let host = UsageEngineHost()
-        host.receive(.network(reading))
+        host.receive(.network(reading), generation: host.liveGeneration)
+        XCTAssertNil(host.networkReading)
+    }
+
+    /// A tab switched away and back inside a second asks for the same thing,
+    /// and the sample taken for the first visit belongs to a dropped series.
+    func testASampleFromAnEarlierDemandIsDropped() {
+        let host = UsageEngineHost()
+        host.setLiveDemand([.network])
+        let first = host.liveGeneration
+        host.setLiveDemand([])
+        host.setLiveDemand([.network])
+        host.receive(.network(reading), generation: first)
         XCTAssertNil(host.networkReading)
     }
 
     func testTheDemandGoingClearsTheReading() {
         let host = UsageEngineHost()
         host.setLiveDemand([.network])
-        host.receive(.network(reading))
+        host.receive(.network(reading), generation: host.liveGeneration)
         XCTAssertEqual(host.networkReading, reading)
         host.setLiveDemand([])
         XCTAssertNil(host.networkReading)

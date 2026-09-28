@@ -33,6 +33,7 @@ actor NetworkMonitor {
     /// is asked again only when the default route moves.
     private var interface: NetworkInterfaceName?
     private var pollTask: Task<Void, Never>?
+    private var onSample: (@Sendable (NetworkReading) async -> Void)?
 
     init(
         readCounters: @escaping @Sendable () -> [NetworkInterfaceCounters] = NetworkReader.counters,
@@ -48,22 +49,31 @@ actor NetworkMonitor {
 
     var isRunning: Bool { pollTask != nil }
 
-    /// Starts sampling, and leaves a monitor already running as it is.
+    /// Starts sampling, or hands a monitor already running the new callback:
+    /// the series goes on, and every sample from here on reaches the caller
+    /// that asked last rather than the one that asked first.
     func start(onSample: @Sendable @escaping (NetworkReading) async -> Void) {
+        self.onSample = onSample
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self, let reading = await self.sampleOnce() else { return }
-                await onSample(reading)
+                guard let self, let (reading, deliver) = await self.nextSample() else { return }
+                await deliver(reading)
                 do { try await Task.sleep(for: Self.sampleInterval) } catch { return }
             }
         }
+    }
+
+    private func nextSample() -> (NetworkReading, @Sendable (NetworkReading) async -> Void)? {
+        guard let onSample, let reading = sampleOnce() else { return nil }
+        return (reading, onSample)
     }
 
     /// Stops sampling and forgets everything the samples built.
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        onSample = nil
         previous = nil
         rates = []
         interface = nil

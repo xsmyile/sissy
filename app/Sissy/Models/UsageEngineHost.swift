@@ -61,6 +61,11 @@ final class UsageEngineHost {
     private(set) var networkReading: NetworkReading?
     /// What the panel's page on screen asked the engine to sample.
     @ObservationIgnored private var liveDemand: Set<LiveReading> = []
+    /// Which demand a sample was asked for under, moved on every change: a
+    /// sample taken for a tab that switched away and back inside one second
+    /// belongs to the series that was dropped, and the demand alone reads the
+    /// same before and after.
+    @ObservationIgnored private(set) var liveGeneration = 0
     /// The last demand sent, awaited by the next one so the engine hears
     /// them in the order the panel asked: two unstructured tasks carry no
     /// ordering of their own, and a close overtaken by the open before it
@@ -1073,6 +1078,7 @@ final class UsageEngineHost {
     func setLiveDemand(_ demand: Set<LiveReading>) {
         guard demand != liveDemand else { return }
         liveDemand = demand
+        liveGeneration += 1
         if !demand.contains(.network) { networkReading = nil }
         sendLiveDemand()
     }
@@ -1080,19 +1086,24 @@ final class UsageEngineHost {
     private func sendLiveDemand() {
         guard let engine else { return }
         let demand = liveDemand
+        let generation = liveGeneration
         let previous = liveDemandTask
         let host = self
         liveDemandTask = Task {
             await previous?.value
-            await engine.setLiveDemand(demand) { sample in await host.receive(sample) }
+            await engine.setLiveDemand(demand) { sample in
+                await host.receive(sample, generation: generation)
+            }
         }
     }
 
-    /// Where a live sample lands. One for a reading the panel has stopped
-    /// asking for is dropped: it was taken before the engine heard the stop,
-    /// and publishing it would put a reading back on a page that has gone.
-    /// Internal so a test can deliver one without an engine.
-    func receive(_ sample: LiveSample) {
+    /// Where a live sample lands. One asked for under an earlier demand is
+    /// dropped: it was taken before the engine heard the change, and
+    /// publishing it would put a reading back on a page that has gone, or an
+    /// old series on the one that replaced it. Internal so a test can deliver
+    /// one without an engine.
+    func receive(_ sample: LiveSample, generation: Int) {
+        guard generation == liveGeneration else { return }
         switch sample {
         case .network(let reading):
             guard network, liveDemand.contains(.network) else { return }
