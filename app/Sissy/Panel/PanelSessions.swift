@@ -16,13 +16,14 @@ import SwiftUI
 /// and a sub-agent is what a session spawned, which is how the two counters
 /// were always defined.
 ///
-/// **The window is this tab's own.** It used to be the headline's, which was
-/// wrong twice over: Usage shows none of these figures, so sharing the
-/// selection bought nothing, and changing it here moved the money headline
-/// behind the user's back. Local means it resets on the way out, which is the
-/// arrangement `PanelIdentities.showsAll` already has and for the same reason
-/// — a page that opens on the answer to the question before last has to be
-/// read before it can be glanced at.
+/// **The window is the panel's, chosen in the header.** It was this page's
+/// own for as long as the only other control was the headline's popup, since
+/// a picker on one page that moved another page's figures moved them behind
+/// the user's back. A control above every tab moves nothing out of sight, and
+/// three pickers answering one question in two sizes, each remembering
+/// differently, is what it replaced (decided 2026-09-28). The label names the
+/// window the figures are over, which is today where the archive has not
+/// counted the one chosen.
 ///
 /// **The counted half leads and the live half follows.** The live half
 /// changes length with every sweep, a session starting or exiting being a
@@ -34,6 +35,8 @@ import SwiftUI
 /// live half's own label, above the list it re-counts.
 struct PanelSessions: View {
     let block: UsagePanelSnapshot.AgentsBlock
+    /// The panel's window, which the counted half answers for.
+    let period: UsagePeriod
     /// When the sweep behind the live half was taken, which the tab's own
     /// label dates since the header above belongs to the whole panel.
     let observedAt: Date?
@@ -44,9 +47,8 @@ struct PanelSessions: View {
     /// reads as wrong.
     let refresh: () -> Void
 
-    @State private var window = UsagePanelSnapshot.AgentsBlock.defaultPeriod
-    /// Local to the page for the reason `window` is: coming back asks the
-    /// question again rather than showing the list opened last time.
+    /// Local to the tab: coming back asks the question again rather than
+    /// showing the list opened last time.
     @State private var showsAllProcesses = false
     /// The chart sample under the pointer, which the caption and every lane
     /// answer for while it is set.
@@ -70,10 +72,14 @@ struct PanelSessions: View {
     /// spends. The figure is written whatever it is; only the colour waits.
     private static let busyLoad: Double = 0.8
 
-    /// The chosen window, falling back to today for a period the archive has
-    /// stopped answering for while the page was open.
+    /// The window the counted half answers for: the panel's, or today where
+    /// the archive has not counted that one.
+    private var shownPeriod: UsagePeriod {
+        block.counted[period] == nil ? .today : period
+    }
+
     private var shown: UsagePanelSnapshot.AgentsBlock.Window? {
-        block.counted[window] ?? block.counted[.today]
+        block.counted[shownPeriod]
     }
 
     var body: some View {
@@ -283,11 +289,7 @@ struct PanelSessions: View {
     private var countedSection: some View {
         if let shown {
             PanelGroup {
-                HStack(spacing: 6) {
-                    SectionLabel(text: "Sessions and sub-agents")
-                    Spacer(minLength: 0)
-                    periodPicker
-                }
+                SectionLabel(text: UsageFormat.sessionsSectionLabel(shownPeriod))
             } content: {
                 VStack(alignment: .leading, spacing: Self.sectionSpacing) {
                     HStack(alignment: .top, spacing: Self.figureSpacing) {
@@ -405,10 +407,10 @@ struct PanelSessions: View {
 
     // MARK: Under the hood
 
-    /// What the cache did for the window the picker above names.
+    /// What the cache did for the window the counted half names.
     ///
     /// **Under the counted half and not under Now**, because it is a reading of
-    /// the same window: the picker is the counted section's and this follows
+    /// the same window: the counted section names it and this follows
     /// it, where the CPU and energy in Now are counted from when each process
     /// or Sissy started and would be mislabelled by any window at all.
     ///
@@ -452,18 +454,6 @@ struct PanelSessions: View {
                 .font(.system(size: Self.captionSize))
                 .foregroundStyle(.secondary)
         }
-    }
-
-    private var periodPicker: some View {
-        Picker("", selection: $window) {
-            ForEach(block.periods, id: \.self) { option in
-                Text(UsageFormat.periodLabel(option)).tag(option)
-            }
-        }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .fixedSize()
-        .controlSize(.small)
     }
 }
 

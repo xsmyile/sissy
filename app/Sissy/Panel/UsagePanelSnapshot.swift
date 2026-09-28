@@ -948,14 +948,11 @@ struct UsagePanelSnapshot: Equatable {
         /// Every window at once, keyed by period.
         ///
         /// Every one rather than the selected one, for the reason
-        /// `FrameData.history` carries them all: the choice is the page's own
-        /// and changing it must not cost a round trip to the engine and a
-        /// frame's wait. It is also what lets the page pick locally, which is
-        /// the whole point — the Overview shows none of this, so a shared
-        /// selection would have moved the money headline behind the user's
-        /// back.
+        /// `FrameData.history` carries them all: changing the panel's period
+        /// must not cost a round trip to the engine and a frame's wait. A
+        /// window the archive has not counted has no entry, and the tab then
+        /// answers for today and says so.
         let counted: [UsagePeriod: Window]
-        let periods: [UsagePeriod]
 
         /// One window's counts, whole and split by provider.
         struct Window: Equatable {
@@ -1154,14 +1151,6 @@ struct UsagePanelSnapshot: Equatable {
                 self.activity = activity
             }
         }
-
-        /// The window a page opens on when nothing has been chosen.
-        ///
-        /// Today rather than the widest, because the block above it is what is
-        /// running *now* and a page whose two halves answer for two different
-        /// spans reads as one reading. Widening is one click and resets on the
-        /// way out, exactly as the identities page's own fold does.
-        static let defaultPeriod: UsagePeriod = .today
     }
 
     /// Builds the block from a frame.
@@ -1228,8 +1217,7 @@ struct UsagePanelSnapshot: Equatable {
                     countedSince: memory.countedSince
                 ).charted(memory)
             },
-            counted: counted,
-            periods: [.today] + UsagePeriod.archived.filter { counted[$0] != nil })
+            counted: counted)
     }
 
     /// How many minutes the local day holding `instant` is made of, which is
@@ -1428,8 +1416,10 @@ struct UsagePanelSnapshot: Equatable {
                 unexpected: wrong.map(identityName), checked: identities.count),
             repository: wrong.count == 1 ? wrong[0].repository : nil)
     }
-    /// Which windows the headline may be put over: today, which needs no
+    /// Which windows the panel's period may be put over: today, which needs no
     /// archive, and each of the rest the frame actually carries a total for.
+    /// The header's control reads it too, so it offers what the headline can
+    /// answer.
     ///
     /// Read off the keys rather than from whether the frame sent anything at
     /// all. The engine sends all of them or none, so the difference is invisible
@@ -1439,7 +1429,7 @@ struct UsagePanelSnapshot: Equatable {
     /// here. Today alone is both the archive switched off and a fresh install,
     /// and then there is no control at all: four windows that all answer the
     /// number already on screen are a feature rather than a reading.
-    private static func availablePeriods(_ history: [UsagePeriod: UsageHistoryRollup])
+    static func availablePeriods(_ history: [UsagePeriod: UsageHistoryRollup])
         -> [UsagePeriod]
     {
         [.today] + UsagePeriod.archived.filter { history[$0] != nil }

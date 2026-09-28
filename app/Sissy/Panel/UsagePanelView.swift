@@ -394,6 +394,7 @@ struct UsagePanelView: View {
         case .sessions:
             PanelSessions(
                 block: snapshot.agents,
+                period: snapshot.period,
                 observedAt: live?.frame.agentMemory?.current.observedAt,
                 refreshing: model.engine.refreshingAgents,
                 refresh: { model.engine.refreshAgentProcesses() })
@@ -422,8 +423,7 @@ struct UsagePanelView: View {
             },
             openProvider: { page = .provider($0, account: $1) },
             openProjects: { page = .projects(nil, account: nil) },
-            openIdentities: { page = .identities(focus: $0) },
-            selectPeriod: { model.setUsagePeriod($0) }
+            openIdentities: { page = .identities(focus: $0) }
         )
     }
 
@@ -551,20 +551,78 @@ struct UsagePanelView: View {
 
             Spacer(minLength: 0)
 
-            headerControls
+            headerControls(live)
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, 12)
     }
 
     /// The app's own switches, which is why they are here and not on a
-    /// provider's page: what the Mac is doing about sleep, and the way into
-    /// Settings. Neither is about an account.
-    private var headerControls: some View {
+    /// provider's page: which window the panel reads over, what the Mac is
+    /// doing about sleep, and the way into Settings. None is about an account.
+    private func headerControls(_ live: SissyModel.LiveFrame?) -> some View {
         HStack(spacing: 6) {
+            periodButton(live.map { UsagePanelSnapshot.availablePeriods($0.frame.history) } ?? [])
             keepAwakeButton(model.keepAwake)
             settingsButton
         }
+    }
+
+    /// The panel's one period, which Usage, Sessions and Forge all read over.
+    ///
+    /// **One control for the panel, in the header**, decided 2026-09-28. The
+    /// period was a popup on Usage's headline, then Sessions and Forge each
+    /// grew one of their own: three answers to one question, in two sizes,
+    /// one remembered and two not, and the first of them moved a page the
+    /// user was not looking at. Up here it sits above every tab it moves.
+    ///
+    /// **An icon, so every reading names its window.** A circle beside the
+    /// keep-awake switch costs the header no width, and the price is that its
+    /// closed face does not say which window is chosen: the headline's
+    /// subline and the Sessions and Forge labels say it instead.
+    ///
+    /// Disabled on the Mac, which reads the moment and has no window, rather
+    /// than hidden: a header whose controls come and go with the tab moves
+    /// under the pointer. Absent while the archive answers nothing but today,
+    /// since a control whose every option answers the number on screen is a
+    /// control about a feature.
+    @ViewBuilder
+    private func periodButton(_ periods: [UsagePeriod]) -> some View {
+        if periods.count > 1 {
+            let chosen =
+                periods.contains(model.preferences.usagePeriod)
+                ? model.preferences.usagePeriod : .today
+            Menu {
+                Picker("Period", selection: periodBinding(chosen)) {
+                    ForEach(periods, id: \.self) { period in
+                        Text(UsageFormat.periodLabel(period)).tag(period)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Image(systemName: "calendar")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+                    .foregroundStyle(.secondary)
+                    .contentShape(.circle)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .glassEffect(.regular, in: .circle)
+            .disabled(page == .overview && tab == .mac)
+            .help(
+                page == .overview && tab == .mac
+                    ? "The Mac reads the moment and has no period"
+                    : "Period: " + UsageFormat.periodHeading(chosen)
+            )
+            .accessibilityLabel("Period")
+            .accessibilityValue(UsageFormat.periodHeading(chosen))
+        }
+    }
+
+    private func periodBinding(_ chosen: UsagePeriod) -> Binding<UsagePeriod> {
+        Binding(get: { chosen }, set: { model.setUsagePeriod($0) })
     }
 
     /// What the header says under its title: why there is no reading, or when

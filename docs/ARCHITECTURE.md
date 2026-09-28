@@ -468,8 +468,9 @@ repository committing under an unexpected name.
 `Panel/PanelOverview.swift` is the Usage tab. It answers what the selected
 window cost and whether there is room to keep working: the cost, one row per
 account carrying the window that binds, and the projects. While no forge is connected the identity line is
-there too, since it is all repositories have to say without one. The headline is over a period the user picks
-(`UsagePeriod`: today, 7d, 30d, all), persisted in `preferences.json` because it
+there too, since it is all repositories have to say without one. The headline is over the panel's period, which
+the user picks with the calendar in the header and Sessions and Forge read over
+too (`UsagePeriod`: today, 7d, 30d, all), persisted in `preferences.json` because it
 changes what is rendered and nothing about what is metered; the frame carries
 every window at once so switching costs no round trip to the engine. Today is
 never rolled up from the archive — the archive's copy of it is written behind
@@ -491,8 +492,9 @@ many sessions and sub-agents have run and how long the day was worked, then
 what the sessions running now are holding, with the sweep's age and the
 re-count on that block's own label. It was a page behind a door on Usage's
 providers label until 2026-09-28, which put a page as long as the Mac's and the
-Forge's together behind an 11 pt reading. The window is local to the tab,
-because sharing the headline's moved the money figure behind the user's back.
+Forge's together behind an 11 pt reading. The window is the panel's, from
+the header, and the counted block names it; where the archive has not counted
+that window it answers for today and its label says so.
 
 Five pages sit one level in from the tabs, and the way back returns to the tab
 each was opened from:
