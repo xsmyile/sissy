@@ -251,14 +251,7 @@ struct PanelTabBar: View {
 
     private static let indicatorID = "selection"
 
-    private nonisolated static let darkSelectedAlpha: CGFloat = 0.16
-    private nonisolated static let lightSelectedAlpha: CGFloat = 0.9
-
     /// Lighter than the bar in both appearances, the way the system's own
     /// segmented control draws its selection.
-    private static let selectedFill = Color(
-        nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            return NSColor(white: 1, alpha: isDark ? darkSelectedAlpha : lightSelectedAlpha)
-        })
+    private static let selectedFill = PanelMetrics.adaptiveWhite(dark: 0.16, light: 0.9)
 }
