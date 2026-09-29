@@ -561,18 +561,6 @@ enum GitHubActivityFeed {
     /// a `search` asked for `first: 1` is one request node whatever it counts.
     /// Re-measured 2026-09-18 with a hundred-comment page added to the same
     /// `viewer`: still 1 point.
-    /// The login a document's `data` names. A `currentUser` that is there
-    /// and null is a request GitLab served as nobody, which is the token's
-    /// refusal and used to read as a host that was not GitLab; a reply with
-    /// no `currentUser` at all is that.
-    static func username(from payload: [String: Any]) throws -> String {
-        if payload["currentUser"] is NSNull { throw ForgeReadFailure.unauthorized }
-        guard let user = payload["currentUser"] as? [String: Any],
-            let username = user["username"] as? String, !username.isEmpty
-        else { throw ForgeReadFailure.malformed }
-        return username
-    }
-
     static func document(
         now: Date, counters: Set<ForgeCounter> = ForgeCounter.all, calendar: Calendar = .current
     ) -> String {
