@@ -822,6 +822,25 @@ enum UsageFormat {
         }
     }
 
+    /// How much a live plot holds, in minutes, read off `LiveCadence.window`
+    /// so the copy under the Network and Disk plots cannot say two minutes
+    /// once the series holds some other length.
+    private static var liveWindowMinutes: Int {
+        Int(LiveCadence.window) / secondsPerMinute
+    }
+
+    /// The left end of a live plot's axis.
+    static var liveWindowStart: String { "\(liveWindowMinutes) min ago" }
+
+    /// The caption under the Disk tab's plot.
+    static var liveWindowCaption: String { "last \(liveWindowMinutes) minutes" }
+
+    /// A live plot's accessibility label: what it plots, over the window it
+    /// holds.
+    static func liveWindowLabel(_ subject: String) -> String {
+        "\(subject) over the last \(liveWindowMinutes) minutes"
+    }
+
     /// What the panel says under "No session logs found": the log trees
     /// Sissy is reading, and that none of them holds a log yet.
     ///

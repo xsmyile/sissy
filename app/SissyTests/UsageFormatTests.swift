@@ -372,6 +372,18 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertTrue(UsageFormat.noWindowsCaption(ProviderID.codex).contains("own turns"))
     }
 
+    // MARK: Live window
+
+    /// The copy under the live plots is read off the series' own length, so
+    /// at the monitor's two minutes it says two minutes.
+    func testLiveWindowCopyFollowsTheSeriesLength() {
+        XCTAssertEqual(LiveCadence.window, 120)
+        XCTAssertEqual(UsageFormat.liveWindowStart, "2 min ago")
+        XCTAssertEqual(UsageFormat.liveWindowCaption, "last 2 minutes")
+        XCTAssertEqual(
+            UsageFormat.liveWindowLabel("Network rate"), "Network rate over the last 2 minutes")
+    }
+
     // MARK: Empty log trees
 
     /// Only the trees Sissy is reading are named, so a provider switched off
