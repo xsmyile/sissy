@@ -106,14 +106,22 @@ actor LimitsBackoffStore {
     /// A write that fails is logged and nothing else: the block is already
     /// published and already being waited out, and all the record buys is the
     /// next launch.
+    ///
+    /// Every write also drops the entries whose deadline has passed, whoever
+    /// they belong to. An entry was otherwise taken out only by its own reader
+    /// answering again, so the key of an account since unlinked, or of a
+    /// reader that never ran again, stayed in the file for good.
     func record(_ until: Date?, for key: String) {
-        var updated = LimitsBackoffLedger.load(from: url)
+        let stored = LimitsBackoffLedger.load(from: url)
+        var updated = stored
+        let now = Date()
+        updated.blockedUntil = updated.blockedUntil.filter { $0.value > now }
         if let until {
-            guard updated.blockedUntil[key] != until else { return }
             updated.blockedUntil[key] = until
         } else {
-            guard updated.blockedUntil.removeValue(forKey: key) != nil else { return }
+            updated.blockedUntil.removeValue(forKey: key)
         }
+        guard updated != stored else { return }
         do {
             try LimitsBackoffLedger.save(updated, to: url)
         } catch {
