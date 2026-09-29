@@ -61,6 +61,23 @@ final class SissyModelKeepAwakeTests: XCTestCase {
         XCTAssertEqual(model.keepAwake.since, since)
     }
 
+    /// A request the engine never answers lets go once its window is out, and
+    /// letting go is a change the panel is told about: with no frame behind
+    /// it, nothing else would redraw the switch.
+    func testAnUnansweredRequestExpiresAsAnObservableChange() async {
+        let model = SissyModel()
+        model.setKeepAwake(.on)
+        let expired = expectation(description: "the request lets go")
+        withObservationTracking {
+            _ = model.keepAwake
+        } onChange: {
+            expired.fulfill()
+        }
+
+        await fulfillment(of: [expired], timeout: 10)
+        XCTAssertEqual(model.keepAwake.mode, .off)
+    }
+
     func testTheAnsweringFrameTakesOver() {
         let model = SissyModel()
         model.setKeepAwake(.on)
