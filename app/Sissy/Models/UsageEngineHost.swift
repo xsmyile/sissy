@@ -736,9 +736,9 @@ final class UsageEngineHost {
         codexResetReport = nil
     }
 
-    /// Re-reads one provider's out-of-band state. On Claude Code this is the
-    /// gesture that may raise the keychain dialog, which is why it is only
-    /// ever reached from a click.
+    /// Re-reads one provider's out-of-band state: every limits reader it has,
+    /// then the account and the plan. Reached only from a click, because each
+    /// reader it wakes is a request to the vendor.
     ///
     /// The engine re-emits when it is done, so the reading's age resets on its
     /// own and nothing here has to tell the panel the numbers moved.

@@ -127,21 +127,18 @@ struct UsagePanelView: View {
     /// Above and below every header's row, home's and each page's alike, so
     /// the tab bar and the page under a header start at one height.
     private static let headerVerticalPadding: CGFloat = 12
-    /// Larger than the legend's, because the header's title is 13 pt semibold
-    /// against the legend's 12 pt medium and it sits between a back chevron
-    /// and a 26 pt button. A mark sized for the quieter row reads as an
-    /// afterthought here.
     /// How far the glass under the keep-awake switch is tinted while a hold
     /// is in force. Enough to read as lit next to an untinted circle, short of
     /// a filled button — it is a state, not a selection.
     private static let heldGlassTint: Double = 0.22
+    /// Larger than the legend's, because the header's title is 13 pt semibold
+    /// against the legend's 12 pt medium and it sits between a back chevron
+    /// and a 26 pt button. A mark sized for the quieter row reads as an
+    /// afterthought here.
     private static let headerMarkSize: CGFloat = 18
     private static let headerTitleSize: CGFloat = 13
     private static let sissySize: CGFloat = 24
 
-    /// The provider the current page is about, when there is one and the frame
-    /// still carries it.
-    ///
     /// Which account the open page was aimed at, or nil on the Overview and
     /// for a vendor whose Overview row is not per account.
     private var openAccount: String? {
@@ -843,7 +840,10 @@ struct UsagePanelView: View {
     /// Colour carries the two axes separately. The glass tints while the Mac
     /// is actually being held; a mode that is armed and holding nothing keeps
     /// the tinted glyph without the tinted glass, so "armed" and "holding"
-    /// stay legible apart.
+    /// stay legible apart. That second state has two causes — an automatic
+    /// hold waiting for the agents to do something, and an assertion power
+    /// management refused — and they look alike because they are alike: the
+    /// Mac is free to sleep either way. The tooltip is what separates them.
     ///
     /// Blue rather than the amber it started as, for two reasons that agree.
     /// Claude's own mark is coral and renders a few points away in the same
@@ -851,10 +851,7 @@ struct UsagePanelView: View {
     /// provider. And on this platform orange is the colour of caution — the
     /// energy-impact column, the recording dot — where blue is the colour of
     /// a control that is engaged, which is what this is. `.blue` rather than
-    /// a literal, so it is the system's own and follows the appearance. That second state has two causes — an automatic hold
-    /// waiting for the agents to do something, and an assertion power
-    /// management refused — and they look alike because they are alike: the
-    /// Mac is free to sleep either way. The tooltip is what separates them.
+    /// a literal, so it is the system's own and follows the appearance.
     ///
     /// Toggling *and* choosing, from one control. A click is the switch it has
     /// always been, so the gesture people already have does not regress, and
