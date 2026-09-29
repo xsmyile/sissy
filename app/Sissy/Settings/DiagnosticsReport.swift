@@ -43,12 +43,17 @@ struct DiagnosticsReport {
         ].joined(separator: "\n")
     }
 
+    /// The report as it stands now. The `ccusage` sweep walks the version
+    /// managers' trees and reads a `package.json` per install, so it runs
+    /// off the main actor: a slow or network home would otherwise hold the
+    /// menu bar, the panel and Settings for the length of the walk.
     @MainActor
     static func current(
         model: SissyModel,
         bundle: Bundle = .main,
         processInfo: ProcessInfo = .processInfo
-    ) -> String {
+    ) async -> String {
+        let ccusage = await Task.detached { CcusageProbe.installs() }.value
         return text(
             Snapshot(
                 version: bundle.shortVersion,
@@ -58,16 +63,17 @@ struct DiagnosticsReport {
                 isWarm: model.engine.isWarm,
                 claudeWebSession: model.engine.claudeWebSession,
                 providers: model.currentFrame?.providers ?? [],
-                ccusage: CcusageProbe.installs()
+                ccusage: ccusage
             )
         )
     }
 
     @MainActor
-    static func copyToClipboard(model: SissyModel) {
+    static func copyToClipboard(model: SissyModel) async {
+        let report = await current(model: model)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(current(model: model), forType: .string)
+        pasteboard.setString(report, forType: .string)
     }
 
     /// `operatingSystemVersionString` reads "Version 26.0 (Build 25A354)".

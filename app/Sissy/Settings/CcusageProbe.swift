@@ -18,7 +18,7 @@ enum CcusageProbe {
     /// One `ccusage` found on disk. `version` is absent for an install whose
     /// layout does not carry one, which is itself worth reporting: it means
     /// neither of the two known distributions put it there.
-    struct Install: Equatable {
+    struct Install: Equatable, Sendable {
         let path: String
         let kind: Kind
         let version: String?
