@@ -963,6 +963,12 @@ func runClaudeLimitsParseTests() {
         ClaudeCredentialBlob.credentials(in: noToken) == nil,
         true
     )
+    let noExpiry = Data(#"{"claudeAiOauth":{"accessToken":"tok","expiresAt":"soon"}}"#.utf8)
+    expect(
+        "credentials with no numeric expiry keep the token and name no expiry",
+        ClaudeCredentialBlob.credentials(in: noExpiry).map { $0.accessToken == "tok" && $0.expiresAt == nil },
+        true
+    )
 
     // Measured shape of `~/.claude.json`: the plan reaches Sissy as
     // `oauthAccount.organizationType`, prefixed, where the CLI's own label
