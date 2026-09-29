@@ -254,12 +254,12 @@ The wider windows are stale rather than wrong, which is what the age on the row
 reports, and blanking them would throw away a reading the user can discount.
 
 **And the wait is taken in slices, because the cadence is chosen before the work
-starts.** `nextDelay` reads `lastActivity` when a round *finishes*, so a Mac that
+starts.** `nextDelay` reads the `ActivityClock` when a round *finishes*, so a Mac that
 was idle then and has agents working a minute later would keep the 30-minute
 interval for the rest of that wait — up to half an hour of the idle cadence
 running over exactly the stretch the 5-minute one exists for, which is also the
-stretch where these counters actually move. `noteActivity` cannot wake a sleeping
-loop: it is nonisolated and written from the frame path, which cannot afford to
+stretch where these counters actually move. `ActivityClock.note` cannot wake a
+sleeping loop: it is nonisolated and written from the frame path, which cannot afford to
 await the actor. So the wait sleeps in `activityCheck` slices and `waitIsOver`
 decides at each one — the delay is the ceiling, and a wait that has already
 covered `refreshInterval` ends as soon as agents are working. A slice costs a
