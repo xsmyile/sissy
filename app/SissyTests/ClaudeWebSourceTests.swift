@@ -231,6 +231,27 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertFalse(polling)
     }
 
+    /// A start that lands while the refusal is being announced is the user
+    /// switching the source back on, and it keeps its loop: the refused poll
+    /// ends its own loop before the announcement rather than after it.
+    func testAStartDuringTheRefusalsAnnouncementKeepsItsLoop() async {
+        let reads = LockedValue(0)
+        let source = source(
+            lookup: { _ in
+                reads.update { $0 += 1 }
+                return reads.load() == 1 ? .denied : .interactionRequired
+            },
+            fetch: { _, _ in throw UsageRequestError.malformedPayload })
+        let restarted = LockedValue(false)
+        await source.refresh {
+            guard !restarted.load() else { return }
+            restarted.update { $0 = true }
+            await source.start(userInitiated: true) {}
+        }
+        let polling = await source.loop.pollTask != nil
+        XCTAssertTrue(polling, "the start made during the announcement was dropped")
+    }
+
     /// Every reader is built for a session that was listed as stored, so an
     /// item that is not there by the time it is read is a linked session gone
     /// missing, not a Claude Code with no stored login.

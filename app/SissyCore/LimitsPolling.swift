@@ -132,8 +132,9 @@ extension LimitsPolling {
         let before = published.load()
         let delay = await readAndFetch(generation: stamp)
         guard isCurrent(stamp) else { return delay }
-        if published.load() != before { await onRefresh() }
-        if loop.halting, stamp == loop.generation { cancelRequests() }
+        let changed = published.load() != before
+        if loop.halting { cancelRequests() }
+        if changed { await onRefresh() }
         return delay
     }
 
@@ -144,7 +145,9 @@ extension LimitsPolling {
     /// Not `cancelRequests()` from inside the poll, which is what the readers
     /// did: that bumped the generation the poll's own publication is checked
     /// against, so the refusal never called `onRefresh` and reached the panel
-    /// only on some later emit.
+    /// only on some later emit. `refreshOnce` ends the loop once the poll is
+    /// judged current and before it announces, so a start the user makes
+    /// while the announcement is suspended finds no loop and gets one.
     func halt() {
         loop.halting = true
     }
