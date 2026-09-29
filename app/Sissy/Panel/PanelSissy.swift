@@ -8,10 +8,11 @@ struct PanelSissyBlinkGate {
     let isAsleep: Bool
 
     /// Asleep she never blinks: it would claim something is arriving
-    /// while nothing is reaching the app. The cooldown is the animator's, so both
-    /// surfaces pace their blinks the same way — each still keeps its own
-    /// clock, and a panel opened mid-cooldown is not in phase with the menu
-    /// bar.
+    /// while nothing is reaching the app. The cooldown is
+    /// `SissyMenuBarMotion.dataBlinkCooldown`, the one `StatusItemController`
+    /// paces the menu bar's blinks on, so both surfaces pace their blinks the
+    /// same way — each still keeps its own clock, and a panel opened
+    /// mid-cooldown is not in phase with the menu bar.
     func allows(at now: Date, lastBlinkAt: Date) -> Bool {
         guard motionEnabled, !reduceMotion, !isAsleep else { return false }
         return now.timeIntervalSince(lastBlinkAt) >= SissyMenuBarMotion.dataBlinkCooldown
