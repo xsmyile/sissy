@@ -25,19 +25,18 @@ final class UsageSnapshotFlushTests: XCTestCase {
     }
 
     private static let pollInterval: Duration = .milliseconds(50)
-    private static let readingDeadline: Duration = .seconds(10)
     private static let tokensPerTurn = 15
 
     func testAFlushWritesWhatTheThrottleHeldBack() async throws {
         try append(turn: "m1")
         let provider = tail()
-        let (readings, emitted) = AsyncStream.makeStream(of: Int.self)
-        await provider.start { today in emitted.yield(today.totalTokens) }
+        let (readings, onChange) = TailReadings.stream()
+        await provider.start(onChange: onChange)
         let snapshot = UsageStatePersistence.defaultURL(in: stateDir)
         try FileManager.default.removeItem(at: snapshot)
 
         try append(turn: "m2")
-        try await Self.waitUntil(readings, reach: 2 * Self.tokensPerTurn)
+        try await TailReadings.waitUntil(readings, reach: 2 * Self.tokensPerTurn)
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: snapshot.path),
             "the snapshot was rewritten inside its throttle")
@@ -86,26 +85,6 @@ final class UsageSnapshotFlushTests: XCTestCase {
         let observed = try XCTUnwrap(midScan.load(), "the cold scan emitted nothing")
         XCTAssertFalse(observed.warm, "the first emit came after the scan, so nothing was tested")
         XCTAssertEqual(observed.days, [], "a flush during the cold scan wrote a day it had half read")
-    }
-
-    /// Returns once the tail has published a reading of at least `tokens`,
-    /// which is the moment its poll has taken the line in.
-    private static func waitUntil(_ readings: AsyncStream<Int>, reach tokens: Int) async throws {
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask {
-                for await reading in readings where reading >= tokens { return }
-            }
-            group.addTask {
-                try await Task.sleep(for: readingDeadline)
-                throw ReadingMissed(tokens: tokens)
-            }
-            try await group.next()
-            group.cancelAll()
-        }
-    }
-
-    private struct ReadingMissed: Error {
-        let tokens: Int
     }
 
     private func tail() -> LocalUsageProvider {
