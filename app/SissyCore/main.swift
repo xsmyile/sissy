@@ -174,7 +174,6 @@ if args.contains("--scan") {
         var out: [String: ScanEntry] = [:]
         for p in providers {
             await p.start { _ in }
-            try? await Task.sleep(for: .seconds(1))
             let today = await p.current()
             let signals = p.currentSignals()
             out[p.id] = ScanEntry(
