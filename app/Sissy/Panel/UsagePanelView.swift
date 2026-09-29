@@ -124,6 +124,9 @@ struct UsagePanelView: View {
     /// 26 pt box around it would make the header's left edge read as heavier
     /// than its right.
     private static let backButtonSize: CGFloat = 20
+    /// Above and below every header's row, home's and each page's alike, so
+    /// the tab bar and the page under a header start at one height.
+    private static let headerVerticalPadding: CGFloat = 12
     /// Larger than the legend's, because the header's title is 13 pt semibold
     /// against the legend's 12 pt medium and it sits between a back chevron
     /// and a 26 pt button. A mark sized for the quieter row reads as an
@@ -498,53 +501,75 @@ struct UsagePanelView: View {
     /// age under the title is what answers a press that changed nothing: the
     /// rows stand still, so without it the button reads as broken.
     private func identitiesHeader(checkedAt: Date?) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                page = .overview
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: Self.backButtonSize, height: Self.backButtonSize)
-                    .contentShape(.rect)
+        subpageHeader(back: .overview, help: homeHelp, mark: nil, title: "Identities") {
+            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+                if let line = UsageFormat.identitiesReading(
+                    checkedAt: checkedAt, refreshing: model.engine.refreshingIdentities,
+                    now: context.date)
+                {
+                    Text(line)
+                        .font(.system(size: PanelMetrics.headlineMeta))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help(homeHelp)
+        } trailing: {
+            refreshButton(help: "Read every repository's commit identity again") {
+                model.engine.refreshIdentities()
+            }
+        }
+    }
+
+    /// The shell every page one level in shares: the way back, whose page
+    /// it is, the title with its line under it, and a control at the end.
+    ///
+    /// One shell rather than one per page, for the reason `backButton` is
+    /// one control: three headers each drawing their own were free to drift
+    /// a point apart, and a user moving between the pages reads that as the
+    /// panel jumping.
+    private func subpageHeader<Subtitle: View, Trailing: View>(
+        back destination: Page,
+        help: String,
+        mark: String?,
+        title: String,
+        @ViewBuilder subtitle: () -> Subtitle,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        HStack(spacing: 8) {
+            backButton(to: destination, help: help)
+
+            if let mark {
+                ProviderMark(id: mark, size: Self.headerMarkSize, textSize: nil)
+            }
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("Identities")
+                Text(title)
                     .font(.system(size: Self.headerTitleSize, weight: .semibold))
                     .lineLimit(1)
-                TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
-                    if let line = UsageFormat.identitiesReading(
-                        checkedAt: checkedAt, refreshing: model.engine.refreshingIdentities,
-                        now: context.date)
-                    {
-                        Text(line)
-                            .font(.system(size: PanelMetrics.headlineMeta))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                subtitle()
             }
 
             Spacer(minLength: 0)
 
-            Button {
-                model.engine.refreshIdentities()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
-                    .contentShape(.circle)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .glassEffect(.regular, in: .circle)
-            .help("Read every repository's commit identity again")
+            trailing()
         }
         .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
+        .padding(.vertical, Self.headerVerticalPadding)
+    }
+
+    /// The re-read at the end of a header, on glass beside the page's title
+    /// like the home header's switches.
+    private func refreshButton(help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .glassEffect(.regular, in: .circle)
+        .help(help)
     }
 
     private func header(_ live: SissyModel.LiveFrame?) -> some View {
@@ -570,7 +595,7 @@ struct UsagePanelView: View {
             headerControls(live)
         }
         .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
+        .padding(.vertical, Self.headerVerticalPadding)
     }
 
     /// The app's own switches, which is why they are here and not on a
@@ -720,29 +745,19 @@ struct UsagePanelView: View {
     /// because both of them have a list that folds and therefore a row that
     /// opens this one.
     private func projectsHeader(_ projects: UsagePanelSnapshot.ProjectsPage) -> some View {
-        HStack(spacing: 8) {
-            backButton(
-                to: projects.provider.map { .provider($0, account: openAccount) } ?? .overview,
-                help: projectsBackHelp(projects.provider))
-
-            if let provider = projects.provider {
-                ProviderMark(id: provider, size: Self.headerMarkSize, textSize: nil)
-            }
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Projects")
-                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
-                    .lineLimit(1)
-                Text(projects.subtitle)
-                    .font(.system(size: PanelMetrics.headlineMeta))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 0)
+        subpageHeader(
+            back: projects.provider.map { .provider($0, account: openAccount) } ?? .overview,
+            help: projectsBackHelp(projects.provider),
+            mark: projects.provider,
+            title: "Projects"
+        ) {
+            Text(projects.subtitle)
+                .font(.system(size: PanelMetrics.headlineMeta))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        } trailing: {
+            EmptyView()
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 
     /// The way back, which every page one level in carries in the same corner
@@ -802,42 +817,22 @@ struct UsagePanelView: View {
     private func providerHeader(
         _ row: UsagePanelSnapshot.ProviderRow, live: SissyModel.LiveFrame?, back: Page
     ) -> some View {
-        HStack(spacing: 8) {
-            backButton(
-                to: back,
-                help: back == .overview ? homeHelp : "Back to \(row.name)")
-
-            ProviderMark(id: row.id, size: Self.headerMarkSize, textSize: nil)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.name)
-                    .font(.system(size: Self.headerTitleSize, weight: .semibold))
-                    .lineLimit(1)
-
-                if back == .overview, let live {
-                    readingLine(
-                        live, holding: nil,
-                        refreshing: model.engine.refreshing.contains(row.id))
-                }
+        subpageHeader(
+            back: back,
+            help: back == .overview ? homeHelp : "Back to \(row.name)",
+            mark: row.id,
+            title: row.name
+        ) {
+            if back == .overview, let live {
+                readingLine(
+                    live, holding: nil,
+                    refreshing: model.engine.refreshing.contains(row.id))
             }
-
-            Spacer(minLength: 0)
-
-            Button {
+        } trailing: {
+            refreshButton(help: UsageFormat.refreshHelp(row.id)) {
                 model.refreshProvider(row.id)
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
-                    .contentShape(.circle)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .glassEffect(.regular, in: .circle)
-            .help(UsageFormat.refreshHelp(row.id))
         }
-        .padding(.horizontal, PanelMetrics.gutter)
-        .padding(.vertical, 12)
     }
 
     /// Styled as a switch rather than a footer glyph: it says what the
