@@ -435,16 +435,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await SissyHTTP.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw UsageRequestError.malformedPayload }
-        if http.statusCode == 429 {
-            throw UsageRequestError.rateLimited(retryAfter: UsageRequestError.retryAfter(http))
-        }
-        guard http.statusCode == 200 else { throw UsageRequestError.badStatus(http.statusCode) }
-        guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw UsageRequestError.malformedPayload
-        }
-        return parse(payload, observedAt: Date())
+        return parse(try await UsageRequestError.object(answering: request), observedAt: Date())
     }
 
     /// The windows the panel draws and the spend beside them, off the body
