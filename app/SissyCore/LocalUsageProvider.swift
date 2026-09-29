@@ -344,6 +344,18 @@ actor LocalUsageProvider: UsageProvider {
     /// moves the keys when `Calendar.current` changes zone, so a day counted
     /// before a flight keeps the date it was counted under.
     private var keyZone = Calendar.current.timeZone
+    /// The cutoff the day-keyed state was last trimmed to, nil before the
+    /// first trim.
+    ///
+    /// Nothing counted after a trim can fall before the cutoff it trimmed to:
+    /// a line older than `retainWindowStart` claims no key and fills no
+    /// bucket. So until the cutoff moves, which is once a day, those filters
+    /// can only rebuild what they were given. Measured 2026-09-29, the dedup
+    /// ledger's alone was 0.69 ms of every FSEvents batch at 28,791 keys. The
+    /// files are still trimmed each time: one arriving with an old mtime is
+    /// entered by the read that finds it. `settleKeyZone` clears it, because
+    /// the keys it moves were trimmed in the zone they left.
+    private var trimmedDaysTo: Date?
     /// False until the initial backfill scan has finished parsing every
     /// in-window JSONL. What `isWarm()` answers, and so what the panel and
     /// the Providers tab read to tell a reader that has found nothing yet
@@ -1072,6 +1084,7 @@ actor LocalUsageProvider: UsageProvider {
         }
         lastEmittedDayKey = lastEmittedDayKey.map(move)
         keyZone = calendar.timeZone
+        trimmedDaysTo = nil
     }
 
     private static func rekeyed<Value>(
@@ -1089,15 +1102,18 @@ actor LocalUsageProvider: UsageProvider {
         if historyDirtyDays.contains(where: { $0 < cutoff }) {
             saveHistoryIfDirty(force: true)
         }
-        dailyTotals = dailyTotals.filter { $0.key >= cutoff }
-        dailyModelTotals = dailyModelTotals.filter { $0.key >= cutoff }
-        dailyAgentCounts = dailyAgentCounts.filter { $0.key >= cutoff }
-        dailyActivity = dailyActivity.filter { $0.key >= cutoff }
-        dailyEffort = dailyEffort.filter { $0.key >= cutoff }
-        historySuppressedDays = historySuppressedDays.filter { $0 >= cutoff }
-        // Evict dedup keys for days that have aged out so the set's memory
-        // footprint stays bounded across long-running sessions.
-        seenEventKeys = seenEventKeys.filter { $0.value.day >= cutoff }
+        if trimmedDaysTo != cutoff {
+            dailyTotals = dailyTotals.filter { $0.key >= cutoff }
+            dailyModelTotals = dailyModelTotals.filter { $0.key >= cutoff }
+            dailyAgentCounts = dailyAgentCounts.filter { $0.key >= cutoff }
+            dailyActivity = dailyActivity.filter { $0.key >= cutoff }
+            dailyEffort = dailyEffort.filter { $0.key >= cutoff }
+            historySuppressedDays = historySuppressedDays.filter { $0 >= cutoff }
+            // Evict dedup keys for days that have aged out so the set's memory
+            // footprint stays bounded across long-running sessions.
+            seenEventKeys = seenEventKeys.filter { $0.value.day >= cutoff }
+            trimmedDaysTo = cutoff
+        }
         let retained = UsageReaderShared.retainedFiles(
             mtimes: fileMTimes, cutoff: cutoff.timeIntervalSince1970)
         fileOffsets = fileOffsets.filter { retained.contains($0.key) }
