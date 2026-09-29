@@ -1230,14 +1230,6 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
-    /// Builds the block from a frame.
-    ///
-    /// Today's counts come off the slices rather than out of the archive, for
-    /// the reason the headline's own figure does: the archive's copy of today
-    /// is written behind the tail's flush, so a count read from it would lag
-    /// the one beside it. Every other window is the archive's, **including its
-    /// per-provider split** — a row taken from the slices under a thirty-day
-    /// heading would be today's figure wearing another window's label.
     /// What is running on this Mac right now, and what the archive has
     /// counted over the window the headline is showing: the Sessions tab's
     /// block, built only while that tab is on screen.
@@ -1247,6 +1239,13 @@ struct UsagePanelSnapshot: Equatable {
     /// Measured 2026-09-29 on a release build, a frame carrying ten agents
     /// over the monitor's 240 retained samples took 214 µs to `make`, 204 µs
     /// of it here, almost all of that the chart and the rows' lanes.
+    ///
+    /// Today's counts come off the slices rather than out of the archive, for
+    /// the reason the headline's own figure does: the archive's copy of today
+    /// is written behind the tail's flush, so a count read from it would lag
+    /// the one beside it. Every other window is the archive's, **including its
+    /// per-provider split** — a row taken from the slices under a thirty-day
+    /// heading would be today's figure wearing another window's label.
     static func makeAgents(_ frame: FrameData, now: Date = Date()) -> AgentsBlock {
         let running = frame.agentMemory?.current.agents ?? []
         // Unioned rather than summed, because two CLIs working in the same
