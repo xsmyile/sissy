@@ -373,10 +373,20 @@ actor LocalUsageProvider: UsageProvider {
     /// and what makes `poll()`'s post-yield check true to its comment: a
     /// teardown, not only a cancelled boot task, now interrupts a cold scan.
     private var lifecycle: Lifecycle = .idle
-    /// Max wall-clock between throttled saves. SIGKILL/power loss bounds
-    /// progress loss to this window; SIGTERM still flushes cleanly via
+    /// Max wall-clock between throttled archive saves. SIGKILL/power loss
+    /// bounds progress loss to this window; SIGTERM still flushes cleanly via
     /// `stop()`. Five seconds keeps SSD churn low on a long-running process.
     private static let saveThrottle: TimeInterval = 5
+
+    /// The snapshot's own, longer throttle. The snapshot is the whole working
+    /// set rewritten each time: measured 2026-09-29, a 2.4 MB file carrying
+    /// 28,791 dedup keys, 29 ms to encode and write, at up to 720 writes an
+    /// hour under `saveThrottle`. What a longer window risks is re-reading
+    /// that many more seconds of log after a crash, from offsets, totals and
+    /// dedup keys that were saved together; a day file written ahead of them
+    /// meanwhile is replaced once the re-read reaches it, never added to. A
+    /// quit flushes through `stop()` and a sleep through `flush()`.
+    private static let snapshotThrottle: TimeInterval = 30
 
     /// The oldest instant a line may carry and still count.
     ///
@@ -917,7 +927,7 @@ actor LocalUsageProvider: UsageProvider {
             await emitReading()
         }
         // Throttled persistence: only writes if state changed since the
-        // last save AND `saveThrottle` seconds have elapsed. SIGKILL/power
+        // last save AND its throttle has elapsed. SIGKILL/power
         // loss therefore bounds progress loss to one throttle window; a
         // graceful SIGTERM forces a final flush via `stop()`.
         adapter.projects.ledger.saveIfDirty()
@@ -1480,9 +1490,10 @@ actor LocalUsageProvider: UsageProvider {
         historyDirtyDays = Set(dailyModelTotals.keys)
     }
 
-    /// Throttled whole-day writes, on the same schedule and for the same
-    /// reasons as the snapshot's. Each dirty day is written complete, so a
-    /// rewrite replaces rather than accumulates.
+    /// Throttled whole-day writes, for the same reasons as the snapshot's and
+    /// on the shorter `saveThrottle`: a day file is a few hundred bytes, so
+    /// the longer window would buy nothing. Each dirty day is written
+    /// complete, so a rewrite replaces rather than accumulates.
     ///
     /// A day file may be left behind or ahead of the snapshot beside it — the
     /// two are written under their own throttles and either can fail on its
@@ -1736,7 +1747,7 @@ actor LocalUsageProvider: UsageProvider {
         guard let url = persistenceURL else { return }
         if !force && !persistDirty { return }
         let now = Date()
-        if !force && now.timeIntervalSince(lastSaveAt) < Self.saveThrottle { return }
+        if !force && now.timeIntervalSince(lastSaveAt) < Self.snapshotThrottle { return }
         // Don't write a useless empty snapshot. If SIGTERM hits before the
         // first poll has ingested anything, in-memory state is empty —
         // persisting it would make the next boot load an empty snapshot and
