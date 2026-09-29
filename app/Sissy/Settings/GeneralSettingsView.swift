@@ -187,17 +187,11 @@ struct GeneralSettingsView: View {
     }
 
     private var animateSissy: some View {
-        LabeledContent {
-            Toggle("Animate Sissy", isOn: sissyMotionBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
-            Text("Animate Sissy")
-            Text(
-                "A blink when usage lands, the eye shut while nothing is. "
-                    + "Follows Reduce Motion."
-            )
-        }
+        SettingsSwitchRow(
+            "Animate Sissy",
+            caption: "A blink when usage lands, the eye shut while nothing is. "
+                + "Follows Reduce Motion.",
+            isOn: sissyMotionBinding)
     }
 
     /// Which end of a rate-limit window the panel's gauges print.
@@ -234,16 +228,11 @@ struct GeneralSettingsView: View {
     }
 
     private var agentHooks: some View {
-        LabeledContent {
-            Toggle(AgentHookCopy.title, isOn: agentHooksBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
+        SettingsSwitchRow(AgentHookCopy.title, caption: agentHooksCaption, isOn: agentHooksBinding) {
             HStack(spacing: 4) {
                 Text(AgentHookCopy.title)
                 SettingsInfoButton(title: AgentHookCopy.detailButtonLabel, detail: AgentHookCopy.detail)
             }
-            Text(agentHooksCaption)
         }
     }
 
@@ -263,14 +252,10 @@ struct GeneralSettingsView: View {
     }
 
     private var keepScreenAwake: some View {
-        LabeledContent {
-            Toggle("Keep the screen on too", isOn: keepScreenAwakeBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
-            Text("Keep the screen on too")
-            Text("Off lets the display sleep while the Mac stays awake underneath for the agents.")
-        }
+        SettingsSwitchRow(
+            "Keep the screen on too",
+            caption: "Off lets the display sleep while the Mac stays awake underneath for the agents.",
+            isOn: keepScreenAwakeBinding)
     }
 
     /// Names both files Sissy writes outside its own folder, which is what the
