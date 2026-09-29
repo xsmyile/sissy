@@ -30,6 +30,16 @@ enum BoundedProcess {
     /// dies takes that caller with it for the life of the app.
     static let killGraceSeconds: TimeInterval = 2
 
+    /// What the child's environment is.
+    enum Environment {
+        /// This process's own, which is what every child got before a caller
+        /// had a reason to say otherwise.
+        case inherited
+        /// Exactly these variables and no others. An empty set is a child
+        /// with no environment at all.
+        case exactly([String: String])
+    }
+
     /// How a run ended and what it wrote. A stream that was not captured is
     /// empty.
     struct Outcome {
@@ -43,14 +53,13 @@ enum BoundedProcess {
     /// started.
     ///
     /// `input` is written to the child's standard input and closed; nil gives
-    /// it the null device. An empty `environment` leaves the child this
-    /// process's own. `captureOutput` and `captureErrors` say which of
+    /// it the null device. `captureOutput` and `captureErrors` say which of
     /// its two output streams the caller reads, the others going to the null
     /// device.
     static func run(
         _ tool: URL,
         _ arguments: [String],
-        environment: [String: String] = [:],
+        environment: Environment = .inherited,
         directory: URL? = nil,
         input: Data? = nil,
         captureOutput: Bool = true,
@@ -60,7 +69,7 @@ enum BoundedProcess {
         let process = Process()
         process.executableURL = tool
         process.arguments = arguments
-        if !environment.isEmpty { process.environment = environment }
+        if case .exactly(let variables) = environment { process.environment = variables }
         if let directory { process.currentDirectoryURL = directory }
         let stdin = input.map { _ in Pipe() }
         let stdout = captureOutput ? Pipe() : nil

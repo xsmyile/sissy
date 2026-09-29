@@ -327,7 +327,7 @@ enum GitIdentityReader {
     ) -> GitOutput {
         do {
             let outcome = try BoundedProcess.run(
-                tool, arguments, environment: environment,
+                tool, arguments, environment: .exactly(environment),
                 directory: directory.map { URL(fileURLWithPath: $0) }, captureErrors: true,
                 timeout: timeoutSeconds)
             return GitOutput(
