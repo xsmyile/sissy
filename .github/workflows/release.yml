@@ -135,7 +135,8 @@ jobs:
       - name: CLI self-test
         working-directory: app
         run: |
-          "$(../scripts/cli-path.sh Debug)" --self-test
+          CLI="$(../scripts/cli-path.sh Debug)"
+          "$CLI" --self-test
 
       # The Release build of the app is the artifact itself, further down;
       # the CLI is built Release here so the configuration that ships runs
@@ -151,12 +152,15 @@ jobs:
       - name: CLI self-test (Release)
         working-directory: app
         run: |
-          "$(../scripts/cli-path.sh Release)" --self-test
+          CLI="$(../scripts/cli-path.sh Release)"
+          "$CLI" --self-test
 
       - name: Codex parser smoke (--scan against fixture)
         working-directory: app
         timeout-minutes: 3
-        run: ../scripts/codex-smoke.sh "$(../scripts/cli-path.sh Debug)"
+        run: |
+          CLI="$(../scripts/cli-path.sh Debug)"
+          ../scripts/codex-smoke.sh "$CLI"
 
       - name: Unit tests (Debug)
         working-directory: app
