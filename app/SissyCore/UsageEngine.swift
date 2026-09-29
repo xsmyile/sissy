@@ -223,12 +223,13 @@ actor UsageEngine {
     /// cancel them.
     private var lifecycle: Lifecycle = .idle
     private var onFrame: (@Sendable (FrameData) async -> Void)?
-    /// Numbers each rebuild at the moment its reading is taken, and the
-    /// newest one delivered, so a rebuild overtaken while it was suspended is
-    /// dropped rather than shipped over the fresher frame. See `deliver`.
-    private var frameSequence = 0
-    private var deliveredSequence = 0
-    /// The delivery in flight, which the next one waits for.
+    /// The aggregator revision of the newest frame handed to `onFrame`, so a
+    /// rebuild overtaken while it was suspended is dropped rather than
+    /// shipped over the fresher totals. See `deliver`.
+    private var deliveredRevision = 0
+    /// The newest frame not yet handed to `onFrame`, and the one delivery
+    /// loop draining it.
+    private var pendingFrame: FrameData?
     private var delivery: Task<Void, Never>?
 
     /// Every provider Sissy knows about, metering or not, with how it was
@@ -505,9 +506,8 @@ actor UsageEngine {
             startClaudeWebAdoption()
         }
         bootTask = Task.detached { [aggregator] in
-            await aggregator.start { today, slices in
-                await me.rebuildAndEmit(
-                    today: today, slices: slices, sequence: await me.nextFrameSequence())
+            await aggregator.start { reading in
+                await me.rebuildAndEmit(reading)
             }
         }
         // After the tail, never before it: the backfill reads the project
@@ -2015,21 +2015,12 @@ actor UsageEngine {
     /// before it, and that pair is what the frame ships.
     private func reemit() async {
         guard hasReading else { return }
-        let sequence = nextFrameSequence()
-        let reading = await aggregator.currentReading()
-        await rebuildAndEmit(today: reading.today, slices: reading.slices, sequence: sequence)
+        await rebuildAndEmit(await aggregator.currentReading())
     }
 
-    private func nextFrameSequence() -> Int {
-        frameSequence += 1
-        return frameSequence
-    }
-
-    private func rebuildAndEmit(
-        today: DayTotals,
-        slices: [ProviderSlice],
-        sequence: Int
-    ) async {
+    private func rebuildAndEmit(_ reading: UsageReading) async {
+        let today = reading.today
+        let slices = reading.slices
         guard lifecycle == .running else { return }
         hasReading = true
         noteAgentActivity(slices)
@@ -2062,29 +2053,41 @@ actor UsageEngine {
             disk: config.disk ? diskMonitor.currentReading() : nil,
             pricing: pricing
         )
-        await deliver(frame, sequence: sequence)
+        await deliver(frame, revision: reading.revision)
     }
 
     /// Hands a frame to `onFrame`, newest reading last.
     ///
     /// The actor is reentrant and a rebuild suspends between taking its
-    /// reading and shipping it, in the aggregator hop and in the keep-awake
-    /// hold, so two rebuilds in flight can finish in either order; every
-    /// monitor's `reemit` makes that ordinary rather than rare. One that a
-    /// newer rebuild has already overtaken is dropped, since its totals are
-    /// older than the frame on screen. And each delivery waits for the one
-    /// before it: `onFrame` hops off the actor, so two calls made in order
-    /// could otherwise still reach the app out of it.
-    private func deliver(_ frame: FrameData, sequence: Int) async {
-        guard sequence > deliveredSequence, let onFrame else { return }
-        deliveredSequence = sequence
-        let previous = delivery
-        let current = Task {
-            await previous?.value
-            await onFrame(frame)
-        }
-        delivery = current
-        await current.value
+    /// reading and shipping it, in the keep-awake hold and in `onFrame`
+    /// itself, so two rebuilds in flight can finish in either order; every
+    /// monitor's `reemit` makes that ordinary rather than rare. One whose
+    /// aggregator revision is older than the frame already delivered is
+    /// dropped, since its totals are older than the frame on screen; one of
+    /// the same revision is not, since it is what carries a monitor's news.
+    ///
+    /// One loop hands frames over, one at a time: `onFrame` hops off the
+    /// actor, so two calls made in order could otherwise reach the app out of
+    /// it. A frame built while one is being handed over replaces any other
+    /// still waiting, so a slow consumer is sent the newest frame rather than
+    /// a backlog, and a caller returns once its frame or a newer one is in.
+    /// Nothing is handed over once the engine has stopped.
+    private func deliver(_ frame: FrameData, revision: Int) async {
+        guard lifecycle == .running, revision >= deliveredRevision, let onFrame else { return }
+        deliveredRevision = revision
+        pendingFrame = frame
+        let drain =
+            delivery
+            ?? Task {
+                while lifecycle == .running, let next = pendingFrame {
+                    pendingFrame = nil
+                    await onFrame(next)
+                }
+                pendingFrame = nil
+                delivery = nil
+            }
+        delivery = drain
+        await drain.value
     }
 
     /// What the archive holds for every period the panel offers, cached for a

@@ -18,7 +18,7 @@ final class UsageAggregatorTests: XCTestCase {
         let second = StubProvider(id: "b")
         let aggregator = UsageAggregator(providers: [first, second])
         let readings = ReadingLog()
-        await aggregator.start { today, slices in readings.record(today, slices) }
+        await aggregator.start { readings.record($0.today, $0.slices) }
 
         await first.emit(today: totals(10, 1))
         await second.emit(today: totals(5, 2))
@@ -33,7 +33,7 @@ final class UsageAggregatorTests: XCTestCase {
         let first = StubProvider(id: "a")
         let second = StubProvider(id: "b")
         let aggregator = UsageAggregator(providers: [first, second])
-        await aggregator.start { _, _ in }
+        await aggregator.start { _ in }
         await first.emit(today: totals(10))
         await second.emit(today: totals(5))
 
@@ -53,7 +53,7 @@ final class UsageAggregatorTests: XCTestCase {
         let first = StubProvider(id: "a")
         let second = StubProvider(id: "b")
         let aggregator = UsageAggregator(providers: [first, second])
-        await aggregator.start { _, _ in }
+        await aggregator.start { _ in }
         await first.emit(today: totals(10))
         await second.emit(today: totals(0))
 
@@ -72,7 +72,7 @@ final class UsageAggregatorTests: XCTestCase {
         let first = StubProvider(id: "a")
         let second = StubProvider(id: "b")
         let aggregator = UsageAggregator(providers: [first, second])
-        await aggregator.start { _, _ in }
+        await aggregator.start { _ in }
         await first.emit(today: totals(10))
 
         let reading = await aggregator.currentReading()
@@ -84,7 +84,7 @@ final class UsageAggregatorTests: XCTestCase {
         let first = StubProvider(id: "a")
         let second = StubProvider(id: "b")
         let aggregator = UsageAggregator(providers: [first, second])
-        await aggregator.start { _, _ in }
+        await aggregator.start { _ in }
 
         await aggregator.stop()
 
