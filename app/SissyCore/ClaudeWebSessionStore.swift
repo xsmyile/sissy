@@ -57,96 +57,31 @@ enum ClaudeWebSessionStore {
         account: String,
         allowingInteraction: Bool
     ) -> ClaudeCredentialsLookup {
-        var query = KeychainAccess.makeQuery(
-            service: keychainService, allowingInteraction: allowingInteraction)
-        query[kSecAttrAccount as String] = account
-        let result = KeychainAccess.copyMatching(
-            query, allowingInteraction: allowingInteraction)
-        return ClaudeCredentialsStore.classify(
-            result.status,
-            data: result.data,
-            allowingInteraction: allowingInteraction,
-            decode: decode
-        )
+        items.load(account: account, allowingInteraction: allowingInteraction, decoding: decode)
     }
 
     /// Files `session`, replacing whatever was there.
-    ///
-    /// Add-then-update rather than delete-then-add: a delete that succeeds
-    /// followed by an add that fails would leave the user with no session and
-    /// no way to tell that from one they never imported.
     static func save(_ session: String, account: String) throws {
         let normalized = normalize(session)
         guard !normalized.isEmpty, let data = normalized.data(using: .utf8) else {
             throw ClaudeWebSessionStoreError.empty
         }
-        var attributes = identity(account: account)
-        attributes[kSecValueData as String] = data
-        let added = SecItemAdd(attributes as CFDictionary, nil)
-        if added == errSecSuccess { return }
-        guard added == errSecDuplicateItem else {
-            throw ClaudeWebSessionStoreError.keychain(added)
-        }
-        let updated = SecItemUpdate(
-            identity(account: account) as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary)
-        guard updated == errSecSuccess else {
-            throw ClaudeWebSessionStoreError.keychain(updated)
-        }
+        let status = items.save(data, account: account)
+        guard status == errSecSuccess else { throw ClaudeWebSessionStoreError.keychain(status) }
     }
 
-    /// Forgets the session. An item that was not there is not a failure: the
-    /// caller asked for it gone and it is gone.
+    /// Forgets the session. An item that was not there is not a failure.
     static func delete(account: String) throws {
-        let status = SecItemDelete(identity(account: account) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw ClaudeWebSessionStoreError.keychain(status)
-        }
+        let status = items.delete(account: account)
+        guard status == errSecSuccess else { throw ClaudeWebSessionStoreError.keychain(status) }
     }
 
-    /// Every account a session is filed under, sorted so two calls agree.
-    ///
-    /// Attributes only and never the data: the keychain authorizes a read of
-    /// the *secret*, so asking which items exist costs no ACL check and cannot
-    /// raise a dialog. That is what lets the engine decide how many readers to
-    /// build before any of them has read anything, and on a build whose grant
-    /// has lapsed.
-    ///
-    /// An empty answer means no session is filed. A keychain that failed for
-    /// any other reason says so in the log rather than passing for one,
-    /// because the two are the same `[]` to every caller and only one of them
-    /// is the user's doing.
-    static func storedAccounts() -> [String] {
-        var query = baseQuery()
-        query[kSecReturnAttributes as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitAll
-        var items: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &items)
-        guard status == errSecSuccess else {
-            if status != errSecItemNotFound {
-                sissyLog("sissy: could not list the stored claude.ai sessions (OSStatus \(status))")
-            }
-            return []
-        }
-        guard let attributes = items as? [[String: Any]] else { return [] }
-        return attributes.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
-    }
+    /// Every account a session is filed under, sorted so two calls agree, and
+    /// read without a dialog: see `SissyKeychainItems.accounts()`.
+    static func storedAccounts() -> [String] { items.accounts() }
 
-    private static func baseQuery() -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-        ]
-    }
-
-    /// What the item is, with neither a value nor a read on it. Shared by
-    /// every operation so an add, an update and a delete cannot drift into
-    /// addressing different items.
-    private static func identity(account: String) -> [String: Any] {
-        var query = baseQuery()
-        query[kSecAttrAccount as String] = account
-        return query
-    }
+    private static let items = SissyKeychainItems(
+        service: keychainService, listing: "the stored claude.ai sessions")
 
     /// A session as it is worth storing.
     ///

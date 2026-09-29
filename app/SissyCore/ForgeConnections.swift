@@ -564,24 +564,13 @@ enum ForgeTokenStore {
     static let keychainService = SissyPaths.keychainService("forge-token")
 
     /// Files a token under a connection, replacing whatever was there.
-    ///
-    /// Add-then-update rather than delete-then-add, so a delete that succeeds
-    /// followed by an add that fails cannot leave the user with no token and no
-    /// way to tell that from a host they never connected.
     static func save(_ token: String, connection id: String) throws {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty, !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else {
             throw ForgeTokenStoreError.empty
         }
-        var attributes = identity(connection: id)
-        attributes[kSecValueData as String] = data
-        let added = SecItemAdd(attributes as CFDictionary, nil)
-        if added == errSecSuccess { return }
-        guard added == errSecDuplicateItem else { throw ForgeTokenStoreError.keychain(added) }
-        let updated = SecItemUpdate(
-            identity(connection: id) as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary)
-        guard updated == errSecSuccess else { throw ForgeTokenStoreError.keychain(updated) }
+        let status = items.save(data, account: id)
+        guard status == errSecSuccess else { throw ForgeTokenStoreError.keychain(status) }
     }
 
     /// The token, under the same suppression every scheduled read in this app
@@ -599,13 +588,8 @@ enum ForgeTokenStore {
     static func load(connection id: String, allowingInteraction: Bool = false)
         -> CredentialLookup<String>
     {
-        var query = KeychainAccess.makeQuery(
-            service: keychainService, allowingInteraction: allowingInteraction)
-        query[kSecAttrAccount as String] = id
-        let result = KeychainAccess.copyMatching(
-            query, allowingInteraction: allowingInteraction)
-        return KeychainAccess.classify(
-            result.status, data: result.data, allowingInteraction: allowingInteraction,
+        items.load(
+            account: id, allowingInteraction: allowingInteraction,
             decoding: { data in
                 guard let token = String(data: data, encoding: .utf8), !token.isEmpty else {
                     return nil
@@ -615,50 +599,18 @@ enum ForgeTokenStore {
     }
 
     /// Forgets one connection's token. An item that was not there is not a
-    /// failure: the caller asked for it gone and it is gone.
+    /// failure.
     static func delete(connection id: String) throws {
-        let status = SecItemDelete(identity(connection: id) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw ForgeTokenStoreError.keychain(status)
-        }
+        let status = items.delete(account: id)
+        guard status == errSecSuccess else { throw ForgeTokenStoreError.keychain(status) }
     }
 
-    /// Every connection a token is filed under.
-    ///
-    /// Attributes only and never the data, so asking which tokens exist costs
-    /// no ACL check and cannot raise a dialog — the same reason
-    /// `CodexAccountStore.storedAccounts` is built this way.
-    static func storedConnections() -> [String] {
-        var query = baseQuery()
-        query[kSecReturnAttributes as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitAll
-        var items: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &items)
-        guard status == errSecSuccess else {
-            if status != errSecItemNotFound {
-                sissyLog("sissy: could not list the connected forges (OSStatus \(status))")
-            }
-            return []
-        }
-        guard let attributes = items as? [[String: Any]] else { return [] }
-        return attributes.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
-    }
+    /// Every connection a token is filed under, read without a dialog: see
+    /// `SissyKeychainItems.accounts()`.
+    static func storedConnections() -> [String] { items.accounts() }
 
-    private static func baseQuery() -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-        ]
-    }
-
-    /// What the item is, with neither a value nor a read on it. Shared by every
-    /// operation so an add, an update and a delete cannot drift into addressing
-    /// different items.
-    private static func identity(connection id: String) -> [String: Any] {
-        var query = baseQuery()
-        query[kSecAttrAccount as String] = id
-        return query
-    }
+    private static let items = SissyKeychainItems(
+        service: keychainService, listing: "the connected forges")
 }
 
 enum ForgeTokenStoreError: Error, Equatable {
