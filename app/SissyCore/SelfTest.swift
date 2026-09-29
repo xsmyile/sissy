@@ -922,8 +922,8 @@ func runAggregatorEmitTest() {
     let received = TestBox<[ProviderSlice]>([])
     Task {
         let aggregator = UsageAggregator(providers: [EmittingProvider()])
-        await aggregator.start { _, slices in
-            received.value = slices
+        await aggregator.start { reading in
+            received.value = reading.slices
             sem.signal()
         }
     }
