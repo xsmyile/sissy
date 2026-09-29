@@ -24,17 +24,17 @@ xcodebuild -project Sissy.xcodeproj -scheme sissy-cli -configuration Debug build
 
 # Self-test (pure formatters + pricing tables)
 xcodebuild -project Sissy.xcodeproj -scheme sissy-cli -configuration Debug build \
-  && "$(xcodebuild -scheme sissy-cli -showBuildSettings | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)/sissy-cli" --self-test
+  && "$(../scripts/cli-path.sh Debug)" --self-test
 
 # Scan-once mode (compare against `npx ccusage@latest claude --json` or
 # `npx ccusage@latest codex --json` — never a bare `ccusage`, which may be the Homebrew build)
-"$(xcodebuild -scheme sissy-cli -showBuildSettings | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)/sissy-cli" --scan
-"$(xcodebuild -scheme sissy-cli -showBuildSettings | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)/sissy-cli" --scan --scan-provider codex
+"$(../scripts/cli-path.sh Debug)" --scan
+"$(../scripts/cli-path.sh Debug)" --scan --scan-provider codex
 ```
 
 `sissy-cli --config <path> --backfill` runs the archive backfill against that config's own state dir and dumps the archive as JSON, which is the shape `ccusage <provider> --json` answers in. It is how the backfill's agreement with the oracle is asserted: `--scan` cannot, because it runs the tail's 48 h window and reports today, so every day a backfill writes is invisible to it.
 
-`sissy-cli` is a CI tool, not a product: nothing ships it to a user, and with no flag it prints the list above and exits 2. **Build the scheme before any of the three invocations above** — `-showBuildSettings` resolves `BUILT_PRODUCTS_DIR` without building, so on its own it runs whatever the last *successful* build left there. A `--self-test` that answers `ALL PASS` from a binary the current source no longer compiles into is the failure mode, and a `--scan` compared against `ccusage` on a stale binary is the same trap with numbers instead of a verdict.
+`sissy-cli` is a CI tool, not a product: nothing ships it to a user, and with no flag it prints the list above and exits 2. **Build the scheme before any of the three invocations above** — `scripts/cli-path.sh` reads `-showBuildSettings`, which resolves `BUILT_PRODUCTS_DIR` without building, so on its own it runs whatever the last *successful* build left there. A `--self-test` that answers `ALL PASS` from a binary the current source no longer compiles into is the failure mode, and a `--scan` compared against `ccusage` on a stale binary is the same trap with numbers instead of a verdict.
 
 The login item and the one-shot retirement of the legacy agent both go through `SMAppService`, which must be tested from a normally signed app bundle. `CODE_SIGNING_ALLOWED=NO` is fine for CI compilation/tests, but launching that product locally makes macOS reject `Contents/Library/LaunchAgents/com.radonforge.sissy.server.plist`.
 
