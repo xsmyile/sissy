@@ -234,12 +234,12 @@ if args.contains("--backfill") {
             return
         }
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
-        if config.remotePricingEnabled, let cached = PriceCatalogSource.loadCache() {
+        let catalog = config.remotePricingEnabled ? PriceCatalogSource.loadCache() : nil
+        if let catalog {
             sissyLog(
                 "sissy: --backfill pricing from cached catalog "
-                    + "(fetched \(ISO8601DateFormatter().string(from: cached.fetchedAt)))")
+                    + "(fetched \(ISO8601DateFormatter().string(from: catalog.fetchedAt)))")
         }
-        let catalog = config.remotePricingEnabled ? PriceCatalogSource.loadCache() : nil
         for vendor in [ProviderID.claudeCode, ProviderID.codex] {
             let home = config.providerHome(vendor: vendor)
             let provider: LocalUsageProvider =
