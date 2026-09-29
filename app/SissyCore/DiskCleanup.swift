@@ -442,10 +442,17 @@ struct DiskCleaner: Sendable {
     /// removed projects DerivedData named on the Mac this was built on, 19 sat
     /// in the home and 9, 2.8 GB, in scratch directories under `/tmp`. A path
     /// with a `.` or `..` component or a NUL is not read at all, so the prefix
-    /// is the path's real place, and the ancestor check catches a volume
-    /// mounted inside the home and then taken away. An ancestor that is a link
-    /// is followed, and must lead to a directory on that same volume: a link
-    /// to a drive that is away is the absence this refuses to believe.
+    /// is the path's real place. An ancestor that is a link is followed, and
+    /// must lead to a directory on the home's volume: a link to a drive that
+    /// is away is the absence this refuses to believe.
+    ///
+    /// **What it cannot tell is a volume mounted inside the home and then
+    /// taken away**: the mount point left behind is an empty directory on the
+    /// home's volume, indistinguishable from one a project was deleted from.
+    /// Such a project loses its builds, which Xcode makes again; a mount point
+    /// in the home is rare, and refusing every empty ancestor would keep the
+    /// scratch directories agents build in, which is most of what this row is
+    /// for.
     static func isGone(_ path: String, inside places: [String], device: dev_t) -> Bool {
         let components = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.contains("\0"), !components.contains("."), !components.contains(".."),
