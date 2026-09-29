@@ -40,7 +40,7 @@ sweep_stray_bundles() {
       rm -rf "$wt/app/build-dev"
       removed=1
     fi
-  done < <(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree /{print $2}')
+  done < <(git -C "$REPO_ROOT" worktree list --porcelain | sed -n 's/^worktree //p')
 
   local stray
   while read -r stray; do
