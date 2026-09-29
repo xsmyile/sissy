@@ -98,33 +98,6 @@ enum ClaudeCredentialsStore {
     }
 
     private static let gate = KeychainLookupGate()
-
-    /// `KeychainAccess.classify` for an item holding Claude Code's own
-    /// credential blob.
-    static func classify(
-        _ status: OSStatus,
-        data: Data?,
-        allowingInteraction: Bool,
-        decode: (Data) -> ClaudeCredentials? = Self.parse
-    ) -> ClaudeCredentialsLookup {
-        KeychainAccess.classify(
-            status, data: data, allowingInteraction: allowingInteraction, decoding: decode)
-    }
-
-    static func parse(_ data: Data) -> ClaudeCredentials? {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let oauth = root["claudeAiOauth"] as? [String: Any],
-            let token = oauth["accessToken"] as? String,
-            !token.isEmpty,
-            let rawExpiry = oauth["expiresAt"] as? Double
-        else { return nil }
-
-        let seconds = rawExpiry > secondsUpperBound ? rawExpiry / 1000 : rawExpiry
-        return ClaudeCredentials(
-            accessToken: token,
-            expiresAt: Date(timeIntervalSince1970: seconds)
-        )
-    }
 }
 
 /// The single in-flight keychain lookup and everyone waiting on its answer.

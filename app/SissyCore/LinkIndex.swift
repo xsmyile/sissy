@@ -53,14 +53,6 @@ struct LinkIndex<Link: IndexedLink>: Sendable {
         try change { $0.removeValue(forKey: key) != nil }
     }
 
-    /// Drops every link, for the switch that forgets every session.
-    func forgetAll() throws {
-        try change {
-            defer { $0.removeAll() }
-            return !$0.isEmpty
-        }
-    }
-
     /// Applies `mutation` to the file's links under the lock, and writes them
     /// back only when it answers that it changed something.
     private func change(_ mutation: (inout [String: Link]) -> Bool) throws {

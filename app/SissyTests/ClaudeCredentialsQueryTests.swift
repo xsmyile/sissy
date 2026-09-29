@@ -75,8 +75,9 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
     /// every launch, which is the failure `.interactionRequired` exists to
     /// prevent: nobody was shown anything, so nobody said no.
     func testASilentReadThatWouldHaveAskedIsNotARefusal() {
-        let outcome = ClaudeCredentialsStore.classify(
-            errSecAuthFailed, data: nil, allowingInteraction: false)
+        let outcome = KeychainAccess.classify(
+            errSecAuthFailed, data: nil, allowingInteraction: false,
+            decoding: ClaudeCredentialBlob.credentials(in:))
 
         guard case .interactionRequired = outcome else {
             return XCTFail("a read that was never allowed to ask reported \(outcome)")
@@ -86,8 +87,9 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
     /// The other half of the same status: a user action did put the panel on
     /// screen, and this is the one path on which someone can actually refuse.
     func testAUserActionThatWasRefusedIsARefusal() {
-        let outcome = ClaudeCredentialsStore.classify(
-            errSecAuthFailed, data: nil, allowingInteraction: true)
+        let outcome = KeychainAccess.classify(
+            errSecAuthFailed, data: nil, allowingInteraction: true,
+            decoding: ClaudeCredentialBlob.credentials(in:))
 
         guard case .denied = outcome else {
             return XCTFail("a refused user action reported \(outcome)")
@@ -96,8 +98,9 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
 
     func testAMissingItemIsAbsentWhicheverReadFoundIt() {
         for interactive in [true, false] {
-            let outcome = ClaudeCredentialsStore.classify(
-                errSecItemNotFound, data: nil, allowingInteraction: interactive)
+            let outcome = KeychainAccess.classify(
+                errSecItemNotFound, data: nil, allowingInteraction: interactive,
+                decoding: ClaudeCredentialBlob.credentials(in:))
 
             guard case .absent = outcome else {
                 return XCTFail("a missing item reported \(outcome)")
@@ -163,8 +166,9 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
     /// clicked Deny.
     func testGivingUpReadsAsInteractionRequiredForBothCallers() {
         for allowingInteraction in [true, false] {
-            let outcome = ClaudeCredentialsStore.classify(
-                errSecInteractionNotAllowed, data: nil, allowingInteraction: allowingInteraction)
+            let outcome = KeychainAccess.classify(
+                errSecInteractionNotAllowed, data: nil, allowingInteraction: allowingInteraction,
+                decoding: ClaudeCredentialBlob.credentials(in:))
             guard case .interactionRequired = outcome else {
                 return XCTFail("giving up read as something the caller would act on")
             }

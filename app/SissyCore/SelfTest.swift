@@ -947,7 +947,7 @@ func runClaudeLimitsParseTests() {
         #"{"claudeAiOauth":{"accessToken":"tok","refreshToken":"r","expiresAt":1789006037000}}"#
             .utf8
     )
-    let credentials = ClaudeCredentialsStore.parse(credentialBlob)
+    let credentials = ClaudeCredentialBlob.credentials(in: credentialBlob)
     expect("credentials access token", credentials?.accessToken, "tok")
     // Claude Code writes the expiry in milliseconds; read as seconds it would
     // land in the year 58,000 and every token would look valid forever.
@@ -960,7 +960,7 @@ func runClaudeLimitsParseTests() {
     let noToken = Data(#"{"claudeAiOauth":{"refreshToken":"r","expiresAt":1}}"#.utf8)
     expect(
         "credentials without an access token are unusable",
-        ClaudeCredentialsStore.parse(noToken) == nil,
+        ClaudeCredentialBlob.credentials(in: noToken) == nil,
         true
     )
 
