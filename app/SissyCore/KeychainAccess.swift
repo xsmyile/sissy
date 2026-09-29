@@ -112,10 +112,14 @@ enum KeychainAccess {
     /// cannot resolve a deprecated symbol, and the read then runs with nothing
     /// suppressing it at all. Held without a budget, one reader parked that
     /// way would take every other linked account's reader down with it, for
-    /// good: the items Sissy owns are read without `loadOffPool`'s budget
-    /// (off the pool through `offPool`, or on `CodexRenewal`'s own queue), so
+    /// good: the items Sissy owns are read without `loadOffPool`'s budget, so
     /// this lock's wait is the only bound they have. That is a worse failure
-    /// than the overlap this exists to prevent.
+    /// than the overlap this exists to prevent. The claude.ai session reads
+    /// (`ClaudeWebSource`, `ClaudeWebSessionAdoption`) go through `offPool` and
+    /// the linked Codex accounts' through `CodexRenewal`'s own queue, so the
+    /// wait parks a dispatch thread. The forge token read does not yet:
+    /// `ForgeActivityMonitor` calls `ForgeTokenStore.load` inside its request
+    /// task, which runs on the cooperative pool.
     ///
     /// A reader that cannot get in answers `unavailable` rather than running
     /// unsuppressed, which would be the original bug on purpose.
