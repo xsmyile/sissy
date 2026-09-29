@@ -62,8 +62,13 @@ extension UsageRequestError {
     /// bare status with its `Retry-After` dropped, and two let a body that
     /// did not parse escape as Foundation's own error rather than as
     /// `malformedPayload`.
-    static func json(answering request: URLRequest) async throws -> Any {
-        let (data, response) = try await SissyHTTP.data(for: request)
+    ///
+    /// `through` is the seam a test stands a stubbed session in, as it is on
+    /// `SissyHTTP.data(for:through:)`; every reader takes the default.
+    static func json(
+        answering request: URLRequest, through session: URLSession = SissyHTTP.session
+    ) async throws -> Any {
+        let (data, response) = try await SissyHTTP.data(for: request, through: session)
         guard let http = response as? HTTPURLResponse else { throw malformedPayload }
         if http.statusCode == rateLimitedStatus {
             throw rateLimited(retryAfter: retryAfter(http))
@@ -77,8 +82,11 @@ extension UsageRequestError {
 
     /// `json(answering:)` for the replies that are one object, which is every
     /// one but claude.ai's organisation list.
-    static func object(answering request: URLRequest) async throws -> [String: Any] {
-        guard let body = try await json(answering: request) as? [String: Any] else {
+    static func object(
+        answering request: URLRequest, through session: URLSession = SissyHTTP.session
+    ) async throws -> [String: Any] {
+        guard let body = try await json(answering: request, through: session) as? [String: Any]
+        else {
             throw malformedPayload
         }
         return body
