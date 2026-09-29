@@ -1172,7 +1172,7 @@ final class UsageEngineHost {
     /// which is the engine's call to make and the reason this is not a view's
     /// own state.
     func setForgeCounter(_ counter: ForgeCounter, _ enabled: Bool) {
-        guard let engine, forgeCounters[counter] ?? true != enabled else { return }
+        guard let engine, forgeCounters.enabled.contains(counter) != enabled else { return }
         forgeCounters[counter] = enabled
         Task { await engine.setForgeCounter(counter, enabled: enabled) }
     }

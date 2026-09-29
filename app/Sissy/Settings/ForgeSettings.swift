@@ -509,7 +509,7 @@ struct ForgeSettingsView: View {
         SettingsSwitchRow(
             ForgeCounterCopy.title(counter), caption: ForgeCounterCopy.caption(counter),
             isOn: Binding(
-                get: { model.engine.forgeCounters[counter] ?? true },
+                get: { model.engine.forgeCounters.enabled.contains(counter) },
                 set: { model.engine.setForgeCounter(counter, $0) })
         ) {
             Label {
