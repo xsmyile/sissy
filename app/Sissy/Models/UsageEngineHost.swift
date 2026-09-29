@@ -849,8 +849,10 @@ final class UsageEngineHost {
     /// Runs `work` and then waits out what is left of `refreshFloor`, so the
     /// word a control shows while it works stays on screen long enough to
     /// read. Whether the task was cancelled meanwhile is the caller's to ask
-    /// before it clears its own flag: a cancelled one belongs to an engine
-    /// `releaseEngine()` has already let go of.
+    /// before it clears its own flag, for the four whose task `releaseEngine()`
+    /// holds and cancels: a cancelled one belongs to an engine already let go
+    /// of. The account switch and the reset spend run in tasks nothing
+    /// cancels, so they have nothing to ask.
     @discardableResult
     private static func holdingFloor<Result>(_ work: () async -> Result) async -> Result {
         let startedAt = ContinuousClock.now
