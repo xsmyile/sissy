@@ -51,6 +51,17 @@ enum PanelMetrics {
     /// is what decides how late a change lands, and the first minute of an
     /// age is worded in seconds.
     static let clockTick: TimeInterval = 1
+
+    /// White at one alpha in a dark appearance and another in a light one,
+    /// resolved by AppKit whenever the appearance changes: the lift a
+    /// platter and the tab bar's selection each draw over the popover.
+    static func adaptiveWhite(dark: CGFloat, light: CGFloat) -> Color {
+        Color(
+            nsColor: NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                return NSColor(white: 1, alpha: isDark ? dark : light)
+            })
+    }
     /// How far a row's text sits inside the wash drawn behind it, so the band
     /// reads as a band rather than as a highlight clipped to the glyphs.
     ///
@@ -580,14 +591,7 @@ struct PanelPlatter: View {
     /// platter off a light popover without drawing a box around it.
     private static let edgeWidth: CGFloat = 0.5
 
-    private nonisolated static let darkAlpha: CGFloat = 0.06
-    private nonisolated static let lightAlpha: CGFloat = 0.6
-
-    private static let fill = Color(
-        nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            return NSColor(white: 1, alpha: isDark ? darkAlpha : lightAlpha)
-        })
+    private static let fill = PanelMetrics.adaptiveWhite(dark: 0.06, light: 0.6)
 }
 
 /// One model's share of a provider's day, as a pill under the strip: the name
