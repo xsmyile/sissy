@@ -179,6 +179,11 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
     /// Re-reads the session with the dialog allowed and polls at once,
     /// returning only once that request has finished.
     ///
+    /// The dialog is real here, unlike on the CLI's credential: the session is
+    /// an item Sissy filed itself, silent while the signature that wrote it
+    /// still matches and not after a re-sign, and a refresh is the user asking
+    /// for it.
+    ///
     /// Deliberately not `stop()` first, for the reason `restart` carries.
     ///
     /// A retired reader reads nothing, whoever asks: `relink` suspends before

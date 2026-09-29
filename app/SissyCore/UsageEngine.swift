@@ -999,17 +999,17 @@ actor UsageEngine {
     /// What a user pressing refresh on one provider reaches.
     ///
     /// Deliberately one door with two behaviours behind it, because the
-    /// action is not the same action: on Claude Code it re-reads the keychain
-    /// with the dialog allowed and polls the usage endpoint at once, which is
-    /// the second and last gesture permitted to ask for that permission. On
-    /// Codex it re-reads `auth.json` and asks OpenAI for this account's
-    /// windows — which is a refresh that moves the numbers, where until the
-    /// usage endpoint was read it could only re-read the plan and wait for the
-    /// CLI's next turn.
+    /// action is not the same action: on Claude Code it re-reads the CLI's
+    /// credential, which asks macOS for nothing, and each linked claude.ai
+    /// session, and polls both usage endpoints at once. On Codex it re-reads
+    /// `auth.json` and asks OpenAI for this account's windows, which is a
+    /// refresh that moves the numbers, where until the usage endpoint was read
+    /// it could only re-read the plan and wait for the CLI's next turn.
     ///
-    /// The probe is only reached when the setting is on: a refresh must not
-    /// be a second way to switch a module on, or the permission would be
-    /// asked for by a control that never promised to.
+    /// The one read here that may put a dialog up is a claude.ai session's,
+    /// an item Sissy filed itself that a re-signed build no longer reads
+    /// silently. A press is the user asking for their limits, so that read is
+    /// allowed to ask.
     func refreshProvider(id: String) async {
         guard lifecycle == .running else { return }
         let me = self
