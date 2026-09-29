@@ -78,6 +78,24 @@ final class ProjectResolverTests: XCTestCase {
         XCTAssertNil(resolver.project(for: loose.path))
     }
 
+    /// The caches are bounded, and a full one starts again rather than
+    /// growing: a directory resolved before it filled is walked afresh after,
+    /// so it picks up a repository initialised in it since.
+    func testAFullCacheStartsAgain() throws {
+        let loose = root.appendingPathComponent("scratch")
+        try FileManager.default.createDirectory(at: loose, withIntermediateDirectories: true)
+        XCTAssertNil(resolver.project(for: loose.path))
+        try FileManager.default.createDirectory(
+            at: loose.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        XCTAssertNil(resolver.project(for: loose.path), "the answer was not cached")
+
+        for index in 0..<ProjectResolver.maxCachedAnswers {
+            _ = resolver.project(for: root.appendingPathComponent("gone-\(index)").path)
+        }
+
+        XCTAssertEqual(resolver.project(for: loose.path), loose.path)
+    }
+
     /// The walk never stats the starting directory, so a worktree kept inside
     /// its own repository still counts against it after being deleted.
     func testAWorktreeDeletedFromInsideItsRepositoryStillResolves() throws {
