@@ -252,10 +252,7 @@ final class UsageEngineHost {
         readinessTask = nil
         bootTask?.cancel()
         bootTask = nil
-        refreshTasks.values.forEach { $0.cancel() }
-        refreshTasks.removeAll()
-        refreshing.removeAll()
-        refreshingForge.removeAll()
+        cancelRefreshes()
         identityRefresh?.cancel()
         identityRefresh = nil
         refreshingIdentities = false
@@ -759,14 +756,8 @@ final class UsageEngineHost {
     /// The engine re-emits when it is done, so the reading's age resets on its
     /// own and nothing here has to tell the panel the numbers moved.
     func refreshProvider(_ id: String) {
-        guard let engine, refreshTasks[id] == nil else { return }
-        refreshing.insert(id)
-        refreshTasks[id] = Task {
-            await Self.holdingFloor { await engine.refreshProvider(id: id) }
-            guard !Task.isCancelled else { return }
-            refreshing.remove(id)
-            refreshTasks[id] = nil
-        }
+        guard let engine else { return }
+        track(id, in: .provider) { await engine.refreshProvider(id: id) }
     }
 
     /// Re-reads one forge connection, for the refresh on its own row.
@@ -775,13 +766,55 @@ final class UsageEngineHost {
     /// connection is keyed `kind:host`, which no provider id can be — so a
     /// teardown already cancels it along with the rest.
     func refreshForge(_ id: String) {
-        guard let engine, refreshTasks[id] == nil else { return }
-        refreshingForge.insert(id)
-        refreshTasks[id] = Task {
-            await Self.holdingFloor { await engine.refreshForge(id: id) }
+        guard let engine else { return }
+        track(id, in: .forge) { await engine.refreshForge(id: id) }
+    }
+
+    /// Which published set a keyed refresh's word lives in.
+    enum RefreshSlot {
+        case provider
+        case forge
+    }
+
+    /// Runs one keyed refresh under the floor, unless one for `id` is already
+    /// in flight, and answers the task it started.
+    ///
+    /// The task clears its own bookkeeping only if it was not cancelled: a
+    /// cancelled one belongs to an engine `releaseEngine()` has let go of,
+    /// which has already cleared it, and the same id may by then name a
+    /// refresh on the engine built after it. Internal rather than private
+    /// so a test can drive that ordering without starting an engine.
+    @discardableResult
+    func track(
+        _ id: String, in slot: RefreshSlot, _ work: @escaping @Sendable () async -> Void
+    ) -> Task<Void, Never>? {
+        guard refreshTasks[id] == nil else { return nil }
+        mark(id, in: slot, refreshing: true)
+        let task = Task {
+            await Self.holdingFloor { await work() }
             guard !Task.isCancelled else { return }
-            refreshingForge.remove(id)
+            mark(id, in: slot, refreshing: false)
             refreshTasks[id] = nil
+        }
+        refreshTasks[id] = task
+        return task
+    }
+
+    /// Cancels every keyed refresh and takes their words down, for a
+    /// teardown.
+    func cancelRefreshes() {
+        refreshTasks.values.forEach { $0.cancel() }
+        refreshTasks.removeAll()
+        refreshing.removeAll()
+        refreshingForge.removeAll()
+    }
+
+    private func mark(_ id: String, in slot: RefreshSlot, refreshing on: Bool) {
+        switch (slot, on) {
+        case (.provider, true): refreshing.insert(id)
+        case (.provider, false): refreshing.remove(id)
+        case (.forge, true): refreshingForge.insert(id)
+        case (.forge, false): refreshingForge.remove(id)
         }
     }
 
@@ -849,7 +882,7 @@ final class UsageEngineHost {
     /// Runs `work` and then waits out what is left of `refreshFloor`, so the
     /// word a control shows while it works stays on screen long enough to
     /// read. Whether the task was cancelled meanwhile is the caller's to ask
-    /// before it clears its own flag, for the four whose task `releaseEngine()`
+    /// before it clears its own flag, for the ones whose task `releaseEngine()`
     /// holds and cancels: a cancelled one belongs to an engine already let go
     /// of. The account switch and the reset spend run in tasks nothing
     /// cancels, so they have nothing to ask.
