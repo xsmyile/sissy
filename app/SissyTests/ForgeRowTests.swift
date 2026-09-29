@@ -99,7 +99,7 @@ final class ForgeRowTests: XCTestCase {
             UsageFormat.forgeNotice(
                 .gitHub, failure: nil, readAt: Self.readAt, opensAt: opensAt,
                 refreshing: false, now: Self.readAt),
-            "GitHub's day starts at " + UsageFormat.forgeClock(opensAt))
+            "GitHub's day starts at " + UsageFormat.clock(opensAt))
     }
 
     /// The hover names the clock time the vendor's day starts at here, which is
@@ -113,7 +113,7 @@ final class ForgeRowTests: XCTestCase {
         XCTAssertTrue(
             tooltip.contains(
                 "Events GitLab recorded for you, in UTC days that start at "
-                    + UsageFormat.forgeClock(dayStart) + " here"),
+                    + UsageFormat.clock(dayStart) + " here"),
             tooltip)
     }
 
