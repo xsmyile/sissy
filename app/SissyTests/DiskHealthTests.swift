@@ -278,11 +278,10 @@ final class DiskMonitorTests: XCTestCase {
         await monitor.stop()
         let published = expectation(description: "the restart published")
         await monitor.start { published.fulfill() }
-        try await Task.sleep(for: .milliseconds(100))
-        XCTAssertEqual(stuck.calls, 1)
 
         stuck.release()
         await fulfillment(of: [published], timeout: 2)
+        XCTAssertEqual(stuck.calls, 1)
         XCTAssertNotNil(monitor.currentReading())
         await monitor.stop()
     }
