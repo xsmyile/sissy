@@ -120,7 +120,7 @@ struct NetworkSparkline: View {
             now: now,
             firstTint: Self.downTint,
             secondTint: Self.upTint, scaleFloor: Self.scaleFloor,
-            label: "Network rate over the last two minutes",
+            label: UsageFormat.liveWindowLabel("Network rate"),
             figures: {
                 UsageFormat.networkDown(rates[$0].rate.received) + " · "
                     + UsageFormat.networkUp(rates[$0].rate.sent)

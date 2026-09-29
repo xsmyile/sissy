@@ -86,7 +86,7 @@ struct RateSparkline: View {
             Text(figures(hovered) + " · " + UsageFormat.age(now.timeIntervalSince(points[hovered].at)))
         } else {
             HStack {
-                Text("2 min ago")
+                Text(UsageFormat.liveWindowStart)
                 Spacer(minLength: 8)
                 Text("now")
             }

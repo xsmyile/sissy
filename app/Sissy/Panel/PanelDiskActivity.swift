@@ -53,13 +53,13 @@ struct DiskActivityPlatter: View {
                     },
                     now: reading?.observedAt ?? Date(), firstTint: Self.readTint,
                     secondTint: Self.writeTint, scaleFloor: Self.scaleFloor,
-                    label: "Disk activity over the last two minutes",
+                    label: UsageFormat.liveWindowLabel("Disk activity"),
                     figures: {
                         UsageFormat.diskRead(rates[$0].rate.read) + " · "
                             + UsageFormat.diskWrite(rates[$0].rate.written)
                     },
                     hovered: $hovered)
-                Text("last 2 minutes")
+                Text(UsageFormat.liveWindowCaption)
                     .font(.system(size: Self.captionSize))
                     .foregroundStyle(.tertiary)
             }
