@@ -341,6 +341,50 @@ final class DiskConfigTests: XCTestCase {
 
 /// A disk read that blocks its thread until released, the way a stuck
 /// volume would.
+/// The single-read gate, driven by hand: one waiter at a time, answered by
+/// `finish` or by its own cancel.
+final class DiskReadGateTests: XCTestCase {
+    private static let sample = DiskReading(
+        observedAt: Date(), home: nil, purgeable: nil, physicalMemory: 1, volumes: [])
+
+    /// A cancel that lands after `finish` already answered its waiter finds
+    /// nothing to cancel and records the id as one that left early. `forget`
+    /// is what clears it: a later waiter under the same id is a waiter again
+    /// rather than answered nil on arrival, which is the id kept for good.
+    func testAnIDCancelledAfterItsReadFinishedIsForgotten() async {
+        let gate = DiskReadGate()
+        let id = UUID()
+        let first = await withCheckedContinuation { continuation in
+            XCTAssertTrue(gate.join(id, continuation))
+            gate.finish(Self.sample)
+        }
+        XCTAssertNotNil(first)
+        gate.leave(id)
+
+        gate.forget(id)
+
+        let second = await withCheckedContinuation { continuation in
+            XCTAssertTrue(gate.join(id, continuation), "the id was still kept as one that left")
+            gate.finish(Self.sample)
+        }
+        XCTAssertNotNil(second)
+    }
+
+    /// And the case the record exists for: a waiter cancelled before it
+    /// joined is answered nil the moment it does.
+    func testAWaiterThatLeftBeforeJoiningIsAnsweredNil() async {
+        let gate = DiskReadGate()
+        let id = UUID()
+        gate.leave(id)
+
+        let answer = await withCheckedContinuation { continuation in
+            XCTAssertFalse(gate.join(id, continuation))
+        }
+
+        XCTAssertNil(answer)
+    }
+}
+
 private final class StuckRead: @unchecked Sendable {
     let entered = XCTestExpectation(description: "the read began")
     let returned = XCTestExpectation(description: "the read returned")
