@@ -99,13 +99,39 @@ final class FrameDeliveryTests: XCTestCase {
         await sent.waitUntilHolding()
         let waiting = Task { await delivery.deliver(2, revision: 2) }
         try await waitUntil { await delivery.waiting == 2 }
-        await delivery.stop()
+        let stopping = Task { await delivery.stop() }
+        try await waitUntil { await delivery.waiting == nil }
         await sent.release()
+        await stopping.value
 
         let firstOutcome = await first.value
         let waitingOutcome = await waiting.value
         XCTAssertEqual(firstOutcome, .stopped)
         XCTAssertEqual(waitingOutcome, .stopped)
+        let frames = await sent.frames
+        XCTAssertEqual(frames, [1])
+    }
+
+    /// `stop()` returns only once the frame the app is still taking is in,
+    /// so an engine that has stopped has nothing left to land.
+    func testStopWaitsForTheFrameBeingHandedOver() async throws {
+        let sent = SentFrames(holdingFirst: true)
+        let delivery = FrameDelivery<Int> { await sent.record($0) }
+        let first = Task { await delivery.deliver(1, revision: 1) }
+        await sent.waitUntilHolding()
+
+        let stopped = StopFlag()
+        let stopping = Task {
+            await delivery.stop()
+            await stopped.set()
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        let returnedEarly = await stopped.isSet
+        await sent.release()
+        await stopping.value
+        _ = await first.value
+
+        XCTAssertFalse(returnedEarly, "stop() returned while a frame was still being handed over")
         let frames = await sent.frames
         XCTAssertEqual(frames, [1])
     }
@@ -154,5 +180,13 @@ private actor SentFrames {
     func release() {
         holding?.resume()
         holding = nil
+    }
+}
+
+private actor StopFlag {
+    private(set) var isSet = false
+
+    func set() {
+        isSet = true
     }
 }
