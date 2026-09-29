@@ -69,7 +69,10 @@ enum StatuspageFeed {
             status: row.status)
     }
 
-    private static func load(_ url: URL) async throws -> Data {
+    /// One status document, fresh: every page a status row reads goes through
+    /// here, so the cache policy, the header and what counts as an answer are
+    /// the same for both trees.
+    static func load(_ url: URL) async throws -> Data {
         var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")

@@ -24,17 +24,7 @@ enum IncidentIOFeed {
         guard let url = componentsURL(root: root) else {
             throw ProviderStatusError.malformedPayload
         }
-        var request = URLRequest(url: url, timeoutInterval: StatuspageFeed.requestTimeout)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await SissyHTTP.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw ProviderStatusError.malformedPayload
-        }
-        guard http.statusCode == 200 else {
-            throw ProviderStatusError.badStatus(http.statusCode)
-        }
-        return try parse(data)
+        return try parse(try await StatuspageFeed.load(url))
     }
 
     /// The page's own structure, with each component's status looked up in the
