@@ -7,7 +7,7 @@ import Foundation
 /// two rebuilds in flight can finish in either order; every monitor's
 /// `reemit` makes that ordinary rather than rare. A frame whose reading is
 /// older than one already handed over is refused as `overtaken`, since its
-/// totals are older than the frame on screen.
+/// totals and signals are older than the frame on screen.
 ///
 /// One loop hands frames over, one at a time: `send` hops off the engine, so
 /// two calls made in order could otherwise reach the app out of it. A frame

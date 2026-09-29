@@ -5,9 +5,11 @@ import Foundation
 struct UsageReading: Sendable {
     let today: DayTotals
     let slices: [ProviderSlice]
-    /// Which of the aggregator's readings this is, counted up once per
-    /// provider emit, so a consumer holding two can tell which is newer
-    /// whatever order they reached it in.
+    /// Which of the aggregator's readings this is, counted up every time one
+    /// is taken, an emit's or a `currentReading()`'s, so a consumer holding
+    /// two can tell which was taken later whatever order they reached it in.
+    /// Every reading rather than every emit, because a slice carries the
+    /// provider's signals as well as its totals, and those move without one.
     let revision: Int
 }
 
@@ -82,7 +84,7 @@ actor UsageAggregator {
     /// hop, with no suspension between them, so a caller cannot pair totals
     /// from one moment with a breakdown from another.
     func currentReading() -> UsageReading {
-        UsageReading(today: aggregate(), slices: currentProviderSlices(), revision: revision)
+        UsageReading(today: aggregate(), slices: currentProviderSlices(), revision: nextRevision())
     }
 
     /// Per-provider scan progress, keyed by provider id. Only the providers
@@ -108,7 +110,7 @@ actor UsageAggregator {
 
     private func handleProviderEmit(id: String, today: DayTotals) async {
         perProvider[id] = today
-        revision += 1
+        let taken = nextRevision()
         let combinedToday = aggregate()
         // Build slices from the same `perProvider` map that just produced
         // `combinedToday` — both before the upcoming `await`. A concurrent
@@ -117,8 +119,13 @@ actor UsageAggregator {
         // captured, so the outgoing frame stays internally consistent.
         let slices = currentProviderSlices()
         if let cb = onChange {
-            await cb(UsageReading(today: combinedToday, slices: slices, revision: revision))
+            await cb(UsageReading(today: combinedToday, slices: slices, revision: taken))
         }
+    }
+
+    private func nextRevision() -> Int {
+        revision += 1
+        return revision
     }
 
     /// Hands one provider the chance to re-read its own out-of-band files.
