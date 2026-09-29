@@ -27,6 +27,9 @@ actor UsageEngine {
     /// into a burst of directory walks.
     private var historyRollups: [UsagePeriod: UsageHistoryRollup] = [:]
     private var historyRollupAt: Date = .distantPast
+    /// The day files the rollups have read, each re-read only once it
+    /// changes, and priced at `pricing`.
+    private var historyDayCache: UsageHistoryDayCache
     /// The one checkout memory every provider shares, kept because the export
     /// re-reads the archive's project paths through a resolver built on it.
     /// A second ledger over the same file would be a second writer to it.
@@ -60,8 +63,11 @@ actor UsageEngine {
     private var initialPriceCatalog: PriceCatalog?
     /// The rates a reading taken after the events is priced at — the cache
     /// saving, today's and the archive's — kept in step with every catalog
-    /// the readers are handed.
-    private var pricing: ProviderPricing
+    /// the readers are handed. The archive's day cache is rebuilt with it,
+    /// because it holds each day already priced.
+    private var pricing: ProviderPricing {
+        didSet { historyDayCache = UsageHistoryDayCache(pricing: pricing) }
+    }
     /// Whether a provider has produced a reading yet. It is what a config
     /// change re-emits against: before the first one there is nothing to
     /// rebuild, and the change lands on the first real frame instead.
@@ -190,10 +196,11 @@ actor UsageEngine {
     /// Long enough that frames do not walk the archive, short enough that a
     /// window is never visibly behind the day it includes.
     ///
-    /// It survives the archive growing from days to months: measured on real
-    /// files, a day is about 819 bytes over four rows, so a full 90-day
-    /// two-provider archive is ~150 KB and decodes in under 2 ms. What a
-    /// backfill needs is not a longer interval but a frame —
+    /// It survives the archive growing from days to years because
+    /// `historyDayCache` reads a day file again only once it changes:
+    /// measured 2026-09-29, a rebuild over this Mac's 62 files went from
+    /// 7.6 ms to 0.6 ms, and over a 7,300-file archive from 1,100 ms to 70 ms.
+    /// What a backfill needs is not a longer interval but a frame —
     /// `invalidateHistoryRollups` — since an idle Mac emits nothing and the
     /// panel would otherwise hold yesterday's windows until the next turn.
     private static let historyRollupTTL: TimeInterval = 2
@@ -272,6 +279,7 @@ actor UsageEngine {
     ) {
         self.config = config
         self.pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: nil)
+        self.historyDayCache = UsageHistoryDayCache(pricing: pricing)
         self.configURL = configURL
         self.configIsWritable = configIsWritable
         self.keepAwakePolicy = keepAwakePolicy
@@ -2093,12 +2101,13 @@ actor UsageEngine {
     private func currentHistory(now: Date) -> [UsagePeriod: UsageHistoryRollup] {
         guard config.resolvedHistoryRetentionDays > 0 else {
             historyRollups = [:]
+            historyDayCache = UsageHistoryDayCache(pricing: pricing)
             return [:]
         }
         let stale = now.timeIntervalSince(historyRollupAt) >= Self.historyRollupTTL
         if historyRollups.isEmpty || stale {
             historyRollups = UsageHistoryStore.rollups(
-                for: Set(UsagePeriod.archived), in: stateDir, now: now, pricing: pricing)
+                for: Set(UsagePeriod.archived), in: stateDir, now: now, cache: &historyDayCache)
             historyRollupAt = now
         }
         return (historyRollups[.all]?.tokens ?? 0) > 0 ? historyRollups : [:]

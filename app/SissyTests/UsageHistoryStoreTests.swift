@@ -480,6 +480,44 @@ final class UsageHistoryStoreTests: XCTestCase {
         }
     }
 
+    /// A rollup through a cache is an optimisation over one without, so a
+    /// warm cache has to answer what a fresh read of the same files would.
+    func testACachedRollupAgreesWithAFreshOne() throws {
+        try write(provider: "codex", day: day(-1), models: ["a": totals(input: 7, cost: "2")])
+        try write(provider: "claude-code", day: day(-9), models: ["b": totals(input: 9, cost: "3")])
+        var cache = UsageHistoryDayCache()
+        _ = UsageHistoryStore.rollups(for: Set(UsagePeriod.archived), in: root, cache: &cache)
+
+        let warm = UsageHistoryStore.rollups(
+            for: Set(UsagePeriod.archived), in: root, cache: &cache)
+
+        XCTAssertEqual(warm, UsageHistoryStore.rollups(for: Set(UsagePeriod.archived), in: root))
+    }
+
+    func testARewrittenDayIsReadAgainThroughTheCache() throws {
+        try write(provider: "codex", day: day(-1), models: ["a": totals(input: 1, cost: "1")])
+        var cache = UsageHistoryDayCache()
+        _ = UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache)
+
+        try write(provider: "codex", day: day(-1), models: ["a": totals(input: 5, cost: "1")])
+        let rollup = UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache)[.all]
+
+        XCTAssertEqual(rollup?.tokens, 5, "the cache answered for a file that had been rewritten")
+    }
+
+    func testADeletedDayLeavesTheCachedRollup() throws {
+        try write(provider: "codex", day: day(-1), models: ["a": totals(input: 1, cost: "1")])
+        try write(provider: "codex", day: day(-2), models: ["a": totals(input: 10, cost: "1")])
+        var cache = UsageHistoryDayCache()
+        _ = UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache)
+
+        try FileManager.default.removeItem(
+            at: UsageHistoryStore.url(provider: "codex", day: day(-2), in: root))
+        let rollup = UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache)[.all]
+
+        XCTAssertEqual(rollup?.tokens, 1, "the cache still counted a day file that was deleted")
+    }
+
     /// `all` is everything kept, so it takes no cutoff — and the day it names
     /// is the whole of what the word means.
     func testTheWidestWindowTakesEveryDayAndNamesItsFirst() throws {
