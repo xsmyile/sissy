@@ -270,25 +270,24 @@ final class ForgeEventTests: XCTestCase {
     func testTheLineReadsTheSameOnEitherForge() throws {
         let now = try Self.instant("2026-09-28T12:00:00Z")
         let minutes = { (count: Double) in now.addingTimeInterval(-count * 60) }
+        let line = { (event: ForgeEvent) in
+            UsageFormat.forgeEventDone(event) + UsageFormat.forgeEventTail(event, now: now)
+        }
         XCTAssertEqual(
-            UsageFormat.forgeEvent(
-                ForgeEvent(action: .pushed, target: "next", repository: "tanuki", at: minutes(25)),
-                now: now),
+            line(
+                ForgeEvent(action: .pushed, target: "next", repository: "tanuki", at: minutes(25))),
             "pushed to next · tanuki · 25m ago")
         XCTAssertEqual(
-            UsageFormat.forgeEvent(
-                ForgeEvent(action: .merged, target: "!41", repository: "tanuki", at: minutes(3)),
-                now: now),
+            line(
+                ForgeEvent(action: .merged, target: "!41", repository: "tanuki", at: minutes(3))),
             "merged !41 · tanuki · 3m ago")
         XCTAssertEqual(
-            UsageFormat.forgeEvent(
-                ForgeEvent(action: .opened, target: "#290", repository: "sissy", at: minutes(16)),
-                now: now),
+            line(
+                ForgeEvent(action: .opened, target: "#290", repository: "sissy", at: minutes(16))),
             "opened #290 · sissy · 16m ago")
         XCTAssertEqual(
-            UsageFormat.forgeEvent(
-                ForgeEvent(action: .commented, target: nil, repository: nil, at: minutes(0)),
-                now: now),
+            line(
+                ForgeEvent(action: .commented, target: nil, repository: nil, at: minutes(0))),
             "commented · just now")
     }
 }

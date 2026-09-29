@@ -2016,18 +2016,12 @@ extension UsageFormat {
         name + " · " + periodHeading(period).lowercased()
     }
 
-    /// The latest event as its line reads: what was done, where, and how long
-    /// ago, in the words both forges share.
+    /// Where and when, joined on with its leading separator: the half of the
+    /// line the row keeps whole while the half before it shortens.
     ///
     /// The age is worded on the row's own clock for the reason `forgeNotice`'s
     /// is: the frame arrives every five to thirty minutes and the event only
     /// gets older between them.
-    static func forgeEvent(_ event: ForgeEvent, now: Date = Date()) -> String {
-        forgeEventDone(event) + forgeEventTail(event, now: now)
-    }
-
-    /// Where and when, joined on with its leading separator: the half of the
-    /// line the row keeps whole while the half before it shortens.
     static func forgeEventTail(_ event: ForgeEvent, now: Date = Date()) -> String {
         [event.repository, age(now.timeIntervalSince(event.at))]
             .compactMap { $0 }
