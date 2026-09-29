@@ -738,7 +738,9 @@ a cold scan instead of only a cancelled boot task doing so.
 - **Failure modes**:
   - No JSONL for any active provider (empty `~/.claude/projects` and/or empty
     `~/.codex/sessions`) → the panel reads "No session logs found", no frames are built
-  - A `server.json` that will not parse → `ServerConfig.load` overlays what it can read
-    onto the defaults rather than metering nothing
+  - A `server.json` that is not JSON → `ServerConfig.loadForRun` runs on the defaults,
+    copies the bytes aside and saves nothing over the file, rather than metering nothing
+  - A `server.json` with a key that will not read → that key lands on its default and
+    every other key keeps what the file says, since the file is decoded key by key
   - A model with no rate in any source → one log line per model per run and zero cost
     for it, surfacing the gap instead of billing at a wrong rate
