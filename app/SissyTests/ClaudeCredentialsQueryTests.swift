@@ -10,7 +10,8 @@ import XCTest
 /// still raise Allow/Deny through it.
 final class ClaudeCredentialsQueryTests: XCTestCase {
     func testASilentReadForbidsInteractionThroughTheAuthenticationContext() throws {
-        let query = ClaudeCredentialsStore.makeQuery(allowingInteraction: false)
+        let query = KeychainAccess.makeQuery(
+            service: ClaudeKeychainCLI.claudeService, allowingInteraction: false)
 
         let context = try XCTUnwrap(
             query[kSecUseAuthenticationContext as String] as? LAContext,
@@ -24,32 +25,35 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
     /// query quietly interactive, which is the failure nobody would notice
     /// until a dialog appeared on someone's Mac at login.
     func testASilentReadAlsoFailsTheLegacyKeychainUI() throws {
-        let query = ClaudeCredentialsStore.makeQuery(allowingInteraction: false)
+        let query = KeychainAccess.makeQuery(
+            service: ClaudeKeychainCLI.claudeService, allowingInteraction: false)
 
         let key = try XCTUnwrap(
-            resolve(ClaudeCredentialsStore.authenticationUIName),
+            resolve(KeychainAccess.authenticationUIName),
             "kSecUseAuthenticationUI no longer resolves; the legacy keychain can still ask"
         )
-        let fail = try XCTUnwrap(resolve(ClaudeCredentialsStore.authenticationUIFailName))
+        let fail = try XCTUnwrap(resolve(KeychainAccess.authenticationUIFailName))
         XCTAssertEqual(query[key] as? String, fail)
     }
 
     /// The read a user action makes is the ordinary one. It has to be able to
     /// ask — that is the only moment Sissy is allowed to.
     func testAUserActionReadCarriesNeitherSuppressor() throws {
-        let query = ClaudeCredentialsStore.makeQuery(allowingInteraction: true)
+        let query = KeychainAccess.makeQuery(
+            service: ClaudeKeychainCLI.claudeService, allowingInteraction: true)
 
         XCTAssertNil(query[kSecUseAuthenticationContext as String])
-        let key = try XCTUnwrap(resolve(ClaudeCredentialsStore.authenticationUIName))
+        let key = try XCTUnwrap(resolve(KeychainAccess.authenticationUIName))
         XCTAssertNil(query[key])
     }
 
     func testBothReadsAskForTheServiceClaudeCodeWritesUnder() {
         for interactive in [true, false] {
-            let query = ClaudeCredentialsStore.makeQuery(allowingInteraction: interactive)
+            let query = KeychainAccess.makeQuery(
+                service: ClaudeKeychainCLI.claudeService, allowingInteraction: interactive)
             XCTAssertEqual(
                 query[kSecAttrService as String] as? String,
-                ClaudeCredentialsStore.keychainService
+                ClaudeKeychainCLI.claudeService
             )
         }
     }
@@ -60,7 +64,7 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
     /// renamed constant — and it is deprecated, so the day it stops resolving
     /// will not be announced.
     func testTheLegacyKeychainInteractionSwitchStillResolves() {
-        let name = ClaudeCredentialsStore.userInteractionName
+        let name = KeychainAccess.userInteractionName
 
         XCTAssertEqual(name, "SecKeychainSetUserInteractionAllowed")
         XCTAssertNotNil(dlsym(UnsafeMutableRawPointer(bitPattern: -2), name))
@@ -138,14 +142,14 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
         let release = expectation(description: "the holder was told to let go")
 
         DispatchQueue.global().async {
-            ClaudeCredentialsStore.suppressingInteraction(false, unavailable: ()) {
+            KeychainAccess.suppressingInteraction(false, unavailable: ()) {
                 held.fulfill()
                 XCTAssertEqual(XCTWaiter().wait(for: [release], timeout: 5), .completed)
             }
         }
         wait(for: [held], timeout: 5)
 
-        let answer = ClaudeCredentialsStore.suppressingInteraction(
+        let answer = KeychainAccess.suppressingInteraction(
             false, unavailable: "gave up", timeout: 0.05
         ) { "read" }
 
@@ -185,7 +189,7 @@ final class ClaudeCredentialsQueryTests: XCTestCase {
         done.expectedFulfillmentCount = iterations
 
         DispatchQueue.concurrentPerform(iterations: iterations) { index in
-            ClaudeCredentialsStore.suppressingInteraction(
+            KeychainAccess.suppressingInteraction(
                 interactive(index), unavailable: ()
             ) {
                 seen.update {

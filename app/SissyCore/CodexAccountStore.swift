@@ -55,12 +55,12 @@ enum CodexAccountStore {
     /// gets — silent in the ordinary case, and refusing rather than
     /// interrupting once a re-signing has cost the grant.
     static func load(account: String, allowingInteraction: Bool) -> CodexCredentialReading {
-        var query = ClaudeCredentialsStore.makeQuery(
+        var query = KeychainAccess.makeQuery(
             service: keychainService, allowingInteraction: allowingInteraction)
         query[kSecAttrAccount as String] = account
-        let result = ClaudeCredentialsStore.copyMatching(
+        let result = KeychainAccess.copyMatching(
             query, allowingInteraction: allowingInteraction)
-        let outcome = ClaudeCredentialsStore.classify(
+        let outcome = KeychainAccess.classify(
             result.status,
             data: result.data,
             allowingInteraction: allowingInteraction,
