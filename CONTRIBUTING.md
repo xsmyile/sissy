@@ -10,7 +10,7 @@ You need macOS 26 or later and Xcode 26 or later. Everything else comes from
 Homebrew:
 
 ```bash
-brew install xcodegen swiftlint xcbeautify shellcheck actionlint
+brew install xcodegen xcbeautify shellcheck actionlint
 ```
 
 `Sissy.xcodeproj` is **generated** and not tracked. Regenerate it, and
@@ -64,7 +64,7 @@ The two gates that block a merge are formatting and linting:
 
 ```bash
 xcrun swift-format lint --recursive --strict app/Sissy app/SissyCore app/SissyTests
-swiftlint lint --quiet --strict --baseline .swiftlint-baseline
+scripts/swiftlint.sh lint --quiet --strict --baseline .swiftlint-baseline
 ```
 
 Tests are CI's job (`xcodebuild test` is too slow to run per commit), but if you

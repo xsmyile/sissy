@@ -106,14 +106,14 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode.app
 
       - name: Install build tools
-        run: brew install xcodegen create-dmg xcbeautify swiftlint
+        run: brew install xcodegen create-dmg xcbeautify
 
       - name: Generate Xcode project
         working-directory: app
         run: xcodegen generate
 
       - name: SwiftLint
-        run: swiftlint lint --quiet --strict --baseline .swiftlint-baseline
+        run: scripts/swiftlint.sh lint --quiet --strict --baseline .swiftlint-baseline
 
       - name: Swift format lint
         run: |

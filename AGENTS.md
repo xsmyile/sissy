@@ -154,7 +154,7 @@ it covers, because most of them record something already tried and removed.
 
 `pre-commit run --all-files` runs the full sweep.
 
-CI lints against a recorded backlog in `.swiftlint-baseline` with `--strict`, so the backlog passes and any **new** violation fails the PR, and the pre-commit hook runs the same command. Regenerate the baseline from the repo root when a change clears violations or the rule set changes: `swiftlint lint --write-baseline .swiftlint-baseline`. Regenerating it to absorb a new violation is what the gate exists to stop.
+CI lints against a recorded backlog in `.swiftlint-baseline` with `--strict`, so the backlog passes and any **new** violation fails the PR, and the pre-commit hook runs the same command. Both go through `scripts/swiftlint.sh`, which pins the SwiftLint release the baseline was generated with (0.65.1) and checks its sha256: under `--strict` a newer SwiftLint that words a rule differently fails every build at once, a tag push included, so moving to one is a commit that changes the pin and regenerates the baseline together. Regenerate the baseline from the repo root when a change clears violations or the rule set changes: `scripts/swiftlint.sh lint --quiet --write-baseline .swiftlint-baseline`. Regenerating it to absorb a new violation is what the gate exists to stop.
 
 ## Quality gates
 
@@ -163,7 +163,7 @@ Consumed by the `/commit` skill. Run before each commit; `--no-checks` to skip.
 ```yaml
 quality-gates:
   format: xcrun swift-format lint --recursive --strict app/Sissy app/SissyCore app/SissyTests
-  lint: swiftlint lint --quiet --strict --baseline .swiftlint-baseline && shellcheck scripts/*.sh app/Sissy/Resources/*.sh
+  lint: scripts/swiftlint.sh lint --quiet --strict --baseline .swiftlint-baseline && shellcheck scripts/*.sh app/Sissy/Resources/*.sh
   docs: python3 scripts/check-doc-refs.py
   prose: python3 scripts/check-prose.py
 ```
