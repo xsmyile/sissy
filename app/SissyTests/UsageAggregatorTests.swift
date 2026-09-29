@@ -44,6 +44,27 @@ final class UsageAggregatorTests: XCTestCase {
         XCTAssertEqual(reading.slices.reduce(0) { $0 + $1.tokens }, reading.today.totalTokens)
     }
 
+    /// Every reading is later than the one before it, an emit's or a
+    /// replay's, which is what lets the engine refuse a frame built from an
+    /// earlier one: a replay also carries signals that move without an emit.
+    func testEveryReadingTakesALaterRevision() async {
+        let first = StubProvider(id: "a")
+        let aggregator = UsageAggregator(providers: [first])
+        let revisions = RevisionLog()
+        await aggregator.start { await revisions.record($0.revision) }
+        await first.emit(today: totals(10))
+
+        let replay = await aggregator.currentReading()
+        let again = await aggregator.currentReading()
+        await first.emit(today: totals(12))
+
+        let emitted = await revisions.all
+        XCTAssertEqual(emitted.count, 2)
+        XCTAssertLessThan(emitted[0], replay.revision)
+        XCTAssertLessThan(replay.revision, again.revision)
+        XCTAssertLessThan(again.revision, emitted[1])
+    }
+
     /// A provider that has spent nothing today keeps its slice. The slice is
     /// what carries its plan, its account, its credits and its rate-limit
     /// gauges, none of which stop existing because the day's total is zero —
@@ -141,5 +162,13 @@ private final class ReadingLog: @unchecked Sendable {
 
     var last: (today: DayTotals, slices: [ProviderSlice])? {
         lock.withLock { readings.last }
+    }
+}
+
+private actor RevisionLog {
+    private(set) var all: [Int] = []
+
+    func record(_ revision: Int) {
+        all.append(revision)
     }
 }
