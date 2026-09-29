@@ -81,10 +81,4 @@ struct AgentCounts: Codable, Equatable, Sendable {
         sessions += other.sessions
         agents += other.agents
     }
-
-    static func + (lhs: Self, rhs: Self) -> Self {
-        var out = lhs
-        out.add(rhs)
-        return out
-    }
 }

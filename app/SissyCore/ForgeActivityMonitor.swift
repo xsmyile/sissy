@@ -129,8 +129,6 @@ actor ForgeActivityMonitor {
         tokenSource = token
     }
 
-    nonisolated func currentActivity() -> [String: ForgeActivityReading] { published.load() }
-
     /// Every connection's reading, in the order the index gave them, so the
     /// panel's rows cannot trade places between polls. A connection nothing has
     /// been published for at all is absent rather than drawn as a zero.
@@ -175,7 +173,7 @@ actor ForgeActivityMonitor {
     /// Stops the loop and drops what it published.
     ///
     /// Dropping is the point, and it is the rule every reader in this app stops
-    /// under: the engine rebuilds every frame from `currentActivity()`, so a
+    /// under: the engine rebuilds every frame from `currentReadings()`, so a
     /// cancelled loop would otherwise leave a contribution count standing under
     /// a connection the user has just removed.
     ///
