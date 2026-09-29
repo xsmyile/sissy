@@ -261,6 +261,8 @@ final class UsageEngineHost {
         refreshingAgents = false
         allRefresh?.cancel()
         allRefresh = nil
+        accountSwitch?.cancel()
+        accountSwitch = nil
         switchingClaudeAccount = nil
         networkReading = nil
         diskActivityReading = nil
@@ -331,17 +333,27 @@ final class UsageEngineHost {
         guard let engine, switchingClaudeAccount == nil else { return }
         accountSwitchFailure = nil
         switchingClaudeAccount = uuid
-        Task { [weak self] in
+        accountSwitch = Task { [weak self] in
             await Self.holdingFloor {
                 let outcome = await engine.activateClaudeAccount(uuid: uuid)
+                guard !Task.isCancelled else { return }
                 if case .failure(let why) = outcome {
                     self?.accountSwitchFailure = ClaudeAccountSwitchCopy.failure(why)
                 }
                 self?.claudeAccounts = engine.claudeAccountSnapshot
             }
-            self?.switchingClaudeAccount = nil
+            guard let self, !Task.isCancelled else { return }
+            switchingClaudeAccount = nil
+            accountSwitch = nil
         }
     }
+
+    /// The switch in flight, held so a teardown can cancel it. Its answer is
+    /// the old engine's once `releaseEngine()` has run: writing that engine's
+    /// snapshot and clearing the flag would land over a switch the next
+    /// engine has started, and let a third press race two credentials into
+    /// one slot.
+    @ObservationIgnored private var accountSwitch: Task<Void, Never>?
 
     /// Whether a claude.ai session is filed, so Settings can offer the right
     /// button. Asked without decrypting one, so it is answerable on a build
@@ -884,8 +896,9 @@ final class UsageEngineHost {
     /// read. Whether the task was cancelled meanwhile is the caller's to ask
     /// before it clears its own flag, for the ones whose task `releaseEngine()`
     /// holds and cancels: a cancelled one belongs to an engine already let go
-    /// of. The account switch and the reset spend run in tasks nothing
-    /// cancels, so they have nothing to ask.
+    /// of. The reset spend runs in a task nothing cancels, so it has nothing
+    /// to ask: a teardown leaves `spendingCodexReset` standing, so no newer
+    /// press can start for its answer to land over.
     @discardableResult
     private static func holdingFloor<Result>(_ work: () async -> Result) async -> Result {
         let startedAt = ContinuousClock.now
