@@ -473,7 +473,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         self.activity = activity
         self.effort = effort
         var ordered = signals
-        ordered.windows.sort { ($0.minutes, $0.scope ?? "") < ($1.minutes, $1.scope ?? "") }
+        ordered.windows = UsageWindow.ordered(ordered.windows)
         if ordered.plan == nil { ordered.planTier = nil }
         self.signals = ordered
         self.projects = projects
