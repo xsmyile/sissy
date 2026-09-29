@@ -113,7 +113,7 @@ jobs:
         run: xcodegen generate
 
       - name: SwiftLint
-        run: swiftlint lint --quiet --lenient --baseline .swiftlint-baseline
+        run: swiftlint lint --quiet --strict --baseline .swiftlint-baseline
 
       - name: Swift format lint
         run: |

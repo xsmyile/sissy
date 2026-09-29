@@ -64,7 +64,7 @@ The two gates that block a merge are formatting and linting:
 
 ```bash
 xcrun swift-format lint --recursive --strict app/Sissy app/SissyCore app/SissyTests
-swiftlint lint --quiet --lenient
+swiftlint lint --quiet --strict --baseline .swiftlint-baseline
 ```
 
 Tests are CI's job (`xcodebuild test` is too slow to run per commit), but if you
