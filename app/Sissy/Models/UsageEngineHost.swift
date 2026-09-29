@@ -363,10 +363,6 @@ final class UsageEngineHost {
     /// The Codex accounts Settings lists, and the only surface one can be
     /// unlinked from.
     private(set) var linkedCodexAccounts: [CodexLinkedAccount] = []
-    /// Whether a login is in flight, from the click until the session is
-    /// filed. The panel's `Add account…` is disabled meanwhile: two logins
-    /// would race for the same keychain item.
-    private(set) var linkingClaudeAccount = false
     private(set) var claudeWebLinkFailure: ClaudeWebAccountLink.Failure?
     /// Why the last Unlink of a claude.ai session did not finish, nil once
     /// one has. The confirmation dialog is gone by the time the keychain
@@ -403,7 +399,6 @@ final class UsageEngineHost {
             loginWindow.bringToFront()
             return
         }
-        linkingClaudeAccount = true
         claudeWebLinkFailure = nil
         let window = VendorLoginWindow(vendor: .claude)
         loginWindow = window
@@ -433,7 +428,6 @@ final class UsageEngineHost {
             onCancel: { [weak self] in
                 guard let self else { return }
                 loginWindow = nil
-                linkingClaudeAccount = false
                 Task { await engine.cancelClaudeWebLink() }
             })
     }
@@ -470,7 +464,6 @@ final class UsageEngineHost {
     private func complete(_ window: VendorLoginWindow) {
         window.finish()
         loginWindow = nil
-        linkingClaudeAccount = false
         claudeWebUnlinkFailure = nil
         codexUnlinkFailure = nil
         noteLinkedAccounts()
