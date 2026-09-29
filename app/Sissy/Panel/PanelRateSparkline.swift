@@ -65,7 +65,8 @@ struct RateSparkline: View {
                 .onContinuousHover { phase in
                     switch phase {
                     case .active(let location):
-                        hovered = Self.index(at: location.x, of: points.map(\.at), now: now, width: width)
+                        hovered = Self.index(
+                            at: location.x, of: points.lazy.map(\.at), now: now, width: width)
                     case .ended: hovered = nil
                     }
                 }
@@ -104,7 +105,13 @@ struct RateSparkline: View {
     /// The point nearest in time to the pointer at `x`, or nil where the
     /// pointer is left of the oldest by more than `hoverSlack`, which is
     /// minutes the series never saw.
-    static func index(at x: CGFloat, of times: [Date], now: Date, width: CGFloat) -> Int? {
+    ///
+    /// Any collection of instants rather than an array, so the hover reads
+    /// the points' own times through a lazy view instead of copying them
+    /// into a new array on every pointer move.
+    static func index<Times: RandomAccessCollection<Date>>(
+        at x: CGFloat, of times: Times, now: Date, width: CGFloat
+    ) -> Int? where Times.Index == Int {
         guard width > 0, let oldest = times.first else { return nil }
         let pointer = now.addingTimeInterval(-LiveCadence.window * (1 - Double(x / width)))
         guard pointer >= oldest.addingTimeInterval(-hoverSlack) else { return nil }
