@@ -91,15 +91,7 @@ enum CodexAccountLinking {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await SissyHTTP.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw UsageRequestError.malformedPayload
-        }
-        guard http.statusCode == 200 else { throw UsageRequestError.badStatus(http.statusCode) }
-        guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw UsageRequestError.malformedPayload
-        }
-        return try workspaces(in: body)
+        return try workspaces(in: await UsageRequestError.object(answering: request))
     }
 
     /// One reply's worth of workspaces. Pure, so which ones a payload yields is
