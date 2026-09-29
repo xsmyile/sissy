@@ -63,6 +63,29 @@ final class UsageSnapshotFlushTests: XCTestCase {
         XCTAssertFalse(rewritten, "a flush rewrote a snapshot nothing had changed")
     }
 
+    /// A sleep can land while the cold scan is still reading. The scan's first
+    /// emit is made from inside it, so a flush issued from that callback runs
+    /// with the scan part-way through, and must leave the archive to the
+    /// scan's own end.
+    func testAFlushDuringTheColdScanWritesNoArchivedDay() async throws {
+        try append(turn: "m1")
+        let provider = tail()
+        let midScan = LockedValue<(warm: Bool, days: [String])?>(nil)
+        let historyRoot = stateDir!
+        await provider.start { _ in
+            guard midScan.load() == nil else { return }
+            let warm = await provider.isWarm()
+            await provider.flush()
+            midScan.store(
+                (warm, UsageHistoryStore.storedDays(provider: ProviderID.claudeCode, in: historyRoot)))
+        }
+        await provider.stop()
+
+        let observed = try XCTUnwrap(midScan.load(), "the cold scan emitted nothing")
+        XCTAssertFalse(observed.warm, "the first emit came after the scan, so nothing was tested")
+        XCTAssertEqual(observed.days, [], "a flush during the cold scan wrote a day it had half read")
+    }
+
     private func tail() -> LocalUsageProvider {
         LocalUsageProvider.claudeCode(
             claudeDir: logDir,
