@@ -28,7 +28,7 @@ enum PanelModule: CaseIterable, Hashable {
         switch self {
         case .providers: return !snapshot.gaugeRows.isEmpty
         case .projects: return !snapshot.projects.isEmpty
-        case .identities: return !PanelTab.visible(in: snapshot).contains(.forge)
+        case .identities: return !PanelTab.forge.isVisible(in: snapshot)
         }
     }
 }
