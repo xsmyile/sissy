@@ -20,10 +20,14 @@ import Foundation
 /// The three rules the Claude readers next door live by hold here too: the
 /// poll is slow, a 429 backs off hard, and a failure leaves the panel on its
 /// previous row rather than surfacing an error nobody can act on.
-actor CodexUsageSource: SourceSignals {
+actor CodexUsageSource: SourceSignals, LimitsPolling {
     static let usageURL = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
     private static let requestTimeout: TimeInterval = 15
-    private static let refreshInterval: Duration = .seconds(300)
+    static let refreshInterval: Duration = .seconds(300)
+    static let vendor = "OpenAI"
+    static var limitsState: WritableKeyPath<ProviderSignals, ProviderLimitsState> {
+        \.limitsState
+    }
     /// Header OpenAI selects a workspace with. A login can hold several and
     /// they are metered separately, so a reading without it is the vendor's
     /// choice of account rather than the user's.
@@ -34,7 +38,7 @@ actor CodexUsageSource: SourceSignals {
     /// in as, which is not this reader's to fix or to remember.
     let account: String?
 
-    nonisolated private let published = LockedValue(ProviderSignals())
+    nonisolated let published = LockedValue(ProviderSignals())
     /// The account the last reading actually came back for, published outside
     /// the actor because the row it belongs to is decided while this reader is
     /// still holding itself. Nil until one lands.
@@ -61,14 +65,10 @@ actor CodexUsageSource: SourceSignals {
     let workspace: String?
     /// Where a refusal is written down so the next run honours it, keyed by
     /// this reader's own credential.
-    private let backoff: LimitsBackoffSlot?
+    let backoff: LimitsBackoffSlot?
 
     private var retired = false
-    private var mayInteract = false
-    private var pollTask: Task<Void, Never>?
-    private var firstRequest: Task<Duration, Never>?
-    private var generation = 0
-    private var lastReported: String?
+    var loop = LimitsLoop()
     /// The access token a renewal handed over that OpenAI refused as well.
     /// The next poll reads that same token back from the keychain, and
     /// renewing it on every refusal rotated the grant once a poll for as long
@@ -120,29 +120,8 @@ actor CodexUsageSource: SourceSignals {
     nonisolated var observedAccount: String? { account ?? observed.load() }
 
     func start(userInitiated: Bool, onRefresh: @Sendable @escaping () async -> Void) {
-        guard !retired, pollTask == nil else { return }
+        guard !retired, loop.pollTask == nil else { return }
         _ = begin(userInitiated: userInitiated, onRefresh: onRefresh)
-    }
-
-    /// Starts the loop and hands back the first request, so an explicit
-    /// refresh stays pending until credential, network and publication have
-    /// all completed rather than ending on the hand-off.
-    private func begin(
-        userInitiated: Bool,
-        onRefresh: @Sendable @escaping () async -> Void
-    ) -> Task<Duration, Never> {
-        mayInteract = userInitiated
-        let request = Task { await refreshOnce(onRefresh: onRefresh) }
-        firstRequest = request
-        pollTask = Task { [weak self] in
-            var delay = await request.value
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: delay) } catch { return }
-                guard let self else { return }
-                delay = await self.refreshOnce(onRefresh: onRefresh)
-            }
-        }
-        return request
     }
 
     /// Stops the loop and drops what it published, because the aggregator
@@ -164,7 +143,7 @@ actor CodexUsageSource: SourceSignals {
             $0.limitsObservedAt = nil
             if clearingState { $0.limitsState = .quiet }
         }
-        lastReported = nil
+        loop.lastReported = nil
     }
 
     /// Stops this reader for good, for an account that is no longer linked.
@@ -176,18 +155,9 @@ actor CodexUsageSource: SourceSignals {
         stop()
     }
 
-    private func cancelRequests() {
-        generation &+= 1
-        pollTask?.cancel()
-        firstRequest?.cancel()
-        pollTask = nil
-        firstRequest = nil
-    }
-
     /// Re-reads the credential and polls at once, returning only once that
-    /// request has finished. Deliberately not `stop()` first: that drops the
-    /// windows, and a refresh that blanks the gauges it is restoring reads as
-    /// a failure for as long as the request takes.
+    /// request has finished. Deliberately not `stop()` first, for the reason
+    /// `restart` carries.
     ///
     /// `userInitiated` is what lets the credential read ask for the keychain.
     /// A reader retired while a caller was suspended stays retired: this is
@@ -197,26 +167,7 @@ actor CodexUsageSource: SourceSignals {
         userInitiated: Bool = true, onRefresh: @Sendable @escaping () async -> Void
     ) async {
         guard !retired else { return }
-        if case .rateLimited(let until) = published.load().limitsState, until > Date() { return }
-        cancelRequests()
-        lastReported = nil
-        let request = begin(userInitiated: userInitiated, onRefresh: onRefresh)
-        await withTaskCancellationHandler {
-            _ = await request.value
-        } onCancel: {
-            request.cancel()
-        }
-    }
-
-    /// One poll. Returns how long to wait before the next one. Internal rather
-    /// than private so a test can run exactly one and assert what it published.
-    func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
-        let stamp = generation
-        let before = published.load()
-        let delay = await readAndFetch(generation: stamp)
-        guard stamp == generation, !Task.isCancelled else { return delay }
-        if published.load() != before { await onRefresh() }
-        return delay
+        await restart(userInitiated: userInitiated, onRefresh: onRefresh)
     }
 
     private enum Credential {
@@ -235,10 +186,8 @@ actor CodexUsageSource: SourceSignals {
     /// tail had already moved on to, until that token expired. Two accounts on
     /// one row, for up to ten days.
     private func currentCredential(generation stamp: Int) async -> Credential {
-        let interactive = mayInteract
-        mayInteract = false
-        let outcome = await credentialSource(interactive)
-        guard stamp == generation, !Task.isCancelled else { return .wait(Self.refreshInterval) }
+        let outcome = await credentialSource(takeInteraction())
+        guard isCurrent(stamp) else { return .wait(Self.refreshInterval) }
         switch outcome {
         case .found(let found):
             published.update {
@@ -276,7 +225,7 @@ actor CodexUsageSource: SourceSignals {
         return .wait(Self.refreshInterval)
     }
 
-    private func readAndFetch(generation stamp: Int) async -> Duration {
+    func readAndFetch(generation stamp: Int) async -> Duration {
         if let wait = await recordedBackoff(generation: stamp) { return wait }
         let credential: CodexCredential
         switch await currentCredential(generation: stamp) {
@@ -286,7 +235,7 @@ actor CodexUsageSource: SourceSignals {
         do {
             return try await read(with: credential, generation: stamp)
         } catch {
-            guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+            guard isCurrent(stamp) else { return Self.refreshInterval }
             guard Self.isRefusal(error), let renewRefused,
                 credential.accessToken != refusedAfterRenewal
             else { return await handle(error) }
@@ -299,12 +248,12 @@ actor CodexUsageSource: SourceSignals {
         -> Duration
     {
         var reading = try await fetchSource(credential)
-        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+        guard isCurrent(stamp) else { return Self.refreshInterval }
         if let named = reading.accountId, let asked = credential.accountId, named != asked {
             report("OpenAI answered for a different account than the one asked for")
         }
         let dated = await dated(reading.resets, with: credential)
-        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+        guard isCurrent(stamp) else { return Self.refreshInterval }
         reading.resets = dated.resets
         nextCredit = dated.nextCredit
         publish(reading)
@@ -388,13 +337,13 @@ actor CodexUsageSource: SourceSignals {
         generation stamp: Int
     ) async -> Duration {
         let outcome = await renewing(refused)
-        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+        guard isCurrent(stamp) else { return Self.refreshInterval }
         switch outcome {
         case .found(let renewed):
             do {
                 return try await read(with: renewed, generation: stamp)
             } catch {
-                guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+                guard isCurrent(stamp) else { return Self.refreshInterval }
                 if Self.isRefusal(error) { refusedAfterRenewal = renewed.accessToken }
                 return await handle(error)
             }
@@ -413,18 +362,6 @@ actor CodexUsageSource: SourceSignals {
     }
 
     private static let refusalStatuses: Set<Int> = [401, 403]
-
-    /// The wait a refusal recorded on an earlier run still has left, guarded
-    /// by the generation on the reasoning the Claude probe's twin carries.
-    private func recordedBackoff(generation stamp: Int) async -> Duration? {
-        guard let until = await backoff?.deadline() else { return nil }
-        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-        let remaining = until.timeIntervalSinceNow
-        guard remaining > 0 else { return nil }
-        published.update { $0.limitsState = .rateLimited(until: until) }
-        report("still refused by OpenAI until \(until); waiting rather than asking")
-        return .seconds(remaining)
-    }
 
     /// What the row takes from one reply.
     ///
@@ -460,14 +397,7 @@ actor CodexUsageSource: SourceSignals {
     /// login`'s, so its refusal is `credentialRefused`: linking would add a
     /// second account and leave this row refused.
     private func handle(_ error: Error) async -> Duration {
-        if case UsageRequestError.rateLimited(let retryAfter) = error {
-            let seconds = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
-            let until = Date().addingTimeInterval(seconds)
-            published.update { $0.limitsState = .rateLimited(until: until) }
-            await backoff?.record(until)
-            report("OpenAI answered 429; backing off until \(until)")
-            return .seconds(seconds)
-        }
+        if let wait = await backOff(after: error) { return wait }
         if case UsageRequestError.badStatus(let code) = error, Self.refusalStatuses.contains(code) {
             let refused: ProviderLimitsState = account == nil ? .credentialRefused : .sessionExpired
             published.update { $0.limitsState = refused }
@@ -486,12 +416,6 @@ actor CodexUsageSource: SourceSignals {
             $0.credits = nil
             $0.resets = nil
         }
-    }
-
-    private func report(_ message: String) {
-        guard lastReported != message else { return }
-        lastReported = message
-        sissyLog("sissy: \(message)")
     }
 
     // MARK: - The wire

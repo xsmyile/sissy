@@ -17,12 +17,16 @@ import Foundation
 /// a fourth: the request needs a `Claude/<version>` product token in its
 /// User-Agent. Measured — the same session with a plain Chrome agent is
 /// refused at 403, and `Electron/` alone does not substitute.
-actor ClaudeWebSource: SourceSignals {
+actor ClaudeWebSource: SourceSignals, LimitsPolling {
     private static let host = "https://claude.ai"
     private static let organizationsPath = "/api/organizations"
     private static let prepaidPath = "prepaid/credits"
     private static let requestTimeout: TimeInterval = 15
-    private static let refreshInterval: Duration = .seconds(300)
+    static let refreshInterval: Duration = .seconds(300)
+    static let vendor = "claude.ai"
+    static var limitsState: WritableKeyPath<ProviderSignals, ProviderLimitsState> {
+        \.limitsState
+    }
 
     /// Capability that names the organization a subscription meters against.
     /// An account can hold several — the measured one also had an
@@ -35,7 +39,7 @@ actor ClaudeWebSource: SourceSignals {
     static let fallbackAppVersion = "1.52386.6"
     private static let chromeVersion = "132.0.6834.210"
 
-    nonisolated private let published = LockedValue(ProviderSignals())
+    nonisolated let published = LockedValue(ProviderSignals())
     /// Where the session comes from. Injectable for the same reason the OAuth
     /// probe's is: reading the keychain is what can raise a system dialog, and
     /// a test of this source must be able to answer for one without putting it
@@ -46,7 +50,7 @@ actor ClaudeWebSource: SourceSignals {
     private let fetchSource: @Sendable (String, String?) async throws -> Reading
     /// Where a refusal is written down so the next run honours it, keyed by
     /// this reader's own account.
-    private let backoff: LimitsBackoffSlot?
+    let backoff: LimitsBackoffSlot?
 
     private var retired = false
     /// What the link recorded, which neither a `stop()` nor a refusal may
@@ -57,11 +61,7 @@ actor ClaudeWebSource: SourceSignals {
     /// Organization the windows belong to, kept so the ordinary poll is one
     /// request rather than two. Dropped whenever the session is.
     private var organization: String?
-    private var mayInteract = false
-    private var pollTask: Task<Void, Never>?
-    private var firstRequest: Task<Duration, Never>?
-    private var generation = 0
-    private var lastReported: String?
+    var loop = LimitsLoop()
 
     /// One answer from claude.ai: the windows it drew and what it has billed.
     struct Reading: Sendable, Equatable {
@@ -107,29 +107,8 @@ actor ClaudeWebSource: SourceSignals {
     /// setting was already on reads silently and shows no limits if the grant
     /// has gone stale.
     func start(userInitiated: Bool, onRefresh: @Sendable @escaping () async -> Void) {
-        guard !retired, pollTask == nil else { return }
+        guard !retired, loop.pollTask == nil else { return }
         _ = begin(userInitiated: userInitiated, onRefresh: onRefresh)
-    }
-
-    /// Starts the loop and hands back the first request, so an explicit
-    /// refresh stays pending until session, network and publication have all
-    /// completed rather than ending on the hand-off.
-    private func begin(
-        userInitiated: Bool,
-        onRefresh: @Sendable @escaping () async -> Void
-    ) -> Task<Duration, Never> {
-        mayInteract = userInitiated
-        let request = Task { await refreshOnce(onRefresh: onRefresh) }
-        firstRequest = request
-        pollTask = Task { [weak self] in
-            var delay = await request.value
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: delay) } catch { return }
-                guard let self else { return }
-                delay = await self.refreshOnce(onRefresh: onRefresh)
-            }
-        }
-        return request
     }
 
     /// Stops the poll loop and drops what it had published, on the same
@@ -151,7 +130,7 @@ actor ClaudeWebSource: SourceSignals {
             $0.limitsObservedAt = nil
             if clearingState { $0.limitsState = .quiet }
         }
-        lastReported = nil
+        loop.lastReported = nil
     }
 
     /// Stops this reader for good, for a session that is no longer stored.
@@ -165,14 +144,6 @@ actor ClaudeWebSource: SourceSignals {
     func retire() {
         retired = true
         stop()
-    }
-
-    private func cancelRequests() {
-        generation &+= 1
-        pollTask?.cancel()
-        firstRequest?.cancel()
-        pollTask = nil
-        firstRequest = nil
     }
 
     /// Points this reader at a link made again, and reads it at once.
@@ -195,20 +166,18 @@ actor ClaudeWebSource: SourceSignals {
     ) async {
         guard !retired else { return }
         stop()
-        let stamp = generation
+        let stamp = loop.generation
         linkedOrganization = organization
         self.organization = organization
         await backoff?.record(nil)
-        guard stamp == generation else { return }
+        guard stamp == loop.generation else { return }
         await refresh(onRefresh: onRefresh)
     }
 
     /// Re-reads the session with the dialog allowed and polls at once,
     /// returning only once that request has finished.
     ///
-    /// Deliberately not `stop()` first: that drops the published windows, and
-    /// a refresh that blanks the gauges it is trying to restore reads as a
-    /// failure for as long as the request takes.
+    /// Deliberately not `stop()` first, for the reason `restart` carries.
     ///
     /// A retired reader reads nothing, whoever asks: `relink` suspends before
     /// it refreshes, and a `retire()` landing there would otherwise be undone
@@ -216,29 +185,7 @@ actor ClaudeWebSource: SourceSignals {
     func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
         guard !retired else { return }
         cached = nil
-        if case .rateLimited(let until) = published.load().limitsState, until > Date() { return }
-        cancelRequests()
-        lastReported = nil
-        let request = begin(userInitiated: true, onRefresh: onRefresh)
-        await withTaskCancellationHandler {
-            _ = await request.value
-        } onCancel: {
-            request.cancel()
-        }
-    }
-
-    /// One poll. Returns how long to wait before the next one.
-    ///
-    /// Internal rather than private so a test can run exactly one and assert
-    /// on what it published, for the reason the probe's twin documents.
-    func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
-        let stamp = generation
-        let before = published.load()
-        let delay = await readAndFetch(generation: stamp)
-        guard stamp == generation else { return delay }
-        if Task.isCancelled && published.load().limitsState != .refused { return delay }
-        if published.load() != before { await onRefresh() }
-        return delay
+        await restart(userInitiated: true, onRefresh: onRefresh)
     }
 
     private enum Session {
@@ -248,10 +195,8 @@ actor ClaudeWebSource: SourceSignals {
 
     private func currentSession(generation stamp: Int) async -> Session {
         if let cached { return .ready(cached) }
-        let interactive = mayInteract
-        mayInteract = false
-        let outcome = await sessionSource(interactive)
-        guard stamp == generation, !Task.isCancelled else { return .wait(Self.refreshInterval) }
+        let outcome = await sessionSource(takeInteraction())
+        guard isCurrent(stamp) else { return .wait(Self.refreshInterval) }
         switch outcome {
         case .found(let found):
             cached = found.accessToken
@@ -282,7 +227,7 @@ actor ClaudeWebSource: SourceSignals {
         }
     }
 
-    private func readAndFetch(generation stamp: Int) async -> Duration {
+    func readAndFetch(generation stamp: Int) async -> Duration {
         if let wait = await recordedBackoff(generation: stamp) { return wait }
         let session: String
         switch await currentSession(generation: stamp) {
@@ -291,7 +236,7 @@ actor ClaudeWebSource: SourceSignals {
         }
         do {
             let reading = try await fetchSource(session, organization)
-            guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+            guard isCurrent(stamp) else { return Self.refreshInterval }
             organization = reading.organization
             published.update {
                 $0.windows = reading.windows
@@ -302,21 +247,9 @@ actor ClaudeWebSource: SourceSignals {
             await backoff?.record(nil)
             return Self.refreshInterval
         } catch {
-            guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+            guard isCurrent(stamp) else { return Self.refreshInterval }
             return await handle(error)
         }
-    }
-
-    /// The wait a refusal recorded on an earlier run still has left, guarded
-    /// by the generation on the reasoning the OAuth probe's twin carries.
-    private func recordedBackoff(generation stamp: Int) async -> Duration? {
-        guard let until = await backoff?.deadline() else { return nil }
-        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-        let remaining = until.timeIntervalSinceNow
-        guard remaining > 0 else { return nil }
-        published.update { $0.limitsState = .rateLimited(until: until) }
-        report("still refused by claude.ai until \(until); waiting rather than asking")
-        return .seconds(remaining)
     }
 
     /// What a failed request costs, and what it says.
@@ -330,14 +263,7 @@ actor ClaudeWebSource: SourceSignals {
     /// that account's, and a reader left to derive one would take whichever
     /// `chat` organization the server lists first.
     private func handle(_ error: Error) async -> Duration {
-        if case UsageRequestError.rateLimited(let retryAfter) = error {
-            let seconds = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
-            let until = Date().addingTimeInterval(seconds)
-            published.update { $0.limitsState = .rateLimited(until: until) }
-            await backoff?.record(until)
-            report("claude.ai answered 429; backing off until \(until)")
-            return .seconds(seconds)
-        }
+        if let wait = await backOff(after: error) { return wait }
         if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
             cached = nil
             organization = linkedOrganization
@@ -358,12 +284,6 @@ actor ClaudeWebSource: SourceSignals {
             $0.windows = []
             $0.credits = nil
         }
-    }
-
-    private func report(_ message: String) {
-        guard lastReported != message else { return }
-        lastReported = message
-        sissyLog("sissy: \(message)")
     }
 
     // MARK: - The wire
