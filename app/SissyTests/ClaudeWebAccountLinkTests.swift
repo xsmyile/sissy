@@ -190,6 +190,20 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
         XCTAssertEqual(Array(index.load().keys), ["e5f6a7b8"])
     }
 
+    /// Links made at once from different threads all land: each change reads,
+    /// mutates and writes the file under one lock, so none writes back a copy
+    /// that predates another's.
+    func testConcurrentLinksAreAllKept() throws {
+        let index = try XCTUnwrap(index)
+        let links = (0..<32).map { link("account-\($0)", organization: nil) }
+        let failures = LockedValue(0)
+        DispatchQueue.concurrentPerform(iterations: links.count) { position in
+            do { try index.remember(links[position]) } catch { failures.update { $0 += 1 } }
+        }
+        XCTAssertEqual(failures.load(), 0)
+        XCTAssertEqual(index.load().count, links.count)
+    }
+
     func testForgettingEverythingEmptiesIt() throws {
         try index.remember(link("a1b2c3d4", organization: "org-1"))
         try index.remember(link("e5f6a7b8", organization: "org-2"))
