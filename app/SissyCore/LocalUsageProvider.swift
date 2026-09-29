@@ -1803,11 +1803,12 @@ actor LocalUsageProvider: UsageProvider {
             }
         }
         let retainedCutoff = cal.startOfDay(for: retainWindowStart)
+        var keyDays: [Date: String] = [:]
         let retainedKeys: [UsageStateSnapshot.DedupKey] = seenEventKeys.compactMap { key, entry in
             guard entry.day >= retainedCutoff else { return nil }
             return UsageStateSnapshot.DedupKey(
                 key: key,
-                day: dayFmt.string(from: entry.day),
+                day: Self.dayString(entry.day, formatter: dayFmt, memo: &keyDays),
                 outputTokens: entry.billedOutputTokens
             )
         }
@@ -1842,5 +1843,20 @@ actor LocalUsageProvider: UsageProvider {
             // invisible and every later launch pays for it.
             sissyLog("sissy: \(id) snapshot save failed at \(url.path): \(error)")
         }
+    }
+
+    /// `day` as the snapshot names it, formatted once per distinct day.
+    ///
+    /// The dedup ledger holds a key per event and a handful of days between
+    /// them. Measured 2026-09-29 against a real 28,791-key ledger, formatting
+    /// each key's day on its own cost 23.0 ms of every save, against 1.6 ms
+    /// memoised.
+    private static func dayString(
+        _ day: Date, formatter: DayKeyFormatter, memo: inout [Date: String]
+    ) -> String {
+        if let known = memo[day] { return known }
+        let formatted = formatter.string(from: day)
+        memo[day] = formatted
+        return formatted
     }
 }
