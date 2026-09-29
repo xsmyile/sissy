@@ -403,12 +403,14 @@ struct UsagePanelView: View {
         case .usage:
             overview(snapshot)
         case .sessions:
-            PanelSessions(
-                block: snapshot.agents,
-                period: snapshot.period,
-                observedAt: live?.frame.agentMemory?.current.observedAt,
-                refreshing: model.engine.refreshingAgents,
-                refresh: { model.engine.refreshAgentProcesses() })
+            if let live {
+                PanelSessions(
+                    block: UsagePanelSnapshot.makeAgents(live.frame),
+                    period: snapshot.period,
+                    observedAt: live.frame.agentMemory?.current.observedAt,
+                    refreshing: model.engine.refreshingAgents,
+                    refresh: { model.engine.refreshAgentProcesses() })
+            }
         case .mac:
             if let mac = snapshot.mac {
                 PanelMac(block: mac)
