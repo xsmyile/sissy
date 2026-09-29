@@ -568,14 +568,14 @@ enum GitHubActivityFeed {
         let contributions =
             periods.map { period in
                 let range =
-                    ForgeWindow.start(of: period, now: now)
+                    ForgeWindow.start(of: period, now: now, calendar: calendar)
                     .map { "(from: \"\(ForgeWindow.vendorDay($0))\")" } ?? ""
                 let alias = ForgeAlias.contributions(period)
                 return "\(alias): contributionsCollection\(range) { \(calendarField) }"
             } + (counters.contains(.comments) ? [commentField] : [])
         let searches = periods.flatMap { period -> [String] in
             let since =
-                ForgeWindow.start(of: period, now: now)
+                ForgeWindow.start(of: period, now: now, calendar: calendar)
                 .map(ForgeWindow.vendorDay) ?? ""
             var fields: [String] = []
             if counters.contains(.merged) {
@@ -697,7 +697,7 @@ enum GitHubActivityFeed {
         let oldestRead = stamps.map(\.updated).min()
         var counts: [UsagePeriod: Int] = [:]
         for period in ForgeWindow.openPeriods(now: now, calendar: calendar) {
-            guard let start = ForgeWindow.start(of: period, now: now) else {
+            guard let start = ForgeWindow.start(of: period, now: now, calendar: calendar) else {
                 counts[period] = total
                 continue
             }
@@ -988,7 +988,7 @@ enum GitLabActivityFeed {
             counters.contains(.merged)
             ? ForgeWindow.openPeriods(now: now, calendar: calendar).map { period -> String in
                 let scope =
-                    ForgeWindow.start(of: period, now: now)
+                    ForgeWindow.start(of: period, now: now, calendar: calendar)
                     .map { ", mergedAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
                 return
                     "\(ForgeAlias.merged(period)): authoredMergeRequests(state: merged\(scope)) { count }"
@@ -1013,7 +1013,7 @@ enum GitLabActivityFeed {
         let fields = ForgeWindow.openPeriods(now: now, calendar: calendar)
             .map { period -> String in
                 let scope =
-                    ForgeWindow.start(of: period, now: now)
+                    ForgeWindow.start(of: period, now: now, calendar: calendar)
                     .map { ", createdAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
                 return "\(ForgeAlias.issues(period)): issues(authorUsername: $author\(scope)) { count }"
             }
@@ -1074,15 +1074,15 @@ enum GitLabActivityFeed {
     /// that had 95 events.
     static func eventsURL(
         _ connection: ForgeConnection, period: UsagePeriod, now: Date, action: String? = nil,
-        rows: Int = onePage
+        rows: Int = onePage, calendar: Calendar = .current
     ) -> URL? {
         guard let root = connection.root,
             var components = URLComponents(
                 url: root.appendingPathComponent(apiPath), resolvingAgainstBaseURL: false)
         else { return nil }
         var query = [URLQueryItem(name: "per_page", value: String(rows))]
-        if let start = ForgeWindow.start(of: period, now: now),
-            let exclusive = Calendar.current.date(byAdding: .day, value: -1, to: start)
+        if let start = ForgeWindow.start(of: period, now: now, calendar: calendar),
+            let exclusive = calendar.date(byAdding: .day, value: -1, to: start)
         {
             query.append(URLQueryItem(name: "after", value: ForgeWindow.day.string(from: exclusive)))
         }
