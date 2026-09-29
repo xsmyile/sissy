@@ -31,6 +31,8 @@ struct FSWatcherEvent: Sendable {
 ///
 /// The stream is torn down on `callbackQueue` itself, so no callback is still
 /// running against a watcher that `stop()` or `deinit` has already let go.
+/// That makes `stop()` wait for a callback in flight, which only builds the
+/// payload and yields it.
 ///
 /// References:
 /// - Apple "File System Events Programming Guide" (archive, still authoritative for Tahoe 26).
@@ -150,7 +152,8 @@ final class FSWatcher: @unchecked Sendable {
     /// Ends the stream and the delivery task after the batches already
     /// yielded, which the caller's handler still receives and is expected to
     /// ignore once it has stopped, as it did when each batch was a task of
-    /// its own.
+    /// its own. A per-file batch dropped here would wait for the tail's
+    /// safety-net poll.
     private func stopLocked() {
         guard let s = stream else { return }
         FSEventStreamStop(s)

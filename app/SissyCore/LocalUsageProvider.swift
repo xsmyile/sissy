@@ -677,8 +677,8 @@ actor LocalUsageProvider: UsageProvider {
         _ urls: [URL], rescanAll: Bool, rootChanged: Bool
     ) async {
         // A batch can already be in flight when `stop()` releases the watcher:
-        // `FSWatcher.dispatch` reads its handler under the lock and then hops
-        // off the FSEvents queue, so the hop can land here after the teardown.
+        // `FSWatcher` hands over the batches it had already yielded, so one
+        // can land here after the teardown.
         // One carrying `rootChanged` would otherwise build a fresh stream that
         // nothing is left to stop.
         guard lifecycle == .running else { return }
