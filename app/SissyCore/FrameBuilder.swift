@@ -735,8 +735,8 @@ enum FrameBuilder {
     /// frames.
     static func providerSortOrder(_ id: String) -> Int {
         switch id {
-        case "claude-code": return 0
-        case "codex": return 1
+        case ProviderID.claudeCode: return 0
+        case ProviderID.codex: return 1
         default: return 2
         }
     }
