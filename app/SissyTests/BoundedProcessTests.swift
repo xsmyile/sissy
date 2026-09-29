@@ -26,6 +26,29 @@ final class BoundedProcessTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 10)
     }
 
+    /// More than a pipe buffer on standard error while standard output is
+    /// read is the deadlock the runner exists to prevent: the child blocks on
+    /// the full pipe unless something drains it at the same time.
+    func testAChildFillingStandardErrorDoesNotDeadlock() throws {
+        let outcome = try BoundedProcess.run(
+            Self.shell, ["-c", "head -c 200000 /dev/zero >&2; echo ok"], captureErrors: true,
+            timeout: 5)
+        XCTAssertEqual(outcome.reason, .exit)
+        XCTAssertEqual(String(bytes: outcome.output, encoding: .utf8), "ok\n")
+        XCTAssertEqual(outcome.errors.count, 200_000)
+    }
+
+    /// Input larger than a pipe buffer, to a child that exits without reading
+    /// it: the write fails instead of holding the caller or raising a
+    /// broken-pipe signal in this process.
+    func testInputAChildNeverReadsDoesNotHoldTheCaller() throws {
+        let outcome = try BoundedProcess.run(
+            Self.shell, ["-c", "exit 0"], input: Data(count: 200_000), captureOutput: false,
+            timeout: 5)
+        XCTAssertEqual(outcome.reason, .exit)
+        XCTAssertEqual(outcome.status, 0)
+    }
+
     func testAToolThatCannotStartThrows() {
         XCTAssertThrowsError(
             try BoundedProcess.run(URL(fileURLWithPath: "/nonexistent/tool"), [], timeout: 1))
