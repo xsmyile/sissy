@@ -222,15 +222,8 @@ actor UsageEngine {
     /// an engine that has already been torn down, with no handle left to
     /// cancel them.
     private var lifecycle: Lifecycle = .idle
-    private var onFrame: (@Sendable (FrameData) async -> Void)?
-    /// The aggregator revision of the newest frame handed to `onFrame`, so a
-    /// rebuild overtaken while it was suspended is dropped rather than
-    /// shipped over the fresher totals. See `deliver`.
-    private var deliveredRevision = 0
-    /// The newest frame not yet handed to `onFrame`, and the one delivery
-    /// loop draining it.
-    private var pendingFrame: FrameData?
-    private var delivery: Task<Void, Never>?
+    /// Where frames go, in order, from `start` on. See `FrameDelivery`.
+    private var frameDelivery: FrameDelivery<FrameData>?
 
     /// Every provider Sissy knows about, metering or not, with how it was
     /// resolved. Built once in `init` alongside the readers, because the
@@ -460,7 +453,7 @@ actor UsageEngine {
     func start(onFrame: @escaping @Sendable (FrameData) async -> Void) async {
         guard lifecycle == .idle else { return }
         lifecycle = .running
-        self.onFrame = onFrame
+        frameDelivery = FrameDelivery(send: onFrame)
         await live.start()
         // Settle on one catalog before the cold scan starts, so the backfill
         // prices historical events against the same rates the live tail will
@@ -712,6 +705,7 @@ actor UsageEngine {
     /// index after the replacement's own watcher had started.
     func stop() async {
         lifecycle = .stopped
+        await frameDelivery?.stop()
         // Cancel the aggregator boot Task first so the cold scan observes
         // cancellation and bails out of its file enumeration loops before
         // anything else is torn down.
@@ -2053,41 +2047,8 @@ actor UsageEngine {
             disk: config.disk ? diskMonitor.currentReading() : nil,
             pricing: pricing
         )
-        await deliver(frame, revision: reading.revision)
-    }
-
-    /// Hands a frame to `onFrame`, newest reading last.
-    ///
-    /// The actor is reentrant and a rebuild suspends between taking its
-    /// reading and shipping it, in the keep-awake hold and in `onFrame`
-    /// itself, so two rebuilds in flight can finish in either order; every
-    /// monitor's `reemit` makes that ordinary rather than rare. One whose
-    /// aggregator revision is older than the frame already delivered is
-    /// dropped, since its totals are older than the frame on screen; one of
-    /// the same revision is not, since it is what carries a monitor's news.
-    ///
-    /// One loop hands frames over, one at a time: `onFrame` hops off the
-    /// actor, so two calls made in order could otherwise reach the app out of
-    /// it. A frame built while one is being handed over replaces any other
-    /// still waiting, so a slow consumer is sent the newest frame rather than
-    /// a backlog, and a caller returns once its frame or a newer one is in.
-    /// Nothing is handed over once the engine has stopped.
-    private func deliver(_ frame: FrameData, revision: Int) async {
-        guard lifecycle == .running, revision >= deliveredRevision, let onFrame else { return }
-        deliveredRevision = revision
-        pendingFrame = frame
-        let drain =
-            delivery
-            ?? Task {
-                while lifecycle == .running, let next = pendingFrame {
-                    pendingFrame = nil
-                    await onFrame(next)
-                }
-                pendingFrame = nil
-                delivery = nil
-            }
-        delivery = drain
-        await drain.value
+        guard lifecycle == .running else { return }
+        _ = await frameDelivery?.deliver(frame, revision: reading.revision)
     }
 
     /// What the archive holds for every period the panel offers, cached for a
