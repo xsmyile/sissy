@@ -94,7 +94,6 @@ struct PanelNetwork: View {
         return "Receiving " + UsageFormat.networkRate(rate.received) + ", sending "
             + UsageFormat.networkRate(rate.sent)
     }
-
 }
 
 /// The last two minutes of both directions, drawn by `RateSparkline`.

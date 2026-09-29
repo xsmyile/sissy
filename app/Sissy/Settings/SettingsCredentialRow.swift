@@ -348,6 +348,8 @@ extension SettingsSwitchRow where Heading == Text {
     }
 }
 
+private let removalCancelTitle = "Cancel"
+
 extension View {
     /// A removal asked about before it runs: raised while `item` holds what
     /// the row's menu chose, and dropped by either button.
@@ -361,7 +363,6 @@ extension View {
         title: @escaping (Item) -> String,
         message: String,
         confirm: String,
-        cancel: String,
         action: @escaping (Item) -> Void
     ) -> some View {
         confirmationDialog(
@@ -371,7 +372,7 @@ extension View {
             presenting: item.wrappedValue
         ) { value in
             Button(confirm, role: .destructive) { action(value) }
-            Button(cancel, role: .cancel) {}
+            Button(removalCancelTitle, role: .cancel) {}
         } message: { _ in
             Text(message)
         }

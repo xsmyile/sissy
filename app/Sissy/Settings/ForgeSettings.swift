@@ -319,15 +319,14 @@ struct ForgeSettingsView: View {
             title: ForgeConnectCopy.unlinkTitle,
             message: ForgeConnectCopy.unlinkMessage,
             confirm: ForgeConnectCopy.unlinkConfirm,
-            cancel: ForgeConnectCopy.cancel
-        ) { model.engine.disconnectForge(id: $0.id) }
+            action: { model.engine.disconnectForge(id: $0.id) }
+        )
         .confirmRemoval(
             of: $removingToken,
             title: ForgeConnectCopy.removeTokenTitle,
             message: ForgeConnectCopy.removeTokenMessage,
             confirm: ForgeConnectCopy.removeTokenConfirm,
-            cancel: ForgeConnectCopy.cancel
-        ) { model.engine.removeOrphanedForgeToken(id: $0.id) }
+            action: { model.engine.removeOrphanedForgeToken(id: $0.id) })
     }
 
     /// A token Sissy holds that no connection names, which an interrupted

@@ -52,6 +52,20 @@ struct ProviderRowSnapshot: Equatable {
     }
 }
 
+/// What one linked account's row carries, whichever vendor it is with: the
+/// only things the two vendors' rows differ in.
+private struct LinkedRowContent {
+    let provider: String
+    let title: String
+    let subtitle: String?
+    /// What the monogram's initials are taken from.
+    let monogram: String
+    let plan: (label: String, tier: String?)?
+    /// What the row's menu copies and names the unlink by.
+    let address: String
+    let unlinkHelp: String
+}
+
 /// What linking an account says whichever vendor it is with: the words the
 /// login window, the account menus and the add buttons share.
 ///
@@ -350,15 +364,15 @@ struct ProvidersSettingsView: View {
             title: { ClaudeAccountLinkCopy.unlinkTitle(Self.label(of: $0)) },
             message: ClaudeAccountLinkCopy.unlinkMessage,
             confirm: ClaudeAccountLinkCopy.unlinkConfirm,
-            cancel: VendorLinkCopy.cancel
-        ) { model.engine.forgetClaudeWebSession(account: $0.id) }
+            action: { model.engine.forgetClaudeWebSession(account: $0.id) }
+        )
         .confirmRemoval(
             of: $unlinkingCodex,
             title: { CodexAccountLinkCopy.unlinkTitle(Self.label(of: $0)) },
             message: CodexAccountLinkCopy.unlinkMessage,
             confirm: CodexAccountLinkCopy.unlinkConfirm,
-            cancel: VendorLinkCopy.cancel
-        ) { model.engine.forgetCodexAccount(id: $0.id) }
+            action: { model.engine.forgetCodexAccount(id: $0.id) }
+        )
         // The readiness poll stops once the scan is warm, so a window opened
         // afterwards would render whatever the last tick left behind.
         .task {
@@ -620,7 +634,7 @@ struct ProvidersSettingsView: View {
     private func linkedAccount(_ account: ClaudeWebAccount) -> some View {
         let row = LinkedAccountRowSnapshot.make(account)
         let signals = self.signals(of: account.id, provider: ProviderID.claudeCode)
-        return linkedRow(
+        let content = LinkedRowContent(
             provider: ProviderID.claudeCode,
             title: row.title,
             subtitle: Self.subtitle(row),
@@ -628,9 +642,8 @@ struct ProvidersSettingsView: View {
             plan: UsageFormat.plan(
                 signals?.plan, tier: signals?.planTier, seat: signals?.account?.seat),
             address: Self.label(of: account),
-            unlinkHelp: ClaudeAccountLinkCopy.unlinkHelp,
-            signals: signals
-        ) { unlinking = account }
+            unlinkHelp: ClaudeAccountLinkCopy.unlinkHelp)
+        return linkedRow(content, signals: signals) { unlinking = account }
     }
 
     /// The address and the organisation on one line, either of which can be
@@ -682,16 +695,15 @@ struct ProvidersSettingsView: View {
         let title = Self.label(of: account)
         let workspace = account.link?.workspace.map(UsageFormat.workspaceLabel)
         let signals = self.signals(of: account.id, provider: ProviderID.codex)
-        return linkedRow(
+        let content = LinkedRowContent(
             provider: ProviderID.codex,
             title: title,
             subtitle: workspace,
             monogram: workspace ?? title,
             plan: UsageFormat.plan(signals?.plan, tier: signals?.planTier),
             address: title,
-            unlinkHelp: CodexAccountLinkCopy.unlinkHelp,
-            signals: signals
-        ) { unlinkingCodex = account }
+            unlinkHelp: CodexAccountLinkCopy.unlinkHelp)
+        return linkedRow(content, signals: signals) { unlinkingCodex = account }
     }
 
     /// One linked account's row, whichever vendor it is with: the name, the
@@ -699,30 +711,25 @@ struct ProvidersSettingsView: View {
     /// copies the address and unlinks. The two vendors differ only in what
     /// they pass, so a row cannot grow a control on one and not the other.
     private func linkedRow(
-        provider: String,
-        title: String,
-        subtitle: String?,
-        monogram: String,
-        plan: (label: String, tier: String?)?,
-        address: String,
-        unlinkHelp: String,
-        signals: AccountSignals?,
-        unlink: @escaping () -> Void
+        _ content: LinkedRowContent, signals: AccountSignals?, unlink: @escaping () -> Void
     ) -> some View {
+        let provider = content.provider
         let health = health(of: signals, provider: provider)
         return CredentialRow(
-            title: title,
-            badge: plan?.label,
-            badgeTier: plan?.tier,
-            subtitle: subtitle,
+            title: content.title,
+            badge: content.plan?.label,
+            badgeTier: content.plan?.tier,
+            subtitle: content.subtitle,
             health: health,
             fix: fix(of: signals, provider: provider)
         ) {
             CredentialMonogram(
-                name: monogram, tint: ProviderPalette.tint(for: provider), health: health)
+                name: content.monogram, tint: ProviderPalette.tint(for: provider), health: health)
         } actions: {
-            CredentialRowMenu(label: VendorLinkCopy.unlink(address), help: unlinkHelp) {
-                CredentialCopyButton(CredentialRowCopy.copyAddress, of: address)
+            CredentialRowMenu(
+                label: VendorLinkCopy.unlink(content.address), help: content.unlinkHelp
+            ) {
+                CredentialCopyButton(CredentialRowCopy.copyAddress, of: content.address)
                 Divider()
                 Button(VendorLinkCopy.unlinkItem, role: .destructive, action: unlink)
             }
