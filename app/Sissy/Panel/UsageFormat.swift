@@ -82,10 +82,22 @@ enum UsageFormat {
     /// sideways under a title that has not moved. Trailing, the clause that
     /// is always there stays put and the one that comes and goes does so at
     /// the end, where nothing follows it.
+    ///
+    /// `terse` drops the word "updated" and nothing else, for a header that
+    /// cannot fit the whole sentence on one line. Measured 2026-09-29 on the
+    /// home header, whose three controls leave the line 167 pt: `updated just
+    /// now · awake 1h 2m` wants 168.8 and wrapped, growing the header by a
+    /// line while the panel sat open. Neither clause has a ceiling, since
+    /// `held` has no unit past the hour: measured the same day, `updated 59m
+    /// ago · awake 123h 59m` wants 192.4 and its terse form 145.9. The word
+    /// goes rather than the hold because the hold is the clause that carries
+    /// its own noun; the age reads as a time without one.
     static func reading(
-        age interval: TimeInterval, holding: TimeInterval?, refreshing: Bool
+        age interval: TimeInterval, holding: TimeInterval?, refreshing: Bool,
+        terse: Bool = false
     ) -> String {
-        let reading = refreshing ? "refreshing…" : "updated " + age(interval)
+        let dated = terse ? age(interval) : "updated " + age(interval)
+        let reading = refreshing ? "refreshing…" : dated
         guard let holding else { return reading }
         return reading + " · awake " + held(holding)
     }
