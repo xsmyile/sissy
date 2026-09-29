@@ -220,15 +220,8 @@ struct ClaudeCodeSignals: SourceSignals {
         var byAccount: [String: AccountSignals] = [:]
         if let active = signedInUUID {
             byAccount[active] = AccountSignals(
-                id: active,
-                account: reading.account,
-                plan: reading.plan,
-                planTier: reading.planTier,
-                windows: reading.windows,
-                credits: reading.credits,
-                limitsState: reading.limitsState,
-                limitsObservedAt: reading.limitsObservedAt,
-                isSignedIn: true)
+                id: active, reading: reading, account: reading.account, plan: reading.plan,
+                planTier: reading.planTier, isSignedIn: true)
         }
         for source in sources where source.account != signedInUUID {
             let identity =
@@ -236,19 +229,12 @@ struct ClaudeCodeSignals: SourceSignals {
                 ?? known.accounts.first { $0.uuid == source.account }
             let signals = source.currentSignals()
             byAccount[source.account] = AccountSignals(
-                id: source.account,
+                id: source.account, reading: signals,
                 account: identity.map(\.providerAccount) ?? signals.account,
                 plan: identity?.plan ?? signals.plan,
-                planTier: identity?.planTier ?? signals.planTier,
-                windows: signals.windows,
-                credits: signals.credits,
-                limitsState: signals.limitsState,
-                limitsObservedAt: signals.limitsObservedAt,
-                isSignedIn: false)
+                planTier: identity?.planTier ?? signals.planTier, isSignedIn: false)
         }
-        return byAccount.values.sorted { lhs, rhs in
-            (lhs.isSignedIn ? 0 : 1, lhs.id) < (rhs.isSignedIn ? 0 : 1, rhs.id)
-        }
+        return AccountSignals.signedInFirst(byAccount.values)
     }
 
     /// The config file's reading, with whichever limits reader is actually
