@@ -893,15 +893,19 @@ final class UsageEngineHost {
     /// somebody has to open to find out.
     ///
     /// The read is the engine's because the project paths are re-resolved
-    /// against the ledger it owns, though it runs off the engine's actor; the
-    /// write is neither's, and runs detached so a user's slow volume stalls the
-    /// export rather than the metering or the main thread.
+    /// against the ledger it owns, though it runs off the engine's actor. Both
+    /// it and the write run detached, so a large archive or a user's slow
+    /// volume stalls the export rather than the metering or the main thread:
+    /// measured 2026-09-29, the read alone held the main thread 7 ms for this
+    /// Mac's 62 day files and 0.8 s for a 7,300-file archive.
     func exportUsageHistory(to directory: URL) async throws -> Int {
         guard let engine else { throw ExportFailure.engineNotRunning }
-        let days = engine.exportableHistory()
-        guard !days.isEmpty else { return 0 }
-        try await Task.detached { try UsageHistoryExport.write(days, to: directory) }.value
-        return days.count
+        return try await Task.detached {
+            let days = engine.exportableHistory()
+            guard !days.isEmpty else { return 0 }
+            try UsageHistoryExport.write(days, to: directory)
+            return days.count
+        }.value
     }
 
     /// What the archive holds for one provider over the panel's own window,
