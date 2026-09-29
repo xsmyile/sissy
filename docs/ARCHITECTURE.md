@@ -679,7 +679,9 @@ a relaunch resumes from persisted offsets and loses nothing. `KeepAwake` is the
 worked example: the mode persists, the power assertions do not.
 
 **Quitting is the only thing that ends a run**, so it is the readers' one chance
-to write their offsets. `applicationShouldTerminate` answers `.terminateLater`,
+to write their offsets with a wait behind it. A sleep flushes them as well
+(`AppDelegate.flushBeforeSleep` → `UsageEngine.flush()`), best effort, since
+nothing holds the sleep back for the write. `applicationShouldTerminate` answers `.terminateLater`,
 awaits `UsageEngine.stop()` and only then releases the quit — bounded by
 `AppDelegate.teardownBudget`, because a teardown that will not finish must not
 leave a menu bar app that refuses to quit. Missing the flush costs a few
