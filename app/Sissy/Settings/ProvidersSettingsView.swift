@@ -620,32 +620,17 @@ struct ProvidersSettingsView: View {
     private func linkedAccount(_ account: ClaudeWebAccount) -> some View {
         let row = LinkedAccountRowSnapshot.make(account)
         let signals = self.signals(of: account.id, provider: ProviderID.claudeCode)
-        let plan = UsageFormat.plan(
-            signals?.plan, tier: signals?.planTier, seat: signals?.account?.seat)
-        return CredentialRow(
+        return linkedRow(
+            provider: ProviderID.claudeCode,
             title: row.title,
-            badge: plan?.label,
-            badgeTier: plan?.tier,
             subtitle: Self.subtitle(row),
-            health: health(of: signals, provider: ProviderID.claudeCode),
-            fix: fix(of: signals, provider: ProviderID.claudeCode)
-        ) {
-            CredentialMonogram(
-                name: row.organization ?? row.title,
-                tint: ProviderPalette.tint(for: ProviderID.claudeCode),
-                health: health(of: signals, provider: ProviderID.claudeCode))
-        } actions: {
-            CredentialRowMenu(
-                label: VendorLinkCopy.unlink(Self.label(of: account)),
-                help: ClaudeAccountLinkCopy.unlinkHelp
-            ) {
-                CredentialCopyButton(CredentialRowCopy.copyAddress, of: Self.label(of: account))
-                Divider()
-                Button(VendorLinkCopy.unlinkItem, role: .destructive) {
-                    unlinking = account
-                }
-            }
-        }
+            monogram: row.organization ?? row.title,
+            plan: UsageFormat.plan(
+                signals?.plan, tier: signals?.planTier, seat: signals?.account?.seat),
+            address: Self.label(of: account),
+            unlinkHelp: ClaudeAccountLinkCopy.unlinkHelp,
+            signals: signals
+        ) { unlinking = account }
     }
 
     /// The address and the organisation on one line, either of which can be
@@ -697,29 +682,49 @@ struct ProvidersSettingsView: View {
         let title = Self.label(of: account)
         let workspace = account.link?.workspace.map(UsageFormat.workspaceLabel)
         let signals = self.signals(of: account.id, provider: ProviderID.codex)
-        let plan = UsageFormat.plan(signals?.plan, tier: signals?.planTier)
+        return linkedRow(
+            provider: ProviderID.codex,
+            title: title,
+            subtitle: workspace,
+            monogram: workspace ?? title,
+            plan: UsageFormat.plan(signals?.plan, tier: signals?.planTier),
+            address: title,
+            unlinkHelp: CodexAccountLinkCopy.unlinkHelp,
+            signals: signals
+        ) { unlinkingCodex = account }
+    }
+
+    /// One linked account's row, whichever vendor it is with: the name, the
+    /// plan, the line under it, the vendor-tinted monogram, and a menu that
+    /// copies the address and unlinks. The two vendors differ only in what
+    /// they pass, so a row cannot grow a control on one and not the other.
+    private func linkedRow(
+        provider: String,
+        title: String,
+        subtitle: String?,
+        monogram: String,
+        plan: (label: String, tier: String?)?,
+        address: String,
+        unlinkHelp: String,
+        signals: AccountSignals?,
+        unlink: @escaping () -> Void
+    ) -> some View {
+        let health = health(of: signals, provider: provider)
         return CredentialRow(
             title: title,
             badge: plan?.label,
             badgeTier: plan?.tier,
-            subtitle: workspace,
-            health: health(of: signals, provider: ProviderID.codex),
-            fix: fix(of: signals, provider: ProviderID.codex)
+            subtitle: subtitle,
+            health: health,
+            fix: fix(of: signals, provider: provider)
         ) {
             CredentialMonogram(
-                name: workspace ?? title,
-                tint: ProviderPalette.tint(for: ProviderID.codex),
-                health: health(of: signals, provider: ProviderID.codex))
+                name: monogram, tint: ProviderPalette.tint(for: provider), health: health)
         } actions: {
-            CredentialRowMenu(
-                label: VendorLinkCopy.unlink(title),
-                help: CodexAccountLinkCopy.unlinkHelp
-            ) {
-                CredentialCopyButton(CredentialRowCopy.copyAddress, of: title)
+            CredentialRowMenu(label: VendorLinkCopy.unlink(address), help: unlinkHelp) {
+                CredentialCopyButton(CredentialRowCopy.copyAddress, of: address)
                 Divider()
-                Button(VendorLinkCopy.unlinkItem, role: .destructive) {
-                    unlinkingCodex = account
-                }
+                Button(VendorLinkCopy.unlinkItem, role: .destructive, action: unlink)
             }
         }
     }
