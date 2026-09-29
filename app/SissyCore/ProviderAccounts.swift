@@ -125,3 +125,27 @@ extension ServerConfig {
         )
     }
 }
+
+extension AccountSignals {
+    /// One account's entry, its gauges off `reading` and its identity as the
+    /// caller resolved it: the two halves are separate because a linked
+    /// account's name can come from its link while its windows come from its
+    /// reader.
+    init(
+        id: String, reading: ProviderSignals, account: ProviderAccount?, plan: String?,
+        planTier: String?, isSignedIn: Bool
+    ) {
+        self.init(
+            id: id, account: account, plan: plan, planTier: planTier, windows: reading.windows,
+            credits: reading.credits, resets: reading.resets, limitsState: reading.limitsState,
+            limitsObservedAt: reading.limitsObservedAt, isSignedIn: isSignedIn)
+    }
+
+    /// The order every provider lists its accounts in: the one the CLI is
+    /// signed in as first, then the rest by id so two builds agree.
+    static func signedInFirst(_ entries: some Sequence<AccountSignals>) -> [AccountSignals] {
+        entries.sorted { lhs, rhs in
+            (lhs.isSignedIn ? 0 : 1, lhs.id) < (rhs.isSignedIn ? 0 : 1, rhs.id)
+        }
+    }
+}

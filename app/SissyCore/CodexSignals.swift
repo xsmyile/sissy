@@ -135,16 +135,8 @@ struct CodexSignals: SourceSignals {
         if let signedInID {
             entries.append(
                 AccountSignals(
-                    id: signedInID,
-                    account: own.account,
-                    plan: own.plan,
-                    planTier: own.planTier,
-                    windows: own.windows,
-                    credits: own.credits,
-                    resets: own.resets,
-                    limitsState: own.limitsState,
-                    limitsObservedAt: own.limitsObservedAt,
-                    isSignedIn: true))
+                    id: signedInID, reading: own, account: own.account, plan: own.plan,
+                    planTier: own.planTier, isSignedIn: true))
         }
         for reader in readers {
             guard let id = reader.account, id != signedInID else { continue }
@@ -152,22 +144,13 @@ struct CodexSignals: SourceSignals {
             let link = links[id]
             entries.append(
                 AccountSignals(
-                    id: id,
+                    id: id, reading: signals,
                     account: signals.account
                         ?? ProviderAccount(
                             email: link?.identity.email,
                             organization: link?.workspace?.name),
-                    plan: signals.plan ?? link?.identity.plan,
-                    planTier: nil,
-                    windows: signals.windows,
-                    credits: signals.credits,
-                    resets: signals.resets,
-                    limitsState: signals.limitsState,
-                    limitsObservedAt: signals.limitsObservedAt,
-                    isSignedIn: false))
+                    plan: signals.plan ?? link?.identity.plan, planTier: nil, isSignedIn: false))
         }
-        return entries.sorted { lhs, rhs in
-            (lhs.isSignedIn ? 0 : 1, lhs.id) < (rhs.isSignedIn ? 0 : 1, rhs.id)
-        }
+        return AccountSignals.signedInFirst(entries)
     }
 }
