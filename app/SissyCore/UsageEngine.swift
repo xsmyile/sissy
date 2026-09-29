@@ -223,6 +223,13 @@ actor UsageEngine {
     /// cancel them.
     private var lifecycle: Lifecycle = .idle
     private var onFrame: (@Sendable (FrameData) async -> Void)?
+    /// Numbers each rebuild at the moment its reading is taken, and the
+    /// newest one delivered, so a rebuild overtaken while it was suspended is
+    /// dropped rather than shipped over the fresher frame. See `deliver`.
+    private var frameSequence = 0
+    private var deliveredSequence = 0
+    /// The delivery in flight, which the next one waits for.
+    private var delivery: Task<Void, Never>?
 
     /// Every provider Sissy knows about, metering or not, with how it was
     /// resolved. Built once in `init` alongside the readers, because the
@@ -499,7 +506,8 @@ actor UsageEngine {
         }
         bootTask = Task.detached { [aggregator] in
             await aggregator.start { today, slices in
-                await me.rebuildAndEmit(today: today, slices: slices)
+                await me.rebuildAndEmit(
+                    today: today, slices: slices, sequence: await me.nextFrameSequence())
             }
         }
         // After the tail, never before it: the backfill reads the project
@@ -2007,13 +2015,20 @@ actor UsageEngine {
     /// before it, and that pair is what the frame ships.
     private func reemit() async {
         guard hasReading else { return }
+        let sequence = nextFrameSequence()
         let reading = await aggregator.currentReading()
-        await rebuildAndEmit(today: reading.today, slices: reading.slices)
+        await rebuildAndEmit(today: reading.today, slices: reading.slices, sequence: sequence)
+    }
+
+    private func nextFrameSequence() -> Int {
+        frameSequence += 1
+        return frameSequence
     }
 
     private func rebuildAndEmit(
         today: DayTotals,
-        slices: [ProviderSlice]
+        slices: [ProviderSlice],
+        sequence: Int
     ) async {
         guard lifecycle == .running else { return }
         hasReading = true
@@ -2047,7 +2062,29 @@ actor UsageEngine {
             disk: config.disk ? diskMonitor.currentReading() : nil,
             pricing: pricing
         )
-        await onFrame?(frame)
+        await deliver(frame, sequence: sequence)
+    }
+
+    /// Hands a frame to `onFrame`, newest reading last.
+    ///
+    /// The actor is reentrant and a rebuild suspends between taking its
+    /// reading and shipping it, in the aggregator hop and in the keep-awake
+    /// hold, so two rebuilds in flight can finish in either order; every
+    /// monitor's `reemit` makes that ordinary rather than rare. One that a
+    /// newer rebuild has already overtaken is dropped, since its totals are
+    /// older than the frame on screen. And each delivery waits for the one
+    /// before it: `onFrame` hops off the actor, so two calls made in order
+    /// could otherwise still reach the app out of it.
+    private func deliver(_ frame: FrameData, sequence: Int) async {
+        guard sequence > deliveredSequence, let onFrame else { return }
+        deliveredSequence = sequence
+        let previous = delivery
+        let current = Task {
+            await previous?.value
+            await onFrame(frame)
+        }
+        delivery = current
+        await current.value
     }
 
     /// What the archive holds for every period the panel offers, cached for a
