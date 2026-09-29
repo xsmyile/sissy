@@ -518,6 +518,65 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertEqual(rollup?.tokens, 1, "the cache still counted a day file that was deleted")
     }
 
+    /// A cached day's key is a midnight in the zone it was read in, so a zone
+    /// change has to start the cache over rather than keep naming days by
+    /// the zone the Mac left.
+    func testAZoneChangeStartsTheCacheOver() throws {
+        let launchZone = NSTimeZone.default
+        defer { NSTimeZone.default = launchZone }
+        NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: "Europe/Rome"))
+        try write(provider: "codex", day: day(-3), models: ["a": totals(input: 1, cost: "1")])
+        var cache = UsageHistoryDayCache()
+        _ = UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache)
+
+        NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let warm = UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache)[.all]
+
+        XCTAssertEqual(
+            warm?.earliestDay, UsageHistoryStore.rollups(for: [.all], in: root)[.all]?.earliestDay,
+            "the cache named a day by the zone the Mac had left")
+    }
+
+    /// A file that does not decode is not a reading, so the cache must not
+    /// hold its absence: the next call reads it again even when nothing about
+    /// it that the file system reports has moved.
+    func testADayThatFailedToDecodeIsReadAgain() throws {
+        try write(provider: "codex", day: day(-1), models: ["a": totals(input: 4, cost: "1")])
+        let url = UsageHistoryStore.url(provider: "codex", day: day(-1), in: root)
+        let good = try Data(contentsOf: url)
+        var broken = good
+        broken[broken.startIndex] = UInt8(ascii: "x")
+        try broken.write(to: url)
+        let stamp = try XCTUnwrap(
+            try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date)
+        var cache = UsageHistoryDayCache()
+        XCTAssertEqual(
+            UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache)[.all]?.tokens, 0,
+            "a file that does not decode was counted")
+
+        try good.write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: stamp], ofItemAtPath: url.path)
+        let rollup = UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache)[.all]
+
+        XCTAssertEqual(rollup?.tokens, 4, "the cache held on to a file it could not decode")
+    }
+
+    /// A day after today is left out, and it must not be left out for good:
+    /// once the calendar reaches it, the same cache reads it.
+    func testADayAfterTodayIsReadOnceTheCalendarReachesIt() throws {
+        let now = Date()
+        try write(provider: "codex", day: day(1, now: now), models: ["a": totals(input: 6, cost: "1")])
+        var cache = UsageHistoryDayCache()
+        XCTAssertEqual(
+            UsageHistoryStore.rollups(for: [.all], in: root, now: now, cache: &cache)[.all]?.tokens,
+            0, "a day after today was counted")
+
+        let tomorrow = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 1, to: now))
+        let rollup = UsageHistoryStore.rollups(for: [.all], in: root, now: tomorrow, cache: &cache)[.all]
+
+        XCTAssertEqual(rollup?.tokens, 6, "the cache kept a future day out after it arrived")
+    }
+
     /// `all` is everything kept, so it takes no cutoff — and the day it names
     /// is the whole of what the word means.
     func testTheWidestWindowTakesEveryDayAndNamesItsFirst() throws {
