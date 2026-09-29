@@ -46,10 +46,12 @@ enum PanelMetrics {
     /// takes the smaller of the two sizes the panel uses.
     static let markSize: CGFloat = 14
     static let rowText: CGFloat = 12
-    /// Cadence for every age a tab or a page keeps on its own clock, which
-    /// matches the panel header's. A second rather than a minute: the tick
-    /// is what decides how late a change lands, and the first minute of an
-    /// age is worded in seconds.
+    /// Cadence for every readout the panel keeps on its own clock: the
+    /// header's age and hold, and each tab's and page's own age. A second is
+    /// finer than a duration needs, since it changes by the minute, but the
+    /// tick is what decides how late a change lands: a minute-long one would
+    /// show the wrong minute for most of it, and the first minute of an age
+    /// is worded in seconds.
     static let clockTick: TimeInterval = 1
 
     /// White at one alpha in a dark appearance and another in a light one,

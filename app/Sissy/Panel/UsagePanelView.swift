@@ -112,12 +112,6 @@ struct UsagePanelView: View {
         case identities(focus: String?)
     }
 
-    /// Cadence for both readouts the panel keeps on its own clock: the
-    /// header's age and the keep-awake control's duration. A second is finer
-    /// than the duration needs — it changes by the minute — but the tick is
-    /// what decides how late a change lands, and a minute-long one would show
-    /// the wrong minute for most of it.
-    private static let clockTick: TimeInterval = 1
     private static let controlButtonSize: CGFloat = 26
     /// The back chevron's target, smaller than the round controls opposite it:
     /// it is a glyph on the text line rather than a button on glass, and a
@@ -689,7 +683,7 @@ struct UsagePanelView: View {
     private func readingLine(
         _ live: SissyModel.LiveFrame, holding: Date?, refreshing: Bool
     ) -> some View {
-        TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+        TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
             let age = context.date.timeIntervalSince(live.at)
             let held = holding.map { context.date.timeIntervalSince($0) }
             let full = UsageFormat.reading(age: age, holding: held, refreshing: refreshing)
