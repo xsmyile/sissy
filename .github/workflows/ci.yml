@@ -90,7 +90,6 @@ jobs:
           "$CLI" --self-test
 
       - name: Codex parser smoke (--scan against fixture)
-        working-directory: app
         timeout-minutes: 3
         run: |
           CLI="$(../scripts/cli-path.sh Debug)"
