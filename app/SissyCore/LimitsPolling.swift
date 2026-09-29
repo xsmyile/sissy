@@ -20,6 +20,9 @@ struct LimitsLoop {
     /// Whether the next credential read may put a dialog on screen. Only the
     /// read a start the user asked for makes, and only the first one.
     var mayInteract = false
+    /// Set by a poll whose read the user refused, which ends the loop once
+    /// that poll has published. See `halt()`.
+    var halting = false
 }
 
 /// The poll loop every reader that asks a vendor for its limits runs: the
@@ -103,6 +106,7 @@ extension LimitsPolling {
     }
 
     func cancelRequests() {
+        loop.halting = false
         loop.generation &+= 1
         loop.pollTask?.cancel()
         loop.firstRequest?.cancel()
@@ -128,7 +132,20 @@ extension LimitsPolling {
         let delay = await readAndFetch(generation: stamp)
         guard isCurrent(stamp) else { return delay }
         if published.load() != before { await onRefresh() }
+        if loop.halting, stamp == loop.generation { cancelRequests() }
         return delay
+    }
+
+    /// Ends the loop once the poll in flight has published, for a credential
+    /// read the user refused: nothing short of a restart they ask for may ask
+    /// again.
+    ///
+    /// Not `cancelRequests()` from inside the poll, which is what the readers
+    /// did: that bumped the generation the poll's own publication is checked
+    /// against, so the refusal never called `onRefresh` and reached the panel
+    /// only on some later emit.
+    func halt() {
+        loop.halting = true
     }
 
     /// Whether a poll that took `stamp` may still publish: no stop or

@@ -215,7 +215,7 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
         case .denied:
             publishFailure(.refused)
             report("reading the claude.ai session was refused; the source stops until restarted")
-            cancelRequests()
+            halt()
             return .wait(Self.refreshInterval)
         case .unreadable(let status):
             publishFailure(.sessionUnreadable)

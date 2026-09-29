@@ -213,6 +213,24 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertEqual(source.currentSignals().limitsState, .needsAuthorization)
     }
 
+    /// A refused read ends the loop, and the refusal still reaches the panel:
+    /// it is the one state on screen offering a way back, and ending the loop
+    /// from inside the poll used to retire the poll's own emit with it.
+    func testARefusedReadIsAnnouncedAsItStopsTheLoop() async {
+        let source = source(
+            lookup: { _ in .denied },
+            fetch: { _, _ in
+                XCTFail("a refused read must not reach the network")
+                throw UsageRequestError.malformedPayload
+            })
+        let emits = LockedValue(0)
+        await source.refresh { emits.update { $0 += 1 } }
+        XCTAssertEqual(source.currentSignals().limitsState, .refused)
+        XCTAssertEqual(emits.load(), 1)
+        let polling = await source.loop.pollTask != nil
+        XCTAssertFalse(polling)
+    }
+
     /// Every reader is built for a session that was listed as stored, so an
     /// item that is not there by the time it is read is a linked session gone
     /// missing, not a Claude Code with no stored login.
