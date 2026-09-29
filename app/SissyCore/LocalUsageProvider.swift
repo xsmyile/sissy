@@ -1120,8 +1120,15 @@ actor LocalUsageProvider: UsageProvider {
     }
 
     /// `ingestNewLines(in:)` for a file the enumerator has just stated.
+    ///
+    /// A prefetched size below the offset is stated again rather than read as
+    /// a truncation: the loops that call this yield the actor, and an FSEvents
+    /// batch that ran in the gap may have read the file past the size the
+    /// enumerator saw. Taken at its word, that stale size restarted the file
+    /// from byte zero.
     private func ingestNewLines(in file: ScannedFile) -> Bool {
-        ingestNewLines(in: file.url, mtime: file.mtime, size: file.size)
+        guard file.size >= fileOffsets[file.url] ?? 0 else { return ingestNewLines(in: file.url) }
+        return ingestNewLines(in: file.url, mtime: file.mtime, size: file.size)
     }
 
     private func ingestNewLines(in url: URL, mtime: TimeInterval, size: UInt64) -> Bool {
