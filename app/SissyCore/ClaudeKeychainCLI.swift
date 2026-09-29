@@ -183,30 +183,17 @@ enum ClaudeKeychainCLI {
         return user
     }
 
-    /// One `security` invocation, bounded.
+    /// One `security` invocation, bounded by `BoundedProcess`.
     ///
-    /// Standard error goes to the null device rather than a pipe: nothing here
-    /// reads it, and a pipe nobody drains blocks the child once the kernel
-    /// buffer fills. A tool that would not start and one the watchdog had to
-    /// stop are both `unavailable`: neither is an answer about the item.
+    /// Standard error goes to the null device: nothing here reads it. A tool
+    /// that would not start and one the deadline had to stop are both
+    /// `unavailable`: neither is an answer about the item.
     private static func run(_ arguments: [String]) throws -> (status: Int32, output: Data) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: toolPath)
-        process.arguments = arguments
-        let stdout = Pipe()
-        process.standardOutput = stdout
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            throw Failure.unavailable
-        }
-        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
-        let output = stdout.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        watchdog.cancel()
-        guard process.terminationReason == .exit else { throw Failure.unavailable }
-        return (process.terminationStatus, output)
+        guard
+            let outcome = try? BoundedProcess.run(
+                URL(fileURLWithPath: toolPath), arguments, timeout: timeout),
+            outcome.reason == .exit
+        else { throw Failure.unavailable }
+        return (outcome.status, outcome.output)
     }
 }
