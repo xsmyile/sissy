@@ -18,8 +18,9 @@ actor SystemHealthMonitor {
     static let sampleInterval: Duration = AgentProcessMonitor.sampleInterval
     /// How long a Mac whose level has not moved goes without a frame at the
     /// most. The colour follows the level on the sample that changes it; the
-    /// numbers beside it can wait a minute.
-    static let quietFrameInterval: TimeInterval = 60
+    /// numbers beside it can wait a minute. The agent sweep's, so the two
+    /// readings that share a cadence also share how long they go quiet.
+    static let quietFrameInterval: TimeInterval = AgentProcessMonitor.quietFrameInterval
 
     nonisolated private let published = LockedValue<MacHealthReading?>(nil)
     private var lastFrameAt: Date?
