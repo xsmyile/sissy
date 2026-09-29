@@ -314,32 +314,20 @@ struct ForgeSettingsView: View {
         .sheet(item: $connecting) { request in
             ForgeConnectSheet(model: model, request: request)
         }
-        .confirmationDialog(
-            disconnecting.map(ForgeConnectCopy.unlinkTitle) ?? "",
-            isPresented: Binding(
-                get: { disconnecting != nil }, set: { if !$0 { disconnecting = nil } }),
-            presenting: disconnecting
-        ) { connection in
-            Button(ForgeConnectCopy.unlinkConfirm, role: .destructive) {
-                model.engine.disconnectForge(id: connection.id)
-            }
-            Button(ForgeConnectCopy.cancel, role: .cancel) {}
-        } message: { _ in
-            Text(ForgeConnectCopy.unlinkMessage)
-        }
-        .confirmationDialog(
-            removingToken.map(ForgeConnectCopy.removeTokenTitle) ?? "",
-            isPresented: Binding(
-                get: { removingToken != nil }, set: { if !$0 { removingToken = nil } }),
-            presenting: removingToken
-        ) { token in
-            Button(ForgeConnectCopy.removeTokenConfirm, role: .destructive) {
-                model.engine.removeOrphanedForgeToken(id: token.id)
-            }
-            Button(ForgeConnectCopy.cancel, role: .cancel) {}
-        } message: { _ in
-            Text(ForgeConnectCopy.removeTokenMessage)
-        }
+        .confirmRemoval(
+            of: $disconnecting,
+            title: ForgeConnectCopy.unlinkTitle,
+            message: ForgeConnectCopy.unlinkMessage,
+            confirm: ForgeConnectCopy.unlinkConfirm,
+            cancel: ForgeConnectCopy.cancel
+        ) { model.engine.disconnectForge(id: $0.id) }
+        .confirmRemoval(
+            of: $removingToken,
+            title: ForgeConnectCopy.removeTokenTitle,
+            message: ForgeConnectCopy.removeTokenMessage,
+            confirm: ForgeConnectCopy.removeTokenConfirm,
+            cancel: ForgeConnectCopy.cancel
+        ) { model.engine.removeOrphanedForgeToken(id: $0.id) }
     }
 
     /// A token Sissy holds that no connection names, which an interrupted
