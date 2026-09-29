@@ -166,18 +166,6 @@ struct UsagePanelView: View {
         }
     }
 
-    /// Switches the open page's vendor to another of its accounts, and moves
-    /// the page with it: the page is addressed by provider id, so leaving it
-    /// pointed at the account that was just switched away from would drop the
-    /// user back to the overview on every switch.
-    /// Picking an account is picking the account: the next `claude` in a
-    /// terminal starts as it, and the identity and limits on the row follow.
-    /// Sissy holds its own copy of every account it has seen, so the one being
-    /// switched away from stays a click away.
-    private func selectAccount(_ uuid: String) {
-        model.engine.activateClaudeAccount(uuid: uuid)
-    }
-
     /// The status reading the services page is about, when that is the page and
     /// there is still a reading to show.
     ///
@@ -426,7 +414,7 @@ struct UsagePanelView: View {
             PanelForge(
                 snapshot: snapshot,
                 refreshingForge: model.engine.refreshingForge,
-                refreshForge: { model.refreshForge($0) },
+                refreshForge: { model.engine.refreshForge($0) },
                 openIdentities: { page = .identities(focus: $0) })
         }
     }
@@ -457,7 +445,7 @@ struct UsagePanelView: View {
         return PanelProviderPage(
             row: row,
             openOnAccount: openAccount,
-            onSelectAccount: { selectAccount($0) },
+            onSelectAccount: { model.engine.activateClaudeAccount(uuid: $0) },
             onAddAccount: {
                 if row.id == ProviderID.codex {
                     model.engine.addCodexAccount()
@@ -470,7 +458,7 @@ struct UsagePanelView: View {
             resetSpending: model.engine.spendingCodexReset,
             resetReport: model.engine.codexResetReport,
             useReset: { model.engine.useCodexReset(account: $0.account) },
-            refresh: { model.refreshProvider(row.id) },
+            refresh: { model.engine.refreshProvider(row.id) },
             openServices: { page = .services(row.id, account: $0) },
             openProjects: { page = .projects(row.id, account: $0) },
             openEffort: { page = .effort(row.id, account: $0) },
@@ -829,7 +817,7 @@ struct UsagePanelView: View {
             }
         } trailing: {
             refreshButton(help: UsageFormat.refreshHelp(row.id)) {
-                model.refreshProvider(row.id)
+                model.engine.refreshProvider(row.id)
             }
         }
     }

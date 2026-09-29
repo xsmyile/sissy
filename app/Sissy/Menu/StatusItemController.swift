@@ -251,7 +251,7 @@ final class StatusItemController: NSObject {
     private static let refreshAllTitle = "Refresh All"
 
     @objc private func handleRefreshAll() {
-        model.refreshAll()
+        model.engine.refreshAll()
     }
 
     @objc private func handleCheckForUpdates() {

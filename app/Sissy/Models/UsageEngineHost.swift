@@ -915,6 +915,9 @@ final class UsageEngineHost {
 
     /// Deletes the archive. The engine re-emits once it is gone, which is
     /// what takes the panel's archive line away with it.
+    ///
+    /// Nothing else in Sissy deletes a user's data, so it is reachable only
+    /// from Settings and only behind a confirmation.
     func deleteUsageHistory() {
         guard let engine else { return }
         Task { await engine.deleteHistory() }
