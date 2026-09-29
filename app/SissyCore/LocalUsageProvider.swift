@@ -648,6 +648,17 @@ actor LocalUsageProvider: UsageProvider {
         onChange = nil
     }
 
+    /// The writes `stop()` makes, without the teardown. A snapshot that is not
+    /// dirty is left alone rather than rewritten, which is where this parts
+    /// from the forced save on the way out.
+    func flush() async {
+        guard lifecycle == .running else { return }
+        settleKeyZone()
+        adapter.projects.ledger.saveIfDirty()
+        if persistDirty { saveSnapshotIfDirty(force: true) }
+        saveHistoryIfDirty(force: true)
+    }
+
     /// Boots an FSEvents watcher rooted at the source tree. FSEvents wakes are
     /// the primary trigger for JSONL ingest; the surviving `pollTask` runs
     /// at the configured cadence (default 60s) as a safety net for missed

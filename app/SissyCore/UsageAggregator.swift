@@ -63,6 +63,10 @@ actor UsageAggregator {
         for p in providers { await p.stop() }
     }
 
+    func flush() async {
+        for p in providers { await p.flush() }
+    }
+
     /// Fans a refreshed rate catalog out to every provider. Each takes the
     /// slice for its own vendor.
     func applyPriceCatalog(_ catalog: PriceCatalog) async {

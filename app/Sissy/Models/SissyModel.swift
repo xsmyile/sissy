@@ -70,6 +70,11 @@ final class SissyModel {
         await engine.stop()
     }
 
+    /// Writes what the engine is holding back, without stopping it.
+    func flush() async {
+        await engine.flush()
+    }
+
     /// Undoes the LaunchAgent an older install registered, once.
     private func retireLegacyAgentIfNeeded() {
         let outcome = LegacyAgentRetirement.run(

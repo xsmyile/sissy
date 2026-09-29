@@ -79,6 +79,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in self?.syncActivationPolicy() }
             }
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.flushBeforeSleep() }
+        }
     }
 
     /// Keeps the Dock icon in step with whether the app currently has a real
@@ -164,6 +169,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             replyToTerminate()
         }
         return .terminateLater
+    }
+
+    /// Writes what the tails' throttles are holding back as the Mac goes to
+    /// sleep, so a battery that runs out during it costs no more than the
+    /// throttle would have.
+    ///
+    /// Best effort: `willSleepNotification` holds nothing back, so a write
+    /// the sleep overtakes lands on wake instead. Either way the state is
+    /// still in memory, which a sleep does not lose.
+    private func flushBeforeSleep() async {
+        await model.flush()
     }
 
     /// Whichever of the two racing tasks arrives first releases the quit. Both
