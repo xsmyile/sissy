@@ -385,6 +385,18 @@ final class UsageEngineHost {
     /// notice names as the folder Sissy does read.
     private(set) var claudeConfigHome = AccountDefaults.claudeHome
 
+    /// Links another account of `provider`'s vendor, for a control that
+    /// already knows which vendor it is on: the provider page's account menu
+    /// and the fix beside a Settings row. The one place a provider id picks a
+    /// login, so a third vendor's is added here rather than at every button.
+    func addAccount(for provider: String) {
+        if provider == ProviderID.codex {
+            addCodexAccount()
+        } else {
+            addClaudeAccount()
+        }
+    }
+
     /// Opens claude.ai's own login and links whatever account it produces.
     ///
     /// The whole flow lives in that window — see `VendorLoginWindow`. A

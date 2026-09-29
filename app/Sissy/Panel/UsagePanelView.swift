@@ -446,13 +446,7 @@ struct UsagePanelView: View {
             row: row,
             openOnAccount: openAccount,
             onSelectAccount: { model.engine.activateClaudeAccount(uuid: $0) },
-            onAddAccount: {
-                if row.id == ProviderID.codex {
-                    model.engine.addCodexAccount()
-                } else {
-                    model.engine.addClaudeAccount()
-                }
-            },
+            onAddAccount: { model.engine.addAccount(for: row.id) },
             switchFailure: model.engine.accountSwitchFailure,
             switchingAccount: model.engine.switchingClaudeAccount,
             resetSpending: model.engine.spendingCodexReset,
