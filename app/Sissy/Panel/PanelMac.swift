@@ -45,7 +45,6 @@ struct PanelMac: View {
     let block: UsagePanelSnapshot.MacBlock
 
     private static let rowSpacing: CGFloat = 7
-    private static let captionSize: CGFloat = 11
     private static let stepSize: CGFloat = 10
     private static let stepGap: CGFloat = 3
     private static let trackOpacity: Double = 0.15
@@ -58,9 +57,9 @@ struct PanelMac: View {
                     track
                     Divider()
                     VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                        row("Swap", value: Text(block.swap))
-                        row("Load", value: Text(block.load))
-                        row("Up", value: Text(block.uptime))
+                        PanelFigureRow(label: "Swap", value: block.swap)
+                        PanelFigureRow(label: "Load", value: block.load)
+                        PanelFigureRow(label: "Up", value: block.uptime)
                     }
                 }
             }
@@ -77,31 +76,13 @@ struct PanelMac: View {
     /// sample's age under it: the same rank and the same place as the day's
     /// cost on Usage.
     private var headline: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(block.memory.text)
-                .font(.system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded))
-                .foregroundStyle(headlineTint)
-            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
-                Text(caption(now: context.date))
-                    .font(.system(size: Self.captionSize))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-        }
+        LevelHeadline(figure: block.memory.text, level: block.pressure, caption: caption(now:))
     }
 
     private func caption(now: Date) -> String {
         let age = UsageFormat.macReading(observedAt: block.observedAt, now: now)
         guard let free = block.freeMemory else { return age }
         return free + " · " + age
-    }
-
-    /// Primary at normal, where the rest of the panel's headlines are, and
-    /// secondary only for the dash: a secondary headline is how this panel
-    /// draws a reading that has not happened, which a normal Mac has.
-    private var headlineTint: Color {
-        guard block.pressure != nil else { return .secondary }
-        return MacLevelStyle.tint(block.pressure, resting: .primary)
     }
 
     /// The kernel's three steps, filled up to the one it is on, with their
@@ -146,18 +127,6 @@ struct PanelMac: View {
         case .warn: .center
         case .critical: .trailing
         }
-    }
-
-    private func row(_ label: String, value: Text) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            value
-                .monospacedDigit()
-                .lineLimit(1)
-        }
-        .font(.system(size: PanelMetrics.rowText))
     }
 
     // MARK: Heaviest

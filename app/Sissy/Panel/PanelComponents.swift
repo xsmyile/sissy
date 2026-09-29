@@ -1109,3 +1109,62 @@ struct Chevron: View {
             .foregroundStyle(.tertiary)
     }
 }
+
+/// A figure a machine tab reads beside its name: the name in secondary, the
+/// figure at the trailing edge in tabular digits, on one line.
+///
+/// One view for the Mac, Disk and Network tabs, so the three pages that sit
+/// side by side in the tab bar cannot drift a point apart in a row they all
+/// draw. `truncation` is Network's, whose values are an interface's name and
+/// a network's, where the ends say more than the middle.
+struct PanelFigureRow: View {
+    let label: String
+    let value: String
+    var truncation: Text.TruncationMode = .tail
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .monospacedDigit()
+                .lineLimit(1)
+                .truncationMode(truncation)
+        }
+        .font(.system(size: PanelMetrics.rowText))
+    }
+}
+
+/// A machine tab's one number in its level's colour, with what it qualifies
+/// and the reading's age under it on the tab's own clock.
+///
+/// Primary at normal, where the rest of the panel's headlines are, and
+/// secondary only for the dash: a secondary headline is how this panel
+/// draws a reading that has not happened, which a normal Mac has. `level`
+/// nil is that dash.
+struct LevelHeadline: View {
+    let figure: String
+    let level: MacHealthLevel?
+    let caption: (Date) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(figure)
+                .font(.system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
+                Text(caption(context.date))
+                    .font(.system(size: PanelMetrics.headlineMeta))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var tint: Color {
+        guard level != nil else { return .secondary }
+        return MacLevelStyle.tint(level, resting: .primary)
+    }
+}

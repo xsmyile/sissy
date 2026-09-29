@@ -53,14 +53,17 @@ struct PanelNetwork: View {
                     rates: reading?.rates ?? [], now: reading?.observedAt ?? Date(), hovered: $hovered)
                 Divider()
                 VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                    row("Interface", value: UsageFormat.networkInterface(reading?.interface))
+                    PanelFigureRow(
+                        label: "Interface", value: UsageFormat.networkInterface(reading?.interface),
+                        truncation: .middle)
                     if let wifi = reading?.wifi {
-                        row("Signal", value: UsageFormat.networkSignal(wifi))
+                        PanelFigureRow(
+                            label: "Signal", value: UsageFormat.networkSignal(wifi), truncation: .middle)
                     }
-                    row(
-                        UsageFormat.networkTotalsLabel(
+                    PanelFigureRow(
+                        label: UsageFormat.networkTotalsLabel(
                             reading?.totals, now: reading?.observedAt ?? Date()),
-                        value: UsageFormat.networkTotals(reading?.totals))
+                        value: UsageFormat.networkTotals(reading?.totals), truncation: .middle)
                 }
             }
         }
@@ -105,18 +108,6 @@ struct PanelNetwork: View {
             + UsageFormat.networkRate(rate.sent)
     }
 
-    private func row(_ label: String, value: String) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            Text(value)
-                .monospacedDigit()
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .font(.system(size: PanelMetrics.rowText))
-    }
 }
 
 /// The last two minutes of both directions, drawn by `RateSparkline`.

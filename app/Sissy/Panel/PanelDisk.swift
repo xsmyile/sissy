@@ -21,7 +21,6 @@ struct PanelDisk: View {
 
     private static let rowSpacing: CGFloat = 7
     private static let volumeSpacing: CGFloat = 4
-    private static let captionSize: CGFloat = 11
     private static let legendSize: CGFloat = 10
 
     var body: some View {
@@ -46,7 +45,7 @@ struct PanelDisk: View {
                     .accessibilityLabel(block.free.text)
                     .accessibilityValue(block.thresholds)
                     Divider()
-                    row("Purgeable", value: block.purgeable)
+                    PanelFigureRow(label: "Purgeable", value: block.purgeable)
                 }
             }
             DiskActivityPlatter(engine: engine)
@@ -64,43 +63,13 @@ struct PanelDisk: View {
     /// The free space as the tab's one number, in the level's colour, with
     /// what it is out of and the read's age under it.
     private var headline: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(block.free.text)
-                .font(.system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded))
-                .foregroundStyle(headlineTint)
-            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
-                Text(caption(now: context.date))
-                    .font(.system(size: Self.captionSize))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
+        LevelHeadline(figure: block.free.text, level: block.free.level, caption: caption(now:))
     }
 
     private func caption(now: Date) -> String {
         let age = UsageFormat.diskReading(observedAt: block.observedAt, now: now)
         guard let volume = block.volume else { return age }
         return volume + " · " + age
-    }
-
-    /// Primary at normal and secondary only for the dash, on `PanelMac`'s
-    /// rule for its own headline.
-    private var headlineTint: Color {
-        guard block.free.level != nil else { return .secondary }
-        return MacLevelStyle.tint(block.free.level, resting: .primary)
-    }
-
-    private func row(_ label: String, value: String) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            Text(value)
-                .monospacedDigit()
-                .lineLimit(1)
-        }
-        .font(.system(size: PanelMetrics.rowText))
     }
 
     // MARK: Volumes
