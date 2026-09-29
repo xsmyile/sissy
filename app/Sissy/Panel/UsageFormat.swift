@@ -806,17 +806,17 @@ enum UsageFormat {
     /// What pressing refresh on a provider actually does, said before it is
     /// pressed.
     ///
-    /// The two are not the same action and the button must not pretend they
-    /// are: on Claude Code it re-reads the keychain with the dialog allowed,
-    /// which is a permission prompt someone is about to meet. On Codex the
-    /// limits ride the CLI's own events, so no button can make them arrive —
-    /// all a refresh can honestly touch is the account and the plan.
+    /// Both vendors answer the press the same way: `refreshProvider(id:)`
+    /// re-reads every limits reader the provider has (the CLI's credential
+    /// and each claude.ai session for Claude, each `CodexUsageSource` for
+    /// Codex) and then the account and the plan. Neither raises a dialog,
+    /// because the CLI's keychain item is read through `/usr/bin/security`,
+    /// so the tooltip warns of nothing. A provider with no limits reader
+    /// can only be read again.
     static func refreshHelp(_ id: String) -> String {
         switch id {
-        case ProviderID.claudeCode:
-            return "Read the limits again · may ask for keychain access"
-        case ProviderID.codex:
-            return "Read the account again · the limits arrive with the next Codex turn"
+        case ProviderID.claudeCode, ProviderID.codex:
+            return "Read the limits and the account again"
         default:
             return "Read this provider again"
         }

@@ -374,18 +374,20 @@ final class UsageFormatTests: XCTestCase {
 
     // MARK: Refresh
 
-    /// The button must say which of the two actions it is before it is
-    /// pressed: one of them raises a system permission dialog.
-    func testRefreshWarnsThatClaudeMayAskForTheKeychain() {
-        XCTAssertTrue(UsageFormat.refreshHelp(ProviderID.claudeCode).contains("keychain"))
+    /// The CLI's keychain item is read through `/usr/bin/security` with no
+    /// dialog, so the Claude tooltip must not warn of one.
+    func testRefreshOnClaudeWarnsOfNoKeychainPrompt() {
+        let help = UsageFormat.refreshHelp(ProviderID.claudeCode)
+        XCTAssertEqual(help, "Read the limits and the account again")
+        XCTAssertFalse(help.contains("keychain"))
     }
 
-    /// No button can make a Codex limit arrive — they ride the CLI's own
-    /// turns — so the tooltip promises the account and nothing more.
-    func testRefreshOnCodexDoesNotPromiseFreshLimits() {
+    /// `CodexUsageSource` polls the vendor, so the press reads the limits
+    /// too rather than waiting for the next Codex turn.
+    func testRefreshOnCodexReadsTheLimitsToo() {
         let help = UsageFormat.refreshHelp(ProviderID.codex)
-        XCTAssertTrue(help.contains("next Codex turn"))
-        XCTAssertFalse(help.contains("keychain"))
+        XCTAssertEqual(help, "Read the limits and the account again")
+        XCTAssertFalse(help.contains("next Codex turn"))
     }
 
     func testPlanLabelCapitalisesAVendorToken() {
