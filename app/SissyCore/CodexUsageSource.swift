@@ -215,7 +215,7 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
         case .refused:
             publishFailure(.refused)
             report("reading the Codex credential was refused; the source stops until restarted")
-            cancelRequests()
+            halt()
         case .expired:
             publishFailure(.sessionExpired)
             report("the Codex credential is spent and could not be renewed; link it again")
