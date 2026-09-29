@@ -190,6 +190,25 @@ final class CodexUsageSourceTests: XCTestCase {
         XCTAssertFalse(source.currentSignals().windows.isEmpty)
     }
 
+    // MARK: - A refused credential read
+
+    /// A refused credential read ends the loop, and the refusal still reaches
+    /// the panel: it is the one state on screen offering a way back.
+    func testARefusedCredentialReadIsAnnouncedAsItStopsTheLoop() async {
+        let source = Self.source(
+            credential: { _ in .refused },
+            fetch: { _ in
+                XCTFail("a refused read must not reach the network")
+                throw UsageRequestError.malformedPayload
+            })
+        let emits = LockedValue(0)
+        await source.refresh { emits.update { $0 += 1 } }
+        XCTAssertEqual(source.currentSignals().limitsState, .refused)
+        XCTAssertEqual(emits.load(), 1)
+        let polling = await source.loop.pollTask != nil
+        XCTAssertFalse(polling)
+    }
+
     // MARK: - A linked token refused early
 
     private static let renewedToken = "token-renewed"
