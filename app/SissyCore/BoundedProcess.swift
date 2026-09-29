@@ -10,7 +10,14 @@ import Foundation
 /// drained or the null device: a pipe nobody reads blocks the child once the
 /// kernel buffer fills, and standard error is drained on a queue of its own,
 /// because reading two pipes in sequence is the same deadlock with a longer
-/// fuse.
+/// fuse. Standard input is written on that queue too, so a child that answers
+/// before it has read everything cannot hold the write, and a child that exits
+/// first fails the write rather than raising a broken-pipe signal in this
+/// process.
+///
+/// The bound is the child's. A grandchild it leaves holding one of the pipes
+/// outlives the kill and keeps that read open until it exits; none of the
+/// commands run through here starts one in normal use.
 ///
 /// It blocks the calling thread until the child has exited, so a caller on
 /// the cooperative pool hops off it first.
@@ -72,12 +79,16 @@ enum BoundedProcess {
             watchdog.cancel()
             executioner.cancel()
         }
-        if let stdin, let input {
-            try? stdin.fileHandleForWriting.write(contentsOf: input)
-            try? stdin.fileHandleForWriting.close()
-        }
         let errors = LockedValue(Data())
         let draining = DispatchGroup()
+        if let stdin, let input {
+            let writer = stdin.fileHandleForWriting
+            _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
+            queue.async(group: draining) {
+                try? writer.write(contentsOf: input)
+                try? writer.close()
+            }
+        }
         if let stderr {
             queue.async(group: draining) {
                 let data = stderr.fileHandleForReading.readDataToEndOfFile()
