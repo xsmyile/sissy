@@ -24,6 +24,7 @@ on:
     paths:
       - "app/SissyCore/**"
       - "app/project.yml"
+      - "scripts/cli-path.sh"
       - ".github/workflows/pricing-oracle.yml"
 
 concurrency:
