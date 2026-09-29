@@ -455,18 +455,8 @@ final class ClaudeCodeAdapter: SourceAdapter {
     func lineMayCount(_ buf: UnsafePointer<UInt8>, from: Int, to: Int) -> Bool {
         Self.bufferContainsAssistantMarker(buf, from: from, to: to)
             || (to - from <= Self.turnDurationLineLimit
-                && Self.bufferContains(buf, from: from, to: to, pattern: Self.turnDurationBytes))
-    }
-
-    private static func bufferContains(
-        _ buf: UnsafePointer<UInt8>, from: Int, to: Int, pattern: [UInt8]
-    ) -> Bool {
-        var i = from
-        while i <= to - pattern.count {
-            if matches(buf, at: i, pattern: pattern) { return true }
-            i += 1
-        }
-        return false
+                && UsageReaderShared.bufferContains(
+                    buf, from: from, to: to, pattern: Self.turnDurationBytes))
     }
 
     static func bufferContainsAssistantMarker(
