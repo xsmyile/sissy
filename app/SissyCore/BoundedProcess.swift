@@ -3,8 +3,8 @@ import Foundation
 /// One child process run to completion under a deadline, and killed if it
 /// will not end.
 ///
-/// The one runner the tools Sissy spawns go through (`git` and `sh -n`),
-/// because the rules are the same for all of them and a copy that
+/// The one runner every tool Sissy spawns goes through (`security`, `git`
+/// and `sh -n`), because the rules are the same for all of them and a copy that
 /// dropped one is a caller held for the life of the app. The deadline sends
 /// `SIGTERM` and, `killGraceSeconds` later, `SIGKILL`. Every stream is either
 /// drained or the null device: a pipe nobody reads blocks the child once the
