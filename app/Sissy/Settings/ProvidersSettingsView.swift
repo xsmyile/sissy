@@ -522,10 +522,8 @@ struct ProvidersSettingsView: View {
             switch notice.kind {
             case .refresh:
                 model.engine.refreshProvider(provider)
-            case .link where provider == ProviderID.codex:
-                model.engine.addCodexAccount()
             case .link:
-                model.engine.addClaudeAccount()
+                model.engine.addAccount(for: provider)
             }
         }
     }
