@@ -63,7 +63,9 @@ struct PanelDisk: View {
     /// The free space as the tab's one number, in the level's colour, with
     /// what it is out of and the read's age under it.
     private var headline: some View {
-        LevelHeadline(figure: block.free.text, level: block.free.level, caption: caption(now:))
+        LevelHeadline(
+            figure: block.free.text, level: block.free.level, captionLineLimit: 1,
+            caption: caption(now:))
     }
 
     private func caption(now: Date) -> String {

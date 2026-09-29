@@ -1170,6 +1170,9 @@ struct PanelFigureRow: View {
 struct LevelHeadline: View {
     let figure: String
     let level: MacHealthLevel?
+    /// One line on Disk, whose caption carries a volume's name and can run
+    /// long; nil on Mac, whose caption is a share and an age and fits.
+    var captionLineLimit: Int?
     let caption: (Date) -> String
 
     var body: some View {
@@ -1182,7 +1185,7 @@ struct LevelHeadline: View {
                     .font(.system(size: PanelMetrics.headlineMeta))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(captionLineLimit)
             }
         }
     }
