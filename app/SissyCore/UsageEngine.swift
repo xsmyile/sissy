@@ -132,6 +132,11 @@ actor UsageEngine {
     private var connectingForges: [String: UUID] = [:]
     private var forgeMonitor: ForgeActivityMonitor
     private let identityMonitor: GitIdentityMonitor
+    /// The one clock the status, forge and identity polls pace themselves by,
+    /// so a turn is noted once and a rebuilt forge monitor keeps its cadence.
+    /// An injected status monitor lends its own, so a test that drives the
+    /// engine still reaches the clock that monitor reads.
+    private let activity: ActivityClock
     /// What the CLIs on this Mac are holding right now. Beside the monitors
     /// above rather than on a provider: a running process belongs to the Mac,
     /// and it is there on a day neither CLI has spent anything.
@@ -269,6 +274,8 @@ actor UsageEngine {
         self.configURL = configURL
         self.configIsWritable = configIsWritable
         self.keepAwakePolicy = keepAwakePolicy
+        let activity = statusMonitor?.activity ?? ActivityClock()
+        self.activity = activity
 
         // The snapshots live beside the config that named the trees they were
         // read from. `ServerConfig.defaultURL` puts both in the support dir, so
@@ -282,7 +289,7 @@ actor UsageEngine {
         // invalidates a tail's snapshot may take it with it.
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         self.projectLedger = projectLedger
-        self.identityMonitor = GitIdentityMonitor(ledger: projectLedger)
+        self.identityMonitor = GitIdentityMonitor(ledger: projectLedger, activity: activity)
         let agentMonitor = AgentProcessMonitor(ledger: projectLedger)
         self.agentMonitor = agentMonitor
         self.healthMonitor =
@@ -304,7 +311,7 @@ actor UsageEngine {
             deleteToken: { try ForgeTokenStore.delete(connection: $0) })
         self.forgeMonitor = ForgeActivityMonitor(
             connections: (try? forgeIndex.loadSettingAside()) ?? [],
-            counters: (config.forgeCounters ?? .defaults).enabled)
+            counters: (config.forgeCounters ?? .defaults).enabled, activity: activity)
         let historyRoot: URL? = config.resolvedHistoryRetentionDays > 0 ? stateDir : nil
         let pollInterval: Duration = .seconds(Int(max(config.pollIntervalSeconds, 1)))
         let claudeHome = config.providerHome(vendor: ProviderID.claudeCode)
@@ -331,7 +338,8 @@ actor UsageEngine {
         self.statusMonitor =
             statusMonitor
             ?? ProviderStatusMonitor(
-                providers: self.resolvedProviders.filter { $0.activation.isMetering }.map(\.id))
+                providers: self.resolvedProviders.filter { $0.activation.isMetering }.map(\.id),
+                activity: activity)
         // Built before the providers rather than after: the Claude adapter's
         // signals hold it, because who the CLI is signed in as is what says
         // which of the per-account readings is the one the row already shows.
@@ -1211,9 +1219,7 @@ actor UsageEngine {
         else { return }
         lastObservedActivityAt = latest
         lastAgentActivityAt = Date()
-        statusMonitor.noteActivity()
-        forgeMonitor.noteActivity()
-        identityMonitor.noteActivity()
+        activity.note()
     }
 
     /// Takes or releases the automatic hold when the agents change the answer.
@@ -1774,7 +1780,7 @@ actor UsageEngine {
         await forgeMonitor.stop()
         forgeMonitor = ForgeActivityMonitor(
             connections: (try? forgeIndex.loadSettingAside()) ?? [],
-            counters: (config.forgeCounters ?? .defaults).enabled)
+            counters: (config.forgeCounters ?? .defaults).enabled, activity: activity)
         await startForgeActivity()
     }
 

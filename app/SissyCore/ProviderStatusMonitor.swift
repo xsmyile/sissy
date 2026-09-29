@@ -18,10 +18,9 @@ import Foundation
 actor ProviderStatusMonitor {
     /// While there are agents working.
     static let refreshInterval: Duration = .seconds(300)
-    /// Once nothing has been seen working for `idleAfter`. A status page read
+    /// Once nothing has been seen working for `ActivityClock.idleAfter`. A status page read
     /// on a Mac nobody is working on answers a question nobody is asking.
     static let idleRefreshInterval: Duration = .seconds(1800)
-    static let idleAfter: TimeInterval = 3600
     /// Spread across the interval, so every Sissy started at login does not
     /// ask the same two pages in the same second.
     static let jitterSeconds: ClosedRange<Int> = 0...30
@@ -32,9 +31,8 @@ actor ProviderStatusMonitor {
     /// round's Codex.
     nonisolated private let published = LockedValue([String: ProviderStatusReading]())
     /// When the engine last saw an agent do something, which is the only input
-    /// to how often this polls. Nonisolated because it is written from the
-    /// frame path, which cannot afford to await this actor.
-    nonisolated private let lastActivity = LockedValue<Date?>(nil)
+    /// to how often this polls.
+    nonisolated let activity: ActivityClock
     private let feeds: [String: ProviderStatusFeed]
     /// The network half, injectable for the reason `ClaudeLimitsProbe`'s is: a
     /// test of the poll contract must not reach a vendor to observe it.
@@ -46,6 +44,7 @@ actor ProviderStatusMonitor {
 
     init(
         providers: [String],
+        activity: ActivityClock = ActivityClock(),
         fetch: @escaping @Sendable (ProviderStatusFeed) async throws -> ProviderStatusReading = {
             try await ProviderStatusMonitor.read($0)
         }
@@ -55,6 +54,7 @@ actor ProviderStatusMonitor {
                 ProviderStatusFeed.feed(for: id).map { (id, $0) }
             })
         fetchSource = fetch
+        self.activity = activity
     }
 
     /// One provider's whole reading, by the shape its vendor publishes.
@@ -79,10 +79,6 @@ actor ProviderStatusMonitor {
     }
 
     nonisolated func currentStatus() -> [String: ProviderStatusReading] { published.load() }
-
-    nonisolated func noteActivity(at when: Date = Date()) {
-        lastActivity.update { $0 = when }
-    }
 
     /// Starts the poll loop. `onRefresh` fires only when the published map
     /// changes, so a vendor that keeps answering the same thing costs no
@@ -177,8 +173,7 @@ actor ProviderStatusMonitor {
     }
 
     private func nextDelay() -> Duration {
-        let working = lastActivity.load().map { Date().timeIntervalSince($0) < Self.idleAfter }
-        let base = working == true ? Self.refreshInterval : Self.idleRefreshInterval
+        let base = activity.isWorking() ? Self.refreshInterval : Self.idleRefreshInterval
         return base + .seconds(Int.random(in: Self.jitterSeconds))
     }
 }

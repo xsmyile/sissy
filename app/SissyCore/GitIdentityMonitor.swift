@@ -26,9 +26,8 @@ actor GitIdentityMonitor {
     /// config file, which is rare and never urgent — the reading has to be
     /// right when the panel is opened, not within a minute of the edit.
     static let refreshInterval: Duration = .seconds(600)
-    /// Once nothing has been seen working for `idleAfter`.
+    /// Once nothing has been seen working for `ActivityClock.idleAfter`.
     static let idleRefreshInterval: Duration = .seconds(3600)
-    static let idleAfter: TimeInterval = 3600
     /// The whole sweep's budget. Each invocation carries its own timeout, so
     /// without this a machine with unreachable checkouts could spend every
     /// repository's ten seconds in turn. What is read by the deadline is
@@ -43,7 +42,9 @@ actor GitIdentityMonitor {
     /// page that dates the reading has to move when a press re-read the same
     /// answer, or the press reads as having done nothing.
     nonisolated private let checkedAt = LockedValue<Date?>(nil)
-    nonisolated private let lastActivity = LockedValue<Date?>(nil)
+    /// When the engine last saw an agent do something, which is the only input
+    /// to how often this sweeps.
+    nonisolated let activity: ActivityClock
     /// The generation the blocking read loop checks between repositories.
     ///
     /// `stop()` cancels `pollTask`, which a loop parked in `waitUntilExit`
@@ -79,9 +80,11 @@ actor GitIdentityMonitor {
     private var stamps: [String: [String: Date]] = [:]
 
     init(
-        ledger: ProjectLedger, git: URL? = nil, home: URL? = AgentHookInstaller.userHome
+        ledger: ProjectLedger, git: URL? = nil, home: URL? = AgentHookInstaller.userHome,
+        activity: ActivityClock = ActivityClock()
     ) {
         self.ledger = ledger
+        self.activity = activity
         self.git = git
         self.didLocate = git != nil
         self.home = home
@@ -90,10 +93,6 @@ actor GitIdentityMonitor {
     nonisolated func currentIdentities() -> [RepositoryIdentity] { published.load() }
 
     nonisolated func currentCheckedAt() -> Date? { checkedAt.load() }
-
-    nonisolated func noteActivity(at when: Date = Date()) {
-        lastActivity.update { $0 = when }
-    }
 
     /// Starts the sweep loop. `onRefresh` fires once per finished round, which
     /// is one frame every ten minutes at the most. Idempotent, and a no-op
@@ -252,7 +251,6 @@ actor GitIdentityMonitor {
     }
 
     private func nextDelay() -> Duration {
-        let working = lastActivity.load().map { Date().timeIntervalSince($0) < Self.idleAfter }
-        return working == true ? Self.refreshInterval : Self.idleRefreshInterval
+        activity.isWorking() ? Self.refreshInterval : Self.idleRefreshInterval
     }
 }
