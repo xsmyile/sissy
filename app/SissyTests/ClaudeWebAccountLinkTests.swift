@@ -70,7 +70,7 @@ final class ClaudeWebAccountLinkTests: XCTestCase {
                     ClaudeWebOrganization(
                         id: "org-1", name: "Acme Srl", plan: "team")
                 ],
-                identify: { _ in throw ClaudeAccountProfile.Failure.badStatus(401) })
+                identify: { _ in throw UsageRequestError.badStatus(401) })
             XCTFail("expected the link to fail")
         } catch {
             XCTAssertEqual(error as? ClaudeWebAccountLink.Failure, .unidentified)

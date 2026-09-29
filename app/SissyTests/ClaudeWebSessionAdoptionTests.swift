@@ -22,7 +22,7 @@ final class ClaudeWebSessionAdoptionTests: XCTestCase {
         let vault = Vault([ClaudeWebSessionStore.unkeyedAccount: "sk-ant-sid-old"])
 
         let outcome = await ClaudeWebSessionAdoption.run(store: vault.store()) { _ in
-            throw ClaudeAccountProfile.Failure.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
 
         XCTAssertEqual(outcome, .unidentified)
