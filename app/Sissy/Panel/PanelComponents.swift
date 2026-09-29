@@ -674,9 +674,7 @@ struct ProjectsSectionLabel: View {
                 .font(.system(size: 11))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.tertiary)
+            Chevron(isOpen: false)
         }
         .contentShape(.rect)
     }
@@ -1095,4 +1093,17 @@ struct ForgeMark: View {
     private nonisolated static let gitHubName = "github"
     private nonisolated static let gitLabName = "gitlab"
     private static let genericSymbol = "arrow.triangle.branch"
+}
+
+/// The one chevron the panel draws where a row opens a page or a group
+/// unfolds, so a group and the row above it cannot point different ways at
+/// the same state, and a row that opens a page reads the same on every tab.
+struct Chevron: View {
+    let isOpen: Bool
+
+    var body: some View {
+        Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.tertiary)
+    }
 }

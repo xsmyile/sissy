@@ -238,9 +238,7 @@ private struct StatusLine: View {
                 Spacer(minLength: 0)
 
                 if navigates {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                    Chevron(isOpen: false)
                 }
             }
             .contentShape(.rect)
@@ -250,18 +248,6 @@ private struct StatusLine: View {
                     provider: provider, label: row.label, checkedAt: row.checkedAt,
                     now: context.date))
         }
-    }
-}
-
-/// The one chevron this surface uses, so a group and the row above it cannot
-/// point different ways at the same state.
-private struct Chevron: View {
-    let isOpen: Bool
-
-    var body: some View {
-        Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(.tertiary)
     }
 }
 

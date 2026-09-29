@@ -277,9 +277,7 @@ struct PanelOverview: View {
                 }
                 Spacer(minLength: 8)
                 gauge(row, binding: binding)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                Chevron(isOpen: false)
             }
             if let binding {
                 ShareBar(
