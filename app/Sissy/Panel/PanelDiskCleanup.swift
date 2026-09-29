@@ -89,7 +89,7 @@ struct DiskCleanupPlatter: View {
             caption(DiskCleanupCopy.confirmBody(confirmation.target, bytes: confirmation.bytes))
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
-                Button(DiskCleanupCopy.confirmCancel) { cleanup.dismissConfirmation() }
+                Button(DialogCopy.cancel) { cleanup.dismissConfirmation() }
                     .keyboardShortcut(.cancelAction)
                 Button(DiskCleanupCopy.confirmAction) { cleanup.confirm() }
             }
@@ -128,7 +128,6 @@ enum DiskCleanupCopy {
     static let cleaning = "Removing…"
     static let preparing = "Checking…"
     static let confirmAction = "Clean"
-    static let confirmCancel = "Cancel"
 
     static func cleanHelp(_ target: CleanupTarget) -> String {
         "Permanently remove \(reach(target))"

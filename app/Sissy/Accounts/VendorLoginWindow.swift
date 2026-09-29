@@ -699,7 +699,7 @@ private struct VendorLinkQuestionView: View {
             Spacer(minLength: 0)
             HStack {
                 Spacer()
-                Button(VendorLinkCopy.cancel, action: onCancel)
+                Button(DialogCopy.cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 Button(VendorLinkCopy.link) {
                     guard let picked else { return }
@@ -769,7 +769,7 @@ private struct VendorLinkFailureView: View {
             Spacer(minLength: 0)
             HStack {
                 Spacer()
-                Button(VendorLinkCopy.cancel, action: onCancel)
+                Button(DialogCopy.cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 Button(VendorLinkCopy.retry, action: onRetry)
                     .keyboardShortcut(.defaultAction)

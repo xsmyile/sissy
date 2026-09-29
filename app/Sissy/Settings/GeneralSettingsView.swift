@@ -146,7 +146,7 @@ struct GeneralSettingsView: View {
             isPresented: $confirmingDelete
         ) {
             Button("Delete", role: .destructive) { model.engine.deleteUsageHistory() }
-            Button("Cancel", role: .cancel) {}
+            Button(DialogCopy.cancel, role: .cancel) {}
         } message: {
             Text(
                 "Today keeps counting. The days before it are gone, and the session logs "

@@ -74,7 +74,6 @@ private struct LinkedRowContent {
 enum VendorLinkCopy {
     static let addTitle = "Add account…"
     static let unlinkItem = "Unlink…"
-    static let cancel = "Cancel"
     static let link = "Link"
     static let retry = "Try again"
     static let done = "Done"
