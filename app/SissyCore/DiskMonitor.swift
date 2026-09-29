@@ -80,7 +80,7 @@ actor DiskMonitor {
         let id = UUID()
         let gate = gate
         let read = read
-        return await withTaskCancellationHandler {
+        let reading = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 if gate.join(id, continuation) {
                     DispatchQueue.global(qos: .utility).async {
@@ -91,6 +91,8 @@ actor DiskMonitor {
         } onCancel: {
             gate.leave(id)
         }
+        gate.forget(id)
+        return reading
     }
 }
 
@@ -142,5 +144,18 @@ final class DiskReadGate: @unchecked Sendable {
         if abandoned == nil { left.insert(id) }
         lock.unlock()
         abandoned?.resume(returning: nil)
+    }
+
+    /// The waiter is done and its cancellation handler can no longer run.
+    ///
+    /// A cancel landing after `finish` had already answered it finds no
+    /// waiter and records the id as one that left before joining, which no
+    /// `join` will ever come to collect. Clearing it here, once the handler's
+    /// scope has closed, is what keeps that race from leaving one id behind
+    /// for the life of the process.
+    func forget(_ id: UUID) {
+        lock.lock()
+        left.remove(id)
+        lock.unlock()
     }
 }
