@@ -948,7 +948,10 @@ struct UsagePanelView: View {
     private var placeholderDetail: String {
         if !model.engine.isWarm { return "The first reading lands as soon as they are read." }
         if model.engine.filesWatched == 0 {
-            return "Sissy reads ~/.claude/projects and ~/.codex/sessions. Neither has anything in it."
+            return UsageFormat.emptyLogTrees(
+                model.engine.providers.filter(\.activation.isMetering).map {
+                    ($0.dataDir.path as NSString).abbreviatingWithTildeInPath
+                })
         }
         return "The first turn of the day shows up here within a few seconds of landing."
     }

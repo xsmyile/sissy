@@ -822,6 +822,21 @@ enum UsageFormat {
         }
     }
 
+    /// What the panel says under "No session logs found": the log trees
+    /// Sissy is reading, and that none of them holds a log yet.
+    ///
+    /// Only the trees of the providers that are switched on, for the reason
+    /// the header asks `isMetering` before it counts: naming a tree Sissy was
+    /// told not to read sends someone looking in it. With none switched on
+    /// there is no tree to name, and the way forward is the switch.
+    static func emptyLogTrees(_ paths: [String]) -> String {
+        guard let last = paths.last else { return "Switch a provider on in Settings to start counting." }
+        guard paths.count > 1 else { return "Sissy reads \(last). It has nothing in it." }
+        let listed = paths.dropLast().joined(separator: ", ") + " and " + last
+        let none = paths.count == 2 ? "Neither has" : "None of them has"
+        return "Sissy reads \(listed). \(none) anything in it."
+    }
+
     /// What a provider's row is called.
     ///
     /// The name of the account, not of the CLI that logs it — which is why

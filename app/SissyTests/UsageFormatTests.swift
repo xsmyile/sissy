@@ -372,6 +372,26 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertTrue(UsageFormat.noWindowsCaption(ProviderID.codex).contains("own turns"))
     }
 
+    // MARK: Empty log trees
+
+    /// Only the trees Sissy is reading are named, so a provider switched off
+    /// does not send anyone looking in its directory.
+    func testEmptyLogTreesNamesOnlyTheTreesBeingRead() {
+        XCTAssertEqual(
+            UsageFormat.emptyLogTrees(["~/.codex/sessions"]),
+            "Sissy reads ~/.codex/sessions. It has nothing in it.")
+        XCTAssertEqual(
+            UsageFormat.emptyLogTrees(["~/.claude/projects", "~/.codex/sessions"]),
+            "Sissy reads ~/.claude/projects and ~/.codex/sessions. Neither has anything in it.")
+    }
+
+    /// With nothing switched on there is no tree to name, and the way forward
+    /// is the switch.
+    func testEmptyLogTreesWithNothingSwitchedOnPointsAtTheSwitch() {
+        XCTAssertEqual(
+            UsageFormat.emptyLogTrees([]), "Switch a provider on in Settings to start counting.")
+    }
+
     // MARK: Refresh
 
     /// The CLI's keychain item is read through `/usr/bin/security` with no
