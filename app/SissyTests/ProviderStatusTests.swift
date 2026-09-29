@@ -121,10 +121,10 @@ final class ProviderStatusTests: XCTestCase {
     func testOnlyAChangedReadingCostsAFrame() async {
         let feed = Feed(.success(reading(.operational, "All Systems Operational")))
         let monitor = makeMonitor(feed)
-        let changes = Counter()
-        _ = await monitor.refreshOnce { changes.bump() }
-        _ = await monitor.refreshOnce { changes.bump() }
-        XCTAssertEqual(changes.value, 1)
+        let changes = LockedValue(0)
+        _ = await monitor.refreshOnce { changes.update { $0 += 1 } }
+        _ = await monitor.refreshOnce { changes.update { $0 += 1 } }
+        XCTAssertEqual(changes.load(), 1)
         XCTAssertEqual(feed.calls, 2)
     }
 
@@ -134,10 +134,10 @@ final class ProviderStatusTests: XCTestCase {
         let monitor = makeMonitor(feed)
         _ = await monitor.refreshOnce {}
         feed.answer(.failure(Unreachable()))
-        let changes = Counter()
-        _ = await monitor.refreshOnce { changes.bump() }
+        let changes = LockedValue(0)
+        _ = await monitor.refreshOnce { changes.update { $0 += 1 } }
         XCTAssertEqual(monitor.currentStatus()[ProviderID.claudeCode], good)
-        XCTAssertEqual(changes.value, 0)
+        XCTAssertEqual(changes.load(), 0)
     }
 
     /// A feed that has never answered is unknown, and stays at the one age it
@@ -150,10 +150,10 @@ final class ProviderStatusTests: XCTestCase {
         let first = monitor.currentStatus()[ProviderID.claudeCode]
         XCTAssertEqual(first?.indicator, .unknown)
         XCTAssertNil(first?.description)
-        let changes = Counter()
-        _ = await monitor.refreshOnce { changes.bump() }
+        let changes = LockedValue(0)
+        _ = await monitor.refreshOnce { changes.update { $0 += 1 } }
         XCTAssertEqual(monitor.currentStatus()[ProviderID.claudeCode], first)
-        XCTAssertEqual(changes.value, 0)
+        XCTAssertEqual(changes.load(), 0)
     }
 
     func testStoppingTakesTheRowsWithIt() async {
@@ -376,13 +376,4 @@ final class ProviderStatusTests: XCTestCase {
         XCTAssertEqual(status.components.first?.children.first?.status, "Partial outage")
         XCTAssertEqual(status.page?.host(), "status.claude.com")
     }
-}
-
-/// Counts callbacks from whichever isolation they arrive on.
-private final class Counter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var count = 0
-
-    func bump() { lock.withLock { count += 1 } }
-    var value: Int { lock.withLock { count } }
 }

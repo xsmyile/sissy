@@ -24,22 +24,11 @@ final class UsageEffortSplitTests: XCTestCase {
     }
 
     private func claudeAdapter() -> ClaudeCodeAdapter {
-        ClaudeCodeAdapter(
-            claudeDir: root.appendingPathComponent("claude"),
-            pricingOverride: nil,
-            limitsProbe: nil,
-            webSources: LockedValue([]),
-            webLinks: LockedValue([:]),
-            profile: ClaudeProfileSource(),
-            accounts: .inert(),
-            ledger: ProjectLedger())
+        .fixture(claudeDir: root.appendingPathComponent("claude"))
     }
 
     private func codexAdapter() -> CodexAdapter {
-        CodexAdapter(
-            codexDir: root.appendingPathComponent("codex"),
-            pricingOverride: nil,
-            ledger: ProjectLedger())
+        .fixture(codexDir: root.appendingPathComponent("codex"))
     }
 
     private func assistant(effort: String?, output: Int) -> String {
