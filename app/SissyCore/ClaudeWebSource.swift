@@ -439,10 +439,17 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
     /// past the edge — the same session with a plain Chrome agent is refused
     /// at 403, and an `Electron/` token does not substitute. The version is
     /// the installed app's, so an agent Sissy sends is one that exists.
-    static func userAgent(appVersion: String? = installedAppVersion()) -> String {
+    ///
+    /// Read once per process rather than per request, which was two to four
+    /// reads of Claude.app's `Info.plist` a poll for every linked account. An
+    /// update of Claude.app while Sissy runs leaves it naming the version it
+    /// was launched beside, which is still one that exists.
+    static func userAgent(appVersion: String? = launchAppVersion) -> String {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
             + "Claude/\(appVersion ?? fallbackAppVersion) Chrome/\(chromeVersion) Safari/537.36"
     }
+
+    private static let launchAppVersion = installedAppVersion()
 
     static func installedAppVersion(
         at url: URL = URL(fileURLWithPath: "/Applications/Claude.app/Contents/Info.plist")
