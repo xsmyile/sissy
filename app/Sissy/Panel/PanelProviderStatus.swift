@@ -205,13 +205,8 @@ private struct StatusLine: View {
     let row: UsagePanelSnapshot.StatusRow
     let navigates: Bool
 
-    /// Matches the panel header's, for the same reason it is a second rather
-    /// than a minute: the tick is what decides how late a change lands, and
-    /// the first minute of an age is worded in seconds.
-    private static let clockTick: TimeInterval = 1
-
     var body: some View {
-        TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+        TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
             HStack(spacing: 8) {
                 Circle()
                     .fill(ProviderPalette.statusTint(row.indicator))
