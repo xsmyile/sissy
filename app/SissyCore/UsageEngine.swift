@@ -1583,13 +1583,25 @@ actor UsageEngine {
     /// `start` that queued behind that `stop()` on the monitor's executor
     /// leaves a poll loop nothing holds a handle to.
     private func startStatusChecks() async {
-        guard lifecycle == .running else { return }
+        await startMonitor(
+            start: { await statusMonitor.start(onRefresh: $0) },
+            stop: { await statusMonitor.stop() })
+    }
+
+    /// The one way a monitor is started: its first frame rebuilds the engine's,
+    /// and the lifecycle and `condition` are checked on both sides of the hop,
+    /// for the reason `startStatusChecks` gives. A `stop()` or a switch turned
+    /// off that lands in the suspension finds nothing started yet to stop, so
+    /// the second look is what stops what this call started.
+    private func startMonitor(
+        while condition: () -> Bool = { true },
+        start: (@escaping @Sendable () async -> Void) async -> Void,
+        stop: () async -> Void
+    ) async {
+        guard lifecycle == .running, condition() else { return }
         let me = self
-        await statusMonitor.start { await me.reemit() }
-        guard lifecycle == .running else {
-            await statusMonitor.stop()
-            return
-        }
+        await start { await me.reemit() }
+        guard lifecycle == .running, condition() else { return await stop() }
     }
 
     /// Starts the forge poll. A build with nothing connected starts nothing,
@@ -1601,13 +1613,9 @@ actor UsageEngine {
     /// can land in — from `start`, and from a connection made while the app is
     /// quitting — and the monitor itself only knows whether *it* is running.
     private func startForgeActivity() async {
-        guard lifecycle == .running else { return }
-        let me = self
-        await forgeMonitor.start { await me.reemit() }
-        guard lifecycle == .running else {
-            await forgeMonitor.stop()
-            return
-        }
+        await startMonitor(
+            start: { await forgeMonitor.start(onRefresh: $0) },
+            stop: { await forgeMonitor.stop() })
     }
 
     /// Starts the identity sweep, under the same guard `startStatusChecks`
@@ -1615,13 +1623,9 @@ actor UsageEngine {
     /// suspensions a `stop()` can land in, and the monitor only knows whether
     /// it is running rather than whether the engine still is.
     private func startIdentityChecks() async {
-        guard lifecycle == .running else { return }
-        let me = self
-        await identityMonitor.start { await me.reemit() }
-        guard lifecycle == .running else {
-            await identityMonitor.stop()
-            return
-        }
+        await startMonitor(
+            start: { await identityMonitor.start(onRefresh: $0) },
+            stop: { await identityMonitor.stop() })
     }
 
     /// Starts the process sweep, under the same guard the identity checks
@@ -1629,13 +1633,9 @@ actor UsageEngine {
     /// in, and the monitor only knows whether it is running rather than
     /// whether the engine still is.
     private func startAgentProcessChecks() async {
-        guard lifecycle == .running else { return }
-        let me = self
-        await agentMonitor.start { await me.reemit() }
-        guard lifecycle == .running else {
-            await agentMonitor.stop()
-            return
-        }
+        await startMonitor(
+            start: { await agentMonitor.start(onRefresh: $0) },
+            stop: { await agentMonitor.stop() })
     }
 
     /// Starts the Mac's own reading, under the guard the process sweep carries
@@ -1647,14 +1647,13 @@ actor UsageEngine {
     /// would start a monitor the switch already says is off, and the next
     /// toggle to off would be a no-op against it.
     private func startMacHealth() async {
-        guard lifecycle == .running, config.macHealth else { return }
-        let me = self
-        await agentMonitor.setMeasuresApps(true)
-        await healthMonitor.start { await me.reemit() }
-        guard lifecycle == .running, config.macHealth else {
-            await stopMacHealth()
-            return
-        }
+        await startMonitor(
+            while: { config.macHealth },
+            start: {
+                await agentMonitor.setMeasuresApps(true)
+                await healthMonitor.start(onRefresh: $0)
+            },
+            stop: { await stopMacHealth() })
     }
 
     private func stopMacHealth() async {
@@ -1665,13 +1664,10 @@ actor UsageEngine {
     /// Starts the disk reads, under `startMacHealth`'s two guards and for its
     /// reasons.
     private func startDisk() async {
-        guard lifecycle == .running, config.disk else { return }
-        let me = self
-        await diskMonitor.start { await me.reemit() }
-        guard lifecycle == .running, config.disk else {
-            await diskMonitor.stop()
-            return
-        }
+        await startMonitor(
+            while: { config.disk },
+            start: { await diskMonitor.start(onRefresh: $0) },
+            stop: { await diskMonitor.stop() })
     }
 
     /// Every forge the user has connected, the tokens none of them name, and
