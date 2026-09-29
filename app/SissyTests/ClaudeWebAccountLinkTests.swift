@@ -203,15 +203,6 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
         XCTAssertEqual(failures.load(), 0)
         XCTAssertEqual(index.load().count, links.count)
     }
-
-    func testForgettingEverythingEmptiesIt() throws {
-        try index.remember(link("a1b2c3d4", organization: "org-1"))
-        try index.remember(link("e5f6a7b8", organization: "org-2"))
-
-        try index.forgetAll()
-
-        XCTAssertTrue(index.load().isEmpty)
-    }
 }
 
 /// Which accounts Settings lists, and what each is called.

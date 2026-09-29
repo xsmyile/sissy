@@ -43,10 +43,6 @@ enum ClaudeWebSessionStore {
     /// rather than a migration answering for one of them.
     static let unkeyedAccount = "claude-web"
 
-    /// Prefix claude.ai's session cookie carries, kept so a paste can be
-    /// recognised as a session before it is spent on a request.
-    static let sessionPrefix = "sk-ant-sid"
-
     /// The session, under the same suppression a read of the CLI's item gets.
     ///
     /// Silent in the ordinary case, because Sissy wrote this item. After a
@@ -98,18 +94,6 @@ enum ClaudeWebSessionStore {
             trimmed = String(trimmed[..<semicolon])
         }
         return trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Whether a paste looks like a claude.ai session at all.
-    ///
-    /// A shape check, not a validity check — only the endpoint can say whether
-    /// a session works. It exists so the obvious mis-paste, an API key or a
-    /// whole shell line, is named before it is sent anywhere.
-    static func looksLikeSession(_ session: String) -> Bool {
-        let normalized = normalize(session)
-        return normalized.hasPrefix(sessionPrefix)
-            && normalized.count > sessionPrefix.count
-            && !normalized.contains(where: \.isWhitespace)
     }
 
     /// Name of the cookie claude.ai authenticates with.

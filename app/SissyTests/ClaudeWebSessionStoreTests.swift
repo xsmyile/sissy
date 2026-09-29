@@ -2,6 +2,10 @@ import XCTest
 
 @testable import Sissy
 
+/// Prefix claude.ai's session cookie carries, which nothing Sissy writes may
+/// contain.
+private let sessionPrefix = "sk-ant-sid"
+
 /// What Sissy will accept as a claude.ai session, and what holding one in an
 /// item Sissy owns actually does.
 final class ClaudeWebSessionStoreTests: XCTestCase {
@@ -32,20 +36,6 @@ final class ClaudeWebSessionStoreTests: XCTestCase {
 
     func testTakesASessionSurroundedByWhitespace() {
         XCTAssertEqual(ClaudeWebSessionStore.normalize("  \(session)\n"), session)
-    }
-
-    func testRecognisesASession() {
-        XCTAssertTrue(ClaudeWebSessionStore.looksLikeSession(session))
-    }
-
-    /// The shape check exists to name the obvious mis-paste before it is sent
-    /// anywhere. An API key is the one that would otherwise look plausible.
-    func testDoesNotMistakeAnAPIKeyForASession() {
-        XCTAssertFalse(ClaudeWebSessionStore.looksLikeSession("sk-ant-api03-abcdef"))
-    }
-
-    func testDoesNotAcceptTheBarePrefix() {
-        XCTAssertFalse(ClaudeWebSessionStore.looksLikeSession("sk-ant-sid"))
     }
 
     // MARK: - The item
@@ -199,7 +189,7 @@ final class ClaudeWebSessionSecrecyTests: XCTestCase {
         in value: Any, _ message: String, file: StaticString = #filePath, line: UInt = #line
     ) {
         let leaked = strings(in: value).filter {
-            $0.contains(ClaudeWebSessionStore.sessionPrefix)
+            $0.contains(sessionPrefix)
         }
         XCTAssertTrue(
             leaked.isEmpty, "\(message): \(leaked.count) string(s) carried a session",
@@ -258,7 +248,7 @@ final class ClaudeWebSessionSecrecyTests: XCTestCase {
 
         let written = try String(
             contentsOf: ClaudeWebSessionIndex.defaultURL(in: directory), encoding: .utf8)
-        XCTAssertFalse(written.contains(ClaudeWebSessionStore.sessionPrefix))
+        XCTAssertFalse(written.contains(sessionPrefix))
         assertNoSession(in: index.load(), "the loaded links")
     }
 
@@ -296,6 +286,6 @@ final class ClaudeWebSessionSecrecyTests: XCTestCase {
                 providers: [], ccusage: []))
         XCTAssertTrue(report.contains("claude.ai session"))
         XCTAssertFalse(report.contains(Self.session))
-        XCTAssertFalse(report.contains(ClaudeWebSessionStore.sessionPrefix))
+        XCTAssertFalse(report.contains(sessionPrefix))
     }
 }
