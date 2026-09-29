@@ -18,14 +18,13 @@ import Foundation
 /// polled feed is when to extract the loop, not the second.
 ///
 /// The cadence is the status monitor's, and for the same reason: these counters
-/// move when the user pushes, which is what `noteActivity` already reports.
+/// move when the user pushes, which is what `ActivityClock` already records.
 actor ForgeActivityMonitor {
     /// While there are agents working.
     static let refreshInterval: Duration = .seconds(300)
-    /// Once nothing has been seen working for `idleAfter`. A contribution count
+    /// Once nothing has been seen working for `ActivityClock.idleAfter`. A contribution count
     /// on a Mac nobody is working at answers a question nobody is asking.
     static let idleRefreshInterval: Duration = .seconds(1800)
-    static let idleAfter: TimeInterval = 3600
     /// Spread across the interval, so every Sissy started at login does not ask
     /// the same two APIs in the same second.
     static let jitterSeconds: ClosedRange<Int> = 0...30
@@ -45,9 +44,9 @@ actor ForgeActivityMonitor {
     /// round's GitLab.
     nonisolated private let published = LockedValue([String: ForgeActivityReading]())
     /// When the engine last saw an agent do something, which is the only input
-    /// to how often this polls. Nonisolated because it is written from the
-    /// frame path, which cannot afford to await this actor.
-    nonisolated private let lastActivity = LockedValue<Date?>(nil)
+    /// to how often this polls. A wait consults it between slices without
+    /// awaiting this actor.
+    nonisolated let activity: ActivityClock
     private let connections: [ForgeConnection]
     /// Which counters to ask for. Held here rather than read per round because
     /// a change to it rebuilds the monitor, exactly as a change to the
@@ -114,6 +113,7 @@ actor ForgeActivityMonitor {
     init(
         connections: [ForgeConnection],
         counters: Set<ForgeCounter> = ForgeCounter.all,
+        activity: ActivityClock = ActivityClock(),
         fetch:
             @escaping @Sendable (ForgeConnection, String, Set<ForgeCounter>, Date) async throws ->
             ForgeActivityReading = {
@@ -125,6 +125,7 @@ actor ForgeActivityMonitor {
     ) {
         self.connections = connections
         self.counters = counters
+        self.activity = activity
         fetchSource = fetch
         tokenSource = token
     }
@@ -135,18 +136,6 @@ actor ForgeActivityMonitor {
     nonisolated func currentReadings() -> [ForgeActivityReading] {
         let readings = published.load()
         return connections.compactMap { readings[$0.id] }
-    }
-
-    nonisolated func noteActivity(at when: Date = Date()) {
-        lastActivity.update { $0 = when }
-    }
-
-    /// Whether an agent has been seen working recently enough for the short
-    /// cadence. Nonisolated because a wait consults it between slices, on the
-    /// same value the frame path writes without awaiting this actor.
-    nonisolated func isWorking(at now: Date = Date()) -> Bool {
-        guard let last = lastActivity.load() else { return false }
-        return now.timeIntervalSince(last) < Self.idleAfter
     }
 
     /// Starts the poll loop. `onRefresh` fires only when the published map
@@ -401,7 +390,7 @@ actor ForgeActivityMonitor {
     /// Internal so a test can hold the cap against an injected instant; the
     /// jitter is what stops it being assertable to the second.
     func nextDelay(from now: Date = Date(), calendar: Calendar = .current) -> Duration {
-        let base = isWorking(at: now) ? Self.refreshInterval : Self.idleRefreshInterval
+        let base = activity.isWorking(at: now) ? Self.refreshInterval : Self.idleRefreshInterval
         let delay = base + .seconds(Int.random(in: Self.jitterSeconds))
         guard
             let midnight = calendar.date(
@@ -448,7 +437,7 @@ actor ForgeActivityMonitor {
         while true {
             let waited = ContinuousClock.now - started
             let over = Self.waitIsOver(
-                waited: waited, of: delay, working: isWorking(), shortest: shortest)
+                waited: waited, of: delay, working: activity.isWorking(), shortest: shortest)
             if over { return }
             try await Task.sleep(for: min(delay - waited, slice))
         }

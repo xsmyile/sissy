@@ -180,7 +180,7 @@ final class ProviderStatusTests: XCTestCase {
         let monitor = makeMonitor(feed)
         let idle = await monitor.refreshOnce {}
         XCTAssertGreaterThanOrEqual(idle, ProviderStatusMonitor.idleRefreshInterval)
-        monitor.noteActivity()
+        monitor.activity.note()
         let working = await monitor.refreshOnce {}
         XCTAssertLessThan(working, ProviderStatusMonitor.idleRefreshInterval)
         XCTAssertGreaterThanOrEqual(working, ProviderStatusMonitor.refreshInterval)

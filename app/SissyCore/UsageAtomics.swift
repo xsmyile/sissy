@@ -12,6 +12,32 @@ final class LockedValue<Value: Sendable>: @unchecked Sendable {
     func update(_ change: (inout Value) -> Void) { lock.withLock { change(&value) } }
 }
 
+/// When the engine last saw an agent do something, which is the one input to
+/// how often the status, forge and identity polls run.
+///
+/// One clock the engine hands to every monitor it builds, so a turn is noted
+/// once and a monitor rebuilt for a new connection keeps what the old one had
+/// seen. Nonisolated because it is written from the frame path, which cannot
+/// afford to await a monitor.
+final class ActivityClock: Sendable {
+    /// How long after the last turn a Mac still counts as being worked on.
+    static let idleAfter: TimeInterval = 3600
+
+    private let last = LockedValue<Date?>(nil)
+
+    init() {}
+
+    func note(at when: Date = Date()) {
+        last.store(when)
+    }
+
+    /// Whether an agent has been seen working within `idleAfter` of `now`.
+    func isWorking(at now: Date = Date()) -> Bool {
+        guard let last = last.load() else { return false }
+        return now.timeIntervalSince(last) < Self.idleAfter
+    }
+}
+
 /// One account's own reading of the limits it is under.
 ///
 /// Deliberately a smaller type than `ProviderSignals` rather than a nesting of

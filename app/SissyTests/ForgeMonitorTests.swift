@@ -353,9 +353,9 @@ final class ForgeMonitorTests: XCTestCase {
     /// running is cut short is the test below.
     func testTheNextIntervalIsPickedFromWhatTheFramePathReported() async {
         let monitor = idleMonitor()
-        XCTAssertFalse(monitor.isWorking())
-        monitor.noteActivity()
-        XCTAssertTrue(monitor.isWorking())
+        XCTAssertFalse(monitor.activity.isWorking())
+        monitor.activity.note()
+        XCTAssertTrue(monitor.activity.isWorking())
         let delay = await monitor.nextDelay(from: at(hour: 12))
         XCTAssertLessThan(delay, ForgeActivityMonitor.idleRefreshInterval)
     }
@@ -367,7 +367,7 @@ final class ForgeMonitorTests: XCTestCase {
     /// long before the ceiling it was given.
     func testAWaitInFlightEndsOnceAgentsAreWorking() async throws {
         let monitor = idleMonitor()
-        monitor.noteActivity()
+        monitor.activity.note()
         let ceiling = Duration.seconds(10)
         let started = ContinuousClock.now
         try await monitor.wait(ceiling, slice: .milliseconds(5), shortest: .milliseconds(20))
@@ -378,7 +378,7 @@ final class ForgeMonitorTests: XCTestCase {
     /// way out rather than a shorter interval by the back door.
     func testAWaitInFlightRunsOnWithNobodyWorking() async throws {
         let monitor = idleMonitor()
-        XCTAssertFalse(monitor.isWorking())
+        XCTAssertFalse(monitor.activity.isWorking())
         let ceiling = Duration.milliseconds(120)
         let started = ContinuousClock.now
         try await monitor.wait(ceiling, slice: .milliseconds(5), shortest: .milliseconds(20))
