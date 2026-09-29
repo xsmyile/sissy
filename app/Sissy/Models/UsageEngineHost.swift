@@ -335,14 +335,12 @@ final class UsageEngineHost {
         accountSwitchFailure = nil
         switchingClaudeAccount = uuid
         Task { [weak self] in
-            let startedAt = ContinuousClock.now
-            let outcome = await engine.activateClaudeAccount(uuid: uuid)
-            if case .failure(let why) = outcome {
-                self?.accountSwitchFailure = ClaudeAccountSwitchCopy.failure(why)
-            }
-            self?.claudeAccounts = engine.claudeAccountSnapshot
-            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
-                try? await Task.sleep(for: rest)
+            await Self.holdingFloor {
+                let outcome = await engine.activateClaudeAccount(uuid: uuid)
+                if case .failure(let why) = outcome {
+                    self?.accountSwitchFailure = ClaudeAccountSwitchCopy.failure(why)
+                }
+                self?.claudeAccounts = engine.claudeAccountSnapshot
             }
             self?.switchingClaudeAccount = nil
         }
@@ -724,11 +722,7 @@ final class UsageEngineHost {
         spendingCodexReset = target
         codexResetReport = nil
         Task { [weak self] in
-            let startedAt = ContinuousClock.now
-            let outcome = await engine.useCodexReset(account: account)
-            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
-                try? await Task.sleep(for: rest)
-            }
+            let outcome = await Self.holdingFloor { await engine.useCodexReset(account: account) }
             self?.codexResetReport = CodexResetReport(target: target, outcome: outcome)
             self?.spendingCodexReset = nil
         }
@@ -752,11 +746,7 @@ final class UsageEngineHost {
         guard let engine, refreshTasks[id] == nil else { return }
         refreshing.insert(id)
         refreshTasks[id] = Task {
-            let startedAt = ContinuousClock.now
-            await engine.refreshProvider(id: id)
-            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
-                try? await Task.sleep(for: rest)
-            }
+            await Self.holdingFloor { await engine.refreshProvider(id: id) }
             guard !Task.isCancelled else { return }
             refreshing.remove(id)
             refreshTasks[id] = nil
@@ -772,11 +762,7 @@ final class UsageEngineHost {
         guard let engine, refreshTasks[id] == nil else { return }
         refreshingForge.insert(id)
         refreshTasks[id] = Task {
-            let startedAt = ContinuousClock.now
-            await engine.refreshForge(id: id)
-            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
-                try? await Task.sleep(for: rest)
-            }
+            await Self.holdingFloor { await engine.refreshForge(id: id) }
             guard !Task.isCancelled else { return }
             refreshingForge.remove(id)
             refreshTasks[id] = nil
@@ -793,11 +779,7 @@ final class UsageEngineHost {
         guard let engine, identityRefresh == nil else { return }
         refreshingIdentities = true
         identityRefresh = Task {
-            let startedAt = ContinuousClock.now
-            await engine.refreshIdentities()
-            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
-                try? await Task.sleep(for: rest)
-            }
+            await Self.holdingFloor { await engine.refreshIdentities() }
             guard !Task.isCancelled else { return }
             refreshingIdentities = false
             identityRefresh = nil
@@ -819,11 +801,7 @@ final class UsageEngineHost {
         guard let engine, agentRefresh == nil else { return }
         refreshingAgents = true
         agentRefresh = Task {
-            let startedAt = ContinuousClock.now
-            await engine.refreshAgentProcesses()
-            if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
-                try? await Task.sleep(for: rest)
-            }
+            await Self.holdingFloor { await engine.refreshAgentProcesses() }
             guard !Task.isCancelled else { return }
             refreshingAgents = false
             agentRefresh = nil
@@ -851,6 +829,21 @@ final class UsageEngineHost {
     }
 
     @ObservationIgnored private var allRefresh: Task<Void, Never>?
+
+    /// Runs `work` and then waits out what is left of `refreshFloor`, so the
+    /// word a control shows while it works stays on screen long enough to
+    /// read. Whether the task was cancelled meanwhile is the caller's to ask
+    /// before it clears its own flag: a cancelled one belongs to an engine
+    /// `releaseEngine()` has already let go of.
+    @discardableResult
+    private static func holdingFloor<Result>(_ work: () async -> Result) async -> Result {
+        let startedAt = ContinuousClock.now
+        let result = await work()
+        if let rest = remainingFloor(elapsed: ContinuousClock.now - startedAt) {
+            try? await Task.sleep(for: rest)
+        }
+        return result
+    }
 
     /// What is left of the floor once the work has taken its time, and nil
     /// once there is nothing left to wait for.
