@@ -557,8 +557,9 @@ actor UsageEngine {
 
     /// One provider's backfill reader: the same adapter the tail uses, over
     /// the same tree, with a window of its own and nothing persisted but day
-    /// files.
-    private static func backfillProvider(
+    /// files. `sissy-cli --backfill` builds its passes through here too, so the
+    /// pass CI asserts against the oracle is the one the app runs.
+    static func backfillProvider(
         home: ProviderHome,
         window: Range<Date>,
         historyRoot: URL,
