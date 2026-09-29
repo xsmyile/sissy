@@ -412,6 +412,31 @@ extension KeyedDecodingContainer {
     /// unknown `KeepAwakeMode` written by a newer build is the case that
     /// shape covers.
     fileprivate func lenient<Value: Decodable>(_ key: Key) -> Value? {
-        try? decodeIfPresent(Value.self, forKey: key)
+        if let value = try? decodeIfPresent(Value.self, forKey: key) { return value }
+        return bridged(key)
+    }
+
+    /// A scalar of the other kind, read as `JSONSerialization` bridges it:
+    /// `0` and `1` are off and on where a switch belongs, and `false` and
+    /// `true` are `0` and `1` where a number does. That is what the file
+    /// meant while it was read through that bridge, and a hand-edited
+    /// `"remotePricing": 0` that came back on would make a request the file
+    /// said not to make.
+    private func bridged<Value>(_ key: Key) -> Value? {
+        if Value.self is any BridgedSwitch.Type {
+            guard let number = try? decodeIfPresent(Double.self, forKey: key),
+                number == 0 || number == 1
+            else { return nil }
+            return (number == 1) as? Value
+        }
+        guard let flag = try? decodeIfPresent(Bool.self, forKey: key) else { return nil }
+        let number = flag ? 1 : 0
+        return number as? Value ?? Double(number) as? Value
     }
 }
+
+/// The types `bridged` reads `0` and `1` into, the optional one included,
+/// because which of the two a call site solves for is the compiler's choice.
+private protocol BridgedSwitch {}
+extension Bool: BridgedSwitch {}
+extension Optional: BridgedSwitch where Wrapped == Bool {}
