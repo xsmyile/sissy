@@ -52,6 +52,44 @@ struct ProviderRowSnapshot: Equatable {
     }
 }
 
+/// What linking an account says whichever vendor it is with: the words the
+/// login window, the account menus and the add buttons share.
+///
+/// The vendor enums below keep only what differs, which is most of it; this
+/// is the rest, so a button both vendors draw is worded once.
+enum VendorLinkCopy {
+    static let addTitle = "Add account…"
+    static let unlinkItem = "Unlink…"
+    static let cancel = "Cancel"
+    static let link = "Link"
+    static let retry = "Try again"
+    static let done = "Done"
+    static let failureTitle = "Sissy could not link that account"
+    static let working = "Linking…"
+
+    static func unlink(_ account: String) -> String { "Unlink \(account)" }
+
+    static func chooseCaption(_ email: String?) -> String {
+        let account = email ?? "That account"
+        return "\(account) has more than one. Sissy reads the one you pick, and keeps reading it."
+    }
+
+    /// Why the vendor's page itself ended the sign-in, named by `vendor` as
+    /// the page is: `claude.ai`, or `OpenAI`. A claude.ai login ends in a
+    /// cookie rather than a redirect, so its decline is only reachable if the
+    /// window is ever handed one.
+    static func pageFailure(_ failure: VendorLoginWindow.PageFailure, vendor: String) -> String {
+        switch failure {
+        case .declined(let reason):
+            return "\(vendor) did not complete the sign-in (\(reason)), so nothing was linked. "
+                + "Try again, or cancel if you meant to stop."
+        case .unreachable:
+            return "The \(vendor) sign-in page could not be loaded. Check the connection and "
+                + "try again."
+        }
+    }
+}
+
 /// What the Codex account link says.
 ///
 /// Its own vocabulary rather than the Claude one's: what is linked is a
@@ -60,7 +98,8 @@ struct ProviderRowSnapshot: Equatable {
 /// different — there is no archived credential left behind, because Sissy
 /// never took one.
 enum CodexAccountLinkCopy {
-    static let addTitle = "Add account…"
+    /// What the sign-in page is called when it fails.
+    static let vendor = "OpenAI"
     static let infoTitle = "How Sissy reads Codex accounts"
 
     static let detail =
@@ -70,17 +109,8 @@ enum CodexAccountLinkCopy {
 
     static let chooseLabel = "Which workspace?"
 
-    static func chooseCaption(_ email: String?) -> String {
-        let account = email ?? "That account"
-        return "\(account) has more than one. Sissy reads the one you pick, and keeps reading it."
-    }
-
     static let unlinkHelp =
         "Forget this account's OpenAI sign-in. Codex itself is untouched."
-
-    static let unlinkItem = "Unlink…"
-
-    static func unlink(_ account: String) -> String { "Unlink \(account)" }
 
     static func unlinkTitle(_ account: String) -> String {
         "Forget the OpenAI sign-in for \(account)?"
@@ -135,23 +165,12 @@ enum CodexAccountLinkCopy {
         return "Sissy could not read which workspaces \(account) belongs to, so it linked "
             + "\(which). To read another, unlink it and link it again."
     }
-
-    /// Why the OpenAI page itself ended the sign-in.
-    static func pageFailure(_ failure: VendorLoginWindow.PageFailure) -> String {
-        switch failure {
-        case .declined(let reason):
-            return "OpenAI did not complete the sign-in (\(reason)), so nothing was linked. "
-                + "Try again, or cancel if you meant to stop."
-        case .unreachable:
-            return "The OpenAI sign-in page could not be loaded. Check the connection and "
-                + "try again."
-        }
-    }
 }
 
 /// What linking another Claude account says.
 enum ClaudeAccountLinkCopy {
-    static let addTitle = "Add account…"
+    /// What the sign-in page is called when it fails.
+    static let vendor = "claude.ai"
     static let infoTitle = "How Sissy reads Claude accounts"
 
     static let detail =
@@ -173,18 +192,9 @@ enum ClaudeAccountLinkCopy {
 
     static let chooseLabel = "Which organisation?"
 
-    static func chooseCaption(_ email: String?) -> String {
-        let account = email ?? "That account"
-        return "\(account) has more than one. Sissy reads the one you pick, and keeps reading it."
-    }
-
     static let unlinkHelp =
         "Forget this account's claude.ai session. The Claude Code sign-in Sissy archived "
         + "for it stays, so you can still switch to it."
-
-    static let unlinkItem = "Unlink…"
-
-    static func unlink(_ account: String) -> String { "Unlink \(account)" }
 
     static func unlinkTitle(_ account: String) -> String {
         "Forget the claude.ai session for \(account)?"
@@ -213,27 +223,6 @@ enum ClaudeAccountLinkCopy {
         case .nameKept:
             return "The claude.ai session was deleted, but Sissy could not update its list of "
                 + "linked accounts. The account is unlinked."
-        }
-    }
-
-    static let cancel = "Cancel"
-    static let link = "Link"
-    static let retry = "Try again"
-    static let done = "Done"
-    static let failureTitle = "Sissy could not link that account"
-    static let working = "Linking…"
-
-    /// Why the claude.ai page itself ended the sign-in. Its login ends in a
-    /// cookie rather than a redirect, so a decline is only reachable if the
-    /// window is ever handed one.
-    static func pageFailure(_ failure: VendorLoginWindow.PageFailure) -> String {
-        switch failure {
-        case .declined(let reason):
-            return "claude.ai did not complete the sign-in (\(reason)), so nothing was linked. "
-                + "Try again, or cancel if you meant to stop."
-        case .unreachable:
-            return "The claude.ai sign-in page could not be loaded. Check the connection and "
-                + "try again."
         }
     }
 
@@ -364,7 +353,7 @@ struct ProvidersSettingsView: View {
             Button(ClaudeAccountLinkCopy.unlinkConfirm, role: .destructive) {
                 model.engine.forgetClaudeWebSession(account: account.id)
             }
-            Button(ClaudeAccountLinkCopy.cancel, role: .cancel) {}
+            Button(VendorLinkCopy.cancel, role: .cancel) {}
         } message: { _ in
             Text(ClaudeAccountLinkCopy.unlinkMessage)
         }
@@ -377,7 +366,7 @@ struct ProvidersSettingsView: View {
             Button(CodexAccountLinkCopy.unlinkConfirm, role: .destructive) {
                 model.engine.forgetCodexAccount(id: account.id)
             }
-            Button(ClaudeAccountLinkCopy.cancel, role: .cancel) {}
+            Button(VendorLinkCopy.cancel, role: .cancel) {}
         } message: { _ in
             Text(CodexAccountLinkCopy.unlinkMessage)
         }
@@ -561,7 +550,7 @@ struct ProvidersSettingsView: View {
             ForEach(sortedAccounts) { account in
                 linkedAccount(account)
             }
-            CredentialAddRow(ClaudeAccountLinkCopy.addTitle) { model.engine.addClaudeAccount() }
+            CredentialAddRow(VendorLinkCopy.addTitle) { model.engine.addClaudeAccount() }
         }
     }
 
@@ -658,12 +647,12 @@ struct ProvidersSettingsView: View {
                 health: health(of: signals, provider: ProviderID.claudeCode))
         } actions: {
             CredentialRowMenu(
-                label: ClaudeAccountLinkCopy.unlink(Self.label(of: account)),
+                label: VendorLinkCopy.unlink(Self.label(of: account)),
                 help: ClaudeAccountLinkCopy.unlinkHelp
             ) {
                 CredentialCopyButton(CredentialRowCopy.copyAddress, of: Self.label(of: account))
                 Divider()
-                Button(ClaudeAccountLinkCopy.unlinkItem, role: .destructive) {
+                Button(VendorLinkCopy.unlinkItem, role: .destructive) {
                     unlinking = account
                 }
             }
@@ -691,7 +680,7 @@ struct ProvidersSettingsView: View {
             ForEach(sortedCodexAccounts) { account in
                 codexAccount(account)
             }
-            CredentialAddRow(CodexAccountLinkCopy.addTitle) { model.engine.addCodexAccount() }
+            CredentialAddRow(VendorLinkCopy.addTitle) { model.engine.addCodexAccount() }
         }
     }
 
@@ -734,12 +723,12 @@ struct ProvidersSettingsView: View {
                 health: health(of: signals, provider: ProviderID.codex))
         } actions: {
             CredentialRowMenu(
-                label: CodexAccountLinkCopy.unlink(title),
+                label: VendorLinkCopy.unlink(title),
                 help: CodexAccountLinkCopy.unlinkHelp
             ) {
                 CredentialCopyButton(CredentialRowCopy.copyAddress, of: title)
                 Divider()
-                Button(CodexAccountLinkCopy.unlinkItem, role: .destructive) {
+                Button(VendorLinkCopy.unlinkItem, role: .destructive) {
                     unlinkingCodex = account
                 }
             }

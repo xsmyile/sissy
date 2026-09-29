@@ -699,9 +699,9 @@ private struct VendorLinkQuestionView: View {
             Spacer(minLength: 0)
             HStack {
                 Spacer()
-                Button(ClaudeAccountLinkCopy.cancel, action: onCancel)
+                Button(VendorLinkCopy.cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button(ClaudeAccountLinkCopy.link) {
+                Button(VendorLinkCopy.link) {
                     guard let picked else { return }
                     onPick(picked)
                 }
@@ -718,7 +718,7 @@ private struct VendorLinkProgressView: View {
     var body: some View {
         VStack(spacing: 12) {
             ProgressView()
-            Text(ClaudeAccountLinkCopy.working)
+            Text(VendorLinkCopy.working)
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -744,7 +744,7 @@ private struct VendorLinkNoticeView: View {
             Spacer(minLength: 0)
             HStack {
                 Spacer()
-                Button(ClaudeAccountLinkCopy.done, action: onDone)
+                Button(VendorLinkCopy.done, action: onDone)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -760,7 +760,7 @@ private struct VendorLinkFailureView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(ClaudeAccountLinkCopy.failureTitle)
+            Text(VendorLinkCopy.failureTitle)
                 .font(.headline)
             Text(message)
                 .font(.callout)
@@ -769,9 +769,9 @@ private struct VendorLinkFailureView: View {
             Spacer(minLength: 0)
             HStack {
                 Spacer()
-                Button(ClaudeAccountLinkCopy.cancel, action: onCancel)
+                Button(VendorLinkCopy.cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button(ClaudeAccountLinkCopy.retry, action: onRetry)
+                Button(VendorLinkCopy.retry, action: onRetry)
                     .keyboardShortcut(.defaultAction)
             }
         }

@@ -433,7 +433,9 @@ final class UsageEngineHost {
                 }
             },
             onFailure: { [weak self] failure in
-                window.report(ClaudeAccountLinkCopy.pageFailure(failure)) { self?.addClaudeAccount() }
+                window.report(VendorLinkCopy.pageFailure(failure, vendor: ClaudeAccountLinkCopy.vendor)) {
+                    self?.addClaudeAccount()
+                }
             },
             onCancel: { [weak self] in
                 guard let self else { return }
@@ -446,7 +448,7 @@ final class UsageEngineHost {
     static func question(_ choice: ClaudeWebLinkChoice) -> VendorLoginQuestion {
         VendorLoginQuestion(
             title: ClaudeAccountLinkCopy.chooseLabel,
-            caption: ClaudeAccountLinkCopy.chooseCaption(choice.identity.email),
+            caption: VendorLinkCopy.chooseCaption(choice.identity.email),
             options: UsageFormat.organizationChoices(choice.organizations).map {
                 VendorLoginQuestion.Option(id: $0.id, label: $0.label)
             })
@@ -564,7 +566,9 @@ final class UsageEngineHost {
                 }
             },
             onFailure: { [weak self] failure in
-                window.report(CodexAccountLinkCopy.pageFailure(failure)) { self?.addCodexAccount() }
+                window.report(VendorLinkCopy.pageFailure(failure, vendor: CodexAccountLinkCopy.vendor)) {
+                    self?.addCodexAccount()
+                }
             },
             onCancel: { [weak self] in
                 guard let self else { return }
@@ -577,7 +581,7 @@ final class UsageEngineHost {
     static func question(_ choice: CodexLinkChoice) -> VendorLoginQuestion {
         VendorLoginQuestion(
             title: CodexAccountLinkCopy.chooseLabel,
-            caption: CodexAccountLinkCopy.chooseCaption(choice.identity.email),
+            caption: VendorLinkCopy.chooseCaption(choice.identity.email),
             options: choice.workspaces.map {
                 VendorLoginQuestion.Option(
                     id: $0.id, label: UsageFormat.workspaceLabel($0))
