@@ -14,22 +14,11 @@ final class ActivityDelegationTests: XCTestCase {
     }
 
     private func claudeAdapter() -> ClaudeCodeAdapter {
-        ClaudeCodeAdapter(
-            claudeDir: URL(fileURLWithPath: "/tmp/sissy-activity-tests/claude"),
-            pricingOverride: nil,
-            limitsProbe: nil,
-            webSources: LockedValue([]),
-            webLinks: LockedValue([:]),
-            profile: ClaudeProfileSource(),
-            accounts: .inert(),
-            ledger: ProjectLedger())
+        .fixture(claudeDir: URL(fileURLWithPath: "/tmp/sissy-activity-tests/claude"))
     }
 
     private func codexAdapter() -> CodexAdapter {
-        CodexAdapter(
-            codexDir: URL(fileURLWithPath: "/tmp/sissy-activity-tests/codex"),
-            pricingOverride: nil,
-            ledger: ProjectLedger())
+        .fixture(codexDir: URL(fileURLWithPath: "/tmp/sissy-activity-tests/codex"))
     }
 
     private func assistant(sidechain: Bool = false) -> String {

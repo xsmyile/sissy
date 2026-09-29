@@ -15,22 +15,11 @@ final class AgentCountingTests: XCTestCase {
     }
 
     private func claudeAdapter() -> ClaudeCodeAdapter {
-        ClaudeCodeAdapter(
-            claudeDir: URL(fileURLWithPath: "/tmp/sissy-agent-tests/claude"),
-            pricingOverride: nil,
-            limitsProbe: nil,
-            webSources: LockedValue([]),
-            webLinks: LockedValue([:]),
-            profile: ClaudeProfileSource(),
-            accounts: .inert(),
-            ledger: ProjectLedger())
+        .fixture(claudeDir: URL(fileURLWithPath: "/tmp/sissy-agent-tests/claude"))
     }
 
     private func codexAdapter() -> CodexAdapter {
-        CodexAdapter(
-            codexDir: URL(fileURLWithPath: "/tmp/sissy-agent-tests/codex"),
-            pricingOverride: nil,
-            ledger: ProjectLedger())
+        .fixture(codexDir: URL(fileURLWithPath: "/tmp/sissy-agent-tests/codex"))
     }
 
     private func assistant(session: String = "s-1", tools: String = "") -> String {
