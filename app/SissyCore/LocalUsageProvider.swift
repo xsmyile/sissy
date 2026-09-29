@@ -943,10 +943,10 @@ actor LocalUsageProvider: UsageProvider {
             // after wake observes the day shift).
             await emitReading()
         }
-        // Throttled persistence: only writes if state changed since the
-        // last save AND its throttle has elapsed. SIGKILL/power
-        // loss therefore bounds progress loss to one throttle window; a
-        // graceful SIGTERM forces a final flush via `stop()`.
+        // Throttled persistence: only writes if state changed since the last
+        // save AND its throttle has elapsed. SIGKILL/power loss therefore
+        // bounds progress loss to one throttle window; a graceful SIGTERM
+        // forces a final flush via `stop()`.
         adapter.projects.ledger.saveIfDirty()
         saveSnapshotIfDirty()
         saveHistoryIfDirty()
