@@ -14,7 +14,9 @@ import Foundation
 /// that arrives while one is being handed over replaces any other still
 /// waiting, so a slow consumer is sent the newest frame rather than a
 /// backlog, and a caller returns once its frame or a newer one is in.
-/// Nothing is handed over once `stop()` has run.
+/// `stop()` drops what is waiting and returns once a frame already being
+/// handed over is in, so nothing reaches the app after it: an engine torn
+/// down for a provider switch cannot land a frame after its replacement's.
 ///
 /// **`send` must not await the engine.** A caller waits for the loop, so a
 /// `send` that waited on an engine call which rebuilt a frame would wait on
@@ -60,10 +62,12 @@ actor FrameDelivery<Frame: Sendable> {
     /// so a test can hold a slow consumer and watch what queues behind it.
     var waiting: Frame? { pending }
 
-    /// Drops what is waiting and refuses everything after it. Terminal.
-    func stop() {
+    /// Drops what is waiting, refuses everything after it, and waits for a
+    /// frame already being handed over. Terminal.
+    func stop() async {
         isStopped = true
         pending = nil
+        await drain?.value
     }
 
     private func drainPending() async {
