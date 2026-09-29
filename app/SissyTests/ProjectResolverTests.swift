@@ -23,13 +23,13 @@ final class ProjectResolverTests: XCTestCase {
     }
 
     func testARepositoryRootIsItsOwnProject() throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: root)
 
         XCTAssertEqual(resolver.project(for: repo.path), repo.path)
     }
 
     func testADirectoryInsideARepositoryBelongsToTheRepository() throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: root)
         let nested = repo.appendingPathComponent("frontend/src")
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
 
@@ -37,8 +37,8 @@ final class ProjectResolverTests: XCTestCase {
     }
 
     func testAWorktreeBelongsToTheCheckoutItWasCutFrom() throws {
-        let main = try makeRepository("sissy")
-        let worktree = try makeWorktree("grampus", of: main)
+        let main = try GitFixture.repository("sissy", in: root)
+        let worktree = try GitFixture.worktree("grampus", of: main, in: root)
 
         XCTAssertEqual(
             resolver.project(for: worktree.path), main.path,
@@ -46,7 +46,7 @@ final class ProjectResolverTests: XCTestCase {
     }
 
     func testAWorktreeWithARelativePointerResolvesTheSameWay() throws {
-        let main = try makeRepository("sissy")
+        let main = try GitFixture.repository("sissy", in: root)
         let worktree = root.appendingPathComponent("cormorant")
         try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
         try "gitdir: ../sissy/.git/worktrees/cormorant\n"
@@ -59,7 +59,7 @@ final class ProjectResolverTests: XCTestCase {
     /// A submodule's `.git` file names `.git/modules/<name>`, not a worktree.
     /// It is its own repository, so it is its own project.
     func testASubmoduleIsItsOwnProject() throws {
-        let parent = try makeRepository("host")
+        let parent = try GitFixture.repository("host", in: root)
         let submodule = parent.appendingPathComponent("vendor/lib")
         try FileManager.default.createDirectory(at: submodule, withIntermediateDirectories: true)
         try "gitdir: ../../.git/modules/lib\n"
@@ -81,7 +81,7 @@ final class ProjectResolverTests: XCTestCase {
     /// The walk never stats the starting directory, so a worktree kept inside
     /// its own repository still counts against it after being deleted.
     func testAWorktreeDeletedFromInsideItsRepositoryStillResolves() throws {
-        let repo = try makeRepository("norace")
+        let repo = try GitFixture.repository("norace", in: root)
 
         XCTAssertEqual(
             resolver.project(for: repo.appendingPathComponent(".git-worktrees/gone").path),
@@ -92,7 +92,7 @@ final class ProjectResolverTests: XCTestCase {
     /// to resolve to, and a dead path this resolver never saw alive is not a
     /// project.
     func testAWorktreeDeletedBesideItsRepositoryAndNeverSeenAliveIsNotAProject() throws {
-        _ = try makeRepository("sissy")
+        _ = try GitFixture.repository("sissy", in: root)
 
         XCTAssertNil(resolver.project(for: root.appendingPathComponent("rockfish").path))
     }
@@ -101,8 +101,8 @@ final class ProjectResolverTests: XCTestCase {
     /// gave. Attribution is a fact about the work, not about whether Sissy
     /// happened to read the line before the worktree was thrown away.
     func testAWorktreeSeenAliveStillNamesItsRepositoryOnceDeleted() throws {
-        let main = try makeRepository("sissy")
-        let worktree = try makeWorktree("grampus", of: main)
+        let main = try GitFixture.repository("sissy", in: root)
+        let worktree = try GitFixture.worktree("grampus", of: main, in: root)
         XCTAssertEqual(resolver.project(for: worktree.path), main.path)
 
         let nextRun = try relaunch(after: worktree)
@@ -116,8 +116,8 @@ final class ProjectResolverTests: XCTestCase {
     /// listed it under the repository it was cut from, and the repository was
     /// walked.
     func testAWorktreeOnlyGitEverNamedIsAnsweredForOnceDeleted() throws {
-        let main = try makeRepository("sissy")
-        let worktree = try makeWorktree("grampus", of: main)
+        let main = try GitFixture.repository("sissy", in: root)
+        let worktree = try GitFixture.worktree("grampus", of: main, in: root)
         XCTAssertEqual(resolver.project(for: main.path), main.path)
 
         try FileManager.default.removeItem(at: worktree)
@@ -132,10 +132,10 @@ final class ProjectResolverTests: XCTestCase {
     /// A worktree is created after the repository has already been resolved,
     /// which is every worktree on a Mac where Sissy is already running.
     func testAWorktreeCutAfterTheRepositoryWasResolvedIsStillAnsweredFor() throws {
-        let main = try makeRepository("sissy")
+        let main = try GitFixture.repository("sissy", in: root)
         XCTAssertEqual(resolver.project(for: main.path), main.path)
 
-        let worktree = try makeWorktree("rockfish", of: main)
+        let worktree = try GitFixture.worktree("rockfish", of: main, in: root)
         ledger.refreshKnownRepositories(now: Date().addingTimeInterval(scanIntervalPassed))
         try FileManager.default.removeItem(at: worktree)
 
@@ -145,8 +145,8 @@ final class ProjectResolverTests: XCTestCase {
     /// A worktree is worked in from its subdirectories as much as from its
     /// root, and they are gone with it.
     func testADirectoryUnderAGoneWorktreeResolvesThroughIt() throws {
-        let main = try makeRepository("sissy")
-        let worktree = try makeWorktree("grampus", of: main)
+        let main = try GitFixture.repository("sissy", in: root)
+        let worktree = try GitFixture.worktree("grampus", of: main, in: root)
         XCTAssertEqual(resolver.project(for: worktree.path), main.path)
 
         let nextRun = try relaunch(after: worktree)
@@ -158,7 +158,7 @@ final class ProjectResolverTests: XCTestCase {
     /// Gone is a fact about the path. A directory still on disk that names no
     /// repository any more is answered by the disk, whatever it used to be.
     func testADirectoryStillOnDiskIsAnsweredByTheDiskRatherThanByWhatItWas() throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: root)
         XCTAssertEqual(resolver.project(for: repo.path), repo.path)
         let remembered = ledger.all()
         try FileManager.default.removeItem(at: repo.appendingPathComponent(".git"))
@@ -171,8 +171,8 @@ final class ProjectResolverTests: XCTestCase {
     /// Two gone checkouts can both contain the directory. The closer one is
     /// the one the work was in.
     func testTheDeepestGoneCheckoutIsTheOneThatAnswers() throws {
-        let outer = try makeRepository("alpha")
-        let other = try makeRepository("beta")
+        let outer = try GitFixture.repository("alpha", in: root)
+        let other = try GitFixture.repository("beta", in: root)
         let inner = outer.appendingPathComponent("worktrees/x")
         try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
         try "gitdir: \(other.path)/.git/worktrees/x\n"
@@ -198,7 +198,7 @@ final class ProjectResolverTests: XCTestCase {
     }
 
     func testAResolvedDirectoryIsNotWalkedTwice() throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: root)
         let nested = repo.appendingPathComponent("frontend")
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
         XCTAssertEqual(resolver.project(for: nested.path), repo.path)
@@ -226,29 +226,5 @@ final class ProjectResolverTests: XCTestCase {
         let next = ProjectLedger()
         next.adopt(remembered)
         return ProjectResolver(ledger: next)
-    }
-
-    private func makeRepository(_ name: String) throws -> URL {
-        let repo = root.appendingPathComponent(name)
-        try FileManager.default.createDirectory(
-            at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
-        return repo.standardizedFileURL
-    }
-
-    /// Both halves of what `git worktree add` leaves behind: the pointer in
-    /// the worktree and the entry in the repository's admin directory naming
-    /// it back. The second is what lets a worktree be recognised without ever
-    /// having been worked in.
-    private func makeWorktree(_ name: String, of main: URL) throws -> URL {
-        let worktree = root.appendingPathComponent(name)
-        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
-        try "gitdir: \(main.path)/.git/worktrees/\(name)\n"
-            .write(
-                to: worktree.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
-        let admin = main.appendingPathComponent(".git/worktrees/\(name)")
-        try FileManager.default.createDirectory(at: admin, withIntermediateDirectories: true)
-        try "\(worktree.standardizedFileURL.path)/.git\n"
-            .write(to: admin.appendingPathComponent("gitdir"), atomically: true, encoding: .utf8)
-        return worktree.standardizedFileURL
     }
 }

@@ -39,18 +39,9 @@ final class UsageUnpricedRowTests: XCTestCase {
         _ name: String, requestId: String, model: String = UsageUnpricedRowTests.newModel,
         input: Int = UsageUnpricedRowTests.tokensPerTurn, oneHourWrites: Int = 0
     ) throws {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        let line = """
-            {"type":"assistant","timestamp":"\(iso.string(from: Date()))",\
-            "requestId":"\(requestId)","message":{"model":"\(model)",\
-            "usage":{"input_tokens":\(input),"output_tokens":0,\
-            "cache_read_input_tokens":0,"cache_creation_input_tokens":\(oneHourWrites),\
-            "cache_creation":{"ephemeral_5m_input_tokens":0,\
-            "ephemeral_1h_input_tokens":\(oneHourWrites)}}}}
-            """
-        try (line + "\n").write(
-            to: logDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        try ClaudeLogFixture.writeTurn(
+            to: logDir.appendingPathComponent(name), requestId: requestId, model: model,
+            input: input, oneHourWrites: oneHourWrites)
     }
 
     private func provider() -> LocalUsageProvider {

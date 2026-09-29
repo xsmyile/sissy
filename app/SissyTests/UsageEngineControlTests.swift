@@ -49,17 +49,12 @@ final class UsageEngineControlTests: XCTestCase {
         disk: Bool = false,
         diskMonitor: DiskMonitor? = nil
     ) -> UsageEngine {
-        var config = ServerConfig.defaults
-        config.claudeDataDir = claudeDir.path
-        config.codexDataDir = codexDir.path
-        config.remotePricing = false
-        config.statusChecks = false
+        var config = ServerConfig.hermetic(claudeDir: claudeDir, codexDir: codexDir)
         config.pollIntervalSeconds = pollIntervalSeconds
         config.providers = ProviderToggles(claudeCode: claudeCode, codex: codex)
         config.keepAwake = keepAwake
         config.macHealth = macHealth
         config.disk = disk
-        config.network = false
         return UsageEngine(
             config: config,
             configURL: configURL,

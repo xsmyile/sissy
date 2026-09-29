@@ -35,7 +35,7 @@ final class UsageProjectSplitTests: XCTestCase {
     private static let tokensPerTurn = 1_000
 
     func testWorkInOneRepositoryIsOneRowWhateverDirectoryItRanIn() async throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: repos)
         let nested = repo.appendingPathComponent("frontend")
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
 
@@ -50,8 +50,8 @@ final class UsageProjectSplitTests: XCTestCase {
     }
 
     func testAWorktreeCountsAgainstTheCheckoutItWasCutFrom() async throws {
-        let main = try makeRepository("sissy")
-        let worktree = try makeWorktree("grampus", of: main)
+        let main = try GitFixture.repository("sissy", in: repos)
+        let worktree = try GitFixture.worktree("grampus", of: main, in: repos)
 
         try writeTurn("a.jsonl", requestId: "r1", cwd: main.path)
         try writeTurn("b.jsonl", requestId: "r2", cwd: worktree.path)
@@ -64,8 +64,8 @@ final class UsageProjectSplitTests: XCTestCase {
     }
 
     func testTwoRepositoriesAreTwoRowsThatAddUpToTheDay() async throws {
-        let legion = try makeRepository("legion")
-        let vedite = try makeRepository("vedite")
+        let legion = try GitFixture.repository("legion", in: repos)
+        let vedite = try GitFixture.repository("vedite", in: repos)
 
         try writeTurn("a.jsonl", requestId: "r1", cwd: legion.path)
         try writeTurn("b.jsonl", requestId: "r2", cwd: vedite.path)
@@ -109,7 +109,7 @@ final class UsageProjectSplitTests: XCTestCase {
     /// that named the directory. Without the split in the snapshot a fresh
     /// process shows a day it has already counted as belonging to nobody.
     func testTheSplitSurvivesARelaunchInTheMiddleOfADay() async throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: repos)
         try writeTurn("a.jsonl", requestId: "r1", cwd: repo.path)
         try await runClaudeTail()
 
@@ -126,7 +126,7 @@ final class UsageProjectSplitTests: XCTestCase {
     /// resumed reader is already past — the same shape that makes it keep a
     /// per-file model map.
     func testCodexTakesTheProjectFromTheRolloutItStartedIn() async throws {
-        let repo = try makeRepository("norace")
+        let repo = try GitFixture.repository("norace", in: repos)
         try writeRollout("rollout-a.jsonl", cwd: repo.path, turns: 1)
         try await runCodexTail()
 
@@ -157,7 +157,7 @@ final class UsageProjectSplitTests: XCTestCase {
     /// repository that entry named once the directory is gone, which is the
     /// whole point of carrying the checkouts between runs.
     func testCodexKeepsTheRepositoryARolloutStartedInAfterItIsDeleted() async throws {
-        let repo = try makeRepository("gone")
+        let repo = try GitFixture.repository("gone", in: repos)
         try writeRollout("rollout-a.jsonl", cwd: repo.path, turns: 1)
         try await runCodexTail()
         XCTAssertEqual(try archivedToday(ProviderID.codex).models.map(\.project), [repo.path])
@@ -198,7 +198,7 @@ final class UsageProjectSplitTests: XCTestCase {
     /// commit, nor a branch, nor a remote. Measured 2026-09-18, one such
     /// directory had taken a row of its own worth $1.26.
     func testCodexNamesNoProjectForARepositoryGitCanSayNothingAbout() async throws {
-        let sandbox = try makeRepository("codex-check")
+        let sandbox = try GitFixture.repository("codex-check", in: repos)
         try writeRollout("rollout-a.jsonl", cwd: sandbox.path, turns: 1, git: "{}")
         try await runCodexTail()
 
@@ -215,7 +215,7 @@ final class UsageProjectSplitTests: XCTestCase {
     /// which the resolver already answers for. Neither may be read as the
     /// sandbox case.
     func testCodexNamesTheRepositoryWhenGitAnswersForIt() async throws {
-        let repo = try makeRepository("named")
+        let repo = try GitFixture.repository("named", in: repos)
         try writeRollout(
             "rollout-a.jsonl", cwd: repo.path, turns: 1,
             git: #"{"branch":"master","commit_hash":"d62716a"}"#)
@@ -229,7 +229,7 @@ final class UsageProjectSplitTests: XCTestCase {
     /// ledger, and a sandbox remembered there would keep its row long after
     /// the sandbox itself was gone.
     func testASandboxRootIsNotRememberedOnceItIsDeleted() async throws {
-        let sandbox = try makeRepository("codex-check")
+        let sandbox = try GitFixture.repository("codex-check", in: repos)
         try writeRollout("rollout-a.jsonl", cwd: sandbox.path, turns: 1, git: "{}")
         try await runCodexTail()
 
@@ -246,7 +246,7 @@ final class UsageProjectSplitTests: XCTestCase {
     }
 
     func testCodexKeepsTheProjectAcrossARelaunch() async throws {
-        let repo = try makeRepository("norace")
+        let repo = try GitFixture.repository("norace", in: repos)
         try writeRollout("rollout-a.jsonl", cwd: repo.path, turns: 1)
         try await runCodexTail()
 
@@ -262,8 +262,8 @@ final class UsageProjectSplitTests: XCTestCase {
     /// about what Sissy writes to disk. The panel's split is read live, and a
     /// disk-retention setting must not quietly take it away as well.
     func testTheSplitIsStillReadableWithTheArchiveSwitchedOff() async throws {
-        let legion = try makeRepository("legion")
-        let vedite = try makeRepository("vedite")
+        let legion = try GitFixture.repository("legion", in: repos)
+        let vedite = try GitFixture.repository("vedite", in: repos)
         try writeTurn("a.jsonl", requestId: "r1", cwd: legion.path)
         try writeTurn("b.jsonl", requestId: "r2", cwd: vedite.path)
 
@@ -329,18 +329,9 @@ final class UsageProjectSplitTests: XCTestCase {
     }
 
     private func writeTurn(_ name: String, requestId: String, cwd: String?) throws {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        let cwdField = cwd.map { "\"cwd\":\"\($0)\"," } ?? ""
-        let line = """
-            {"type":"assistant","timestamp":"\(iso.string(from: Date()))",\
-            \(cwdField)"requestId":"\(requestId)",\
-            "message":{"id":"m-\(requestId)","model":"\(Self.model)",\
-            "usage":{"input_tokens":\(Self.tokensPerTurn),"output_tokens":0,\
-            "cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
-            """
-        try (line + "\n").write(
-            to: logDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        try ClaudeLogFixture.writeTurn(
+            to: logDir.appendingPathComponent(name), requestId: requestId, model: Self.model,
+            input: Self.tokensPerTurn, messageId: "m-\(requestId)", cwd: cwd)
     }
 
     private func writeRollout(_ name: String, cwd: String, turns: Int, git: String? = nil) throws {
@@ -381,20 +372,5 @@ final class UsageProjectSplitTests: XCTestCase {
         {"input_tokens":\(tokensPerTurn),"cached_input_tokens":0,"output_tokens":0,\
         "reasoning_output_tokens":0,"total_tokens":\(tokensPerTurn)}}}}
         """
-    }
-
-    private func makeRepository(_ name: String) throws -> URL {
-        let repo = repos.appendingPathComponent(name)
-        try FileManager.default.createDirectory(
-            at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
-        return repo.standardizedFileURL
-    }
-
-    private func makeWorktree(_ name: String, of main: URL) throws -> URL {
-        let worktree = repos.appendingPathComponent(name)
-        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
-        try "gitdir: \(main.path)/.git/worktrees/\(name)\n"
-            .write(to: worktree.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
-        return worktree.standardizedFileURL
     }
 }

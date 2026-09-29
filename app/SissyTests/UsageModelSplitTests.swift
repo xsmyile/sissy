@@ -33,7 +33,7 @@ final class UsageModelSplitTests: XCTestCase {
     private static let tokensPerTurn = 1_000
 
     func testTwoModelsAreTwoRowsThatAddUpToTheDay() async throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: repos)
         try writeTurn("a.jsonl", requestId: "r1", model: Self.opus, cwd: repo.path)
         try writeTurn("b.jsonl", requestId: "r2", model: Self.sonnet, cwd: repo.path)
 
@@ -52,8 +52,8 @@ final class UsageModelSplitTests: XCTestCase {
     /// reads is per model alone, so one model working in two repositories is
     /// one row rather than two with the same name.
     func testOneModelAcrossTwoProjectsIsOneRow() async throws {
-        let legion = try makeRepository("legion")
-        let vedite = try makeRepository("vedite")
+        let legion = try GitFixture.repository("legion", in: repos)
+        let vedite = try GitFixture.repository("vedite", in: repos)
         try writeTurn("a.jsonl", requestId: "r1", model: Self.opus, cwd: legion.path)
         try writeTurn("b.jsonl", requestId: "r2", model: Self.opus, cwd: vedite.path)
 
@@ -68,7 +68,7 @@ final class UsageModelSplitTests: XCTestCase {
     /// the way to disk; the live split has to drop it too, or the panel names
     /// a model that never ran.
     func testAModelThatSpentNothingGetsNoRow() async throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: repos)
         try writeTurn("a.jsonl", requestId: "r1", model: Self.opus, cwd: repo.path)
         try writeTurn(
             "b.jsonl", requestId: "r2", model: Self.synthetic, cwd: repo.path, tokens: 0)
@@ -83,7 +83,7 @@ final class UsageModelSplitTests: XCTestCase {
     /// A model no pricing source knows costs nothing and still spent tokens.
     /// Dropping it would lose real usage; pricing it would invent a rate.
     func testAnUnpricedModelKeepsItsTokensAtZeroCost() async throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: repos)
         try writeTurn("a.jsonl", requestId: "r1", model: "claude-not-a-model", cwd: repo.path)
 
         let (split, _) = try await runClaudeTail()
@@ -97,7 +97,7 @@ final class UsageModelSplitTests: XCTestCase {
     /// that named the model. The split comes back off `historyResume` with the
     /// day totals it belongs to.
     func testTheSplitSurvivesARelaunchInTheMiddleOfADay() async throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: repos)
         try writeTurn("a.jsonl", requestId: "r1", model: Self.opus, cwd: repo.path)
         _ = try await runClaudeTail()
 
@@ -114,7 +114,7 @@ final class UsageModelSplitTests: XCTestCase {
     /// about what reaches disk. The split is read live and must survive it,
     /// exactly as the project split does.
     func testTheSplitIsStillReadableWithTheArchiveSwitchedOff() async throws {
-        let repo = try makeRepository("legion")
+        let repo = try GitFixture.repository("legion", in: repos)
         try writeTurn("a.jsonl", requestId: "r1", model: Self.opus, cwd: repo.path)
         try writeTurn("b.jsonl", requestId: "r2", model: Self.sonnet, cwd: repo.path)
 
@@ -173,24 +173,9 @@ final class UsageModelSplitTests: XCTestCase {
         _ name: String, requestId: String, model: String, cwd: String,
         tokens: Int? = nil
     ) throws {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        let line = """
-            {"type":"assistant","timestamp":"\(iso.string(from: Date()))",\
-            "cwd":"\(cwd)","requestId":"\(requestId)",\
-            "message":{"id":"m-\(requestId)","model":"\(model)",\
-            "usage":{"input_tokens":\(tokens ?? Self.tokensPerTurn),"output_tokens":0,\
-            "cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
-            """
-        try (line + "\n").write(
-            to: logDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
-    }
-
-    private func makeRepository(_ name: String) throws -> URL {
-        let repo = repos.appendingPathComponent(name)
-        try FileManager.default.createDirectory(
-            at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
-        return repo.standardizedFileURL
+        try ClaudeLogFixture.writeTurn(
+            to: logDir.appendingPathComponent(name), requestId: requestId, model: model,
+            input: tokens ?? Self.tokensPerTurn, messageId: "m-\(requestId)", cwd: cwd)
     }
 
     /// The third key. Two models tied on cost and on tokens still need one

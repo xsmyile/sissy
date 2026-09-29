@@ -52,16 +52,9 @@ final class UsageBackfillTests: XCTestCase {
         let cal = Calendar.current
         let when = try XCTUnwrap(
             cal.date(byAdding: .hour, value: 12, to: try day(dayOffset)))
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        let line = """
-            {"type":"assistant","timestamp":"\(iso.string(from: when))",\
-            "requestId":"\(requestId)","message":{"model":"\(model)",\
-            "usage":{"input_tokens":\(Self.tokensPerTurn),"output_tokens":0,\
-            "cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
-            """
         let url = logDir.appendingPathComponent(name)
-        try (line + "\n").write(to: url, atomically: true, encoding: .utf8)
+        try ClaudeLogFixture.writeTurn(
+            to: url, requestId: requestId, model: model, input: Self.tokensPerTurn, at: when)
         try FileManager.default.setAttributes(
             [.modificationDate: when], ofItemAtPath: url.path)
         return url

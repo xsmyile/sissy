@@ -30,14 +30,7 @@ final class UsageEngineHistoryTests: XCTestCase {
     private static let archivedTokens = 4_242
 
     private func makeEngine(retentionDays: Int? = nil) -> UsageEngine {
-        var config = ServerConfig.defaults
-        config.claudeDataDir = claudeDir.path
-        config.codexDataDir = codexDir.path
-        config.remotePricing = false
-        config.macHealth = false
-        config.disk = false
-        config.network = false
-        config.statusChecks = false
+        var config = ServerConfig.hermetic(claudeDir: claudeDir, codexDir: codexDir)
         config.providers = ProviderToggles(claudeCode: true, codex: false)
         config.historyRetentionDays = retentionDays
         return UsageEngine(
@@ -50,16 +43,9 @@ final class UsageEngineHistoryTests: XCTestCase {
 
     private func writeClaudeTurn() throws {
         try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        let line = """
-            {"type":"assistant","timestamp":"\(iso.string(from: Date()))",\
-            "requestId":"r1","message":{"model":"claude-sonnet-4-6",\
-            "usage":{"input_tokens":\(Self.tokensPerTurn),"output_tokens":0,\
-            "cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
-            """
-        try (line + "\n").write(
-            to: claudeDir.appendingPathComponent("a.jsonl"), atomically: true, encoding: .utf8)
+        try ClaudeLogFixture.writeTurn(
+            to: claudeDir.appendingPathComponent("a.jsonl"), requestId: "r1",
+            model: "claude-sonnet-4-6", input: Self.tokensPerTurn)
     }
 
     private func yesterday() throws -> Date {
