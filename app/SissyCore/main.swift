@@ -241,18 +241,10 @@ if args.contains("--backfill") {
                     + "(fetched \(ISO8601DateFormatter().string(from: catalog.fetchedAt)))")
         }
         for vendor in [ProviderID.claudeCode, ProviderID.codex] {
-            let home = config.providerHome(vendor: vendor)
-            let provider: LocalUsageProvider =
-                vendor == ProviderID.codex
-                ? LocalUsageProvider.codex(
-                    codexDir: home.dataDir, id: home.id, historyRoot: stateDir,
-                    pricingOverride: config.pricingOverride, ledger: projectLedger,
-                    backfill: window)
-                : LocalUsageProvider.claudeCode(
-                    claudeDir: home.dataDir, id: home.id, historyRoot: stateDir,
-                    pricingOverride: config.pricingOverride,
-                    profile: ClaudeProfileSource(url: home.claudeProfileURL),
-                    ledger: projectLedger, backfill: window)
+            let provider = UsageEngine.backfillProvider(
+                home: config.providerHome(vendor: vendor), window: window,
+                historyRoot: stateDir, pricingOverride: config.pricingOverride,
+                ledger: projectLedger)
             if let catalog { await provider.applyPriceCatalog(catalog) }
             _ = await provider.backfillArchive()
         }
