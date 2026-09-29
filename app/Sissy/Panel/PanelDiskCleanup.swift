@@ -23,7 +23,6 @@ import SwiftUI
 struct DiskCleanupPlatter: View {
     let cleanup: DiskCleanupModel
 
-    private static let rowSize: CGFloat = 12
     private static let captionSize: CGFloat = 11
     private static let rowSpacing: CGFloat = 7
 
@@ -60,7 +59,7 @@ struct DiskCleanupPlatter: View {
                         .help(DiskCleanupCopy.cleanHelp(target))
                 }
             }
-            .font(.system(size: Self.rowSize))
+            .font(.system(size: PanelMetrics.rowText))
             status(target)
         }
     }

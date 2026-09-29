@@ -23,9 +23,6 @@ struct PanelDisk: View {
     private static let volumeSpacing: CGFloat = 4
     private static let captionSize: CGFloat = 11
     private static let legendSize: CGFloat = 10
-    /// Matches `PanelMac`'s: the first minute of an age is worded in seconds.
-    private static let clockTick: TimeInterval = 1
-    private static let rowSize: CGFloat = 12
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
@@ -71,7 +68,7 @@ struct PanelDisk: View {
             Text(block.free.text)
                 .font(.system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded))
                 .foregroundStyle(headlineTint)
-            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
                 Text(caption(now: context.date))
                     .font(.system(size: Self.captionSize))
                     .monospacedDigit()
@@ -103,7 +100,7 @@ struct PanelDisk: View {
                 .monospacedDigit()
                 .lineLimit(1)
         }
-        .font(.system(size: Self.rowSize))
+        .font(.system(size: PanelMetrics.rowText))
     }
 
     // MARK: Volumes
@@ -127,7 +124,7 @@ struct PanelDisk: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
-                        .font(.system(size: Self.rowSize))
+                        .font(.system(size: PanelMetrics.rowText))
                         ShareBar(share: volume.used, tint: .secondary)
                     }
                     .accessibilityElement(children: .combine)

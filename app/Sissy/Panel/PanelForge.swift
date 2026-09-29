@@ -69,17 +69,13 @@ struct ForgeSectionLabel: View {
     let row: UsagePanelSnapshot.ForgeRow
     let refreshing: Bool
 
-    /// Matches the panel header's, for the reason that one is a second rather
-    /// than a minute: the first minute of an age is worded in seconds.
-    private static let clockTick: TimeInterval = 1
-
     var body: some View {
         HStack(spacing: 6) {
             SectionLabel(text: row.title)
                 .lineLimit(1)
                 .layoutPriority(1)
             Spacer(minLength: 8)
-            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
                 if let notice = UsageFormat.forgeNotice(
                     row.kind, failure: row.failure, readAt: row.readAt, opensAt: row.opensAt,
                     refreshing: refreshing, now: context.date)

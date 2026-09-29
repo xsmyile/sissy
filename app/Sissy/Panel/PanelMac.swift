@@ -46,10 +46,6 @@ struct PanelMac: View {
 
     private static let rowSpacing: CGFloat = 7
     private static let captionSize: CGFloat = 11
-    /// Matches the panel header's: the first minute of an age is worded in
-    /// seconds.
-    private static let clockTick: TimeInterval = 1
-    private static let rowSize: CGFloat = 12
     private static let stepSize: CGFloat = 10
     private static let stepGap: CGFloat = 3
     private static let trackOpacity: Double = 0.15
@@ -85,7 +81,7 @@ struct PanelMac: View {
             Text(block.memory.text)
                 .font(.system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded))
                 .foregroundStyle(headlineTint)
-            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
                 Text(caption(now: context.date))
                     .font(.system(size: Self.captionSize))
                     .monospacedDigit()
@@ -161,7 +157,7 @@ struct PanelMac: View {
                 .monospacedDigit()
                 .lineLimit(1)
         }
-        .font(.system(size: Self.rowSize))
+        .font(.system(size: PanelMetrics.rowText))
     }
 
     // MARK: Heaviest
@@ -190,7 +186,7 @@ struct PanelMac: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-                    .font(.system(size: Self.rowSize))
+                    .font(.system(size: PanelMetrics.rowText))
                     .help(app.id)
                 }
             }

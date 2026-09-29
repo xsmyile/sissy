@@ -53,14 +53,10 @@ struct PanelSessions: View {
     @State private var showsAllProcesses = false
 
     private static let sectionSpacing: CGFloat = 10
-    /// Matches the panel header's: the first minute of an age is worded in
-    /// seconds.
-    private static let clockTick: TimeInterval = 1
     private static let refreshSize: CGFloat = 10
     fileprivate static let rowSpacing: CGFloat = 7
     fileprivate static let headlineSize: CGFloat = 18
     fileprivate static let captionSize: CGFloat = 11
-    fileprivate static let rowSize: CGFloat = 12
     private static let figureSpacing: CGFloat = 28
     private static let stripHeight: CGFloat = 8
     private static let stripSpacing: CGFloat = 5
@@ -112,7 +108,7 @@ struct PanelSessions: View {
         HStack(spacing: 6) {
             SectionLabel(text: "Now")
             Spacer(minLength: 8)
-            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
                 if let line = UsageFormat.agentsReading(
                     observedAt: observedAt, refreshing: refreshing, now: context.date)
                 {
@@ -253,7 +249,7 @@ struct PanelSessions: View {
         HStack(spacing: 6) {
             ProviderMark(id: row.id)
             Text(row.name)
-                .font(.system(size: Self.rowSize))
+                .font(.system(size: PanelMetrics.rowText))
                 .lineLimit(1)
             Spacer(minLength: 8)
             Text(
@@ -265,7 +261,7 @@ struct PanelSessions: View {
                         ? " · " + UsageFormat.workedDuration(minutes: row.activity.activeMinutes)
                         : "")
             )
-            .font(.system(size: Self.rowSize))
+            .font(.system(size: PanelMetrics.rowText))
             .monospacedDigit()
             .foregroundStyle(.secondary)
             .lineLimit(1)
@@ -439,7 +435,7 @@ private struct PanelSessionsLive: View {
         HStack(spacing: 6) {
             ProviderMark(id: row.provider)
             Text(UsageFormat.agentProcessName(row))
-                .font(.system(size: PanelSessions.rowSize))
+                .font(.system(size: PanelMetrics.rowText))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(row.project == nil ? Color.secondary : .primary)
@@ -451,7 +447,7 @@ private struct PanelSessionsLive: View {
             }
             if let load = row.cpuLoad {
                 Text(UsageFormat.cpuLoad(load) + " ·")
-                    .font(.system(size: PanelSessions.rowSize))
+                    .font(.system(size: PanelMetrics.rowText))
                     .monospacedDigit()
                     .foregroundStyle(
                         load >= PanelSessions.busyLoad ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)
@@ -463,7 +459,7 @@ private struct PanelSessionsLive: View {
                 UsageFormat.bytes(row.footprint) + " · "
                     + UsageFormat.agentUptime(since: row.startedAt)
             )
-            .font(.system(size: PanelSessions.rowSize))
+            .font(.system(size: PanelMetrics.rowText))
             .monospacedDigit()
             .foregroundStyle(.secondary)
             .lineLimit(1)

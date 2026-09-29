@@ -40,7 +40,6 @@ struct PanelNetwork: View {
 
     private static let rowSpacing: CGFloat = 7
     private static let captionSize: CGFloat = 11
-    private static let rowSize: CGFloat = 12
     private static let swatchWidth: CGFloat = 10
     private static let swatchHeight: CGFloat = 3
     private static let figureGap: CGFloat = 14
@@ -116,7 +115,7 @@ struct PanelNetwork: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .font(.system(size: Self.rowSize))
+        .font(.system(size: PanelMetrics.rowText))
     }
 }
 

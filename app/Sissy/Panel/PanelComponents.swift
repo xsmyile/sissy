@@ -46,6 +46,11 @@ enum PanelMetrics {
     /// takes the smaller of the two sizes the panel uses.
     static let markSize: CGFloat = 14
     static let rowText: CGFloat = 12
+    /// Cadence for every age a tab or a page keeps on its own clock, which
+    /// matches the panel header's. A second rather than a minute: the tick
+    /// is what decides how late a change lands, and the first minute of an
+    /// age is worded in seconds.
+    static let clockTick: TimeInterval = 1
     /// How far a row's text sits inside the wash drawn behind it, so the band
     /// reads as a band rather than as a highlight clipped to the glyphs.
     ///
@@ -904,9 +909,6 @@ struct ForgeRowView: View {
     let refresh: () -> Void
 
     private static let eventSize: CGFloat = 11
-    /// Matches the panel header's, for the reason that one is a second rather
-    /// than a minute: the first minute of an age is worded in seconds.
-    private static let clockTick: TimeInterval = 1
     private static let refreshItem = "Refresh now"
     /// Smaller than `PanelMetrics.markSize`, which labels a whole provider: a
     /// mark that qualifies one number on a line has to read as part of that
@@ -963,7 +965,7 @@ struct ForgeRowView: View {
             Image(systemName: ProviderPalette.forgeEventSymbol(event.action))
                 .font(.system(size: Self.markSize, weight: Self.markWeight))
                 .foregroundStyle(ProviderPalette.forgeEventTint(event.action))
-            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
                 HStack(spacing: 0) {
                     Text(UsageFormat.forgeEventDone(event))
                         .truncationMode(.middle)
