@@ -48,21 +48,19 @@ struct PanelSessions: View {
     let refresh: () -> Void
 
     /// Local to the tab: coming back asks the question again rather than
-    /// showing the list opened last time.
+    /// showing the list opened last time. Held here rather than by the live
+    /// half, so a sweep that finds no session and then one does not shut it.
     @State private var showsAllProcesses = false
-    /// The chart sample under the pointer, which the caption and every lane
-    /// answer for while it is set.
-    @State private var hoveredSample: Int?
 
     private static let sectionSpacing: CGFloat = 10
     /// Matches the panel header's: the first minute of an age is worded in
     /// seconds.
     private static let clockTick: TimeInterval = 1
     private static let refreshSize: CGFloat = 10
-    private static let rowSpacing: CGFloat = 7
-    private static let headlineSize: CGFloat = 18
-    private static let captionSize: CGFloat = 11
-    private static let rowSize: CGFloat = 12
+    fileprivate static let rowSpacing: CGFloat = 7
+    fileprivate static let headlineSize: CGFloat = 18
+    fileprivate static let captionSize: CGFloat = 11
+    fileprivate static let rowSize: CGFloat = 12
     private static let figureSpacing: CGFloat = 28
     private static let stripHeight: CGFloat = 8
     private static let stripSpacing: CGFloat = 5
@@ -70,7 +68,7 @@ struct PanelSessions: View {
     /// Where a session's load is worth the row's one colour: most of a core,
     /// held for a whole sweep, which a session waiting on its user never
     /// spends. The figure is written whatever it is; only the colour waits.
-    private static let busyLoad: Double = 0.8
+    fileprivate static let busyLoad: Double = 0.8
 
     /// The window the counted half answers for: the panel's, or today where
     /// the archive has not counted that one.
@@ -100,7 +98,7 @@ struct PanelSessions: View {
             liveLabel
         } content: {
             if let live = block.live, live.running > 0 {
-                running(live)
+                PanelSessionsLive(live: live, showsAllProcesses: $showsAllProcesses)
             } else {
                 idle
             }
@@ -134,137 +132,6 @@ struct PanelSessions: View {
             .disabled(refreshing)
             .help("Count the running sessions again")
         }
-    }
-
-    private func running(_ live: UsagePanelSnapshot.AgentsBlock.Live) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(UsageFormat.agentsRunning(live.running, footprint: live.footprint))
-                .font(.system(size: Self.headlineSize, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-            if let chart = live.chart {
-                AgentMemoryChart(chart: chart, hovered: $hoveredSample)
-            }
-            Text(caption(live))
-                .font(.system(size: Self.captionSize))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            if let countedSince = live.countedSince {
-                Text(
-                    UsageFormat.agentsLoad(
-                        cpu: live.cpuTime, energy: live.energy, since: countedSince)
-                )
-                .font(.system(size: Self.captionSize))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .help(
-                    "What the sessions themselves used since Sissy started counting, "
-                        + "including sessions that have since exited. "
-                        + "What they started, a build or a dev server, is not in it.")
-            }
-            processes(live)
-        }
-    }
-
-    /// Under the pointer the caption answers for the instant it is on, and at
-    /// rest for the hour: the rule the day strip keeps, where a hover replaces
-    /// the caption and never the headline, so the figure a reader came for
-    /// does not change on the pointer's way to the chart.
-    private func caption(_ live: UsagePanelSnapshot.AgentsBlock.Live) -> String {
-        guard let chart = live.chart, let index = hoveredSample, index < chart.totals.count else {
-            return UsageFormat.samplesSince(live.since) + " · "
-                + UsageFormat.agentsWithChildren(live.treeFootprint)
-        }
-        let names = Dictionary(
-            live.processes.map { ($0.id, UsageFormat.agentProcessName($0)) },
-            uniquingKeysWith: { first, _ in first })
-        return UsageFormat.chartInstant(
-            chart.instant(index), total: chart.totals[index],
-            leaders: chart.leaders(at: index).compactMap { leader in
-                names[leader.process].map { ($0, leader.bytes) }
-            })
-    }
-
-    /// One disclosure row, and behind it every running session.
-    ///
-    /// **Closed by default**, dated 2026-09-28: the list changes length on
-    /// every 15 s sweep and the popover grows from its top edge, so a list
-    /// open by default moved everything under it on every re-count. Closed,
-    /// the tab holds a stable height, and what a closed list gives up the
-    /// chart's hover caption already answers — it names the two sessions
-    /// holding the most.
-    ///
-    /// Opened, it draws every running session — the rows a row limit used to
-    /// keep standing and the ones it folded, together — as one list with no
-    /// fold of its own. This is what answers "two gigabytes of what", and it
-    /// is why a row names a repository at all: the totals above say how
-    /// much, and only the rows say *where*. The repository rather than the
-    /// directory, resolved the way a project row's is, so two worktrees of
-    /// one checkout read as the one project they are — and the path stays on
-    /// the hover, because a path is a client's name as often as not.
-    private func processes(_ live: UsagePanelSnapshot.AgentsBlock.Live) -> some View {
-        VStack(alignment: .leading, spacing: Self.rowSpacing) {
-            processDisclosure
-            if showsAllProcesses {
-                ForEach(live.processes) { processRow($0) }
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    private var processDisclosure: some View {
-        Button {
-            showsAllProcesses.toggle()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: showsAllProcesses ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                Text(UsageFormat.sessionsDisclosure)
-                Spacer(minLength: 0)
-            }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func processRow(_ row: UsagePanelSnapshot.AgentsBlock.Process) -> some View {
-        HStack(spacing: 6) {
-            ProviderMark(id: row.provider)
-            Text(UsageFormat.agentProcessName(row))
-                .font(.system(size: Self.rowSize))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(row.project == nil ? Color.secondary : .primary)
-            Spacer(minLength: 8)
-            if !row.lane.isEmpty {
-                CPULane(
-                    lane: row.lane, tint: AgentMemoryChart.bandTint(row.band),
-                    hovered: hoveredSample)
-            }
-            if let load = row.cpuLoad {
-                Text(UsageFormat.cpuLoad(load) + " ·")
-                    .font(.system(size: Self.rowSize))
-                    .monospacedDigit()
-                    .foregroundStyle(
-                        load >= Self.busyLoad ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)
-                    )
-                    .lineLimit(1)
-                    .help("CPU since the last sweep, as a share of one core")
-            }
-            Text(
-                UsageFormat.bytes(row.footprint) + " · "
-                    + UsageFormat.agentUptime(since: row.startedAt)
-            )
-            .font(.system(size: Self.rowSize))
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
-        .help(row.directory ?? "The kernel would not say where this session is working")
     }
 
     /// A dash and no chart, which is the panel's own rule for a reading
@@ -454,6 +321,154 @@ struct PanelSessions: View {
                 .font(.system(size: Self.captionSize))
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// The live half while sessions are running: the headline, the chart and
+/// its caption, the load, and the list behind the disclosure.
+///
+/// Its own view because the pointer's sample lives here. A hover moves it on
+/// every pointer event, and while it sat on the whole tab each one rebuilt
+/// the counted half, its strip and its provider rows for a reading none of
+/// them answers for; here it reaches only the chart, the caption and the
+/// lanes that do.
+private struct PanelSessionsLive: View {
+    let live: UsagePanelSnapshot.AgentsBlock.Live
+    @Binding var showsAllProcesses: Bool
+
+    /// The chart sample under the pointer, which the caption and every lane
+    /// answer for while it is set.
+    @State private var hoveredSample: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(UsageFormat.agentsRunning(live.running, footprint: live.footprint))
+                .font(.system(size: PanelSessions.headlineSize, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            if let chart = live.chart {
+                AgentMemoryChart(chart: chart, hovered: $hoveredSample)
+            }
+            Text(caption)
+                .font(.system(size: PanelSessions.captionSize))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if let countedSince = live.countedSince {
+                Text(
+                    UsageFormat.agentsLoad(
+                        cpu: live.cpuTime, energy: live.energy, since: countedSince)
+                )
+                .font(.system(size: PanelSessions.captionSize))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .help(
+                    "What the sessions themselves used since Sissy started counting, "
+                        + "including sessions that have since exited. "
+                        + "What they started, a build or a dev server, is not in it.")
+            }
+            processes
+        }
+    }
+
+    /// Under the pointer the caption answers for the instant it is on, and at
+    /// rest for the hour: the rule the day strip keeps, where a hover replaces
+    /// the caption and never the headline, so the figure a reader came for
+    /// does not change on the pointer's way to the chart.
+    private var caption: String {
+        guard let chart = live.chart, let index = hoveredSample, index < chart.totals.count else {
+            return UsageFormat.samplesSince(live.since) + " · "
+                + UsageFormat.agentsWithChildren(live.treeFootprint)
+        }
+        let names = Dictionary(
+            live.processes.map { ($0.id, UsageFormat.agentProcessName($0)) },
+            uniquingKeysWith: { first, _ in first })
+        return UsageFormat.chartInstant(
+            chart.instant(index), total: chart.totals[index],
+            leaders: chart.leaders(at: index).compactMap { leader in
+                names[leader.process].map { ($0, leader.bytes) }
+            })
+    }
+
+    /// One disclosure row, and behind it every running session.
+    ///
+    /// **Closed by default**, dated 2026-09-28: the list changes length on
+    /// every 15 s sweep and the popover grows from its top edge, so a list
+    /// open by default moved everything under it on every re-count. Closed,
+    /// the tab holds a stable height, and what a closed list gives up the
+    /// chart's hover caption already answers — it names the two sessions
+    /// holding the most.
+    ///
+    /// Opened, it draws every running session — the rows a row limit used to
+    /// keep standing and the ones it folded, together — as one list with no
+    /// fold of its own. This is what answers "two gigabytes of what", and it
+    /// is why a row names a repository at all: the totals above say how
+    /// much, and only the rows say *where*. The repository rather than the
+    /// directory, resolved the way a project row's is, so two worktrees of
+    /// one checkout read as the one project they are — and the path stays on
+    /// the hover, because a path is a client's name as often as not.
+    private var processes: some View {
+        VStack(alignment: .leading, spacing: PanelSessions.rowSpacing) {
+            processDisclosure
+            if showsAllProcesses {
+                ForEach(live.processes) { processRow($0) }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private var processDisclosure: some View {
+        Button {
+            showsAllProcesses.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: showsAllProcesses ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(UsageFormat.sessionsDisclosure)
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func processRow(_ row: UsagePanelSnapshot.AgentsBlock.Process) -> some View {
+        HStack(spacing: 6) {
+            ProviderMark(id: row.provider)
+            Text(UsageFormat.agentProcessName(row))
+                .font(.system(size: PanelSessions.rowSize))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(row.project == nil ? Color.secondary : .primary)
+            Spacer(minLength: 8)
+            if !row.lane.isEmpty {
+                CPULane(
+                    lane: row.lane, tint: AgentMemoryChart.bandTint(row.band),
+                    hovered: hoveredSample)
+            }
+            if let load = row.cpuLoad {
+                Text(UsageFormat.cpuLoad(load) + " ·")
+                    .font(.system(size: PanelSessions.rowSize))
+                    .monospacedDigit()
+                    .foregroundStyle(
+                        load >= PanelSessions.busyLoad ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)
+                    )
+                    .lineLimit(1)
+                    .help("CPU since the last sweep, as a share of one core")
+            }
+            Text(
+                UsageFormat.bytes(row.footprint) + " · "
+                    + UsageFormat.agentUptime(since: row.startedAt)
+            )
+            .font(.system(size: PanelSessions.rowSize))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        .help(row.directory ?? "The kernel would not say where this session is working")
     }
 }
 
