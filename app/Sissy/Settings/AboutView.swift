@@ -237,8 +237,10 @@ struct AboutView: View {
     /// link this replaced got away with only because a link has no edges.
     private var copyDiagnosticsButton: some View {
         Button {
-            DiagnosticsReport.copyToClipboard(model: model)
-            didCopyDiagnostics = true
+            Task {
+                await DiagnosticsReport.copyToClipboard(model: model)
+                didCopyDiagnostics = true
+            }
         } label: {
             Text(Self.copyTitle)
                 .hidden()
