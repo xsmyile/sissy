@@ -555,6 +555,13 @@ final class CodexAdapter: SourceAdapter {
         return fileCumulative[url] != reported
     }
 
+    /// The limits a `token_count` event carries, taken when they are newer
+    /// than the last ones taken.
+    ///
+    /// Only an event that carries its own timestamp reaches here. One with
+    /// none is billed as if it landed now, and taking its windows at that
+    /// stamp as well would, during a cold scan, publish an old line's limits
+    /// as the newest reading and hold every fresher one off behind it.
     private func captureWindows(_ raw: Any?, observedAt: Date) {
         guard let dict = raw as? [String: Any] else { return }
         if let boundary = identityBoundaryAt, observedAt < boundary { return }
@@ -666,20 +673,14 @@ final class CodexAdapter: SourceAdapter {
         // Timestamp lives on the wrapper, ISO with fractional seconds. The
         // shape is identical to Claude Code's, so both go through
         // `UsageReaderShared.parseTimestamp`.
-        let ts: Date
-        if let tsStr = obj["timestamp"] as? String,
-            let parsed = UsageReaderShared.parseTimestamp(tsStr)
-        {
-            ts = parsed
-        } else {
-            // Without a timestamp we can't bucket the event, but rather than
-            // dropping it we attribute it to "now" so live ingest still
-            // surfaces. Cold-scan backfill drops if it falls outside the
-            // retain window below.
-            ts = Date()
-        }
+        let stamped = (obj["timestamp"] as? String).flatMap(UsageReaderShared.parseTimestamp)
+        // Without a timestamp we can't bucket the event, but rather than
+        // dropping it we attribute it to "now" so live ingest still
+        // surfaces. Cold-scan backfill drops if it falls outside the
+        // retain window below.
+        let ts = stamped ?? Date()
 
-        captureWindows(payload["rate_limits"], observedAt: ts)
+        if let stamped { captureWindows(payload["rate_limits"], observedAt: stamped) }
 
         // Both guards below run before the retain cutoff and before the
         // dedup ledger, and the bookkeeping they keep is updated for every
