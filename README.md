@@ -14,7 +14,7 @@ The menu bar companion for developers: your agents, your Mac, your repositories.
 [![License](https://img.shields.io/github/license/xsmyile/sissy?style=flat-square&color=green)](./LICENSE)
 
 <img src="assets/sissy-demo.gif" width="100%"
-  alt="Sissy's panel opening from the menu bar: the day's cost, a rate-limit gauge per account, the agents running now and the memory they hold, a repository committing under the wrong name, and keep awake" />
+  alt="Sissy's panel opening from the menu bar and stepping through its tabs: a rate-limit gauge per account, the agents running now and the memory they hold, the Mac's memory pressure and heaviest apps, the builds of removed projects taking room on the disk, the network rate, and keep awake" />
 
 [Install](#install) • [What it shows](#what-it-shows) • [What it reads](#what-it-reads) • [Privacy](#privacy) • [Uninstall](#uninstall) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build](#build-from-source)
 
