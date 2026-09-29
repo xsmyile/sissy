@@ -34,7 +34,9 @@ enum PanelTab: CaseIterable, Hashable {
         allCases.filter { $0.isVisible(in: snapshot, network: network) }
     }
 
-    private func isVisible(in snapshot: UsagePanelSnapshot, network: Bool) -> Bool {
+    /// Whether this tab is in the bar. `network` answers only for the
+    /// Network tab, so another tab's question can leave it out.
+    func isVisible(in snapshot: UsagePanelSnapshot, network: Bool = false) -> Bool {
         switch self {
         case .usage, .sessions: true
         case .mac: snapshot.mac != nil
