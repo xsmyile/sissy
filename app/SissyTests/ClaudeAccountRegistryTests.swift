@@ -408,6 +408,34 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertEqual(vault.active, credential("rotated-by-the-cli"))
     }
 
+    /// A 429 from the profile endpoint is waited out, not asked again on the
+    /// next tick: the watch polls every two minutes and the endpoint is one
+    /// that earns a persistent refusal from exactly that.
+    func testARateLimitedIdentificationWaitsOutTheVendorsDelay() async {
+        let vault = Vault()
+        vault.active = credential("tok-a")
+        let clock = LockedValue(Date())
+        let asked = LockedValue(0)
+        let registry = makeRegistry(
+            vault, now: { clock.load() },
+            identify: { token in
+                asked.update { $0 += 1 }
+                guard asked.load() > 1 else {
+                    throw UsageRequestError.rateLimited(retryAfter: 600)
+                }
+                return Self.byToken(token)
+            })
+
+        await registry.captureActive()
+        await registry.captureActive()
+        XCTAssertEqual(asked.load(), 1, "the endpoint was asked again inside its own wait")
+
+        clock.update { $0 = $0.addingTimeInterval(601) }
+        await registry.captureActive()
+        XCTAssertEqual(asked.load(), 2)
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, Self.byToken("tok-a").uuid)
+    }
+
     /// The refusal this exists for: the CLI has rotated, the identify that
     /// would say whose the new token is cannot be made, and the click lands on
     /// the account Sissy last saw there. Writing the frozen archive back would
