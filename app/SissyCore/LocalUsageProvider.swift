@@ -673,8 +673,13 @@ actor LocalUsageProvider: UsageProvider {
     /// The writes `stop()` makes, without the teardown. A snapshot that is not
     /// dirty is left alone rather than rewritten, which is where this parts
     /// from the forced save on the way out.
+    ///
+    /// Nothing is written before the cold scan is warm. A flush reaches the
+    /// actor at any of the scan's suspensions, and forcing the archive there
+    /// would write days the scan has only read part of; the scan's own end
+    /// writes them whole a moment later.
     func flush() async {
-        guard lifecycle == .running else { return }
+        guard lifecycle == .running, coldScanComplete else { return }
         settleKeyZone()
         adapter.projects.ledger.saveIfDirty()
         if persistDirty { saveSnapshotIfDirty(force: true) }
