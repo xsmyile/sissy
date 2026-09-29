@@ -153,7 +153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// before the process goes, both bounded by `teardownBudget`.
     /// `.terminateLater` is what buys the await: quitting is the only thing
     /// that ends a run, so it is the only chance the readers get to write
-    /// their offsets.
+    /// their offsets with a wait behind it. A sleep flushes them too, through
+    /// `flushBeforeSleep`, but nothing holds the sleep back for it.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !isTerminating else { return .terminateNow }
         isTerminating = true
