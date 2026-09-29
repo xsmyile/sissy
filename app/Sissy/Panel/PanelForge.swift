@@ -147,9 +147,7 @@ struct PanelIdentityLine: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                    Chevron(isOpen: false)
                 }
                 .contentShape(.rect)
             }

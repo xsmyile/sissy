@@ -840,9 +840,7 @@ struct PanelProviderPage: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             if summary.opens {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                Chevron(isOpen: false)
             }
         }
         .contentShape(.rect)
