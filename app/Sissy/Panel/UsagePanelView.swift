@@ -483,7 +483,7 @@ struct UsagePanelView: View {
     /// rows stand still, so without it the button reads as broken.
     private func identitiesHeader(checkedAt: Date?) -> some View {
         subpageHeader(back: .overview, mark: nil, title: "Identities") {
-            TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
+            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
                 if let line = UsageFormat.identitiesReading(
                     checkedAt: checkedAt, refreshing: model.engine.refreshingIdentities,
                     now: context.date)
