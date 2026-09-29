@@ -390,12 +390,19 @@ extension ProviderToggles {
 
 /// Key by key, so a typo in one counter's switch leaves every other one as the
 /// user set it rather than switching them all back on.
+///
+/// Driven by `ForgeCounter.allCases` through the subscript rather than by a
+/// list of keys, so a counter added later is read back without a line here: a
+/// list that missed it would read a switched-off counter as on, and on, for
+/// this setting, means asking the vendor for it again on the next poll.
 extension ForgeCounters {
     init(from decoder: any Decoder) throws {
         let keys = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            merged: keys.lenient(.merged), issues: keys.lenient(.issues),
-            comments: keys.lenient(.comments), latest: keys.lenient(.latest))
+        self = .defaults
+        for counter in ForgeCounter.allCases {
+            guard let key = CodingKeys(stringValue: counter.rawValue) else { continue }
+            self[counter] = keys.lenient(key)
+        }
     }
 }
 
