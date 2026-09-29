@@ -593,18 +593,18 @@ enum ForgeTokenStore {
     /// to fix. An item that is not there means nothing was ever connected;
     /// a keychain that would not answer this read means the grant has gone
     /// stale — which happens on every re-signed build — and folding the second
-    /// into the first is the mistake `ClaudeCredentialsStore.classify` exists
+    /// into the first is the mistake `KeychainAccess.classify` exists
     /// to prevent: nobody was asked, nobody refused, and a reader that reports
     /// "no token" for it stops polling an account that is perfectly fine.
     static func load(connection id: String, allowingInteraction: Bool = false)
         -> CredentialLookup<String>
     {
-        var query = ClaudeCredentialsStore.makeQuery(
+        var query = KeychainAccess.makeQuery(
             service: keychainService, allowingInteraction: allowingInteraction)
         query[kSecAttrAccount as String] = id
-        let result = ClaudeCredentialsStore.copyMatching(
+        let result = KeychainAccess.copyMatching(
             query, allowingInteraction: allowingInteraction)
-        return ClaudeCredentialsStore.classify(
+        return KeychainAccess.classify(
             result.status, data: result.data, allowingInteraction: allowingInteraction,
             decoding: { data in
                 guard let token = String(data: data, encoding: .utf8), !token.isEmpty else {

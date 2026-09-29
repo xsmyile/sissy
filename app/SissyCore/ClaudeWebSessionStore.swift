@@ -57,10 +57,10 @@ enum ClaudeWebSessionStore {
         account: String,
         allowingInteraction: Bool
     ) -> ClaudeCredentialsLookup {
-        var query = ClaudeCredentialsStore.makeQuery(
+        var query = KeychainAccess.makeQuery(
             service: keychainService, allowingInteraction: allowingInteraction)
         query[kSecAttrAccount as String] = account
-        let result = ClaudeCredentialsStore.copyMatching(
+        let result = KeychainAccess.copyMatching(
             query, allowingInteraction: allowingInteraction)
         return ClaudeCredentialsStore.classify(
             result.status,

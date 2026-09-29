@@ -83,7 +83,8 @@ enum ClaudeUnsupportedHomes {
     /// with no such items, for the reason `ClaudeWebSessionStore.storedAccounts`
     /// gives: both are `[]` to the caller and only one is the user's doing.
     static func keychainItems() -> [ListedItem] {
-        var query = ClaudeCredentialsStore.makeQuery(allowingInteraction: false)
+        var query = KeychainAccess.makeQuery(
+            service: ClaudeKeychainCLI.claudeService, allowingInteraction: false)
         query.removeValue(forKey: kSecAttrService as String)
         query.removeValue(forKey: kSecReturnData as String)
         query[kSecAttrAccount as String] = ClaudeKeychainCLI.claudeLoginName()
