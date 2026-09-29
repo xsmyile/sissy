@@ -130,23 +130,21 @@ jobs:
           # snapshot to Sissy's cache means a mismatch below is a convention
           # diverging rather than the embedded seed simply being older than
           # upstream.
-          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
-            -configuration Debug -showBuildSettings 2>/dev/null \
-            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
-          echo "DD=$DD" >> "$GITHUB_ENV"
+          CLI="$(../scripts/cli-path.sh Debug)"
+          echo "CLI=$CLI" >> "$GITHUB_ENV"
           # `--refresh-catalog` carries its own retry budget (3 attempts x 20s
           # request timeout + ~7s of backoff) and exits non-zero if none of
           # them land a usable catalog, so a transient upstream slowdown the
           # fetch is designed to absorb does not turn into a red oracle.
           status=0
-          "$DD/sissy-cli" --refresh-catalog > "$RUNNER_TEMP/refresh.log" 2>&1 || status=$?
+          "$CLI" --refresh-catalog > "$RUNNER_TEMP/refresh.log" 2>&1 || status=$?
           cat "$RUNNER_TEMP/refresh.log"
           exit "$status"
 
       - name: Compare against ccusage
         run: |
           FIX="$RUNNER_TEMP/oracle"
-          CODEX_HOME="$FIX/codex" "$DD/sissy-cli" \
+          CODEX_HOME="$FIX/codex" "$CLI" \
             --config "$RUNNER_TEMP/oracle.json" --scan > "$RUNNER_TEMP/sissy.json"
           CLAUDE_CONFIG_DIR="$FIX/claude" npx -y ccusage@latest claude --json \
             > "$RUNNER_TEMP/ccu-claude.json"
@@ -210,7 +208,7 @@ jobs:
           # months, and `--backfill` is what indexes the difference. A day it
           # writes is past and nothing will grow it back, so the agreement that
           # matters is the one asserted here rather than on today's totals.
-          "$DD/sissy-cli" --config "$RUNNER_TEMP/oracle.json" --backfill \
+          "$CLI" --config "$RUNNER_TEMP/oracle.json" --backfill \
             > "$RUNNER_TEMP/sissy-archive.json"
           python3 - <<'PY'
           import json, os, sys
