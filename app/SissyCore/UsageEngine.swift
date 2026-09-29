@@ -2012,7 +2012,16 @@ actor UsageEngine {
         await rebuildAndEmit(await aggregator.currentReading())
     }
 
-    private func rebuildAndEmit(_ reading: UsageReading) async {
+    /// Builds a frame from `reading` and hands it to the app.
+    ///
+    /// A frame refused as overtaken is rebuilt once from a fresh reading
+    /// rather than dropped. The rebuild may have changed the engine's own
+    /// state on the way, the keep-awake hold above all, and the frame that
+    /// overtook it was built before that change: dropping this one would
+    /// leave the panel saying the Mac is free while it is held, until the
+    /// next frame. Once is enough, because any frame that overtakes the
+    /// retry was built after the change and carries it.
+    private func rebuildAndEmit(_ reading: UsageReading, retrying: Bool = true) async {
         let today = reading.today
         let slices = reading.slices
         guard lifecycle == .running else { return }
@@ -2047,8 +2056,11 @@ actor UsageEngine {
             disk: config.disk ? diskMonitor.currentReading() : nil,
             pricing: pricing
         )
-        guard lifecycle == .running else { return }
-        _ = await frameDelivery?.deliver(frame, revision: reading.revision)
+        guard lifecycle == .running,
+            await frameDelivery?.deliver(frame, revision: reading.revision) == .overtaken,
+            retrying
+        else { return }
+        await rebuildAndEmit(await aggregator.currentReading(), retrying: false)
     }
 
     /// What the archive holds for every period the panel offers, cached for a
