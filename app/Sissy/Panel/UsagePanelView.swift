@@ -673,20 +673,36 @@ struct UsagePanelView: View {
     /// `TimelineView` rather than a value recomputed with the body: the
     /// instant it counts from is fixed, so the line stays true while the
     /// panel sits open and the engine emits nothing.
+    ///
+    /// One line whatever it says: a second one grows the header and moves
+    /// every block under it while the pointer is on the panel. The terse
+    /// wording is what keeps it to one; should a wording ever outgrow that
+    /// too, the line limit truncates it rather than wrapping. VoiceOver reads
+    /// the whole sentence either way, since the width is not its concern.
     private func readingLine(
         _ live: SissyModel.LiveFrame, holding: Date?, refreshing: Bool
     ) -> some View {
         TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
-            Text(
-                UsageFormat.reading(
-                    age: context.date.timeIntervalSince(live.at),
-                    holding: holding.map { context.date.timeIntervalSince($0) },
-                    refreshing: refreshing)
-            )
+            let age = context.date.timeIntervalSince(live.at)
+            let held = holding.map { context.date.timeIntervalSince($0) }
+            let full = UsageFormat.reading(age: age, holding: held, refreshing: refreshing)
+            ViewThatFits(in: .horizontal) {
+                readingText(full)
+                readingText(
+                    UsageFormat.reading(
+                        age: age, holding: held, refreshing: refreshing, terse: true))
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(full)
+        }
+    }
+
+    private func readingText(_ line: String) -> some View {
+        Text(line)
             .font(.system(size: PanelMetrics.headlineMeta))
             .monospacedDigit()
             .foregroundStyle(.secondary)
-        }
+            .lineLimit(1)
     }
 
     /// The projects page's header: the way back, what the page is, and the

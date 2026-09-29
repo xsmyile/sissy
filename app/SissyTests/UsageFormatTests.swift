@@ -61,6 +61,28 @@ final class UsageFormatTests: XCTestCase {
             "updated 41s ago · awake " + UsageFormat.held(900))
     }
 
+    /// The terse wording gives up the word "updated" and keeps the age and the
+    /// hold whole, since the hold is the clause that names itself.
+    func testTerseReadingDropsOnlyTheWordUpdated() {
+        XCTAssertEqual(
+            UsageFormat.reading(age: 3, holding: 3720, refreshing: false, terse: true),
+            "just now · awake " + UsageFormat.held(3720))
+    }
+
+    /// Without a hold the terse line is the bare age, whatever unit it is in.
+    func testTerseReadingWithoutAHoldIsTheBareAge() {
+        XCTAssertEqual(
+            UsageFormat.reading(age: 41, holding: nil, refreshing: false, terse: true),
+            "41s ago")
+    }
+
+    /// Refreshing already has no age to shorten, so terse says the same.
+    func testTerseReadingLeavesRefreshingAlone() {
+        XCTAssertEqual(
+            UsageFormat.reading(age: 41, holding: 900, refreshing: true, terse: true),
+            UsageFormat.reading(age: 41, holding: 900, refreshing: true))
+    }
+
     /// A refresh re-reads the provider, not the power assertion, so the hold
     /// stays put while the age goes.
     func testRefreshingKeepsTheHoldAndDropsOnlyTheAge() {
