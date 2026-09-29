@@ -677,8 +677,10 @@ struct UsagePanelView: View {
     /// One line whatever it says: a second one grows the header and moves
     /// every block under it while the pointer is on the panel. The terse
     /// wording is what keeps it to one; should a wording ever outgrow that
-    /// too, the line limit truncates it rather than wrapping. VoiceOver reads
-    /// the whole sentence either way, since the width is not its concern.
+    /// too, the line limit truncates it rather than wrapping. The choice is
+    /// made on `UsageFormat.widestReading` drawn hidden under the live
+    /// sentence, so it does not change as the age ticks. VoiceOver reads the
+    /// whole sentence either way, since the width is not its concern.
     private func readingLine(
         _ live: SissyModel.LiveFrame, holding: Date?, refreshing: Bool
     ) -> some View {
@@ -687,13 +689,15 @@ struct UsagePanelView: View {
             let held = holding.map { context.date.timeIntervalSince($0) }
             let full = UsageFormat.reading(age: age, holding: held, refreshing: refreshing)
             ViewThatFits(in: .horizontal) {
-                readingText(full)
+                readingText(UsageFormat.widestReading(holding: held))
+                    .hidden()
+                    .overlay(alignment: .leading) { readingText(full) }
                 readingText(
                     UsageFormat.reading(
-                        age: age, holding: held, refreshing: refreshing, terse: true))
+                        age: age, holding: held, refreshing: refreshing, terse: true)
+                )
+                .accessibilityLabel(full)
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(full)
         }
     }
 

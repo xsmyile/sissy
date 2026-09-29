@@ -76,6 +76,15 @@ final class UsageFormatTests: XCTestCase {
             "41s ago")
     }
 
+    /// The width a header measures is the widest the line gets before the
+    /// hold next gains a digit, so the choice cannot flip as the age ticks.
+    func testWidestReadingPadsTheAgeAndTheHoldToTwoDigitsOfMinutes() {
+        XCTAssertEqual(
+            UsageFormat.widestReading(holding: 3720), "updated 59m ago · awake 1h 59m")
+        XCTAssertEqual(UsageFormat.widestReading(holding: 120), "updated 59m ago · awake 59m")
+        XCTAssertEqual(UsageFormat.widestReading(holding: nil), "updated 59m ago")
+    }
+
     /// Refreshing already has no age to shorten, so terse says the same.
     func testTerseReadingLeavesRefreshingAlone() {
         XCTAssertEqual(
