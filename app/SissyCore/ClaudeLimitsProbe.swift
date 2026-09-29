@@ -149,16 +149,16 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
         loop.lastReported = nil
     }
 
-    /// Re-reads the credentials with the dialog allowed and polls at once,
-    /// returning only once that request has finished.
+    /// Re-reads the CLI's credential and polls at once, returning only once
+    /// that request has finished.
     ///
-    /// The gesture behind a user asking for their limits back. It is one of
-    /// the reads allowed to put a keychain dialog on screen, alongside the
-    /// start a flipped switch makes and the switch of account the panel
-    /// offers. Two things stand between a running probe and a fresh read
-    /// and this clears both: the poll task, which makes `start` a no-op while
-    /// it lives, and the deduped log line, so the outcome of the read the user
-    /// just asked for is actually recorded.
+    /// The gesture behind a user asking for their limits back. The read asks
+    /// macOS for nothing, as every read this probe makes: the credential comes
+    /// from the CLI's file or through `/usr/bin/security`. Two things stand
+    /// between a running probe and a fresh read and this clears both: the
+    /// poll task, which makes `start` a no-op while it lives, and the deduped
+    /// log line, so the outcome of the read the user just asked for is
+    /// actually recorded.
     ///
     /// Deliberately not `stop()` first, for the reason `restart` carries.
     func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
