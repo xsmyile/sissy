@@ -28,9 +28,6 @@ struct DiskActivityPlatter: View {
     static let writeTint = NetworkSparkline.upTint
     private static let legendSize: CGFloat = 12
     private static let captionSize: CGFloat = 10
-    private static let swatchWidth: CGFloat = 10
-    private static let swatchHeight: CGFloat = 3
-    private static let figureGap: CGFloat = 14
 
     var body: some View {
         let reading = engine.diskActivityReading
@@ -40,9 +37,9 @@ struct DiskActivityPlatter: View {
             SectionLabel(text: "Activity")
         } content: {
             VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
-                HStack(spacing: Self.figureGap) {
-                    figure(UsageFormat.diskRead(current?.read), tint: Self.readTint)
-                    figure(UsageFormat.diskWrite(current?.written), tint: Self.writeTint)
+                HStack(spacing: RateFigure.gap) {
+                    RateFigure(text: UsageFormat.diskRead(current?.read), tint: Self.readTint)
+                    RateFigure(text: UsageFormat.diskWrite(current?.written), tint: Self.writeTint)
                 }
                 .font(.system(size: Self.legendSize))
                 .monospacedDigit()
@@ -66,16 +63,6 @@ struct DiskActivityPlatter: View {
                     .font(.system(size: Self.captionSize))
                     .foregroundStyle(.tertiary)
             }
-        }
-    }
-
-    private func figure(_ text: String, tint: Color) -> some View {
-        HStack(spacing: 5) {
-            Capsule()
-                .fill(tint)
-                .frame(width: Self.swatchWidth, height: Self.swatchHeight)
-            Text(text)
-                .contentTransition(.numericText())
         }
     }
 
