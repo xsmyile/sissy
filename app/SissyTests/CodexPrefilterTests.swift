@@ -8,10 +8,9 @@ import XCTest
 /// because the tail passes it a line inside a chunk, so a marker has to sit
 /// wholly inside that window to count.
 final class CodexPrefilterTests: XCTestCase {
-    private let adapter = CodexAdapter(
-        codexDir: URL(fileURLWithPath: "/tmp/sissy-prefilter-tests/codex"),
-        pricingOverride: nil,
-        ledger: ProjectLedger())
+    private let adapter = CodexAdapter.fixture(
+        codexDir: FileManager.default.temporaryDirectory
+            .appendingPathComponent("sissy-prefilter-\(UUID().uuidString)"))
 
     private static let types = ["token_count", "turn_context", "session_meta", "task_complete"]
 
