@@ -67,7 +67,7 @@ enum ClaudeCredentialBlob {
     static func refreshExpiresAt(in data: Data) -> Date? {
         guard let oauth = oauth(in: data) else { return nil }
         if let text = oauth[refreshExpiryKey] as? String {
-            return ISO8601DateFormatter().date(from: text)
+            return UsageReaderShared.parseTimestamp(text)
         }
         return date(oauth[refreshExpiryKey])
     }
@@ -108,12 +108,17 @@ enum ClaudeCredentialBlob {
         try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .withoutEscapingSlashes])
     }
 
-    /// Claude Code writes its dates in milliseconds. The bound is the one
-    /// `ClaudeCredentialsStore` applies, so no two readers of one field can
-    /// disagree about its unit.
+    /// Epoch values above this many seconds cannot be a plausible date, so
+    /// they are milliseconds. Claude Code writes `expiresAt` in ms; the guard
+    /// keeps the parse correct if that ever changes.
+    private static let secondsUpperBound: Double = 4_102_444_800
+
+    /// Claude Code writes its dates in milliseconds. This is the one reader of
+    /// its epoch fields, so no two readers of one field can disagree about
+    /// its unit.
     private static func date(_ raw: Any?) -> Date? {
         guard let seconds = (raw as? Double) ?? (raw as? NSNumber)?.doubleValue else { return nil }
-        let scaled = seconds > ClaudeCredentialsStore.secondsUpperBound ? seconds / 1000 : seconds
+        let scaled = seconds > secondsUpperBound ? seconds / 1000 : seconds
         return Date(timeIntervalSince1970: scaled)
     }
 }

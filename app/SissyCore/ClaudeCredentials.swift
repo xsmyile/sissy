@@ -25,15 +25,6 @@ struct ClaudeCredentials: Sendable, Equatable {
 typealias ClaudeCredentialsLookup = CredentialLookup<ClaudeCredentials>
 
 enum ClaudeCredentialsStore {
-    /// Epoch values above this many seconds cannot be a plausible date, so
-    /// they are milliseconds. Claude Code writes `expiresAt` in ms; the guard
-    /// keeps the parse correct if that ever changes.
-    ///
-    /// Shared with `ClaudeCredentialBlob`, which parses the same field out of
-    /// the copy the CLI keeps in its config home: two readers of one vendor's
-    /// number must not disagree about its unit.
-    static let secondsUpperBound: Double = 4_102_444_800
-
     /// `SecItemCopyMatching` blocks for as long as macOS takes to authorize,
     /// which is unbounded: it can sit behind a dialog nobody answers. The call
     /// runs off the cooperative pool so it parks a dispatch thread rather than
