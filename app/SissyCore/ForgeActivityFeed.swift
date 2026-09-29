@@ -1074,12 +1074,13 @@ enum GitLabActivityFeed {
     /// that had 95 events.
     static func eventsURL(
         _ connection: ForgeConnection, period: UsagePeriod, now: Date, action: String? = nil,
-        rows: Int = onePage, calendar: Calendar = .current
+        rows: Int = onePage
     ) -> URL? {
         guard let root = connection.root,
             var components = URLComponents(
                 url: root.appendingPathComponent(apiPath), resolvingAgainstBaseURL: false)
         else { return nil }
+        let calendar = Calendar.current
         var query = [URLQueryItem(name: "per_page", value: String(rows))]
         if let start = ForgeWindow.start(of: period, now: now, calendar: calendar),
             let exclusive = calendar.date(byAdding: .day, value: -1, to: start)
