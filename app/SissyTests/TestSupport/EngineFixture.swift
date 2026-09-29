@@ -5,7 +5,9 @@ import Foundation
 extension ServerConfig {
     /// `defaults` with both log trees pointed into a test's own directory and
     /// every switch that reaches the network or the machine off: remote
-    /// pricing, `statusChecks`, `macHealth`, `disk` and `network`. A suite that
+    /// pricing, `statusChecks`, `macHealth`, `disk`, `network`, `keepAwake`
+    /// and `agentHooks`. The last two ship off already and are set anyway, so
+    /// a default that flips cannot reach a suite through here. A suite that
     /// exercises one of them turns it back on by name.
     ///
     /// The one place those switches are listed, because each engine suite used
@@ -22,6 +24,8 @@ extension ServerConfig {
         config.macHealth = false
         config.disk = false
         config.network = false
+        config.keepAwake = .off
+        config.agentHooks = false
         return config
     }
 }
