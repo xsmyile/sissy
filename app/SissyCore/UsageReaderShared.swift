@@ -291,3 +291,30 @@ final class DayKeyFormatter: @unchecked Sendable {
         }
     }
 }
+
+/// The models a reader has already reported as unpriced, so the warning is
+/// one line per model per run instead of one per ingested event.
+///
+/// One for both adapters, which had each written the same logger out: an
+/// unpriced model's tokens contribute $0 to the day's cost, which is
+/// otherwise indistinguishable from a quiet day, so each reports the first
+/// one it meets.
+struct UnpricedModelLog {
+    private var logged: Set<String> = []
+
+    /// Logs `model` once, and only if `isPriced` answers that no pricing
+    /// source rates it. The lookup runs only for a model not yet reported.
+    mutating func report(_ model: String, isPriced: () -> Bool) {
+        guard !logged.contains(model), !isPriced() else { return }
+        logged.insert(model)
+        sissyLog(
+            "sissy: no rate for '\(model)' in any pricing source, so its tokens "
+                + "bill at $0; add a `pricingOverride` entry in server.json")
+    }
+
+    /// Re-arms every model: a catalog refresh may price one the previous
+    /// catalog lacked, and the operator wants to see that it healed.
+    mutating func reset() {
+        logged.removeAll()
+    }
+}

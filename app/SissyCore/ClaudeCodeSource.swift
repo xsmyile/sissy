@@ -314,9 +314,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// `applyPriceCatalog`; a refresh applies to events ingested from then on,
     /// and to the rows, live or archived, counted with no rate at all.
     private var priceCatalog: PricingTable?
-    /// Models already reported as unpriced. Keeps the warning to one line per
-    /// model per run instead of one per ingested event.
-    private var loggedUnpricedModels: Set<String> = []
+    private var unpriced = UnpricedModelLog()
     /// Claude Code names the working directory on every assistant line,
     /// so the resolver's cache is what keeps this off the per-line path. The
     /// ledger behind it is the process's, not this adapter's.
@@ -366,9 +364,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
 
     func applyPriceCatalog(_ catalog: PriceCatalog) {
         priceCatalog = catalog.table(for: .anthropic)
-        // Re-arm the log: a model the previous catalog lacked may now resolve,
-        // and the operator wants to see that it healed.
-        loggedUnpricedModels.removeAll()
+        unpriced.reset()
     }
 
     /// Cheap by construction: the source stats the file and re-parses only
@@ -399,17 +395,12 @@ final class ClaudeCodeAdapter: SourceAdapter {
     /// fire on every run and train the operator to ignore the real warnings.
     private static let nonBillableModels: Set<String> = ["<synthetic>"]
 
-    /// Reports an unpriced model once per model: its tokens contribute $0 to the
-    /// day's cost, which is otherwise indistinguishable from a quiet day.
+    /// Reports an unpriced model once per model, a non-billable one never.
     private func logUnpricedModelOnce(for model: String) {
         guard !Self.nonBillableModels.contains(model) else { return }
-        guard !loggedUnpricedModels.contains(model) else { return }
-        guard Pricing.price(for: model, override: pricingOverride, catalog: priceCatalog) == nil
-        else { return }
-        loggedUnpricedModels.insert(model)
-        sissyLog(
-            "sissy: no rate for '\(model)' in any pricing source — its tokens "
-                + "bill at $0; add a `pricingOverride` entry in server.json")
+        unpriced.report(model) {
+            Pricing.price(for: model, override: pricingOverride, catalog: priceCatalog) != nil
+        }
     }
 
     /// Bytes for `"type"` and `"assistant"`. Used as a cheap prefilter on raw
