@@ -128,6 +128,7 @@ extension LimitsPolling {
     /// so an assertion hung off the read passes or fails by luck.
     func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
         let stamp = loop.generation
+        loop.halting = false
         let before = published.load()
         let delay = await readAndFetch(generation: stamp)
         guard isCurrent(stamp) else { return delay }
