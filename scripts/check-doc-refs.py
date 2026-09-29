@@ -24,6 +24,7 @@ ROOTS = ("app/Sissy", "app/SissyCore", "app/SissyTests")
 BASELINE = REPO / ".docref-baseline"
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_(:)]*)*$")
 BACKTICKED = re.compile(r"`([^`]+)`")
+WORD = re.compile(r"\w+")
 MIN_BARE_LENGTH = 4
 
 
@@ -56,14 +57,18 @@ def collect(files: list[pathlib.Path]) -> tuple[dict[str, str], str]:
 
 
 def unresolved(references: dict[str, str], code: str) -> list[str]:
+    words = set(WORD.findall(code))
+
+    def declared(name: str) -> bool:
+        if WORD.fullmatch(name):
+            return name in words
+        return re.search(rf"\b{re.escape(name)}\b", code) is not None
+
     missing = []
     for token in references:
         head = token.split(".")[0]
         tail = token.split(".")[-1].split("(")[0]
-        found = re.search(rf"\b{re.escape(head)}\b", code) and re.search(
-            rf"\b{re.escape(tail)}\b", code
-        )
-        if not found:
+        if not (declared(head) and declared(tail)):
             missing.append(token)
     return sorted(missing)
 
