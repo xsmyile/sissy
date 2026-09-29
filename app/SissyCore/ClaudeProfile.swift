@@ -14,7 +14,6 @@ import Foundation
 /// nonisolated: the aggregator reads it while the emitting provider still
 /// holds its own actor, so an actor hop here would deadlock the pair.
 final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
-
     /// Claude Code rewrites this file on nearly every interaction — project
     /// history, feature counters — so a changed mtime is no evidence anything
     /// this type reads has moved. The floor is what keeps the safety-net poll

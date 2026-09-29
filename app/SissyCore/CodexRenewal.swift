@@ -44,8 +44,9 @@ import Foundation
 /// The actor runs on a serial dispatch queue of its own rather than on the
 /// cooperative pool. Its keychain reads and writes are synchronous calls that
 /// can block for as long as the Security framework takes (up to
-/// `KeychainAccess.suppressorTimeout` behind another reader, longer behind a
-/// dialog), and every linked Codex reader shares this one actor. Awaiting them
+/// `KeychainAccess.suppressorTimeout` behind another reader, and with no bound
+/// at all behind the dialog an interactive read may raise), and every linked
+/// Codex reader shares this one actor, which waits with it. Awaiting them
 /// off the actor instead would open a suspension between reading the item and
 /// consulting what this process holds unsaved, which is exactly where a
 /// renewal landing would hand a reader the refresh token it had just spent.
