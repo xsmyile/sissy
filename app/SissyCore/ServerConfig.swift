@@ -208,7 +208,7 @@ struct ServerConfig: Sendable, Codable {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .defaults
         }
-        return try JSONDecoder().decode(ServerConfig.self, from: Data(contentsOf: url))
+        return try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
     }
 
     /// What a run of the app reads out of `server.json`: the config it runs
@@ -405,6 +405,6 @@ extension KeyedDecodingContainer {
     /// unknown `KeepAwakeMode` written by a newer build is the case that
     /// shape covers.
     fileprivate func lenient<Value: Decodable>(_ key: Key) -> Value? {
-        (try? decodeIfPresent(Value.self, forKey: key)) ?? nil
+        try? decodeIfPresent(Value.self, forKey: key)
     }
 }
