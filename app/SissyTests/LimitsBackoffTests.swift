@@ -41,6 +41,21 @@ final class LimitsBackoffTests: XCTestCase {
         XCTAssertNil(deadline)
     }
 
+    /// An entry whose deadline has passed goes with the next write, whoever
+    /// makes it: the reader it belonged to may never run again, as for an
+    /// account since unlinked.
+    func testAnExpiredEntryIsDroppedByAnotherReadersWrite() async {
+        let store = LimitsBackoffStore(url: url)
+        let gone = LimitsBackoffLedger.claudeWebKey(account: "unlinked")
+        await store.record(Date().addingTimeInterval(-60), for: gone)
+
+        await store.record(Date().addingTimeInterval(900), for: LimitsBackoffLedger.claudeCLIKey)
+
+        let ledger = LimitsBackoffLedger.load(from: url)
+        XCTAssertNil(ledger.blockedUntil[gone])
+        XCTAssertNotNil(ledger.blockedUntil[LimitsBackoffLedger.claudeCLIKey])
+    }
+
     /// The file is input like any other. A date further out than a live
     /// refusal could have earned is not something this build wrote, and
     /// honouring it would silence the reader for as long as it said.
