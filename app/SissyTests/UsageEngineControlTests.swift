@@ -171,7 +171,8 @@ final class UsageEngineControlTests: XCTestCase {
         await engine.setForgeCounter(.comments, enabled: false)
         XCTAssertEqual(try ServerConfig.load(from: configURL).forgeCounters?.comments, false)
         XCTAssertEqual(
-            try ServerConfig.load(from: configURL).forgeCounters?.enabled, [.merged, .issues])
+            try ServerConfig.load(from: configURL).forgeCounters?.enabled,
+            [.merged, .issues, .latest])
 
         await engine.setForgeCounter(.comments, enabled: true)
         XCTAssertEqual(try ServerConfig.load(from: configURL).forgeCounters?.comments, true)
@@ -193,7 +194,7 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertEqual(loaded.forgeCounters?.issues, true)
         // Unnamed stays unset, which reads as on.
         XCTAssertNil(loaded.forgeCounters?.merged)
-        XCTAssertEqual(loaded.forgeCounters?.enabled, [.merged, .issues])
+        XCTAssertEqual(loaded.forgeCounters?.enabled, [.merged, .issues, .latest])
     }
 
     // MARK: The provider switch
