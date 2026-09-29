@@ -108,6 +108,15 @@ actor ClaudeAccountRegistry {
     private var reconciled = false
     /// Whether a `captureActive()` is running, suspended on the vendor or not.
     private var capturing = false
+    /// When the profile endpoint may be asked again after it answered 429.
+    ///
+    /// The endpoint is undocumented and the watch polls every two minutes, so
+    /// a credential it will not identify was otherwise asked about again on
+    /// every tick for as long as the refusal lasted. The wait is the one
+    /// `UsageRequestError.backoffSeconds(retryAfter:)` gives every other
+    /// reader, and it lives in memory only: the archive is not blocked by it,
+    /// just the identification, and a relaunch costs one request.
+    private var identifyRefusedUntil: Date?
     nonisolated private let published = LockedValue(Snapshot())
 
     /// A registry that knows nothing and learns nothing: no keychain, no
@@ -408,10 +417,16 @@ actor ClaudeAccountRegistry {
     @discardableResult
     private func file(credential: Data, markActive: Bool) async -> Bool {
         guard let parsed = ClaudeCredentialBlob.credentials(in: credential) else { return false }
+        if let until = identifyRefusedUntil, until > now() { return false }
         let identity: ClaudeAccountIdentity
         do {
             identity = try await identify(parsed.accessToken)
+            identifyRefusedUntil = nil
         } catch {
+            if case UsageRequestError.rateLimited(let retryAfter) = error {
+                identifyRefusedUntil = now().addingTimeInterval(
+                    UsageRequestError.backoffSeconds(retryAfter: retryAfter))
+            }
             sissyLog("sissy: could not identify a Claude credential: \(error)")
             return false
         }
