@@ -394,7 +394,10 @@ extension ProviderToggles {
 /// Driven by `ForgeCounter.allCases` through the subscript rather than by a
 /// list of keys, so a counter added later is read back without a line here: a
 /// list that missed it would read a switched-off counter as on, and on, for
-/// this setting, means asking the vendor for it again on the next poll.
+/// this setting, means asking the vendor for it again on the next poll. Each
+/// counter's stored property is named after its raw value, which is what the
+/// key is looked up by; `ServerConfigDecodingTests` switches every case off
+/// and fails on one that comes back on.
 extension ForgeCounters {
     init(from decoder: any Decoder) throws {
         let keys = try decoder.container(keyedBy: CodingKeys.self)
