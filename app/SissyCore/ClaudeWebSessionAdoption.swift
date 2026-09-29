@@ -46,13 +46,15 @@ enum ClaudeWebSessionAdoption {
     /// *decides* — especially that it never ends holding none — has to be
     /// provable without the developer's own login keychain taking part.
     struct Store: Sendable {
-        var read: @Sendable (String) -> ClaudeCredentialsLookup
+        var read: @Sendable (String) async -> ClaudeCredentialsLookup
         var write: @Sendable (String, String) throws -> Void
         var delete: @Sendable (String) throws -> Void
 
         static let keychain = Self(
             read: { account in
-                ClaudeWebSessionStore.load(account: account, allowingInteraction: false)
+                await KeychainAccess.offPool {
+                    ClaudeWebSessionStore.load(account: account, allowingInteraction: false)
+                }
             },
             write: { account, session in
                 try ClaudeWebSessionStore.save(session, account: account)
@@ -94,7 +96,7 @@ enum ClaudeWebSessionAdoption {
         remember: @Sendable (ClaudeWebLink) -> Void = { _ in }
     ) async -> Outcome {
         let session: String
-        switch store.read(ClaudeWebSessionStore.unkeyedAccount) {
+        switch await store.read(ClaudeWebSessionStore.unkeyedAccount) {
         case .found(let held):
             session = held.accessToken
         case .absent:
@@ -119,7 +121,7 @@ enum ClaudeWebSessionAdoption {
             return .unidentified
         }
 
-        switch store.read(identity.uuid) {
+        switch await store.read(identity.uuid) {
         case .absent:
             break
         case .interactionRequired, .denied, .unreadable, .timedOut:
@@ -128,12 +130,12 @@ enum ClaudeWebSessionAdoption {
                     + "leaving the unkeyed one where it is")
             return .unreadable
         case .found:
-            return dropSuperseded(session, store: store, account: identity.uuid)
+            return await dropSuperseded(session, store: store, account: identity.uuid)
         }
 
         do {
             try store.write(identity.uuid, session)
-            if case .found(let holding) = store.read(ClaudeWebSessionStore.unkeyedAccount),
+            if case .found(let holding) = await store.read(ClaudeWebSessionStore.unkeyedAccount),
                 holding.accessToken == session
             {
                 try store.delete(ClaudeWebSessionStore.unkeyedAccount)
@@ -168,8 +170,8 @@ enum ClaudeWebSessionAdoption {
     /// way, because the keyed one is never touched.
     private static func dropSuperseded(
         _ session: String, store: Store, account: String
-    ) -> Outcome {
-        if case .found(let holding) = store.read(ClaudeWebSessionStore.unkeyedAccount),
+    ) async -> Outcome {
+        if case .found(let holding) = await store.read(ClaudeWebSessionStore.unkeyedAccount),
             holding.accessToken == session
         {
             do {
