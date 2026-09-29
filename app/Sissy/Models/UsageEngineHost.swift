@@ -513,7 +513,7 @@ final class UsageEngineHost {
     private func noteForgeConnections(_ engine: UsageEngine) {
         let state = engine.forgeIndexState()
         forgeConnections = state.connections
-        orphanedForgeTokens = state.orphanedTokens
+        orphanedForgeTokens = state.orphanedTokens.map(OrphanedForgeToken.init(id:))
         forgeIndexSetAside = state.setAside
         forgeIndexUnreadable = state.unreadable
     }
@@ -605,7 +605,7 @@ final class UsageEngineHost {
     private(set) var forgeConnections: [ForgeConnection] = []
     /// Tokens Sissy holds for a forge no connection names, which Settings
     /// lists so they can be removed.
-    private(set) var orphanedForgeTokens: [String] = []
+    private(set) var orphanedForgeTokens: [OrphanedForgeToken] = []
     /// Whether an unreadable connection index was set aside.
     private(set) var forgeIndexSetAside = false
     /// Whether the connection index is there and would not be read, which
@@ -1323,6 +1323,29 @@ final class UsageEngineHost {
                 if host.isWarm { return }
                 try? await Task.sleep(for: Self.readinessPollInterval)
             }
+        }
+    }
+}
+
+/// A token Sissy holds for a forge no connection names, read once off the
+/// `kind:address` id its keychain item is filed under so no surface parses
+/// that id again.
+struct OrphanedForgeToken: Identifiable, Equatable {
+    let id: String
+    /// Nil for an id this build names no forge in, which is then titled by
+    /// the id itself rather than dropped: it is on the list to be removed.
+    let kind: ForgeKind?
+    let address: String
+
+    init(id: String) {
+        self.id = id
+        let parts = id.split(separator: ":", maxSplits: 1).map(String.init)
+        if parts.count == 2, let kind = ForgeKind(rawValue: parts[0]) {
+            self.kind = kind
+            address = parts[1]
+        } else {
+            kind = nil
+            address = id
         }
     }
 }

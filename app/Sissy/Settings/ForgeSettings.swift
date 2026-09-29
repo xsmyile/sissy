@@ -121,10 +121,9 @@ enum ForgeConnectCopy {
 
     /// A token Sissy holds for a forge no connection names, titled by the
     /// forge and address its keychain item is filed under.
-    static func orphanTitle(_ id: String) -> String {
-        let parts = id.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2, let kind = ForgeKind(rawValue: parts[0]) else { return id }
-        return "\(UsageFormat.forgeName(kind)) · \(parts[1])"
+    static func orphanTitle(_ token: OrphanedForgeToken) -> String {
+        guard let kind = token.kind else { return token.id }
+        return "\(UsageFormat.forgeName(kind)) · \(token.address)"
     }
 
     static let orphanSubtitle = "A token with no connection. Nothing reads it."
@@ -133,12 +132,12 @@ enum ForgeConnectCopy {
     static let removeTokenMessage =
         "Sissy deletes the token it kept for this forge. Nothing about gh, glab or the forge itself changes."
 
-    static func removeTokenTitle(_ id: String) -> String {
-        "Remove the token for \(orphanTitle(id))?"
+    static func removeTokenTitle(_ token: OrphanedForgeToken) -> String {
+        "Remove the token for \(orphanTitle(token))?"
     }
 
-    static func orphanMenu(_ id: String) -> String {
-        "Actions for the token kept for \(orphanTitle(id))"
+    static func orphanMenu(_ token: OrphanedForgeToken) -> String {
+        "Actions for the token kept for \(orphanTitle(token))"
     }
 
     static let orphanMenuHelp = "Remove this token"
@@ -288,7 +287,7 @@ struct ForgeSettingsView: View {
     @State private var disconnecting: ForgeConnection?
     /// The orphaned token `Remove Token…` was chosen for, asked about first
     /// for the reason a disconnect is.
-    @State private var removingToken: String?
+    @State private var removingToken: OrphanedForgeToken?
     /// What the connect sheet is up for, and nil while it is not.
     @State private var connecting: ForgeConnectRequest?
 
@@ -299,8 +298,8 @@ struct ForgeSettingsView: View {
                 ForEach(model.engine.forgeConnections) { connection in
                     row(connection)
                 }
-                ForEach(model.engine.orphanedForgeTokens, id: \.self) { id in
-                    orphanRow(id)
+                ForEach(model.engine.orphanedForgeTokens) { token in
+                    orphanRow(token)
                 }
                 CredentialAddRow(ForgeConnectCopy.connect) { open(.new) }
                     .disabled(model.engine.connectingForge != nil || model.engine.forgeIndexUnreadable)
@@ -333,9 +332,9 @@ struct ForgeSettingsView: View {
             isPresented: Binding(
                 get: { removingToken != nil }, set: { if !$0 { removingToken = nil } }),
             presenting: removingToken
-        ) { id in
+        ) { token in
             Button(ForgeConnectCopy.removeTokenConfirm, role: .destructive) {
-                model.engine.removeOrphanedForgeToken(id: id)
+                model.engine.removeOrphanedForgeToken(id: token.id)
             }
             Button(ForgeConnectCopy.cancel, role: .cancel) {}
         } message: { _ in
@@ -347,21 +346,21 @@ struct ForgeSettingsView: View {
     /// connect or disconnect, or an index set aside, leaves behind. It is on
     /// the list so it can be removed: before it was, nothing on any surface
     /// said the keychain still held it.
-    private func orphanRow(_ id: String) -> some View {
+    private func orphanRow(_ token: OrphanedForgeToken) -> some View {
         CredentialRow(
-            title: ForgeConnectCopy.orphanTitle(id),
+            title: ForgeConnectCopy.orphanTitle(token),
             subtitle: ForgeConnectCopy.orphanSubtitle
         ) {
             CredentialDisc(tint: .secondary) {
-                ForgeMark(host: id)
+                ForgeMark(host: token.id)
             }
         } actions: {
             CredentialRowMenu(
-                label: ForgeConnectCopy.orphanMenu(id),
+                label: ForgeConnectCopy.orphanMenu(token),
                 help: ForgeConnectCopy.orphanMenuHelp
             ) {
                 Button(ForgeConnectCopy.removeTokenItem, role: .destructive) {
-                    removingToken = id
+                    removingToken = token
                 }
             }
             .disabled(model.engine.connectingForge != nil)

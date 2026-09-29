@@ -169,6 +169,15 @@ final class ForgeConnectSheetTests: XCTestCase {
     }
 
     func testAnOrphanedTokenIsTitledByItsForgeAndAddress() {
-        XCTAssertEqual(ForgeConnectCopy.orphanTitle(Self.gitLab.id), "GitLab · gitlab.example.com")
+        XCTAssertEqual(
+            ForgeConnectCopy.orphanTitle(OrphanedForgeToken(id: Self.gitLab.id)),
+            "GitLab · gitlab.example.com")
+    }
+
+    /// An id this build names no forge in keeps its row, titled by the id.
+    func testAnOrphanedTokenOfNoKnownForgeIsTitledByItsID() {
+        XCTAssertEqual(
+            ForgeConnectCopy.orphanTitle(OrphanedForgeToken(id: "gitea:git.example.com")),
+            "gitea:git.example.com")
     }
 }
