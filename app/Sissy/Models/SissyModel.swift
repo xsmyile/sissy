@@ -210,20 +210,6 @@ final class SissyModel {
         )
     }
 
-    // MARK: Menu actions
-
-    func refreshProvider(_ id: String) {
-        engine.refreshProvider(id)
-    }
-
-    func refreshForge(_ id: String) {
-        engine.refreshForge(id)
-    }
-
-    func refreshAll() {
-        engine.refreshAll()
-    }
-
     // MARK: Keep awake
 
     /// A mode the app has asked for and the engine has not answered yet.
@@ -277,14 +263,6 @@ final class SissyModel {
     /// second copy of it here could disagree with the file the assertions are
     /// taken from.
     private(set) var preferredKeepAwakeMode: KeepAwakeMode = .on
-
-    func setAgentHooks(_ enabled: Bool) {
-        engine.setAgentHooks(enabled)
-    }
-
-    func setKeepScreenAwake(_ enabled: Bool) {
-        engine.setKeepScreenAwake(enabled)
-    }
 
     func setKeepAwake(_ mode: KeepAwakeMode) {
         guard mode != keepAwake.mode else { return }
@@ -362,13 +340,6 @@ final class SissyModel {
             let verb = enabled ? "Enable" : "Disable"
             Task { await showError(title: "\(verb) at login failed", message: error.localizedDescription) }
         }
-    }
-
-    /// Forgets everything the archive kept. Nothing else in Sissy deletes a
-    /// user's data, so it is reachable only from Settings and only behind a
-    /// confirmation.
-    func deleteUsageHistory() {
-        engine.deleteUsageHistory()
     }
 
     /// Asks where the archive should go and writes it there as CSV.

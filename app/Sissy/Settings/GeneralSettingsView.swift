@@ -83,7 +83,7 @@ struct GeneralSettingsView: View {
     private var agentHooksBinding: Binding<Bool> {
         Binding(
             get: { model.engine.agentHooks },
-            set: { model.setAgentHooks($0) }
+            set: { model.engine.setAgentHooks($0) }
         )
     }
 
@@ -145,7 +145,7 @@ struct GeneralSettingsView: View {
             "Delete the usage history Sissy has recorded?",
             isPresented: $confirmingDelete
         ) {
-            Button("Delete", role: .destructive) { model.deleteUsageHistory() }
+            Button("Delete", role: .destructive) { model.engine.deleteUsageHistory() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(
@@ -310,7 +310,7 @@ struct GeneralSettingsView: View {
     private var keepScreenAwakeBinding: Binding<Bool> {
         Binding(
             get: { model.engine.keepScreenAwake },
-            set: { model.setKeepScreenAwake($0) }
+            set: { model.engine.setKeepScreenAwake($0) }
         )
     }
 
