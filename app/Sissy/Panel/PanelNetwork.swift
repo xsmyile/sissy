@@ -40,9 +40,6 @@ struct PanelNetwork: View {
 
     private static let rowSpacing: CGFloat = 7
     private static let captionSize: CGFloat = 11
-    private static let swatchWidth: CGFloat = 10
-    private static let swatchHeight: CGFloat = 3
-    private static let figureGap: CGFloat = 14
 
     var body: some View {
         let reading = engine.networkReading
@@ -76,9 +73,9 @@ struct PanelNetwork: View {
     private func headline(_ reading: NetworkReading?) -> some View {
         let current = reading?.current
         return VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: Self.figureGap) {
-                figure(UsageFormat.networkDown(current?.received), tint: NetworkSparkline.downTint)
-                figure(UsageFormat.networkUp(current?.sent), tint: NetworkSparkline.upTint)
+            HStack(spacing: RateFigure.gap) {
+                RateFigure(text: UsageFormat.networkDown(current?.received), tint: NetworkSparkline.downTint)
+                RateFigure(text: UsageFormat.networkUp(current?.sent), tint: NetworkSparkline.upTint)
             }
             .font(.system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded))
             .monospacedDigit()
@@ -89,16 +86,6 @@ struct PanelNetwork: View {
             Text(UsageFormat.networkCaption(reading?.interface))
                 .font(.system(size: Self.captionSize))
                 .foregroundStyle(.secondary)
-        }
-    }
-
-    private func figure(_ text: String, tint: Color) -> some View {
-        HStack(spacing: 5) {
-            Capsule()
-                .fill(tint)
-                .frame(width: Self.swatchWidth, height: Self.swatchHeight)
-            Text(text)
-                .contentTransition(.numericText())
         }
     }
 

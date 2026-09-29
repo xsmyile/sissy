@@ -143,3 +143,28 @@ struct RateSparkline: View {
         }
     }
 }
+
+/// One direction's current rate over a `RateSparkline`, with the swatch of
+/// the series it names, so the figure reads as that series' legend.
+///
+/// Shared by the Network and Disk tabs, which draw the same two-series plot
+/// and so owe it the same legend.
+struct RateFigure: View {
+    let text: String
+    let tint: Color
+
+    /// Between the two figures of one legend.
+    static let gap: CGFloat = 14
+    private static let swatchWidth: CGFloat = 10
+    private static let swatchHeight: CGFloat = 3
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Capsule()
+                .fill(tint)
+                .frame(width: Self.swatchWidth, height: Self.swatchHeight)
+            Text(text)
+                .contentTransition(.numericText())
+        }
+    }
+}
