@@ -502,32 +502,19 @@ struct ForgeSettingsView: View {
     /// governs has no words at all — the panel spends a glyph where it cannot
     /// spend seven characters, so the switch that turns that glyph off is the
     /// one place the two can be seen to be the same thing.
-    ///
-    /// A switch rather than the checkbox a `Toggle` renders as by default in a
-    /// grouped `Form`, which is what every other control in this window is:
-    /// these rows say whether something is on, and a window that answered that
-    /// question two ways would be asking the reader which one meant what. The
-    /// title goes to the `Toggle` and is then hidden, so the control the
-    /// pointer lands on is still named for the reader who cannot see the label
-    /// beside it.
     private func counterRow(_ counter: ForgeCounter) -> some View {
-        LabeledContent {
-            Toggle(
-                ForgeCounterCopy.title(counter),
-                isOn: Binding(
-                    get: { model.engine.forgeCounters[counter] ?? true },
-                    set: { model.engine.setForgeCounter(counter, $0) })
-            )
-            .labelsHidden()
-            .toggleStyle(.switch)
-        } label: {
+        SettingsSwitchRow(
+            ForgeCounterCopy.title(counter), caption: ForgeCounterCopy.caption(counter),
+            isOn: Binding(
+                get: { model.engine.forgeCounters[counter] ?? true },
+                set: { model.engine.setForgeCounter(counter, $0) })
+        ) {
             Label {
                 Text(ForgeCounterCopy.title(counter))
             } icon: {
                 Image(systemName: ProviderPalette.forgeSymbol(counter))
                     .foregroundStyle(ProviderPalette.forgeTint(counter))
             }
-            Text(ForgeCounterCopy.caption(counter))
         }
     }
 }

@@ -304,6 +304,50 @@ struct CredentialRowMenu<Content: View>: View {
     }
 }
 
+/// One on/off row, in the shape `docs/DECISIONS.md`'s height-budget entry
+/// asks every control for: a `LabeledContent` whose label carries the
+/// heading and the caption under it, beside a switch.
+///
+/// A switch rather than the checkbox a `Toggle` renders as by default in a
+/// grouped `Form`, because every row in this window says whether something is
+/// on and a window that answered that two ways would be asking the reader
+/// which one meant what. The title goes to the `Toggle` and is then hidden,
+/// so the control the pointer lands on is still named for a reader who cannot
+/// see the heading beside it.
+struct SettingsSwitchRow<Heading: View>: View {
+    let title: String
+    let caption: String
+    @Binding var isOn: Bool
+    let heading: Heading
+
+    init(
+        _ title: String, caption: String, isOn: Binding<Bool>,
+        @ViewBuilder heading: () -> Heading
+    ) {
+        self.title = title
+        self.caption = caption
+        _isOn = isOn
+        self.heading = heading()
+    }
+
+    var body: some View {
+        LabeledContent {
+            Toggle(title, isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        } label: {
+            heading
+            Text(caption)
+        }
+    }
+}
+
+extension SettingsSwitchRow where Heading == Text {
+    init(_ title: String, caption: String, isOn: Binding<Bool>) {
+        self.init(title, caption: caption, isOn: isOn) { Text(title) }
+    }
+}
+
 /// The ⓘ beside a heading, which is where the paragraph that used to sit under
 /// it now lives.
 ///

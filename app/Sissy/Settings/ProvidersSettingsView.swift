@@ -402,17 +402,15 @@ struct ProvidersSettingsView: View {
     /// carries is nothing — no account, no credential, no identity — which is
     /// why it can be on without being asked for.
     private var statusChecks: some View {
-        LabeledContent {
-            Toggle(ProviderStatusCopy.label, isOn: statusChecksBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
+        SettingsSwitchRow(
+            ProviderStatusCopy.label, caption: ProviderStatusCopy.caption,
+            isOn: statusChecksBinding
+        ) {
             HStack(spacing: 4) {
                 Text(ProviderStatusCopy.label)
                 SettingsInfoButton(
                     title: ProviderStatusCopy.infoTitle, detail: ProviderStatusCopy.detail)
             }
-            Text(ProviderStatusCopy.caption)
         }
     }
 

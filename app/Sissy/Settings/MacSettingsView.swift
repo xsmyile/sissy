@@ -23,56 +23,24 @@ struct MacSettingsView: View {
     }
 
     private var macHealth: some View {
-        LabeledContent {
-            Toggle("Mac health", isOn: macHealthBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
-            Text("Mac health")
-            Text("Memory, swap and load in the panel and the menu bar. Asks for nothing.")
-        }
+        SettingsSwitchRow(
+            "Mac health",
+            caption: "Memory, swap and load in the panel and the menu bar. Asks for nothing.",
+            isOn: Binding(get: { model.engine.macHealth }, set: { model.engine.setMacHealth($0) }))
     }
 
     private var disk: some View {
-        LabeledContent {
-            Toggle("Disk", isOn: diskBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
-            Text("Disk")
-            Text("Free space and volumes in the panel, and a low disk in the menu bar. Asks for nothing.")
-        }
-    }
-
-    private var diskBinding: Binding<Bool> {
-        Binding(
-            get: { model.engine.disk },
-            set: { model.engine.setDisk($0) }
-        )
+        SettingsSwitchRow(
+            "Disk",
+            caption: "Free space and volumes in the panel, and a low disk in the menu bar. "
+                + "Asks for nothing.",
+            isOn: Binding(get: { model.engine.disk }, set: { model.engine.setDisk($0) }))
     }
 
     private var network: some View {
-        LabeledContent {
-            Toggle("Network", isOn: networkBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        } label: {
-            Text("Network")
-            Text("A tab with the rate, the link and the Wi-Fi signal. Asks for nothing.")
-        }
-    }
-
-    private var networkBinding: Binding<Bool> {
-        Binding(
-            get: { model.engine.network },
-            set: { model.engine.setNetwork($0) }
-        )
-    }
-
-    private var macHealthBinding: Binding<Bool> {
-        Binding(
-            get: { model.engine.macHealth },
-            set: { model.engine.setMacHealth($0) }
-        )
+        SettingsSwitchRow(
+            "Network",
+            caption: "A tab with the rate, the link and the Wi-Fi signal. Asks for nothing.",
+            isOn: Binding(get: { model.engine.network }, set: { model.engine.setNetwork($0) }))
     }
 }
