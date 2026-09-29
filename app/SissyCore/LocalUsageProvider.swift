@@ -594,7 +594,7 @@ actor LocalUsageProvider: UsageProvider {
         var written = 0
         var interrupted = false
         for (index, file) in files.enumerated() {
-            _ = ingestNewLines(in: file.url)
+            _ = ingestNewLines(in: file)
             if index % Self.yieldInterval == Self.yieldInterval - 1 {
                 await Task.yield()
                 if Task.isCancelled {
@@ -700,7 +700,7 @@ actor LocalUsageProvider: UsageProvider {
             let files = enumerateJSONLSortedByMTime()
             watchedCounter.store(files.count)
             for file in files {
-                if ingestNewLines(in: file.url) { dirty = true }
+                if ingestNewLines(in: file) { dirty = true }
             }
         } else {
             // Dedup via Set: a single turn can produce multiple events for the
@@ -871,7 +871,7 @@ actor LocalUsageProvider: UsageProvider {
         var lastEmitAt = Date.distantPast
         let emitThrottle = UsageReaderShared.pollEmitThrottle
         for (i, file) in files.enumerated() {
-            if ingestNewLines(in: file.url) { dirtySinceEmit = true }
+            if ingestNewLines(in: file) { dirtySinceEmit = true }
             // Cooperative concurrency: without these yields the actor pins
             // one Swift concurrency thread for the entire backfill scan,
             // starving everything else that awaits on it — the readiness
@@ -920,9 +920,15 @@ actor LocalUsageProvider: UsageProvider {
     /// the ordering as a guarantee: files come newest first, so once a file of
     /// mtime `M` has been consumed no unread file can hold an event later than
     /// `M`, and every day after `M`'s is therefore complete.
+    ///
+    /// The size rides with it so the read that follows gates on the stat the
+    /// enumerator already prefetched rather than taking a second one: measured
+    /// 2026-09-29, 1,989 files under `~/.claude/projects` and 607 under
+    /// `~/.codex/sessions`, each stated twice a poll.
     private struct ScannedFile {
         let url: URL
         let mtime: TimeInterval
+        let size: UInt64
     }
 
     /// Every `.jsonl` under the tree, newest first. Any name is accepted —
@@ -940,15 +946,21 @@ actor LocalUsageProvider: UsageProvider {
         var candidates: [ScannedFile] = []
         while let u = it.nextObject() as? URL {
             guard u.pathExtension == "jsonl" else { continue }
-            guard let attrs = try? FileManager.default.attributesOfItem(atPath: u.path),
-                let mtimeDate = attrs[.modificationDate] as? Date
+            guard
+                let values = try? u.resourceValues(forKeys: [
+                    .contentModificationDateKey, .fileSizeKey,
+                ]),
+                let mtimeDate = values.contentModificationDate,
+                let size = values.fileSize
             else { continue }
             if mtimeDate < cutoff, fileOffsets[u] == nil {
                 // Stale file we've never read; its data is outside the
                 // retain window so skip permanently.
                 continue
             }
-            candidates.append(ScannedFile(url: u, mtime: mtimeDate.timeIntervalSince1970))
+            candidates.append(
+                ScannedFile(
+                    url: u, mtime: mtimeDate.timeIntervalSince1970, size: UInt64(size)))
         }
         candidates.sort { $0.mtime > $1.mtime }
         return candidates
@@ -1104,7 +1116,15 @@ actor LocalUsageProvider: UsageProvider {
             let mtimeDate = attrs[.modificationDate] as? Date,
             let size = (attrs[.size] as? NSNumber)?.uint64Value
         else { return false }
-        let mtime = mtimeDate.timeIntervalSince1970
+        return ingestNewLines(in: url, mtime: mtimeDate.timeIntervalSince1970, size: size)
+    }
+
+    /// `ingestNewLines(in:)` for a file the enumerator has just stated.
+    private func ingestNewLines(in file: ScannedFile) -> Bool {
+        ingestNewLines(in: file.url, mtime: file.mtime, size: file.size)
+    }
+
+    private func ingestNewLines(in url: URL, mtime: TimeInterval, size: UInt64) -> Bool {
 
         let prevMTime = fileMTimes[url] ?? 0
         let prevOffset = fileOffsets[url] ?? 0
