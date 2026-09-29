@@ -757,6 +757,7 @@ final class UsageEngineHost {
             if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
                 try? await Task.sleep(for: rest)
             }
+            guard !Task.isCancelled else { return }
             refreshing.remove(id)
             refreshTasks[id] = nil
         }
@@ -776,6 +777,7 @@ final class UsageEngineHost {
             if let rest = Self.remainingFloor(elapsed: ContinuousClock.now - startedAt) {
                 try? await Task.sleep(for: rest)
             }
+            guard !Task.isCancelled else { return }
             refreshingForge.remove(id)
             refreshTasks[id] = nil
         }
