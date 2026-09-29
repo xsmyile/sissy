@@ -145,6 +145,17 @@ enum KeychainAccess {
 
     private static let interactionLock = NSLock()
 
+    /// Runs a blocking keychain read on a dispatch thread and resumes with its
+    /// answer, so it parks that thread rather than one of the cooperative
+    /// pool's, which the whole runtime shares. For a read that needs no gate
+    /// and no budget of its own: `suppressingInteraction` already bounds the
+    /// wait behind another reader.
+    static func offPool<Value: Sendable>(_ read: @escaping @Sendable () -> Value) async -> Value {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async { continuation.resume(returning: read()) }
+        }
+    }
+
     /// What one `SecItemCopyMatching` outcome means. Pure, because this is the
     /// mapping that decides whether the probe keeps polling or stops for good,
     /// and it has to be testable without a keychain.
