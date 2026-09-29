@@ -64,21 +64,43 @@ enum CodexAuthSource {
     }
 
     static func read(at url: URL) -> Reading {
+        switch file(at: url) {
+        case .signedIn(let root): return parse(root: root).map(Reading.found) ?? .unreadable
+        case .signedOut: return .signedOut
+        case .missing: return .missing
+        case .notJSON, .unreadable: return .unreadable
+        }
+    }
+
+    /// What reading `auth.json` found before either question is asked of it.
+    private enum File {
+        case signedIn([String: Any])
+        case signedOut
+        case missing
+        case notJSON
+        case unreadable
+    }
+
+    /// The file read and parsed once, for both `read` and `credential`: a
+    /// file with no tokens, or one driving the API on a key, is signed out
+    /// whichever question is asked.
+    private static func file(at url: URL) -> File {
+        let data: Data
         do {
-            let data = try Data(contentsOf: url)
-            guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return .unreadable
-            }
-            let tokens = root["tokens"]
-            if root["auth_mode"] as? String == "apikey" || tokens == nil || tokens is NSNull {
-                return .signedOut
-            }
-            return parse(data).map(Reading.found) ?? .unreadable
+            data = try Data(contentsOf: url)
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             return .missing
         } catch {
             return .unreadable
         }
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .notJSON
+        }
+        let tokens = root["tokens"]
+        if root["auth_mode"] as? String == "apikey" || tokens == nil || tokens is NSNull {
+            return .signedOut
+        }
+        return .signedIn(root)
     }
 
     /// `auth.json` sits beside the rollout tree in Codex's home, so the path
@@ -101,23 +123,16 @@ enum CodexAuthSource {
     /// sign in is one Sissy may not renew — the token is one-time, and the
     /// copy the CLI keeps stops working the moment Sissy spends it.
     static func credential(at url: URL) -> CodexCredentialReading {
-        do {
-            let data = try Data(contentsOf: url)
-            guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return .unreadable("auth.json is not JSON")
-            }
-            let tokens = root["tokens"]
-            if root["auth_mode"] as? String == "apikey" || tokens == nil || tokens is NSNull {
-                return .signedOut
-            }
-            guard let credential = credential(data, renewable: false) else {
+        switch file(at: url) {
+        case .signedIn(let root):
+            guard let credential = credential(root: root, renewable: false) else {
                 return .unreadable("auth.json holds no access token")
             }
             return .found(credential)
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            return .missing
-        } catch {
-            return .unreadable("auth.json could not be read")
+        case .signedOut: return .signedOut
+        case .missing: return .missing
+        case .notJSON: return .unreadable("auth.json is not JSON")
+        case .unreadable: return .unreadable("auth.json could not be read")
         }
     }
 
@@ -130,8 +145,14 @@ enum CodexAuthSource {
     /// "Sissy never renews the CLI's credential" a property of the value
     /// rather than a rule every caller has to remember.
     static func credential(_ data: Data, renewable: Bool) -> CodexCredential? {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let tokens = root["tokens"] as? [String: Any],
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return credential(root: root, renewable: renewable)
+    }
+
+    private static func credential(root: [String: Any], renewable: Bool) -> CodexCredential? {
+        guard let tokens = root["tokens"] as? [String: Any],
             let accessToken = tokens["access_token"] as? String, !accessToken.isEmpty
         else { return nil }
         let idToken = tokens["id_token"] as? String
@@ -157,8 +178,14 @@ enum CodexAuthSource {
     }
 
     static func parse(_ data: Data) -> Identity? {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let tokens = root["tokens"] as? [String: Any],
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return parse(root: root)
+    }
+
+    private static func parse(root: [String: Any]) -> Identity? {
+        guard let tokens = root["tokens"] as? [String: Any],
             let idToken = tokens["id_token"] as? String,
             let claims = claims(inJWT: idToken)
         else { return nil }
@@ -177,7 +204,7 @@ enum CodexAuthSource {
     /// identity stays unknown; it is not a reason to invent an account key.
     private static func fingerprint(claims: [String: Any], auth: [String: Any]) -> String? {
         let parts = [
-            claims["sub"] as? String, auth["chatgpt_account_id"] as? String,
+            claims["sub"] as? String, auth[accountClaimKey] as? String,
             claims[emailClaimKey] as? String,
         ]
         guard parts.contains(where: { $0 != nil }),
