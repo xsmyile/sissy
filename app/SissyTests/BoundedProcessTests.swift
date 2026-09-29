@@ -17,10 +17,14 @@ final class BoundedProcessTests: XCTestCase {
 
     /// A child that ignores `SIGTERM` is killed once the grace has passed,
     /// rather than holding the caller for as long as it likes.
+    ///
+    /// The deadline leaves the shell time to install its trap first: at
+    /// 0.2 s a loaded CI runner delivered the `SIGTERM` before the trap ran,
+    /// and the child died of it (status 15) rather than of the kill.
     func testAChildThatIgnoresTerminationIsKilled() throws {
         let started = Date()
         let outcome = try BoundedProcess.run(
-            Self.shell, ["-c", "trap '' TERM; exec sleep 30"], timeout: 0.2)
+            Self.shell, ["-c", "trap '' TERM; exec sleep 30"], timeout: 1.5)
         XCTAssertEqual(outcome.reason, .uncaughtSignal)
         XCTAssertEqual(outcome.status, SIGKILL)
         XCTAssertLessThan(Date().timeIntervalSince(started), 10)
