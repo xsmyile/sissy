@@ -339,8 +339,6 @@ final class DiskConfigTests: XCTestCase {
     }
 }
 
-/// A disk read that blocks its thread until released, the way a stuck
-/// volume would.
 /// The single-read gate, driven by hand: one waiter at a time, answered by
 /// `finish` or by its own cancel.
 final class DiskReadGateTests: XCTestCase {
@@ -385,6 +383,8 @@ final class DiskReadGateTests: XCTestCase {
     }
 }
 
+/// A disk read that blocks its thread until released, the way a stuck
+/// volume would.
 private final class StuckRead: @unchecked Sendable {
     let entered = XCTestExpectation(description: "the read began")
     let returned = XCTestExpectation(description: "the read returned")
