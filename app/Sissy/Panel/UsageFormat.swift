@@ -1286,14 +1286,16 @@ extension UsageFormat {
     /// how many repositories the answer covers are the heading's, as of
     /// 2026-09-28: the line led with both when it was the one block on the page
     /// without a heading, and a finding naming a repository still truncated
-    /// behind them. "No findings" rather than "commit as expected": a
-    /// repository with no remote or a lone account is read and not judged,
-    /// and a line claiming it agrees would claim a verdict the page does not
-    /// give.
+    /// behind them. The verdict is two words after a middle dot for the same
+    /// reason: measured 2026-09-29, a finding reading "owner/repo commits under
+    /// an unexpected name" still truncated mid-sentence under the heading. "No
+    /// findings" rather than "commit as expected": a repository with no remote
+    /// or a lone account is read and not judged, and a line claiming it agrees
+    /// would claim a verdict the page does not give.
     static func identityLine(unexpected: [String], checked: Int) -> String {
         switch unexpected.count {
-        case 1: return "\(unexpected[0]) commits under an unexpected name"
-        case 2...: return "\(unexpected.count) repositories commit under an unexpected name"
+        case 1: return "\(unexpected[0]) · unexpected name"
+        case 2...: return "\(unexpected.count) repositories · unexpected name"
         default: return checked > 0 ? "No findings" : "Nothing read yet"
         }
     }
