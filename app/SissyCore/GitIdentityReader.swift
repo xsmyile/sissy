@@ -48,14 +48,6 @@ enum GitIdentityReader {
     /// Longer than three `git config` reads need by any margin, and short
     /// enough that a repository on a sleeping volume does not hold a sweep.
     static let timeoutSeconds: TimeInterval = 10
-    /// What a child gets to exit in after `SIGTERM` before it is killed.
-    ///
-    /// Terminating is a request, and a process wedged on a network mount or a
-    /// disk that has stopped answering does not get to read it — while this
-    /// caller is inside a blocking `readDataToEndOfFile`, so a child that
-    /// never dies takes the sweep loop with it for the life of the app, and
-    /// the panel's own refresh with it.
-    static let killGraceSeconds: TimeInterval = 2
 
     /// Where a real `git` is, in the order a Mac is likely to have one.
     ///
@@ -323,11 +315,8 @@ enum GitIdentityReader {
         return environment
     }
 
-    /// One bounded invocation.
-    ///
-    /// Both pipes are drained, and standard error on a queue of its own: a
-    /// pipe nobody reads blocks the child once the kernel buffer fills, and
-    /// reading them in sequence is the same deadlock with a longer fuse.
+    /// One bounded invocation, through `BoundedProcess`, with both of its
+    /// output streams read.
     ///
     /// UTF-8 first and Latin-1 behind it. A committer's name is free text in
     /// a file git never validated, and every byte is a Latin-1 character — so
@@ -336,43 +325,18 @@ enum GitIdentityReader {
     private static func run(
         _ tool: URL, _ arguments: [String], in directory: String?, environment: [String: String]
     ) -> GitOutput {
-        let process = Process()
-        process.executableURL = tool
-        process.arguments = arguments
-        process.environment = environment
-        if let directory { process.currentDirectoryURL = URL(fileURLWithPath: directory) }
-        let out = Pipe()
-        let errors = Pipe()
-        process.standardOutput = out
-        process.standardError = errors
-        process.standardInput = FileHandle.nullDevice
         do {
-            try process.run()
+            let outcome = try BoundedProcess.run(
+                tool, arguments, environment: environment,
+                directory: directory.map { URL(fileURLWithPath: $0) }, captureErrors: true,
+                timeout: timeoutSeconds)
+            return GitOutput(
+                status: outcome.status,
+                output: Self.text(outcome.output),
+                failure: Self.text(outcome.errors))
         } catch {
             return GitOutput(status: -1, output: "", failure: "\(error)")
         }
-        let collected = LockedValue(Data())
-        let draining = DispatchGroup()
-        DispatchQueue.global(qos: .utility).async(group: draining) {
-            let data = errors.fileHandleForReading.readDataToEndOfFile()
-            collected.update { $0 = data }
-        }
-        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        let executioner = DispatchWorkItem {
-            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-        }
-        let queue = DispatchQueue.global(qos: .utility)
-        queue.asyncAfter(deadline: .now() + timeoutSeconds, execute: watchdog)
-        queue.asyncAfter(deadline: .now() + timeoutSeconds + killGraceSeconds, execute: executioner)
-        let output = out.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        draining.wait()
-        watchdog.cancel()
-        executioner.cancel()
-        return GitOutput(
-            status: process.terminationStatus,
-            output: Self.text(output),
-            failure: Self.text(collected.load()))
     }
 }
 
