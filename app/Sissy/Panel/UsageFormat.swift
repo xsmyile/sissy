@@ -447,7 +447,7 @@ enum UsageFormat {
             let day = shortfall(
                 days: days, earliestDay: earliestDay, now: now, calendar: calendar)
         else { return "Last \(days) days" }
-        return "Since \(day.formatted(.dateTime.day().month(.abbreviated)))"
+        return "Since " + sinceDay(day)
     }
 
     /// The first day the archive holds inside a window, when it falls short of
@@ -470,7 +470,12 @@ enum UsageFormat {
 
     /// Lowercase because it lands mid-line, after the tokens it qualifies.
     private static func since(_ day: Date) -> String {
-        "since \(day.formatted(.dateTime.day().month(.abbreviated)))"
+        "since " + sinceDay(day)
+    }
+
+    /// The first day a window holds, as both labels above word it: `11 Sept`.
+    private static func sinceDay(_ day: Date) -> String {
+        day.formatted(.dateTime.day().month(.abbreviated))
     }
 
     /// The period control's own label for a window, in its menu.
