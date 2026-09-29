@@ -31,9 +31,11 @@ final class SissyModel {
     init(
         loginItem: LoginItemController = LoginItemController(),
         updates: UpdateController = UpdateController(),
-        supportDirectory: URL = Preferences.appSupportDir()
+        supportDirectory: URL = Preferences.appSupportDir(),
+        keepAwakeAckWait: @escaping @Sendable () async -> Void = SissyModel.waitOutKeepAwakeAck
     ) {
         self.supportDirectory = supportDirectory
+        self.keepAwakeAckWait = keepAwakeAckWait
         self.preferences = .load(from: supportDirectory)
         self.loginItem = loginItem
         self.updates = updates
@@ -232,6 +234,14 @@ final class SissyModel {
     /// the Mac.
     private static let keepAwakeAckWindow: TimeInterval = 5
 
+    /// What `expire` waits on before it drops an unanswered request: the
+    /// window in real time, injected so a test can end it without waiting.
+    @ObservationIgnored private let keepAwakeAckWait: @Sendable () async -> Void
+
+    nonisolated static func waitOutKeepAwakeAck() async {
+        try? await Task.sleep(for: .seconds(keepAwakeAckWindow))
+    }
+
     /// The keep-awake state as the panel should draw it.
     ///
     /// Falls back to the mode the engine booted with rather than to `off`,
@@ -278,8 +288,9 @@ final class SissyModel {
     /// on whatever frame happens to land next, which on a quiet Mac is a
     /// minute away.
     private func expire(_ request: PendingKeepAwake) {
+        let wait = keepAwakeAckWait
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.keepAwakeAckWindow))
+            await wait()
             guard let self, pendingKeepAwake == request else { return }
             pendingKeepAwake = nil
         }
