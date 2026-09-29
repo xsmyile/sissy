@@ -49,7 +49,6 @@ enum ForgeConnectCopy {
 
     static let pathPrompt = "Path, if served under one (optional)"
     static let tokenPrompt = "Token"
-    static let cancel = "Cancel"
     static let confirm = "Connect"
     static let reconnectConfirm = "Reconnect"
     static let connecting = "Connecting…"
@@ -622,7 +621,7 @@ struct ForgeConnectSheet: View {
                     .disabled(busy)
                 }
                 Spacer()
-                Button(ForgeConnectCopy.cancel) { dismiss() }
+                Button(DialogCopy.cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(busy ? ForgeConnectCopy.connecting : confirmTitle) {
                     guard let connection else { return }

@@ -1675,6 +1675,12 @@ extension UsageFormat {
     private static let wholeDollarRateFloor: Double = 10
 }
 
+/// The words every dialog, sheet and confirmation in the app shares, so a
+/// button that means the same thing everywhere is spelt once.
+enum DialogCopy {
+    static let cancel = "Cancel"
+}
+
 /// What a failed account switch says.
 ///
 /// Each case is a different thing for the user to do, which is why they are
@@ -1707,7 +1713,6 @@ enum ClaudeAccountSwitchCopy {
     /// lands in the day beside it. Only shown once there is more than one.
     static let signedInBadge = "· in CLI"
     static let confirmAction = "Switch"
-    static let confirmCancel = "Cancel"
 
     /// Shown while the credential is written and the reading behind it
     /// re-read. It is a keychain write plus a network round trip, so without
@@ -1780,7 +1785,6 @@ enum CodexResetCopy {
     static let useHelp = "Spend one reset to put this account's windows back to zero"
     static let confirmTitle = "Use a reset now?"
     static let confirmAction = "Use reset"
-    static let confirmCancel = "Cancel"
     static let retry = "Try again"
     static let spending = "Spending a reset…"
     /// What the vendor calls the only kind of reset measured, when a reset

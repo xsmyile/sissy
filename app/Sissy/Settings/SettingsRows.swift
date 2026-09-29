@@ -44,8 +44,6 @@ extension SettingsSwitchRow where Heading == Text {
     }
 }
 
-private let removalCancelTitle = "Cancel"
-
 extension View {
     /// A removal asked about before it runs: raised while `item` holds what
     /// the row's menu chose, and dropped by either button.
@@ -68,7 +66,7 @@ extension View {
             presenting: item.wrappedValue
         ) { value in
             Button(confirm, role: .destructive) { action(value) }
-            Button(removalCancelTitle, role: .cancel) {}
+            Button(DialogCopy.cancel, role: .cancel) {}
         } message: { _ in
             Text(message)
         }

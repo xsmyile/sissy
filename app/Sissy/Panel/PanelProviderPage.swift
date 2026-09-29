@@ -356,7 +356,7 @@ struct PanelProviderPage: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button(ClaudeAccountSwitchCopy.confirmCancel) { pendingAccount = nil }
+                Button(DialogCopy.cancel) { pendingAccount = nil }
                     .keyboardShortcut(.cancelAction)
                 Button(ClaudeAccountSwitchCopy.confirmAction) {
                     pendingAccount = nil
@@ -676,7 +676,7 @@ struct PanelProviderPage: View {
                     available: resets.available, naturalReset: naturalReset))
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
-                Button(CodexResetCopy.confirmCancel) { confirmingReset = nil }
+                Button(DialogCopy.cancel) { confirmingReset = nil }
                     .keyboardShortcut(.cancelAction)
                 Button(CodexResetCopy.confirmAction) {
                     confirmingReset = nil
