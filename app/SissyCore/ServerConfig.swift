@@ -103,9 +103,8 @@ struct ServerConfig: Sendable, Codable {
     /// user opened the app for, it carries no account, no credential and no
     /// identity, and the request is one a browser tab would make anyway. Off
     /// is for the Mac that is to make no request Sissy was not asked for.
-    /// Non-optional, so a `server.json` written before this key existed falls
-    /// through the partial-config path below and lands on the default, which
-    /// is what `keepScreenAwake` already does.
+    /// Non-optional, and a `server.json` written before this key existed
+    /// lands on the default, which is what `keepScreenAwake` already does.
     var statusChecks: Bool
     var providers: ProviderToggles
     /// How many days of the day-by-model archive Sissy keeps. `nil` means the
@@ -125,8 +124,7 @@ struct ServerConfig: Sendable, Codable {
     /// expects. Off is for the Mac left running agents unattended: the display
     /// sleeps and the Mac locks itself on its usual schedule while the system
     /// assertion keeps the work going. A `server.json` written before this key
-    /// existed decodes through the partial-config path below and lands on the
-    /// default, which is the behaviour it already had.
+    /// existed lands on the default, which is the behaviour it already had.
     var keepScreenAwake: Bool
     /// Whether Sissy registers a `SessionStart` hook with the CLIs it meters,
     /// so a session writes down which repository its directory belongs to
@@ -144,8 +142,7 @@ struct ServerConfig: Sendable, Codable {
     /// could not rewrite — is retried at the next launch. Without it the
     /// switch is already off and nothing would ever go back for the line left
     /// in someone else's configuration. Like `keepScreenAwake`, a
-    /// `server.json` written before this key existed decodes through the
-    /// partial-config path below and lands on the default.
+    /// `server.json` written before this key existed lands on the default.
     var agentHooksRemovalPending: Bool
 
     /// Which counters each forge row carries, and therefore which ones are
@@ -158,8 +155,8 @@ struct ServerConfig: Sendable, Codable {
     ///
     /// On: the reading asks for no permission, holds no entitlement and makes
     /// no request, which is what lets a default switch it on. Like
-    /// `statusChecks`, a `server.json` written before this key existed falls
-    /// through the partial-config path below and lands on the default.
+    /// `statusChecks`, a `server.json` written before this key existed lands
+    /// on the default.
     var macHealth: Bool
 
     /// Whether Sissy reads the disks, for the Disk tab and the menu bar's dot,
@@ -211,15 +208,7 @@ struct ServerConfig: Sendable, Codable {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .defaults
         }
-        let data = try Data(contentsOf: url)
-        let decoder = JSONDecoder()
-        do {
-            return try decoder.decode(ServerConfig.self, from: data)
-        } catch {
-            // Partial config OK: fall back to defaults and overlay decodable keys.
-            let merged = try mergeWithDefaults(data: data) ?? .defaults
-            return merged
-        }
+        return try JSONDecoder().decode(ServerConfig.self, from: Data(contentsOf: url))
     }
 
     /// What a run of the app reads out of `server.json`: the config it runs
@@ -276,60 +265,6 @@ struct ServerConfig: Sendable, Codable {
             sissyLog("sissy: could not copy \(url.path) aside: \(error)")
             return nil
         }
-    }
-
-    /// The counter switches out of a partly-readable file, key by key.
-    ///
-    /// This path is what a file with one unreadable field falls through, so a
-    /// counter left out of it would come back **on** — and on, for this
-    /// setting, means asking the vendor for it again on the next poll. A
-    /// switch a neighbouring key's typo silently undoes is worse than no
-    /// switch. Its own function because the overlay above is already at the
-    /// complexity the linter allows, and this reads as one question anyway.
-    private static func forgeCounters(in obj: [String: Any]) -> ForgeCounters? {
-        guard let counters = obj["forgeCounters"] as? [String: Any] else { return nil }
-        var switches = ForgeCounters.defaults
-        for counter in ForgeCounter.allCases {
-            switches[counter] = counters[counter.rawValue] as? Bool
-        }
-        return switches
-    }
-
-    private static func mergeWithDefaults(data: Data) throws -> ServerConfig? {
-        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        var merged = defaults
-        if let v = obj["claudeDataDir"] as? String { merged.claudeDataDir = v }
-        if let v = obj["codexDataDir"] as? String { merged.codexDataDir = v }
-        if let v = obj["pollIntervalSeconds"] as? Double { merged.pollIntervalSeconds = v }
-        if let v = obj["remotePricing"] as? Bool { merged.remotePricing = v }
-        if let v = obj["historyRetentionDays"] as? Int { merged.historyRetentionDays = v }
-        // An unknown mode reads as off rather than failing the whole file: a
-        // value written by a newer build must not cost the user every other
-        // setting in here.
-        merged.keepAwake = (obj["keepAwake"] as? String).flatMap(KeepAwakeMode.init(rawValue:)) ?? .off
-        if let v = obj["keepScreenAwake"] as? Bool { merged.keepScreenAwake = v }
-        if let v = obj["statusChecks"] as? Bool { merged.statusChecks = v }
-        if let v = obj["agentHooks"] as? Bool { merged.agentHooks = v }
-        if let v = obj["agentHooksRemovalPending"] as? Bool { merged.agentHooksRemovalPending = v }
-        if let prov = obj["providers"] as? [String: Any] {
-            var toggles = ProviderToggles.defaults
-            toggles.claudeCode = prov["claudeCode"] as? Bool
-            toggles.codex = prov["codex"] as? Bool
-            merged.providers = toggles
-        }
-        merged.forgeCounters = forgeCounters(in: obj) ?? merged.forgeCounters
-        merged.macHealth = obj["macHealth"] as? Bool ?? merged.macHealth
-        merged.disk = obj["disk"] as? Bool ?? merged.macHealth
-        merged.network = obj["network"] as? Bool ?? merged.network
-        if let raw = obj["pricingOverride"],
-            let nested = try? JSONSerialization.data(withJSONObject: raw),
-            let decoded = try? JSONDecoder().decode([String: ModelPricing].self, from: nested)
-        {
-            merged.pricingOverride = decoded
-        }
-        return merged
     }
 
     /// Atomic write to disk. Used by the engine's runtime config-change paths
@@ -401,5 +336,75 @@ struct ServerConfig: Sendable, Codable {
 
     var remotePricingEnabled: Bool {
         remotePricing ?? true
+    }
+}
+
+/// One decoder for the whole file, key by key.
+///
+/// The file is hand-editable, so a key can be absent, because the file
+/// predates it, or unreadable, because of a typo. Either lands that key on its
+/// default and costs nothing else: a switch a neighbouring key's typo silently
+/// undid would be worse than no switch, and for a forge counter on means
+/// asking the vendor for it again on the next poll. A file that is not an
+/// object at all reads as the defaults. Only bytes that are not JSON throw,
+/// which `loadForRun` answers for.
+///
+/// One decoder rather than the synthesized one with an overlay behind it,
+/// because two had to be kept in step by hand, and a key added to only one of
+/// them would have every existing file read it as its default.
+extension ServerConfig {
+    init(from decoder: any Decoder) throws {
+        guard let keys = try? decoder.container(keyedBy: CodingKeys.self) else {
+            self = .defaults
+            return
+        }
+        let defaults = Self.defaults
+        claudeDataDir = keys.lenient(.claudeDataDir) ?? defaults.claudeDataDir
+        codexDataDir = keys.lenient(.codexDataDir) ?? defaults.codexDataDir
+        pollIntervalSeconds = keys.lenient(.pollIntervalSeconds) ?? defaults.pollIntervalSeconds
+        pricingOverride = keys.lenient(.pricingOverride) ?? defaults.pricingOverride
+        remotePricing = keys.lenient(.remotePricing) ?? defaults.remotePricing
+        statusChecks = keys.lenient(.statusChecks) ?? defaults.statusChecks
+        providers = keys.lenient(.providers) ?? defaults.providers
+        historyRetentionDays = keys.lenient(.historyRetentionDays) ?? defaults.historyRetentionDays
+        keepAwake = keys.lenient(.keepAwake) ?? defaults.keepAwake
+        keepScreenAwake = keys.lenient(.keepScreenAwake) ?? defaults.keepScreenAwake
+        agentHooks = keys.lenient(.agentHooks) ?? defaults.agentHooks
+        agentHooksRemovalPending =
+            keys.lenient(.agentHooksRemovalPending) ?? defaults.agentHooksRemovalPending
+        forgeCounters = keys.lenient(.forgeCounters) ?? defaults.forgeCounters
+        macHealth = keys.lenient(.macHealth) ?? defaults.macHealth
+        disk = keys.lenient(.disk) ?? macHealth
+        network = keys.lenient(.network) ?? defaults.network
+    }
+}
+
+/// Key by key for the same reason as the file around it: one unreadable
+/// provider toggle must not reset the other.
+extension ProviderToggles {
+    init(from decoder: any Decoder) throws {
+        let keys = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(claudeCode: keys.lenient(.claudeCode), codex: keys.lenient(.codex))
+    }
+}
+
+/// Key by key, so a typo in one counter's switch leaves every other one as the
+/// user set it rather than switching them all back on.
+extension ForgeCounters {
+    init(from decoder: any Decoder) throws {
+        let keys = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            merged: keys.lenient(.merged), issues: keys.lenient(.issues),
+            comments: keys.lenient(.comments), latest: keys.lenient(.latest))
+    }
+}
+
+extension KeyedDecodingContainer {
+    /// The value under `key`, or nil when it is absent, null or of a shape
+    /// that does not decode, which a hand-edited file is free to hold. An
+    /// unknown `KeepAwakeMode` written by a newer build is the case that
+    /// shape covers.
+    fileprivate func lenient<Value: Decodable>(_ key: Key) -> Value? {
+        (try? decodeIfPresent(Value.self, forKey: key)) ?? nil
     }
 }
