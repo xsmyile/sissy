@@ -14,8 +14,6 @@ import Foundation
 /// nonisolated: the aggregator reads it while the emitting provider still
 /// holds its own actor, so an actor hop here would deadlock the pair.
 final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
-    private static let fileName = ".claude.json"
-    private static let configDirEnvVar = "CLAUDE_CONFIG_DIR"
 
     /// Claude Code rewrites this file on nearly every interaction — project
     /// history, feature counters — so a changed mtime is no evidence anything
@@ -27,19 +25,6 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     /// a user checks against their spend cap is worth a 320 KB parse a minute,
     /// which costs about a millisecond.
     private static let minimumReparseInterval: TimeInterval = 60
-
-    /// Claude Code's config file, in the config home the CLI resolves for
-    /// itself: `CLAUDE_CONFIG_DIR` when set, `$HOME` otherwise — the same
-    /// env-var deference `ServerConfig.resolvedCodexDataDir` pays `CODEX_HOME`.
-    /// Deliberately not derived from `claudeDataDir`: that setting points at
-    /// the projects tree, which is not where this file lives.
-    static var defaultURL: URL {
-        let configured = ProcessInfo.processInfo.environment[configDirEnvVar]
-        let configHome =
-            configured.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
-            ?? URL(fileURLWithPath: NSHomeDirectory())
-        return configHome.appendingPathComponent(fileName)
-    }
 
     private let url: URL
     private let lock = NSLock()
@@ -113,8 +98,22 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
         case unreadable
     }
 
-    init(url: URL = ClaudeProfileSource.defaultURL) {
+    /// `url` is the config file of the home being read, which is
+    /// `ProviderHome.claudeProfileURL` everywhere Sissy reads one: that is the
+    /// one place the CLI's own rule for where the file lives is written.
+    init(url: URL) {
         self.url = url
+    }
+
+    /// A source that reads nothing: its file sits in a directory nobody
+    /// creates, so every read answers absent. The default everywhere a tail is
+    /// built without a profile, so a test never reads the developer's own
+    /// `.claude.json`.
+    static func inert() -> ClaudeProfileSource {
+        ClaudeProfileSource(
+            url: FileManager.default.temporaryDirectory
+                .appendingPathComponent("sissy-inert-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent(AccountDefaults.claudeLegacyProfileName))
     }
 
     /// Plan, tier, account and credits as the CLI's config last named them.

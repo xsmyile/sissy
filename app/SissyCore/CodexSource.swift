@@ -144,16 +144,6 @@ final class CodexAdapter: SourceAdapter {
         )
     }
 
-    /// Resolves the default rollout directory. Honors `CODEX_HOME` if set
-    /// (matches `codex` CLI semantics) so an installation that relocates the
-    /// home (e.g. dotfile manager symlinking) still gets picked up.
-    static func defaultDir() -> URL {
-        if let home = ProcessInfo.processInfo.environment["CODEX_HOME"], !home.isEmpty {
-            return URL(fileURLWithPath: home).appendingPathComponent("sessions")
-        }
-        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/sessions")
-    }
-
     func cost(of totals: UsageHistoryTotals, model: String) -> Decimal? {
         guard OpenAIPricing.price(for: model, override: pricingOverride, catalog: priceCatalog) != nil
         else { return nil }
@@ -852,7 +842,7 @@ final class CodexAdapter: SourceAdapter {
 extension LocalUsageProvider {
     /// Codex's tail.
     static func codex(
-        codexDir: URL = CodexAdapter.defaultDir(),
+        codexDir: URL,
         id: String = ProviderID.codex,
         retainDays: Int = LocalUsageProvider.defaultRetainDays,
         pollInterval: Duration = .seconds(60),

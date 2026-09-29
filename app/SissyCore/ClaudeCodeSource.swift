@@ -771,8 +771,7 @@ extension LocalUsageProvider {
     /// persistence path where callers pass one — existing installs already
     /// wrote it, and renaming it would strand their offsets.
     static func claudeCode(
-        claudeDir: URL = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(".claude/projects"),
+        claudeDir: URL,
         id: String = ProviderID.claudeCode,
         retainDays: Int = LocalUsageProvider.defaultRetainDays,
         pollInterval: Duration = .seconds(60),
@@ -782,7 +781,7 @@ extension LocalUsageProvider {
         limitsProbe: ClaudeLimitsProbe? = nil,
         webSources: LockedValue<[ClaudeWebSource]> = LockedValue([]),
         webLinks: LockedValue<[String: ClaudeWebLink]> = LockedValue([:]),
-        profile: ClaudeProfileSource = ClaudeProfileSource(),
+        profile: ClaudeProfileSource = .inert(),
         accounts: ClaudeAccountRegistry = .inert(),
         ledger: ProjectLedger = ProjectLedger(),
         backfill: Range<Date>? = nil

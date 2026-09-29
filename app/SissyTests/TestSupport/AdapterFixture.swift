@@ -14,7 +14,7 @@ extension ClaudeCodeAdapter {
             limitsProbe: nil,
             webSources: LockedValue([]),
             webLinks: LockedValue([:]),
-            profile: ClaudeProfileSource(),
+            profile: .inert(),
             accounts: .inert(),
             ledger: ProjectLedger())
     }
