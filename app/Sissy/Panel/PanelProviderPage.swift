@@ -441,7 +441,7 @@ struct PanelProviderPage: View {
     /// measured on the dev build, the item opened Settings on whatever tab was
     /// last shown.
     private var addAccount: some View {
-        Button(ClaudeAccountLinkCopy.addTitle, action: onAddAccount)
+        Button(VendorLinkCopy.addTitle, action: onAddAccount)
     }
 
     /// What the picker does, which is not the same sentence for both vendors.
