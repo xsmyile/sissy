@@ -28,45 +28,22 @@ enum CodexAccountStore {
 
     /// Files a credential under the login it belongs to, replacing whatever
     /// was there.
-    ///
-    /// Add-then-update rather than delete-then-add, so a delete that succeeds
-    /// followed by an add that fails cannot leave the user with no credential
-    /// and no way to tell that from an account they never linked.
     static func save(_ credential: CodexCredential, account: String) throws {
         guard !account.isEmpty, let data = encode(credential) else {
             throw CodexAccountStoreError.empty
         }
-        var attributes = identity(account: account)
-        attributes[kSecValueData as String] = data
-        let added = SecItemAdd(attributes as CFDictionary, nil)
-        if added == errSecSuccess { return }
-        guard added == errSecDuplicateItem else {
-            throw CodexAccountStoreError.keychain(added)
-        }
-        let updated = SecItemUpdate(
-            identity(account: account) as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary)
-        guard updated == errSecSuccess else {
-            throw CodexAccountStoreError.keychain(updated)
-        }
+        let status = items.save(data, account: account)
+        guard status == errSecSuccess else { throw CodexAccountStoreError.keychain(status) }
     }
 
     /// The credential, under the same suppression a read of the CLI's own item
     /// gets — silent in the ordinary case, and refusing rather than
     /// interrupting once a re-signing has cost the grant.
     static func load(account: String, allowingInteraction: Bool) -> CodexCredentialReading {
-        var query = KeychainAccess.makeQuery(
-            service: keychainService, allowingInteraction: allowingInteraction)
-        query[kSecAttrAccount as String] = account
-        let result = KeychainAccess.copyMatching(
-            query, allowingInteraction: allowingInteraction)
-        let outcome = KeychainAccess.classify(
-            result.status,
-            data: result.data,
-            allowingInteraction: allowingInteraction,
-            decoding: { CodexAuthSource.credential($0, renewable: true) }
-        )
-        return Self.reading(outcome)
+        reading(
+            items.load(
+                account: account, allowingInteraction: allowingInteraction,
+                decoding: { CodexAuthSource.credential($0, renewable: true) }))
     }
 
     /// The keychain's own outcomes in this reader's vocabulary.
@@ -86,35 +63,18 @@ enum CodexAccountStore {
     }
 
     /// Forgets one account's credential. An item that was not there is not a
-    /// failure: the caller asked for it gone and it is gone.
+    /// failure.
     static func delete(account: String) throws {
-        let status = SecItemDelete(identity(account: account) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw CodexAccountStoreError.keychain(status)
-        }
+        let status = items.delete(account: account)
+        guard status == errSecSuccess else { throw CodexAccountStoreError.keychain(status) }
     }
 
-    /// Every account a credential is filed under, sorted so two calls agree.
-    ///
-    /// Attributes only and never the data, so asking which accounts exist
-    /// costs no ACL check and cannot raise a dialog — which is what lets the
-    /// engine decide how many readers to build before any of them has read
-    /// anything, and on a build whose grant has lapsed.
-    static func storedAccounts() -> [String] {
-        var query = baseQuery()
-        query[kSecReturnAttributes as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitAll
-        var items: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &items)
-        guard status == errSecSuccess else {
-            if status != errSecItemNotFound {
-                sissyLog("sissy: could not list the linked Codex accounts (OSStatus \(status))")
-            }
-            return []
-        }
-        guard let attributes = items as? [[String: Any]] else { return [] }
-        return attributes.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
-    }
+    /// Every account a credential is filed under, sorted so two calls agree,
+    /// and read without a dialog: see `SissyKeychainItems.accounts()`.
+    static func storedAccounts() -> [String] { items.accounts() }
+
+    private static let items = SissyKeychainItems(
+        service: keychainService, listing: "the linked Codex accounts")
 
     /// The credential as `auth.json` spells it, so the item and the CLI's file
     /// are read by one parser rather than two that can disagree about which
@@ -125,22 +85,6 @@ enum CodexAccountStore {
         tokens["id_token"] = credential.idToken
         tokens["account_id"] = credential.accountId
         return try? JSONSerialization.data(withJSONObject: ["tokens": tokens])
-    }
-
-    private static func baseQuery() -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-        ]
-    }
-
-    /// What the item is, with neither a value nor a read on it. Shared by
-    /// every operation so an add, an update and a delete cannot drift into
-    /// addressing different items.
-    private static func identity(account: String) -> [String: Any] {
-        var query = baseQuery()
-        query[kSecAttrAccount as String] = account
-        return query
     }
 }
 

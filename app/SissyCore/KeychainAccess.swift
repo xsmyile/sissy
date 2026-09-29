@@ -251,3 +251,98 @@ enum KeychainAccess {
         return symbol.assumingMemoryBound(to: CFString?.self).pointee as String?
     }
 }
+
+/// The generic-password items Sissy files under one service of its own, one
+/// per account.
+///
+/// One value for every such store (the claude.ai sessions, the linked Codex
+/// accounts and the forge tokens), which had each written out the same save,
+/// load, delete and listing and differ only in the service and what the
+/// secret decodes to.
+struct SissyKeychainItems: Sendable {
+    let service: String
+    /// What a failed listing says it could not list, for the log.
+    let listing: String
+
+    /// One account's item, under the suppression every scheduled read in this
+    /// app takes: silent in the ordinary case, and refusing rather than
+    /// interrupting once a re-signing has cost the grant.
+    func load<Value>(
+        account: String, allowingInteraction: Bool, decoding decode: (Data) -> Value?
+    ) -> CredentialLookup<Value> {
+        var query = KeychainAccess.makeQuery(
+            service: service, allowingInteraction: allowingInteraction)
+        query[kSecAttrAccount as String] = account
+        let result = KeychainAccess.copyMatching(query, allowingInteraction: allowingInteraction)
+        return KeychainAccess.classify(
+            result.status, data: result.data, allowingInteraction: allowingInteraction,
+            decoding: decode)
+    }
+
+    /// Files `data` under `account`, replacing whatever was there, and answers
+    /// the keychain's status: `errSecSuccess` or the failure.
+    ///
+    /// Add-then-update rather than delete-then-add: a delete that succeeds
+    /// followed by an add that fails would leave the user with no secret and
+    /// no way to tell that from one they never handed over.
+    func save(_ data: Data, account: String) -> OSStatus {
+        var attributes = identity(account: account)
+        attributes[kSecValueData as String] = data
+        let added = SecItemAdd(attributes as CFDictionary, nil)
+        guard added == errSecDuplicateItem else { return added }
+        return SecItemUpdate(
+            identity(account: account) as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary)
+    }
+
+    /// Forgets one account's item. An item that was not there is not a
+    /// failure: the caller asked for it gone and it is gone.
+    func delete(account: String) -> OSStatus {
+        let status = SecItemDelete(identity(account: account) as CFDictionary)
+        return status == errSecItemNotFound ? errSecSuccess : status
+    }
+
+    /// Every account an item is filed under, sorted so two calls agree.
+    ///
+    /// Attributes only and never the data: the keychain authorizes a read of
+    /// the *secret*, so asking which items exist costs no ACL check and cannot
+    /// raise a dialog. That is what lets the engine decide how many readers to
+    /// build before any of them has read anything, and on a build whose grant
+    /// has lapsed.
+    ///
+    /// An empty answer means nothing is filed. A keychain that failed for any
+    /// other reason says so in the log rather than passing for one, because
+    /// the two are the same `[]` to every caller and only one of them is the
+    /// user's doing.
+    func accounts() -> [String] {
+        var query = baseQuery()
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
+        var items: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &items)
+        guard status == errSecSuccess else {
+            if status != errSecItemNotFound {
+                sissyLog("sissy: could not list \(listing) (OSStatus \(status))")
+            }
+            return []
+        }
+        guard let attributes = items as? [[String: Any]] else { return [] }
+        return attributes.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
+    }
+
+    private func baseQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+        ]
+    }
+
+    /// What the item is, with neither a value nor a read on it. Shared by
+    /// every operation so an add, an update and a delete cannot drift into
+    /// addressing different items.
+    private func identity(account: String) -> [String: Any] {
+        var query = baseQuery()
+        query[kSecAttrAccount as String] = account
+        return query
+    }
+}
