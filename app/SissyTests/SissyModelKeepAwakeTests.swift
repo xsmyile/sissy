@@ -65,8 +65,10 @@ final class SissyModelKeepAwakeTests: XCTestCase {
     /// letting go is a change the panel is told about: with no frame behind
     /// it, nothing else would redraw the switch.
     func testAnUnansweredRequestExpiresAsAnObservableChange() async {
-        let model = SissyModel()
+        let window = AckWindow()
+        let model = SissyModel(keepAwakeAckWait: { await window.wait() })
         model.setKeepAwake(.on)
+        XCTAssertEqual(model.keepAwake.mode, .on)
         let expired = expectation(description: "the request lets go")
         withObservationTracking {
             _ = model.keepAwake
@@ -74,7 +76,8 @@ final class SissyModelKeepAwakeTests: XCTestCase {
             expired.fulfill()
         }
 
-        await fulfillment(of: [expired], timeout: 10)
+        await window.end()
+        await fulfillment(of: [expired], timeout: 2)
         XCTAssertEqual(model.keepAwake.mode, .off)
     }
 
@@ -141,5 +144,22 @@ final class SissyModelKeepAwakeTests: XCTestCase {
         model.applyFrame(frame(.off))
 
         XCTAssertEqual(model.preferredKeepAwakeMode, .auto)
+    }
+}
+
+/// The acknowledgement window, held open until the test ends it.
+private actor AckWindow {
+    private var isOver = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOver else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func end() {
+        isOver = true
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
     }
 }
