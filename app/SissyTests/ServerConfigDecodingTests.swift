@@ -72,6 +72,39 @@ final class ServerConfigDecodingTests: XCTestCase {
         XCTAssertEqual(config.forgeCounters?.issues, false)
     }
 
+    /// `0` switched a network reading off for as long as the file went
+    /// through `JSONSerialization`, and must go on doing so.
+    func testZeroAndOneReadAsSwitches() throws {
+        let config = try decode(
+            #"""
+            {"remotePricing": 0, "statusChecks": 0, "agentHooks": 1,
+             "providers": {"codex": 0}, "forgeCounters": {"merged": 0, "issues": 1}}
+            """#)
+
+        XCTAssertEqual(config.remotePricing, false)
+        XCTAssertFalse(config.statusChecks)
+        XCTAssertTrue(config.agentHooks)
+        XCTAssertEqual(config.providers.codex, false)
+        XCTAssertEqual(config.forgeCounters?.merged, false)
+        XCTAssertEqual(config.forgeCounters?.issues, true)
+    }
+
+    func testAnyOtherNumberIsNotASwitch() throws {
+        let config = try decode(#"{"statusChecks": 2, "remotePricing": 0.5}"#)
+
+        XCTAssertEqual(config.statusChecks, ServerConfig.defaults.statusChecks)
+        XCTAssertNil(config.remotePricing)
+    }
+
+    /// The other half of the same bridge: `true` read as `1` where a number
+    /// belongs.
+    func testTrueAndFalseReadAsNumbers() throws {
+        let config = try decode(#"{"historyRetentionDays": true, "pollIntervalSeconds": false}"#)
+
+        XCTAssertEqual(config.historyRetentionDays, 1)
+        XCTAssertEqual(config.pollIntervalSeconds, 0)
+    }
+
     private func decode(_ json: String) throws -> ServerConfig {
         try JSONDecoder().decode(ServerConfig.self, from: Data(json.utf8))
     }
