@@ -352,7 +352,11 @@ struct ForgeSettingsView: View {
             subtitle: ForgeConnectCopy.orphanSubtitle
         ) {
             CredentialDisc(tint: .secondary) {
-                ForgeMark(host: token.id)
+                if let kind = token.kind {
+                    ForgeMark(kind: kind)
+                } else {
+                    ForgeMark(host: token.address)
+                }
             }
         } actions: {
             CredentialRowMenu(
@@ -432,7 +436,7 @@ struct ForgeSettingsView: View {
             fix: fix(connection, reading: reading)
         ) {
             CredentialDisc(tint: .secondary, health: Self.health(of: reading)) {
-                ForgeMark(host: connection.host)
+                ForgeMark(kind: connection.kind)
             }
         } actions: {
             CredentialRowMenu(

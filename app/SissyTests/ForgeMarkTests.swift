@@ -34,4 +34,12 @@ final class ForgeMarkTests: XCTestCase {
     func testTheMatchIgnoresCase() {
         XCTAssertEqual(ForgeMark.assetName(forHost: "GitHub.com"), "ForgeMarkGitHub")
     }
+
+    /// A row that knows its forge wears that forge's mark whatever the host
+    /// is called: a self-hosted GitLab on a company domain is GitLab.
+    func testAKnownForgeWearsItsMarkWhateverTheHost() {
+        XCTAssertNil(ForgeMark.assetName(forHost: "git.acme.com"))
+        XCTAssertEqual(ForgeMark.assetName(for: .gitLab), "ForgeMarkGitLab")
+        XCTAssertEqual(ForgeMark.assetName(for: .gitHub), "ForgeMarkGitHub")
+    }
 }
