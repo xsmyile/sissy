@@ -22,17 +22,19 @@ final class UsageEngineLifecycleTests: XCTestCase {
 
     /// Points every path at the temp tree and pins pricing to the embedded
     /// seed, so a test neither reads the real log trees nor reaches the network.
-    /// The status checks stay on, answered by an injected monitor, because
-    /// switching them off and on against a stopped engine is what this suite
-    /// holds.
+    /// `statusChecks` is on only for the test that passes its own monitor,
+    /// because switching the checks off and on against a stopped engine is
+    /// what it holds; every other test would otherwise poll the real feeds
+    /// the moment it wrote a log tree.
     private func makeEngine(
         limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe { _ in .absent },
+        statusChecks: Bool = false,
         statusMonitor: ProviderStatusMonitor? = nil
     ) -> UsageEngine {
         var config = ServerConfig.hermetic(
             claudeDir: tempDir.appendingPathComponent("claude"),
             codexDir: tempDir.appendingPathComponent("codex"))
-        config.statusChecks = true
+        config.statusChecks = statusChecks
         return UsageEngine(
             config: config,
             configURL: tempDir.appendingPathComponent("server.json"),
@@ -129,7 +131,8 @@ final class UsageEngineLifecycleTests: XCTestCase {
     func testTheStatusToggleDoesNotRestartAStoppedEngine() async {
         let fetched = XCTestExpectation(description: "status fetch after teardown")
         fetched.isInverted = true
-        let engine = makeEngine(statusMonitor: signallingMonitor(fetched))
+        let engine = makeEngine(
+            statusChecks: true, statusMonitor: signallingMonitor(fetched))
         await engine.stop()
 
         await engine.setStatusChecks(enabled: false)
