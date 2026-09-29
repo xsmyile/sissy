@@ -535,12 +535,9 @@ final class DiskActivityEngineTests: XCTestCase {
     private var configURL: URL { tempDir.appendingPathComponent("server.json") }
 
     private func makeEngine(disk diskOn: Bool = true) -> UsageEngine {
-        var config = ServerConfig.defaults
-        config.claudeDataDir = tempDir.appendingPathComponent("claude").path
-        config.codexDataDir = tempDir.appendingPathComponent("codex").path
-        config.remotePricing = false
-        config.statusChecks = false
-        config.macHealth = false
+        var config = ServerConfig.hermetic(
+            claudeDir: tempDir.appendingPathComponent("claude"),
+            codexDir: tempDir.appendingPathComponent("codex"))
         config.disk = diskOn
         return UsageEngine(
             config: config, configURL: configURL, limitsProbe: ClaudeLimitsProbe { _ in .absent },

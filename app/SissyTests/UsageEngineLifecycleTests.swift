@@ -22,17 +22,17 @@ final class UsageEngineLifecycleTests: XCTestCase {
 
     /// Points every path at the temp tree and pins pricing to the embedded
     /// seed, so a test neither reads the real log trees nor reaches the network.
+    /// The status checks stay on, answered by an injected monitor, because
+    /// switching them off and on against a stopped engine is what this suite
+    /// holds.
     private func makeEngine(
         limitsProbe: ClaudeLimitsProbe = ClaudeLimitsProbe { _ in .absent },
         statusMonitor: ProviderStatusMonitor? = nil
     ) -> UsageEngine {
-        var config = ServerConfig.defaults
-        config.claudeDataDir = tempDir.appendingPathComponent("claude").path
-        config.codexDataDir = tempDir.appendingPathComponent("codex").path
-        config.remotePricing = false
-        config.macHealth = false
-        config.disk = false
-        config.network = false
+        var config = ServerConfig.hermetic(
+            claudeDir: tempDir.appendingPathComponent("claude"),
+            codexDir: tempDir.appendingPathComponent("codex"))
+        config.statusChecks = true
         return UsageEngine(
             config: config,
             configURL: tempDir.appendingPathComponent("server.json"),

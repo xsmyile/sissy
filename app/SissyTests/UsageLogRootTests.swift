@@ -24,16 +24,9 @@ final class UsageLogRootTests: XCTestCase {
     private func writeTurn(in directory: URL) throws {
         let project = directory.appendingPathComponent("project")
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        let line = """
-            {"type":"assistant","timestamp":"\(iso.string(from: Date()))",\
-            "requestId":"r1","message":{"model":"claude-sonnet-4-6",\
-            "usage":{"input_tokens":\(Self.tokensPerTurn),"output_tokens":0,\
-            "cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
-            """
-        try (line + "\n").write(
-            to: project.appendingPathComponent("s.jsonl"), atomically: true, encoding: .utf8)
+        try ClaudeLogFixture.writeTurn(
+            to: project.appendingPathComponent("s.jsonl"), requestId: "r1",
+            model: "claude-sonnet-4-6", input: Self.tokensPerTurn)
     }
 
     func testATurnUnderASymlinkedRootIsCounted() async throws {

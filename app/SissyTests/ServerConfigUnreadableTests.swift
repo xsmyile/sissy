@@ -84,16 +84,10 @@ final class ServerConfigUnreadableTests: XCTestCase {
     }
 
     private func makeEngine(isWritable: Bool) -> UsageEngine {
-        var config = ServerConfig.defaults
-        config.claudeDataDir = tempDir.appendingPathComponent("claude").path
-        config.codexDataDir = tempDir.appendingPathComponent("codex").path
-        config.remotePricing = false
-        config.macHealth = false
-        config.disk = false
-        config.network = false
-        config.statusChecks = false
-        return UsageEngine(
-            config: config,
+        UsageEngine(
+            config: .hermetic(
+                claudeDir: tempDir.appendingPathComponent("claude"),
+                codexDir: tempDir.appendingPathComponent("codex")),
             configURL: configURL,
             configIsWritable: isWritable,
             limitsProbe: ClaudeLimitsProbe { _ in .absent },

@@ -751,13 +751,10 @@ final class NetworkEngineTests: XCTestCase {
     private let monitor = NetworkMonitor.readingNothing()
 
     private func makeEngine() -> UsageEngine {
-        var config = ServerConfig.defaults
-        config.claudeDataDir = tempDir.appendingPathComponent("claude").path
-        config.codexDataDir = tempDir.appendingPathComponent("codex").path
-        config.remotePricing = false
-        config.statusChecks = false
-        config.macHealth = false
-        config.disk = false
+        var config = ServerConfig.hermetic(
+            claudeDir: tempDir.appendingPathComponent("claude"),
+            codexDir: tempDir.appendingPathComponent("codex"))
+        config.network = true
         return UsageEngine(
             config: config, configURL: configURL, limitsProbe: ClaudeLimitsProbe { _ in .absent },
             claudeAccounts: .inert(), networkMonitor: monitor)

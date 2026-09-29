@@ -23,8 +23,8 @@ final class ProjectLedgerTests: XCTestCase {
     /// The point of the file: a checkout read on one run answers on the next,
     /// with nothing but the ledger carried between them.
     func testACheckoutReadOnOneRunAnswersOnTheNext() throws {
-        let main = try makeRepository("sissy")
-        let worktree = try makeWorktree("grampus", of: main)
+        let main = try GitFixture.repository("sissy", in: root)
+        let worktree = try GitFixture.worktree("grampus", of: main, in: root)
         let first = ProjectLedger(url: url)
         XCTAssertEqual(ProjectResolver(ledger: first).project(for: worktree.path), main.path)
         first.saveIfDirty()
@@ -39,8 +39,8 @@ final class ProjectLedgerTests: XCTestCase {
     /// entry of its own — the directories its rollouts name are scratch — so
     /// every checkout it can recognise was read by another provider's.
     func testACheckoutOneProvidersResolverReadIsAnsweredForByAnothers() throws {
-        let main = try makeRepository("sissy")
-        let worktree = try makeWorktree("grampus", of: main)
+        let main = try GitFixture.repository("sissy", in: root)
+        let worktree = try GitFixture.worktree("grampus", of: main, in: root)
         let shared = ProjectLedger()
         XCTAssertEqual(ProjectResolver(ledger: shared).project(for: worktree.path), main.path)
 
@@ -52,9 +52,9 @@ final class ProjectLedgerTests: XCTestCase {
     /// It knows nothing about a repository until something resolves against
     /// it, and then it knows every worktree git lists for it.
     func testResolvingARepositoryRecordsTheWorktreesGitListsForIt() throws {
-        let main = try makeRepository("sissy")
-        _ = try makeWorktree("grampus", of: main)
-        _ = try makeWorktree("rockfish", of: main)
+        let main = try GitFixture.repository("sissy", in: root)
+        _ = try GitFixture.worktree("grampus", of: main, in: root)
+        _ = try GitFixture.worktree("rockfish", of: main, in: root)
         let ledger = ProjectLedger()
 
         _ = ProjectResolver(ledger: ledger).project(for: main.path)
@@ -71,12 +71,12 @@ final class ProjectLedgerTests: XCTestCase {
     /// A repository's worktree list is taken on trust for a window, so the
     /// tail's own cadence cannot turn into a directory read per line.
     func testARepositorysWorktreeListIsNotReReadWithinTheWindow() throws {
-        let main = try makeRepository("sissy")
+        let main = try GitFixture.repository("sissy", in: root)
         let ledger = ProjectLedger()
         let now = Date()
         ledger.harvestWorktrees(of: main.path, now: now)
 
-        _ = try makeWorktree("grampus", of: main)
+        _ = try GitFixture.worktree("grampus", of: main, in: root)
         ledger.harvestWorktrees(of: main.path, now: now.addingTimeInterval(1))
 
         XCTAssertEqual(ledger.all().map(\.directory), [])
@@ -85,8 +85,8 @@ final class ProjectLedgerTests: XCTestCase {
     /// Gone is a fact about the path: a directory still on disk is answered by
     /// the disk, whatever the ledger remembers about it.
     func testADirectoryStillOnDiskIsNotAnsweredFor() throws {
-        let main = try makeRepository("sissy")
-        let worktree = try makeWorktree("grampus", of: main)
+        let main = try GitFixture.repository("sissy", in: root)
+        let worktree = try GitFixture.worktree("grampus", of: main, in: root)
         let ledger = ProjectLedger()
         _ = ProjectResolver(ledger: ledger).project(for: worktree.path)
 
@@ -141,23 +141,4 @@ final class ProjectLedgerTests: XCTestCase {
     }
 
     private var url: URL { ProjectLedger.defaultURL(in: stateDir) }
-
-    private func makeRepository(_ name: String) throws -> URL {
-        let repo = root.appendingPathComponent(name)
-        try FileManager.default.createDirectory(
-            at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
-        return repo.standardizedFileURL
-    }
-
-    private func makeWorktree(_ name: String, of main: URL) throws -> URL {
-        let worktree = root.appendingPathComponent(name)
-        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
-        try "gitdir: \(main.path)/.git/worktrees/\(name)\n"
-            .write(to: worktree.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
-        let admin = main.appendingPathComponent(".git/worktrees/\(name)")
-        try FileManager.default.createDirectory(at: admin, withIntermediateDirectories: true)
-        try "\(worktree.standardizedFileURL.path)/.git\n"
-            .write(to: admin.appendingPathComponent("gitdir"), atomically: true, encoding: .utf8)
-        return worktree.standardizedFileURL
-    }
 }

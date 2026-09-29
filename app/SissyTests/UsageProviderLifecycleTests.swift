@@ -26,16 +26,9 @@ final class UsageProviderLifecycleTests: XCTestCase {
     /// One assistant turn of `tokensPerTurn` input tokens, timestamped now so
     /// it lands in today's bucket.
     private func writeTurn(_ name: String, requestId: String) throws {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        let line = """
-            {"type":"assistant","timestamp":"\(iso.string(from: Date()))",\
-            "requestId":"\(requestId)","message":{"model":"claude-sonnet-4-6",\
-            "usage":{"input_tokens":\(Self.tokensPerTurn),"output_tokens":0,\
-            "cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
-            """
-        try (line + "\n").write(
-            to: tempDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        try ClaudeLogFixture.writeTurn(
+            to: tempDir.appendingPathComponent(name), requestId: requestId,
+            model: "claude-sonnet-4-6", input: Self.tokensPerTurn)
     }
 
     /// No persistence URL: the provider reads the temp tree and writes nothing,
