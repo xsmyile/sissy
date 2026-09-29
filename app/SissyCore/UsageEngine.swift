@@ -637,9 +637,10 @@ actor UsageEngine {
     /// Keeps the account archive level with whichever account is signed in.
     ///
     /// The poll is what catches a `/login` or a switch made outside Sissy, and
-    /// it is cheap: an unchanged credential costs one `security` call and no
-    /// request. Only a token Sissy has not filed buys a round trip to identify
-    /// it, which is roughly once per token rotation.
+    /// it is cheap: an unchanged credential costs a `security` call for each
+    /// slot name read, one more per archived account, and no request. Only a
+    /// token Sissy has not filed buys a round trip to identify it, which is
+    /// roughly once per token rotation.
     ///
     /// An account it has not seen before re-emits, because nothing else will:
     /// a `/login` produces no token event of its own, and the switcher would
