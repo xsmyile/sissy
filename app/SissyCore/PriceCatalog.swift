@@ -270,7 +270,9 @@ enum PriceCatalogSource {
 
     /// The embedded seed as a catalog. Read back out of `PricingSeed.json`
     /// rather than added as a generated field, so the snapshot stays a plain
-    /// dump of the same `PriceCatalog` the runtime fetch produces.
+    /// dump of the same `PriceCatalog` the runtime fetch produces. Decoded
+    /// once: `PricingSeed`'s two tables are built from this value rather than
+    /// from a second decode of the same text.
     static let seed: PriceCatalog? = {
         guard let data = PricingSeed.json.data(using: .utf8),
             let decoded = try? JSONDecoder().decode(PriceCatalog.self, from: data),
@@ -475,16 +477,8 @@ enum PriceCatalogSource {
                     \(body)
                     \"\"\"#
 
-                private static let catalog: PriceCatalog? = {
-                    guard let data = json.data(using: .utf8),
-                        let decoded = try? JSONDecoder().decode(PriceCatalog.self, from: data),
-                        PriceCatalogSource.isUsable(decoded)
-                    else { return nil }
-                    return decoded
-                }()
-
-                static let anthropic = PricingTable(catalog?.anthropic ?? [:])
-                static let openai = PricingTable(catalog?.openai ?? [:])
+                static let anthropic = PricingTable(PriceCatalogSource.seed?.anthropic ?? [:])
+                static let openai = PricingTable(PriceCatalogSource.seed?.openai ?? [:])
             }
             """
     }
