@@ -40,7 +40,19 @@ import Foundation
 /// Whether a failed renewal ends the link is `CodexOAuth.RenewalFailure`'s
 /// answer. Only a grant the endpoint rejected does; anything else defers the
 /// next attempt, and the reader keeps its last reading meanwhile.
+///
+/// The actor runs on a serial dispatch queue of its own rather than on the
+/// cooperative pool. Its keychain reads and writes are synchronous calls that
+/// can block for as long as the Security framework takes (up to
+/// `KeychainAccess.suppressorTimeout` behind another reader, longer behind a
+/// dialog), and every linked Codex reader shares this one actor. Awaiting them
+/// off the actor instead would open a suspension between reading the item and
+/// consulting what this process holds unsaved, which is exactly where a
+/// renewal landing would hand a reader the refresh token it had just spent.
 actor CodexRenewal {
+    private let queue = DispatchSerialQueue(label: "sissy.codex-renewal", qos: .utility)
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+
     typealias Load =
         @Sendable (_ account: String, _ allowingInteraction: Bool) ->
         CodexCredentialReading
