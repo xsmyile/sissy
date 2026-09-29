@@ -69,16 +69,17 @@ final class LimitsBackoffTests: XCTestCase {
 
     /// One credential's entry is not another's: the vendor refuses a token,
     /// and a Mac with two accounts has one of each.
-    func testEachCredentialKeepsItsOwnDeadline() async {
+    func testEachCredentialKeepsItsOwnDeadline() async throws {
         let store = LimitsBackoffStore(url: url)
-        await store.record(
-            Date().addingTimeInterval(900), for: LimitsBackoffLedger.claudeWebKey(account: "a"))
+        let until = Date().addingTimeInterval(900)
+        await store.record(until, for: LimitsBackoffLedger.claudeWebKey(account: "a"))
 
         let other = await store.deadline(for: LimitsBackoffLedger.claudeWebKey(account: "b"))
 
         XCTAssertNil(other)
         let own = await store.deadline(for: LimitsBackoffLedger.claudeWebKey(account: "a"))
-        XCTAssertNotNil(own)
+        XCTAssertEqual(
+            try XCTUnwrap(own).timeIntervalSince1970, until.timeIntervalSince1970, accuracy: 1)
     }
 
     /// A file this build cannot decode blocks nothing, which costs one request
