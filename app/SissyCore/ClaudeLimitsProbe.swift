@@ -11,11 +11,15 @@ import Foundation
 /// previous row rather than surfacing an error the user cannot act on. Its
 /// shape is measured, never inferred: the buckets meter in percent and report
 /// their dollar fields as null.
-actor ClaudeLimitsProbe: SourceSignals {
+actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private static let betaHeader = "oauth-2025-04-20"
     private static let requestTimeout: TimeInterval = 10
-    private static let refreshInterval: Duration = .seconds(300)
+    static let refreshInterval: Duration = .seconds(300)
+    static let vendor = "the Claude usage endpoint"
+    static var limitsState: WritableKeyPath<AttributedReading, ProviderLimitsState> {
+        \.signals.limitsState
+    }
     private static let keychainTimeout: Duration = .seconds(20)
 
     /// Windows, why they are missing when they are, and when the last
@@ -24,7 +28,7 @@ actor ClaudeLimitsProbe: SourceSignals {
     ///
     /// The token they were read with rides in the same value, so a reader
     /// can never pair one token's windows with another token's fingerprint.
-    nonisolated private let published = LockedValue(AttributedReading())
+    nonisolated let published = LockedValue(AttributedReading())
 
     /// What the probe published, and which credential it was read with.
     struct AttributedReading: Sendable, Equatable {
@@ -54,7 +58,7 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// Where a refusal is written down so the next run honours it. Nil is a
     /// probe that forgets its block when the process ends, which is every
     /// test that has no opinion about one.
-    private let backoff: LimitsBackoffSlot?
+    let backoff: LimitsBackoffSlot?
 
     /// One answer from the usage endpoint: the windows it drew and what it has
     /// billed against the spend cap.
@@ -69,17 +73,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         let windows: [UsageWindow]
         let credits: ProviderCredits?
     }
-    private var pollTask: Task<Void, Never>?
-    /// The request a refresh awaits, so "refreshing" ends when Claude has
-    /// answered rather than when the task was handed off.
-    private var firstRequest: Task<Duration, Never>?
-    /// Bumped by every cancellation, so a request in flight when the probe was
-    /// stopped or restarted cannot publish over the run that replaced it.
-    private var generation = 0
-    /// Last condition logged, so a poll that keeps failing the same way says
-    /// so once instead of every five minutes — and a *different* failure
-    /// still gets through.
-    private var lastReported: String?
+    var loop = LimitsLoop()
 
     /// `credentials` leads so a trailing closure still names the read: it is
     /// the half nearly every test answers for.
@@ -121,27 +115,8 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// user for anything, so a start the user asked for and a start a launch
     /// made do exactly the same thing.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
-        guard pollTask == nil else { return }
-        _ = begin(onRefresh: onRefresh)
-    }
-
-    /// Starts the loop and hands back the first request, so an explicit
-    /// refresh stays pending until credentials, network and publication have
-    /// all completed rather than ending on the hand-off.
-    private func begin(onRefresh: @Sendable @escaping () async -> Void) -> Task<
-        Duration, Never
-    > {
-        let request = Task { await refreshOnce(onRefresh: onRefresh) }
-        firstRequest = request
-        pollTask = Task { [weak self] in
-            var delay = await request.value
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: delay) } catch { return }
-                guard let self else { return }
-                delay = await self.refreshOnce(onRefresh: onRefresh)
-            }
-        }
-        return request
+        guard loop.pollTask == nil else { return }
+        _ = begin(userInitiated: false, onRefresh: onRefresh)
     }
 
     /// Stops the poll loop and drops the windows it had published.
@@ -171,15 +146,7 @@ actor ClaudeLimitsProbe: SourceSignals {
             $0.credential = nil
             if clearingState { $0.signals.limitsState = .quiet }
         }
-        lastReported = nil
-    }
-
-    private func cancelRequests() {
-        generation &+= 1
-        pollTask?.cancel()
-        firstRequest?.cancel()
-        pollTask = nil
-        firstRequest = nil
+        loop.lastReported = nil
     }
 
     /// Re-reads the credentials with the dialog allowed and polls at once,
@@ -193,49 +160,9 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// it lives, and the deduped log line, so the outcome of the read the user
     /// just asked for is actually recorded.
     ///
-    /// Deliberately not `stop()` first: that drops the published windows, and
-    /// a refresh that blanks the gauges it is trying to restore reads as a
-    /// failure for as long as the request takes.
+    /// Deliberately not `stop()` first, for the reason `restart` carries.
     func refresh(onRefresh: @Sendable @escaping () async -> Void) async {
-        if case .rateLimited(let until) = published.load().signals.limitsState, until > Date() { return }
-        cancelRequests()
-        lastReported = nil
-        let request = begin(onRefresh: onRefresh)
-        await withTaskCancellationHandler {
-            _ = await request.value
-        } onCancel: {
-            request.cancel()
-        }
-    }
-
-    /// Logs `message` the first time this condition is seen, and again only
-    /// once something else has happened in between.
-    private func report(_ message: String) {
-        guard lastReported != message else { return }
-        lastReported = message
-        sissyLog("sissy: \(message)")
-    }
-
-    /// One poll. Returns how long to wait before the next one.
-    ///
-    /// `onRefresh` fires on any change to the published reading, not only on
-    /// new windows: an authorization that lapsed is a change the panel has to
-    /// show, and it arrives on a day where no token event will follow it. A
-    /// failed request publishes nothing, which is what preserves the age of
-    /// the last successful reading beside the windows it produced.
-    ///
-    /// Internal rather than private so a test can run exactly one and assert
-    /// on what it published. Waiting on the poll loop instead means waiting on
-    /// the scheduler: the read is recorded before the outcome is classified,
-    /// so an assertion hung off the read passes or fails by luck.
-    func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
-        let stamp = generation
-        let before = published.load()
-        let delay = await readAndFetch(generation: stamp)
-        guard stamp == generation else { return delay }
-        if Task.isCancelled && published.load().signals.limitsState != .refused { return delay }
-        if published.load() != before { await onRefresh() }
-        return delay
+        await restart(userInitiated: false, onRefresh: onRefresh)
     }
 
     /// A token to spend, or the wait its absence earns.
@@ -262,13 +189,10 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// registry identified, and still only once every five minutes.
     ///
     /// The read is a suspension a `stop()` or a second `refresh` can land in,
-    /// which is what `stamp` guards. The generation is checked rather than
-    /// `pollTask != nil`, because a quick off/on of the setting leaves a *new*
-    /// task in that property while this continuation still belongs to the
-    /// cancelled one.
+    /// which is what `stamp` guards, through `isCurrent(_:)`.
     private func currentCredentials(generation stamp: Int) async -> Credentials {
         let outcome = await credentialsSource(Self.keychainTimeout)
-        guard stamp == generation, !Task.isCancelled else { return .wait(Self.refreshInterval) }
+        guard isCurrent(stamp) else { return .wait(Self.refreshInterval) }
         switch outcome {
         case .found(let found):
             published.update {
@@ -306,30 +230,6 @@ actor ClaudeLimitsProbe: SourceSignals {
         return .wait(Self.refreshInterval)
     }
 
-    /// The wait a refusal recorded on an earlier run still has left, and nil
-    /// when there is none.
-    ///
-    /// Consulted before the credential rather than once at launch: the block
-    /// belongs in front of every request that could meet it, and a reader
-    /// stopped and started inside one would otherwise spend a request on a
-    /// vendor that is still refusing. Everything after the first poll of a
-    /// block reads it as already expired, because the sleep this returns is
-    /// exactly as long as the deadline it names.
-    ///
-    /// Reading the record is a suspension, so it is `stamp` that decides
-    /// whether the answer may still be published — a `stop()` that landed in
-    /// it has already cleared the row, and a block restored over that is the
-    /// same defect as a reply arriving after the windows were dropped.
-    private func recordedBackoff(generation stamp: Int) async -> Duration? {
-        guard let until = await backoff?.deadline() else { return nil }
-        guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-        let remaining = until.timeIntervalSinceNow
-        guard remaining > 0 else { return nil }
-        published.update { $0.signals.limitsState = .rateLimited(until: until) }
-        report("still refused by the Claude usage endpoint until \(until); waiting rather than asking")
-        return .seconds(remaining)
-    }
-
     /// Drops the block, on the row and in the record.
     ///
     /// For the account switch, which is the one event that makes a refusal
@@ -360,7 +260,7 @@ actor ClaudeLimitsProbe: SourceSignals {
     /// The request is the other suspension `stamp` guards: a reply that
     /// arrived a moment too late would restore windows a `stop()` had just
     /// cleared.
-    private func readAndFetch(generation stamp: Int) async -> Duration {
+    func readAndFetch(generation stamp: Int) async -> Duration {
         if let wait = await recordedBackoff(generation: stamp) { return wait }
         let credentials: ClaudeCredentials
         switch await currentCredentials(generation: stamp) {
@@ -369,7 +269,7 @@ actor ClaudeLimitsProbe: SourceSignals {
         }
         do {
             let reading = try await fetchSource(credentials.accessToken)
-            guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
+            guard isCurrent(stamp) else { return Self.refreshInterval }
             published.update {
                 $0.signals.windows = reading.windows
                 $0.signals.credits = reading.credits
@@ -380,16 +280,8 @@ actor ClaudeLimitsProbe: SourceSignals {
             await backoff?.record(nil)
             return Self.refreshInterval
         } catch {
-            guard stamp == generation, !Task.isCancelled else { return Self.refreshInterval }
-            if case UsageRequestError.rateLimited(let retryAfter) = error {
-                let seconds = UsageRequestError.backoffSeconds(retryAfter: retryAfter)
-                let until = Date().addingTimeInterval(seconds)
-                published.update { $0.signals.limitsState = .rateLimited(until: until) }
-                await backoff?.record(until)
-                report(
-                    "the Claude usage endpoint answered 429; backing off until \(until)")
-                return .seconds(seconds)
-            }
+            guard isCurrent(stamp) else { return Self.refreshInterval }
+            if let wait = await backOff(after: error) { return wait }
             if case UsageRequestError.badStatus(let code) = error, code == 401 || code == 403 {
                 publishFailure(.credentialRefused)
                 report(
