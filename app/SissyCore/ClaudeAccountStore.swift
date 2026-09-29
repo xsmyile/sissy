@@ -135,14 +135,6 @@ enum ClaudeAccountProfile {
     private static let betaHeader = "oauth-2025-04-20"
     private static let requestTimeout: TimeInterval = 10
 
-    enum Failure: Error, Equatable {
-        case badStatus(Int)
-        /// Named rather than folded into a status, because it is the one
-        /// failure that says "ask again later" in so many words.
-        case rateLimited
-        case malformedPayload
-    }
-
     /// The seat, on the organisation beside the plan and the tier. claude.ai
     /// puts the same token on the membership instead, which is why the two
     /// parsers read it from different places and record the same answer.
@@ -162,7 +154,7 @@ enum ClaudeAccountProfile {
     static func parse(_ payload: [String: Any]) throws -> ClaudeAccountIdentity {
         let account = payload["account"] as? [String: Any]
         guard let uuid = account?["uuid"] as? String, !uuid.isEmpty else {
-            throw Failure.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
         let organization = payload["organization"] as? [String: Any]
         return ClaudeAccountIdentity(
@@ -420,15 +412,7 @@ enum ClaudeWebAccountProfile {
     /// cannot tell them apart retries the first forever and says nothing about
     /// why, which is what the log line off this is for.
     static func resolve(session: String) async throws -> ClaudeAccountIdentity {
-        do {
-            return try parse(await ClaudeWebSource.account(session: session))
-        } catch let failure as UsageRequestError {
-            switch failure {
-            case .badStatus(let code): throw ClaudeAccountProfile.Failure.badStatus(code)
-            case .rateLimited: throw ClaudeAccountProfile.Failure.rateLimited
-            case .malformedPayload: throw ClaudeAccountProfile.Failure.malformedPayload
-            }
-        }
+        try parse(await ClaudeWebSource.account(session: session))
     }
 
     private static let idKey = "uuid"
@@ -461,7 +445,7 @@ enum ClaudeWebAccountProfile {
     /// polls of one account.
     static func parse(_ payload: [String: Any]) throws -> ClaudeAccountIdentity {
         guard let uuid = payload[idKey] as? String, !uuid.isEmpty else {
-            throw ClaudeAccountProfile.Failure.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
         let membership = subscriptionMembership(in: payload)
         let organization = membership?[organizationKey] as? [String: Any]

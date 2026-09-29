@@ -157,9 +157,9 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
 
         for shape in shapes {
             XCTAssertThrowsError(try ClaudeWebAccountProfile.parse(shape)) {
-                XCTAssertEqual(
-                    $0 as? ClaudeAccountProfile.Failure,
-                    ClaudeAccountProfile.Failure.malformedPayload)
+                guard case .malformedPayload? = $0 as? UsageRequestError else {
+                    return XCTFail("expected a malformed payload, got \($0)")
+                }
             }
         }
     }

@@ -417,7 +417,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         vault.active = credential("tok-a")
         let offline = LockedValue(false)
         let registry = makeRegistry(vault) { _ in
-            if offline.load() { throw ClaudeAccountProfile.Failure.badStatus(401) }
+            if offline.load() { throw UsageRequestError.badStatus(401) }
             return ClaudeAccountIdentity(
                 uuid: "u-a", email: nil, organization: nil, organizationType: nil,
                 rateLimitTier: nil)
@@ -441,7 +441,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         let vault = Vault()
         let offline = LockedValue(false)
         let registry = makeRegistry(vault) { token in
-            if offline.load() { throw ClaudeAccountProfile.Failure.badStatus(401) }
+            if offline.load() { throw UsageRequestError.badStatus(401) }
             return ClaudeAccountIdentity(
                 uuid: token == "tok-a" ? "u-a" : "u-b", email: nil, organization: nil,
                 organizationType: nil, rateLimitTier: nil)
@@ -511,7 +511,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         let vault = Vault()
         vault.active = credential("tok-a")
         let registry = makeRegistry(vault) { token in
-            guard token != "tok-c" else { throw ClaudeAccountProfile.Failure.badStatus(401) }
+            guard token != "tok-c" else { throw UsageRequestError.badStatus(401) }
             return ClaudeAccountIdentity(
                 uuid: "u-\(token)", email: nil, organization: nil, organizationType: nil,
                 rateLimitTier: nil)
@@ -633,7 +633,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         vault.active = credential("tok-a")
 
         let relaunched = makeRegistry(vault) { _ in
-            throw ClaudeAccountProfile.Failure.badStatus(401)
+            throw UsageRequestError.badStatus(401)
         }
         let outcome = await relaunched.activate(uuid: "u-tok-b")
 
@@ -657,7 +657,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         vault.active = credential("rotated-by-the-cli")
 
         let relaunched = makeRegistry(vault) { _ in
-            throw ClaudeAccountProfile.Failure.badStatus(401)
+            throw UsageRequestError.badStatus(401)
         }
         let outcome = await relaunched.activate(uuid: "u-tok-a")
 
@@ -671,7 +671,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         let vault = Vault()
         let registry = makeRegistry(vault) { _ in
             XCTFail("identifying must not be reached")
-            throw ClaudeAccountProfile.Failure.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
         let outcome = await registry.activate(uuid: "u-nobody")
         guard case .failure(.notArchived) = outcome else { return XCTFail("expected notArchived") }
@@ -684,7 +684,7 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         let vault = Vault()
         vault.active = credential("tok-a")
         let registry = makeRegistry(vault) { _ in
-            throw ClaudeAccountProfile.Failure.badStatus(401)
+            throw UsageRequestError.badStatus(401)
         }
         await registry.captureActive()
 

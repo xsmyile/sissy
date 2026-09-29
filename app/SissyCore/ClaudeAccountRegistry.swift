@@ -120,7 +120,7 @@ actor ClaudeAccountRegistry {
         var store = ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: nowhere))
         store.secrets = .none
         return ClaudeAccountRegistry(store: store, slot: .inert) { _ in
-            throw ClaudeAccountProfile.Failure.malformedPayload
+            throw UsageRequestError.malformedPayload
         }
     }
 
