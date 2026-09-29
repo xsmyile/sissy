@@ -132,7 +132,7 @@ enum DiskCleanupCopy {
     static let confirmCancel = "Cancel"
 
     static func cleanHelp(_ target: CleanupTarget) -> String {
-        "Permanently remove what \(target.displayPath) holds"
+        "Permanently remove \(reach(target))"
     }
 
     static func confirmTitle(_ target: CleanupTarget) -> String { "Clean \(target.name)?" }
@@ -141,13 +141,22 @@ enum DiskCleanupCopy {
     /// counts blocks APFS clones share with files outside the cache.
     static func confirmBody(_ target: CleanupTarget, bytes: Int64) -> String {
         let size = UsageFormat.storage(UInt64(max(0, bytes)))
-        return "Permanently removes everything inside \(target.displayPath), up to \(size). "
-            + rebuilds(target)
+        return "Permanently removes \(reach(target)), up to \(size). " + rebuilds(target)
+    }
+
+    /// What a removal of `target` reaches, as the object of a sentence.
+    static func reach(_ target: CleanupTarget) -> String {
+        switch target {
+        case .removedProjects:
+            "the builds in \(target.displayPath) of projects no longer on this Mac"
+        default: "everything inside \(target.displayPath)"
+        }
     }
 
     static func rebuilds(_ target: CleanupTarget) -> String {
         switch target {
         case .derivedData: "Xcode rebuilds it on the next build."
+        case .removedProjects: "Builds of projects still on this Mac stay."
         case .npm: "npm downloads packages again as it needs them."
         case .uv: "uv downloads packages again as it needs them."
         case .deviceSupport: "Xcode copies it again from each device the next time it connects."

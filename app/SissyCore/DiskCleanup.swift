@@ -23,8 +23,19 @@ import Synchronization
 /// `~/Library/Developer/CoreSimulator/Caches` is left out because what it held
 /// on that Mac, a Personalization folder, is not a cache anything documents as
 /// regenerable.
+///
+/// **`removedProjects` is DerivedData again, narrowed to the builds nothing can
+/// use.** Xcode files each project's build products in a folder of its own and
+/// records the project's path in that folder's `info.plist`, and nothing
+/// removes the folder when the project goes. Measured 2026-09-29 on a Mac
+/// working in throwaway worktrees, 28 of DerivedData's 30 folders, 9.1 GB of
+/// its 9.5, named a project that no longer existed. Emptying the whole root
+/// frees the same space and costs every live project a full rebuild, so this
+/// row takes only the folders whose project is gone, and is refused only
+/// while the Xcode app runs. See `DiskCleaner.isRemovedProject`.
 enum CleanupTarget: String, CaseIterable, Sendable, Identifiable {
     case derivedData
+    case removedProjects
     case npm
     case uv
     case deviceSupport
@@ -34,6 +45,7 @@ enum CleanupTarget: String, CaseIterable, Sendable, Identifiable {
     var name: String {
         switch self {
         case .derivedData: "Xcode DerivedData"
+        case .removedProjects: "Builds of removed projects"
         case .npm: "npm cache"
         case .uv: "uv cache"
         case .deviceSupport: "iOS device support"
@@ -44,7 +56,7 @@ enum CleanupTarget: String, CaseIterable, Sendable, Identifiable {
     /// how it is opened.
     var components: [String] {
         switch self {
-        case .derivedData: ["Library", "Developer", "Xcode", "DerivedData"]
+        case .derivedData, .removedProjects: ["Library", "Developer", "Xcode", "DerivedData"]
         case .npm: [".npm", "_cacache"]
         case .uv: [".cache", "uv"]
         case .deviceSupport: ["Library", "Developer", "Xcode", "iOS DeviceSupport"]
@@ -142,7 +154,8 @@ final class CleanupCancellation: Sendable {
 ///
 /// **One walk per root at a time**, sizing or removal, so two can never race
 /// over one tree and the descriptors held stay bounded: at most `maxDepth`
-/// plus one per walk.
+/// plus one per walk. A root is its directory rather than its target, so
+/// DerivedData and its removed projects wait for each other.
 ///
 /// **What is counted is the allocated size**, `st_blocks`, once per inode for
 /// a hard-linked file, and only for what a cleanup would reach: a directory
@@ -228,7 +241,9 @@ struct DiskCleaner: Sendable {
         var seen: Set<ino_t> = []
         return allocated(
             in: root.descriptor, own: 0, depth: 0, seen: &seen,
-            Walk(device: root.device, cancellation: cancellation))
+            Walk(
+                device: root.device, cancellation: cancellation,
+                removedProjectsOnly: target == .removedProjects, places: root.places))
     }
 
     func clean(_ target: CleanupTarget, cancellation: CleanupCancellation) -> Result<
@@ -247,8 +262,11 @@ struct DiskCleaner: Sendable {
         var report = CleanupReport()
         let kept = lock == nil ? [] : Array(CleanupToolLock.fileName.utf8CString)
         empty(
-            Directory(descriptor: root.descriptor, path: root.path), depth: 0, report: &report,
-            Walk(device: root.device, cancellation: cancellation, kept: kept))
+            Directory(descriptor: root.descriptor, path: root.path), depth: 0, keeping: kept,
+            report: &report,
+            Walk(
+                device: root.device, cancellation: cancellation,
+                removedProjectsOnly: target == .removedProjects, places: root.places))
         return .success(report)
     }
 
@@ -272,13 +290,17 @@ struct DiskCleaner: Sendable {
         let descriptor: Int32
         let device: dev_t
         let path: String
+        /// Where a removed project may have been: see `DiskCleaner.isGone`.
+        let places: [String]
     }
 
     /// The roots a walk holds, keyed by home and target, across every cleaner
     /// in the process.
     private static let walking = LockedValue<Set<String>>([])
 
-    private func walkKey(_ target: CleanupTarget) -> String { home + "\u{0}" + target.rawValue }
+    private func walkKey(_ target: CleanupTarget) -> String {
+        home + "\u{0}" + target.components.joined(separator: "/")
+    }
 
     private func claim(_ target: CleanupTarget) -> Bool {
         var claimed = false
@@ -313,7 +335,17 @@ struct DiskCleaner: Sendable {
             close(descriptor)
             return nil
         }
-        return Root(descriptor: descriptor, device: device(status), path: expected)
+        return Root(
+            descriptor: descriptor, device: device(status), path: expected,
+            places: Self.projectPlaces(home: home, realHome: realHome))
+    }
+
+    /// The home as it was given and as it resolves, and the two temporary
+    /// directories, each spelled every way a recorded path may start with.
+    private static func projectPlaces(home: String, realHome: String) -> [String] {
+        let temporary = (NSTemporaryDirectory() as NSString).standardizingPath
+        let spellings = [home, realHome, "/tmp", "/private/tmp", temporary, realPath(temporary)]
+        return Array(Set(spellings.compactMap { $0 }))
     }
 
     private static func realPath(_ path: String) -> String? {
@@ -347,12 +379,102 @@ struct DiskCleaner: Sendable {
     }
 
     /// What every level of one walk shares: the root's volume, the stop
-    /// signal, and the one entry of the root a removal keeps, uv's lock file,
-    /// which uv would otherwise recreate beside a lock still held.
+    /// signal, and, when only the root's removed projects are reached, the
+    /// home a project must have been inside to count as gone.
     private struct Walk {
         let device: dev_t
         let cancellation: CleanupCancellation
-        var kept: [CChar] = []
+        var removedProjectsOnly = false
+        var places: [String] = []
+
+        /// Whether the walk reaches an entry of the root at all.
+        func reaches(_ name: [CChar], in root: Int32, _ status: stat) -> Bool {
+            !removedProjectsOnly
+                || DiskCleaner.isRemovedProject(name, in: root, status, inside: places, device: device)
+        }
+
+        /// The entry a folder of the root keeps until the rest of it is gone:
+        /// a removed project's record, which is what says the folder is one.
+        var record: [CChar] { removedProjectsOnly ? DiskCleaner.infoPlist : [] }
+    }
+
+    // MARK: Removed projects
+
+    /// The most an `info.plist` of DerivedData is read to; measured 2026-09-29
+    /// the largest of 30 was under 1 KB.
+    private static let infoPlistLimit = 64 * 1024
+    fileprivate static let infoPlist = Array("info.plist".utf8CString)
+
+    /// Whether a folder of DerivedData holds the builds of a project that is
+    /// no longer there.
+    ///
+    /// **Only an answer of absence counts.** The folder must be a directory
+    /// whose `info.plist`, opened without following a link, names a
+    /// `WorkspacePath` that `isGone` answers for. Anything else keeps the
+    /// folder: a folder with no such record (`ModuleCache.noindex` and the SDK
+    /// caches beside it), a record that cannot be read, a project Sissy is
+    /// refused the right to look at, which answers `EPERM`.
+    static func isRemovedProject(
+        _ name: [CChar], in parent: Int32, _ status: stat, inside places: [String], device: dev_t
+    ) -> Bool {
+        guard isDirectory(status), let folder = openChild(name, in: parent, matching: status) else {
+            return false
+        }
+        defer { close(folder) }
+        guard let data = readInfoPlist(in: folder),
+            let record = try? PropertyListSerialization.propertyList(from: data, format: nil)
+                as? [String: Any],
+            let project = record["WorkspacePath"] as? String
+        else { return false }
+        return isGone(project, inside: places, device: device)
+    }
+
+    /// Whether `path`, inside one of `places`, names nothing, and the nearest
+    /// directory above it that does exist is on the home's volume `device`.
+    ///
+    /// **Inside the home or a temporary directory, because only there can
+    /// absence be told from a volume that is away.** A project on a drive that
+    /// is not mounted answers `ENOENT` while it is still whole, and so does one
+    /// under an empty mount point left behind at `/Volumes`, an automount
+    /// under `/net`, or a path spelled `/volumes` on a case-insensitive disk.
+    /// The temporary directories are the boot volume's own and nobody mounts
+    /// there, and they are where agents build: measured 2026-09-29, of the 28
+    /// removed projects DerivedData named on the Mac this was built on, 19 sat
+    /// in the home and 9, 2.8 GB, in scratch directories under `/tmp`. A path
+    /// with a `.` or `..` component or a NUL is not read at all, so the prefix
+    /// is the path's real place, and the ancestor check catches a volume
+    /// mounted inside the home and then taken away. An ancestor that is a link
+    /// is followed, and must lead to a directory on that same volume: a link
+    /// to a drive that is away is the absence this refuses to believe.
+    static func isGone(_ path: String, inside places: [String], device: dev_t) -> Bool {
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !path.contains("\0"), !components.contains("."), !components.contains(".."),
+            places.contains(where: { path.hasPrefix($0 + "/") })
+        else { return false }
+        var status = stat()
+        guard lstat(path, &status) != 0, errno == ENOENT else { return false }
+        var ancestor = (path as NSString).deletingLastPathComponent
+        while lstat(ancestor, &status) != 0 {
+            guard errno == ENOENT, places.contains(where: { ancestor.hasPrefix($0 + "/") }) else {
+                return false
+            }
+            ancestor = (ancestor as NSString).deletingLastPathComponent
+        }
+        if status.st_mode & S_IFMT == S_IFLNK, stat(ancestor, &status) != 0 { return false }
+        return isDirectory(status) && status.st_dev == device
+    }
+
+    private static func readInfoPlist(in folder: Int32) -> Data? {
+        let file = openat(folder, "info.plist", O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard file >= 0 else { return nil }
+        defer { close(file) }
+        var status = stat()
+        guard fstat(file, &status) == 0, status.st_mode & S_IFMT == S_IFREG,
+            status.st_size <= infoPlistLimit
+        else { return nil }
+        var data = Data(count: Int(status.st_size))
+        let count = data.withUnsafeMutableBytes { read(file, $0.baseAddress, $0.count) }
+        return count == data.count ? data : nil
     }
 
     /// A directory whose entries could not be read to the end.
@@ -412,7 +534,8 @@ struct DiskCleaner: Sendable {
             if walk.cancellation.isCancelled { return nil }
             var status = stat()
             guard fstatat(descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0,
-                device(status) == walk.device, owns(status)
+                device(status) == walk.device, owns(status),
+                depth > 0 || walk.reaches(name, in: descriptor, status)
             else { continue }
             if Self.isDirectory(status) {
                 guard depth < Self.maxDepth,
@@ -431,8 +554,11 @@ struct DiskCleaner: Sendable {
         return total
     }
 
+    /// Empties a directory, leaving `keeping` where it is, and at the root
+    /// every entry the walk does not reach.
     private func empty(
-        _ directory: Directory, depth: Int, report: inout CleanupReport, _ walk: Walk
+        _ directory: Directory, depth: Int, keeping: [CChar], report: inout CleanupReport,
+        _ walk: Walk
     ) {
         guard Self.path(of: directory.descriptor) == directory.path,
             let names = try? Self.names(in: directory.descriptor)
@@ -445,10 +571,12 @@ struct DiskCleaner: Sendable {
                 report.cancelled = true
                 return
             }
-            if depth == 0, name == walk.kept { continue }
             var status = stat()
             guard fstatat(directory.descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else {
                 report.failed += 1
+                continue
+            }
+            if name == keeping || depth == 0 && !walk.reaches(name, in: directory.descriptor, status) {
                 continue
             }
             guard device(status) == walk.device, owns(status) else {
@@ -470,6 +598,11 @@ struct DiskCleaner: Sendable {
 
     /// Empties a directory below the root, then removes it. One left holding
     /// what was skipped or refused inside it is not counted a second time.
+    ///
+    /// A removed project's record goes last, and only once everything beside
+    /// it has: a folder a removal left half emptied, by a refusal, a
+    /// cancellation or the app quitting, must still read as a removed project
+    /// the next time, or only emptying all of DerivedData could reach it.
     private func removeDirectory(
         _ entry: Entry, in parent: Directory, depth: Int, _ report: inout CleanupReport, _ walk: Walk
     ) {
@@ -482,16 +615,36 @@ struct DiskCleaner: Sendable {
         let child = parent.child(entry.name, descriptor)
         directoryOpened?(child.path)
         let before = report
-        empty(child, depth: depth + 1, report: &report, walk)
+        let record = depth == 0 ? walk.record : []
+        empty(child, depth: depth + 1, keeping: record, report: &report, walk)
+        if !report.cancelled, !record.isEmpty, !Self.leftSomething(since: before, report) {
+            removeFile(record, in: descriptor, &report)
+        }
         close(descriptor)
         if report.cancelled { return }
-        let leftInside = report.skipped != before.skipped || report.failed != before.failed
+        let leftInside = Self.leftSomething(since: before, report)
         if unlinkat(parent.descriptor, entry.name, AT_REMOVEDIR) == 0 {
             report.removed += 1
             report.removedBytes += Self.blocks(entry.status)
         } else if !leftInside {
             report.failed += 1
         }
+    }
+
+    private static func leftSomething(since before: CleanupReport, _ report: CleanupReport) -> Bool {
+        report.skipped != before.skipped || report.failed != before.failed
+    }
+
+    private func removeFile(_ name: [CChar], in directory: Int32, _ report: inout CleanupReport) {
+        var status = stat()
+        guard fstatat(directory, name, &status, AT_SYMLINK_NOFOLLOW) == 0,
+            unlinkat(directory, name, 0) == 0
+        else {
+            report.failed += 1
+            return
+        }
+        report.removed += 1
+        if status.st_nlink <= 1 { report.removedBytes += Self.blocks(status) }
     }
 
     // MARK: Off the actor

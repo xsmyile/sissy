@@ -30,6 +30,8 @@ final class DiskCleanupModel {
     /// What each cache would free, keyed once it has been sized; 0 for one
     /// that is not there.
     private(set) var sizes: [CleanupTarget: Int64] = [:]
+    /// When each of `sizes` was read, set with it.
+    @ObservationIgnored private var sizedAt: [CleanupTarget: ContinuousClock.Instant] = [:]
     /// Whether every cache has been sized.
     private(set) var measured = false
     /// The cache a press is being checked and sized for.
@@ -54,13 +56,21 @@ final class DiskCleanupModel {
         }
     }
 
-    /// What the row shows: the size a finished removal left, or the size this
-    /// panel measured.
+    /// What the row shows: the newest reading of it, whether this panel's own
+    /// or what a finished removal on its root left.
     func size(of target: CleanupTarget) -> Int64 {
-        if case .finished(let outcome) = host.removals[target], let remaining = outcome.remaining {
-            return remaining
+        var newest = sizes[target].flatMap { bytes in sizedAt[target].map { (bytes, $0) } }
+        for case .finished(let outcome) in host.removals.values {
+            guard let bytes = outcome.remaining[target] else { continue }
+            if let current = newest, current.1 >= outcome.measuredAt { continue }
+            newest = (bytes, outcome.measuredAt)
         }
-        return sizes[target] ?? 0
+        return newest?.0 ?? 0
+    }
+
+    private func record(_ bytes: Int64, for target: CleanupTarget) {
+        sizes[target] = bytes
+        sizedAt[target] = .now
     }
 
     /// Whether a row may offer its `Clean…`: nothing else is being asked or
@@ -80,7 +90,7 @@ final class DiskCleanupModel {
                 guard host.removals[target] != .running else { continue }
                 let size = await host.size(of: target)
                 guard !Task.isCancelled, let size else { return }
-                sizes[target] = size
+                record(size, for: target)
             }
             measured = true
             sizingTask = nil
@@ -104,7 +114,7 @@ final class DiskCleanupModel {
             }
             let bytes = await host.size(of: target)
             guard !Task.isCancelled, let bytes else { return }
-            sizes[target] = bytes
+            record(bytes, for: target)
             preparing = nil
             if bytes > 0 { confirmation = Confirmation(target: target, bytes: bytes) }
         }

@@ -20,11 +20,15 @@ import Observation
 @MainActor
 @Observable
 final class DiskCleanupHost {
-    /// What a removal did, and what its root takes afterwards, nil when
-    /// nothing was touched.
+    /// What a removal did, and what each target on its root takes
+    /// afterwards, none when nothing was touched: emptying DerivedData empties
+    /// its removed projects too, and the other way round shrinks it.
+    /// `measuredAt` is when those sizes were read, so a page holding a newer
+    /// reading of a row, or a later removal's, shows that one instead.
     struct Outcome: Equatable {
         let result: Result<CleanupReport, CleanupRefusal>
-        let remaining: Int64?
+        let remaining: [CleanupTarget: Int64]
+        var measuredAt = ContinuousClock.now
     }
 
     enum Removal: Equatable {
@@ -36,7 +40,7 @@ final class DiskCleanupHost {
 
     @ObservationIgnored private let cleaner: DiskCleaner
     /// The last walk asked for on each root, which the next one waits for.
-    @ObservationIgnored private var walks: [CleanupTarget: Task<Void, Never>] = [:]
+    @ObservationIgnored private var walks: [[String]: Task<Void, Never>] = [:]
 
     init(cleaner: DiskCleaner = DiskCleaner()) {
         self.cleaner = cleaner
@@ -68,8 +72,12 @@ final class DiskCleanupHost {
         removals[target] = .running
         let walk = queued(on: target) { cleaner in
             let result = await cleaner.clean(target)
-            let touched = (try? result.get()) != nil
-            return Outcome(result: result, remaining: touched ? await cleaner.size(of: target) : nil)
+            guard (try? result.get()) != nil else { return Outcome(result: result, remaining: [:]) }
+            var remaining: [CleanupTarget: Int64] = [:]
+            for sibling in CleanupTarget.allCases where sibling.components == target.components {
+                remaining[sibling] = await cleaner.size(of: sibling)
+            }
+            return Outcome(result: result, remaining: remaining)
         }
         Task {
             removals[target] = .finished(await walk.value)
@@ -85,13 +93,13 @@ final class DiskCleanupHost {
     private func queued<Value: Sendable>(
         on target: CleanupTarget, _ work: @escaping @Sendable (DiskCleaner) async -> Value
     ) -> Task<Value, Never> {
-        let previous = walks[target]
+        let previous = walks[target.components]
         let cleaner = cleaner
         let walk = Task {
             await previous?.value
             return await work(cleaner)
         }
-        walks[target] = Task { _ = await walk.value }
+        walks[target.components] = Task { _ = await walk.value }
         return walk
     }
 }
