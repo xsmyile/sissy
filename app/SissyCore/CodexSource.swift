@@ -21,7 +21,7 @@ final class CodexAdapter: SourceAdapter {
     /// OpenAI slice of the runtime `PriceCatalog`. See the twin property on
     /// `ClaudeCodeAdapter` for the precedence rationale.
     private var priceCatalog: PricingTable?
-    private var loggedUnpricedModels: Set<String> = []
+    private var unpriced = UnpricedModelLog()
 
     /// Rate-limit buckets Codex ships on a `token_count` event. Position is
     /// not meaning: each bucket carries its own `window_minutes`.
@@ -159,21 +159,14 @@ final class CodexAdapter: SourceAdapter {
 
     func applyPriceCatalog(_ catalog: PriceCatalog) {
         priceCatalog = catalog.table(for: .openai)
-        loggedUnpricedModels.removeAll()
+        unpriced.reset()
     }
 
-    /// Reports an unpriced model once per model. See the twin on
-    /// `ClaudeCodeAdapter`.
+    /// Reports an unpriced model once per model.
     private func logUnpricedModelOnce(for model: String) {
-        guard !loggedUnpricedModels.contains(model) else { return }
-        guard
-            OpenAIPricing.price(for: model, override: pricingOverride, catalog: priceCatalog)
-                == nil
-        else { return }
-        loggedUnpricedModels.insert(model)
-        sissyLog(
-            "sissy: no rate for '\(model)' in any pricing source — its tokens "
-                + "bill at $0; add a `pricingOverride` entry in server.json")
+        unpriced.report(model) {
+            OpenAIPricing.price(for: model, override: pricingOverride, catalog: priceCatalog) != nil
+        }
     }
 
     /// Takes the account from Codex's auth file, and the plan too when
