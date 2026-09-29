@@ -562,6 +562,10 @@ final class CodexAdapter: SourceAdapter {
     /// none is billed as if it landed now, and taking its windows at that
     /// stamp as well would, during a cold scan, publish an old line's limits
     /// as the newest reading and hold every fresher one off behind it.
+    ///
+    /// A bucket with no reset is kept, on the rule `CodexUsagePayload.windows`
+    /// reads the same block by: a period nobody has started is a window at
+    /// its reading, not a window that does not exist.
     private func captureWindows(_ raw: Any?, observedAt: Date) {
         guard let dict = raw as? [String: Any] else { return }
         if let boundary = identityBoundaryAt, observedAt < boundary { return }
@@ -579,13 +583,12 @@ final class CodexAdapter: SourceAdapter {
         let windows = Self.rateLimitBuckets.compactMap { key -> UsageWindow? in
             guard let bucket = dict[key] as? [String: Any],
                 let minutes = bucket["window_minutes"] as? Int,
-                let used = bucket["used_percent"] as? Double,
-                let resets = bucket["resets_at"] as? Double
+                let used = bucket["used_percent"] as? Double
             else { return nil }
             return UsageWindow(
                 minutes: minutes,
                 usedPercent: used,
-                resetsAt: Date(timeIntervalSince1970: resets)
+                resetsAt: (bucket["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
             )
         }
         if windows.isEmpty { return }

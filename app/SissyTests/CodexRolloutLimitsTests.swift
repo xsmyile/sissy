@@ -32,6 +32,18 @@ final class CodexRolloutLimitsTests: XCTestCase {
         XCTAssertEqual(windows.map(\.usedPercent), [10])
     }
 
+    /// A bucket nobody has started carries no reset, which is a window at
+    /// its reading rather than no window, on the rule the poll of the same
+    /// block already follows.
+    func testABucketWithNoResetIsKept() async throws {
+        try write([event(at: Date().addingTimeInterval(-60), used: 0, resetsAt: nil)])
+
+        let windows = await windows()
+
+        XCTAssertEqual(windows.count, 1)
+        XCTAssertNil(windows.first?.resetsAt)
+    }
+
     private func windows() async -> [UsageWindow] {
         let provider = LocalUsageProvider.codex(
             codexDir: sessionsDir,
