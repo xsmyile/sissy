@@ -119,8 +119,19 @@ enum UsageReaderShared {
     /// `timegm`, sub-µs/line. Returns nil for any unexpected shape so the
     /// caller can fall back to the Foundation formatter, keeping forward
     /// compatibility if the upstream timestamp format ever shifts.
+    ///
+    /// The bytes are read in place: a native string's UTF-8 is contiguous, so
+    /// the copy into an array that a line used to cost is made only for a
+    /// bridged string that has none.
     static func parseISODate(_ s: String) -> Date? {
-        let bytes = Array(s.utf8)
+        s.utf8.withContiguousStorageIfAvailable(parseISODate(bytes:))
+            ?? Array(s.utf8).withUnsafeBufferPointer(parseISODate(bytes:))
+    }
+
+    /// Offsets of the digits in the `YYYY-MM-DDTHH:MM:SS` skeleton.
+    private static let skeletonDigits = [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
+
+    private static func parseISODate(bytes: UnsafeBufferPointer<UInt8>) -> Date? {
         if bytes.count < 20 { return nil }
         // Fixed-offset digit check on the date+time skeleton. Bails on the
         // first wrong separator so a slightly different shape ("+00:00"
@@ -129,7 +140,7 @@ enum UsageReaderShared {
             bytes[13] == 0x3A, bytes[16] == 0x3A
         else { return nil }
         func d(_ i: Int) -> Int { Int(bytes[i] &- 0x30) }
-        for idx in [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18] {
+        for idx in skeletonDigits {
             let v = bytes[idx]
             if v < 0x30 || v > 0x39 { return nil }
         }
