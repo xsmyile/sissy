@@ -482,7 +482,7 @@ struct UsagePanelView: View {
     /// age under the title is what answers a press that changed nothing: the
     /// rows stand still, so without it the button reads as broken.
     private func identitiesHeader(checkedAt: Date?) -> some View {
-        subpageHeader(back: .overview, help: homeHelp, mark: nil, title: "Identities") {
+        subpageHeader(back: .overview, mark: nil, title: "Identities") {
             TimelineView(.periodic(from: .now, by: Self.clockTick)) { context in
                 if let line = UsageFormat.identitiesReading(
                     checkedAt: checkedAt, refreshing: model.engine.refreshingIdentities,
@@ -510,14 +510,13 @@ struct UsagePanelView: View {
     /// panel jumping.
     private func subpageHeader<Subtitle: View, Trailing: View>(
         back destination: Page,
-        help: String,
         mark: String?,
         title: String,
         @ViewBuilder subtitle: () -> Subtitle,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack(spacing: 8) {
-            backButton(to: destination, help: help)
+            backButton(to: destination)
 
             if let mark {
                 ProviderMark(id: mark, size: Self.headerMarkSize, textSize: nil)
@@ -728,7 +727,6 @@ struct UsagePanelView: View {
     private func projectsHeader(_ projects: UsagePanelSnapshot.ProjectsPage) -> some View {
         subpageHeader(
             back: projects.provider.map { .provider($0, account: openAccount) } ?? .overview,
-            help: projectsBackHelp(projects.provider),
             mark: projects.provider,
             title: "Projects"
         ) {
@@ -745,7 +743,7 @@ struct UsagePanelView: View {
     /// at the same size. One control rather than one per header: a page that
     /// drew its own would be free to draw it a point off, and the chevron is
     /// the only thing on these headers a user has to find without looking.
-    private func backButton(to destination: Page, help: String) -> some View {
+    private func backButton(to destination: Page) -> some View {
         Button {
             page = destination
         } label: {
@@ -756,12 +754,14 @@ struct UsagePanelView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .help(help)
+        .help(backHelp(to: destination))
     }
 
-    private func projectsBackHelp(_ provider: String?) -> String {
-        guard let provider else { return homeHelp }
-        return "Back to \(UsageFormat.providerName(provider))"
+    /// The way back's tooltip, named by where it lands: the vendor's page by
+    /// the vendor, and the Overview by the tab it was opened from.
+    private func backHelp(to destination: Page) -> String {
+        guard case .provider(let id, _) = destination else { return homeHelp }
+        return "Back to \(UsageFormat.providerName(id))"
     }
 
     /// Where the way back from a page one level in goes: the tab it was
@@ -800,7 +800,6 @@ struct UsagePanelView: View {
     ) -> some View {
         subpageHeader(
             back: back,
-            help: back == .overview ? homeHelp : "Back to \(row.name)",
             mark: row.id,
             title: row.name
         ) {
