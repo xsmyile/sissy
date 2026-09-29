@@ -748,7 +748,7 @@ enum UsageHistoryStore {
         // union of the day's readers and only the sum of the days.
         var unionByDay: [Date: AgentActivityDay] = [:]
         var activityByProvider: [UsagePeriod: [String: ActivityTotals]] = [:]
-        var cache: [UsagePeriod: CacheReading] = [:]
+        var cacheReadings: [UsagePeriod: CacheReading] = [:]
         for provider in providers(in: parent) {
             for url in dayFileURLs(
                 provider: provider, in: parent, prefetching: UsageHistoryDayCache.stampKeys)
@@ -772,7 +772,7 @@ enum UsageHistoryStore {
                     byProvider[period, default: [:]][provider, default: .none].add(day.agents)
                     activityByProvider[period, default: [:]][provider, default: .none]
                         .add(day.activityTotals)
-                    cache[period, default: .none].add(day.cache)
+                    cacheReadings[period, default: .none].add(day.cache)
                     earliest[period] = earliest[period].map { min($0, dayKey) } ?? dayKey
                 }
             }
@@ -795,7 +795,7 @@ enum UsageHistoryStore {
                 agentsByProvider: byProvider[period] ?? [:],
                 activity: activity[period] ?? .none,
                 activityByProvider: activityByProvider[period] ?? [:],
-                cache: cache[period] ?? .none)
+                cache: cacheReadings[period] ?? .none)
         }
         return out
     }
