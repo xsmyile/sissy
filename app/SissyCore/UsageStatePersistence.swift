@@ -333,7 +333,13 @@ enum UsageStatePersistence {
     /// boot doesn't loop on the same bad bytes and the operator has a
     /// forensic artifact. Returns a structured outcome so the caller can
     /// log at the right level (info for missing, warn for invalid).
+    ///
+    /// Every load prunes the copies set aside for this snapshot, not only the
+    /// one that sets another aside: a backlog left before pruning shipped, or
+    /// by a build that never met an unreadable snapshot again, would otherwise
+    /// stay until the next schema bump.
     static func load(from url: URL) -> LoadOutcome {
+        pruneQuarantined(of: url)
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .missing
         }

@@ -76,6 +76,17 @@ final class UsageStateQuarantineTests: XCTestCase {
         XCTAssertEqual(try quarantinedCopies().count, UsageStatePersistence.quarantineKeep)
     }
 
+    /// A backlog is pruned by any load, not only by the next quarantine: an
+    /// install whose snapshot reads fine again would otherwise keep it until
+    /// the next schema bump.
+    func testABacklogIsPrunedByALoadThatQuarantinesNothing() throws {
+        try leaveOlderCopies(4)
+        guard case .missing = UsageStatePersistence.load(from: snapshotURL) else {
+            return XCTFail("no snapshot was written, so none should load")
+        }
+        XCTAssertEqual(try quarantinedCopies().count, UsageStatePersistence.quarantineKeep)
+    }
+
     func testThePrunedCopiesAreTheOldestOnes() throws {
         let older = try leaveOlderCopies(4)
         let newest = try XCTUnwrap(older.first).lastPathComponent
