@@ -49,7 +49,9 @@ final class FSWatcherTests: XCTestCase {
 }
 
 /// Records each batch's name and how many were in the handler at once, the
-/// first one taking long enough for the rest to pile up behind it.
+/// first one taking long enough for the rest to pile up behind it. Only the
+/// test's own batches are named, since the real stream underneath is free to
+/// report the directory the test just made.
 private actor SeenBatches {
     private(set) var names: [String] = []
     private(set) var mostAtOnce = 0
@@ -59,7 +61,8 @@ private actor SeenBatches {
         inside += 1
         mostAtOnce = max(mostAtOnce, inside)
         if names.isEmpty { try? await Task.sleep(for: .milliseconds(100)) }
-        names.append(contentsOf: event.urls.map(\.lastPathComponent))
+        names.append(
+            contentsOf: event.urls.map(\.lastPathComponent).filter { $0.hasPrefix("batch-") })
         inside -= 1
     }
 }
