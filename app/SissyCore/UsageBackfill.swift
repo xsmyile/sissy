@@ -39,10 +39,9 @@ enum ArchiveBackfill {
         calendar: Calendar = .current
     ) -> Range<Date>? {
         guard retentionDays > 0, liveRetainDays > 0 else { return nil }
-        let today = calendar.startOfDay(for: now)
         let liveStart = LocalUsageProvider.liveWindowStart(retainDays: liveRetainDays, now: now)
         guard
-            let start = calendar.date(byAdding: .day, value: -(retentionDays - 1), to: today),
+            let start = UsagePeriod.start(days: retentionDays, now: now, calendar: calendar),
             let end = calendar.date(
                 byAdding: .day, value: 1, to: calendar.startOfDay(for: liveStart)),
             start < end

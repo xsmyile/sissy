@@ -358,7 +358,7 @@ struct UsagePanelSnapshot: Equatable {
         calendar: Calendar = .current
     ) -> DayStrip? {
         let today = calendar.startOfDay(for: now)
-        let start = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today) ?? today
+        let start = UsagePeriod.start(days: days, now: now, calendar: calendar) ?? today
         let past = series.filter {
             let day = calendar.startOfDay(for: $0.day)
             return day >= start && day < today

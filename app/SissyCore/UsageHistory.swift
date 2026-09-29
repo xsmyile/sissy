@@ -493,6 +493,30 @@ enum UsagePeriod: String, Codable, CaseIterable, Sendable {
 
     /// Every period the archive answers for, which is every one but `today`.
     static let archived: [Self] = [.sevenDays, .thirtyDays, .all]
+
+    /// The first day of a window `days` wide that includes today: `days - 1`
+    /// before the start of today, inclusive, and never later than today.
+    ///
+    /// The one copy of the rule, because the archive's rollup, its strip, its
+    /// prune, the backfill's cutoff, the forge query and the panel's caption
+    /// all have to count the same days: a window that drifted in one of them
+    /// would put two answers under one label. Nil only when the calendar
+    /// cannot subtract, which each caller answers for itself.
+    static func start(days: Int, now: Date, calendar: Calendar = .current) -> Date? {
+        calendar.date(
+            byAdding: .day, value: -(max(days, 1) - 1), to: calendar.startOfDay(for: now))
+    }
+
+    /// The first day this window counts, or nil for `all`, which is unbounded.
+    ///
+    /// A failed subtraction falls back to the start of today rather than to
+    /// nil, which would turn a bounded window into the whole archive under the
+    /// bounded window's name.
+    func start(now: Date, calendar: Calendar = .current) -> Date? {
+        guard let days else { return nil }
+        return Self.start(days: days, now: now, calendar: calendar)
+            ?? calendar.startOfDay(for: now)
+    }
 }
 
 /// What a window of the archive adds up to.
@@ -700,14 +724,7 @@ enum UsageHistoryStore {
         guard !periods.isEmpty else { return [:] }
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
-        // A nil cutoff means unbounded, so a failed subtraction must not
-        // produce one: it would turn a bounded window into the whole archive
-        // under the bounded window's name.
-        let cutoffs = periods.map { period -> (UsagePeriod, Date?) in
-            guard let days = period.days else { return (period, nil) }
-            let start = cal.date(byAdding: .day, value: -(max(days, 1) - 1), to: today)
-            return (period, start ?? today)
-        }
+        let cutoffs = periods.map { ($0, $0.start(now: now, calendar: cal)) }
         var tokens: [UsagePeriod: Int] = [:]
         var cost: [UsagePeriod: Decimal] = [:]
         var agents: [UsagePeriod: AgentCounts] = [:]
@@ -788,7 +805,7 @@ enum UsageHistoryStore {
     ) -> [UsageHistoryDaySummary] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
-        let cutoff = cal.date(byAdding: .day, value: -(max(days, 1) - 1), to: today) ?? today
+        let cutoff = UsagePeriod.start(days: days, now: now, calendar: cal) ?? today
         return dayFiles(provider: provider, in: parent)
             .filter { $0.0 >= cutoff && $0.0 < today }
             .compactMap { day, url in
@@ -828,10 +845,8 @@ enum UsageHistoryStore {
     /// A file whose name is not a day is left alone: the archive is the user's
     /// directory and nothing here may delete what it did not write.
     static func prune(keeping retentionDays: Int, in parent: URL, now: Date = Date()) {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: now)
         guard retentionDays > 0,
-            let cutoff = cal.date(byAdding: .day, value: -(retentionDays - 1), to: today)
+            let cutoff = UsagePeriod.start(days: retentionDays, now: now)
         else { return }
         for provider in providers(in: parent) {
             for (dayKey, url) in dayFiles(provider: provider, in: parent) where dayKey < cutoff {

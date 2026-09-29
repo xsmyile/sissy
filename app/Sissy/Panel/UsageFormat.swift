@@ -426,8 +426,7 @@ enum UsageFormat {
     ) -> Date? {
         guard let earliestDay else { return nil }
         guard let days else { return earliestDay }
-        let today = calendar.startOfDay(for: now)
-        guard let start = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today),
+        guard let start = UsagePeriod.start(days: days, now: now, calendar: calendar),
             calendar.startOfDay(for: earliestDay) > start
         else { return nil }
         return earliestDay

@@ -10,9 +10,7 @@ import Foundation
 /// inclusive, and `all` is unbounded.
 enum ForgeWindow {
     static func start(of period: UsagePeriod, now: Date, calendar: Calendar = .current) -> Date? {
-        guard let days = period.days else { return nil }
-        let today = calendar.startOfDay(for: now)
-        return calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today) ?? today
+        period.start(now: now, calendar: calendar)
     }
 
     /// A day in the `YYYY-MM-DD` form GitLab's `after` takes, in the **local**
