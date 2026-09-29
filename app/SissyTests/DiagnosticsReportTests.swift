@@ -37,6 +37,8 @@ final class DiagnosticsReportTests: XCTestCase {
             )
         )
 
+        XCTAssertTrue(report.contains("Sissy 0.1.9 (12)"), report)
+        XCTAssertTrue(report.contains("claude-code 1000 tokens"), report)
         for secret in ["someone@example.com", "Example Ltd", "acme", "team_tier_1"] {
             XCTAssertFalse(report.contains(secret), "the report carried \(secret)")
         }

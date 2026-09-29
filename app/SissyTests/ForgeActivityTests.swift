@@ -481,8 +481,7 @@ final class ForgeActivityTests: XCTestCase {
     /// not carry a date: `UPDATED_AT` is an order, not a window.
     func testGitHubDocumentAsksForTheCommentPageInsideTheSameViewer() {
         let document = GitHubActivityFeed.document(now: Self.measuredDay)
-        let viewer = try? XCTUnwrap(document.range(of: "viewer {"))
-        XCTAssertNotNil(viewer)
+        XCTAssertTrue(document.contains("viewer {"), document)
         XCTAssertTrue(
             document.contains(
                 "comments: issueComments(first: \(GitHubActivityFeed.commentPage),"
