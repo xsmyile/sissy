@@ -69,14 +69,13 @@ scripts/swiftlint.sh lint --quiet --strict --baseline .swiftlint-baseline
 
 Tests are CI's job (`xcodebuild test` is too slow to run per commit), but if you
 touched the engine, run the self-test yourself. **Build first**, because
-`-showBuildSettings` happily points at whatever the last successful build left
-behind:
+`scripts/cli-path.sh` reads `-showBuildSettings`, which happily points at
+whatever the last successful build left behind:
 
 ```bash
 cd app
 xcodebuild -project Sissy.xcodeproj -scheme sissy-cli -configuration Debug build \
-  && "$(xcodebuild -scheme sissy-cli -showBuildSettings \
-        | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)/sissy-cli" --self-test
+  && "$(../scripts/cli-path.sh Debug)" --self-test
 ```
 
 ## Commits and pull requests
