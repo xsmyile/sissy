@@ -80,9 +80,34 @@ enum Pricing {
         override: PricingTable? = nil,
         catalog: PricingTable? = nil
     ) -> ModelPricing? {
+        price(for: model, override: override, catalog: catalog, seed: PricingSeed.anthropic)
+    }
+
+    /// The precedence every vendor resolves through, with the vendor's own
+    /// seed table as the last resort: one copy, so the order that decides
+    /// which rate wins cannot differ between two vendors.
+    static func price(
+        for model: String,
+        override: PricingTable?,
+        catalog: PricingTable?,
+        seed: PricingTable
+    ) -> ModelPricing? {
         if let override, let p = override.match(model) { return p }
         if let catalog, let p = catalog.match(model) { return p }
-        return PricingSeed.anthropic.match(model)
+        return seed.match(model)
+    }
+
+    /// A sum of token counts times per-million rates, in dollars, rounded to
+    /// six places with banker's rounding.
+    ///
+    /// The one rounding every cost and saving takes, because it is the rule
+    /// that has to land on `ccusage` exactly, and a saving printed beside a
+    /// cost must be rounded alike.
+    static func roundedCost(_ raw: Decimal) -> Decimal {
+        var result = raw / Decimal(1_000_000)
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &result, 6, .bankers)
+        return rounded
     }
 
     /// Default 1-hour cache-write multiplier over base input (Anthropic: 2×,
@@ -107,18 +132,13 @@ enum Pricing {
         catalog: PricingTable? = nil
     ) -> Decimal {
         guard let p = price(for: model, override: override, catalog: catalog) else { return 0 }
-        let million = Decimal(1_000_000)
         let cache1hPerMTok =
             p.cacheCreation1hPerMTok ?? (p.inputPerMTok * cacheCreation1hInputMultiplier)
-        let raw =
+        return roundedCost(
             Decimal(input) * p.inputPerMTok
-            + Decimal(output) * p.outputPerMTok
-            + Decimal(cacheRead) * p.cacheReadPerMTok
-            + Decimal(cacheCreation.fiveMinute) * p.cacheCreationPerMTok
-            + Decimal(cacheCreation.oneHour) * cache1hPerMTok
-        var result = raw / million
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &result, 6, .bankers)
-        return rounded
+                + Decimal(output) * p.outputPerMTok
+                + Decimal(cacheRead) * p.cacheReadPerMTok
+                + Decimal(cacheCreation.fiveMinute) * p.cacheCreationPerMTok
+                + Decimal(cacheCreation.oneHour) * cache1hPerMTok)
     }
 }

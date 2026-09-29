@@ -16,9 +16,7 @@ enum OpenAIPricing {
         override: PricingTable? = nil,
         catalog: PricingTable? = nil
     ) -> ModelPricing? {
-        if let override, let p = override.match(model) { return p }
-        if let catalog, let p = catalog.match(model) { return p }
-        return PricingSeed.openai.match(model)
+        Pricing.price(for: model, override: override, catalog: catalog, seed: PricingSeed.openai)
     }
 
     static func cost(
@@ -30,14 +28,9 @@ enum OpenAIPricing {
         catalog: PricingTable? = nil
     ) -> Decimal {
         guard let p = price(for: model, override: override, catalog: catalog) else { return 0 }
-        let million = Decimal(1_000_000)
-        let raw =
+        return Pricing.roundedCost(
             Decimal(input) * p.inputPerMTok
-            + Decimal(output) * p.outputPerMTok
-            + Decimal(cacheRead) * p.cacheReadPerMTok
-        var result = raw / million
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &result, 6, .bankers)
-        return rounded
+                + Decimal(output) * p.outputPerMTok
+                + Decimal(cacheRead) * p.cacheReadPerMTok)
     }
 }

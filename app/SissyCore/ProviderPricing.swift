@@ -50,17 +50,8 @@ struct ProviderPricing: Sendable {
             return 0
         }
         let perMTok = max(rates.inputPerMTok - rates.cacheReadPerMTok, 0)
-        var raw = Decimal(cacheReadTokens) * perMTok / Self.tokensPerRate
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &raw, Self.savingScale, .bankers)
-        return rounded
+        return Pricing.roundedCost(Decimal(cacheReadTokens) * perMTok)
     }
-
-    /// Rates are quoted per million tokens.
-    private static let tokensPerRate = Decimal(1_000_000)
-    /// The scale `Pricing.cost` rounds a cost to, so a saving and the cost
-    /// beside it are rounded alike.
-    private static let savingScale = 6
 }
 
 /// How much of a window's input the prompt cache answered, and what that saved.
