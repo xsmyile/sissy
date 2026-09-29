@@ -234,7 +234,7 @@ final class SissyModel {
     /// next frame rather than on the *answering* one would flash the old mode
     /// back for a moment, so the mode is what was asked for until a frame
     /// agrees with it.
-    private struct PendingKeepAwake {
+    private struct PendingKeepAwake: Equatable {
         let mode: KeepAwakeMode
         let askedAt: Date
     }
@@ -289,8 +289,22 @@ final class SissyModel {
     func setKeepAwake(_ mode: KeepAwakeMode) {
         guard mode != keepAwake.mode else { return }
         if mode != .off { preferredKeepAwakeMode = mode }
-        pendingKeepAwake = PendingKeepAwake(mode: mode, askedAt: Date())
+        let request = PendingKeepAwake(mode: mode, askedAt: Date())
+        pendingKeepAwake = request
         engine.setKeepAwake(mode: mode)
+        expire(request)
+    }
+
+    /// Drops a request the engine never answered once its window is out, so
+    /// the switch goes back to the engine's own mode on its own rather than
+    /// on whatever frame happens to land next, which on a quiet Mac is a
+    /// minute away.
+    private func expire(_ request: PendingKeepAwake) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.keepAwakeAckWindow))
+            guard let self, pendingKeepAwake == request else { return }
+            pendingKeepAwake = nil
+        }
     }
 
     /// Where the engine's answer lands. Both fields move together so an
