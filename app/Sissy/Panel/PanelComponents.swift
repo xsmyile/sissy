@@ -1066,7 +1066,20 @@ struct ForgeRowView: View {
 /// Template assets, so the mark takes the colour of the line it sits on and
 /// one file serves light and dark.
 struct ForgeMark: View {
-    let host: String
+    private let asset: String?
+
+    /// For a repository row, which knows the host it was cloned from and
+    /// not which forge answers there.
+    init(host: String) {
+        asset = Self.assetName(forHost: host)
+    }
+
+    /// For a row whose forge is already known, a connection or a token filed
+    /// under its kind, where guessing from the host would give a self-hosted
+    /// GitLab on a company domain the generic glyph.
+    init(kind: ForgeKind) {
+        asset = Self.assetName(for: kind)
+    }
 
     private static let size: CGFloat = 11
 
@@ -1078,7 +1091,7 @@ struct ForgeMark: View {
     }
 
     private var mark: Image {
-        guard let asset = Self.assetName(forHost: host) else {
+        guard let asset else {
             return Image(systemName: Self.genericSymbol)
         }
         return Image(asset)
@@ -1091,9 +1104,16 @@ struct ForgeMark: View {
     /// whichever the compiler reached first.
     nonisolated static func assetName(forHost host: String) -> String? {
         let host = host.lowercased()
-        if host.contains(Self.gitHubName) { return "ForgeMarkGitHub" }
-        if host.contains(Self.gitLabName) { return "ForgeMarkGitLab" }
+        if host.contains(Self.gitHubName) { return assetName(for: .gitHub) }
+        if host.contains(Self.gitLabName) { return assetName(for: .gitLab) }
         return nil
+    }
+
+    nonisolated static func assetName(for kind: ForgeKind) -> String {
+        switch kind {
+        case .gitHub: "ForgeMarkGitHub"
+        case .gitLab: "ForgeMarkGitLab"
+        }
     }
 
     private nonisolated static let gitHubName = "github"
