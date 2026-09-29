@@ -85,13 +85,14 @@ enum UsageFormat {
     ///
     /// `terse` drops the word "updated" and nothing else, for a header that
     /// cannot fit the whole sentence on one line. Measured 2026-09-29 on the
-    /// home header, whose three controls leave the line 167 pt: `updated just
-    /// now · awake 1h 2m` wants 168.8 and wrapped, growing the header by a
-    /// line while the panel sat open. Neither clause has a ceiling, since
-    /// `held` has no unit past the hour: measured the same day, `updated 59m
-    /// ago · awake 123h 59m` wants 192.4 and its terse form 145.9. The word
-    /// goes rather than the hold because the hold is the clause that carries
-    /// its own noun; the age reads as a time without one.
+    /// home header, whose three controls leave the line 167 pt while the
+    /// period button is shown: `updated just now · awake 1h 2m` wants 168.8
+    /// and wrapped, growing the header by a line while the panel sat open.
+    /// Neither clause has a ceiling, since neither `age` nor `held` has a unit
+    /// past the hour: measured the same day, `updated 59m ago · awake 123h
+    /// 59m` wants 192.4 and its terse form 145.9. The word goes rather than
+    /// the hold because the hold is the clause that carries its own noun; the
+    /// age reads as a time without one.
     static func reading(
         age interval: TimeInterval, holding: TimeInterval?, refreshing: Bool,
         terse: Bool = false
@@ -100,6 +101,29 @@ enum UsageFormat {
         let reading = refreshing ? "refreshing…" : dated
         guard let holding else { return reading }
         return reading + " · awake " + held(holding)
+    }
+
+    /// The widest full `reading` the line can show before the hold next
+    /// grows a digit, which is what a header measures to choose between the
+    /// full and the terse wording.
+    ///
+    /// Choosing on the live sentence instead flipped the word "updated" on
+    /// and off as the clock ran: measured 2026-09-29 against the 167 pt home
+    /// line with a hold of `1h 2m`, `just now` wanted 168.8, `5s ago` 160.6,
+    /// `10s ago` 167.6 and `10m ago` 171.4, so the line changed shape several
+    /// times a minute under a pointer that had not moved. Measured on this
+    /// template, the choice holds for the whole of an hour of hold and moves
+    /// only when the hours gain a digit. The age is the widest a live reading
+    /// shows, two digits of minutes, and the minutes of the hold are two
+    /// digits for the same reason. Refreshing is left out because it is
+    /// narrower, so the wording a refresh ends on is the one it started on.
+    static func widestReading(holding: TimeInterval?) -> String {
+        let widestAge = TimeInterval(minutesPerHour * secondsPerMinute - 1)
+        let widestHold = holding.map { held in
+            let hours = (Int(max(held, 0)) / secondsPerMinute) / minutesPerHour
+            return TimeInterval(hours * minutesPerHour * secondsPerMinute) + widestAge
+        }
+        return reading(age: widestAge, holding: widestHold, refreshing: false)
     }
 
     /// The providers block's one-line recap: how many of the CLIs Sissy is
