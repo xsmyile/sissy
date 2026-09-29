@@ -40,6 +40,87 @@ final class UsageDayKeyZoneChangeTests: XCTestCase {
         try? FileManager.default.removeItem(at: logDir.deletingLastPathComponent())
     }
 
+    /// The tail trims its day-keyed state only when the cutoff it trims to
+    /// moves. A zone change moves it: from eleven hours behind UTC to fourteen
+    /// ahead, the window's first day is more than a day later, so a day
+    /// counted at the old window's edge has to go on the next batch rather
+    /// than wait for the cutoff to move again at midnight.
+    func testTheNextBatchAfterAZoneChangeTrimsToTheNewCutoff() async throws {
+        let behind = try XCTUnwrap(TimeZone(identifier: "Pacific/Pago_Pago"))
+        let ahead = try XCTUnwrap(TimeZone(identifier: "Pacific/Kiritimati"))
+        NSTimeZone.default = behind
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = behind
+        let windowStart = LocalUsageProvider.liveWindowStart(retainDays: 2)
+        let edgeDayEnd = try XCTUnwrap(
+            calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: windowStart)))
+        guard edgeDayEnd.timeIntervalSince(windowStart) > Self.edgeMargin * 2 else {
+            throw XCTSkip("the window starts too close to a midnight for a line to sit on its first day")
+        }
+        let edge = windowStart.addingTimeInterval(Self.edgeMargin)
+        let edgeDay = UsageReaderShared.dayFormatter.string(from: edge)
+        try appendTurn(id: "edge", at: edge)
+        let (readings, onChange) = TailReadings.stream()
+        let tail = LocalUsageProvider.claudeCode(
+            claudeDir: logDir,
+            retainDays: 2,
+            pollInterval: .milliseconds(50),
+            persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
+            historyRoot: stateDir,
+            profile: ClaudeProfileSource(url: stateDir.appendingPathComponent("claude.json")))
+        await tail.start(onChange: onChange)
+        XCTAssertTrue(
+            try snapshotDays().contains(edgeDay), "the day at the window's edge was never counted")
+
+        NSTimeZone.default = ahead
+        try appendTurn(id: "after-1", at: Date())
+        try await TailReadings.waitUntil(readings, reach: Self.edgeTurnTokens)
+        try appendTurn(id: "after-2", at: Date())
+        try await TailReadings.waitUntil(readings, reach: 2 * Self.edgeTurnTokens)
+        await tail.stop()
+
+        XCTAssertFalse(
+            try snapshotDays().contains(edgeDay),
+            "a day before the moved cutoff outlived the batch after the zone change")
+    }
+
+    /// How far inside the window the edge line sits, enough for the scan that
+    /// reads it to run before the window slides past it.
+    private static let edgeMargin: TimeInterval = 60
+    /// What one turn `appendTurn` writes counts for. The second wait is for a
+    /// reading holding both, which only a poll starting after the one that
+    /// read the first can publish, so the first poll's trim has run by then.
+    private static let edgeTurnTokens = 11
+
+    private func snapshotDays() throws -> [String] {
+        guard
+            case .ok(let snapshot) = UsageStatePersistence.load(
+                from: UsageStatePersistence.defaultURL(in: stateDir))
+        else {
+            XCTFail("no snapshot was written")
+            return []
+        }
+        return snapshot.dailyTotals.map(\.day)
+    }
+
+    private func appendTurn(id: String, at when: Date) throws {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let line = """
+            {"type":"assistant","timestamp":"\(iso.string(from: when))","requestId":"r-\(id)",\
+            "message":{"id":"\(id)","model":"\(Self.model)","usage":{"input_tokens":10,"output_tokens":1}}}
+
+            """
+        let url = logDir.appendingPathComponent("edge.jsonl")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(line.utf8))
+        } else {
+            try line.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
     func testADayCountedBeforeAZoneChangeKeepsItsDate() async throws {
         var rome = Calendar(identifier: .gregorian)
         rome.timeZone = Self.rome
