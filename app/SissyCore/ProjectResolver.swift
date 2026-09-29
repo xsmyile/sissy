@@ -72,6 +72,12 @@ struct ProjectRemote: Sendable, Equatable {
 /// its label, never a total its tokens, and re-walking every line to catch it
 /// would cost the walk this cache exists to avoid.
 ///
+/// It is bounded all the same, at `maxCachedAnswers` entries per map: every
+/// distinct directory a log names is an entry, nils included, and a Mac that
+/// makes throwaway worktrees by the hour would otherwise grow it for as long
+/// as the app runs. A full map is emptied rather than trimmed, which costs one
+/// walk per directory still in use and needs no order kept to decide who goes.
+///
 /// The cache and the owner lookups are this resolver's own; what it has read
 /// about checkouts is the ledger's, and shared, because two memories answer
 /// the same deleted path differently as soon as one of them has seen it alive.
@@ -96,6 +102,11 @@ final class ProjectResolver {
     private static let hostBracketOpen = "["
     private static let hostBracketClose = "]"
 
+    /// The most answers either cache holds before it starts again. The
+    /// ledger's own bound, so the resolver never remembers more directories
+    /// than the ledger does.
+    static let maxCachedAnswers = ProjectLedger.maxCheckouts
+
     private let fileManager: FileManager
     let ledger: ProjectLedger
     private var cache: [String: String?] = [:]
@@ -109,6 +120,7 @@ final class ProjectResolver {
     func project(for workingDirectory: String) -> String? {
         if let hit = cache[workingDirectory] { return hit }
         let resolved = resolve(workingDirectory)
+        if cache.count >= Self.maxCachedAnswers { cache.removeAll() }
         cache[workingDirectory] = resolved
         return resolved
     }
@@ -135,6 +147,7 @@ final class ProjectResolver {
     func repositoryRemote(for project: String) -> ProjectRemote? {
         if let hit = remotes[project] { return hit }
         let resolved = readRepositoryRemote(project)
+        if remotes.count >= Self.maxCachedAnswers { remotes.removeAll() }
         remotes[project] = resolved
         return resolved
     }
