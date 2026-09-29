@@ -419,6 +419,165 @@ final class DiskCleanupTests: XCTestCase {
         XCTAssertEqual(try contents(swapped), ["theirs"])
     }
 
+    // MARK: Removed projects
+
+    /// A DerivedData folder as Xcode files it: build products beside an
+    /// `info.plist` naming the project they were built from.
+    @discardableResult
+    private func build(_ folder: String, of project: String?, in root: URL) throws -> URL {
+        let url = root.appendingPathComponent(folder)
+        try write(url.appendingPathComponent("Build/Products/Debug/App"))
+        if let project {
+            let record = try PropertyListSerialization.data(
+                fromPropertyList: ["WorkspacePath": project], format: .xml, options: 0)
+            try record.write(to: url.appendingPathComponent("info.plist"))
+        }
+        return url
+    }
+
+    /// Where a worktree the tests delete would have been, inside the home.
+    private func goneProject(_ name: String = "gone") -> String {
+        home.appendingPathComponent("work/\(name)/App.xcodeproj").path
+    }
+
+    /// Only a folder whose project inside the home answers that it is gone is
+    /// reached: one whose project is there, one with no record, one outside
+    /// the home and one on a volume that is not mounted all stay, and the
+    /// root's other target still sees them.
+    func testRemovedProjectsReachOnlyTheBuildsOfAProjectThatIsGone() async throws {
+        let root = try root(.removedProjects)
+        let present = home.appendingPathComponent("work/here/App.xcodeproj")
+        try FileManager.default.createDirectory(at: present, withIntermediateDirectories: true)
+        let gone = try build("Gone-a", of: goneProject(), in: root)
+        try build("Here-b", of: present.path, in: root)
+        try build("ModuleCache.noindex", of: nil, in: root)
+        try build("Outside-d", of: "/Library/Sissy-\(UUID().uuidString)/App.xcodeproj", in: root)
+        try build("Unplugged-c", of: "/Volumes/Sissy-\(UUID().uuidString)/App.xcodeproj", in: root)
+        let goneBlocks = [
+            gone, gone.appendingPathComponent("info.plist"),
+            gone.appendingPathComponent("Build"), gone.appendingPathComponent("Build/Products"),
+            gone.appendingPathComponent("Build/Products/Debug"),
+            gone.appendingPathComponent("Build/Products/Debug/App"),
+        ].map(allocated).reduce(0, +)
+
+        let size = await cleaner.size(of: .removedProjects)
+        let report = try await cleaner.clean(.removedProjects).get()
+
+        XCTAssertEqual(size, goneBlocks)
+        XCTAssertEqual(report.removedBytes, goneBlocks)
+        XCTAssertTrue(report.isComplete)
+        XCTAssertEqual(
+            try contents(root), ["Here-b", "ModuleCache.noindex", "Outside-d", "Unplugged-c"])
+        let rest = await cleaner.size(of: .derivedData)
+        XCTAssertGreaterThan(rest ?? 0, 0)
+    }
+
+    /// A record reached through a link is not read, so the folder stays.
+    func testRemovedProjectsDoNotFollowALinkedRecord() async throws {
+        let root = try root(.removedProjects)
+        let folder = try build("Linked-a", of: nil, in: root)
+        let record = outside.appendingPathComponent("info.plist")
+        try PropertyListSerialization.data(
+            fromPropertyList: ["WorkspacePath": goneProject()],
+            format: .xml, options: 0
+        ).write(to: record)
+        try FileManager.default.createSymbolicLink(
+            at: folder.appendingPathComponent("info.plist"), withDestinationURL: record)
+
+        let size = await cleaner.size(of: .removedProjects)
+        _ = try await cleaner.clean(.removedProjects).get()
+
+        XCTAssertEqual(size, 0)
+        XCTAssertEqual(try contents(root), ["Linked-a"])
+    }
+
+    /// A command-line build refuses DerivedData and not its removed projects,
+    /// since it cannot outlive its project; the Xcode app, which can still be
+    /// indexing a project deleted under it, refuses both.
+    func testRemovedProjectsAreRefusedOnlyWhileTheXcodeAppRuns() async throws {
+        let root = try root(.removedProjects)
+        try build("Gone-a", of: goneProject(), in: root)
+
+        let appOpen = await makeCleaner(running: [.xcode, .xcodeApp]).clean(.removedProjects)
+        let building = makeCleaner(running: [.xcode])
+        let whole = await building.clean(.derivedData)
+        let removed = try await building.clean(.removedProjects).get()
+
+        XCTAssertEqual(appOpen, .failure(.toolRunning(.xcodeApp)))
+        XCTAssertEqual(whole, .failure(.toolRunning(.xcode)))
+        XCTAssertGreaterThan(removed.removed, 0)
+        XCTAssertEqual(try contents(root), [])
+    }
+
+    /// A folder a removal cannot finish keeps its record, so it still reads as
+    /// a removed project the next time.
+    func testAHalfEmptiedRemovedProjectKeepsItsRecord() async throws {
+        let root = try root(.removedProjects)
+        let folder = try build("Gone-a", of: goneProject(), in: root)
+        let foreign = folder.appendingPathComponent("Build/Products/Debug/App")
+        let foreignInode = try inode(foreign)
+        let cleaner = makeCleaner(owns: { $0.st_ino != foreignInode && $0.st_uid == getuid() })
+
+        let report = try await cleaner.clean(.removedProjects).get()
+        let again = await cleaner.size(of: .removedProjects)
+
+        XCTAssertEqual(report.skipped, 1)
+        XCTAssertEqual(try contents(folder), ["Build", "info.plist"])
+        XCTAssertGreaterThan(again ?? 0, 0)
+    }
+
+    /// Only absence inside a given place counts: the place itself, a path outside
+    /// it, one spelled through `..`, a relative one and one on a volume that
+    /// is not mounted are never gone.
+    func testOnlyAnAnswerOfAbsenceInsideTheHomeMakesAProjectGone() {
+        var status = stat()
+        XCTAssertEqual(lstat(home.path, &status), 0)
+        let homes = [home.path]
+        func gone(_ path: String) -> Bool {
+            DiskCleaner.isGone(path, inside: homes, device: status.st_dev)
+        }
+        XCTAssertTrue(gone(goneProject()))
+        XCTAssertFalse(gone(home.path))
+        XCTAssertFalse(gone("/Library/Sissy-\(UUID().uuidString)"))
+        XCTAssertFalse(gone(home.path + "/../outside/nothing"))
+        XCTAssertFalse(gone("relative/App.xcodeproj"))
+        XCTAssertFalse(gone("/Volumes/Sissy-\(UUID().uuidString)/App.xcodeproj"))
+        XCTAssertFalse(DiskCleaner.isGone(goneProject(), inside: homes, device: status.st_dev &+ 1))
+        XCTAssertFalse(gone(home.path + "/work/a\u{0}b"))
+    }
+
+    /// A project under a link to a drive that is away is not gone: the link
+    /// is the nearest thing that exists, and it leads nowhere.
+    func testAProjectBehindALinkToAMissingVolumeIsNotGone() throws {
+        var status = stat()
+        XCTAssertEqual(lstat(home.path, &status), 0)
+        let link = home.appendingPathComponent("Projects")
+        try FileManager.default.createSymbolicLink(
+            atPath: link.path, withDestinationPath: "/Volumes/Sissy-\(UUID().uuidString)/Projects")
+        let linkedHere = home.appendingPathComponent("Here")
+        try FileManager.default.createSymbolicLink(
+            atPath: linkedHere.path, withDestinationPath: home.appendingPathComponent("work").path)
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent("work"), withIntermediateDirectories: true)
+
+        XCTAssertFalse(
+            DiskCleaner.isGone(link.path + "/app/App.xcodeproj", inside: [home.path], device: status.st_dev))
+        XCTAssertTrue(
+            DiskCleaner.isGone(
+                linkedHere.path + "/app/App.xcodeproj", inside: [home.path], device: status.st_dev))
+    }
+
+    /// A project an agent built in a scratch directory under `/tmp` is reached
+    /// once that directory is gone.
+    func testARemovedProjectMayHaveBeenInATemporaryDirectory() async throws {
+        let root = try root(.removedProjects)
+        try build("Scratch-a", of: "/tmp/Sissy-\(UUID().uuidString)/ios/App.xcodeproj", in: root)
+
+        _ = try await cleaner.clean(.removedProjects).get()
+
+        XCTAssertEqual(try contents(root), [])
+    }
+
     // MARK: The tool at work
 
     /// A cache whose tool is running is refused, and the press says which.
@@ -587,13 +746,41 @@ final class DiskCleanupTests: XCTestCase {
         XCTAssertEqual(report.removed, 2)
         XCTAssertEqual(report.removedBytes, fileBlocks)
         XCTAssertGreaterThan(fileBlocks, 0)
-        XCTAssertEqual(outcome.remaining, 0)
+        XCTAssertEqual(outcome.remaining, [.uv: 0])
         XCTAssertEqual(try contents(root), [])
         let next = DiskCleanupModel(host: host)
         XCTAssertEqual(next.rows, [.uv])
         XCTAssertEqual(next.size(of: .uv), 0)
         next.cancel()
         XCTAssertNil(host.removals[.uv])
+    }
+
+    /// A removal answers for every target on its root, so DerivedData's row
+    /// shrinks when its removed projects go.
+    @MainActor
+    func testARemovalResizesTheOtherTargetOnItsRoot() async throws {
+        let root = try root(.removedProjects)
+        try build("Gone-a", of: goneProject(), in: root)
+        let kept = try build("ModuleCache.noindex", of: nil, in: root)
+        let host = DiskCleanupHost(cleaner: cleaner)
+        let model = DiskCleanupModel(host: host)
+        model.measure()
+        try await waitUntil { model.measured }
+        let before = model.size(of: .derivedData)
+
+        host.remove(.removedProjects)
+        try await waitUntil { host.removals[.removedProjects] != .running }
+
+        XCTAssertEqual(model.size(of: .removedProjects), 0)
+        XCTAssertLessThan(model.size(of: .derivedData), before)
+        XCTAssertEqual(model.rows, [.derivedData, .removedProjects])
+        XCTAssertEqual(try contents(root), [kept.lastPathComponent])
+
+        host.remove(.derivedData)
+        try await waitUntil { host.removals[.derivedData] != .running }
+
+        XCTAssertEqual(model.size(of: .derivedData), 0, "the newer removal's reading wins")
+        XCTAssertEqual(try contents(root), [])
     }
 
     /// A root refused at the press keeps the size it was offered at, rather
@@ -615,7 +802,9 @@ final class DiskCleanupTests: XCTestCase {
         model.confirm()
         try await waitUntil { host.removals[.uv] != .running }
 
-        XCTAssertEqual(host.removals[.uv], .finished(.init(result: .failure(.unsafeRoot), remaining: nil)))
+        guard case .finished(let outcome) = host.removals[.uv] else { return XCTFail("no outcome") }
+        XCTAssertEqual(outcome.result, .failure(.unsafeRoot))
+        XCTAssertEqual(outcome.remaining, [:])
         XCTAssertEqual(model.size(of: .uv), offered)
         XCTAssertEqual(try contents(outside), ["keep.bin"])
     }
@@ -673,12 +862,20 @@ final class DiskCleanupCopyTests: XCTestCase {
                 + "up to 9.2 GB. Xcode rebuilds it on the next build.")
     }
 
+    /// The removed projects' confirmation names what it reaches and what stays.
+    func testRemovedProjectsConfirmationSaysWhatStays() {
+        XCTAssertEqual(
+            DiskCleanupCopy.confirmBody(.removedProjects, bytes: 9_100_000_000),
+            "Permanently removes the builds in ~/Library/Developer/Xcode/DerivedData of projects "
+                + "no longer on this Mac, up to 9.1 GB. Builds of projects still on this Mac stay.")
+    }
+
     /// A partial removal says what stayed and why, beside what went.
     func testOutcomeSaysWhatWasLeft() {
         let outcome = DiskCleanupHost.Outcome(
             result: .success(
                 CleanupReport(removed: 40, removedBytes: 2_000_000_000, skipped: 1, failed: 3)),
-            remaining: 0)
+            remaining: [.npm: 0])
         XCTAssertEqual(
             DiskCleanupCopy.outcome(outcome, target: .npm),
             "Freed up to 2.0 GB · 3 items could not be removed · 1 item left as another user's or "

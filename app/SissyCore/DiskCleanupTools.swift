@@ -15,12 +15,16 @@ import Foundation
 /// process table the Sessions tab reads and without spawning anything.
 enum CleanupTool: String, Sendable, Equatable {
     case xcode
+    /// The Xcode app alone, without the builds `xcodebuild` runs: what can
+    /// still write into the builds of a project deleted while it had it open,
+    /// indexing it, where a command-line build cannot outlive its project.
+    case xcodeApp
     case npm
     case uv
 
     var name: String {
         switch self {
-        case .xcode: "Xcode"
+        case .xcode, .xcodeApp: "Xcode"
         case .npm: "npm"
         case .uv: "uv"
         }
@@ -34,6 +38,7 @@ enum CleanupTool: String, Sendable, Equatable {
     var executables: Set<String> {
         switch self {
         case .xcode: ["Xcode", "xcodebuild", "SWBBuildService", "XCBBuildService"]
+        case .xcodeApp: ["Xcode"]
         case .npm: ["npm", "npx"]
         case .uv: ["uv", "uvx"]
         }
@@ -44,6 +49,7 @@ extension CleanupTarget {
     var tool: CleanupTool {
         switch self {
         case .derivedData, .deviceSupport: .xcode
+        case .removedProjects: .xcodeApp
         case .npm: .npm
         case .uv: .uv
         }
@@ -64,12 +70,16 @@ enum CleanupToolScan {
     static func running() -> Set<CleanupTool> {
         let processes = AgentProcessReader.snapshot()
         let parents = Set(processes.map(\.parent))
-        return Set(
+        let tools = Set(
             processes.compactMap {
                 tool(of: $0, hasChildren: parents.contains($0.pid)) {
                     AgentProcessReader.firstArgument(of: $0)
                 }
             })
+        let app = processes.contains {
+            CleanupTool.xcodeApp.executables.contains(($0.executablePath as NSString).lastPathComponent)
+        }
+        return app ? tools.union([.xcodeApp]) : tools
     }
 
     /// The tool a process is, if any.
