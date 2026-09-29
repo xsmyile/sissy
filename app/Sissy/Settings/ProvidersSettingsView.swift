@@ -345,31 +345,20 @@ struct ProvidersSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .confirmationDialog(
-            unlinking.map { ClaudeAccountLinkCopy.unlinkTitle(Self.label(of: $0)) } ?? "",
-            isPresented: Binding(get: { unlinking != nil }, set: { if !$0 { unlinking = nil } }),
-            presenting: unlinking
-        ) { account in
-            Button(ClaudeAccountLinkCopy.unlinkConfirm, role: .destructive) {
-                model.engine.forgetClaudeWebSession(account: account.id)
-            }
-            Button(VendorLinkCopy.cancel, role: .cancel) {}
-        } message: { _ in
-            Text(ClaudeAccountLinkCopy.unlinkMessage)
-        }
-        .confirmationDialog(
-            unlinkingCodex.map { CodexAccountLinkCopy.unlinkTitle(Self.label(of: $0)) } ?? "",
-            isPresented: Binding(
-                get: { unlinkingCodex != nil }, set: { if !$0 { unlinkingCodex = nil } }),
-            presenting: unlinkingCodex
-        ) { account in
-            Button(CodexAccountLinkCopy.unlinkConfirm, role: .destructive) {
-                model.engine.forgetCodexAccount(id: account.id)
-            }
-            Button(VendorLinkCopy.cancel, role: .cancel) {}
-        } message: { _ in
-            Text(CodexAccountLinkCopy.unlinkMessage)
-        }
+        .confirmRemoval(
+            of: $unlinking,
+            title: { ClaudeAccountLinkCopy.unlinkTitle(Self.label(of: $0)) },
+            message: ClaudeAccountLinkCopy.unlinkMessage,
+            confirm: ClaudeAccountLinkCopy.unlinkConfirm,
+            cancel: VendorLinkCopy.cancel
+        ) { model.engine.forgetClaudeWebSession(account: $0.id) }
+        .confirmRemoval(
+            of: $unlinkingCodex,
+            title: { CodexAccountLinkCopy.unlinkTitle(Self.label(of: $0)) },
+            message: CodexAccountLinkCopy.unlinkMessage,
+            confirm: CodexAccountLinkCopy.unlinkConfirm,
+            cancel: VendorLinkCopy.cancel
+        ) { model.engine.forgetCodexAccount(id: $0.id) }
         // The readiness poll stops once the scan is warm, so a window opened
         // afterwards would render whatever the last tick left behind.
         .task {

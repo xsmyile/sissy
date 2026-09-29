@@ -348,6 +348,36 @@ extension SettingsSwitchRow where Heading == Text {
     }
 }
 
+extension View {
+    /// A removal asked about before it runs: raised while `item` holds what
+    /// the row's menu chose, and dropped by either button.
+    ///
+    /// One shape for every destructive press in Settings, because each of
+    /// them deletes something the user cannot read back and never typed, and
+    /// a dialog that drifted from the others in which button is the default
+    /// would be the one somebody confirms by reflex.
+    func confirmRemoval<Item>(
+        of item: Binding<Item?>,
+        title: @escaping (Item) -> String,
+        message: String,
+        confirm: String,
+        cancel: String,
+        action: @escaping (Item) -> Void
+    ) -> some View {
+        confirmationDialog(
+            item.wrappedValue.map(title) ?? "",
+            isPresented: Binding(
+                get: { item.wrappedValue != nil }, set: { if !$0 { item.wrappedValue = nil } }),
+            presenting: item.wrappedValue
+        ) { value in
+            Button(confirm, role: .destructive) { action(value) }
+            Button(cancel, role: .cancel) {}
+        } message: { _ in
+            Text(message)
+        }
+    }
+}
+
 /// The ⓘ beside a heading, which is where the paragraph that used to sit under
 /// it now lives.
 ///
