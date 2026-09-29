@@ -180,6 +180,9 @@ jobs:
               mine_cost = float(sissy[provider]["cost"])
               their_tokens = row["totalTokens"]
               their_cost = row.get("totalCost", row.get("costUSD"))
+              if their_cost is None:
+                  failures.append(f"{provider}: ccusage row has neither totalCost nor costUSD")
+                  continue
               print(
                   f"{provider}: tokens {mine_tokens} vs {their_tokens} | "
                   f"cost {mine_cost:.6f} vs {their_cost:.6f}"
