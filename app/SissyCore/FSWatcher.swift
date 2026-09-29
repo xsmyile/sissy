@@ -179,8 +179,9 @@ final class FSWatcher: @unchecked Sendable {
     /// Entry point invoked from the C callback after it has decoded the
     /// `eventPaths`/`eventFlags` arrays. Yields the Sendable payload to the
     /// delivery stream, which a slow consumer drains at its own pace without
-    /// stalling future kernel notifications.
-    fileprivate func dispatch(_ event: FSWatcherEvent) {
+    /// stalling future kernel notifications. Internal so a test can yield
+    /// batches in a known order without waiting on the kernel to coalesce.
+    func dispatch(_ event: FSWatcherEvent) {
         lock.lock()
         let events = events
         lock.unlock()
