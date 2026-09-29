@@ -125,9 +125,6 @@ struct UsagePanelSnapshot: Equatable {
     /// the door to the page, and a door that comes and goes with the findings
     /// is one nobody learns is there.
     let identityLine: IdentityLine
-    /// What is running on this Mac right now, and what the archive has
-    /// counted over the window the headline is showing.
-    let agents: AgentsBlock
     /// What the Mac itself is answering, nil with the module off and before
     /// its first sample: the Overview then draws no line and the page has
     /// nothing to open on.
@@ -956,7 +953,6 @@ struct UsagePanelSnapshot: Equatable {
             forge: makeForge(frame.forge, period: resolved, now: now),
             identities: makeIdentities(frame.identities),
             identityLine: makeIdentityLine(frame.identities),
-            agents: makeAgents(frame, now: now),
             mac: frame.mac.map(makeMac),
             disk: frame.disk.map(makeDisk)
         )
@@ -1242,7 +1238,16 @@ struct UsagePanelSnapshot: Equatable {
     /// the one beside it. Every other window is the archive's, **including its
     /// per-provider split** — a row taken from the slices under a thirty-day
     /// heading would be today's figure wearing another window's label.
-    static func makeAgents(_ frame: FrameData, now: Date) -> AgentsBlock {
+    /// What is running on this Mac right now, and what the archive has
+    /// counted over the window the headline is showing: the Sessions tab's
+    /// block, built only while that tab is on screen.
+    ///
+    /// Off `make` for the reason `projectsPage` is: the snapshot is remade on
+    /// every body pass the panel takes, and this block is wanted on one tab.
+    /// Measured 2026-09-29 on a release build, a frame carrying ten agents
+    /// over the monitor's 240 retained samples took 214 µs to `make`, 204 µs
+    /// of it here, almost all of that the chart and the rows' lanes.
+    static func makeAgents(_ frame: FrameData, now: Date = Date()) -> AgentsBlock {
         let running = frame.agentMemory?.current.agents ?? []
         // Unioned rather than summed, because two CLIs working in the same
         // minute are one minute of the day.

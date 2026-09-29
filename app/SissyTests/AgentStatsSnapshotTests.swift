@@ -41,9 +41,9 @@ final class AgentStatsSnapshotTests: XCTestCase {
     /// The live half has to say something before the first sweep lands rather
     /// than disappear until one does.
     func testTheRowSpeaksBeforeTheFirstSweep() {
-        let snapshot = UsagePanelSnapshot.make(frame: frame())
-        XCTAssertNil(snapshot.agents.live)
-        XCTAssertEqual(snapshot.agents.summary, "no reading yet")
+        let block = UsagePanelSnapshot.makeAgents(frame())
+        XCTAssertNil(block.live)
+        XCTAssertEqual(block.summary, "no reading yet")
     }
 
     /// The tab is there before the first sweep and on a Mac with nothing
@@ -59,31 +59,31 @@ final class AgentStatsSnapshotTests: XCTestCase {
     /// A sweep that found nothing is a measurement, and reads differently from
     /// never having measured.
     func testAQuietMacReadsAsMeasuredRatherThanUnmeasured() {
-        let snapshot = UsagePanelSnapshot.make(frame: frame(memory: memory([])))
-        XCTAssertNotNil(snapshot.agents.live)
-        XCTAssertEqual(snapshot.agents.summary, "no sessions running")
+        let block = UsagePanelSnapshot.makeAgents(frame(memory: memory([])))
+        XCTAssertNotNil(block.live)
+        XCTAssertEqual(block.summary, "no sessions running")
     }
 
     func testTheRowNamesTheCountAndWhatItHolds() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(
+        let block = UsagePanelSnapshot.makeAgents(
+            frame(
                 memory: memory([
                     agent(ProviderID.claudeCode, bytes: 1_000_000_000, pid: 1),
                     agent(ProviderID.codex, bytes: 940_000_000, pid: 2),
                 ])))
-        XCTAssertEqual(snapshot.agents.summary, "2 sessions · 1.94 GB")
+        XCTAssertEqual(block.summary, "2 sessions · 1.94 GB")
     }
 
     /// One sample is not a line, and a chart drawn through it would be a
     /// claim about a stretch that has not been measured yet.
     func testOneSampleDrawsNoChart() {
-        let single = UsagePanelSnapshot.make(
-            frame: frame(memory: memory([agent(ProviderID.codex, bytes: 512)], samples: [512])))
-        XCTAssertNil(single.agents.live?.chart)
-        let pair = UsagePanelSnapshot.make(
-            frame: frame(
+        let single = UsagePanelSnapshot.makeAgents(
+            frame(memory: memory([agent(ProviderID.codex, bytes: 512)], samples: [512])))
+        XCTAssertNil(single.live?.chart)
+        let pair = UsagePanelSnapshot.makeAgents(
+            frame(
                 memory: memory([agent(ProviderID.codex, bytes: 512)], samples: [512, 600])))
-        XCTAssertEqual(pair.agents.live?.chart?.totals, [512, 600])
+        XCTAssertEqual(pair.live?.chart?.totals, [512, 600])
     }
 
     /// The bands stack in the list's order with the rest on top, and at every
@@ -102,9 +102,9 @@ final class AgentStatsSnapshotTests: XCTestCase {
             })
         let totals = [first, second].map { $0.values.reduce(0) { $0 + $1.footprint } }
         let chart = try XCTUnwrap(
-            UsagePanelSnapshot.make(
-                frame: frame(memory: memory(running, samples: totals, perAgent: [first, second]))
-            ).agents.live?.chart)
+            UsagePanelSnapshot.makeAgents(
+                frame(memory: memory(running, samples: totals, perAgent: [first, second]))
+            ).live?.chart)
         XCTAssertEqual(chart.bands.map(\.process), [1, 2, 3, 4, 5, nil])
         for index in totals.indices {
             XCTAssertEqual(chart.bands.reduce(0) { $0 + $1.values[index] }, totals[index])
@@ -129,10 +129,10 @@ final class AgentStatsSnapshotTests: XCTestCase {
             new.key: AgentSample(footprint: 100, cpuLoad: 0.9),
         ]
         let live = try XCTUnwrap(
-            UsagePanelSnapshot.make(
-                frame: frame(
+            UsagePanelSnapshot.makeAgents(
+                frame(
                     memory: memory([old, new], samples: [900, 1_000], perAgent: [before, after]))
-            ).agents.live)
+            ).live)
         XCTAssertEqual(live.processes.first { $0.id == 2 }?.lane, [nil, 0.9])
         XCTAssertEqual(live.chart?.starts, [1])
         XCTAssertEqual(live.chart?.leaders(at: 1).map(\.process), [1, 2])
@@ -142,8 +142,8 @@ final class AgentStatsSnapshotTests: XCTestCase {
     /// today is written behind the tail's flush, so a count read from it would
     /// lag the cost beside it.
     func testTodayIsCountedFromTheSlices() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(
+        let block = UsagePanelSnapshot.makeAgents(
+            frame(
                 providers: [
                     ProviderSlice(
                         id: ProviderID.claudeCode, tokens: 10, cost: 1,
@@ -154,7 +154,7 @@ final class AgentStatsSnapshotTests: XCTestCase {
                 ]),
         )
         XCTAssertEqual(
-            snapshot.agents.counted[.today]?.counts, AgentCounts(sessions: 57, agents: 18))
+            block.counted[.today]?.counts, AgentCounts(sessions: 57, agents: 18))
     }
 
     /// The defect this replaced: the rows under the figures came off the
@@ -170,15 +170,15 @@ final class AgentStatsSnapshotTests: XCTestCase {
                     ProviderID.codex: AgentCounts(sessions: 50, agents: 20),
                 ])
         ]
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(
+        let block = UsagePanelSnapshot.makeAgents(
+            frame(
                 providers: [
                     ProviderSlice(
                         id: ProviderID.claudeCode, tokens: 10, cost: 1,
                         agents: AgentCounts(sessions: 41, agents: 10))
                 ],
                 history: history))
-        let week = snapshot.agents.counted[.sevenDays]
+        let week = block.counted[.sevenDays]
         XCTAssertEqual(week?.counts, AgentCounts(sessions: 300, agents: 120))
         XCTAssertEqual(
             week?.byProvider.first { $0.id == ProviderID.claudeCode }?.counts,
@@ -195,8 +195,8 @@ final class AgentStatsSnapshotTests: XCTestCase {
     func testEachWindowCarriesItsOwnCacheReading() {
         let today = CacheReading(cacheReadTokens: 9, inputSideTokens: 10, saved: 1)
         let week = CacheReading(cacheReadTokens: 90, inputSideTokens: 100, saved: 12)
-        let snapshot = UsagePanelSnapshot.make(
-            frame: FrameData(
+        let block = UsagePanelSnapshot.makeAgents(
+            FrameData(
                 tokens: 0, cost: 0, burn: nil, providers: [], keepAwake: .off,
                 history: [
                     .sevenDays: UsageHistoryRollup(
@@ -204,15 +204,15 @@ final class AgentStatsSnapshotTests: XCTestCase {
                 ],
                 cache: today))
 
-        XCTAssertEqual(snapshot.agents.counted[.today]?.cache, today)
-        XCTAssertEqual(snapshot.agents.counted[.sevenDays]?.cache, week)
+        XCTAssertEqual(block.counted[.today]?.cache, today)
+        XCTAssertEqual(block.counted[.sevenDays]?.cache, week)
     }
 
     /// Only the windows the archive has counted carry an entry, so a period
     /// it has not answered falls back to today rather than to a zero.
     func testOnlyAnsweredWindowsAreCounted() {
-        let snapshot = UsagePanelSnapshot.make(frame: frame())
-        XCTAssertEqual(Set(snapshot.agents.counted.keys), [.today])
+        let block = UsagePanelSnapshot.makeAgents(frame())
+        XCTAssertEqual(Set(block.counted.keys), [.today])
     }
 
     /// A provider keeps its row whether or not any of its processes is up:
@@ -220,23 +220,23 @@ final class AgentStatsSnapshotTests: XCTestCase {
     /// row that vanished between turns would read as a CLI that stopped
     /// working.
     func testAProviderRowSurvivesHavingNothingRunning() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(
+        let block = UsagePanelSnapshot.makeAgents(
+            frame(
                 providers: [
                     ProviderSlice(
                         id: ProviderID.codex, tokens: 5, cost: 1,
                         agents: AgentCounts(sessions: 16, agents: 8))
                 ],
                 memory: memory([])))
-        let today = snapshot.agents.counted[.today]
+        let today = block.counted[.today]
         XCTAssertEqual(today?.byProvider.map(\.id), [ProviderID.codex])
         XCTAssertEqual(today?.byProvider.first?.running, 0)
         XCTAssertEqual(today?.byProvider.first?.counts.agents, 8)
     }
 
     func testTheRunningCountIsPerProvider() {
-        let snapshot = UsagePanelSnapshot.make(
-            frame: frame(
+        let block = UsagePanelSnapshot.makeAgents(
+            frame(
                 providers: [
                     ProviderSlice(id: ProviderID.claudeCode, tokens: 1, cost: 1),
                     ProviderSlice(id: ProviderID.codex, tokens: 1, cost: 1),
@@ -247,7 +247,7 @@ final class AgentStatsSnapshotTests: XCTestCase {
                     agent(ProviderID.codex, bytes: 1, pid: 3),
                 ])))
         let byProvider = Dictionary(
-            uniqueKeysWithValues: (snapshot.agents.counted[.today]?.byProvider ?? []).map {
+            uniqueKeysWithValues: (block.counted[.today]?.byProvider ?? []).map {
                 ($0.id, $0.running)
             })
         XCTAssertEqual(byProvider[ProviderID.claudeCode], 2)
@@ -262,10 +262,10 @@ final class AgentStatsSnapshotTests: XCTestCase {
     /// A list at the limit hands the chart every row as standing: a fold
     /// standing for one band would cost the row it hides.
     func testAListAtTheLimitStandsWhole() {
-        let live = UsagePanelSnapshot.make(
-            frame: frame(
+        let live = UsagePanelSnapshot.makeAgents(
+            frame(
                 memory: memory(agents(UsagePanelSnapshot.AgentsBlock.Live.processRowLimit)))
-        ).agents.live
+        ).live
         XCTAssertEqual(live?.standingProcesses.count, 6)
     }
 
@@ -273,7 +273,7 @@ final class AgentStatsSnapshotTests: XCTestCase {
     /// so a band's colour is always the same session's.
     func testAListPastTheLimitKeepsTheDearestFiveStanding() throws {
         let live = try XCTUnwrap(
-            UsagePanelSnapshot.make(frame: frame(memory: memory(agents(8)))).agents.live)
+            UsagePanelSnapshot.makeAgents(frame(memory: memory(agents(8)))).live)
         XCTAssertEqual(live.standingProcesses.map(\.id), [1, 2, 3, 4, 5])
     }
 }
