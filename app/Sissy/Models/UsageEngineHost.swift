@@ -272,6 +272,11 @@ final class UsageEngineHost {
         await engine.stop()
     }
 
+    /// Writes what the running engine is holding back on its throttles.
+    func flush() async {
+        await engine?.flush()
+    }
+
     /// Re-reads what each provider is doing. The readiness poll below stops
     /// once the scan is warm, so a surface that opens later asks for itself
     /// rather than keeping a timer alive for the whole session.

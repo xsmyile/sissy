@@ -701,6 +701,13 @@ actor UsageEngine {
     /// would buy is noticing a switch sooner than the next frame.
     private static let claudeAccountPollInterval: Duration = .seconds(120)
 
+    /// Writes what every tail is holding back on its throttles, for a Mac
+    /// about to sleep. Metering carries on.
+    func flush() async {
+        guard lifecycle != .stopped else { return }
+        await aggregator.flush()
+    }
+
     /// Tears everything down. Idempotent, and safe to land while `start()` is
     /// still suspended — that is what `lifecycle` is re-read for. Terminal: an
     /// engine that has stopped stays stopped.

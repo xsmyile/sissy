@@ -25,6 +25,12 @@ protocol UsageProvider: AnyObject, SourceSignals {
     /// the FSEvents stream. Idempotent.
     func stop() async
 
+    /// Writes whatever persistence the provider is holding back on a
+    /// throttle, and keeps running. What the Mac going to sleep asks for:
+    /// the process survives it, but a battery that runs out during it does
+    /// not.
+    func flush() async
+
     /// Drops whatever the provider still holds of the days the archive has
     /// just been told to forget. Today is untouched — it is still being
     /// counted, and the archive takes it back on the next flush.
@@ -101,6 +107,7 @@ extension UsageProvider {
     /// A provider that keeps no archive has nothing that could rewrite a day
     /// the user deleted.
     func forgetArchivedDays() async {}
+    func flush() async {}
     func refreshSignals() async {}
 
     nonisolated func currentProjects() -> [ProjectTotals] { [] }
