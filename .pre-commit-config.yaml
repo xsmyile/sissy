@@ -14,7 +14,7 @@ repos:
 
       - id: swiftlint
         name: swiftlint
-        entry: swiftlint lint --quiet --lenient
+        entry: swiftlint lint --quiet --strict --baseline .swiftlint-baseline
         language: system
         files: ^app/(Sissy|SissyCore)/.*\.swift$
         pass_filenames: false
