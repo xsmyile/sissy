@@ -460,7 +460,7 @@ final class GitIdentityPanelTests: XCTestCase {
             identity("/repos/a", author: work), identity("/repos/b", author: work),
         ]).identityLine
         XCTAssertEqual(one.state, .findings)
-        XCTAssertEqual(one.summary, "owner/stray commits under an unexpected name")
+        XCTAssertEqual(one.summary, "owner/stray · unexpected name")
         XCTAssertEqual(one.repository, "/repos/stray")
 
         let several = snapshot([
@@ -468,7 +468,7 @@ final class GitIdentityPanelTests: XCTestCase {
             identity("/repos/a", author: work), identity("/repos/b", author: work),
             identity("/repos/c", author: work),
         ]).identityLine
-        XCTAssertEqual(several.summary, "2 repositories commit under an unexpected name")
+        XCTAssertEqual(several.summary, "2 repositories · unexpected name")
         XCTAssertNil(
             several.repository, "a line that cannot name one repository opens the whole list")
     }
