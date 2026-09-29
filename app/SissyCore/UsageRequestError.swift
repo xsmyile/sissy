@@ -52,6 +52,42 @@ extension UsageRequestError {
     }
 }
 
+extension UsageRequestError {
+    /// The JSON a 200 answered `request` with, or the error a reader acts on:
+    /// a 429 with its wait, any other status as itself, and a body that is not
+    /// JSON as a malformed reply.
+    ///
+    /// The one place a vendor's status becomes this type. It was written out
+    /// once per request and the copies had drifted: two reported a 429 as a
+    /// bare status with its `Retry-After` dropped, and two let a body that
+    /// did not parse escape as Foundation's own error rather than as
+    /// `malformedPayload`.
+    static func json(answering request: URLRequest) async throws -> Any {
+        let (data, response) = try await SissyHTTP.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw malformedPayload }
+        if http.statusCode == rateLimitedStatus {
+            throw rateLimited(retryAfter: retryAfter(http))
+        }
+        guard http.statusCode == okStatus else { throw badStatus(http.statusCode) }
+        guard let body = try? JSONSerialization.jsonObject(with: data) else {
+            throw malformedPayload
+        }
+        return body
+    }
+
+    /// `json(answering:)` for the replies that are one object, which is every
+    /// one but claude.ai's organisation list.
+    static func object(answering request: URLRequest) async throws -> [String: Any] {
+        guard let body = try await json(answering: request) as? [String: Any] else {
+            throw malformedPayload
+        }
+        return body
+    }
+
+    private static let okStatus = 200
+    private static let rateLimitedStatus = 429
+}
+
 extension UsageRequestError: CustomStringConvertible {
     /// What the log says this refusal was.
     ///

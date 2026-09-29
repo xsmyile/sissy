@@ -82,8 +82,8 @@ enum CodexResetCredits {
 
     /// Every reset the account holds, dated.
     static func fetchCredits(_ credential: CodexCredential) async throws -> [Credit] {
-        let body = try await CodexUsageSource.send(
-            CodexUsageSource.request(listURL, credential: credential))
+        let body = try await UsageRequestError.object(
+            answering: CodexUsageSource.request(listURL, credential: credential))
         return credits(body, now: Date())
     }
 
@@ -99,7 +99,7 @@ enum CodexResetCredits {
         var payload = ["redeem_request_id": requestID]
         if let creditID { payload["credit_id"] = creditID }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        guard let answer = answer(try await CodexUsageSource.send(request)) else {
+        guard let answer = answer(try await UsageRequestError.object(answering: request)) else {
             throw UsageRequestError.malformedPayload
         }
         return answer

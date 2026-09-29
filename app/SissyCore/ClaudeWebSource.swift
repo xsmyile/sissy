@@ -489,22 +489,18 @@ actor ClaudeWebSource: SourceSignals {
     private static let organizationPlanKey = "analytics_subscription_plan"
 
     private static func get(_ path: String, session: String) async throws -> [String: Any] {
-        let data = try await send(path, session: session)
-        guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw UsageRequestError.malformedPayload
-        }
-        return body
+        try await UsageRequestError.object(answering: request(path, session: session))
     }
 
     private static func getArray(_ path: String, session: String) async throws -> [Any] {
-        let data = try await send(path, session: session)
-        guard let body = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
-            throw UsageRequestError.malformedPayload
-        }
+        guard
+            let body = try await UsageRequestError.json(
+                answering: request(path, session: session)) as? [Any]
+        else { throw UsageRequestError.malformedPayload }
         return body
     }
 
-    private static func send(_ path: String, session: String) async throws -> Data {
+    private static func request(_ path: String, session: String) throws -> URLRequest {
         guard let url = URL(string: host + path) else { throw UsageRequestError.malformedPayload }
         var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -512,17 +508,7 @@ actor ClaudeWebSource: SourceSignals {
             "\(ClaudeWebSessionStore.cookieName)=\(session)", forHTTPHeaderField: "Cookie")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(userAgent(), forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await SissyHTTP.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw UsageRequestError.malformedPayload
-        }
-        if http.statusCode == 429 {
-            throw UsageRequestError.rateLimited(retryAfter: UsageRequestError.retryAfter(http))
-        }
-        guard http.statusCode == 200 else {
-            throw UsageRequestError.badStatus(http.statusCode)
-        }
-        return data
+        return request
     }
 
     /// The agent claude.ai answers.
