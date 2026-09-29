@@ -64,7 +64,11 @@ enum AccountDefaults {
     static let codexLogsSubdirectory = "sessions"
 
     /// Claude Code's config home, deferring to the CLI's own environment
-    /// variable exactly as `ClaudeProfileSource` already does.
+    /// variable.
+    ///
+    /// The one place a vendor's home is resolved: every tail, profile and
+    /// credential read takes its paths from a `ProviderHome` built on this or
+    /// on the configured log tree, never from a default of its own.
     static var claudeHome: URL {
         let configured = ProcessInfo.processInfo.environment[claudeConfigDirEnvVar]
         if let configured, !configured.isEmpty { return URL(fileURLWithPath: configured) }
