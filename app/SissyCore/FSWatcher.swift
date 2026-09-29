@@ -23,9 +23,14 @@ struct FSWatcherEvent: Sendable {
 ///
 /// Threading model: the C callback runs on `callbackQueue` (a dedicated
 /// utility-QoS serial queue). It synchronously builds the `FSWatcherEvent`
-/// payload then hands it to the caller's async handler via a `Task`. The
-/// handler runs off the FSEvents queue so a slow consumer can't block
-/// future kernel callbacks.
+/// payload then yields it to a stream that one task drains into the caller's
+/// async handler, so batches arrive in the order the kernel sent them and one
+/// at a time: a `rescanAll` batch cannot land after the per-file batch that
+/// followed it. The handler runs off the FSEvents queue so a slow consumer
+/// can't block future kernel callbacks.
+///
+/// The stream is torn down on `callbackQueue` itself, so no callback is still
+/// running against a watcher that `stop()` or `deinit` has already let go.
 ///
 /// References:
 /// - Apple "File System Events Programming Guide" (archive, still authoritative for Tahoe 26).
@@ -33,7 +38,7 @@ struct FSWatcherEvent: Sendable {
 ///   `FSEventStreamScheduleWithRunLoop` in favor of
 ///   `FSEventStreamSetDispatchQueue`.
 ///
-/// `@unchecked Sendable`: mutable state (`stream`, `onEvent`) is guarded by
+/// `@unchecked Sendable`: mutable state (`stream`, `events`) is guarded by
 /// `lock`; the FSEvents C callback receives `self` via an `Unmanaged`
 /// passUnretained pointer, which is safe as long as the owner keeps a
 /// strong reference for the watcher's lifetime — the standard pattern for
@@ -44,14 +49,19 @@ final class FSWatcher: @unchecked Sendable {
     private let callbackQueue: DispatchQueue
     private let lock = NSLock()
     private var stream: FSEventStreamRef?
-    private var onEvent: (@Sendable (FSWatcherEvent) async -> Void)?
+    private var events: AsyncStream<FSWatcherEvent>.Continuation?
+    /// Marks `callbackQueue` as this watcher's, so a teardown that is already
+    /// running on it does not wait on itself.
+    private static let queueKey = DispatchSpecificKey<UUID>()
+    private let queueToken = UUID()
 
     init(label: String = "sissy.fswatcher") {
         self.callbackQueue = DispatchQueue(label: label, qos: .utility)
+        callbackQueue.setSpecific(key: Self.queueKey, value: queueToken)
     }
 
     deinit {
-        stopLocked()
+        onCallbackQueue { stopLocked() }
     }
 
     /// Begin watching `path`. Latency is the FSEvents coalescing window — at
@@ -72,8 +82,6 @@ final class FSWatcher: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if stream != nil { return false }
-
-        self.onEvent = onEvent
 
         var context = FSEventStreamContext(
             version: 0,
@@ -114,46 +122,66 @@ final class FSWatcher: @unchecked Sendable {
                 flags
             )
         else {
-            self.onEvent = nil
             return false
         }
         FSEventStreamSetDispatchQueue(s, callbackQueue)
         if !FSEventStreamStart(s) {
             FSEventStreamInvalidate(s)
             FSEventStreamRelease(s)
-            self.onEvent = nil
             return false
         }
         stream = s
+        let (batches, continuation) = AsyncStream<FSWatcherEvent>.makeStream()
+        events = continuation
+        Task {
+            for await batch in batches { await onEvent(batch) }
+        }
         return true
     }
 
     func stop() {
-        lock.lock()
-        defer { lock.unlock() }
-        stopLocked()
+        onCallbackQueue {
+            lock.lock()
+            defer { lock.unlock() }
+            stopLocked()
+        }
     }
 
+    /// Ends the stream and the delivery task after the batches already
+    /// yielded, which the caller's handler still receives and is expected to
+    /// ignore once it has stopped, as it did when each batch was a task of
+    /// its own.
     private func stopLocked() {
         guard let s = stream else { return }
         FSEventStreamStop(s)
         FSEventStreamInvalidate(s)
         FSEventStreamRelease(s)
         stream = nil
-        onEvent = nil
+        events?.finish()
+        events = nil
+    }
+
+    /// Runs `work` on `callbackQueue`, where the C callback runs, so a
+    /// teardown can never interleave with a callback in flight. Inline when
+    /// already there, which is where a last reference dropped by a callback
+    /// would run `deinit`.
+    private func onCallbackQueue(_ work: () -> Void) {
+        if DispatchQueue.getSpecific(key: Self.queueKey) == queueToken {
+            work()
+        } else {
+            callbackQueue.sync(execute: work)
+        }
     }
 
     /// Entry point invoked from the C callback after it has decoded the
-    /// `eventPaths`/`eventFlags` arrays. Splits the work: build a Sendable
-    /// payload, then hop off the FSEvents queue via `Task` so a slow consumer
-    /// can't stall future kernel notifications.
+    /// `eventPaths`/`eventFlags` arrays. Yields the Sendable payload to the
+    /// delivery stream, which a slow consumer drains at its own pace without
+    /// stalling future kernel notifications.
     fileprivate func dispatch(_ event: FSWatcherEvent) {
-        let handler: (@Sendable (FSWatcherEvent) async -> Void)?
         lock.lock()
-        handler = onEvent
+        let events = events
         lock.unlock()
-        guard let handler else { return }
-        Task { await handler(event) }
+        events?.yield(event)
     }
 }
 
