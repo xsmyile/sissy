@@ -111,6 +111,22 @@ enum UsageReaderShared {
         return f
     }()
 
+    /// Whether `pattern` occurs in `buf[from..<to]`, through libc's `memmem`
+    /// rather than a byte loop.
+    ///
+    /// The one substring scan a reader's prefilter should use: it runs on
+    /// every line of every file a cold scan reads, and `memmem` compares a
+    /// word at a time where the loops it replaces compared a byte.
+    static func bufferContains(
+        _ buf: UnsafePointer<UInt8>, from: Int, to: Int, pattern: [UInt8]
+    ) -> Bool {
+        guard !pattern.isEmpty else { return true }
+        guard to - from >= pattern.count else { return false }
+        return pattern.withUnsafeBytes { needle in
+            memmem(buf + from, to - from, needle.baseAddress, needle.count) != nil
+        }
+    }
+
     /// Manual parser for the `YYYY-MM-DDTHH:MM:SS[.fff]Z` shape both CLIs
     /// write to JSONL. Foundation's `ISO8601DateFormatter` allocates on
     /// every call and walks Calendar+locale, costing tens of µs per parse.
