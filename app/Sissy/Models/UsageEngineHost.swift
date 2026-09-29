@@ -897,7 +897,7 @@ final class UsageEngineHost {
     /// it and the write run detached, so a large archive or a user's slow
     /// volume stalls the export rather than the metering or the main thread:
     /// measured 2026-09-29, the read alone held the main thread 7 ms for this
-    /// Mac's 62 day files and 0.8 s for a 7,300-file archive.
+    /// Mac's 62 day files and 0.87 s for a 7,300-file archive.
     func exportUsageHistory(to directory: URL) async throws -> Int {
         guard let engine else { throw ExportFailure.engineNotRunning }
         return try await Task.detached {
