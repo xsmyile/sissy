@@ -446,7 +446,13 @@ actor UsageEngine {
     }
 
     /// Starts metering. `onFrame` is called for every reading from here on,
-    /// including the replays a config change triggers.
+    /// including the replays a config change triggers, one call at a time
+    /// and newest last, see `FrameDelivery`.
+    ///
+    /// **`onFrame` must not await the engine.** Every rebuild waits for the
+    /// frame it made to be handed over, so an `onFrame` that waited on an
+    /// engine call which rebuilt a frame would wait on itself for good. The
+    /// app's own is synchronous on the main actor, which is the shape to keep.
     ///
     /// The cold backfill runs in a detached task: on a multi-GB log tree it
     /// takes seconds, and the caller has a surface to put up in the meantime.
