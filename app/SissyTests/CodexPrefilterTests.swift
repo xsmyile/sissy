@@ -15,11 +15,11 @@ final class CodexPrefilterTests: XCTestCase {
 
     private static let types = ["token_count", "turn_context", "session_meta", "task_complete"]
 
-    func testEveryMarkerHoldsExactlyOneUnderscore() {
+    func testEveryMarkerIsAnchoredOnItsFirstUnderscore() {
         for marker in CodexAdapter.markers {
             XCTAssertEqual(
-                marker.bytes.filter { $0 == UInt8(ascii: "_") }.count, 1,
-                "\(String(decoding: marker.bytes, as: UTF8.self)) cannot anchor on one underscore")
+                marker.bytes.firstIndex(of: UInt8(ascii: "_")), marker.underscore,
+                "\(String(decoding: marker.bytes, as: UTF8.self)) is anchored off its first underscore")
         }
     }
 

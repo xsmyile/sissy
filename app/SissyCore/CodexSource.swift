@@ -263,12 +263,20 @@ final class CodexAdapter: SourceAdapter {
     static let taskCompleteType = "task_complete"
     private static let taskCompleteMarker: [UInt8] = Array("\"\(taskCompleteType)\"".utf8)
 
-    /// The four markers a line has to carry one of, each with where its
-    /// underscore sits. `lineMayCount` is exact only while each holds exactly
-    /// one underscore, which `CodexPrefilterTests` asserts.
+    /// The four markers a line has to carry one of, each with where its first
+    /// underscore sits. `lineMayCount` anchors on that underscore, so it is
+    /// exact for any marker holding at least one. One holding none could never
+    /// be found, and every line carrying it would go unbilled, so building the
+    /// table stops the process instead.
     static let markers: [(bytes: [UInt8], underscore: Int)] = [
         tokenCountMarker, turnContextMarker, sessionMetaMarker, taskCompleteMarker,
-    ].map { marker in (marker, marker.firstIndex(of: underscore) ?? 0) }
+    ].map { marker in
+        guard let first = marker.firstIndex(of: underscore) else {
+            preconditionFailure(
+                "Codex prefilter marker \(marker) has no underscore")
+        }
+        return (marker, first)
+    }
     private static let underscore = UInt8(ascii: "_")
 
     /// Whether `buf[from..<to]` holds any of the four markers, in one pass.
