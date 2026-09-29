@@ -1534,9 +1534,6 @@ extension UsageFormat {
         "\(count) \(count == 1 ? singular : plural)"
     }
 
-    /// The window a series of memory samples covers, which begins when Sissy
-    /// did: a reading from a Mac that was asleep is not a low reading, it is
-    /// no reading.
     /// What a running agent's row is called: the repository it is working in,
     /// rendered as its last component exactly as a project row is.
     ///
@@ -1570,9 +1567,22 @@ extension UsageFormat {
         return "\(hours / 24)d \(hours % 24)h"
     }
 
+    /// The window a series of memory samples covers, which begins when Sissy
+    /// did: a reading from a Mac that was asleep is not a low reading, it is
+    /// no reading.
     static func samplesSince(_ since: Date) -> String {
         "since " + clock(since)
     }
+
+    /// How long one turn ran, at the grain `cpuDuration` reads a process's
+    /// time: a turn is a stretch of wall clock of the same order, and a
+    /// five-minute turn read as `5m` would hide the half of it that decides
+    /// whether it was long.
+    static func turnDuration(milliseconds: Int) -> String {
+        cpuDuration(TimeInterval(milliseconds) / millisecondsPerSecond)
+    }
+
+    private static let millisecondsPerSecond: TimeInterval = 1000
 
     /// A worked duration, in the shape the figure beside it is read at a
     /// glance: `12h03` above an hour, `47m` below one.
@@ -1584,16 +1594,6 @@ extension UsageFormat {
     /// not `held`: that reads "12h 3m", two tokens sized to what is left of
     /// something, where this is a headline figure standing beside two counts
     /// and changing width with the window a click away — `78h12` for a week.
-    /// How long one turn ran, at the grain `cpuDuration` reads a process's
-    /// time: a turn is a stretch of wall clock of the same order, and a
-    /// five-minute turn read as `5m` would hide the half of it that decides
-    /// whether it was long.
-    static func turnDuration(milliseconds: Int) -> String {
-        cpuDuration(TimeInterval(milliseconds) / millisecondsPerSecond)
-    }
-
-    private static let millisecondsPerSecond: TimeInterval = 1000
-
     static func workedDuration(minutes: Int) -> String {
         let clamped = max(minutes, 0)
         guard clamped >= minutesPerHour else { return "\(clamped)m" }

@@ -52,12 +52,6 @@ struct ProviderRowSnapshot: Equatable {
     }
 }
 
-/// The claude.ai session, and what importing it changes.
-///
-/// It says what the thing is before the button is pressed, because it is a
-/// whole browser session rather than a read-only usage token, and a user who
-/// only finds that out afterwards was not asked.
-/// What linking another Claude account says.
 /// What the Codex account link says.
 ///
 /// Its own vocabulary rather than the Claude one's: what is linked is a
@@ -155,6 +149,7 @@ enum CodexAccountLinkCopy {
     }
 }
 
+/// What linking another Claude account says.
 enum ClaudeAccountLinkCopy {
     static let addTitle = "Add account…"
     static let infoTitle = "How Sissy reads Claude accounts"

@@ -413,10 +413,10 @@ final class SissyModel {
     /// The last frame for as long as it still describes a day something is
     /// counting, paired with when it landed.
     ///
-    /// nil until the first frame lands, and nothing nils it afterwards: in
+    /// nil until the first frame lands, and afterwards only while
+    /// `clearFrame()` has dropped a reading a provider switch invalidated: in
     /// one process the engine is either counting or the app is gone, so a
     /// timestamp on screen can never be ageing under something that stopped.
-    ///
     var liveFrame: LiveFrame? {
         guard let currentFrame, let lastFrameAt else { return nil }
         return LiveFrame(frame: currentFrame, at: lastFrameAt)

@@ -2,6 +2,19 @@ import AppKit
 import SwiftUI
 import WebKit
 
+/// The one question a link cannot answer for itself, in the vendor's own
+/// vocabulary: an organisation for Claude, a workspace for Codex.
+struct VendorLoginQuestion {
+    let title: String
+    let caption: String
+    let options: [Option]
+
+    struct Option: Identifiable {
+        let id: String
+        let label: String
+    }
+}
+
 /// The one window Sissy opens, and the only thing it can do is link an
 /// account.
 ///
@@ -75,19 +88,6 @@ import WebKit
 /// window the app has, which this one cannot see, so the demotion is left to
 /// it. The promotion stays here because it has to happen before the activation
 /// it is for.
-/// The one question a link cannot answer for itself, in the vendor's own
-/// vocabulary: an organisation for Claude, a workspace for Codex.
-struct VendorLoginQuestion {
-    let title: String
-    let caption: String
-    let options: [Option]
-
-    struct Option: Identifiable {
-        let id: String
-        let label: String
-    }
-}
-
 @MainActor
 final class VendorLoginWindow: NSObject {
     /// What this window signs into, and how it recognises that it has.
