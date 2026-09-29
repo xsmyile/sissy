@@ -112,9 +112,10 @@ enum KeychainAccess {
     /// cannot resolve a deprecated symbol, and the read then runs with nothing
     /// suppressing it at all. Held without a budget, one reader parked that
     /// way would take every other linked account's reader down with it, for
-    /// good — neither `ClaudeWebSessionStore` nor `CodexAccountStore` goes
-    /// through `loadOffPool`, so neither has a timeout of its own. That is a
-    /// worse failure than the overlap this exists to prevent.
+    /// good: the items Sissy owns are read without `loadOffPool`'s budget
+    /// (off the pool through `offPool`, or on `CodexRenewal`'s own queue), so
+    /// this lock's wait is the only bound they have. That is a worse failure
+    /// than the overlap this exists to prevent.
     ///
     /// A reader that cannot get in answers `unavailable` rather than running
     /// unsuppressed, which would be the original bug on purpose.
@@ -148,8 +149,10 @@ enum KeychainAccess {
     /// Runs a blocking keychain read on a dispatch thread and resumes with its
     /// answer, so it parks that thread rather than one of the cooperative
     /// pool's, which the whole runtime shares. For a read that needs no gate
-    /// and no budget of its own: `suppressingInteraction` already bounds the
-    /// wait behind another reader.
+    /// and no budget of its own beyond the one `suppressingInteraction` puts
+    /// on the wait behind another reader. An interactive read still waits on
+    /// its dialog for as long as it is up, which is why only a user's own
+    /// gesture makes one.
     static func offPool<Value: Sendable>(_ read: @escaping @Sendable () -> Value) async -> Value {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async { continuation.resume(returning: read()) }
