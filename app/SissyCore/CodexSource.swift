@@ -251,9 +251,7 @@ final class CodexAdapter: SourceAdapter {
     /// JSON-parse cost.
     private static let tokenCountMarker: [UInt8] = Array("\"token_count\"".utf8)
 
-    /// `turn_context` lines also matter (they update the per-file model). The
-    /// marker keeps the slow path bounded — we walk both prefilters on each
-    /// candidate line.
+    /// `turn_context` lines also matter (they update the per-file model).
     private static let turnContextMarker: [UInt8] = Array("\"turn_context\"".utf8)
 
     /// `session_meta` is the rollout's first line and the only one naming the
@@ -265,50 +263,35 @@ final class CodexAdapter: SourceAdapter {
     static let taskCompleteType = "task_complete"
     private static let taskCompleteMarker: [UInt8] = Array("\"\(taskCompleteType)\"".utf8)
 
-    /// Linear scan for `marker` within `buf[from..<to]`. Cheap substring
-    /// prefilter run before paying the JSON-parse cost on a candidate line.
-    private static func bufferContainsMarker(
-        _ buf: UnsafePointer<UInt8>, from: Int, to: Int, marker: [UInt8]
-    ) -> Bool {
-        let m = marker.count
-        let n = to - from
-        if m > n { return false }
-        let limit = to - m
-        var i = from
-        while i <= limit {
-            if buf[i] == marker[0] {
-                var j = 1
-                while j < m && buf[i + j] == marker[j] { j += 1 }
-                if j == m { return true }
+    /// The four markers a line has to carry one of, each with where its
+    /// underscore sits. `lineMayCount` is exact only while each holds exactly
+    /// one underscore, which `CodexPrefilterTests` asserts.
+    static let markers: [(bytes: [UInt8], underscore: Int)] = [
+        tokenCountMarker, turnContextMarker, sessionMetaMarker, taskCompleteMarker,
+    ].map { marker in (marker, marker.firstIndex(of: underscore) ?? 0) }
+    private static let underscore = UInt8(ascii: "_")
+
+    /// Whether `buf[from..<to]` holds any of the four markers, in one pass.
+    ///
+    /// Every marker has an underscore at a fixed place in it, so a line holds
+    /// one exactly when some underscore in the line is that marker's. `memchr`
+    /// finds the underscores, which JSON carries far fewer of than quotes.
+    /// Measured 2026-09-29 over the newest 232 MB of real rollouts, 5,524
+    /// lines: 480 ms for a byte-by-byte scan per marker, 480 ms for libc's
+    /// substring search per marker, 8.6 ms for this, with the same answer on
+    /// every line.
+    func lineMayCount(_ buf: UnsafePointer<UInt8>, from: Int, to: Int) -> Bool {
+        var cursor = from
+        while cursor < to, let hit = memchr(buf + cursor, Int32(Self.underscore), to - cursor) {
+            let position = buf.distance(to: hit.assumingMemoryBound(to: UInt8.self))
+            for marker in Self.markers {
+                let start = position - marker.underscore
+                guard start >= from, start + marker.bytes.count <= to else { continue }
+                if memcmp(buf + start, marker.bytes, marker.bytes.count) == 0 { return true }
             }
-            i += 1
+            cursor = position + 1
         }
         return false
-    }
-
-    static func bufferContainsTokenCountMarker(
-        _ buf: UnsafePointer<UInt8>, from: Int, to: Int
-    ) -> Bool {
-        bufferContainsMarker(buf, from: from, to: to, marker: tokenCountMarker)
-    }
-
-    static func bufferContainsTurnContextMarker(
-        _ buf: UnsafePointer<UInt8>, from: Int, to: Int
-    ) -> Bool {
-        bufferContainsMarker(buf, from: from, to: to, marker: turnContextMarker)
-    }
-
-    static func bufferContainsSessionMetaMarker(
-        _ buf: UnsafePointer<UInt8>, from: Int, to: Int
-    ) -> Bool {
-        bufferContainsMarker(buf, from: from, to: to, marker: sessionMetaMarker)
-    }
-
-    func lineMayCount(_ buf: UnsafePointer<UInt8>, from: Int, to: Int) -> Bool {
-        Self.bufferContainsTokenCountMarker(buf, from: from, to: to)
-            || Self.bufferContainsTurnContextMarker(buf, from: from, to: to)
-            || Self.bufferContainsSessionMetaMarker(buf, from: from, to: to)
-            || Self.bufferContainsMarker(buf, from: from, to: to, marker: Self.taskCompleteMarker)
     }
 
     /// Routes a JSONL line to the right parser. `turn_context` lines update
