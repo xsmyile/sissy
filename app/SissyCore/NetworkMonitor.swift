@@ -24,7 +24,7 @@ import Foundation
 /// **In memory and nowhere else.** `stop()` drops the series and the counters
 /// it was measured from, so a switch turned on again starts a new series
 /// rather than joining a line across minutes nobody sampled.
-actor NetworkMonitor {
+actor NetworkMonitor: LiveMonitor {
     private let readCounters: @Sendable () -> [NetworkInterfaceCounters]
     private let readPrimary: @Sendable () -> String?
     private let readDisplayName: @Sendable (String) -> String?
@@ -35,8 +35,7 @@ actor NetworkMonitor {
     /// The interface last named, kept so the listing behind its display name
     /// is asked again only when the default route moves.
     private var interface: NetworkInterfaceName?
-    private var pollTask: Task<Void, Never>?
-    private var onSample: (@Sendable (NetworkReading) async -> Void)?
+    private var poll = LivePoll<NetworkReading>()
 
     init(
         readCounters: @escaping @Sendable () -> [NetworkInterfaceCounters] = NetworkReader.counters,
@@ -52,13 +51,10 @@ actor NetworkMonitor {
         self.readWiFi = readWiFi
     }
 
-    var isRunning: Bool { pollTask != nil }
+    var isRunning: Bool { poll.isRunning }
 
     /// The pace the monitor runs at, nil while it is stopped.
-    var cadence: LiveCadence? {
-        guard isRunning else { return nil }
-        return onSample == nil ? .background : .watched
-    }
+    var cadence: LiveCadence? { poll.cadence }
 
     /// Runs the monitor, watched and publishing to `onSample` or in the
     /// background with nil, and hands one already running the new callback:
@@ -69,37 +65,23 @@ actor NetworkMonitor {
     /// sample is taken at once rather than up to five seconds later. A page
     /// leaving does not: the one-second wait in flight ends, the sample it
     /// ends in is kept and not published, and the next wait is five seconds.
-    func run(publishing onSample: (@Sendable (NetworkReading) async -> Void)?) {
-        let wasWatched = self.onSample != nil
-        self.onSample = onSample
-        if isRunning, wasWatched || onSample == nil { return }
-        pollTask?.cancel()
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self, let (cadence, delivery) = await self.step() else { return }
-                if let (reading, deliver) = delivery { await deliver(reading) }
-                do {
-                    try await Task.sleep(for: cadence.interval, tolerance: cadence.tolerance)
-                } catch { return }
-            }
-        }
+    func run(publishing onSample: LivePoll<NetworkReading>.Deliver?) {
+        poll.run(publishing: onSample) { [weak self] in await self?.step() }
     }
 
     /// One step of the loop at the cadence in force: the counters alone in
     /// the background, the whole reading and where it goes while watched.
-    private func step() -> (
-        LiveCadence, (NetworkReading, @Sendable (NetworkReading) async -> Void)?
-    )? {
-        guard let onSample else { return record(next: .background) ? (.background, nil) : nil }
+    private func step() -> LivePoll<NetworkReading>.Step? {
+        guard let onSample = poll.onSample else {
+            return record(next: .background) ? (.background, nil) : nil
+        }
         guard let reading = sampleOnce(next: .watched) else { return nil }
         return (.watched, (reading, onSample))
     }
 
     /// Stops sampling and forgets everything the samples built.
     func stop() {
-        pollTask?.cancel()
-        pollTask = nil
-        onSample = nil
+        poll.stop()
         log = RateLog()
         interface = nil
     }

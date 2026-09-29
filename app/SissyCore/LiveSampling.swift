@@ -83,6 +83,71 @@ enum LiveSample: Sendable, Equatable {
     case disk(DiskActivityReading)
 }
 
+/// What `LiveSampling` drives: a monitor that runs watched or in the
+/// background, and stops.
+protocol LiveMonitor: Actor {
+    associatedtype Reading: Sendable
+    var cadence: LiveCadence? { get }
+    func run(publishing onSample: LivePoll<Reading>.Deliver?)
+    func stop()
+}
+
+/// The loop every live monitor runs, and the two facts it keeps: whether it
+/// is running, and where a watched sample goes.
+///
+/// One copy because the rule it carries is the one `LiveCadence` names, and a
+/// monitor written beside it would be a second place for that rule to drift.
+/// The monitor keeps what differs, which is what one step reads.
+struct LivePoll<Reading: Sendable> {
+    typealias Deliver = @Sendable (Reading) async -> Void
+    /// The cadence a step ran at, and the sample with where it goes when the
+    /// step is watched. Nil ends the loop, which a monitor answers when
+    /// `stop()` ran ahead of the step.
+    typealias Step = (LiveCadence, (Reading, Deliver)?)
+
+    private(set) var onSample: Deliver?
+    private var task: Task<Void, Never>?
+
+    var isRunning: Bool { task != nil }
+
+    /// The pace the loop runs at, nil while it is stopped.
+    var cadence: LiveCadence? {
+        guard isRunning else { return nil }
+        return onSample == nil ? .background : .watched
+    }
+
+    /// Runs the loop, watched and publishing to `onSample` or in the
+    /// background with nil, and hands one already running the new callback.
+    ///
+    /// **A page arriving interrupts the background's wait**, so its first
+    /// sample is taken at once rather than up to five seconds later. A page
+    /// leaving does not: the one-second wait in flight ends, the sample it
+    /// ends in is kept and not published, and the next wait is five seconds.
+    mutating func run(
+        publishing onSample: Deliver?, step: @escaping @Sendable () async -> Step?
+    ) {
+        let wasWatched = self.onSample != nil
+        self.onSample = onSample
+        if isRunning, wasWatched || onSample == nil { return }
+        task?.cancel()
+        task = Task {
+            while !Task.isCancelled {
+                guard let (cadence, delivery) = await step() else { return }
+                if let (reading, deliver) = delivery { await deliver(reading) }
+                do {
+                    try await Task.sleep(for: cadence.interval, tolerance: cadence.tolerance)
+                } catch { return }
+            }
+        }
+    }
+
+    mutating func stop() {
+        task?.cancel()
+        task = nil
+        onSample = nil
+    }
+}
+
 /// Runs the live readings against each reading's own switch in `server.json`,
 /// and sets their cadence against what the panel's page on screen asks for.
 ///
@@ -157,23 +222,19 @@ actor LiveSampling {
             let on = isStarted && !isStopped && enabled.contains(reading)
             let publish = demand.contains(reading) ? onSample : nil
             switch reading {
-            case .network:
-                if !on {
-                    await network.stop()
-                } else if let publish {
-                    await network.run(publishing: { await publish(.network($0)) })
-                } else {
-                    await network.run(publishing: nil)
-                }
-            case .disk:
-                if !on {
-                    await disk.stop()
-                } else if let publish {
-                    await disk.run(publishing: { await publish(.disk($0)) })
-                } else {
-                    await disk.run(publishing: nil)
-                }
+            case .network: await drive(network, on: on, publishing: publish) { .network($0) }
+            case .disk: await drive(disk, on: on, publishing: publish) { .disk($0) }
             }
         }
+    }
+
+    private func drive<Monitor: LiveMonitor>(
+        _ monitor: Monitor, on: Bool,
+        publishing publish: (@Sendable (LiveSample) async -> Void)?,
+        as sample: @escaping @Sendable (Monitor.Reading) -> LiveSample
+    ) async {
+        guard on else { return await monitor.stop() }
+        guard let publish else { return await monitor.run(publishing: nil) }
+        await monitor.run(publishing: { await publish(sample($0)) })
     }
 }

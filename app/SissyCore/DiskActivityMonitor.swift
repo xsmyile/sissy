@@ -15,59 +15,39 @@ import Foundation
 ///
 /// A sample costs 0.046 ms of CPU for the read, measured 2026-09-28 on a
 /// Mac16,8 running macOS 27.0.
-actor DiskActivityMonitor {
+actor DiskActivityMonitor: LiveMonitor {
     private let readCounters: @Sendable () -> [DiskDriverCounters]
 
     private var log = RateLog<[UInt64: DiskByteCounts], DiskRate>()
-    private var pollTask: Task<Void, Never>?
-    private var onSample: (@Sendable (DiskActivityReading) async -> Void)?
+    private var poll = LivePoll<DiskActivityReading>()
 
     init(readCounters: @escaping @Sendable () -> [DiskDriverCounters] = DiskActivityReader.counters) {
         self.readCounters = readCounters
     }
 
-    var isRunning: Bool { pollTask != nil }
+    var isRunning: Bool { poll.isRunning }
 
     /// The pace the monitor runs at, nil while it is stopped.
-    var cadence: LiveCadence? {
-        guard isRunning else { return nil }
-        return onSample == nil ? .background : .watched
-    }
+    var cadence: LiveCadence? { poll.cadence }
 
     /// Runs the monitor, watched and publishing to `onSample` or in the
     /// background with nil, on `NetworkMonitor`'s terms: a page arriving
     /// interrupts the background's wait, and a page leaving lets the wait in
     /// flight end.
-    func run(publishing onSample: (@Sendable (DiskActivityReading) async -> Void)?) {
-        let wasWatched = self.onSample != nil
-        self.onSample = onSample
-        if isRunning, wasWatched || onSample == nil { return }
-        pollTask?.cancel()
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self, let (cadence, delivery) = await self.step() else { return }
-                if let (reading, deliver) = delivery { await deliver(reading) }
-                do {
-                    try await Task.sleep(for: cadence.interval, tolerance: cadence.tolerance)
-                } catch { return }
-            }
-        }
+    func run(publishing onSample: LivePoll<DiskActivityReading>.Deliver?) {
+        poll.run(publishing: onSample) { [weak self] in await self?.step() }
     }
 
-    private func step() -> (
-        LiveCadence, (DiskActivityReading, @Sendable (DiskActivityReading) async -> Void)?
-    )? {
-        let cadence: LiveCadence = onSample == nil ? .background : .watched
+    private func step() -> LivePoll<DiskActivityReading>.Step? {
+        let cadence: LiveCadence = poll.onSample == nil ? .background : .watched
         guard let reading = sampleOnce(next: cadence) else { return nil }
-        guard let onSample else { return (cadence, nil) }
+        guard let onSample = poll.onSample else { return (cadence, nil) }
         return (cadence, (reading, onSample))
     }
 
     /// Stops sampling and forgets everything the samples built.
     func stop() {
-        pollTask?.cancel()
-        pollTask = nil
-        onSample = nil
+        poll.stop()
         log = RateLog()
     }
 
