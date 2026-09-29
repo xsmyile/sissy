@@ -8,6 +8,9 @@ enum AgentHookCopy {
 
     static let caption = "Asks Claude Code and Codex to name the repository a session starts in."
 
+    /// Behind an ⓘ rather than a tooltip: this is the only thing Sissy writes
+    /// outside its own folder, and what it writes has to be readable before
+    /// the switch is flipped.
     static let detail =
         "Without this, work in a worktree deleted while Sissy was not running counts towards "
         + "no project at all.\n\n"
@@ -56,11 +59,6 @@ struct GeneralSettingsView: View {
     let model: SissyModel
 
     @State private var confirmingDelete = false
-    @State private var showingHookDetail = false
-    @State private var showingExportDetail = false
-
-    /// Wide enough that the detail reads as a paragraph rather than a column.
-    private static let detailPopoverWidth: CGFloat = 280
 
     /// What the two armed modes cost. Both the names and both the bounds are
     /// read rather than written out: a caption that says ten minutes while the
@@ -80,25 +78,6 @@ struct GeneralSettingsView: View {
         let refused = model.engine.agentHooksRefused
         guard !refused.isEmpty else { return AgentHookCopy.caption }
         return AgentHookCopy.refusedCaption(refused, enabled: model.engine.agentHooks)
-    }
-
-    /// A button rather than a tooltip, for the reason the claude.ai import has
-    /// one: this is the only thing Sissy writes outside its own folder, and
-    /// what it writes has to be readable before the switch is flipped.
-    private var agentHooksDetailButton: some View {
-        Button {
-            showingHookDetail = true
-        } label: {
-            Image(systemName: "info.circle")
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(AgentHookCopy.detailButtonLabel)
-        .popover(isPresented: $showingHookDetail, arrowEdge: .bottom) {
-            Text(AgentHookCopy.detail)
-                .font(.callout)
-                .frame(width: Self.detailPopoverWidth)
-                .padding()
-        }
     }
 
     private var agentHooksBinding: Binding<Bool> {
@@ -134,24 +113,6 @@ struct GeneralSettingsView: View {
         + "names no repository."
 
     private static let exportDetailButtonLabel = "What the export carries"
-
-    /// The ⓘ beside Usage history, for the reason the hook switch has one:
-    /// what a button sends off the Mac has to be readable before it is pressed.
-    private var exportDetailButton: some View {
-        Button {
-            showingExportDetail = true
-        } label: {
-            Image(systemName: "info.circle")
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(Self.exportDetailButtonLabel)
-        .popover(isPresented: $showingExportDetail, arrowEdge: .bottom) {
-            Text(Self.exportDetail)
-                .font(.callout)
-                .frame(width: Self.detailPopoverWidth)
-                .padding()
-        }
-    }
 
     var body: some View {
         Form {
@@ -280,7 +241,7 @@ struct GeneralSettingsView: View {
         } label: {
             HStack(spacing: 4) {
                 Text(AgentHookCopy.title)
-                agentHooksDetailButton
+                SettingsInfoButton(title: AgentHookCopy.detailButtonLabel, detail: AgentHookCopy.detail)
             }
             Text(agentHooksCaption)
         }
@@ -341,7 +302,7 @@ struct GeneralSettingsView: View {
         } label: {
             HStack(spacing: 4) {
                 Text("Usage history")
-                exportDetailButton
+                SettingsInfoButton(title: Self.exportDetailButtonLabel, detail: Self.exportDetail)
             }
             Text(historyCaption)
         }
