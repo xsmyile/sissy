@@ -71,10 +71,7 @@ jobs:
 
       - name: CLI self-test
         run: |
-          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
-            -configuration Debug -showBuildSettings 2>/dev/null \
-            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
-          "$DD/sissy-cli" --self-test
+          "$(../scripts/cli-path.sh Debug)" --self-test
 
       # The configuration that ships: its own bundle id, and with it the
       # release paths and keychain namespace, and whole-module optimisation.
@@ -88,43 +85,12 @@ jobs:
 
       - name: CLI self-test (Release)
         run: |
-          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
-            -configuration Release -showBuildSettings 2>/dev/null \
-            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
-          "$DD/sissy-cli" --self-test
+          "$(../scripts/cli-path.sh Release)" --self-test
 
       - name: Codex parser smoke (--scan against fixture)
+        working-directory: app
         timeout-minutes: 3
-        run: |
-          # End-to-end check that the engine's Codex parser produces a
-          # deterministic token total on a known fixture. The fixture is
-          # generated inline with a fresh timestamp so it never ages out of
-          # the retain window. Asserts the field-mapping math (uncached =
-          # input - cached, output = gross, never re-add reasoning) one more
-          # time at the CLI surface — pure unit coverage already lives in
-          # --self-test.
-          DD=$(xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
-            -configuration Debug -showBuildSettings 2>/dev/null \
-            | awk -F= '/BUILT_PRODUCTS_DIR/{print $2; exit}' | xargs)
-          FIXTURE_HOME="$RUNNER_TEMP/codex-home"
-          mkdir -p "$FIXTURE_HOME/sessions/2026/05/25"
-          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-          cat > "$FIXTURE_HOME/sessions/2026/05/25/rollout-fixture.jsonl" <<JSONL
-          {"type":"session_meta","timestamp":"$NOW","payload":{"id":"fixture","timestamp":"$NOW","model_provider":"openai"}}
-          {"type":"turn_context","timestamp":"$NOW","payload":{"turn_id":"t1","model":"gpt-5-codex"}}
-          {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":0,"total_tokens":14658},"total_token_usage":{"input_tokens":14297,"cached_input_tokens":9600,"output_tokens":361,"reasoning_output_tokens":0,"total_tokens":14658}}}}
-          {"type":"event_msg","timestamp":"$NOW","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":28035,"cached_input_tokens":9600,"output_tokens":546,"reasoning_output_tokens":66,"total_tokens":28581},"total_token_usage":{"input_tokens":42332,"cached_input_tokens":19200,"output_tokens":907,"reasoning_output_tokens":66,"total_tokens":43239}}}}
-          JSONL
-          # Sum: event1 (4697+361+9600) + event2 (18435+546+9600) = 43_239
-          # `output` is already gross (includes reasoning); we never re-add it.
-          EXPECTED=43239
-          OUT=$(CODEX_HOME="$FIXTURE_HOME" "$DD/sissy-cli" --scan --scan-provider codex)
-          echo "$OUT"
-          GOT=$(echo "$OUT" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['codex']['tokens'])")
-          if [ "$GOT" != "$EXPECTED" ]; then
-            echo "Codex parser drift: expected $EXPECTED, got $GOT" >&2
-            exit 1
-          fi
+        run: ../scripts/codex-smoke.sh "$(../scripts/cli-path.sh Debug)"
 
       - name: Build app
         run: |
