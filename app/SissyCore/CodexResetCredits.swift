@@ -111,7 +111,7 @@ enum CodexResetOutcome: Sendable, Equatable {
     /// The windows are back to zero. `already_redeemed` lands here too: it is
     /// the vendor saying an earlier attempt under the same request id did it.
     case reset
-    /// Nothing was spent, because nothing needed resetting yet.
+    /// Nothing was spent: OpenAI says the account does not need a reset now.
     case nothingToReset
     /// The account had no reset left to spend, or the one asked for lapsed.
     case noCredit

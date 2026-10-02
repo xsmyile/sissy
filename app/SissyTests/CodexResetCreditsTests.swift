@@ -58,16 +58,16 @@ final class CodexResetCreditsTests: XCTestCase {
             Self.usageReply(resets: #"{"available_count": 1, "applicable_available_count": 0}"#))
         XCTAssertEqual(resets?.available, 1)
         XCTAssertEqual(resets?.applicable, 0)
-        XCTAssertEqual(resets?.usable, 0)
+        XCTAssertEqual(resets?.appliesNow, false)
     }
 
     /// A reply that names no applicable count is read the way OpenAI's desktop
     /// client reads it: the whole inventory.
-    func testWithoutAnApplicableCountEveryResetIsUsable() {
+    func testWithoutAnApplicableCountAResetIsNeeded() {
         let resets = CodexResetCredits.summary(
             Self.usageReply(resets: #"{"available_count": 2}"#))
         XCTAssertNil(resets?.applicable)
-        XCTAssertEqual(resets?.usable, 2)
+        XCTAssertEqual(resets?.appliesNow, true)
     }
 
     /// No block is an account nobody knows about, never a zero.
