@@ -195,7 +195,10 @@ enum GitHubActionsFeed {
             }
             let isPublic = try await publicRepositories(
                 Set(reports.flatMap(\.repositories)), connection: connection, token: token)
-            let linuxRate = reports.lazy.flatMap(\.items).first(where: \.isLinuxStandard)?.unitPrice
+            let all = reports.flatMap(\.items)
+            let pricing = MonthPricing(
+                linuxRate: all.first(where: \.isLinuxStandard)?.unitPrice,
+                covered: coveredRunners(all))
             var quotas: [ActionsQuota] = []
             for report in reports {
                 let counted = report.items.filter {
@@ -204,7 +207,7 @@ enum GitHubActionsFeed {
                 do {
                     quotas.append(
                         try await quota(
-                            report, counted, linuxRate: linuxRate, token: token, now: now))
+                            report, counted, pricing: pricing, token: token, now: now))
                 } catch {
                     try Task.checkCancellation()
                     unread.insert(report.owner)
@@ -228,10 +231,10 @@ enum GitHubActionsFeed {
     /// minutes for a round; a budget that would not answer leaves the caption
     /// saying the allowance is spent without saying what follows.
     private static func quota(
-        _ report: OwnerReport, _ items: [ActionsItem], linuxRate: Double?, token: String,
+        _ report: OwnerReport, _ items: [ActionsItem], pricing: MonthPricing, token: String,
         now: Date
     ) async throws -> ActionsQuota {
-        let unpriced = month(report, items, linuxRate: linuxRate, now: now)
+        let unpriced = month(report, items, pricing: pricing, now: now)
         guard unpriced.hasUsage else { return unpriced }
         let priced = unpriced.with(plan: try await plan(report.kind, report.owner, token: token))
         guard priced.overrun == nil, report.kind == .organization, priced.isSpent else {
@@ -246,14 +249,28 @@ enum GitHubActionsFeed {
     /// the billed one is only what the allowance's own runners were charged,
     /// so a larger runner's bill does not read as the allowance running out.
     static func month(
-        _ report: OwnerReport, _ items: [ActionsItem], linuxRate: Double?, now: Date
+        _ report: OwnerReport, _ items: [ActionsItem], pricing: MonthPricing, now: Date
     ) -> ActionsQuota {
-        let billed = items.filter(\.drawsOnAllowance).reduce(0) { $0 + $1.net }
+        let billed = items.filter { pricing.covered.contains($0.sku) }.reduce(0) { $0 + $1.net }
         return ActionsQuota(
-            id: report.owner, owner: report.kind, plan: nil, linuxRate: linuxRate,
+            id: report.owner, owner: report.kind, plan: nil, linuxRate: pricing.linuxRate,
             minutes: items.reduce(0) { $0 + $1.quantity },
             spent: items.reduce(0) { $0 + $1.discount }, billed: billed, heaviest: heaviest(items),
             overrun: billed > 0 ? .bills : nil, readAt: now)
+    }
+
+    /// The runners the allowance covers, read off the month's own rows rather
+    /// than a list of SKUs: a runner the allowance covers is discounted
+    /// somewhere, and a larger runner never is, in a private repository or a
+    /// public one (GitHub's Actions billing documentation, read 2026-10-02).
+    /// Every owner's rows are read, public repositories included, because a
+    /// public repository's standard runners are discounted in full and so
+    /// prove the SKU is one the allowance covers. A covered runner seen only
+    /// past the allowance in private repositories is the case this cannot
+    /// prove, and its bill is then left out of the overage, never charged
+    /// to the allowance.
+    static func coveredRunners(_ items: [ActionsItem]) -> Set<String> {
+        Set(items.filter { $0.discount > 0 }.map(\.sku))
     }
 
     /// The repository and runner with the largest cost, as a share of all of
@@ -287,6 +304,14 @@ enum GitHubActionsFeed {
         case items([ActionsItem])
         /// Refused, and whether the refusal is a classic token without `user`.
         case refused(missingUserScope: Bool)
+    }
+
+    /// What the month's rows say about every owner's runners at once.
+    struct MonthPricing {
+        /// The Linux 2-core rate the allowance is valued at.
+        let linuxRate: Double?
+        /// The runner SKUs the allowance covers, from `coveredRunners`.
+        let covered: Set<String>
     }
 
     /// One owner's report rows, kept with whose they are.
@@ -521,21 +546,6 @@ struct ActionsItem: Sendable, Equatable {
 
     /// The standard Linux runner, whose rate the allowance is valued at.
     var isLinuxStandard: Bool { sku == Self.linuxStandard }
-
-    /// Whether this runner is one the allowance covers, which is what makes
-    /// a charge on it a charge *past* the allowance.
-    ///
-    /// Larger runners are always billed and never draw on the included
-    /// minutes (GitHub's Actions billing documentation, read 2026-10-02), so
-    /// their cost is not the allowance running out. Their discount is zero,
-    /// so the spent figure needs no filter; only the billed one does. The
-    /// standard SKUs are the three measured or documented on 2026-10-02:
-    /// `Actions Linux`, `Actions Windows` and `Actions macOS 3-core`.
-    var drawsOnAllowance: Bool { Self.standardRunners.contains(sku) }
-
-    private static let standardRunners: Set<String> = [
-        "Actions Linux", "Actions Windows", "Actions macOS 3-core",
-    ]
 
     /// The runner's system, `macOS` for `Actions macOS 3-core`; the SKU
     /// without its prefix for one that names none of the three.
