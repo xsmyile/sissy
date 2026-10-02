@@ -259,19 +259,28 @@ enum GitHubActionsFeed {
             overrun: billed > 0 ? .bills : nil, readAt: now)
     }
 
-    /// The runners the allowance covers, read off the month's own rows rather
-    /// than a list of SKUs: a runner the allowance covers is discounted
-    /// somewhere, and a larger runner never is, in a private repository or a
-    /// public one (GitHub's Actions billing documentation, read 2026-10-02).
-    /// Every owner's rows are read, public repositories included, because a
-    /// public repository's standard runners are discounted in full and so
-    /// prove the SKU is one the allowance covers. A covered runner seen only
-    /// past the allowance in private repositories is the case this cannot
-    /// prove, and its bill is then left out of the overage, never charged
-    /// to the allowance.
+    /// The runners the allowance covers: the standard three GitHub documents,
+    /// and any other the month's own rows prove by discounting it.
+    ///
+    /// A larger runner is never discounted, in a private repository or a
+    /// public one (GitHub's Actions billing documentation, read 2026-10-02),
+    /// so a discount anywhere proves a SKU is covered: that is how a slim or
+    /// ARM runner no list names is covered. The absence of one proves nothing,
+    /// because a standard runner first run after the allowance is spent is
+    /// never discounted either, which is why the documented three are covered
+    /// whether or not the month discounted them. Every owner's rows are read,
+    /// public repositories included, since their standard runners are
+    /// discounted in full.
     static func coveredRunners(_ items: [ActionsItem]) -> Set<String> {
-        Set(items.filter { $0.discount > 0 }.map(\.sku))
+        documentedStandardRunners.union(items.filter { $0.discount > 0 }.map(\.sku))
     }
+
+    /// GitHub's standard runners, as the usage report names them: the first
+    /// two measured 2026-10-02, the third the Windows SKU documented beside
+    /// them.
+    static let documentedStandardRunners: Set<String> = [
+        "Actions Linux", "Actions macOS 3-core", "Actions Windows",
+    ]
 
     /// The repository and runner with the largest cost, as a share of all of
     /// it. Gross rather than discount, so a repository that ran past the
