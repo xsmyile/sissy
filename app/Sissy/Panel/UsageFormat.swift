@@ -2061,6 +2061,39 @@ extension UsageFormat {
         name + " · " + periodHeading(period).lowercased()
     }
 
+    /// The Actions block's heading, naming the month the allowance is for:
+    /// it follows its own reset rather than the panel's period, so the period
+    /// heading the section above it carries would name the wrong window.
+    static func actionsTitle(resetsAt: Date) -> String {
+        let month = resetsAt.addingTimeInterval(-1)
+        return "Actions minutes · "
+            + month.formatted(Date.FormatStyle(timeZone: .gmt).month(.wide))
+    }
+
+    /// An owner's minutes, for the row whose plan has no allowance Sissy knows.
+    static func actionsMinutes(_ minutes: Double) -> String {
+        "\(Int(minutes.rounded()).formatted()) min"
+    }
+
+    /// What an allowance spent in full means for CI, or what was billed past it.
+    static func actionsState(_ quota: ActionsQuota, resetsAt: Date) -> String {
+        if quota.billed > 0 { return "Billed past the allowance" }
+        switch quota.overrun {
+        case .stops: return "CI stopped until " + sinceDay(resetsAt)
+        case .bills: return "Billed past the allowance from now on"
+        case nil: return "Allowance spent until " + sinceDay(resetsAt)
+        }
+    }
+
+    /// The repository and runner that cost the most, and how much of the
+    /// month that was: `try-on-buddy · macOS 80%`.
+    static func actionsSpender(_ spender: ActionsSpender) -> String {
+        "\(spender.repository) · \(spender.runner) \(Int((spender.share * 100).rounded()))%"
+    }
+
+    static let actionsNeedsUserScope =
+        "Your own minutes need the user scope on the token"
+
     /// Where and when, joined on with its leading separator: the half of the
     /// line the row keeps whole while the half before it shortens.
     ///

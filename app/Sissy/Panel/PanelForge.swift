@@ -26,6 +26,9 @@ struct PanelForge: View {
         VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
             ForEach(snapshot.forge) { row in
                 section(row)
+                if let actions = row.actions {
+                    PanelActions(block: actions)
+                }
             }
             PanelIdentityLine(line: snapshot.identityLine, open: openIdentities)
         }
@@ -47,6 +50,81 @@ struct PanelForge: View {
         } content: {
             ForgeRowView(row: row, refreshing: refreshing, refresh: { refreshForge(row.id) })
         }
+    }
+}
+
+/// A GitHub connection's Actions allowances, under its section.
+///
+/// A platter of its own rather than lines on the forge's row, because it
+/// answers a different window: the row follows the panel's period and this
+/// follows the month GitHub bills by, which the heading names. The gauges are
+/// the limit windows' own view, so a quota at 80% with ten days left reads
+/// the way a weekly limit at 80% does.
+struct PanelActions: View {
+    let block: UsagePanelSnapshot.ActionsBlock
+
+    var body: some View {
+        PanelGroup {
+            SectionLabel(text: block.title)
+                .lineLimit(1)
+        } content: {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(block.rows) { row in
+                    ActionsRowView(row: row)
+                }
+                if let notice = block.scopeNotice {
+                    Text(notice)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
+/// One owner's allowance: the gauge, then what stopped and who spent it.
+struct ActionsRowView: View {
+    let row: UsagePanelSnapshot.ActionsRow
+
+    private static let lineSize: CGFloat = 10
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let window = row.window {
+                WindowRowView(window: window, tint: tint, isBinding: row.isBinding)
+            } else {
+                HStack(spacing: 8) {
+                    Text(row.id)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(row.minutes)
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                }
+            }
+            if let state = row.state {
+                Text(state)
+                    .font(.system(size: Self.lineSize, weight: row.stopped ? .medium : .regular))
+                    .foregroundStyle(row.stopped ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+            }
+            if let spender = row.spender {
+                Text(spender)
+                    .font(.system(size: Self.lineSize))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+    }
+
+    /// The reading's colour, never the projection's, which is the rule the
+    /// limit rows are on: a spent allowance is red, anything below it the
+    /// accent.
+    private var tint: Color {
+        (row.window?.percent ?? 0) >= 100 ? .red : .accentColor
     }
 }
 

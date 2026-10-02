@@ -110,10 +110,48 @@ struct UsagePanelSnapshot: Equatable {
         let mergedHelp: String
         let issuesHelp: String
         let commentsHelp: String
+        /// The month's Actions allowances, nil where the counter is off or
+        /// the forge has none to read.
+        let actions: ActionsBlock?
 
         var hasFigures: Bool {
             contributions != nil || merged != nil || issues != nil || comments != nil
         }
+    }
+
+    /// One GitHub connection's Actions allowances for the month.
+    ///
+    /// **Drawn as limit windows, not as counters**, because that is what an
+    /// allowance is: it has its own reset, the first of the month in UTC, and
+    /// does not move when the panel's period does. So each owner is a
+    /// `WindowRow` with the pace the rate-limit rows carry, and the one that
+    /// runs out first leads by the rule `binding` holds for those.
+    struct ActionsBlock: Equatable {
+        let title: String
+        /// Every owner that spent any of its allowance this month, the one
+        /// running out soonest first. An owner that ran nothing has no row:
+        /// four organisations at 0% would be four bars saying nothing.
+        let rows: [ActionsRow]
+        /// Said once, under the rows, while the token cannot read the
+        /// account's own bill.
+        let scopeNotice: String?
+    }
+
+    struct ActionsRow: Equatable, Identifiable {
+        /// The owner's login.
+        let id: String
+        /// The gauge, nil for a plan whose allowance Sissy does not know,
+        /// where the row prints the minutes instead.
+        let window: WindowRow?
+        /// The reading when there is no gauge.
+        let minutes: String
+        /// What happened at 100%, nil below it.
+        let state: String?
+        /// Whether that state is CI that has stopped, which is drawn red.
+        let stopped: Bool
+        /// The repository and runner that cost the most.
+        let spender: String?
+        let isBinding: Bool
     }
 
     /// Every repository Sissy could read a commit identity for, the ones that
@@ -1440,9 +1478,68 @@ struct UsagePanelSnapshot: Equatable {
                     + (floored ? "\n" + UsageFormat.forgeFloorNote : ""),
                 mergedHelp: UsageFormat.forgeMergedHelp(reading.kind),
                 issuesHelp: UsageFormat.forgeIssuesHelp(reading.kind),
-                commentsHelp: UsageFormat.forgeCommentsHelp(reading.kind))
+                commentsHelp: UsageFormat.forgeCommentsHelp(reading.kind),
+                actions: makeActions(reading.actions, now: now))
         }
     }
+
+    /// The Actions block, nil where there is nothing to draw in it.
+    ///
+    /// The pace is measured from each owner's own reading rather than the
+    /// clock, which is `makePace`'s rule: the bill was true when it was read,
+    /// and an owner whose report failed this round is still the last one's. A reading from a
+    /// month that has since ended keeps its rows and loses its figures, the
+    /// roll-over every limit window is on.
+    static func makeActions(_ reading: ActionsReading?, now: Date) -> ActionsBlock? {
+        guard let reading else { return nil }
+        let quotas = reading.quotas.filter(\.hasUsage)
+        let windows: [String: WindowRow] = Dictionary(
+            uniqueKeysWithValues: quotas.compactMap { quota in
+                guard let percent = quota.usedPercent,
+                    let window = UsageWindow(
+                        minutes: reading.monthMinutes, usedPercent: percent,
+                        resetsAt: reading.resetsAt)
+                else { return nil }
+                let row = makeWindow(window, observedAt: quota.readAt, reading: .used, now: now)
+                return (quota.id, row.labelled(quota.id))
+            })
+        let bindingID = binding(quotas.compactMap { windows[$0.id] })?.id
+        let rows = quotas.map { quota in
+            let window = windows[quota.id]
+            let spent = quota.isSpent && window?.hasRolledOver != true
+            return ActionsRow(
+                id: quota.id,
+                window: window,
+                minutes: UsageFormat.actionsMinutes(quota.minutes),
+                state: spent || (quota.billed > 0 && window?.hasRolledOver != true)
+                    ? UsageFormat.actionsState(quota, resetsAt: reading.resetsAt) : nil,
+                stopped: spent && quota.overrun == .stops,
+                spender: quota.heaviest.map(UsageFormat.actionsSpender),
+                isBinding: bindingID != nil && window?.id == bindingID)
+        }
+        .sorted(by: leadsActions)
+        guard !rows.isEmpty || reading.ownNeedsUserScope else { return nil }
+        return ActionsBlock(
+            title: UsageFormat.actionsTitle(resetsAt: reading.resetsAt),
+            rows: rows,
+            scopeNotice: reading.ownNeedsUserScope ? UsageFormat.actionsNeedsUserScope : nil)
+    }
+
+    /// The Actions rows in reading order: a live gauge before a rolled-over
+    /// one, which `bindsSooner` alone does not exclude, then by the order
+    /// `binding` picks from, and a row without a gauge last.
+    private static func leadsActions(_ left: ActionsRow, _ right: ActionsRow) -> Bool {
+        switch (left.window, right.window) {
+        case (let lhs?, let rhs?):
+            guard lhs.hasRolledOver == rhs.hasRolledOver else { return !lhs.hasRolledOver }
+            return bindsSooner(lhs, rhs)
+        case (.some, .none):
+            return true
+        case (.none, .some), (.none, .none):
+            return false
+        }
+    }
+
     /// The identities page's rows, the findings first.
     ///
     /// Ordered by what the row says rather than by name: a page whose one
@@ -2316,6 +2413,18 @@ struct UsagePanelSnapshot: Equatable {
         guard rate > 0 else { return nil }
         let untilEmpty = headroom / rate
         return untilEmpty >= remaining ? nil : observedAt.addingTimeInterval(untilEmpty)
+    }
+}
+
+extension UsagePanelSnapshot.WindowRow {
+    /// The same gauge under an owner's name, for a window that is one owner's
+    /// among several of the same length: the id has to be the owner's too, or
+    /// `UsagePanelSnapshot.binding` could not say which of them leads.
+    func labelled(_ name: String) -> Self {
+        Self(
+            id: name, minutes: minutes, label: name, percent: percent, reading: reading,
+            readingSentence: readingSentence, fraction: fraction, resetsAt: resetsAt, pace: pace,
+            hasRolledOver: hasRolledOver)
     }
 }
 
