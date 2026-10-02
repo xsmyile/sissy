@@ -593,14 +593,16 @@ struct PanelProviderPage: View {
         resetReport?.target == target && resetReport?.outcome == .unconfirmed
     }
 
-    /// The resets OpenAI lets this account spend, and the one control on the
+    /// The resets this account holds, and the one control on the
     /// panel that spends something on the user's behalf.
     ///
     /// It sits under the limits for the reason credits do: it is what covers
-    /// the work once a window runs out. The button is there only while the
-    /// vendor would apply a reset, and a press only asks. What it asks says
-    /// when the longest window would reset anyway, which is the figure that
-    /// tells a reset worth spending from one that buys an hour.
+    /// the work once a window runs out. The button is there while the account
+    /// holds a reset, and a press only asks. What it asks says when the longest
+    /// window would reset anyway, which is the figure that tells a reset worth
+    /// spending from one that buys an hour, and whether OpenAI counts one as
+    /// needed yet: whether to spend it is the user's call, and whether it
+    /// applies is the vendor's.
     @ViewBuilder
     private func resets(_ resets: UsagePanelSnapshot.ResetsRow?, target: CodexResetTarget)
         -> some View
@@ -625,16 +627,11 @@ struct PanelProviderPage: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    if resets.usable, resetSpending == nil, confirmingReset != target,
-                        !awaitsRetry(target)
-                    {
+                    if resetSpending == nil, confirmingReset != target, !awaitsRetry(target) {
                         Button(CodexResetCopy.use) { confirmingReset = target }
                             .controlSize(.small)
                             .help(CodexResetCopy.useHelp)
                     }
-                }
-                if !resets.usable {
-                    resetCaption(CodexResetCopy.notYet)
                 }
                 if confirmingReset == target, resetSpending == nil {
                     resetConfirmation(resets, target: target)
@@ -673,7 +670,8 @@ struct PanelProviderPage: View {
                 .font(.system(size: 12, weight: .medium))
             resetCaption(
                 CodexResetCopy.confirmBody(
-                    available: resets.available, naturalReset: naturalReset))
+                    available: resets.available, naturalReset: naturalReset,
+                    appliesNow: resets.appliesNow))
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 Button(DialogCopy.cancel) { confirmingReset = nil }

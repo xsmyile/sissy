@@ -1790,9 +1790,10 @@ enum CodexResetCopy {
     /// What the vendor calls the only kind of reset measured, when a reset
     /// arrives without a title of its own.
     static let defaultTitle = "Full reset"
-    /// Said where the button would be while OpenAI would apply none. A count
-    /// with no button and no reason reads as a control that broke.
-    static let notYet = "Ready once a window is nearly used up"
+    /// Added to the confirmation while OpenAI counts no reset as needed, so
+    /// the press is made knowing the vendor may decline it.
+    static let notNeededYet =
+        "OpenAI does not count one as needed yet and may decline it, which spends nothing."
 
     static func available(_ count: Int) -> String { "\(count) available" }
 
@@ -1805,20 +1806,24 @@ enum CodexResetCopy {
 
     /// The spend, and what waiting instead would cost: `naturalReset` is the
     /// longest window's own label and countdown, which is the one figure that
-    /// tells a reset worth spending from one that buys an hour.
-    static func confirmBody(available: Int, naturalReset: (label: String, countdown: String)?)
-        -> String
-    {
-        let spend = "Both windows go back to zero. This spends 1 of \(available)."
-        guard let naturalReset else { return spend }
-        return "\(spend) \(naturalReset.label) resets on its own \(naturalReset.countdown)."
+    /// tells a reset worth spending from one that buys an hour. `appliesNow`
+    /// false adds that OpenAI may decline it.
+    static func confirmBody(
+        available: Int, naturalReset: (label: String, countdown: String)?, appliesNow: Bool
+    ) -> String {
+        var sentences = ["Both windows go back to zero. This spends 1 of \(available)."]
+        if let naturalReset {
+            sentences.append("\(naturalReset.label) resets on its own \(naturalReset.countdown).")
+        }
+        if !appliesNow { sentences.append(notNeededYet) }
+        return sentences.joined(separator: " ")
     }
 
     static func outcome(_ outcome: CodexResetOutcome) -> String {
         switch outcome {
         case .reset: return "Done. Both windows are back to zero."
         case .nothingToReset:
-            return "Nothing was spent: OpenAI applies a reset once a window is nearly used up."
+            return "Nothing was spent: OpenAI says this account does not need a reset right now."
         case .noCredit: return "No reset left to spend on this account."
         case .unconfirmed: return "No answer from OpenAI. Trying again cannot spend a second reset."
         case .refused: return "OpenAI refused the Codex credential. Sign in again, then retry."

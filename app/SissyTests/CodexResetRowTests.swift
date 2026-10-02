@@ -44,15 +44,16 @@ final class CodexResetRowTests: XCTestCase {
     }
 
     /// Measured 2026-09-24: one reset held, none applicable with the windows
-    /// at 29% and 83%. The count stays and the button does not.
-    func testAResetTheVendorWouldNotApplyIsNotUsable() {
+    /// at 29% and 83%. The row stays, and says the vendor counts none needed.
+    func testAResetTheVendorWouldNotApplyKeepsItsRow() {
         let row = codex(resets: LimitResets(available: 1, applicable: 0)).resets
         XCTAssertEqual(row?.headline, "1 available")
-        XCTAssertEqual(row?.usable, false)
+        XCTAssertEqual(row?.appliesNow, false)
     }
 
-    func testWithoutAnApplicableCountTheResetIsUsable() {
-        XCTAssertEqual(codex(resets: LimitResets(available: 1, applicable: nil)).resets?.usable, true)
+    func testWithoutAnApplicableCountTheResetIsNeeded() {
+        XCTAssertEqual(
+            codex(resets: LimitResets(available: 1, applicable: nil)).resets?.appliesNow, true)
     }
 
     func testTheCaptionCarriesTheVendorsTitleAndTheExpiry() {
@@ -114,11 +115,21 @@ final class CodexResetRowTests: XCTestCase {
     func testTheConfirmationSaysWhatWaitingWouldCost() {
         XCTAssertEqual(
             CodexResetCopy.confirmBody(
-                available: 2, naturalReset: (label: "Weekly", countdown: "in 3d 4h")),
+                available: 2, naturalReset: (label: "Weekly", countdown: "in 3d 4h"),
+                appliesNow: true),
             "Both windows go back to zero. This spends 1 of 2. Weekly resets on its own in 3d 4h.")
         XCTAssertEqual(
-            CodexResetCopy.confirmBody(available: 1, naturalReset: nil),
+            CodexResetCopy.confirmBody(available: 1, naturalReset: nil, appliesNow: true),
             "Both windows go back to zero. This spends 1 of 1.")
+    }
+
+    func testTheConfirmationSaysWhenOpenAICountsNoneNeeded() {
+        XCTAssertEqual(
+            CodexResetCopy.confirmBody(
+                available: 1, naturalReset: (label: "Weekly", countdown: "in 1d 12h"),
+                appliesNow: false),
+            "Both windows go back to zero. This spends 1 of 1. Weekly resets on its own in 1d 12h. "
+                + "OpenAI does not count one as needed yet and may decline it, which spends nothing.")
     }
 
     func testEachAnswerIsItsOwnSentence() {
@@ -127,6 +138,9 @@ final class CodexResetRowTests: XCTestCase {
         ]
         XCTAssertEqual(Set(outcomes.map(CodexResetCopy.outcome)).count, outcomes.count)
         XCTAssertEqual(CodexResetCopy.outcome(.reset), "Done. Both windows are back to zero.")
+        XCTAssertEqual(
+            CodexResetCopy.outcome(.nothingToReset),
+            "Nothing was spent: OpenAI says this account does not need a reset right now.")
         XCTAssertEqual(
             CodexResetCopy.outcome(.unconfirmed),
             "No answer from OpenAI. Trying again cannot spend a second reset.")

@@ -651,16 +651,18 @@ struct UsagePanelSnapshot: Equatable {
     }
 
     /// The resets block of a provider's page: how many the account holds, when
-    /// the soonest lapses, and whether a press would spend one now.
+    /// the soonest lapses, and whether the vendor counts one as needed now.
     struct ResetsRow: Equatable {
         /// `1 available`, the vendor's own count.
         let headline: String
         /// The vendor's name for the soonest reset and when it lapses.
         let caption: String
-        /// Whether the vendor would apply one now. False keeps the count on the
-        /// page and the button off it: measured 2026-09-24, an account holding
-        /// one reset with its windows at 29% and 83% was offered none.
-        let usable: Bool
+        /// Whether the vendor counts one as needed now. False keeps the button
+        /// and says so in the confirmation: on 2026-10-02 an account at 100% of
+        /// its session and 79% of its week found the button gone, which only an
+        /// applicable count of zero did, and so had no way to spend the reset
+        /// it held.
+        let appliesNow: Bool
         /// How many a press is spending from, for the confirmation's arithmetic.
         let available: Int
     }
@@ -1738,7 +1740,7 @@ struct UsagePanelSnapshot: Equatable {
         return ResetsRow(
             headline: CodexResetCopy.available(resets.available),
             caption: CodexResetCopy.caption(title: resets.title, expiresAt: resets.nextExpiry),
-            usable: resets.usable > 0,
+            appliesNow: resets.appliesNow,
             available: resets.available)
     }
 

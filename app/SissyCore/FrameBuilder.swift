@@ -403,10 +403,13 @@ struct LimitResets: Sendable, Equatable {
     /// The vendor's own name for that reset, `Full reset (Weekly + 5 hr)`.
     var title: String?
 
-    /// How many a press could spend now: the vendor's applicable count, and the
-    /// whole inventory where the reply names none. OpenAI's desktop client
-    /// reads it the same way, measured 2026-09-24 in its bundle.
-    var usable: Int { applicable ?? available }
+    /// Whether the vendor counts a reset as needed now: its applicable count,
+    /// and the whole inventory where the reply names none. It words the
+    /// confirmation and never gates the press, because the Codex CLI offers
+    /// `Redeem reset` on `available_count` alone (read 2026-10-02 in
+    /// `codex-rs/tui/src/chatwidget/usage.rs`) and the vendor answers a press
+    /// it would not apply with `nothing_to_reset`, which spends nothing.
+    var appliesNow: Bool { (applicable ?? available) > 0 }
 
     /// The same count with the reset a press just spent taken off, until the
     /// next reading says what the vendor now holds.
