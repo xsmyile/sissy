@@ -1485,6 +1485,9 @@ struct UsagePanelSnapshot: Equatable {
 
     /// The Actions block, nil where there is nothing to draw in it.
     ///
+    /// The month's end is read off the reading itself rather than off a gauge,
+    /// so a row with no gauge loses last month's minutes too.
+    ///
     /// The pace is measured from each owner's own reading rather than the
     /// clock, which is `makePace`'s rule: the bill was true when it was read,
     /// and an owner whose report failed this round is still the last one's. A reading from a
@@ -1504,14 +1507,15 @@ struct UsagePanelSnapshot: Equatable {
                 return (quota.id, row.labelled(quota.id))
             })
         let bindingID = binding(quotas.compactMap { windows[$0.id] })?.id
+        let ended = reading.resetsAt < now
         let rows = quotas.map { quota in
             let window = windows[quota.id]
-            let spent = quota.isSpent && window?.hasRolledOver != true
+            let spent = quota.isSpent && !ended
             return ActionsRow(
                 id: quota.id,
                 window: window,
-                minutes: UsageFormat.actionsMinutes(quota.minutes),
-                state: spent || (quota.billed > 0 && window?.hasRolledOver != true)
+                minutes: ended ? UsageFormat.actionsNoReading : UsageFormat.actionsMinutes(quota.minutes),
+                state: spent || (quota.billed > 0 && !ended)
                     ? UsageFormat.actionsState(quota, resetsAt: reading.resetsAt) : nil,
                 stopped: spent && quota.overrun == .stops,
                 spender: quota.heaviest.map(UsageFormat.actionsSpender),
