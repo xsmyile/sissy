@@ -169,12 +169,19 @@ enum ForgeConnectCopy {
     /// repository — for a feature that reads two counters. A user who would
     /// rather mint a read-only token has to be told that before they press the
     /// convenient button, not after.
+    ///
+    /// The Actions half was measured 2026-10-02: an account's own usage report
+    /// answers `404` without `user` (`X-Accepted-OAuth-Scopes: user`), and an
+    /// organisation's answers with `repo` alone (`admin:org, repo`).
     static let scopeWarning = """
         Sissy copies the token into its own keychain item and only ever reads \
         activity counts with it. It never writes to a repository and never \
         changes what gh or glab hold. A token from those tools carries whatever \
         scopes you gave them. That is often write access to every repository, \
-        so a read-only token you mint yourself is the narrower choice.
+        so a read-only token you mint yourself is the narrower choice. On \
+        GitHub, your own Actions minutes also need the user scope on a classic \
+        token, which can edit your profile too. Organisation minutes need only \
+        repo, and only where you own the organisation or manage its billing.
         """
 
     static func unlinkTitle(_ connection: ForgeConnection) -> String {
@@ -215,6 +222,7 @@ enum ForgeCounterCopy {
         case .issues: "Opened issues"
         case .comments: "Comments"
         case .latest: "Latest activity"
+        case .actions: "Actions minutes"
         }
     }
 
@@ -226,6 +234,7 @@ enum ForgeCounterCopy {
         case .issues: "Issues you opened"
         case .comments: "Comments you wrote on issues and requests"
         case .latest: "What you last pushed, opened, merged or commented on"
+        case .actions: "How much of each monthly GitHub Actions allowance your private repositories spent"
         }
     }
 }

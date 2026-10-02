@@ -692,7 +692,7 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertEqual(ForgeCounters.defaults.enabled, ForgeCounter.all)
         var some = ForgeCounters.defaults
         some[.comments] = false
-        XCTAssertEqual(some.enabled, [.merged, .issues, .latest])
+        XCTAssertEqual(some.enabled, [.merged, .issues, .latest, .actions])
         some[.comments] = true
         XCTAssertEqual(some.enabled, ForgeCounter.all)
     }
