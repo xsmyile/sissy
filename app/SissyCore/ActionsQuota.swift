@@ -231,18 +231,29 @@ enum GitHubActionsFeed {
         _ report: OwnerReport, _ items: [ActionsItem], linuxRate: Double?, token: String,
         now: Date
     ) async throws -> ActionsQuota {
-        let billed = items.reduce(0) { $0 + $1.net }
-        let unpriced = ActionsQuota(
-            id: report.owner, owner: report.kind, plan: nil, linuxRate: linuxRate,
-            minutes: items.reduce(0) { $0 + $1.quantity }, spent: items.reduce(0) { $0 + $1.discount },
-            billed: billed, heaviest: heaviest(items), overrun: billed > 0 ? .bills : nil,
-            readAt: now)
+        let unpriced = month(report, items, linuxRate: linuxRate, now: now)
         guard unpriced.hasUsage else { return unpriced }
         let priced = unpriced.with(plan: try await plan(report.kind, report.owner, token: token))
         guard priced.overrun == nil, report.kind == .organization, priced.isSpent else {
             return priced
         }
         return priced.with(overrun: try? await budget(report.owner, token: token))
+    }
+
+    /// An owner's month before its plan is known, from its private rows.
+    ///
+    /// The spent figure is every discount, which a larger runner never gets;
+    /// the billed one is only what the allowance's own runners were charged,
+    /// so a larger runner's bill does not read as the allowance running out.
+    static func month(
+        _ report: OwnerReport, _ items: [ActionsItem], linuxRate: Double?, now: Date
+    ) -> ActionsQuota {
+        let billed = items.filter(\.drawsOnAllowance).reduce(0) { $0 + $1.net }
+        return ActionsQuota(
+            id: report.owner, owner: report.kind, plan: nil, linuxRate: linuxRate,
+            minutes: items.reduce(0) { $0 + $1.quantity },
+            spent: items.reduce(0) { $0 + $1.discount }, billed: billed, heaviest: heaviest(items),
+            overrun: billed > 0 ? .bills : nil, readAt: now)
     }
 
     /// The repository and runner with the largest cost, as a share of all of
@@ -510,6 +521,21 @@ struct ActionsItem: Sendable, Equatable {
 
     /// The standard Linux runner, whose rate the allowance is valued at.
     var isLinuxStandard: Bool { sku == Self.linuxStandard }
+
+    /// Whether this runner is one the allowance covers, which is what makes
+    /// a charge on it a charge *past* the allowance.
+    ///
+    /// Larger runners are always billed and never draw on the included
+    /// minutes (GitHub's Actions billing documentation, read 2026-10-02), so
+    /// their cost is not the allowance running out. Their discount is zero,
+    /// so the spent figure needs no filter; only the billed one does. The
+    /// standard SKUs are the three measured or documented on 2026-10-02:
+    /// `Actions Linux`, `Actions Windows` and `Actions macOS 3-core`.
+    var drawsOnAllowance: Bool { Self.standardRunners.contains(sku) }
+
+    private static let standardRunners: Set<String> = [
+        "Actions Linux", "Actions Windows", "Actions macOS 3-core",
+    ]
 
     /// The runner's system, `macOS` for `Actions macOS 3-core`; the SKU
     /// without its prefix for one that names none of the three.

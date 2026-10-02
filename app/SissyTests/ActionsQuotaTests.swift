@@ -94,6 +94,28 @@ final class ActionsQuotaTests: XCTestCase {
 
     // MARK: The arithmetic
 
+    /// A larger runner is billed from its first minute and never draws on the
+    /// allowance, so its bill is not the allowance running out.
+    func testALargerRunnersBillIsNotPastTheAllowance() throws {
+        let items =
+            try Self.items() + [
+                ActionsItem(
+                    repository: "try-on-buddy", sku: "Actions Linux 16-core", quantity: 100,
+                    unitPrice: 0.042, gross: 4.2, discount: 0, net: 4.2)
+            ]
+        let report = GitHubActionsFeed.OwnerReport(
+            owner: "radonforge", kind: .organization, items: items)
+        let quota = GitHubActionsFeed.month(report, items, linuxRate: 0.006, now: Self.midOctober)
+            .withPlan("free")
+        XCTAssertEqual(quota.billed, 0)
+        XCTAssertNil(quota.overrun)
+        XCTAssertEqual(try XCTUnwrap(quota.usedPercent), 12.006 / 12 * 100, accuracy: 0.001)
+    }
+
+    func testTheStandardRunnersDrawOnTheAllowance() throws {
+        XCTAssertEqual(try Self.items().map(\.drawsOnAllowance), [true, true, true])
+    }
+
     /// September as measured: $12.006 of discount against 2,000 minutes at
     /// $0.006, which is the allowance spent.
     func testSeptemberSpentTheWholeAllowance() throws {
@@ -236,5 +258,13 @@ final class ActionsQuotaTests: XCTestCase {
         XCTAssertTrue(query.contains("r1: repository(owner: $o1, name: $n1) { isPrivate }"))
         XCTAssertEqual(variables["o1"], "rustmailapp")
         XCTAssertEqual(variables["n0"], "try-on-buddy")
+    }
+}
+
+extension ActionsQuota {
+    fileprivate func withPlan(_ plan: String) -> Self {
+        Self(
+            id: id, owner: owner, plan: plan, linuxRate: linuxRate, minutes: minutes,
+            spent: spent, billed: billed, heaviest: heaviest, overrun: overrun, readAt: readAt)
     }
 }
