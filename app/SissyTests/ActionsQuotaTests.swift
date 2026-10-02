@@ -105,15 +105,52 @@ final class ActionsQuotaTests: XCTestCase {
             ]
         let report = GitHubActionsFeed.OwnerReport(
             owner: "radonforge", kind: .organization, items: items)
-        let quota = GitHubActionsFeed.month(report, items, linuxRate: 0.006, now: Self.midOctober)
-            .withPlan("free")
+        let quota = GitHubActionsFeed.month(
+            report, items,
+            pricing: GitHubActionsFeed.MonthPricing(
+                linuxRate: 0.006, covered: GitHubActionsFeed.coveredRunners(items)),
+            now: Self.midOctober
+        )
+        .withPlan("free")
         XCTAssertEqual(quota.billed, 0)
         XCTAssertNil(quota.overrun)
         XCTAssertEqual(try XCTUnwrap(quota.usedPercent), 12.006 / 12 * 100, accuracy: 0.001)
     }
 
-    func testTheStandardRunnersDrawOnTheAllowance() throws {
-        XCTAssertEqual(try Self.items().map(\.drawsOnAllowance), [true, true, true])
+    /// A standard runner no list names, an ARM one here, is covered by being
+    /// discounted; a larger runner never is.
+    func testARunnerTheMonthDiscountedIsCovered() throws {
+        let items =
+            try Self.items() + [
+                ActionsItem(
+                    repository: "rustmail", sku: "Actions Linux ARM", quantity: 10, unitPrice: 0.005,
+                    gross: 0.05, discount: 0.05, net: 0),
+                ActionsItem(
+                    repository: "try-on-buddy", sku: "Actions Linux 16-core", quantity: 100,
+                    unitPrice: 0.042, gross: 4.2, discount: 0, net: 4.2),
+            ]
+        XCTAssertEqual(
+            GitHubActionsFeed.coveredRunners(items),
+            ["Actions Linux", "Actions macOS 3-core", "Actions Linux ARM"])
+    }
+
+    /// Past the allowance a covered runner's charge is the overage.
+    func testACoveredRunnersChargeIsPastTheAllowance() throws {
+        let items =
+            try Self.items() + [
+                ActionsItem(
+                    repository: "try-on-buddy", sku: "Actions Linux", quantity: 50, unitPrice: 0.006,
+                    gross: 0.3, discount: 0, net: 0.3)
+            ]
+        let report = GitHubActionsFeed.OwnerReport(
+            owner: "radonforge", kind: .organization, items: items)
+        let quota = GitHubActionsFeed.month(
+            report, items,
+            pricing: GitHubActionsFeed.MonthPricing(
+                linuxRate: 0.006, covered: GitHubActionsFeed.coveredRunners(items)),
+            now: Self.midOctober)
+        XCTAssertEqual(quota.billed, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(quota.overrun, .bills)
     }
 
     /// September as measured: $12.006 of discount against 2,000 minutes at
