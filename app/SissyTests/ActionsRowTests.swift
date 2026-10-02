@@ -91,4 +91,17 @@ final class ActionsRowTests: XCTestCase {
         XCTAssertFalse(row.stopped)
         XCTAssertNil(row.state)
     }
+
+    /// A row with no gauge rolls over with the month too: last month's
+    /// minutes and its bill are not this month's.
+    func testARowWithoutAGaugeRollsOverToo() throws {
+        let november = Fixture.october.end.addingTimeInterval(3_600)
+        let block = try XCTUnwrap(
+            UsagePanelSnapshot.makeActions(
+                Fixture.reading([Fixture.quota(plan: nil, billed: 2)]), now: november))
+        let row = try XCTUnwrap(block.rows.first)
+        XCTAssertNil(row.window)
+        XCTAssertEqual(row.minutes, UsageFormat.actionsNoReading)
+        XCTAssertNil(row.state)
+    }
 }

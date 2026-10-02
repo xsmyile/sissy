@@ -2091,6 +2091,10 @@ extension UsageFormat {
         "\(spender.repository) · \(spender.runner) \(Int((spender.share * 100).rounded()))%"
     }
 
+    /// A gaugeless row whose month has ended: the dash every window with no
+    /// reading prints, rather than last month's minutes under this month.
+    static let actionsNoReading = "—"
+
     static let actionsNeedsUserScope =
         "Your own minutes need the user scope on the token"
 
