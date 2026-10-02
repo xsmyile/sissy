@@ -131,7 +131,27 @@ final class ActionsQuotaTests: XCTestCase {
             ]
         XCTAssertEqual(
             GitHubActionsFeed.coveredRunners(items),
-            ["Actions Linux", "Actions macOS 3-core", "Actions Linux ARM"])
+            GitHubActionsFeed.documentedStandardRunners.union(["Actions Linux ARM"]))
+    }
+
+    /// A standard runner first run once the allowance is spent is never
+    /// discounted, and its charge is still the overage.
+    func testAStandardRunnerFirstRunPastTheAllowanceIsStillOverage() throws {
+        let items =
+            try Self.items() + [
+                ActionsItem(
+                    repository: "try-on-buddy", sku: "Actions Windows", quantity: 30, unitPrice: 0.010,
+                    gross: 0.3, discount: 0, net: 0.3)
+            ]
+        let report = GitHubActionsFeed.OwnerReport(
+            owner: "radonforge", kind: .organization, items: items)
+        let quota = GitHubActionsFeed.month(
+            report, items,
+            pricing: GitHubActionsFeed.MonthPricing(
+                linuxRate: 0.006, covered: GitHubActionsFeed.coveredRunners(items)),
+            now: Self.midOctober)
+        XCTAssertEqual(quota.billed, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(quota.overrun, .bills)
     }
 
     /// Past the allowance a covered runner's charge is the overage.
