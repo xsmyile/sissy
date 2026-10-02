@@ -387,8 +387,8 @@ enum GitHubActivityFeed {
     static let dotComHost = "github.com"
     private static let dotComEndpoint = URL(string: "https://api.github.com/graphql")!
     private static let enterprisePath = "/api/graphql"
-    private static let authorizationHeader = "Authorization"
-    private static let authorizationScheme = "Bearer"
+    static let authorizationHeader = "Authorization"
+    static let authorizationScheme = "Bearer"
 
     static func endpoint(_ connection: ForgeConnection) -> URL? {
         guard !connection.isVendorHosted else { return dotComEndpoint }
@@ -432,10 +432,15 @@ enum GitHubActivityFeed {
             reading.latest = await latestEvent(connection, token: token, login: login)
             try Task.checkCancellation()
         }
+        if counters.contains(.actions), let login = reading.login {
+            reading.actions = await GitHubActionsFeed.read(
+                connection, token: token, login: login, now: now)
+            try Task.checkCancellation()
+        }
         return reading
     }
 
-    private static let dotComREST = URL(string: "https://api.github.com")!
+    static let dotComREST = URL(string: "https://api.github.com")!
     private static let enterpriseRESTPath = "/api/v3"
     /// How many events one read of the feed asks for, which is the most a
     /// page of it carries.

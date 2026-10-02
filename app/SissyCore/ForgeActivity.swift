@@ -39,6 +39,10 @@ enum ForgeCounter: String, Sendable, Codable, CaseIterable {
     case comments
     /// The newest thing the account did on the forge, as `ForgeEvent`.
     case latest
+    /// What each owner's private repositories have spent of their monthly
+    /// Actions allowance, as `ActionsReading`. GitHub's hosted instance only,
+    /// and a few REST requests a poll: see `GitHubActionsFeed`.
+    case actions
 
     /// Every counter, which is what a build with nothing configured reads.
     static let all = Set(allCases)
@@ -243,6 +247,10 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     /// the document before it already carried. A failed round keeps the
     /// previous one along with the figures, for the reason those are kept.
     var latest: ForgeEvent?
+    /// The month's Actions bill for every owner the token can read it for, nil
+    /// where it is switched off, the forge has none to read, or it would not
+    /// answer. Absent rather than a failure, for the reason `latest` is.
+    var actions: ActionsReading?
 
     /// A connection that has answered nothing at all. Distinct from a zero:
     /// a day with no contributions is a reading, and this is the absence of

@@ -82,6 +82,7 @@ enum ProviderPalette {
         case .issues: "smallcircle.filled.circle"
         case .comments: "bubble.left"
         case .latest: "clock"
+        case .actions: "gearshape.2"
         }
     }
 
@@ -94,7 +95,7 @@ enum ProviderPalette {
         case .merged: forgeMerged
         case .issues: forgeIssue
         case .comments: forgeComment
-        case .latest: .secondary
+        case .latest, .actions: .secondary
         }
     }
 

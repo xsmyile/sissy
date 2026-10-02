@@ -345,6 +345,7 @@ actor ForgeActivityMonitor {
             published.update { map in
                 if let previous = map[connection.id], previous.login == reading.login {
                     reading.latest = ForgeEvent.merged(reading.latest, over: previous.latest)
+                    reading.actions = ActionsReading.merged(reading.actions, over: previous.actions)
                 }
                 map[connection.id] = reading
             }
@@ -363,7 +364,8 @@ actor ForgeActivityMonitor {
                 map[connection.id] = ForgeActivityReading(
                     id: previous.id, kind: previous.kind, host: previous.host,
                     login: previous.login, activity: previous.activity,
-                    readAt: previous.readAt, failure: failure, latest: previous.latest)
+                    readAt: previous.readAt, failure: failure, latest: previous.latest,
+                    actions: previous.actions)
             }
         }
     }

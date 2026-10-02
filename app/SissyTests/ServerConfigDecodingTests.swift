@@ -26,7 +26,8 @@ final class ServerConfigDecodingTests: XCTestCase {
         config.keepScreenAwake = false
         config.agentHooks = true
         config.agentHooksRemovalPending = true
-        config.forgeCounters = ForgeCounters(merged: false, issues: true, comments: false, latest: true)
+        config.forgeCounters = ForgeCounters(
+            merged: false, issues: true, comments: false, latest: true, actions: false)
         config.macHealth = false
         config.disk = false
         config.network = false
@@ -70,6 +71,16 @@ final class ServerConfigDecodingTests: XCTestCase {
 
         XCTAssertNil(config.forgeCounters?.merged)
         XCTAssertEqual(config.forgeCounters?.issues, false)
+    }
+
+    /// A file written before the Actions switch existed keeps every switch it
+    /// set and reads the new one as on.
+    func testAFileWithoutTheActionsSwitchKeepsTheRest() throws {
+        let config = try decode(#"{"forgeCounters": {"merged": false, "latest": false}}"#)
+
+        XCTAssertEqual(config.forgeCounters?.merged, false)
+        XCTAssertEqual(config.forgeCounters?.latest, false)
+        XCTAssertEqual(config.forgeCounters?.actions, true)
     }
 
     /// `0` switched a network reading off for as long as the file went

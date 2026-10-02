@@ -53,6 +53,10 @@ struct ForgeCounters: Sendable, Codable, Equatable {
     var issues: Bool?
     var comments: Bool?
     var latest: Bool?
+    /// On unless set off, like the four before it, and held as a plain flag
+    /// rather than a `nil` meaning on: the subscript reads an absent key as on
+    /// either way, and new code is held to `discouraged_optional_boolean`.
+    var actions = true
 
     static let defaults = Self(merged: nil, issues: nil, comments: nil, latest: nil)
 
@@ -66,6 +70,7 @@ struct ForgeCounters: Sendable, Codable, Equatable {
             case .issues: return issues
             case .comments: return comments
             case .latest: return latest
+            case .actions: return actions
             }
         }
         set {
@@ -74,6 +79,7 @@ struct ForgeCounters: Sendable, Codable, Equatable {
             case .issues: issues = newValue
             case .comments: comments = newValue
             case .latest: latest = newValue
+            case .actions: actions = newValue ?? true
             }
         }
     }

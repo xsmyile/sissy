@@ -186,6 +186,26 @@ final class ForgeMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.currentReadings().first?.latest, event)
     }
 
+    /// The bill rides the reading the way the event does: a billing endpoint
+    /// that would not answer on one round leaves the gauges the last one read.
+    func testARoundWhoseBillFailedKeepsTheRowsAllowances() async {
+        let billed = LockedValue<Bool>(true)
+        let actions = ActionsReading(
+            quotas: [], ownNeedsUserScope: true, resetsAt: Self.readAt, monthMinutes: 44_640)
+        let monitor = ForgeActivityMonitor(
+            connections: [Self.gitHub],
+            fetch: { connection, _, _, _ in
+                var reading = Self.reading(connection, login: "gh", contributions: 42, merged: 7)
+                reading.actions = billed.load() ? actions : nil
+                return reading
+            },
+            token: { _, _ in .found("token") })
+        _ = await monitor.refreshOnce {}
+        billed.store(false)
+        _ = await monitor.refreshOnce {}
+        XCTAssertEqual(monitor.currentReadings().first?.actions, actions)
+    }
+
     /// A refused token cannot be fixed by asking again in five minutes, so the
     /// connection is parked and the next round spends no request on it.
     func testARefusedTokenParksTheConnectionUntilTheUserActs() async {
