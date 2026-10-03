@@ -89,8 +89,10 @@ enum ForgeSpanFeed {
     /// the named final date; instant filters use the exclusive next midnight.
     /// Today's end is capped at now. GitLab events use the following date as
     /// their proposed exclusive before boundary and the preceding date as after.
-    /// GitLab exclusivity is unmeasured: on 2026-10-03 the configured host
-    /// gitlab.sermix.com timed out during glab authentication verification.
+    /// GitLab's GraphQL upper filters are inclusive, read in its source on
+    /// 2026-10-03: `mergedBefore` widens a time to the end of its UTC day and
+    /// `createdBefore` compares with `<=`, so both take the final date's last
+    /// instant rather than the exclusive next midnight.
     static func bounds(
         from: Date, to: Date, now: Date, calendar: Calendar = .current
     ) -> VendorBounds? {
@@ -277,7 +279,7 @@ enum ForgeSpanFeed {
         {
             let iso = ISO8601DateFormatter()
             fields =
-                "merged: authoredMergeRequests(state: merged, mergedAfter: \"\(iso.string(from: bounds.start))\", mergedBefore: \"\(iso.string(from: bounds.upper))\") { count }"
+                "merged: authoredMergeRequests(state: merged, mergedAfter: \"\(iso.string(from: bounds.start))\", mergedBefore: \"\(iso.string(from: bounds.end))\") { count }"
         }
         return "query { currentUser { username \(fields) } }"
     }
@@ -287,8 +289,11 @@ enum ForgeSpanFeed {
     ) -> String {
         guard let bounds = bounds(from: from, to: to, now: now, calendar: calendar) else { return "" }
         let iso = ISO8601DateFormatter()
+        let last = ISO8601DateFormatter()
+        last.formatOptions.insert(.withFractionalSeconds)
+        let upper = bounds.upper == now ? now : bounds.upper.addingTimeInterval(-0.001)
         return
-            "query($author: String!) { issues: issues(authorUsername: $author, createdAfter: \"\(iso.string(from: bounds.start))\", createdBefore: \"\(iso.string(from: bounds.upper))\") { count } }"
+            "query($author: String!) { issues: issues(authorUsername: $author, createdAfter: \"\(iso.string(from: bounds.start))\", createdBefore: \"\(last.string(from: upper))\") { count } }"
     }
 
     static func gitlabEventsURL(
@@ -448,6 +453,11 @@ enum ForgeSpanFeed {
         try Task.checkCancellation()
         guard let root = try JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
         else { throw ForgeReadFailure.malformed }
+        if let refusal = ForgeActivityFeed.fileGraphQLRefusal(
+            root, reply: reply.response, url: url, token: token)
+        {
+            throw refusal
+        }
         return try decode(root)
     }
 }
