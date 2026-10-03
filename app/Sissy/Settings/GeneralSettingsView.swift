@@ -60,20 +60,6 @@ struct GeneralSettingsView: View {
 
     @State private var confirmingDelete = false
 
-    /// What the two armed modes cost. Both the names and both the bounds are
-    /// read rather than written out: a caption that says ten minutes while the
-    /// shipped policy waits fifteen, or that calls a mode by a name the picker
-    /// above it no longer uses, is worse than no caption. These are also the
-    /// only numbers in the app that say when a hold ends, and the only place it
-    /// says what a closed lid does to one.
-    private var keepAwakeCaption: String {
-        let idle = UsageFormat.countdown(KeepAwakePolicy.default.idleWindow)
-        let ceiling = UsageFormat.countdown(KeepAwakePolicy.default.manualCeiling)
-        return "\(UsageFormat.keepAwakeTitle(.auto)) lets go \(idle) after the last turn; "
-            + "\(UsageFormat.keepAwakeTitle(.on)) stops at \(ceiling). "
-            + "Closing the lid sleeps the Mac either way."
-    }
-
     private var agentHooksCaption: String {
         let refused = model.engine.agentHooksRefused
         guard !refused.isEmpty else { return AgentHookCopy.caption }
@@ -129,11 +115,6 @@ struct GeneralSettingsView: View {
                     Button("Retry") { model.engine.retryAgentHooks() }
                         .buttonStyle(.link)
                 }
-            }
-
-            Section {
-                keepAwake
-                keepScreenAwake
             }
 
             Section {
@@ -236,28 +217,6 @@ struct GeneralSettingsView: View {
         }
     }
 
-    private var keepAwake: some View {
-        LabeledContent {
-            Picker("Keep awake", selection: keepAwakeModeBinding) {
-                ForEach(KeepAwakeMode.allCases, id: \.self) { mode in
-                    Text(UsageFormat.keepAwakeTitle(mode)).tag(mode)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
-        } label: {
-            Text("Keep awake")
-            Text(keepAwakeCaption)
-        }
-    }
-
-    private var keepScreenAwake: some View {
-        SettingsSwitchRow(
-            "Keep the screen on too",
-            caption: "Off lets the display sleep while the Mac stays awake underneath for the agents.",
-            isOn: keepScreenAwakeBinding)
-    }
-
     /// Names both files Sissy writes outside its own folder, which is what the
     /// hook switch promises can be found.
     private var files: some View {
@@ -297,20 +256,6 @@ struct GeneralSettingsView: View {
         Binding(
             get: { model.loginItem.isEnabled },
             set: { model.setLaunchAtLogin($0) }
-        )
-    }
-
-    private var keepAwakeModeBinding: Binding<KeepAwakeMode> {
-        Binding(
-            get: { model.keepAwake.mode },
-            set: { model.setKeepAwake($0) }
-        )
-    }
-
-    private var keepScreenAwakeBinding: Binding<Bool> {
-        Binding(
-            get: { model.engine.keepScreenAwake },
-            set: { model.engine.setKeepScreenAwake($0) }
         )
     }
 
