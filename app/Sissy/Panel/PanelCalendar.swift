@@ -124,7 +124,12 @@ struct PanelCalendar: View {
     let select: (UsageRange) -> Void
 
     @State private var month: Date?
-    @State private var monthReading: UsageSpanReading?
+    /// The month on screen as a grid, made when the month turns, when the day
+    /// does, and when its reading lands, and never by `body`: a hover or a
+    /// drag step redraws the page, and rebuilding every cell's figures for
+    /// each was a cost paid for a month that had not changed. The pointer and
+    /// the run stay out of it.
+    @State private var grid: CalendarMonth?
     @State private var pointed: Date?
     @State private var run: Run?
 
@@ -153,7 +158,9 @@ struct PanelCalendar: View {
     var body: some View {
         let now = Date()
         let shown = month ?? Self.startOfMonth(window?.to ?? now)
-        let grid = CalendarMonth.make(month: shown, reading: monthReading, now: now)
+        let grid =
+            self.grid.flatMap { $0.month == shown ? $0 : nil }
+            ?? CalendarMonth.make(month: shown, reading: nil, now: now)
         return VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
             PanelGroup {
                 VStack(alignment: .leading, spacing: 8) {
@@ -176,11 +183,14 @@ struct PanelCalendar: View {
             }
         }
         .padding(PanelMetrics.platterInset)
-        .task(id: shown) {
-            guard let span = UsageDaySpan.month(containing: shown, now: now) else { return }
+        .task(id: [shown, Calendar.current.startOfDay(for: now)]) {
+            if self.grid?.month != shown {
+                self.grid = CalendarMonth.make(month: shown, reading: nil, now: Date())
+            }
+            guard let span = UsageDaySpan.month(containing: shown, now: Date()) else { return }
             let reading = await load(span)
             guard !Task.isCancelled else { return }
-            monthReading = reading
+            self.grid = CalendarMonth.make(month: shown, reading: reading, now: Date())
         }
     }
 
