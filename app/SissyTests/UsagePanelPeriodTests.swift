@@ -65,6 +65,12 @@ final class UsagePanelPeriodTests: XCTestCase {
             days: days)
     }
 
+    /// That reading as the panel holds it once it has landed for `span`
+    /// picked on the calendar, the strip drawn from it.
+    private func answer(_ span: UsageDaySpan, filed: [Int]) -> UsagePanelSnapshot.SpanAnswer {
+        UsagePanelSnapshot.SpanAnswer(reading(span, filed: filed), period: .days(span), now: now)
+    }
+
     // MARK: A picked day
 
     /// One past day is read from its own reading: the headline is that day's,
@@ -73,7 +79,7 @@ final class UsagePanelPeriodTests: XCTestCase {
     func testAPickedDayReadsItsOwnReadingAndHidesTheGauges() throws {
         let picked = try span(-3, -3)
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(), period: .days(picked), span: reading(picked, filed: [-3]), now: now)
+            frame: frame(), period: .days(picked), span: answer(picked, filed: [-3]), now: now)
 
         XCTAssertEqual(snapshot.period, .days(picked))
         XCTAssertEqual(snapshot.cost, "$2.00")
@@ -91,9 +97,9 @@ final class UsagePanelPeriodTests: XCTestCase {
         let picked = try span(-3, -3)
         let elsewhere = try span(-4, -4)
         let pending = UsagePanelSnapshot.make(
-            frame: frame(), period: .days(picked), span: reading(elsewhere, filed: [-4]), now: now)
+            frame: frame(), period: .days(picked), span: answer(elsewhere, filed: [-4]), now: now)
         let empty = UsagePanelSnapshot.make(
-            frame: frame(), period: .days(picked), span: reading(picked, filed: []), now: now)
+            frame: frame(), period: .days(picked), span: answer(picked, filed: []), now: now)
 
         XCTAssertEqual(pending.cost, "—")
         XCTAssertNil(pending.window)
@@ -109,7 +115,7 @@ final class UsagePanelPeriodTests: XCTestCase {
     func testAPastRangeDrawsEveryDayAndTheProvidersSpend() throws {
         let picked = try span(-6, -2)
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(), period: .days(picked), span: reading(picked, filed: [-6, -4, -2]),
+            frame: frame(), period: .days(picked), span: answer(picked, filed: [-6, -4, -2]),
             now: now)
 
         let strip = try XCTUnwrap(snapshot.strip)
@@ -130,7 +136,7 @@ final class UsagePanelPeriodTests: XCTestCase {
     func testARangeIncludingTodayKeepsTheGaugesAndDrawsNoSpendRows() throws {
         let picked = try span(-2, 0)
         let snapshot = UsagePanelSnapshot.make(
-            frame: frame(), period: .days(picked), span: reading(picked, filed: [-2, 0]), now: now)
+            frame: frame(), period: .days(picked), span: answer(picked, filed: [-2, 0]), now: now)
 
         XCTAssertTrue(snapshot.includesToday)
         XCTAssertTrue(snapshot.spendRows.isEmpty)
@@ -166,7 +172,7 @@ final class UsagePanelPeriodTests: XCTestCase {
             frame: frame(history: [:]), period: .preset(.sevenDays), archiveKept: true, now: now)
         let day = UsagePanelSnapshot.make(
             frame: frame(history: [:]), period: .days(picked), archiveKept: true,
-            span: reading(picked, filed: [-3]), now: now)
+            span: answer(picked, filed: [-3]), now: now)
 
         XCTAssertEqual(week.period, .preset(.sevenDays))
         XCTAssertEqual(week.cost, "—")
@@ -231,6 +237,90 @@ final class UsagePanelPeriodTests: XCTestCase {
         let block = UsagePanelSnapshot.makeAgents(frame(), window: empty, now: now)
 
         XCTAssertNil(block.window(for: .days(picked)))
+    }
+
+    // MARK: Wide windows
+
+    /// The strip of `span` with one Claude day filed on each of `filed`.
+    private func strip(_ span: UsageDaySpan, filed: [Int]) throws -> UsagePanelSnapshot.DayStrip {
+        try XCTUnwrap(answer(span, filed: filed).strip)
+    }
+
+    /// Every bar's days, laid end to end, are the window's days: none left out
+    /// and none counted twice.
+    private func assertBarsTile(
+        _ strip: UsagePanelSnapshot.DayStrip, _ span: UsageDaySpan, file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let keys = try strip.rows.flatMap { try XCTUnwrap($0.span).dayKeys }
+        XCTAssertEqual(keys, span.dayKeys, file: file, line: line)
+    }
+
+    /// Up to the measured threshold a bar is a day, so the archive's default
+    /// ninety days still draws one each.
+    func testAWindowThatFitsDrawsABarADay() throws {
+        let picked = try span(-89, 0)
+        let strip = try strip(picked, filed: [-89, -1])
+
+        XCTAssertEqual(DayBarGeometry.maxBars, 96)
+        XCTAssertEqual(strip.rows.count, 90)
+        XCTAssertTrue(strip.rows.allSatisfy { $0.span?.dayCount() == 1 })
+        XCTAssertEqual(strip.rows.first?.title, UsageFormat.dayTitle(day(-89)))
+        try assertBarsTile(strip, picked)
+    }
+
+    /// Past it a bar is a week, which the hover names by its two ends, and the
+    /// bars still add up to the total under them.
+    func testAWiderWindowDrawsABarAWeekNamedByItsDays() throws {
+        let picked = try span(-199, 0)
+        let strip = try strip(picked, filed: [-199, -150, -100, -3])
+
+        XCTAssertLessThanOrEqual(strip.rows.count, DayBarGeometry.maxBars)
+        XCTAssertGreaterThan(strip.rows.count, 96 / 7)
+        let middle = try XCTUnwrap(strip.rows.dropFirst().first?.span)
+        XCTAssertEqual(middle.dayCount(), 7)
+        XCTAssertEqual(strip.rows.dropFirst().first?.title, UsageFormat.spanHeading(middle, now: now))
+        XCTAssertEqual(strip.rows.compactMap(\.cost).reduce(0, +), Decimal(8))
+        XCTAssertEqual(strip.total, "$8.00")
+        try assertBarsTile(strip, picked)
+    }
+
+    /// Years of archive are a bar a month while the months fit, a whole month
+    /// named by its name, and a bar a year past that.
+    func testYearsOfArchiveDrawAMonthOrAYearABar() throws {
+        let months = try span(-3 * 365, 0)
+        let byMonth = try strip(months, filed: [-400])
+        let decade = try span(-10 * 365, 0)
+        let byYear = try strip(decade, filed: [-3000])
+
+        let month = try XCTUnwrap(byMonth.rows.dropFirst().first)
+        let first = try XCTUnwrap(month.span?.from)
+        XCTAssertEqual(first, calendar.dateInterval(of: .month, for: first)?.start)
+        XCTAssertFalse(month.title.contains(" to "), month.title)
+        XCTAssertLessThanOrEqual(byMonth.rows.count, DayBarGeometry.maxBars)
+        XCTAssertLessThanOrEqual(byYear.rows.count, 11)
+        let year = try XCTUnwrap(byYear.rows.dropFirst().first)
+        XCTAssertEqual(year.title.count, 4, year.title)
+        try assertBarsTile(byMonth, months)
+        try assertBarsTile(byYear, decade)
+    }
+
+    /// The strip comes with the answer it was drawn from, so a frame drawn
+    /// over a reading that has not changed draws the same strip without
+    /// building it again, and an answer for another period draws none.
+    func testTheStripIsTheAnswersOwn() throws {
+        let picked = try span(-6, -2)
+        let held = answer(picked, filed: [-6, -4])
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(), period: .days(picked), span: held, now: now)
+        let elsewhere = UsagePanelSnapshot.SpanAnswer(
+            reading(picked, filed: [-6]), period: .preset(.sevenDays), now: now)
+        let ignored = UsagePanelSnapshot.make(
+            frame: frame(), period: .days(picked), span: elsewhere, now: now)
+
+        XCTAssertEqual(snapshot.strip, held.strip)
+        XCTAssertNil(ignored.strip)
+        XCTAssertEqual(ignored.cost, "—")
     }
 
     // MARK: Calendar

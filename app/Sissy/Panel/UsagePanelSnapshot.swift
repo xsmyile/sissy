@@ -373,6 +373,10 @@ struct UsagePanelSnapshot: Equatable {
         /// reading is not a reading of zero, and the pills say nothing rather
         /// than keeping the last day that had some.
         let models: [ModelRow]
+        /// The days a click on this bar reads, nil on a strip that is a
+        /// picture rather than a way in. A day, or the week, month or year a
+        /// wide window's bar stands for.
+        let span: UsageDaySpan?
     }
 
     /// A provider's recent days, with the window they cover named.
@@ -382,6 +386,36 @@ struct UsagePanelSnapshot: Equatable {
         /// the window it actually covers.
         let label: String
         let total: String
+    }
+
+    /// The archive's reading of the days a period covers, with the strip
+    /// drawn from it.
+    ///
+    /// The strip is made here, once, when the reading lands, rather than by
+    /// `make` on every frame the panel draws: `All` over an archive kept for
+    /// years is thousands of days, and each one formatted per frame was a
+    /// cost paid for a reading that had not changed.
+    struct SpanAnswer: Equatable {
+        /// The period the reading was asked for, which names the strip and
+        /// tells two presets over the same days apart.
+        let period: UsageRange
+        let reading: UsageSpanReading
+        let strip: DayStrip?
+
+        init(
+            _ reading: UsageSpanReading, period: UsageRange, now: Date = Date(),
+            calendar: Calendar = .current
+        ) {
+            self.period = period
+            self.reading = reading
+            guard case .days(let span) = reading.rollup.period else {
+                strip = nil
+                return
+            }
+            strip = windowStrip(
+                reading, span: span, named: UsageFormat.periodHeading(period, now: now, calendar: calendar),
+                now: now, calendar: calendar)
+        }
     }
 
     /// How many bars the strip draws, and how many days its reader asks for.
@@ -457,7 +491,8 @@ struct UsagePanelSnapshot: Equatable {
                 fraction: Self.share(cost, of: peak),
                 title: UsageFormat.dayTitle(day),
                 figures: UsageFormat.dayFigures(tokens: tokens, cost: cost),
-                models: models)
+                models: models,
+                span: nil)
         }
         let covered = rows.count { $0.cost != nil }
         return DayStrip(
@@ -1001,11 +1036,12 @@ struct UsagePanelSnapshot: Equatable {
     /// The snapshot for `frame` over `period`.
     ///
     /// `span` is the archive's reading of the days `windowSpan` names for the
-    /// period, fetched by the panel while it is open and handed in rather
-    /// than read here: it is what a picked window's headline is and what any
-    /// window's strip is drawn from. A reading of other days is ignored, so a
-    /// reply that lands after the period moved cannot answer for the new one.
-    /// `forgeSpan` is the forge's answer for a picked window, by the same rule.
+    /// period, with the strip drawn from it, fetched by the panel while it is
+    /// open and handed in rather than read here: it is what a picked window's
+    /// headline is and what any window's strip is. An answer for another
+    /// period or other days is ignored, so a reply that lands after the
+    /// period moved cannot answer for the new one. `forgeSpan` is the forge's
+    /// answer for a picked window, by the same rule.
     ///
     /// `archiveKept` is whether the archive is switched on, which the frame
     /// cannot say: it carries no windows both while the archive is off and
@@ -1016,7 +1052,7 @@ struct UsagePanelSnapshot: Equatable {
         frame: FrameData,
         period: UsageRange = .preset(.today),
         archiveKept: Bool = false,
-        span: UsageSpanReading? = nil,
+        span: SpanAnswer? = nil,
         forgeSpan: [ForgeSpanReading] = [],
         claudeAccounts: ClaudeAccountRegistry.Snapshot = .init(),
         limitsReading: LimitsReading = .used,
@@ -1032,7 +1068,10 @@ struct UsagePanelSnapshot: Equatable {
         let resolved = resolve(period, periods: periods, archiveKept: archiveKept)
         let days = windowSpan(
             resolved, earliest: frame.history[.all]?.earliestDay, now: now, calendar: calendar)
-        let reading = span.flatMap { days.map(UsageRange.days) == $0.rollup.period ? $0 : nil }
+        let answer = span.flatMap {
+            $0.period == resolved && days.map(UsageRange.days) == $0.reading.rollup.period ? $0 : nil
+        }
+        let reading = answer?.reading
         let window: UsageHistoryRollup? =
             switch resolved {
             case .preset(.today): nil
@@ -1065,11 +1104,7 @@ struct UsagePanelSnapshot: Equatable {
             },
             providers: rows,
             spendRows: includesToday ? [] : window.map(makeSpendRows) ?? [],
-            strip: both(reading, days).flatMap {
-                windowStrip(
-                    $0, span: $1, named: UsageFormat.periodHeading(resolved, now: now), now: now,
-                    calendar: calendar)
-            },
+            strip: answer?.strip,
             usedToday: frame.providers.count { $0.tokens > 0 },
             projects: isToday
                 ? makeProjects(frame.projects, totalCost: totalCost)
@@ -1087,11 +1122,6 @@ struct UsagePanelSnapshot: Equatable {
             mac: frame.mac.map(makeMac),
             disk: frame.disk.map(makeDisk)
         )
-    }
-
-    private static func both<A, B>(_ first: A?, _ second: B?) -> (A, B)? {
-        guard let first, let second else { return nil }
-        return (first, second)
     }
 
     /// The period the panel can answer: a preset the archive carries, a
@@ -1148,45 +1178,89 @@ struct UsagePanelSnapshot: Equatable {
     }
 
     /// The window's days as bars, one per day from its first to its last,
-    /// summed across providers, a day with no file drawn as the strip's dot.
+    /// summed across providers, a stretch with no file drawn as the strip's
+    /// dot.
     ///
     /// Read off the archive for every day, today included, so the bars sum to
     /// the headline over the same window rather than to a figure read
     /// somewhere else. Weekdays label the bars while a week's worth fits under
     /// them (`DayBarGeometry`'s measurement); a wider strip names its days on
     /// hover alone.
+    ///
+    /// **A bar a day for as long as `DayBarGeometry.maxBars` days fit**, and
+    /// past that a bar per week, then per month, then per year, whichever is
+    /// the shortest that fits: a strip of years drawn a day at a time is bars
+    /// narrower than the dot for a day with no reading, and a hover target
+    /// for each. The first and last bar cover only the days of their week or
+    /// month the window holds, and the hover names exactly those days.
     static func windowStrip(
         _ reading: UsageSpanReading, span: UsageDaySpan, named name: String,
         now: Date = Date(), calendar: Calendar = .current
     ) -> DayStrip? {
         let count = span.dayCount(calendar: calendar)
         guard count > 1 else { return nil }
-        let today = calendar.startOfDay(for: now)
-        let byDay = Dictionary(
-            reading.days.map { (calendar.startOfDay(for: $0.day), $0) },
-            uniquingKeysWith: { _, last in last })
-        let peak = reading.days.map(\.cost).max() ?? 0
+        let unit = stripUnit(span, count: count, now: now, calendar: calendar)
+        let buckets = stripBuckets(span, by: unit, now: now, calendar: calendar)
+        let bucketStart = { (day: Date) -> Date in
+            max(calendar.dateInterval(of: unit, for: day)?.start ?? day, span.from)
+        }
+        var sums: [Date: (tokens: Int, cost: Decimal)] = [:]
+        var filed = Set<Date>()
+        for total in reading.days where span.contains(total.day) {
+            filed.insert(calendar.startOfDay(for: total.day))
+            let sum = sums[bucketStart(total.day), default: (0, 0)]
+            sums[bucketStart(total.day)] = (sum.tokens + total.tokens, sum.cost + total.cost)
+        }
+        let peak = sums.values.map(\.cost).max() ?? 0
         let labelled = count <= dayStripDays
-        let rows: [DayRow] = (0..<count).compactMap { offset in
-            guard let day = calendar.date(byAdding: .day, value: offset, to: span.from) else {
-                return nil
-            }
-            let total = byDay[day]
-            let isToday = day == today
+        let rows: [DayRow] = buckets.map { bucket in
+            let sum = sums[bucket.from]
+            let isToday = bucket.includesToday(now: now, calendar: calendar)
             return DayRow(
-                id: UsageReaderShared.dayFormatter.string(from: day),
-                label: !labelled ? "" : isToday ? "Today" : day.formatted(.dateTime.weekday(.abbreviated)),
+                id: UsageReaderShared.dayFormatter.string(from: bucket.from),
+                label: !labelled
+                    ? "" : isToday ? "Today" : bucket.from.formatted(.dateTime.weekday(.abbreviated)),
                 isToday: isToday,
-                cost: total?.cost,
-                fraction: share(total?.cost, of: peak),
-                title: UsageFormat.dayTitle(day),
-                figures: UsageFormat.dayFigures(tokens: total?.tokens, cost: total?.cost),
-                models: [])
+                cost: sum?.cost,
+                fraction: share(sum?.cost, of: peak),
+                title: UsageFormat.stripBucketTitle(bucket, unit: unit, now: now, calendar: calendar),
+                figures: UsageFormat.dayFigures(tokens: sum?.tokens, cost: sum?.cost),
+                models: [],
+                span: bucket)
         }
         return DayStrip(
             rows: rows,
-            label: UsageFormat.spanStripLabel(name, covered: byDay.count, days: count),
-            total: UsageFormat.cost(reading.days.reduce(Decimal(0)) { $0 + $1.cost }))
+            label: UsageFormat.spanStripLabel(name, covered: filed.count, days: count),
+            total: UsageFormat.cost(sums.values.reduce(Decimal(0)) { $0 + $1.cost }))
+    }
+
+    /// The shortest stretch a bar can stand for and still fit the strip.
+    /// Years are the last resort and are taken however many there are.
+    private static func stripUnit(
+        _ span: UsageDaySpan, count: Int, now: Date, calendar: Calendar
+    ) -> Calendar.Component {
+        guard count > DayBarGeometry.maxBars else { return .day }
+        return [Calendar.Component.weekOfYear, .month].first {
+            stripBuckets(span, by: $0, now: now, calendar: calendar).count <= DayBarGeometry.maxBars
+        } ?? .year
+    }
+
+    /// `span` cut at every boundary of `unit`, oldest first, the first and
+    /// last piece clipped to the window.
+    private static func stripBuckets(
+        _ span: UsageDaySpan, by unit: Calendar.Component, now: Date, calendar: Calendar
+    ) -> [UsageDaySpan] {
+        var buckets: [UsageDaySpan] = []
+        var start = span.from
+        while start <= span.to,
+            let interval = calendar.dateInterval(of: unit, for: start),
+            let last = calendar.date(byAdding: .day, value: -1, to: interval.end),
+            let bucket = UsageDaySpan(from: start, to: min(last, span.to), now: now, calendar: calendar)
+        {
+            buckets.append(bucket)
+            start = interval.end
+        }
+        return buckets
     }
 
     static func makeMac(_ reading: MacHealthReading) -> MacBlock {

@@ -78,19 +78,22 @@ struct UsagePanelView: View {
     /// What the page has once the header has taken its share.
     private var availableForPage: CGFloat { max(maxHeight - headerHeight, 0) }
 
-    /// The archive's reading of the days the panel's period covers, for a
-    /// picked window's headline and any window's strip. Fetched while the
-    /// panel is open and dropped with it, so a closed panel reads nothing.
-    @State private var spanReading: UsageSpanReading?
+    /// The archive's reading of the days the panel's period covers, with the
+    /// strip drawn from it, for a picked window's headline and any window's
+    /// strip. Fetched while the panel is open and dropped with it, so a
+    /// closed panel reads nothing.
+    @State private var spanAnswer: UsagePanelSnapshot.SpanAnswer?
     /// Each forge's counters over a picked window, fetched only while the
     /// Forge tab is on screen over one. Each carries its own dates, so an
     /// answer for other days is ignored rather than cleared.
     @State private var forgeSpan: [ForgeSpanReading] = []
 
-    /// What the span fetch is keyed on: the days, and while they reach today
-    /// the archive's own total, which moves when today's file is rewritten.
-    /// A frame that changed nothing on disk re-reads nothing.
+    /// What the span fetch is keyed on: the period and its days, and while
+    /// they reach today the archive's own total, which moves when today's
+    /// file is rewritten. A frame that changed nothing on disk re-reads
+    /// nothing.
     private struct SpanFetch: Equatable {
+        let period: UsageRange
         let span: UsageDaySpan?
         let tokens: Int?
         let cost: Decimal?
@@ -228,7 +231,7 @@ struct UsagePanelView: View {
                 frame: $0.frame,
                 period: period,
                 archiveKept: archiveKept,
-                span: spanReading,
+                span: spanAnswer,
                 forgeSpan: forgeSpan,
                 claudeAccounts: model.engine.claudeAccounts,
                 limitsReading: model.preferences.limitsReading,
@@ -310,7 +313,9 @@ struct UsagePanelView: View {
             guard let span = spanFetch.span else { return }
             let reading = await model.engine.usageHistoryReading(over: span)
             guard !Task.isCancelled else { return }
-            spanReading = reading
+            spanAnswer = reading.map {
+                UsagePanelSnapshot.SpanAnswer($0, period: spanFetch.period, now: Date())
+            }
         }
         .task(id: forgeFetch) {
             guard let span = forgeFetch else { return }
@@ -326,9 +331,11 @@ struct UsagePanelView: View {
         _ period: UsageRange, days: UsageDaySpan?, history: [UsagePeriod: UsageHistoryRollup],
         now: Date
     ) -> SpanFetch {
-        guard period != .preset(.today) else { return SpanFetch(span: nil, tokens: nil, cost: nil) }
+        guard period != .preset(.today) else {
+            return SpanFetch(period: period, span: nil, tokens: nil, cost: nil)
+        }
         let archive = period.includesToday(now: now) ? history[.all] : nil
-        return SpanFetch(span: days, tokens: archive?.tokens, cost: archive?.cost)
+        return SpanFetch(period: period, span: days, tokens: archive?.tokens, cost: archive?.cost)
     }
 
     /// The picked window the Forge tab is asking the forges about, nil while
@@ -553,10 +560,7 @@ struct UsagePanelView: View {
             openProjects: { page = .projects(nil, account: nil) },
             openIdentities: { page = .identities(focus: $0) },
             resetPeriod: { model.setUsagePeriod(.preset(.today)) },
-            selectDay: { day in
-                guard let span = UsageDaySpan(from: day, to: day) else { return }
-                model.setUsagePeriod(.days(span))
-            }
+            selectDays: { model.setUsagePeriod(.days($0)) }
         )
     }
 

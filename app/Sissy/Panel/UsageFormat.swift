@@ -655,6 +655,30 @@ enum UsageFormat {
         day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 
+    /// A strip bar's own name when it stands for more than a day: a whole
+    /// month or year by its name, and any other stretch, a week or the part
+    /// of a month or year the window cuts into, by its two ends, so the hover
+    /// names exactly the days the figure beside it sums.
+    static func stripBucketTitle(
+        _ bucket: UsageDaySpan, unit: Calendar.Component, now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        guard bucket.from != bucket.to else { return dayTitle(bucket.from) }
+        let whole = calendar.dateInterval(of: unit, for: bucket.from).map {
+            $0.start == bucket.from && calendar.date(byAdding: .day, value: -1, to: $0.end) == bucket.to
+        }
+        switch unit {
+        case .month where whole == true:
+            return calendarMonth(bucket.from, covered: nil, days: 0, now: now, calendar: calendar)
+        case .year where whole == true:
+            var style = Date.FormatStyle.dateTime.year()
+            style.timeZone = calendar.timeZone
+            return style.format(bucket.from)
+        default:
+            return spanHeading(bucket, now: now, calendar: calendar)
+        }
+    }
+
     /// A day bar's own figures, since the strip carries no axis to read one
     /// off.
     ///

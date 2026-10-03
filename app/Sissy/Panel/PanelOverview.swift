@@ -69,8 +69,8 @@ struct PanelOverview: View {
     let openIdentities: (String?) -> Void
     /// Puts the panel's period back on the `Today` preset.
     let resetPeriod: () -> Void
-    /// Puts the panel's period on one day, from a bar of the strip.
-    let selectDay: (Date) -> Void
+    /// Puts the panel's period on a bar's days, from a bar of the strip.
+    let selectDays: (UsageDaySpan) -> Void
 
     /// The strip's bar under the pointer, which swaps its caption.
     @State private var pointedDay: String?
@@ -152,7 +152,7 @@ struct PanelOverview: View {
                 }
                 if let strip = snapshot.strip {
                     PanelDayBars(
-                        strip: strip, tint: .accentColor, hovered: $pointedDay, select: selectDay)
+                        strip: strip, tint: .accentColor, hovered: $pointedDay, select: selectDays)
                 }
             }
         }
