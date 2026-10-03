@@ -167,7 +167,7 @@ actor UsageEngine {
     /// Holds the power assertion. Constructed unconditionally and inert until
     /// asked, like the probe above: an actor nobody has told to hold anything
     /// touches nothing.
-    private let keepAwake = KeepAwake()
+    private let keepAwake: KeepAwake
     /// How long a hold in each mode survives without help.
     private let keepAwakePolicy: KeepAwakePolicy
     /// Whether the Mac is being held awake right now, as opposed to what the
@@ -184,6 +184,9 @@ actor UsageEngine {
     /// user asked for it — which is `config.keepScreenAwake`. Same split as
     /// `keepAwakeActive` draws against the mode, for the same reason.
     private var keepAwakeCoversScreen = false
+    /// Whether closing the lid leaves the Mac working, as opposed to whether
+    /// the user asked for it, which is `config.keepAwakeWithLidClosed`.
+    private var keepAwakeCoversLid = false
     /// Which `applyKeepAwake` call currently speaks for the engine. Bumped on
     /// entry so a call that returns to find a newer stamp knows it was
     /// overtaken while suspended.
@@ -283,13 +286,15 @@ actor UsageEngine {
         diskMonitor: DiskMonitor? = nil,
         networkMonitor: NetworkMonitor? = nil,
         diskActivityMonitor: DiskActivityMonitor? = nil,
-        keepAwakePolicy: KeepAwakePolicy = .default
+        keepAwakePolicy: KeepAwakePolicy = .default,
+        clamshell: ClamshellSleepSwitch = .rootDomain
     ) {
         self.config = config
         self.pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: nil)
         self.configURL = configURL
         self.configIsWritable = configIsWritable
         self.keepAwakePolicy = keepAwakePolicy
+        self.keepAwake = KeepAwake(clamshell: clamshell)
         let activity = statusMonitor?.activity ?? ActivityClock()
         self.activity = activity
 
@@ -476,6 +481,10 @@ actor UsageEngine {
         guard lifecycle == .idle else { return }
         lifecycle = .running
         frameDelivery = FrameDelivery(send: onFrame)
+        if config.lidHoldPending {
+            sissyLog("sissy: the clamshell switch was left set by a previous run; taking it over")
+            await keepAwake.adoptStrandedLid()
+        }
         await live.start()
         // Settle on one catalog before the cold scan starts, so the backfill
         // prices historical events against the same rates the live tail will
@@ -1115,6 +1124,18 @@ actor UsageEngine {
         persistConfig("agentHooks")
     }
 
+    /// Switch how long `on` holds and persist it.
+    ///
+    /// Re-arms the deadline under a running hold rather than waiting for the
+    /// next one, so a hold that has already outlived a shorter ceiling ends
+    /// now, the way it would have had that ceiling been chosen first.
+    func setKeepAwakeCeiling(_ ceiling: KeepAwakeCeiling) async {
+        guard ceiling != config.keepAwakeCeiling else { return }
+        config.keepAwakeCeiling = ceiling
+        persistConfig("keepAwakeCeiling")
+        rearmKeepAwakeDeadline()
+    }
+
     /// Applied through the same path as the mode, so flipping it under a
     /// running hold drops or adds the screen half without disturbing the
     /// system assertion underneath.
@@ -1122,6 +1143,17 @@ actor UsageEngine {
         guard enabled != config.keepScreenAwake else { return }
         config.keepScreenAwake = enabled
         persistConfig("keepScreenAwake")
+        await applyKeepAwake()
+        await reemit()
+    }
+
+    /// Switch whether a hold keeps the Mac working with its lid closed, and
+    /// persist it. Applied through the same path as the screen, so the lid is
+    /// added or dropped under a running hold without touching the assertions.
+    func setKeepAwakeWithLidClosed(enabled: Bool) async {
+        guard enabled != config.keepAwakeWithLidClosed else { return }
+        config.keepAwakeWithLidClosed = enabled
+        persistConfig("keepAwakeWithLidClosed")
         await applyKeepAwake()
         await reemit()
     }
@@ -1162,17 +1194,42 @@ actor UsageEngine {
         keepAwakeGeneration &+= 1
         let generation = keepAwakeGeneration
         let wanted = keepAwakeWanted
+        let lidWanted = wanted && config.keepAwakeWithLidClosed && recordLidHold()
         let hold = await keepAwake.apply(
-            holding: wanted, includingScreen: config.keepScreenAwake)
+            holding: wanted, includingScreen: config.keepScreenAwake, includingLid: lidWanted)
         guard generation == keepAwakeGeneration else { return }
         keepAwakeActive = hold.system && wanted
         keepAwakeCoversScreen = hold.screen && wanted
+        keepAwakeCoversLid = hold.lid && wanted
         keepAwakeSince = keepAwakeActive ? (keepAwakeSince ?? Date()) : nil
+        if !hold.lid, config.lidHoldPending {
+            config.lidHoldPending = false
+            if !persistConfig("lidHoldPending") { config.lidHoldPending = true }
+        }
         sissyLog(
             "sissy: keep-awake \(config.keepAwake.rawValue) — "
                 + (keepAwakeActive ? "holding" : "not holding")
-                + (keepAwakeCoversScreen ? ", screen on" : ""))
+                + (keepAwakeCoversScreen ? ", screen on" : "")
+                + (keepAwakeCoversLid ? ", lid closed too" : ""))
         rearmKeepAwakeDeadline()
+    }
+
+    /// Writes down that the clamshell switch is about to be set, and answers
+    /// whether it may be.
+    ///
+    /// Before the switch, never after: the switch outlives a crash and the
+    /// record is the only way the next launch learns there is one to clear,
+    /// so a run that cannot write the record does not set the switch. The
+    /// record is cleared only once the switch is, by `applyKeepAwake`.
+    private func recordLidHold() -> Bool {
+        guard !config.lidHoldPending else { return true }
+        config.lidHoldPending = true
+        guard persistConfig("lidHoldPending") else {
+            config.lidHoldPending = false
+            sissyLog("sissy: not keeping the lid: the record a crash would need cannot be written")
+            return false
+        }
+        return true
     }
 
     /// When the hold in force runs out on its own, and `nil` when nothing is
@@ -1182,7 +1239,10 @@ actor UsageEngine {
         switch config.keepAwake {
         case .off: return nil
         case .auto: return (lastAgentActivityAt ?? since) + keepAwakePolicy.idleWindow
-        case .on: return since + keepAwakePolicy.manualCeiling
+        case .on:
+            return config.keepAwakeCeiling.hours.map {
+                since + TimeInterval($0) * keepAwakePolicy.ceilingHour
+            }
         }
     }
 
@@ -2089,7 +2149,8 @@ actor UsageEngine {
                 mode: config.keepAwake,
                 active: keepAwakeActive,
                 since: keepAwakeSince,
-                coversScreen: keepAwakeCoversScreen),
+                coversScreen: keepAwakeCoversScreen,
+                coversLid: keepAwakeCoversLid),
             history: currentHistory(now: now),
             providerStatus: statusMonitor.currentStatus(),
             forge: forgeMonitor.currentReadings(),

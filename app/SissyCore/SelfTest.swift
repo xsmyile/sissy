@@ -321,7 +321,7 @@ private func runFrameBuildTests() {
             ProviderSlice(id: "codex", tokens: 0, cost: 0),
         ],
         keepAwake: KeepAwakeState(
-            mode: .on, active: true, since: heldSince, coversScreen: true)
+            mode: .on, active: true, since: heldSince, coversScreen: true, coversLid: true)
     )
     expect("frame providers count", frame.providers.count, 2)
     expect("frame providers[0].id", frame.providers[0].id, "claude-code")
@@ -332,6 +332,7 @@ private func runFrameBuildTests() {
     expect("frame keep-awake active", frame.keepAwake.active, true)
     expect("frame keep-awake since", frame.keepAwake.since, heldSince)
     expect("frame keep-awake covers screen", frame.keepAwake.coversScreen, true)
+    expect("frame keep-awake covers lid", frame.keepAwake.coversLid, true)
     let defaults = FrameBuilder.build(
         today: DayTotals(totalTokens: 10, totalCost: 1),
         hoursElapsed: 1

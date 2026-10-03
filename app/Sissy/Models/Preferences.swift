@@ -36,6 +36,12 @@ struct Preferences: Codable, Equatable {
     /// metered. `used` is the vendor's own end and the one Sissy has always
     /// shown, so a file written before this key existed keeps its gauges.
     var limitsReading: LimitsReading = .used
+    /// Whether the user has read and accepted what keeping the lid closed
+    /// costs. Asked once: the warning does not change, and a confirmation in
+    /// the way every time would push the switch out of the cup's menu, which
+    /// is where it is reached for. Here rather than in `server.json` because
+    /// it is about what the app asks, not about what the engine holds.
+    var lidClosedConfirmed: Bool = false
 
     init(
         sissyMotion: Bool = true,
@@ -43,12 +49,14 @@ struct Preferences: Codable, Equatable {
         usagePeriod: UsageRange = .preset(.today),
         usagePeriodPickedAt: Date? = nil,
         limitsReading: LimitsReading = .used,
+        lidClosedConfirmed: Bool = false,
     ) {
         self.sissyMotion = sissyMotion
         self.retiredServerAgent = retiredServerAgent
         self.usagePeriod = usagePeriod
         self.usagePeriodPickedAt = usagePeriodPickedAt
         self.limitsReading = limitsReading
+        self.lidClosedConfirmed = lidClosedConfirmed
     }
 
     /// How long a window picked on the calendar stays the panel's period.
@@ -92,6 +100,7 @@ struct Preferences: Codable, Equatable {
         usagePeriod = (try? c.decode(UsageRange.self, forKey: .usagePeriod)) ?? .preset(.today)
         usagePeriodPickedAt = try? c.decode(Date.self, forKey: .usagePeriodPickedAt)
         limitsReading = (try? c.decode(LimitsReading.self, forKey: .limitsReading)) ?? .used
+        lidClosedConfirmed = (try? c.decode(Bool.self, forKey: .lidClosedConfirmed)) ?? false
     }
 
     /// `sissyMotion` was persisted as `mascotMotion` up to and including
