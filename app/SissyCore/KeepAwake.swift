@@ -174,7 +174,12 @@ struct KeepAwakeHold: Sendable, Equatable {
 /// - **It is one bit shared with powerd**, which writes it on its own
 ///   transitions, an external display coming or going above all. A switch
 ///   powerd cleared under a running hold is set again by `KeepAwake`, on
-///   every change of power source and on a backstop interval.
+///   every change of power source and on a backstop interval. That repair
+///   holds an open lid and cannot hold a closed one: the kernel sleeps a
+///   closed lid the instant the bit clears, before any write of Sissy's can
+///   land (the root domain's clamshell evaluation in xnu, read 2026-10-03).
+///   Undocking with the lid already closed can therefore still sleep the Mac, and the
+///   confirmation says so rather than promising otherwise.
 /// - **It is one bit for every caller.** Clearing it clears it for another
 ///   app that set it too, which is why Sissy clears it only when it set it.
 ///

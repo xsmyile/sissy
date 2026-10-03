@@ -11,8 +11,9 @@ enum KeepAwakeLidCopy {
 
     static let confirmMessage =
         "While Sissy holds the Mac awake, closing the lid will not put it to sleep, on battery too. "
-        + "Only a nearly empty battery or overheating will. A closed Mac in a bag cannot shed its "
-        + "heat, so leave it somewhere open. If Sissy quits normally the lid works as usual again; "
+        + "Only a nearly empty battery or overheating will, and so can unplugging an external "
+        + "display or the charger once the lid is already closed: unplug first, then close it. A "
+        + "closed Mac in a bag cannot shed its heat, so leave it somewhere open. If Sissy quits normally the lid works as usual again; "
         + "if it crashes, the Mac keeps ignoring the lid until Sissy is opened again or the Mac "
         + "restarts."
 }
