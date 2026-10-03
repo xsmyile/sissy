@@ -253,7 +253,7 @@ struct GeneralSettingsView: View {
 
     private var keepScreenAwake: some View {
         SettingsSwitchRow(
-            "Keep the screen on too",
+            UsageFormat.keepScreenAwakeTitle,
             caption: "Off lets the display sleep while the Mac stays awake underneath for the agents.",
             isOn: keepScreenAwakeBinding)
     }

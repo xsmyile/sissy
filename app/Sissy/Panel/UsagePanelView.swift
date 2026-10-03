@@ -842,7 +842,7 @@ struct UsagePanelView: View {
     /// anyone who never finds either gesture.
     private func keepAwakeButton(_ state: KeepAwakeState) -> some View {
         Menu {
-            keepAwakeModes
+            keepAwakeMenu
         } label: {
             Image(systemName: "cup.and.saucer.fill")
                 .font(.system(size: 11, weight: .semibold))
@@ -860,7 +860,7 @@ struct UsagePanelView: View {
             in: .circle
         )
         .help(UsageFormat.keepAwakeHelp(state, arming: model.preferredKeepAwakeMode))
-        .contextMenu { keepAwakeModes }
+        .contextMenu { keepAwakeMenu }
     }
 
     /// The same circle as the keep-awake switch beside it, and grey where that
@@ -896,25 +896,40 @@ struct UsagePanelView: View {
     }
 
     /// The three modes as a radio group, which is what an inline `Picker` in a
-    /// menu renders to — the same shape as the status item's own menu, from
-    /// the same words, so the two cannot drift.
+    /// menu renders to, and under a rule the screen half as a checkmark, in
+    /// the words Settings uses for both so the two surfaces cannot drift.
     ///
-    /// The selection reads the mode the model reports rather than a `@State`
-    /// copy: the engine can move it on its own, when a manual hold reaches its
+    /// The screen sits here because it is the half someone changes with the
+    /// hold already running: walking away from the Mac and coming back to it
+    /// are the two moments, and both start at this button rather than in
+    /// Settings. The status item's menu still offers neither, for the reason
+    /// `StatusItemController.buildMenu` gives.
+    ///
+    /// Both read what the model reports rather than a `@State` copy: the
+    /// engine can move the mode on its own, when a manual hold reaches its
     /// ceiling and switches itself off.
-    @ViewBuilder private var keepAwakeModes: some View {
+    @ViewBuilder private var keepAwakeMenu: some View {
         Picker("Keep awake", selection: keepAwakeModeBinding) {
             ForEach(KeepAwakeMode.allCases, id: \.self) { mode in
                 Text(UsageFormat.keepAwakeTitle(mode)).tag(mode)
             }
         }
         .pickerStyle(.inline)
+        Divider()
+        Toggle(UsageFormat.keepScreenAwakeTitle, isOn: keepScreenAwakeBinding)
     }
 
     private var keepAwakeModeBinding: Binding<KeepAwakeMode> {
         Binding(
             get: { model.keepAwake.mode },
             set: { model.setKeepAwake($0) }
+        )
+    }
+
+    private var keepScreenAwakeBinding: Binding<Bool> {
+        Binding(
+            get: { model.engine.keepScreenAwake },
+            set: { model.engine.setKeepScreenAwake($0) }
         )
     }
 

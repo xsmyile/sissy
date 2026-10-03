@@ -195,8 +195,14 @@ enum UsageFormat {
         }
     }
 
+    /// What the screen half of the hold is called, in Settings and in the
+    /// cup's menu, for the reason `keepAwakeTitle` is one switch: one setting
+    /// worded twice reads as two.
+    static let keepScreenAwakeTitle = "Keep the screen on too"
+
     /// The keep-awake button's tooltip: what the Mac is doing, what a click
-    /// would do to it, and where the modes a click cannot reach are.
+    /// would do to it, and where the modes a click cannot reach are, together
+    /// with the screen switch that hangs beside them.
     ///
     /// Names the lid in every wording that claims the Mac stays up, because
     /// the assertion holds off *idle* sleep and nothing else: a MacBook closed
@@ -219,7 +225,7 @@ enum UsageFormat {
     /// the press — "hold" is the verb this whole control already uses for what
     /// it does to the Mac.
     static func keepAwakeHelp(_ state: KeepAwakeState, arming: KeepAwakeMode) -> String {
-        let modes = " · right-click for the other modes"
+        let modes = " · right-click for the other modes and the screen"
         switch (state.mode, state.active) {
         case (.off, _):
             return "Keep this Mac awake, \(keepAwakeTitle(arming).lowercased()) · "
