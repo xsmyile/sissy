@@ -849,13 +849,18 @@ struct UsagePanelView: View {
     /// set has is the one on a saucer, and the two together read as two
     /// different controls (decided 2026-10-03). Hiding the steam layer instead
     /// leaves the cup's rim cut where the steam meets it.
+    ///
+    /// Two points larger than the gear beside it, because the steam is thin
+    /// strokes and the cup itself fills only the lower half of the glyph:
+    /// measured 2026-10-03, at 13 it carries 92.4 pt² of ink against the
+    /// gear's 91.5 at 12, where at 11 it carried 66.1 and read visibly smaller.
     private func keepAwakeButton(_ state: KeepAwakeState) -> some View {
         Menu {
             keepAwakeMenu
         } label: {
             Image(systemName: "cup.and.heat.waves.fill")
                 .symbolRenderingMode(state.active ? .monochrome : .hierarchical)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
                 .foregroundStyle(state.mode == .off ? Color.secondary : Color.blue)
                 .contentShape(.circle)
@@ -891,10 +896,10 @@ struct UsagePanelView: View {
     /// it takes no action closure, so the simultaneous gesture is what aims
     /// the window at a tab.
     ///
-    /// Filled and a point larger than the cup, which is what makes the two
-    /// weigh the same: rendered side by side, an outline gear reads lighter
-    /// than a filled cup at every size, and a filled one only catches up at
-    /// 12.
+    /// Filled, which is what makes it weigh the same as the cup beside it:
+    /// rendered side by side, an outline gear reads lighter than a filled cup
+    /// at every size. The cup is the one sized to match, because its steam
+    /// leaves less ink per point.
     private var settingsButton: some View {
         SettingsLink {
             Image(systemName: "gearshape.fill")
