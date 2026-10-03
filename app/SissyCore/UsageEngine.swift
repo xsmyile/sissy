@@ -1814,6 +1814,16 @@ actor UsageEngine {
         await startForgeActivity()
     }
 
+    // MARK: - Custom forge dates
+
+    /// Fetches each connected forge's enabled counters over inclusive local days.
+    /// Cancellation propagates to the caller; periodic readings are independent.
+    func forgeActivity(from: Date, to: Date) async throws -> [ForgeSpanReading] {
+        try await forgeMonitor.readSpan(from: from, to: to)
+    }
+
+    // MARK: - Forge counter settings
+
     /// Switches one of a forge row's counters on or off, and persists it.
     ///
     /// The poll is rebuilt rather than told, because the counters are what the
