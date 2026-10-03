@@ -780,8 +780,8 @@ struct UsageHistoryRollup: Sendable, Equatable {
     /// its days are filed under. These sum to `tokens` and `cost`.
     let spendByProvider: [String: UsageSpend]
     /// The window's spend by repository, in `FrameBuilder.orderedProjects`'
-    /// order, every path read through the resolver again the way the export
-    /// reads it.
+    /// order, every path read through the resolver when the window is
+    /// summed, the way the export reads it.
     let projects: [ProjectTotals]
     /// What named no repository, or names one no longer: the residue the
     /// projects cannot reach the headline without. Kept rather than dropped,
@@ -966,11 +966,12 @@ enum UsageHistoryStore {
     /// `files` does not already hold as they stand now, and leaving it
     /// holding every file it read.
     ///
-    /// A file is attributed through `projects` when it is read, and the cache
-    /// keeps the answer with the rest of the day, so a warm rollup asks the
-    /// resolver nothing but each repository's remote, which it has cached.
-    /// A caller that keeps the cache keeps one resolver beside it: a cache
-    /// filled through one resolver answers with that resolver's attribution.
+    /// The cache keeps each day's spend by the path the file wrote, and the
+    /// path is read through `projects` when the window is summed rather than
+    /// when the file was read, so the cache holds no answer of its own: a
+    /// rollup and a span read through one resolver split a repository alike
+    /// however warm the cache, and a warm rollup asks the resolver only for
+    /// answers it has already cached.
     ///
     /// Measured 2026-10-03 against the build before the project and provider
     /// splits, with the resolver kept across calls as the engine keeps it: a
@@ -978,7 +979,11 @@ enum UsageHistoryStore {
     /// and over a 7,300-file archive from 74 ms to 75 ms, a cold one from
     /// 9.4 ms to 9.1 ms and from 979 ms to 929 ms. A resolver built per call
     /// doubled the warm figure on this Mac, every repository's remote read
-    /// again, which is why the engine holds one.
+    /// again, which is why the engine holds one. Reading the paths at the fold
+    /// rather than at the file costs a cached lookup per path per day: measured
+    /// 2026-10-03 on a synthetic 60-day archive naming 400 distinct paths, a
+    /// warm rollup went from 2.3 ms to 3.2 ms, and one naming 100 from 1.0 ms
+    /// to 1.1 ms, the cold figures unchanged at 49 ms and 16 ms.
     static func rollups(
         for periods: Set<UsagePeriod>, in parent: URL, now: Date = Date(),
         cache files: inout UsageHistoryDayCache, projects: ProjectResolver = ProjectResolver()
@@ -1001,8 +1006,7 @@ enum UsageHistoryStore {
                         at: url, through: today, holding: &held, dayKey: dayKey(of:),
                         read: { url, pricing in
                             decode(at: url).map {
-                                UsageHistoryDayCache.Reading(
-                                    $0, provider: provider, pricing: pricing, projects: projects)
+                                UsageHistoryDayCache.Reading($0, provider: provider, pricing: pricing)
                             }
                         })
                 else { continue }
@@ -1010,7 +1014,8 @@ enum UsageHistoryStore {
                     unionByDay[dayKey, default: .none].formUnion(shape)
                 }
                 for (period, cutoff) in cutoffs where cutoff.map({ dayKey >= $0 }) ?? true {
-                    tallies[period, default: RollupTally()].add(day, on: dayKey, provider: provider)
+                    tallies[period, default: RollupTally()].add(
+                        day, on: dayKey, provider: provider, projects: projects)
                 }
             }
         }
@@ -1059,12 +1064,11 @@ enum UsageHistoryStore {
             for (dayKey, name) in dayKeys {
                 guard let decoded = decode(at: url(provider: provider, day: name, in: parent))
                 else { continue }
-                let day = UsageHistoryDayCache.Reading(
-                    decoded, provider: provider, pricing: pricing, projects: projects)
+                let day = UsageHistoryDayCache.Reading(decoded, provider: provider, pricing: pricing)
                 if let shape = day.activity {
                     unionByDay[dayKey, default: .none].formUnion(shape)
                 }
-                tally.add(day, on: dayKey, provider: provider)
+                tally.add(day, on: dayKey, provider: provider, projects: projects)
                 byDay[dayKey, default: UsageSpend()].add(UsageSpend(tokens: day.tokens, cost: day.cost))
             }
         }
@@ -1271,27 +1275,25 @@ struct UsageHistoryDayCache: Sendable {
         let agents: AgentCounts
         let activity: AgentActivityDay?
         let activityTotals: ActivityTotals
-        /// The day's spend by repository as `projects` answered when the file
-        /// was read, nil keying what named none. Folded across models, so a
-        /// day holds a key per repository rather than a row per model too.
-        let projects: [String?: UsageSpend]
+        /// The day's spend by the working directory each row wrote, nil keying
+        /// what named none. Folded across models, so a day holds a key per path
+        /// rather than a row per model too. Kept as written rather than
+        /// resolved: what a path means is the resolver's answer when a window
+        /// is summed, and an answer kept here would outlive it.
+        let spendByPath: [String?: UsageSpend]
 
         /// `provider` is the directory the file was found in.
-        init(
-            _ day: UsageHistoryDay, provider: String, pricing: ProviderPricing,
-            projects resolver: ProjectResolver
-        ) {
+        init(_ day: UsageHistoryDay, provider: String, pricing: ProviderPricing) {
             var tokens = 0
             var cost: Decimal = 0
             var cache = CacheReading.none
-            var projects: [String?: UsageSpend] = [:]
+            var spendByPath: [String?: UsageSpend] = [:]
             for entry in day.models {
                 let spend = UsageSpend(
                     tokens: entry.totalTokens, cost: Decimal(string: entry.cost) ?? 0)
                 tokens += spend.tokens
                 cost += spend.cost
-                projects[entry.project.flatMap(resolver.project(for:)), default: UsageSpend()]
-                    .add(spend)
+                spendByPath[entry.project, default: UsageSpend()].add(spend)
                 cache.add(
                     provider: provider, model: entry.model, totals: entry.totals,
                     pricing: pricing)
@@ -1302,7 +1304,7 @@ struct UsageHistoryDayCache: Sendable {
             self.agents = day.agents ?? .none
             self.activity = day.activity
             self.activityTotals = day.activity.map(ActivityTotals.init) ?? .none
-            self.projects = projects
+            self.spendByPath = spendByPath
         }
     }
 
@@ -1371,7 +1373,12 @@ private struct RollupTally {
     var unattributed = UsageSpend()
     var earliest: Date?
 
-    mutating func add(_ day: UsageHistoryDayCache.Reading, on dayKey: Date, provider: String) {
+    /// Each path the day wrote is read through `resolver` here, so every
+    /// window summed through one resolver splits a repository the same way.
+    mutating func add(
+        _ day: UsageHistoryDayCache.Reading, on dayKey: Date, provider: String,
+        projects resolver: ProjectResolver
+    ) {
         let spend = UsageSpend(tokens: day.tokens, cost: day.cost)
         self.spend.add(spend)
         agents.add(day.agents)
@@ -1379,8 +1386,8 @@ private struct RollupTally {
         activityByProvider[provider, default: .none].add(day.activityTotals)
         cache.add(day.cache)
         spendByProvider[provider, default: UsageSpend()].add(spend)
-        for (project, share) in day.projects {
-            guard let project else {
+        for (path, share) in day.spendByPath {
+            guard let project = path.flatMap(resolver.project(for:)) else {
                 unattributed.add(share)
                 continue
             }

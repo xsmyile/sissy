@@ -21,24 +21,27 @@ actor UsageEngine {
     /// Where the archive lives, which is beside the config that named the
     /// trees it was read from — the rule the snapshots already follow.
     private let stateDir: URL
-    /// Last archive rollups and when they were taken. The day files are written
+    /// Last archive rollups and when they landed. The day files are written
     /// by the providers on their own throttle, so the frame re-reads them rather
     /// than being told; the cache is what keeps a burst of frames from turning
     /// into a burst of directory walks.
     private var historyRollups: [UsagePeriod: UsageHistoryRollup] = [:]
     private var historyRollupAt: Date = .distantPast
-    /// The day files the rollups have read, each re-read only once it
-    /// changes, and priced at `pricing`.
-    private var historyDayCache: UsageHistoryDayCache
+    /// Where the rollups and a picked span are read, off this actor, through
+    /// the one resolver and day cache the reader keeps for the engine's life.
+    private let historyReader: UsageHistoryReader
+    /// The rollup the reader is taking now, so a burst of frames past the TTL
+    /// starts one rather than one each.
+    private var historyRefresh: Task<Void, Never>?
+    /// Moves whenever the rollups held, or the reader's day cache, can no
+    /// longer answer: the pricing changed, the archive was deleted or switched
+    /// off. A rollup started before the move is dropped when it lands rather
+    /// than served.
+    private var historyGeneration = 0
     /// The one checkout memory every provider shares, kept because the export
     /// re-reads the archive's project paths through a resolver built on it.
     /// A second ledger over the same file would be a second writer to it.
     private let projectLedger: ProjectLedger
-    /// What the frame's rollups read the archive's project paths through,
-    /// kept for the life of the engine so the day cache and the answers it
-    /// holds come from one resolver. It pins an answer for that life, the
-    /// terms every tail's resolver already runs on.
-    private let historyProjects: ProjectResolver
     /// Day the archive was last pruned for. Retention is measured in days, so
     /// the answer changes only when the day does — and a Mac that stays up for
     /// a month has to keep the promise the setting makes without waiting for a
@@ -68,10 +71,10 @@ actor UsageEngine {
     private var initialPriceCatalog: PriceCatalog?
     /// The rates a reading taken after the events is priced at — the cache
     /// saving, today's and the archive's — kept in step with every catalog
-    /// the readers are handed. The archive's day cache is rebuilt with it,
-    /// because it holds each day already priced.
+    /// the readers are handed. The archive's day cache is started again with
+    /// it, because it holds each day already priced.
     private var pricing: ProviderPricing {
-        didSet { historyDayCache = UsageHistoryDayCache(pricing: pricing) }
+        didSet { historyGeneration += 1 }
     }
     /// Whether a provider has produced a reading yet. It is what a config
     /// change re-emits against: before the first one there is nothing to
@@ -202,7 +205,7 @@ actor UsageEngine {
     /// window is never visibly behind the day it includes.
     ///
     /// It survives the archive growing from days to years because
-    /// `historyDayCache` reads a day file again only once it changes:
+    /// `historyReader`'s day cache reads a day file again only once it changes:
     /// measured 2026-09-29, a rebuild over this Mac's 62 files went from
     /// 7.6 ms to 0.6 ms, and over a 7,300-file archive from 1,100 ms to 70 ms.
     /// What a backfill needs is not a longer interval but a frame —
@@ -284,7 +287,6 @@ actor UsageEngine {
     ) {
         self.config = config
         self.pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: nil)
-        self.historyDayCache = UsageHistoryDayCache(pricing: pricing)
         self.configURL = configURL
         self.configIsWritable = configIsWritable
         self.keepAwakePolicy = keepAwakePolicy
@@ -303,7 +305,7 @@ actor UsageEngine {
         // invalidates a tail's snapshot may take it with it.
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         self.projectLedger = projectLedger
-        self.historyProjects = ProjectResolver(ledger: projectLedger)
+        self.historyReader = UsageHistoryReader(directory: stateDir, ledger: projectLedger)
         self.identityMonitor = GitIdentityMonitor(ledger: projectLedger, activity: activity)
         let agentMonitor = AgentProcessMonitor(ledger: projectLedger)
         self.agentMonitor = agentMonitor
@@ -742,6 +744,8 @@ actor UsageEngine {
         claudeAccountsTask?.cancel()
         claudeWebAdoptionTask?.cancel()
         priceCatalogTask?.cancel()
+        historyRefresh?.cancel()
+        historyRefresh = nil
         keepAwakeDeadlineTask?.cancel()
         keepAwakeDeadlineTask = nil
         // Released first, before the awaits below: the kernel drops a dead
@@ -2092,7 +2096,7 @@ actor UsageEngine {
     }
 
     /// What the archive holds for every period the panel offers, cached for a
-    /// beat.
+    /// beat and read off this actor.
     ///
     /// Empty when the archive is switched off, and when it is on but empty — a
     /// control offering four windows that all come to nothing offers a feature
@@ -2105,20 +2109,63 @@ actor UsageEngine {
     /// frame. Switching the archive off drops it instead: the setting can come
     /// back inside the TTL, and serving what was read before it went off would
     /// answer for days the user asked to stop recording.
+    ///
+    /// Past the TTL the frame is built from the rollups already held while
+    /// `historyReader` takes new ones, and `landHistory` emits again once they
+    /// differ: a cold rollup walks every project path the archive names, which
+    /// `UsageHistoryReader` measures, and every emit would otherwise wait on
+    /// it. The first frame after launch therefore carries no windows, and the
+    /// one after the reader lands does.
     private func currentHistory(now: Date) -> [UsagePeriod: UsageHistoryRollup] {
         guard config.resolvedHistoryRetentionDays > 0 else {
-            historyRollups = [:]
-            historyDayCache = UsageHistoryDayCache(pricing: pricing)
+            if !historyRollups.isEmpty || historyRefresh != nil {
+                historyRollups = [:]
+                historyGeneration += 1
+            }
+            historyRollupAt = .distantPast
             return [:]
         }
-        let stale = now.timeIntervalSince(historyRollupAt) >= Self.historyRollupTTL
-        if historyRollups.isEmpty || stale {
-            historyRollups = UsageHistoryStore.rollups(
-                for: Set(UsagePeriod.archived), in: stateDir, now: now, cache: &historyDayCache,
-                projects: historyProjects)
-            historyRollupAt = now
+        if now.timeIntervalSince(historyRollupAt) >= Self.historyRollupTTL {
+            refreshHistory(now: now)
         }
         return (historyRollups[.all]?.tokens ?? 0) > 0 ? historyRollups : [:]
+    }
+
+    /// Has the reader take every window's rollup, unless it is taking them
+    /// already.
+    private func refreshHistory(now: Date) {
+        guard historyRefresh == nil else { return }
+        let reader = historyReader
+        let pricing = pricing
+        let generation = historyGeneration
+        historyRefresh = Task {
+            let rollups = await reader.rollups(
+                for: Set(UsagePeriod.archived), now: now, pricing: pricing, generation: generation)
+            await self.landHistory(rollups, generation: generation)
+        }
+    }
+
+    /// Takes a rollup the reader finished, and emits a frame when it says
+    /// something the last one did not.
+    ///
+    /// The TTL runs from here rather than from the start, so a rollup slower
+    /// than the TTL is not started again the moment it lands. One started
+    /// before the generation moved is dropped and read again at once, since
+    /// what it holds is the archive as it stood before a deletion or priced
+    /// at a catalog since replaced; the archive switched off meanwhile is
+    /// not read again at all.
+    private func landHistory(_ rollups: [UsagePeriod: UsageHistoryRollup], generation: Int) async {
+        historyRefresh = nil
+        guard lifecycle == .running else { return }
+        guard generation == historyGeneration else {
+            historyRollupAt = .distantPast
+            if config.resolvedHistoryRetentionDays > 0 { refreshHistory(now: Date()) }
+            return
+        }
+        historyRollupAt = Date()
+        guard rollups != historyRollups else { return }
+        historyRollups = rollups
+        await reemit()
     }
 
     /// Prunes the archive to what `historyRetentionDays` allows, once for each
@@ -2197,22 +2244,15 @@ actor UsageEngine {
     ///
     /// Off the actor for `historySeries`' reasons, and never on the frame
     /// path: it decodes every file the span names, which is a window the
-    /// user asked for once rather than one every frame re-reads. A resolver
-    /// of its own, as the export builds, because one that outlives the call
-    /// would be touched from a task the engine does not own.
+    /// user asked for once rather than one every frame re-reads. Read by
+    /// `historyReader`, through the resolver the frame's rollups go through,
+    /// so a span and the preset of the same days split a repository alike.
     ///
     /// Nil rather than an empty reading when retention is `0`: the archive
     /// switched off is no reading, and a window drawn at zero would be one.
     func historyReading(over span: UsageDaySpan) async -> UsageSpanReading? {
         guard config.resolvedHistoryRetentionDays > 0 else { return nil }
-        let directory = stateDir
-        let pricing = pricing
-        let ledger = projectLedger
-        return await Task.detached {
-            UsageHistoryStore.reading(
-                over: span, in: directory, pricing: pricing,
-                projects: ProjectResolver(ledger: ledger))
-        }.value
+        return await historyReader.reading(over: span, pricing: pricing)
     }
 
     /// Deletes the archive, on the one explicit ask there is for it.
@@ -2237,6 +2277,7 @@ actor UsageEngine {
         }
         historyRollups = [:]
         historyRollupAt = .distantPast
+        historyGeneration += 1
         await reemit()
     }
 
@@ -2318,15 +2359,17 @@ actor UsageEngine {
         }
     }
 
-    /// Reprices the readings taken after the events. The archive's are
-    /// dropped rather than left to their TTL, so a window is never priced at
-    /// two catalogs on one page, and a frame is built from them at once: the
-    /// providers emit while the catalog is still being handed out, against
-    /// rollups taken before it, and an idle Mac would otherwise keep a
-    /// repriced archived day out of the windows until the next turn.
+    /// Reprices the readings taken after the events. The archive's are read
+    /// again at once rather than left to their TTL, and a frame follows when
+    /// they land: the providers emit while the catalog is still being handed
+    /// out, against rollups taken before it, and an idle Mac would otherwise
+    /// keep a repriced archived day out of the windows until the next turn.
+    /// The windows held until then are served, each priced whole at the
+    /// catalog before, rather than dropped for the moment the reader takes,
+    /// which would take the period control's windows off an open panel.
     private func applyPricing(_ catalog: PriceCatalog) async {
         pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: catalog)
-        historyRollups = [:]
+        historyRollupAt = .distantPast
         await reemit()
     }
 }

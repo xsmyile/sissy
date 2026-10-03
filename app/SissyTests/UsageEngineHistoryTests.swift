@@ -28,6 +28,10 @@ final class UsageEngineHistoryTests: XCTestCase {
 
     private static let tokensPerTurn = 1_000_000
     private static let archivedTokens = 4_242
+    /// How long a test waits for windows that must not arrive. The reader
+    /// lands a fixture this size in milliseconds, which is what
+    /// `firstFrameWithHistory` waits on, so a second is far past it.
+    private static let readerLandingWindow: TimeInterval = 1
 
     private func makeEngine(retentionDays: Int? = nil) -> UsageEngine {
         var config = ServerConfig.hermetic(claudeDir: claudeDir, codexDir: codexDir)
@@ -83,6 +87,18 @@ final class UsageEngineHistoryTests: XCTestCase {
         await engine.start { frames.record($0) }
         await fulfillment(of: [landed], timeout: 5)
         return try XCTUnwrap(frames.all.last)
+    }
+
+    /// The first frame carrying the archive's windows. The rollups are read
+    /// off the engine's actor and land a frame after the one they were asked
+    /// for on, so the first frame of all carries none.
+    private func firstFrameWithHistory(from engine: UsageEngine) async throws -> FrameData {
+        let frames = FrameRecorder()
+        let landed = frames.expectation(
+            "a frame carrying the archive", forNextFrameMatching: { !$0.history.isEmpty })
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [landed], timeout: 5)
+        return try XCTUnwrap(frames.all.last { !$0.history.isEmpty })
     }
 
     private func archive(dayOffset: Int, project: String?, tokens: Int) throws {
@@ -149,7 +165,7 @@ final class UsageEngineHistoryTests: XCTestCase {
         let engine = makeEngine()
         addTeardownBlock { await engine.stop() }
 
-        let frame = try await firstFrame(from: engine)
+        let frame = try await firstFrameWithHistory(from: engine)
 
         XCTAssertEqual(
             Set(frame.history.keys), Set(UsagePeriod.archived),
@@ -184,7 +200,7 @@ final class UsageEngineHistoryTests: XCTestCase {
         let engine = makeEngine()
         addTeardownBlock { await engine.stop() }
 
-        let frame = try await firstFrame(from: engine)
+        let frame = try await firstFrameWithHistory(from: engine)
 
         XCTAssertNil(frame.history[.today])
     }
@@ -216,7 +232,10 @@ final class UsageEngineHistoryTests: XCTestCase {
         let engine = makeEngine()
         addTeardownBlock { await engine.stop() }
         let frames = FrameRecorder()
-        let landed = frames.expectation(forFrameCount: 1)
+        let archived = try yesterday()
+        let landed = frames.expectation(
+            "a frame carrying yesterday",
+            forNextFrameMatching: { $0.history[.all]?.earliestDay == archived })
         await engine.start { frames.record($0) }
         await fulfillment(of: [landed], timeout: 5)
         let replayed = frames.expectation(forFrameCount: frames.count + 1)
@@ -243,11 +262,18 @@ final class UsageEngineHistoryTests: XCTestCase {
         try archiveYesterday()
         let engine = makeEngine(retentionDays: 0)
         addTeardownBlock { await engine.stop() }
+        let frames = FrameRecorder()
+        let first = frames.expectation(forFrameCount: 1)
+        let windows = frames.expectation(
+            "a frame carrying the archive", forNextFrameMatching: { !$0.history.isEmpty })
+        windows.isInverted = true
 
-        let frame = try await firstFrame(from: engine)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [first], timeout: 5)
+        await fulfillment(of: [windows], timeout: Self.readerLandingWindow)
         await engine.stop()
 
-        XCTAssertTrue(frame.history.isEmpty)
+        XCTAssertTrue(frames.all.allSatisfy { $0.history.isEmpty })
         XCTAssertNil(
             UsageHistoryStore.load(
                 provider: ProviderID.claudeCode,

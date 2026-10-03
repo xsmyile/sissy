@@ -914,6 +914,101 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertEqual(reading.rollup.earliestDay, week.earliestDay)
     }
 
+    /// A cached day keeps the paths it wrote and no answer about them, so a
+    /// rollup through a resolver that answers differently splits by that
+    /// resolver's answer however warm the cache is.
+    func testACachedDayIsAttributedByTheResolverItIsSummedThrough() throws {
+        let later = root.appendingPathComponent("later")
+        try FileManager.default.createDirectory(at: later, withIntermediateDirectories: true)
+        try writeRows(
+            provider: "codex", day: day(-1),
+            rows: [UsageHistoryRow(model: "b", project: later.path): totals(input: 20, cost: "2")])
+        var cache = UsageHistoryDayCache()
+        let before = UsageHistoryStore.rollups(
+            for: [.all], in: root, cache: &cache, projects: ProjectResolver())[.all]
+        try FileManager.default.createDirectory(
+            at: later.appendingPathComponent(".git"), withIntermediateDirectories: true)
+
+        let after = UsageHistoryStore.rollups(
+            for: [.all], in: root, cache: &cache, projects: ProjectResolver())[.all]
+
+        XCTAssertEqual(before?.projects, [])
+        XCTAssertEqual(after?.projects.map(\.tokens), [20])
+        XCTAssertEqual(after?.unattributed, UsageSpend())
+    }
+
+    /// The frame's preset and a span picked over the same days are read
+    /// through one reader, and split every repository the same way.
+    func testAPresetAndASpanOverTheSameDaysSplitAlike() async throws {
+        let repo = try repository("repo")
+        let worktree = root.appendingPathComponent("gone-worktree")
+        try writeRows(
+            provider: "claude-code", day: day(0),
+            rows: [UsageHistoryRow(model: "a", project: repo.path): totals(input: 10, cost: "1")])
+        try writeRows(
+            provider: "codex", day: day(-3),
+            rows: [
+                UsageHistoryRow(model: "b", project: repo.appendingPathComponent("app").path):
+                    totals(input: 20, cost: "2"),
+                UsageHistoryRow(model: "b", project: worktree.path): totals(input: 40, cost: "4"),
+                UsageHistoryRow(model: "b", project: nil): totals(input: 5, cost: "1"),
+            ])
+        let reader = UsageHistoryReader(directory: root, ledger: ProjectLedger())
+
+        let presets = await reader.rollups(
+            for: [.sevenDays], now: Date(), pricing: .seed, generation: 0)
+        let picked = await reader.reading(over: try span(-6, 0), pricing: .seed).rollup
+
+        let week = try XCTUnwrap(presets[.sevenDays])
+
+        XCTAssertEqual(picked.projects, week.projects)
+        XCTAssertEqual(picked.unattributed, week.unattributed)
+        XCTAssertEqual(picked.spendByProvider, week.spendByProvider)
+        XCTAssertEqual(picked.tokens, week.tokens)
+        XCTAssertEqual(week.projects.map(\.tokens), [30])
+        XCTAssertEqual(week.unattributed, UsageSpend(tokens: 45, cost: 5))
+    }
+
+    /// The residue is what keeps the split honest: a checkout deleted since
+    /// its day was written, whether the ledger remembers it or never saw it,
+    /// leaves its money in the window's total under one of the two.
+    func testTheSplitAddsUpToTheWindowWhenACheckoutHasBeenDeleted() throws {
+        let repo = try repository("repo")
+        let remembered = root.appendingPathComponent("remembered-worktree")
+        try FileManager.default.createDirectory(at: remembered, withIntermediateDirectories: true)
+        try "gitdir: \(repo.path)/.git/worktrees/remembered\n".write(
+            to: remembered.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        let ledger = ProjectLedger()
+        XCTAssertNotNil(ProjectResolver(ledger: ledger).project(for: remembered.path))
+        try FileManager.default.removeItem(at: remembered)
+        let neverSeen = root.appendingPathComponent("never-seen/checkout")
+        try writeRows(
+            provider: "codex", day: day(-2),
+            rows: [
+                UsageHistoryRow(model: "b", project: repo.path): totals(input: 1, cost: "0.1"),
+                UsageHistoryRow(model: "b", project: remembered.path): totals(input: 20, cost: "2"),
+                UsageHistoryRow(model: "b", project: neverSeen.path): totals(input: 300, cost: "30"),
+                UsageHistoryRow(model: "c", project: nil): totals(input: 4000, cost: "400"),
+            ])
+
+        let resolver = ProjectResolver(ledger: ledger)
+        let week = try XCTUnwrap(
+            UsageHistoryStore.rollups(for: [.sevenDays], in: root, projects: resolver)[.sevenDays])
+        let picked = UsageHistoryStore.reading(over: try span(-6, 0), in: root, projects: resolver)
+            .rollup
+
+        for rollup in [week, picked] {
+            XCTAssertEqual(rollup.projects.map(\.tokens), [21])
+            XCTAssertEqual(rollup.unattributed, UsageSpend(tokens: 4300, cost: 430))
+            XCTAssertEqual(
+                rollup.projects.reduce(0) { $0 + $1.tokens } + rollup.unattributed.tokens,
+                rollup.tokens)
+            XCTAssertEqual(
+                rollup.projects.reduce(Decimal(0)) { $0 + $1.cost } + rollup.unattributed.cost,
+                rollup.cost)
+        }
+    }
+
     private func instant(_ year: Int, _ month: Int, _ day: Int, hour: Int, in zone: TimeZone)
         throws -> Date
     {
