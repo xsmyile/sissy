@@ -35,7 +35,7 @@ struct AboutView: View {
     /// What the page says Sissy is, in the words the README opens with. It
     /// described the spend of two CLIs until the Forge module landed and made
     /// that one module's description rather than the app's.
-    private static let tagline = "The numbers you keep checking, in the macOS menu bar."
+    private static let tagline = "Your agents, your Mac, your repos. One click away."
 
     /// The room above and below the divider, and above the copyright line
     /// that closes the page.
