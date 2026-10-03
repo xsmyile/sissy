@@ -1809,8 +1809,8 @@ actor UsageEngine {
     ///
     /// **Connecting the same host again is how a refused or missing token is
     /// replaced.** The index keys on the host, the monitor is rebuilt from it,
-    /// and a fresh monitor has nothing parked — so this is the way back from
-    /// both states the poll stops asking about.
+    /// and the replacement credential has its own refusal record, so this is
+    /// the way back from both states the poll stops asking about.
     func connectForge(_ connection: ForgeConnection, token: String, probing: Bool = true) async
         -> ForgeConnector.Outcome
     {
@@ -1867,6 +1867,18 @@ actor UsageEngine {
             counters: (config.forgeCounters ?? .defaults).enabled, activity: activity)
         await startForgeActivity()
     }
+
+    // MARK: - Custom forge dates
+
+    /// Fetches each connected forge's enabled counters over inclusive local days.
+    /// Caller cancellation throws; a monitor rebuilt during the pick answers
+    /// monitorChanged so the page can request the new configuration explicitly.
+    func forgeActivity(from: Date, to: Date) async throws -> [ForgeSpanReading] {
+        guard lifecycle == .running else { return [] }
+        return try await forgeMonitor.readSpan(from: from, to: to)
+    }
+
+    // MARK: - Forge counter settings
 
     /// Switches one of a forge row's counters on or off, and persists it.
     ///

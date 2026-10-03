@@ -231,9 +231,12 @@ enum ForgeActivityFeed {
     /// Who the token belongs to, asked of whichever forge the connection
     /// names. It is what a connect is held on before anything is filed.
     static func probe(_ connection: ForgeConnection, token: String) async throws -> String {
+        if ForgeRefusalStore.shared.failure(url: connection.root, token: token) == .unauthorized {
+            ForgeRefusalStore.shared.record(nil, url: connection.root, token: token)
+        }
         switch connection.kind {
-        case .gitHub: try await GitHubActivityFeed.probe(connection, token: token)
-        case .gitLab: try await GitLabActivityFeed.probe(connection, token: token)
+        case .gitHub: return try await GitHubActivityFeed.probe(connection, token: token)
+        case .gitLab: return try await GitLabActivityFeed.probe(connection, token: token)
         }
     }
 
@@ -243,6 +246,10 @@ enum ForgeActivityFeed {
     /// call site, so a 401 from GitHub and a 401 from GitLab reach the row as
     /// the same sentence.
     static func send(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse) {
+        let token =
+            request.value(forHTTPHeaderField: "Authorization")?.replacingOccurrences(of: "Bearer ", with: "")
+            ?? request.value(forHTTPHeaderField: "PRIVATE-TOKEN") ?? ""
+        if let failure = ForgeRefusalStore.shared.failure(url: request.url, token: token) { throw failure }
         let data: Data
         let response: URLResponse
         do {
@@ -251,7 +258,13 @@ enum ForgeActivityFeed {
             throw failure(thrown: error)
         }
         guard let http = response as? HTTPURLResponse else { throw ForgeReadFailure.malformed }
-        if let failure = failure(of: http, addressedTo: request.url) { throw failure }
+        if let failure = failure(of: http, addressedTo: request.url) {
+            ForgeRefusalStore.shared.record(
+                failure, url: request.url, token: token,
+                until: ForgeRefusalStore.retryDeadline(http))
+            throw failure
+        }
+        ForgeRefusalStore.shared.record(nil, url: request.url, token: token)
         return (data, http)
     }
 

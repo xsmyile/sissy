@@ -109,6 +109,175 @@ actor ForgeActivityMonitor {
     /// Bumped by every stop, so a request in flight when the monitor was torn
     /// down cannot publish over the run that replaced it.
     private var generation = 0
+    private struct SpanKey: Hashable {
+        let connection: String
+        let bounds: ForgeSpanFeed.VendorBounds
+    }
+    private struct SpanRunning {
+        let id: UUID
+        let task: Task<ForgeSpanReading, Never>
+        var waiters: Set<UUID>
+    }
+    private var spanCache: [SpanKey: ForgeSpanReading] = [:]
+    private var spanTasks: [SpanKey: SpanRunning] = [:]
+    private var retryUntil: [String: Date] = [:]
+    private var spanRefusals: [String: ForgeReadFailure] = [:]
+    static let spanCacheTTL: TimeInterval = 60
+    static let spanDeadline: Duration = .seconds(20)
+
+    /// Each connection reads concurrently within a total twenty-second budget.
+    /// Equivalent vendor bounds share a task; cancelling the last waiter cancels
+    /// its request. A monitor replacement answers monitorChanged, while a
+    /// caller's own cancellation still throws CancellationError.
+    func readSpan(
+        from: Date, to: Date, now: Date = Date(), deadline: Duration = spanDeadline,
+        fetch:
+            @escaping @Sendable (ForgeConnection, String, Set<ForgeCounter>, Date, Date, Date) async throws ->
+            ForgeSpanReading = {
+                try await ForgeSpanFeed.read($0, token: $1, counters: $2, from: $3, to: $4, now: $5)
+            }
+    ) async throws -> [ForgeSpanReading] {
+        try Task.checkCancellation()
+        let expires = ContinuousClock.now + deadline
+        return try await withThrowingTaskGroup(of: (Int, ForgeSpanReading).self) { group in
+            for (index, connection) in connections.enumerated() {
+                group.addTask {
+                    let reading = try await self.span(
+                        connection, dates: (from, to), now: now, expires: expires, fetch: fetch)
+                    return (index, reading)
+                }
+            }
+            var result: [(Int, ForgeSpanReading)] = []
+            for try await item in group { result.append(item) }
+            try Task.checkCancellation()
+            return result.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+    }
+
+    private func span(
+        _ connection: ForgeConnection, dates: (Date, Date), now: Date,
+        expires: ContinuousClock.Instant,
+        fetch:
+            @escaping @Sendable (ForgeConnection, String, Set<ForgeCounter>, Date, Date, Date) async throws ->
+            ForgeSpanReading
+    ) async throws -> ForgeSpanReading {
+        let (from, to) = dates
+        let absent: @Sendable (ForgeSpanAbsence) -> ForgeSpanReading = { [counters] reason in
+            .unavailable(connection, dates: (from, to), now: now, enabled: counters, reason: reason)
+        }
+        guard let bounds = ForgeSpanFeed.bounds(from: from, to: to, now: now) else {
+            return absent(.invalidDates)
+        }
+        guard bounds.start <= bounds.end else { return absent(.notOpened) }
+        if let failure = spanBlock(connection.id, now: now) { return absent(.failure(failure)) }
+        let lookup = tokenSource(connection.id, false)
+        guard case .found(let token) = lookup else { return absent(.failure(Self.credentialFailure(lookup))) }
+        if let failure = ForgeRefusalStore.shared.failure(url: connection.root, token: token, now: now) {
+            return absent(.failure(failure))
+        }
+        let key = SpanKey(connection: connection.id, bounds: bounds)
+        let waiter = UUID()
+        if let cached = spanCache[key], now.timeIntervalSince(cached.readAt) < Self.spanCacheTTL {
+            return cached
+        }
+        let running: SpanRunning
+        if var existing = spanTasks[key] {
+            existing.waiters.insert(waiter)
+            spanTasks[key] = existing
+            running = existing
+        } else {
+            let stamp = generation
+            let id = UUID()
+            let enabled = counters
+            let task = Task {
+                let reading = await withTaskGroup(of: ForgeSpanReading.self) { group in
+                    group.addTask {
+                        do { return try await fetch(connection, token, enabled, from, to, now) } catch {
+                            return absent(
+                                error is CancellationError ? .monitorChanged : ForgeSpanFeed.absence(error))
+                        }
+                    }
+                    group.addTask {
+                        do { try await ContinuousClock().sleep(until: expires) } catch {
+                            return absent(.monitorChanged)
+                        }
+                        return absent(.deadlineExceeded)
+                    }
+                    let first = await group.next() ?? absent(.monitorChanged)
+                    group.cancelAll()
+                    return first
+                }
+                return self.finishSpan(reading, key: key, id: id, stamp: stamp)
+            }
+            running = SpanRunning(id: id, task: task, waiters: [waiter])
+            spanTasks[key] = running
+        }
+        let reading = await withTaskCancellationHandler {
+            await running.task.value
+        } onCancel: {
+            Task { await self.releaseSpan(key, waiter: waiter) }
+        }
+        releaseSpan(key, waiter: waiter)
+        try Task.checkCancellation()
+        return reading
+    }
+
+    private func retryDeadline(id: String, now: Date) -> Date {
+        if let connection = connections.first(where: { $0.id == id }),
+            case .found(let token) = tokenSource(id, false),
+            let until = ForgeRefusalStore.shared.deadline(url: connection.root, token: token)
+        {
+            return until
+        }
+        return now.addingTimeInterval(300)
+    }
+
+    private func spanBlock(_ id: String, now: Date) -> ForgeReadFailure? {
+        if let failure = spanRefusals[id], failure.needsTheUser { return failure }
+        if parked.contains(id), let failure = published.load()[id]?.failure { return failure }
+        if let until = retryUntil[id], until > now { return .rateLimited }
+        return nil
+    }
+
+    private func releaseSpan(_ key: SpanKey, waiter: UUID) {
+        guard var running = spanTasks[key] else { return }
+        running.waiters.remove(waiter)
+        if running.waiters.isEmpty {
+            running.task.cancel()
+            spanTasks[key] = nil
+        } else {
+            spanTasks[key] = running
+        }
+    }
+
+    private func finishSpan(_ reading: ForgeSpanReading, key: SpanKey, id: UUID, stamp: Int)
+        -> ForgeSpanReading
+    {
+        guard stamp == generation else {
+            guard let connection = connections.first(where: { $0.id == key.connection }) else {
+                return reading
+            }
+            return .unavailable(
+                connection, dates: (reading.from, reading.to), now: reading.readAt,
+                enabled: counters, reason: .monitorChanged)
+        }
+        guard spanTasks[key]?.id == id else { return reading }
+        spanTasks[key] = nil
+        for counter in reading.counters.values {
+            guard case .unavailable(.failure(let failure)) = counter else { continue }
+            if failure.needsTheUser { spanRefusals[key.connection] = failure }
+            if failure == .rateLimited {
+                retryUntil[key.connection] = retryDeadline(id: key.connection, now: reading.readAt)
+            }
+        }
+        if reading.isCacheable {
+            spanCache = spanCache.filter {
+                reading.readAt.timeIntervalSince($0.value.readAt) < Self.spanCacheTTL
+            }
+            spanCache[key] = reading
+        }
+        return reading
+    }
 
     init(
         connections: [ForgeConnection],
@@ -172,6 +341,9 @@ actor ForgeActivityMonitor {
     /// loop above it at all. The generation still decides what may publish.
     func stop() {
         generation &+= 1
+        spanCache.removeAll()
+        spanTasks.values.forEach { $0.task.cancel() }
+        spanTasks.removeAll()
         pollTask?.cancel()
         pollTask = nil
         inFlight.values.forEach { $0.task.cancel() }
@@ -188,7 +360,9 @@ actor ForgeActivityMonitor {
     func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
         let stamp = generation
         let before = published.load()
-        let due = connections.filter { !parked.contains($0.id) }
+        let due = connections.filter {
+            !parked.contains($0.id) && (retryUntil[$0.id] ?? .distantPast) <= Date()
+        }
         for task in due.map({ read($0, allowingInteraction: false) }) { await task.value }
         guard stamp == generation, !Task.isCancelled else { return nextDelay() }
         if published.load() != before { await onRefresh() }
@@ -219,6 +393,8 @@ actor ForgeActivityMonitor {
     /// two arrives second.
     func refreshOnce(id: String, onRefresh: @Sendable @escaping () async -> Void) async {
         guard let connection = connections.first(where: { $0.id == id }) else { return }
+        spanRefusals[connection.id] = nil
+        spanCache = spanCache.filter { $0.key.connection != connection.id }
         let stamp = generation
         let before = published.load()
         await read(connection, allowingInteraction: true).value
@@ -256,6 +432,11 @@ actor ForgeActivityMonitor {
             let outcome: Result<ForgeActivityReading, Error>
             let lookup = token(connection.id, allowingInteraction)
             if case .found(let secret) = lookup {
+                if allowingInteraction,
+                    ForgeRefusalStore.shared.failure(url: connection.root, token: secret) == .unauthorized
+                {
+                    ForgeRefusalStore.shared.record(nil, url: connection.root, token: secret)
+                }
                 do {
                     outcome = .success(try await fetch(connection, secret, counters, Date()))
                 } catch {
@@ -342,6 +523,8 @@ actor ForgeActivityMonitor {
         switch outcome {
         case .success(var reading):
             parked.remove(connection.id)
+            retryUntil[connection.id] = nil
+            spanRefusals[connection.id] = nil
             published.update { map in
                 if let previous = map[connection.id], previous.login == reading.login {
                     reading.latest = ForgeEvent.merged(reading.latest, over: previous.latest)
@@ -351,6 +534,9 @@ actor ForgeActivityMonitor {
             }
         case .failure(let error):
             let failure = (error as? ForgeReadFailure) ?? .malformed
+            if failure == .rateLimited {
+                retryUntil[connection.id] = retryDeadline(id: connection.id, now: Date())
+            }
             if failure.needsTheUser {
                 parked.insert(connection.id)
             } else {
