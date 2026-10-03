@@ -114,14 +114,15 @@ project row's right-click menu opens the same page on that repository.
 
 **Keep awake** is the cup in the panel header: *Never*, *While agents are
 working* (holds the Mac while turns land, lets go ten minutes after they stop),
-or *Always* (eight hours, then off; Settings makes that one to twelve hours,
-or no limit at all). On a MacBook, *Keep working with the lid closed* in
-Settings lets a hold survive the lid too; it is off until you switch it on, and
-it says what that costs before it does. The hold dies with Sissy: quit and the
-Mac sleeps normally, lid included, with nothing to undo. After a crash the lid
-stays ignored until Sissy is opened again or the Mac restarts.
+or *Always* (eight hours, then off; Settings makes that one to twelve hours, or
+no limit at all), with the screen and, on a MacBook, *Keep working with the lid
+closed* beside them: the cup's menu and Settings' Awake tab carry both. The lid
+is off until you switch it on, and the first time it says what that costs
+before it does. The hold dies with Sissy: quit and the Mac sleeps normally, lid
+included, with nothing to undo. After a crash the lid stays ignored until Sissy
+is opened again or the Mac restarts.
 
-**Settings** is ⌘, or the gear: General, Providers, Mac, Forge, About. **Copy
+**Settings** is ⌘, or the gear: General, Providers, Mac, Awake, Forge, About. **Copy
 diagnostics** lives in About and is what a bug report needs.
 
 ## What it reads

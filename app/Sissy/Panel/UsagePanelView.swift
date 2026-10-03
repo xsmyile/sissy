@@ -47,6 +47,7 @@ struct UsagePanelView: View {
     /// the panel is dropped when it closes, and a page selection that outlived
     /// it would reopen on a provider the user last glanced at instead of home.
     @State private var page: Page = .overview
+    @Environment(\.openSettings) private var openSettings
 
     /// Which module's tab `Page.overview` is showing. Local for the reason the
     /// page is, and always `usage` on open: a tab that outlived the panel
@@ -840,11 +841,15 @@ struct UsagePanelView: View {
     /// and the indicator is hidden here: a chevron does not fit a 26 pt circle
     /// sitting beside the refresh button. Settings carries the same choice for
     /// anyone who never finds either gesture.
+    ///
+    /// The cup steams while the hold is in force, which says the effect in the
+    /// glyph as well as in the glass: the tint is the mode, the steam and the
+    /// fill are what came of it.
     private func keepAwakeButton(_ state: KeepAwakeState) -> some View {
         Menu {
             keepAwakeMenu
         } label: {
-            Image(systemName: "cup.and.saucer.fill")
+            Image(systemName: state.active ? "cup.and.heat.waves.fill" : "cup.and.saucer.fill")
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
                 .foregroundStyle(state.mode == .off ? Color.secondary : Color.blue)
@@ -900,14 +905,22 @@ struct UsagePanelView: View {
     }
 
     /// The three modes as a radio group, which is what an inline `Picker` in a
-    /// menu renders to, and under a rule the screen half as a checkmark, in
-    /// the words Settings uses for both so the two surfaces cannot drift.
+    /// menu renders to, and under a rule the screen and the lid as checkmarks,
+    /// in the words the Awake tab uses for them so the two surfaces cannot
+    /// drift. Then the way to that tab, which is where each says what it
+    /// costs and where the ceiling on `Always` is chosen.
     ///
-    /// The screen sits here because it is the half someone changes with the
-    /// hold already running: walking away from the Mac and coming back to it
-    /// are the two moments, and both start at this button rather than in
-    /// Settings. The status item's menu still offers neither, for the reason
-    /// `StatusItemController.buildMenu` gives.
+    /// The screen and the lid sit here because they are the halves someone
+    /// changes with the hold already running: walking away from the Mac,
+    /// closing it to leave with it and coming back to it all start at this
+    /// button rather than in Settings. The lid's first switch-on opens the
+    /// Awake tab on its confirmation instead, for the reason
+    /// `SissyModel.setKeepAwakeWithLidClosed` gives. The status item's menu
+    /// still offers none of it, for the reason `StatusItemController.buildMenu`
+    /// gives.
+    ///
+    /// `openSettings` rather than `SettingsLink`, which cannot be aimed at a
+    /// tab from inside a menu: `AboutCommand` records why.
     ///
     /// Both read what the model reports rather than a `@State` copy: the
     /// engine can move the mode on its own, when a manual hold reaches its
@@ -921,6 +934,27 @@ struct UsagePanelView: View {
         .pickerStyle(.inline)
         Divider()
         Toggle(UsageFormat.keepScreenAwakeTitle, isOn: keepScreenAwakeBinding)
+        if SissyModel.machineHasLid {
+            Toggle(UsageFormat.keepAwakeWithLidClosedTitle, isOn: keepAwakeWithLidClosedBinding)
+        }
+        Divider()
+        Button(Self.awakeSettingsTitle) { openSettingsTab(.awake) }
+    }
+
+    private static let awakeSettingsTitle = "\(SettingsTab.awake.title) Settings…"
+
+    private func openSettingsTab(_ tab: SettingsTab) {
+        model.settingsTab = tab
+        openSettings()
+    }
+
+    private var keepAwakeWithLidClosedBinding: Binding<Bool> {
+        Binding(
+            get: { model.engine.keepAwakeWithLidClosed },
+            set: { enabled in
+                if model.setKeepAwakeWithLidClosed(enabled) { openSettings() }
+            }
+        )
     }
 
     private var keepAwakeModeBinding: Binding<KeepAwakeMode> {

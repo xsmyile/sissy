@@ -7,6 +7,7 @@ enum SettingsTab: Hashable {
     case general
     case providers
     case mac
+    case awake
     case forge
     case about
 
@@ -15,6 +16,7 @@ enum SettingsTab: Hashable {
         case .general: return "General"
         case .providers: return "Providers"
         case .mac: return "Mac"
+        case .awake: return "Awake"
         case .forge: return "Forge"
         case .about: return "About"
         }
@@ -28,12 +30,14 @@ enum SettingsTab: Hashable {
     /// SDK ships name exactly one, a robotic vacuum, and the Apple
     /// Intelligence glyph is restricted by the catalogue to referring to it.
     /// Mac's is the same `memorychip` `PanelTab.mac` draws, since both name
-    /// the machine.
+    /// the machine, and Awake's is the steaming cup the panel's switch wears
+    /// while it holds.
     var symbol: String {
         switch self {
         case .general: return "gearshape"
         case .providers: return "sparkles"
         case .mac: return "memorychip"
+        case .awake: return "cup.and.heat.waves.fill"
         case .forge: return "arrow.triangle.branch"
         case .about: return "info.circle"
         }
@@ -79,6 +83,7 @@ struct SettingsRootView: View {
             tab(.general) { GeneralSettingsView(model: model) }
             tab(.providers) { ProvidersSettingsView(model: model) }
             tab(.mac) { MacSettingsView(model: model) }
+            tab(.awake) { AwakeSettingsView(model: model) }
             tab(.forge) { ForgeSettingsView(model: model) }
             tab(.about) { AboutView(model: model) }
         }
