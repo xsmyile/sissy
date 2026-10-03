@@ -133,7 +133,13 @@ struct PanelDayBars: View {
     /// slot, and a pointer between two bars is still pointing at one of them.
     private func day(_ row: UsagePanelSnapshot.DayRow, slot: CGFloat) -> some View {
         let isPointed = hovered == row.id
-        return VStack(spacing: DayBarGeometry.plotLabelGap) {
+        return selectable(row, column(row, slot: slot, isPointed: isPointed))
+    }
+
+    private func column(
+        _ row: UsagePanelSnapshot.DayRow, slot: CGFloat, isPointed: Bool
+    ) -> some View {
+        VStack(spacing: DayBarGeometry.plotLabelGap) {
             ZStack(alignment: .bottom) {
                 Color.clear
                 mark(row, width: slot * DayBarGeometry.barWidthRatio, isPointed: isPointed)
@@ -147,10 +153,6 @@ struct PanelDayBars: View {
         }
         .frame(width: slot)
         .contentShape(.rect)
-        .onTapGesture {
-            guard let select, let span = row.span else { return }
-            select(span)
-        }
         .onHover { inside in
             if inside {
                 hovered = row.id
@@ -160,6 +162,20 @@ struct PanelDayBars: View {
         }
         .accessibilityElement()
         .accessibilityLabel("\(row.title) · \(row.figures)")
+    }
+
+    /// The click, only on a strip that is a way in and a bar that names its
+    /// days, and announced as a button exactly there.
+    @ViewBuilder
+    private func selectable(_ row: UsagePanelSnapshot.DayRow, _ content: some View) -> some View {
+        if let select, let span = row.span {
+            content
+                .onTapGesture { select(span) }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { select(span) }
+        } else {
+            content
+        }
     }
 
     /// The pointed day's own label comes forward, which is what pairs the bar
