@@ -345,13 +345,15 @@ final class SissyModel {
         return true
     }
 
+    /// Remembered only once the engine has taken the switch, so a
+    /// confirmation given before metering started is asked again rather than
+    /// spent on a switch that never went on.
     func confirmKeepAwakeWithLidClosed() {
         lidConfirmationRequested = false
-        if !preferences.lidClosedConfirmed {
-            preferences.lidClosedConfirmed = true
-            savePreferences()
-        }
         engine.setKeepAwakeWithLidClosed(true)
+        guard engine.keepAwakeWithLidClosed, !preferences.lidClosedConfirmed else { return }
+        preferences.lidClosedConfirmed = true
+        savePreferences()
     }
 
     func setSissyMotion(_ enabled: Bool) {

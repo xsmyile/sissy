@@ -28,6 +28,8 @@ enum KeepAwakeLidCopy {
 struct AwakeSettingsView: View {
     let model: SissyModel
 
+    @State private var confirmingLid = false
+
     var body: some View {
         Form {
             Section {
@@ -45,7 +47,7 @@ struct AwakeSettingsView: View {
         .formStyle(.grouped)
         .confirmationDialog(
             KeepAwakeLidCopy.confirmTitle,
-            isPresented: lidConfirmationBinding,
+            isPresented: $confirmingLid,
             titleVisibility: .visible
         ) {
             Button(UsageFormat.keepAwakeWithLidClosedTitle) { model.confirmKeepAwakeWithLidClosed() }
@@ -53,6 +55,20 @@ struct AwakeSettingsView: View {
         } message: {
             Text(KeepAwakeLidCopy.confirmMessage)
         }
+        .task(id: model.lidConfirmationRequested) { await presentRequestedConfirmation() }
+    }
+
+    /// Takes the model's request and presents it a turn later, rather than
+    /// binding the dialog to the request directly: the request is usually
+    /// already true when this tab is first built, from the cup's menu, and a
+    /// presentation whose binding starts true is one SwiftUI is free to skip.
+    /// Taking the request here also retires it, so a request whose window
+    /// never opened is answered the next time the tab does, and only once.
+    private func presentRequestedConfirmation() async {
+        guard model.lidConfirmationRequested else { return }
+        await Task.yield()
+        model.lidConfirmationRequested = false
+        confirmingLid = true
     }
 
     private static let coversSection = "What a hold covers"
@@ -145,16 +161,6 @@ struct AwakeSettingsView: View {
         Binding(
             get: { model.engine.keepAwakeCeiling },
             set: { model.engine.setKeepAwakeCeiling($0) }
-        )
-    }
-
-    /// Reads the model's request rather than a `@State` of its own, so the
-    /// cup's menu in the panel can ask for the confirmation and have it waiting
-    /// here when the tab opens.
-    private var lidConfirmationBinding: Binding<Bool> {
-        Binding(
-            get: { model.lidConfirmationRequested },
-            set: { model.lidConfirmationRequested = $0 }
         )
     }
 }
