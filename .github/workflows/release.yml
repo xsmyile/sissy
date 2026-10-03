@@ -530,8 +530,8 @@ jobs:
 
             url "https://github.com/xsmyile/sissy/releases/download/v#{version}/Sissy-#{version}.dmg"
             name "Sissy"
-            desc "Menu bar meter for Claude Code and Codex spend, rate limits and activity"
-            homepage "https://github.com/xsmyile/sissy"
+            desc "Menu bar companion for developers: agent limits and spend, system health, git"
+            homepage "https://sissy.smyile.com"
 
             depends_on macos: :tahoe
             # Sissy updates itself through Sparkle, so Homebrew leaves it to
