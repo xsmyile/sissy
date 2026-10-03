@@ -109,6 +109,82 @@ actor ForgeActivityMonitor {
     /// Bumped by every stop, so a request in flight when the monitor was torn
     /// down cannot publish over the run that replaced it.
     private var generation = 0
+    private struct SpanKey: Hashable {
+        let connection: String
+        let from: Date
+        let to: Date
+    }
+    private var spanCache: [SpanKey: ForgeSpanReading] = [:]
+    private var spanTasks: [UUID: Task<[ForgeSpanReading], Error>] = [:]
+    static let spanCacheTTL: TimeInterval = 60
+
+    /// A picked window has its own short-lived cache and never publishes into
+    /// the poll. Rebuilding or stopping this monitor drops the cache as well,
+    /// so removing a connection or switching off a counter stops its reads.
+    func readSpan(
+        from: Date, to: Date, now: Date = Date(),
+        fetch:
+            @escaping @Sendable (ForgeConnection, String, Set<ForgeCounter>, Date, Date, Date) async throws ->
+            ForgeSpanReading = {
+                try await ForgeSpanFeed.read($0, token: $1, counters: $2, from: $3, to: $4, now: $5)
+            }
+    ) async throws -> [ForgeSpanReading] {
+        let id = UUID()
+        let task = Task {
+            try await self.performSpan(from: from, to: to, now: now, fetch: fetch)
+        }
+        spanTasks[id] = task
+        defer { spanTasks[id] = nil }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performSpan(
+        from: Date, to: Date, now: Date,
+        fetch:
+            @Sendable (ForgeConnection, String, Set<ForgeCounter>, Date, Date, Date) async throws ->
+            ForgeSpanReading
+    ) async throws -> [ForgeSpanReading] {
+        let stamp = generation
+        spanCache = spanCache.filter { now.timeIntervalSince($0.value.readAt) < Self.spanCacheTTL }
+        var result: [ForgeSpanReading] = []
+        for connection in connections {
+            try Task.checkCancellation()
+            let key = SpanKey(connection: connection.id, from: from, to: to)
+            if let cached = spanCache[key] {
+                result.append(cached)
+                continue
+            }
+            var reading = ForgeSpanReading.unavailable(
+                connection, dates: (from, to), now: now, enabled: counters,
+                reason: .failure(.malformed))
+            do {
+                let lookup = tokenSource(connection.id, false)
+                if case .found(let token) = lookup {
+                    do {
+                        reading = try await fetch(connection, token, counters, from, to, now)
+                    } catch {
+                        try Task.checkCancellation()
+                        reading = .unavailable(
+                            connection, dates: (from, to), now: now,
+                            enabled: counters, reason: ForgeSpanFeed.absence(error))
+                    }
+                } else {
+                    reading = .unavailable(
+                        connection, dates: (from, to), now: now,
+                        enabled: counters, reason: .failure(Self.credentialFailure(lookup)))
+                }
+            }
+            try Task.checkCancellation()
+            guard generation == stamp else { throw CancellationError() }
+            spanCache[key] = reading
+            result.append(reading)
+        }
+        return result
+    }
 
     init(
         connections: [ForgeConnection],
@@ -172,6 +248,9 @@ actor ForgeActivityMonitor {
     /// loop above it at all. The generation still decides what may publish.
     func stop() {
         generation &+= 1
+        spanCache.removeAll()
+        spanTasks.values.forEach { $0.cancel() }
+        spanTasks.removeAll()
         pollTask?.cancel()
         pollTask = nil
         inFlight.values.forEach { $0.task.cancel() }
