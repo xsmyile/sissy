@@ -37,6 +37,9 @@ final class UsageEngineHost {
     /// that file, and a second copy in the app could disagree with the one the
     /// assertions are actually taken from.
     private(set) var keepScreenAwake: Bool = true
+    /// How long `on` holds before switching itself off, read from
+    /// `server.json` for the same reason as `keepScreenAwake`.
+    private(set) var keepAwakeCeiling: KeepAwakeCeiling = ServerConfig.defaults.keepAwakeCeiling
     /// Whether Sissy reads each vendor's own status page. Read from
     /// `server.json` for the reason the rest of these are: the engine owns the
     /// file and owns the poll, and a copy kept in the app could say the
@@ -171,6 +174,7 @@ final class UsageEngineHost {
         noteForgeConnections(engine)
         historyRetentionDays = config.resolvedHistoryRetentionDays
         keepScreenAwake = config.keepScreenAwake
+        keepAwakeCeiling = config.keepAwakeCeiling
         statusChecks = config.statusChecks
         macHealth = config.macHealth
         disk = config.disk
@@ -1110,6 +1114,12 @@ final class UsageEngineHost {
         guard let engine, enabled != keepScreenAwake else { return }
         keepScreenAwake = enabled
         Task { await engine.setKeepScreenAwake(enabled: enabled) }
+    }
+
+    func setKeepAwakeCeiling(_ ceiling: KeepAwakeCeiling) {
+        guard let engine, ceiling != keepAwakeCeiling else { return }
+        keepAwakeCeiling = ceiling
+        Task { await engine.setKeepAwakeCeiling(ceiling) }
     }
 
     func setStatusChecks(_ enabled: Bool) {

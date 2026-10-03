@@ -19,10 +19,47 @@ enum KeepAwakeMode: String, Sendable, Codable, CaseIterable {
     case on
 }
 
+/// How long `on` holds before switching itself off, as the user chose it.
+///
+/// `auto` has no ceiling on purpose: its idle window already bounds it, and
+/// cutting a hold out from under agents that are demonstrably still working
+/// is the exact failure the automatic mode exists to prevent. A manual hold
+/// has no such evidence behind it, which is why it has one by default.
+///
+/// A choice rather than a constant, decided 2026-10-03: a fixed eight hours
+/// was a limit nobody had set, and a hold that let go in the middle of a
+/// night's run was the surprise it caused. `never` is in the list for the
+/// same reason `caffeinate` without `-t` exists, and it costs nothing the
+/// other rules depend on: the hold still dies with Sissy, and the lit eye and
+/// the menu's running count still say it is there. Eight hours stays the
+/// default, so a `server.json` written before the choice existed holds the
+/// way it always did.
+enum KeepAwakeCeiling: String, Sendable, Codable, CaseIterable {
+    case oneHour = "1h"
+    case twoHours = "2h"
+    case fourHours = "4h"
+    case eightHours = "8h"
+    case twelveHours = "12h"
+    case never
+
+    /// How many hours the hold lasts, and `nil` for the one ceiling that
+    /// sets no deadline.
+    var hours: Int? {
+        switch self {
+        case .oneHour: return 1
+        case .twoHours: return 2
+        case .fourHours: return 4
+        case .eightHours: return 8
+        case .twelveHours: return 12
+        case .never: return nil
+        }
+    }
+}
+
 /// How long each mode's hold survives without help.
 ///
-/// Values rather than constants so a test can run a whole idle window inside a
-/// test run; `default` is what ships.
+/// Values rather than constants so a test can run a whole idle window, or a
+/// whole ceiling, inside a test run; `default` is what ships.
 struct KeepAwakePolicy: Sendable, Equatable {
     /// Silence that ends an automatic hold.
     ///
@@ -34,17 +71,10 @@ struct KeepAwakePolicy: Sendable, Equatable {
     /// near the throttle would let go in the middle of an exchange.
     let idleWindow: TimeInterval
 
-    /// The longest a manual hold runs before switching itself off.
-    ///
-    /// `auto` has none on purpose: its idle window already bounds it, and
-    /// cutting a hold out from under agents that are demonstrably still
-    /// working is the exact failure the automatic mode exists to prevent. A
-    /// manual hold has no such evidence behind it — it is a switch someone
-    /// flipped, and a switch nobody flips back must not hold a Mac awake for
-    /// a week.
-    let manualCeiling: TimeInterval
+    /// How long one hour of a `KeepAwakeCeiling` lasts.
+    let ceilingHour: TimeInterval
 
-    static let `default` = Self(idleWindow: 10 * 60, manualCeiling: 8 * 60 * 60)
+    static let `default` = Self(idleWindow: 10 * 60, ceilingHour: 60 * 60)
 }
 
 /// The mode together with whether the Mac is actually being held awake right

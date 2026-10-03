@@ -60,18 +60,25 @@ struct GeneralSettingsView: View {
 
     @State private var confirmingDelete = false
 
-    /// What the two armed modes cost. Both the names and both the bounds are
-    /// read rather than written out: a caption that says ten minutes while the
-    /// shipped policy waits fifteen, or that calls a mode by a name the picker
-    /// above it no longer uses, is worse than no caption. These are also the
-    /// only numbers in the app that say when a hold ends, and the only place it
-    /// says what a closed lid does to one.
+    /// What the automatic mode costs. The name and the bound are read rather
+    /// than written out: a caption that says ten minutes while the shipped
+    /// policy waits fifteen, or that calls a mode by a name the picker above
+    /// it no longer uses, is worse than no caption. This and the ceiling row
+    /// under it are the only places the app says when a hold ends, and this
+    /// is the only one that says what a closed lid does to one.
     private var keepAwakeCaption: String {
         let idle = UsageFormat.countdown(KeepAwakePolicy.default.idleWindow)
-        let ceiling = UsageFormat.countdown(KeepAwakePolicy.default.manualCeiling)
-        return "\(UsageFormat.keepAwakeTitle(.auto)) lets go \(idle) after the last turn; "
-            + "\(UsageFormat.keepAwakeTitle(.on)) stops at \(ceiling). "
+        return "\(UsageFormat.keepAwakeTitle(.auto)) lets go \(idle) after the last turn. "
             + "Closing the lid sleeps the Mac either way."
+    }
+
+    /// What happens when the chosen ceiling is reached, and for `never` that
+    /// nothing will: the two ways such a hold still ends are named, because
+    /// both are the user's.
+    private var keepAwakeCeilingCaption: String {
+        model.engine.keepAwakeCeiling.hours == nil
+            ? "It holds until you switch it off or quit Sissy."
+            : "Then it switches itself off."
     }
 
     private var agentHooksCaption: String {
@@ -133,6 +140,7 @@ struct GeneralSettingsView: View {
 
             Section {
                 keepAwake
+                keepAwakeCeiling
                 keepScreenAwake
             }
 
@@ -251,6 +259,23 @@ struct GeneralSettingsView: View {
         }
     }
 
+    private var keepAwakeCeiling: some View {
+        LabeledContent {
+            Picker(Self.keepAwakeCeilingLabel, selection: keepAwakeCeilingBinding) {
+                ForEach(KeepAwakeCeiling.allCases, id: \.self) { ceiling in
+                    Text(UsageFormat.keepAwakeCeilingTitle(ceiling)).tag(ceiling)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        } label: {
+            Text(Self.keepAwakeCeilingLabel)
+            Text(keepAwakeCeilingCaption)
+        }
+    }
+
+    private static let keepAwakeCeilingLabel = "\(UsageFormat.keepAwakeTitle(.on)) stops after"
+
     private var keepScreenAwake: some View {
         SettingsSwitchRow(
             UsageFormat.keepScreenAwakeTitle,
@@ -304,6 +329,13 @@ struct GeneralSettingsView: View {
         Binding(
             get: { model.keepAwake.mode },
             set: { model.setKeepAwake($0) }
+        )
+    }
+
+    private var keepAwakeCeilingBinding: Binding<KeepAwakeCeiling> {
+        Binding(
+            get: { model.engine.keepAwakeCeiling },
+            set: { model.engine.setKeepAwakeCeiling($0) }
         )
     }
 

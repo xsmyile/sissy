@@ -195,6 +195,14 @@ enum UsageFormat {
         }
     }
 
+    /// What each ceiling on `Always` is called, in the picker Settings offers
+    /// them from. Spelled out rather than run through `countdown`, which
+    /// words a time left on a clock rather than a length someone chooses.
+    static func keepAwakeCeilingTitle(_ ceiling: KeepAwakeCeiling) -> String {
+        guard let hours = ceiling.hours else { return "Never" }
+        return hours == 1 ? "1 hour" : "\(hours) hours"
+    }
+
     /// What the screen half of the hold is called, in Settings and in the
     /// cup's menu, for the reason `keepAwakeTitle` is one switch: one setting
     /// worded twice reads as two.

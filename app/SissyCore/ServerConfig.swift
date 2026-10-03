@@ -124,6 +124,10 @@ struct ServerConfig: Sendable, Codable {
     /// setting, not a hold: a user who switched their Mac to never sleep
     /// expects that to survive Sissy restarting at login.
     var keepAwake: KeepAwakeMode
+    /// How long `on` holds before switching itself off. A `server.json`
+    /// written before this key existed lands on the default, which is the
+    /// eight hours it always held for.
+    var keepAwakeCeiling: KeepAwakeCeiling
     /// Whether the keep-awake hold covers the screen as well as the Mac.
     ///
     /// On, which is the hold someone switching keep-awake on from the panel
@@ -197,6 +201,7 @@ struct ServerConfig: Sendable, Codable {
         providers: .defaults,
         historyRetentionDays: nil,
         keepAwake: .off,
+        keepAwakeCeiling: .eightHours,
         keepScreenAwake: true,
         agentHooks: false,
         agentHooksRemovalPending: false,
@@ -374,6 +379,7 @@ extension ServerConfig {
         providers = keys.lenient(.providers) ?? defaults.providers
         historyRetentionDays = keys.lenient(.historyRetentionDays) ?? defaults.historyRetentionDays
         keepAwake = keys.lenient(.keepAwake) ?? defaults.keepAwake
+        keepAwakeCeiling = keys.lenient(.keepAwakeCeiling) ?? defaults.keepAwakeCeiling
         keepScreenAwake = keys.lenient(.keepScreenAwake) ?? defaults.keepScreenAwake
         agentHooks = keys.lenient(.agentHooks) ?? defaults.agentHooks
         agentHooksRemovalPending =

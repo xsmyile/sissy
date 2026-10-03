@@ -114,8 +114,9 @@ project row's right-click menu opens the same page on that repository.
 
 **Keep awake** is the cup in the panel header: *Never*, *While agents are
 working* (holds the Mac while turns land, lets go ten minutes after they stop),
-or *Always* (eight hours, then off). Neither overrides a closed lid, and the
-hold dies with Sissy. Quit and the Mac sleeps normally, with nothing to undo.
+or *Always* (eight hours, then off; Settings makes that one to twelve hours,
+or no limit at all). Neither overrides a closed lid, and the hold dies with
+Sissy. Quit and the Mac sleeps normally, with nothing to undo.
 
 **Settings** is ⌘, or the gear: General, Providers, Mac, Forge, About. **Copy
 diagnostics** lives in About and is what a bug report needs.
@@ -243,7 +244,8 @@ Settings.
 | `claudeDataDir`, `codexDataDir` | `~/.claude/projects`, `~/.codex/sessions` | where to look |
 | `forgeCounters` | all on | which of `merged` / `issues` / `comments` a forge row reads; one off is not fetched ▸ |
 | `statusChecks` | `true` | read each vendor's public status page ▸ |
-| `keepAwake` | `off` | `auto` holds while agents work, releasing after 10 min of silence; `on` holds for 8 hours ▸ |
+| `keepAwake` | `off` | `auto` holds while agents work, releasing after 10 min of silence; `on` holds for `keepAwakeCeiling` ▸ |
+| `keepAwakeCeiling` | `8h` | how long `on` holds before switching itself off: `1h`, `2h`, `4h`, `8h`, `12h` or `never` ▸ |
 | `keepScreenAwake` | `true` | whether that hold covers the screen ▸ |
 | `agentHooks` | `false` | register the `SessionStart` hook with both CLIs ▸ |
 | `historyRetentionDays` | `90` | days of history kept; `0` records none ▸ |

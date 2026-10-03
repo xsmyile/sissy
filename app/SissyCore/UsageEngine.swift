@@ -1105,6 +1105,18 @@ actor UsageEngine {
         persistConfig("agentHooks")
     }
 
+    /// Switch how long `on` holds and persist it.
+    ///
+    /// Re-arms the deadline under a running hold rather than waiting for the
+    /// next one, so a hold that has already outlived a shorter ceiling ends
+    /// now, the way it would have had that ceiling been chosen first.
+    func setKeepAwakeCeiling(_ ceiling: KeepAwakeCeiling) async {
+        guard ceiling != config.keepAwakeCeiling else { return }
+        config.keepAwakeCeiling = ceiling
+        persistConfig("keepAwakeCeiling")
+        rearmKeepAwakeDeadline()
+    }
+
     /// Applied through the same path as the mode, so flipping it under a
     /// running hold drops or adds the screen half without disturbing the
     /// system assertion underneath.
@@ -1172,7 +1184,10 @@ actor UsageEngine {
         switch config.keepAwake {
         case .off: return nil
         case .auto: return (lastAgentActivityAt ?? since) + keepAwakePolicy.idleWindow
-        case .on: return since + keepAwakePolicy.manualCeiling
+        case .on:
+            return config.keepAwakeCeiling.hours.map {
+                since + TimeInterval($0) * keepAwakePolicy.ceilingHour
+            }
         }
     }
 
