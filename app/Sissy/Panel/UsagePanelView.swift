@@ -80,8 +80,8 @@ struct UsagePanelView: View {
 
     /// The archive's reading of the days the panel's period covers, with the
     /// strip drawn from it, for a picked window's headline and any window's
-    /// strip. Fetched while the panel is open and dropped with it, so a
-    /// closed panel reads nothing.
+    /// strip. Fetched while a page that draws it is on screen and dropped
+    /// with the panel, so a closed panel reads nothing.
     @State private var spanAnswer: UsagePanelSnapshot.SpanAnswer?
     /// Each forge's counters over a picked window, fetched only while the
     /// Forge tab is on screen over one. Each carries its own dates, so an
@@ -89,9 +89,10 @@ struct UsagePanelView: View {
     @State private var forgeSpan: [ForgeSpanReading] = []
 
     /// What the span fetch is keyed on: the period and its days, and while
-    /// they reach today the archive's own total, which moves when today's
-    /// file is rewritten. A frame that changed nothing on disk re-reads
-    /// nothing.
+    /// they reach today the archive's own total, which moves only when a
+    /// rollup lands that a rewritten day file changed. A frame that changed
+    /// nothing on disk re-reads nothing, and neither does a page that draws
+    /// none of it, which keys on no span at all.
     private struct SpanFetch: Equatable {
         let period: UsageRange
         let span: UsageDaySpan?
@@ -244,7 +245,8 @@ struct UsagePanelView: View {
             open: open, services: servicesReading(of: open),
             projects: projectsPage(of: live?.frame, snapshot: snapshot),
             days: period == .preset(.today) ? nil : days, earliest: earliest, period: period)
-        let spanFetch = Self.spanFetch(period, days: days, history: history, now: now)
+        let spanFetch = Self.spanFetch(
+            period, days: drawsSpan(period) ? days : nil, history: history, now: now)
         let forgeFetch = forgeFetch(period)
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
@@ -336,6 +338,21 @@ struct UsagePanelView: View {
         }
         let archive = period.includesToday(now: now) ? history[.all] : nil
         return SpanFetch(period: period, span: days, tokens: archive?.tokens, cost: archive?.cost)
+    }
+
+    /// Whether the page on screen draws the span reading: the Usage tab's
+    /// headline and strip, and for a picked window the Sessions tab and the
+    /// projects page, which read their window from it. Every other page
+    /// keeps what was last read without asking again.
+    private func drawsSpan(_ period: UsageRange) -> Bool {
+        switch page {
+        case .overview:
+            tab == .usage || (tab == .sessions && period.isPicked)
+        case .projects:
+            period.isPicked
+        default:
+            false
+        }
     }
 
     /// The picked window the Forge tab is asking the forges about, nil while
