@@ -215,14 +215,17 @@ struct UsagePanelView: View {
         let live = model.liveFrame
         let now = Date()
         let history = live?.frame.history ?? [:]
+        let archiveKept = model.engine.historyRetentionDays > 0
         let period = UsagePanelSnapshot.resolve(
-            model.usagePeriod, periods: UsagePanelSnapshot.availablePeriods(history))
+            model.usagePeriod, periods: UsagePanelSnapshot.availablePeriods(history),
+            archiveKept: archiveKept)
         let earliest = history[.all]?.earliestDay
         let days = UsagePanelSnapshot.windowSpan(period, earliest: earliest, now: now)
         let snapshot = live.map {
             UsagePanelSnapshot.make(
                 frame: $0.frame,
                 period: period,
+                archiveKept: archiveKept,
                 span: spanReading,
                 forgeSpan: forgeSpan,
                 claudeAccounts: model.engine.claudeAccounts,
@@ -691,7 +694,10 @@ struct UsagePanelView: View {
         let periods = live.map { UsagePanelSnapshot.availablePeriods($0.frame.history) } ?? []
         return HStack(spacing: 6) {
             periodButton(
-                periods, chosen: UsagePanelSnapshot.resolve(model.usagePeriod, periods: periods))
+                periods,
+                chosen: UsagePanelSnapshot.resolve(
+                    model.usagePeriod, periods: periods,
+                    archiveKept: model.engine.historyRetentionDays > 0))
             keepAwakeButton(model.keepAwake)
             settingsButton
         }

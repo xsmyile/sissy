@@ -1006,9 +1006,16 @@ struct UsagePanelSnapshot: Equatable {
     /// window's strip is drawn from. A reading of other days is ignored, so a
     /// reply that lands after the period moved cannot answer for the new one.
     /// `forgeSpan` is the forge's answer for a picked window, by the same rule.
+    ///
+    /// `archiveKept` is whether the archive is switched on, which the frame
+    /// cannot say: it carries no windows both while the archive is off and
+    /// in the moment after launch before the engine's first rollup lands.
+    /// With the archive on, a chosen window is kept through that moment and
+    /// reads as the dash rather than as today's figure under its name.
     static func make(
         frame: FrameData,
         period: UsageRange = .preset(.today),
+        archiveKept: Bool = false,
         span: UsageSpanReading? = nil,
         forgeSpan: [ForgeSpanReading] = [],
         claudeAccounts: ClaudeAccountRegistry.Snapshot = .init(),
@@ -1022,7 +1029,7 @@ struct UsagePanelSnapshot: Equatable {
             frame.providers, claudeAccounts: claudeAccounts, status: frame.providerStatus,
             totalTokens: totalTokens, limitsReading: limitsReading, now: now)
         let periods = availablePeriods(frame.history)
-        let resolved = resolve(period, periods: periods)
+        let resolved = resolve(period, periods: periods, archiveKept: archiveKept)
         let days = windowSpan(
             resolved, earliest: frame.history[.all]?.earliestDay, now: now, calendar: calendar)
         let reading = span.flatMap { days.map(UsageRange.days) == $0.rollup.period ? $0 : nil }
@@ -1033,7 +1040,8 @@ struct UsagePanelSnapshot: Equatable {
             case .days: reading?.rollup
             }
         let isToday = resolved == .preset(.today)
-        let unread = resolved.isPicked && window?.earliestDay == nil
+        let unread =
+            resolved.isPicked ? reading?.hasReading != true : !isToday && window == nil
         let includesToday = resolved.includesToday(now: now, calendar: calendar)
         return Self(
             period: resolved,
@@ -1089,10 +1097,20 @@ struct UsagePanelSnapshot: Equatable {
     /// The period the panel can answer: a preset the archive carries, a
     /// picked window while there is an archive to read it from, and today
     /// otherwise.
-    static func resolve(_ period: UsageRange, periods: [UsagePeriod]) -> UsageRange {
+    ///
+    /// A frame carrying no window at all with the archive kept is one whose
+    /// rollups have not landed yet, so the chosen window stands and its figure
+    /// waits; a frame carrying some windows but not the chosen one answers
+    /// for an archive that cannot reach it, and falls back.
+    static func resolve(
+        _ period: UsageRange, periods: [UsagePeriod], archiveKept: Bool = false
+    ) -> UsageRange {
+        let pending = archiveKept && periods.count == 1
         switch period {
-        case .preset(let preset): periods.contains(preset) ? period : .preset(.today)
-        case .days: periods.count > 1 ? period : .preset(.today)
+        case .preset(let preset):
+            return periods.contains(preset) || pending ? period : .preset(.today)
+        case .days:
+            return periods.count > 1 || archiveKept ? period : .preset(.today)
         }
     }
 

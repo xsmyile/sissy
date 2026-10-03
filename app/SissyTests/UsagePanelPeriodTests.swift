@@ -156,6 +156,26 @@ final class UsagePanelPeriodTests: XCTestCase {
         XCTAssertEqual(snapshot.cost, "$1.00")
     }
 
+    /// In the moment after launch the frame carries no windows until the
+    /// engine's first rollup lands. With the archive kept, a chosen window
+    /// stands and reads as the dash rather than as today's figure under its
+    /// name; a picked one still reads its own span.
+    func testAChosenWindowWaitsForTheFirstRollupRatherThanReadingToday() throws {
+        let picked = try span(-3, -3)
+        let week = UsagePanelSnapshot.make(
+            frame: frame(history: [:]), period: .preset(.sevenDays), archiveKept: true, now: now)
+        let day = UsagePanelSnapshot.make(
+            frame: frame(history: [:]), period: .days(picked), archiveKept: true,
+            span: reading(picked, filed: [-3]), now: now)
+
+        XCTAssertEqual(week.period, .preset(.sevenDays))
+        XCTAssertEqual(week.cost, "—")
+        XCTAssertEqual(week.tokens, "—")
+        XCTAssertTrue(week.projects.isEmpty)
+        XCTAssertEqual(day.period, .days(picked))
+        XCTAssertEqual(day.cost, "$2.00")
+    }
+
     // MARK: Projects
 
     /// Under seven days the projects block and its page read the week from the
