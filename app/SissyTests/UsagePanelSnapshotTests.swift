@@ -540,11 +540,11 @@ final class UsagePanelSnapshotTests: XCTestCase {
     func testTheHeadlineIsTheSelectedWindowsOwnTotal() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("codex", 10, "1.00")], history: archive()),
-            period: .sevenDays,
+            period: .preset(.sevenDays),
             now: Self.now
         )
 
-        XCTAssertEqual(snapshot.period, .sevenDays)
+        XCTAssertEqual(snapshot.period, .preset(.sevenDays))
         XCTAssertEqual(snapshot.tokens, "2.5M")
         XCTAssertEqual(snapshot.cost, "$41.50")
     }
@@ -555,7 +555,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
     func testTodayIsTheLiveTotalAndNotTheArchivesCopyOfIt() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("codex", 10, "1.00")], history: archive()),
-            period: .today,
+            period: .preset(.today),
             now: Self.now
         )
 
@@ -569,10 +569,10 @@ final class UsagePanelSnapshotTests: XCTestCase {
         let short = archive(earliestOffset: -2)
         let today = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("codex", 10, "1.00")], history: short),
-            period: .today, now: Self.now)
+            period: .preset(.today), now: Self.now)
         let week = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("codex", 10, "1.00")], history: short),
-            period: .sevenDays, now: Self.now)
+            period: .preset(.sevenDays), now: Self.now)
 
         XCTAssertNotNil(today.burn)
         XCTAssertNil(today.coverage)
@@ -585,12 +585,12 @@ final class UsagePanelSnapshotTests: XCTestCase {
     func testWithNoArchiveThereIsOnlyTodayAndNoControl() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("codex", 10, "1.00")]),
-            period: .thirtyDays,
+            period: .preset(.thirtyDays),
             now: Self.now
         )
 
         XCTAssertEqual(snapshot.periods, [.today])
-        XCTAssertEqual(snapshot.period, .today)
+        XCTAssertEqual(snapshot.period, .preset(.today))
         XCTAssertEqual(snapshot.cost, "$1.00")
     }
 
@@ -601,11 +601,11 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(
                 providers: [slice("codex", 10, "1.00")],
                 history: [.sevenDays: rollup(.sevenDays, earliestOffset: -6)]),
-            period: .all,
+            period: .preset(.all),
             now: Self.now
         )
 
-        XCTAssertEqual(snapshot.period, .today)
+        XCTAssertEqual(snapshot.period, .preset(.today))
     }
 
     private static let now = Date()

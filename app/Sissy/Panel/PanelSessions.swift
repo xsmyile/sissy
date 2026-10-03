@@ -36,7 +36,7 @@ import SwiftUI
 struct PanelSessions: View {
     let block: UsagePanelSnapshot.AgentsBlock
     /// The panel's window, which the counted half answers for.
-    let period: UsagePeriod
+    let period: UsageRange
     /// When the sweep behind the live half was taken, which the tab's own
     /// label dates since the header above belongs to the whole panel.
     let observedAt: Date?
@@ -68,12 +68,12 @@ struct PanelSessions: View {
 
     /// The window the counted half answers for: the panel's, or today where
     /// the archive has not counted that one.
-    private var shownPeriod: UsagePeriod {
-        block.counted[period] == nil ? .today : period
+    private var shownPeriod: UsageRange {
+        block.window(for: period) == nil ? .preset(.today) : period
     }
 
     private var shown: UsagePanelSnapshot.AgentsBlock.Window? {
-        block.counted[shownPeriod]
+        block.window(for: shownPeriod)
     }
 
     var body: some View {

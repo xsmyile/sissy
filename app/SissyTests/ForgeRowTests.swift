@@ -75,7 +75,7 @@ final class ForgeRowTests: XCTestCase {
         let frame = FrameBuilder.build(
             today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [], history: history,
             forge: readings)
-        return UsagePanelSnapshot.make(frame: frame, period: period, now: now).forge
+        return UsagePanelSnapshot.make(frame: frame, period: .preset(period), now: now).forge
     }
 
     /// The caption the row draws, which the view words on its own clock rather
@@ -108,7 +108,7 @@ final class ForgeRowTests: XCTestCase {
     func testTheHoverNamesWhenTheVendorsDayStartsHere() {
         let dayStart = Self.readAt.addingTimeInterval(59 * 60)
         let tooltip = UsageFormat.forgeTooltip(
-            .gitLab, host: Self.gitLab.host, login: "davide", period: .today,
+            .gitLab, host: Self.gitLab.host, login: "davide", period: .preset(.today),
             boundedToOneYear: false, vendorDayStart: dayStart)
         XCTAssertTrue(
             tooltip.contains(
@@ -161,8 +161,8 @@ final class ForgeRowTests: XCTestCase {
                 Self.reading(
                     Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7)
             ])
-        let snapshot = UsagePanelSnapshot.make(frame: frame, period: .all, now: Self.readAt)
-        XCTAssertEqual(snapshot.period, .today)
+        let snapshot = UsagePanelSnapshot.make(frame: frame, period: .preset(.all), now: Self.readAt)
+        XCTAssertEqual(snapshot.period, .preset(.today))
         XCTAssertEqual(snapshot.forge.first?.contributions, "128")
     }
 

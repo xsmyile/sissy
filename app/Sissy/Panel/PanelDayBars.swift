@@ -67,6 +67,10 @@ struct PanelDayBars: View {
     /// would let the caption name one day while the pills answered for
     /// another.
     @Binding var hovered: String?
+    /// Reads the clicked day, where the strip is a way into it: the
+    /// Overview's strip sets the panel's period to that day, and a provider's
+    /// page, whose strip is a picture of its week, passes none.
+    var select: ((Date) -> Void)?
 
     private var pointed: UsagePanelSnapshot.DayRow? {
         hovered.flatMap { key in strip.rows.first { $0.id == key } }
@@ -131,6 +135,12 @@ struct PanelDayBars: View {
         }
         .frame(width: slot)
         .contentShape(.rect)
+        .onTapGesture {
+            guard let select, let day = UsageReaderShared.dayFormatter.date(from: row.id) else {
+                return
+            }
+            select(day)
+        }
         .onHover { inside in
             if inside {
                 hovered = row.id
