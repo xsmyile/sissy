@@ -844,12 +844,17 @@ struct UsagePanelView: View {
     ///
     /// The cup steams while the hold is in force, which says the effect in the
     /// glyph as well as in the glass: the tint is the mode, the steam and the
-    /// fill are what came of it.
+    /// fill are what came of it. One glyph in both states, with the steam
+    /// faded rather than swapped out: the only cup without steam the symbol
+    /// set has is the one on a saucer, and the two together read as two
+    /// different controls (decided 2026-10-03). Hiding the steam layer instead
+    /// leaves the cup's rim cut where the steam meets it.
     private func keepAwakeButton(_ state: KeepAwakeState) -> some View {
         Menu {
             keepAwakeMenu
         } label: {
-            Image(systemName: state.active ? "cup.and.heat.waves.fill" : "cup.and.saucer.fill")
+            Image(systemName: "cup.and.heat.waves.fill")
+                .symbolRenderingMode(state.active ? .monochrome : .hierarchical)
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
                 .foregroundStyle(state.mode == .off ? Color.secondary : Color.blue)
