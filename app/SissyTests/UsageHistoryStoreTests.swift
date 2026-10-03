@@ -813,6 +813,211 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertEqual(keys, ["from": day(-9), "to": day(-2)])
     }
 
+    /// A preference written by a later build can name a window this one does
+    /// not offer, and it has to be refused as that rather than as a span
+    /// missing its keys, so the caller can tell and fall back.
+    func testAnUnknownStoredWindowIsRefusedAsAnUnknownPreset() throws {
+        let stored = try JSONEncoder().encode("14d")
+
+        XCTAssertThrowsError(try JSONDecoder().decode(UsageRange.self, from: stored)) { error in
+            guard case DecodingError.dataCorrupted(let context) = error else {
+                return XCTFail("refused as \(error) rather than as an unknown window")
+            }
+            XCTAssertTrue(context.debugDescription.contains("14d"), context.debugDescription)
+        }
+    }
+
+    /// A stored span is held to today as the clock reads it when it is read
+    /// back, not as it read when it was picked, so a window that has come to
+    /// name a day after today is refused rather than read.
+    func testAStoredSpanEndingAfterTodayIsRefused() throws {
+        let future = try JSONEncoder().encode(["from": day(-1), "to": day(1)])
+        let past = try JSONEncoder().encode(["from": day(-3), "to": day(-1)])
+
+        XCTAssertThrowsError(try JSONDecoder().decode(UsageRange.self, from: future))
+        XCTAssertEqual(
+            try JSONDecoder().decode(UsageRange.self, from: past), .days(try span(-3, -1)))
+    }
+
+    /// The two dates a span was picked as are what it names after the Mac
+    /// changes zone: its midnights, what it contains and whether it reaches
+    /// today all follow the zone in force, as the archive's keys do.
+    func testASpanNamesTheSameDatesAfterTheZoneMoves() throws {
+        let launchZone = NSTimeZone.default
+        defer { NSTimeZone.default = launchZone }
+        let rome = try XCTUnwrap(TimeZone(identifier: "Europe/Rome"))
+        let newYork = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        NSTimeZone.default = rome
+        let picked = try XCTUnwrap(
+            UsageDaySpan(
+                from: try instant(2026, 9, 10, hour: 0, in: rome),
+                to: try instant(2026, 9, 12, hour: 0, in: rome),
+                now: try instant(2026, 9, 20, hour: 12, in: rome)))
+
+        NSTimeZone.default = newYork
+
+        XCTAssertEqual(picked.dayKeys, ["2026-09-10", "2026-09-11", "2026-09-12"])
+        XCTAssertEqual(picked.from, try instant(2026, 9, 10, hour: 0, in: newYork))
+        XCTAssertEqual(picked.to, try instant(2026, 9, 12, hour: 0, in: newYork))
+        XCTAssertTrue(picked.contains(try instant(2026, 9, 12, hour: 23, in: newYork)))
+        XCTAssertFalse(picked.contains(try instant(2026, 9, 13, hour: 0, in: newYork)))
+        XCTAssertTrue(picked.includesToday(now: try instant(2026, 9, 12, hour: 20, in: newYork)))
+        XCTAssertEqual(picked.dayCount(), 3)
+    }
+
+    /// The zones furthest from UTC on either side, and Auckland on the day
+    /// its clocks go forward, each name the date the instant falls on and
+    /// start it at that date's own first instant.
+    func testASpanFindsItsMidnightInTheZonesFurthestFromUTC() throws {
+        let launchZone = NSTimeZone.default
+        defer { NSTimeZone.default = launchZone }
+        for (identifier, day) in [
+            ("Pacific/Kiritimati", 27), ("Etc/GMT+12", 27), ("Pacific/Auckland", 27),
+        ] {
+            let zone = try XCTUnwrap(TimeZone(identifier: identifier))
+            NSTimeZone.default = zone
+            let noon = try instant(2026, 9, day, hour: 12, in: zone)
+
+            let picked = try XCTUnwrap(UsageDaySpan(from: noon, to: noon, now: noon))
+
+            XCTAssertEqual(picked.dayKeys, ["2026-09-\(day)"], identifier)
+            XCTAssertEqual(picked.from, Calendar.current.startOfDay(for: noon), identifier)
+            XCTAssertTrue(picked.contains(picked.from), identifier)
+        }
+    }
+
+    /// Santiago's clocks skip from Saturday 23:59 to Sunday 01:00 on 6
+    /// September 2026, so that day has no midnight. A span across it keys
+    /// every day as the preset of the same days does, and contains each.
+    func testASpanAcrossAMidnightThatDoesNotExistKeysItsDaysAsThePresetDoes() throws {
+        let launchZone = NSTimeZone.default
+        defer { NSTimeZone.default = launchZone }
+        let santiago = try XCTUnwrap(TimeZone(identifier: "America/Santiago"))
+        NSTimeZone.default = santiago
+        for name in ["2026-09-05", "2026-09-06", "2026-09-07"] {
+            try write(provider: "codex", day: name, models: ["a": totals(input: 1, cost: "1")])
+        }
+        let now = try instant(2026, 9, 7, hour: 12, in: santiago)
+        let picked = try XCTUnwrap(
+            UsageDaySpan(from: try instant(2026, 9, 1, hour: 12, in: santiago), to: now, now: now))
+
+        let reading = UsageHistoryStore.reading(over: picked, in: root)
+        let week = try XCTUnwrap(
+            UsageHistoryStore.rollups(for: [.sevenDays], in: root, now: now)[.sevenDays])
+
+        let cal = Calendar.current
+        XCTAssertEqual(
+            reading.days.map(\.day),
+            try [5, 6, 7].map { cal.startOfDay(for: try instant(2026, 9, $0, hour: 12, in: santiago)) })
+        XCTAssertTrue(reading.days.allSatisfy { picked.contains($0.day) })
+        XCTAssertEqual(reading.rollup.tokens, week.tokens)
+        XCTAssertEqual(reading.rollup.earliestDay, week.earliestDay)
+    }
+
+    /// A cached day keeps the paths it wrote and no answer about them, so a
+    /// rollup through a resolver that answers differently splits by that
+    /// resolver's answer however warm the cache is.
+    func testACachedDayIsAttributedByTheResolverItIsSummedThrough() throws {
+        let later = root.appendingPathComponent("later")
+        try FileManager.default.createDirectory(at: later, withIntermediateDirectories: true)
+        try writeRows(
+            provider: "codex", day: day(-1),
+            rows: [UsageHistoryRow(model: "b", project: later.path): totals(input: 20, cost: "2")])
+        var cache = UsageHistoryDayCache()
+        let before = UsageHistoryStore.rollups(
+            for: [.all], in: root, cache: &cache, projects: ProjectResolver())[.all]
+        try FileManager.default.createDirectory(
+            at: later.appendingPathComponent(".git"), withIntermediateDirectories: true)
+
+        let after = UsageHistoryStore.rollups(
+            for: [.all], in: root, cache: &cache, projects: ProjectResolver())[.all]
+
+        XCTAssertEqual(before?.projects, [])
+        XCTAssertEqual(after?.projects.map(\.tokens), [20])
+        XCTAssertEqual(after?.unattributed, UsageSpend())
+    }
+
+    /// The frame's preset and a span picked over the same days are read
+    /// through one reader, and split every repository the same way.
+    func testAPresetAndASpanOverTheSameDaysSplitAlike() async throws {
+        let repo = try repository("repo")
+        let worktree = root.appendingPathComponent("gone-worktree")
+        try writeRows(
+            provider: "claude-code", day: day(0),
+            rows: [UsageHistoryRow(model: "a", project: repo.path): totals(input: 10, cost: "1")])
+        try writeRows(
+            provider: "codex", day: day(-3),
+            rows: [
+                UsageHistoryRow(model: "b", project: repo.appendingPathComponent("app").path):
+                    totals(input: 20, cost: "2"),
+                UsageHistoryRow(model: "b", project: worktree.path): totals(input: 40, cost: "4"),
+                UsageHistoryRow(model: "b", project: nil): totals(input: 5, cost: "1"),
+            ])
+        let reader = UsageHistoryReader(directory: root, ledger: ProjectLedger())
+
+        let presets = await reader.rollups(
+            for: [.sevenDays], now: Date(), pricing: .seed, generation: 0)
+        let picked = await reader.reading(over: try span(-6, 0), pricing: .seed).rollup
+
+        let week = try XCTUnwrap(presets[.sevenDays])
+
+        XCTAssertEqual(picked.projects, week.projects)
+        XCTAssertEqual(picked.unattributed, week.unattributed)
+        XCTAssertEqual(picked.spendByProvider, week.spendByProvider)
+        XCTAssertEqual(picked.tokens, week.tokens)
+        XCTAssertEqual(week.projects.map(\.tokens), [30])
+        XCTAssertEqual(week.unattributed, UsageSpend(tokens: 45, cost: 5))
+    }
+
+    /// The residue is what keeps the split honest: a checkout deleted since
+    /// its day was written, whether the ledger remembers it or never saw it,
+    /// leaves its money in the window's total under one of the two.
+    func testTheSplitAddsUpToTheWindowWhenACheckoutHasBeenDeleted() throws {
+        let repo = try repository("repo")
+        let remembered = root.appendingPathComponent("remembered-worktree")
+        try FileManager.default.createDirectory(at: remembered, withIntermediateDirectories: true)
+        try "gitdir: \(repo.path)/.git/worktrees/remembered\n".write(
+            to: remembered.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        let ledger = ProjectLedger()
+        XCTAssertNotNil(ProjectResolver(ledger: ledger).project(for: remembered.path))
+        try FileManager.default.removeItem(at: remembered)
+        let neverSeen = root.appendingPathComponent("never-seen/checkout")
+        try writeRows(
+            provider: "codex", day: day(-2),
+            rows: [
+                UsageHistoryRow(model: "b", project: repo.path): totals(input: 1, cost: "0.1"),
+                UsageHistoryRow(model: "b", project: remembered.path): totals(input: 20, cost: "2"),
+                UsageHistoryRow(model: "b", project: neverSeen.path): totals(input: 300, cost: "30"),
+                UsageHistoryRow(model: "c", project: nil): totals(input: 4000, cost: "400"),
+            ])
+
+        let resolver = ProjectResolver(ledger: ledger)
+        let week = try XCTUnwrap(
+            UsageHistoryStore.rollups(for: [.sevenDays], in: root, projects: resolver)[.sevenDays])
+        let picked = UsageHistoryStore.reading(over: try span(-6, 0), in: root, projects: resolver)
+            .rollup
+
+        for rollup in [week, picked] {
+            XCTAssertEqual(rollup.projects.map(\.tokens), [21])
+            XCTAssertEqual(rollup.unattributed, UsageSpend(tokens: 4300, cost: 430))
+            XCTAssertEqual(
+                rollup.projects.reduce(0) { $0 + $1.tokens } + rollup.unattributed.tokens,
+                rollup.tokens)
+            XCTAssertEqual(
+                rollup.projects.reduce(Decimal(0)) { $0 + $1.cost } + rollup.unattributed.cost,
+                rollup.cost)
+        }
+    }
+
+    private func instant(_ year: Int, _ month: Int, _ day: Int, hour: Int, in zone: TimeZone)
+        throws -> Date
+    {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = zone
+        return try XCTUnwrap(
+            cal.date(from: DateComponents(year: year, month: month, day: day, hour: hour)))
+    }
+
     private func week(in root: URL) throws -> UsageHistoryRollup {
         try XCTUnwrap(UsageHistoryStore.rollups(for: [.sevenDays], in: root)[.sevenDays])
     }

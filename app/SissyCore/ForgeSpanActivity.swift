@@ -31,6 +31,8 @@ enum ForgeSpanAbsence: Error, Sendable, Equatable {
     case incomplete
     case notOpened
     case invalidDates
+    case deadlineExceeded
+    case monitorChanged
     case failure(ForgeReadFailure)
 }
 
@@ -45,6 +47,15 @@ struct ForgeSpanReading: Sendable, Equatable, Identifiable {
     let to: Date
     let readAt: Date
     var counters: [ForgeSpanMetric: ForgeSpanCounter]
+
+    var isCacheable: Bool {
+        !counters.values.contains { counter in
+            switch counter {
+            case .unavailable(.failure), .unavailable(.deadlineExceeded), .unavailable(.monitorChanged): true
+            default: false
+            }
+        }
+    }
 
     static func unavailable(
         _ connection: ForgeConnection, dates: (Date, Date), now: Date,
@@ -63,7 +74,7 @@ struct ForgeSpanReading: Sendable, Equatable, Identifiable {
 /// On-demand counters only: no event line, billing request, or change to periodic readings.
 enum ForgeSpanFeed {
     /// UTC request boundaries, not the engine's selected-window value.
-    struct VendorBounds {
+    struct VendorBounds: Hashable {
         let start: Date
         let end: Date
         let after: String
@@ -77,11 +88,17 @@ enum ForgeSpanFeed {
     /// the following UTC midnight. GitHub's calendar ends at 23:59:59 UTC on
     /// the named final date; instant filters use the exclusive next midnight.
     /// Today's end is capped at now. GitLab events use the following date as
-    /// their exclusive before boundary and the preceding date as after.
+    /// their proposed exclusive before boundary and the preceding date as after.
+    /// GitLab exclusivity is unmeasured: on 2026-10-03 the configured host
+    /// gitlab.sermix.com timed out during glab authentication verification.
     static func bounds(
         from: Date, to: Date, now: Date, calendar: Calendar = .current
     ) -> VendorBounds? {
-        guard from <= to, to <= calendar.startOfDay(for: now),
+        let firstDay = calendar.startOfDay(for: from)
+        let lastDay = calendar.startOfDay(for: to)
+        guard firstDay <= lastDay, lastDay <= calendar.startOfDay(for: now),
+            let days = calendar.dateComponents([.day], from: firstDay, to: lastDay).day,
+            days < 3650,
             let zone = TimeZone(secondsFromGMT: 0)
         else { return nil }
         let formatter = DateFormatter()
@@ -199,8 +216,11 @@ enum ForgeSpanFeed {
 
     /// At most 365 UTC days per contribution field, so multi-year picks stay
     /// inside GitHub's one-year limit without overlapping a calendar bucket.
-    /// Verified with a constructed three-year pick 2026-10-03.
+    /// Constructed three-year and 3650-day picks verified 2026-10-03; no
+    /// multi-year vendor reply was measured. At most ten year-sized fields
+    /// are requested, and longer picks are invalid rather than truncated.
     static func contributionRanges(start: Date, end: Date) -> [(Date, Date)] {
+        guard start <= end, end.timeIntervalSince(start) < 3650 * 86400 else { return [] }
         var ranges: [(Date, Date)] = []
         var cursor = start
         while cursor <= end {
@@ -296,6 +316,14 @@ enum ForgeSpanFeed {
         counters enabled: Set<ForgeCounter>, calendar: Calendar = .current
     ) throws -> ForgeSpanReading {
         let (from, to) = dates
+        guard let bounds = bounds(from: from, to: to, now: now, calendar: calendar),
+            !contributionRanges(start: bounds.start, end: bounds.end).isEmpty
+        else {
+            return .unavailable(connection, dates: dates, now: now, enabled: enabled, reason: .invalidDates)
+        }
+        if let reason = failures["viewer"], payload["viewer"] as? [String: Any] == nil {
+            return .unavailable(connection, dates: dates, now: now, enabled: enabled, reason: reason)
+        }
         let login = try GitHubActivityFeed.login(fromProbe: payload)
         let viewer = payload["viewer"] as? [String: Any] ?? [:]
         var reading = ForgeSpanReading.unavailable(
@@ -304,7 +332,6 @@ enum ForgeSpanFeed {
         reading = ForgeSpanReading(
             id: reading.id, kind: reading.kind, host: reading.host,
             login: login, from: from, to: to, readAt: now, counters: reading.counters)
-        guard let bounds = bounds(from: from, to: to, now: now, calendar: calendar) else { return reading }
         do {
             var total = 0
             var missing: ForgeSpanAbsence?
@@ -314,7 +341,9 @@ enum ForgeSpanFeed {
                     let contribution = block["contributionCalendar"] as? [String: Any],
                     let value = contribution["totalContributions"] as? Int, value >= 0
                 else {
-                    missing = failures[alias] ?? failures["*"] ?? .failure(.malformed)
+                    missing =
+                        failures[alias] ?? failures["contributionsCollection"] ?? failures["viewer"]
+                        ?? failures["*"] ?? .failure(.malformed)
                     break
                 }
                 total += value
@@ -330,7 +359,8 @@ enum ForgeSpanFeed {
         }
         if enabled.contains(.comments) {
             reading.counters[.comments] =
-                (failures["comments"] ?? failures["*"]).map(ForgeSpanCounter.unavailable)
+                (failures["comments"] ?? failures["viewer"] ?? failures["*"]).map(
+                    ForgeSpanCounter.unavailable)
                 ?? commentCount(
                     viewer, start: bounds.start, end: bounds.upper, inclusiveEnd: bounds.upper == now)
         }
@@ -386,13 +416,18 @@ enum ForgeSpanFeed {
             let message = (error["message"] as? String ?? "").lowercased()
             let reason: ForgeSpanAbsence =
                 type == "FORBIDDEN" || type == "INSUFFICIENT_SCOPES"
-                    || message.contains("scope") ? .missingScope : .failure(.malformed)
+                    || (type == nil && message.contains("scope")) ? .missingScope : .failure(.malformed)
             let path = (error["path"] as? [Any] ?? []).compactMap { $0 as? String }
             if path.isEmpty { failures["*"] = reason }
-            for field in path { failures[field] = reason }
+            let field =
+                path.first {
+                    ["merged", "issues", "comments", "contributionsCollection"].contains($0)
+                        || $0.hasPrefix("contrib")
+                } ?? path.last
+            if let field { failures[field] = reason }
         }
         guard let data = root["data"] as? [String: Any] else {
-            throw failures["*"] ?? .failure(.malformed)
+            throw failures["*"] ?? failures["viewer"] ?? .failure(.malformed)
         }
         return (data, failures)
     }
