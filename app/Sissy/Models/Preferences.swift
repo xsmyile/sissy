@@ -73,6 +73,15 @@ struct Preferences: Codable, Equatable {
         return usagePeriod
     }
 
+    /// When the window picked on the calendar stops being the panel's period,
+    /// nil for a preset and for a window that has stopped already.
+    func pickedPeriodExpiry(now: Date = Date()) -> Date? {
+        guard period(now: now) != .preset(.today), let pickedAt = usagePeriodPickedAt else {
+            return nil
+        }
+        return pickedAt.addingTimeInterval(Self.pickedPeriodLifetime)
+    }
+
     /// Backwards-compatible decoder so a `preferences.json` written by an
     /// older build still loads, with anything it predates defaulted, instead
     /// of forcing a wipe-and-restart on first launch.

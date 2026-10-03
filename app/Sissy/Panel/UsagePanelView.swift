@@ -216,8 +216,10 @@ struct UsagePanelView: View {
         let now = Date()
         let history = live?.frame.history ?? [:]
         let archiveKept = model.engine.historyRetentionDays > 0
+        let chosen = model.usagePeriod(now: now)
+        let expiry = model.preferences.pickedPeriodExpiry(now: now)
         let period = UsagePanelSnapshot.resolve(
-            model.usagePeriod, periods: UsagePanelSnapshot.availablePeriods(history),
+            chosen, periods: UsagePanelSnapshot.availablePeriods(history),
             archiveKept: archiveKept)
         let earliest = history[.all]?.earliestDay
         let days = UsagePanelSnapshot.windowSpan(period, earliest: earliest, now: now)
@@ -238,7 +240,7 @@ struct UsagePanelView: View {
         let readings = PageReadings(
             open: open, services: servicesReading(of: open),
             projects: projectsPage(of: live?.frame, snapshot: snapshot),
-            days: period == .preset(.today) ? nil : days, earliest: earliest)
+            days: period == .preset(.today) ? nil : days, earliest: earliest, period: period)
         let spanFetch = Self.spanFetch(period, days: days, history: history, now: now)
         let forgeFetch = forgeFetch(period)
         return VStack(alignment: .leading, spacing: 0) {
@@ -290,6 +292,20 @@ struct UsagePanelView: View {
                 page = .overview
             }
         }
+        .onChange(of: chosen != model.preferences.usagePeriod, initial: true) { _, retired in
+            if retired { model.retireExpiredUsagePeriod(now: Date()) }
+        }
+        .task(id: expiry) {
+            guard let expiry else { return }
+            while expiry.timeIntervalSinceNow > 0 {
+                do {
+                    try await Task.sleep(for: .seconds(expiry.timeIntervalSinceNow))
+                } catch {
+                    return
+                }
+            }
+            model.retireExpiredUsagePeriod(now: Date())
+        }
         .task(id: spanFetch) {
             guard let span = spanFetch.span else { return }
             let reading = await model.engine.usageHistoryReading(over: span)
@@ -338,6 +354,8 @@ struct UsagePanelView: View {
         let days: UsageDaySpan?
         /// The first day the archive holds, which bounds the calendar.
         let earliest: Date?
+        /// The period the panel reads over, resolved once for this render.
+        let period: UsageRange
     }
 
     /// The header for `target`, exhaustive over every `Page` case so a case
@@ -348,22 +366,22 @@ struct UsagePanelView: View {
     ) -> some View {
         switch target {
         case .overview:
-            header(live)
+            header(live, period: readings.period)
         case .provider:
-            providerOrHomeHeader(readings.open, live: live) { _ in .overview }
+            providerOrHomeHeader(readings.open, live: live, period: readings.period) { _ in .overview }
         case .services:
-            providerOrHomeHeader(readings.open, live: live) { row in
+            providerOrHomeHeader(readings.open, live: live, period: readings.period) { row in
                 readings.services == nil ? .overview : .provider(row.id, account: openAccount)
             }
         case .effort:
-            providerOrHomeHeader(readings.open, live: live) { row in
+            providerOrHomeHeader(readings.open, live: live, period: readings.period) { row in
                 .provider(row.id, account: openAccount)
             }
         case .projects:
             if let projects = readings.projects {
                 projectsHeader(projects)
             } else {
-                header(live)
+                header(live, period: readings.period)
             }
         case .identities:
             identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt)
@@ -381,13 +399,13 @@ struct UsagePanelView: View {
     /// spenders, and a day rolls over while a provider's page is open.
     @ViewBuilder
     private func providerOrHomeHeader(
-        _ open: UsagePanelSnapshot.ProviderRow?, live: SissyModel.LiveFrame?,
+        _ open: UsagePanelSnapshot.ProviderRow?, live: SissyModel.LiveFrame?, period: UsageRange,
         back: (UsagePanelSnapshot.ProviderRow) -> Page
     ) -> some View {
         if let open {
             providerHeader(open, live: live, back: back(open))
         } else {
-            header(live)
+            header(live, period: period)
         }
     }
 
@@ -661,7 +679,7 @@ struct UsagePanelView: View {
         .help(help)
     }
 
-    private func header(_ live: SissyModel.LiveFrame?) -> some View {
+    private func header(_ live: SissyModel.LiveFrame?, period: UsageRange) -> some View {
         let menuHeader = model.menuSnapshot.header
         return HStack(spacing: 10) {
             PanelSissy(
@@ -681,7 +699,7 @@ struct UsagePanelView: View {
 
             Spacer(minLength: 0)
 
-            headerControls(live)
+            headerControls(live, chosen: period)
         }
         .padding(.horizontal, PanelMetrics.gutter)
         .padding(.vertical, Self.headerVerticalPadding)
@@ -690,14 +708,10 @@ struct UsagePanelView: View {
     /// The app's own switches, which is why they are here and not on a
     /// provider's page: which window the panel reads over, what the Mac is
     /// doing about sleep, and the way into Settings. None is about an account.
-    private func headerControls(_ live: SissyModel.LiveFrame?) -> some View {
+    private func headerControls(_ live: SissyModel.LiveFrame?, chosen: UsageRange) -> some View {
         let periods = live.map { UsagePanelSnapshot.availablePeriods($0.frame.history) } ?? []
         return HStack(spacing: 6) {
-            periodButton(
-                periods,
-                chosen: UsagePanelSnapshot.resolve(
-                    model.usagePeriod, periods: periods,
-                    archiveKept: model.engine.historyRetentionDays > 0))
+            periodButton(periods, chosen: chosen)
             keepAwakeButton(model.keepAwake)
             settingsButton
         }

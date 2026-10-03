@@ -157,6 +157,7 @@ final class PreferencesTests: XCTestCase {
         let prefs = Preferences(usagePeriod: .days(span), usagePeriodPickedAt: now.addingTimeInterval(60))
 
         XCTAssertEqual(prefs.period(now: now), .preset(.today))
+        XCTAssertNil(prefs.pickedPeriodExpiry(now: now))
     }
 
     /// A stored window whose last day has come to be after today, which a
@@ -175,5 +176,21 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(
             Preferences(usagePeriod: .days(endingToday), usagePeriodPickedAt: now).period(now: now),
             .days(endingToday))
+    }
+
+    /// The expiry is the instant the pick turns a day old, and nothing for a
+    /// preset.
+    func testAPickedWindowExpiresADayAfterItWasPicked() throws {
+        let pickedAt = Date()
+        let span = try XCTUnwrap(
+            UsageDaySpan(
+                from: pickedAt.addingTimeInterval(-86_400), to: pickedAt.addingTimeInterval(-86_400),
+                now: pickedAt))
+        let prefs = Preferences(usagePeriod: .days(span), usagePeriodPickedAt: pickedAt)
+
+        XCTAssertEqual(
+            prefs.pickedPeriodExpiry(now: pickedAt),
+            pickedAt.addingTimeInterval(Preferences.pickedPeriodLifetime))
+        XCTAssertNil(Preferences(usagePeriod: .preset(.sevenDays)).pickedPeriodExpiry(now: pickedAt))
     }
 }

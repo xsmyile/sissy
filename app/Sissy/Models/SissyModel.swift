@@ -323,10 +323,15 @@ final class SissyModel {
         savePreferences()
     }
 
-    /// Which window the panel reads over, with a picked window retired once
-    /// it has outlived `Preferences.pickedPeriodLifetime`.
-    var usagePeriod: UsageRange {
-        preferences.period()
+    /// Which window the panel reads over at `now`, with a picked window
+    /// retired once it has outlived `Preferences.pickedPeriodLifetime`.
+    ///
+    /// Takes the instant rather than reading the clock, so a render resolves
+    /// its period at the same `now` its snapshot is built at: two clocks a
+    /// few microseconds apart across the 24 h mark would draw a picked
+    /// window's headline under a control already back on today.
+    func usagePeriod(now: Date) -> UsageRange {
+        preferences.period(now: now)
     }
 
     /// Which window the panel's headline is over. Persisted rather than held
@@ -338,7 +343,9 @@ final class SissyModel {
     /// be two readings of one figure, one of them lagging the tail's flush.
     func setUsagePeriod(_ period: UsageRange, now: Date = Date()) {
         let chosen = Self.normalized(period, now: now)
-        guard chosen != usagePeriod || preferences.usagePeriodPickedAt != nil else { return }
+        guard chosen != usagePeriod(now: now) || preferences.usagePeriodPickedAt != nil else {
+            return
+        }
         preferences.usagePeriod = chosen
         if case .days = chosen {
             preferences.usagePeriodPickedAt = now
@@ -349,8 +356,10 @@ final class SissyModel {
     }
 
     /// Writes the fallback to today once a picked window has expired, so the
-    /// file says what the panel reads. Called when the panel opens; the
-    /// reading itself never waits on it, since `usagePeriod` ages on read.
+    /// file says what the panel reads. Called when the panel opens, when a
+    /// render resolves a period the file no longer holds, and at the expiry
+    /// instant of a panel left open across it; the reading itself never
+    /// waits on it, since `usagePeriod(now:)` ages on read.
     func retireExpiredUsagePeriod(now: Date = Date()) {
         guard case .days = preferences.usagePeriod, preferences.period(now: now) == .preset(.today)
         else { return }
