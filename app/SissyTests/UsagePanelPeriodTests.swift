@@ -223,6 +223,16 @@ final class UsagePanelPeriodTests: XCTestCase {
         XCTAssertNil(block.window(for: .days(try span(-5, -2))))
     }
 
+    /// A picked window the archive holds no day of counts nothing, so the
+    /// tab draws the absence the headline does rather than zeros.
+    func testSessionsDrawNoCountsForAPickedWindowWithNoReading() throws {
+        let picked = try span(-6, -2)
+        let empty = reading(picked, filed: []).rollup
+        let block = UsagePanelSnapshot.makeAgents(frame(), window: empty, now: now)
+
+        XCTAssertNil(block.window(for: .days(picked)))
+    }
+
     // MARK: Calendar
 
     /// A month lands each day under its weekday, flags the days still to come,

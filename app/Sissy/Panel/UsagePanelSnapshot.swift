@@ -1492,7 +1492,9 @@ struct UsagePanelSnapshot: Equatable {
     ///
     /// `window` is the archive's reading of a picked window, which the panel
     /// fetches while a picked window is its period; it carries the same
-    /// split by provider every preset's rollup does.
+    /// split by provider every preset's rollup does. One the archive holds no
+    /// day inside answers no window at all, so the tab draws the absence the
+    /// headline does rather than counts of zero.
     static func makeAgents(
         _ frame: FrameData, window: UsageHistoryRollup? = nil, now: Date = Date()
     ) -> AgentsBlock {
@@ -1537,7 +1539,7 @@ struct UsagePanelSnapshot: Equatable {
             counted[period] = counts(rollup)
         }
         var picked: [UsageDaySpan: AgentsBlock.Window] = [:]
-        if let window, case .days(let span) = window.period {
+        if let window, case .days(let span) = window.period, window.earliestDay != nil {
             picked[span] = counts(window)
         }
         return AgentsBlock(

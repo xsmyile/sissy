@@ -67,9 +67,11 @@ struct PanelSessions: View {
     fileprivate static let busyLoad: Double = 0.8
 
     /// The window the counted half answers for: the panel's, or today where
-    /// the archive has not counted that one.
+    /// the archive has not counted a preset. A picked window is never swapped
+    /// for today: until its reading lands, and when the archive holds none of
+    /// its days, it is the absence the headline draws.
     private var shownPeriod: UsageRange {
-        block.window(for: period) == nil ? .preset(.today) : period
+        block.window(for: period) == nil && !period.isPicked ? .preset(.today) : period
     }
 
     private var shown: UsagePanelSnapshot.AgentsBlock.Window? {
@@ -147,10 +149,21 @@ struct PanelSessions: View {
     // MARK: Counted
 
     /// Drawn only once a window has been counted: a platter with nothing on
-    /// it would claim a reading that is not there.
+    /// it would claim a reading that is not there. A picked window with no
+    /// reading draws its heading over dashes, the headline's own absence.
     @ViewBuilder
     private var countedSection: some View {
-        if let shown {
+        if shown == nil, shownPeriod.isPicked {
+            PanelGroup {
+                SectionLabel(text: UsageFormat.sessionsSectionLabel(shownPeriod))
+            } content: {
+                HStack(alignment: .top, spacing: Self.figureSpacing) {
+                    reading(nil, caption: "sessions")
+                    reading(nil, caption: "sub-agents")
+                    reading(nil, caption: "active")
+                }
+            }
+        } else if let shown {
             PanelGroup {
                 SectionLabel(text: UsageFormat.sessionsSectionLabel(shownPeriod))
             } content: {
