@@ -323,13 +323,49 @@ final class SissyModel {
         savePreferences()
     }
 
+    /// Which window the panel reads over, with a picked window retired once
+    /// it has outlived `Preferences.pickedPeriodLifetime`.
+    var usagePeriod: UsageRange {
+        preferences.period()
+    }
+
     /// Which window the panel's headline is over. Persisted rather than held
     /// for the life of the popover: the panel's page selection is dropped on
     /// close because it is navigation, where this is a reading the user chose.
-    func setUsagePeriod(_ period: UsagePeriod) {
-        guard period != preferences.usagePeriod else { return }
-        preferences.usagePeriod = period
+    ///
+    /// A picked window is stamped with when it was picked, and today picked on
+    /// the calendar is the `Today` preset: the same day under two names would
+    /// be two readings of one figure, one of them lagging the tail's flush.
+    func setUsagePeriod(_ period: UsageRange, now: Date = Date()) {
+        let chosen = Self.normalized(period, now: now)
+        guard chosen != usagePeriod || preferences.usagePeriodPickedAt != nil else { return }
+        preferences.usagePeriod = chosen
+        if case .days = chosen {
+            preferences.usagePeriodPickedAt = now
+        } else {
+            preferences.usagePeriodPickedAt = nil
+        }
         savePreferences()
+    }
+
+    /// Writes the fallback to today once a picked window has expired, so the
+    /// file says what the panel reads. Called when the panel opens; the
+    /// reading itself never waits on it, since `usagePeriod` ages on read.
+    func retireExpiredUsagePeriod(now: Date = Date()) {
+        guard case .days = preferences.usagePeriod, preferences.period(now: now) == .preset(.today)
+        else { return }
+        preferences.usagePeriod = .preset(.today)
+        preferences.usagePeriodPickedAt = nil
+        savePreferences()
+    }
+
+    nonisolated static func normalized(
+        _ period: UsageRange, now: Date, calendar: Calendar = .current
+    ) -> UsageRange {
+        guard case .days(let span) = period, span.from == span.to,
+            span.includesToday(now: now, calendar: calendar)
+        else { return period }
+        return .preset(.today)
     }
 
     /// Which end of a rate-limit window its gauge prints. A wording, so it

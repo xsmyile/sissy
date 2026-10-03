@@ -21,7 +21,16 @@ struct Preferences: Codable, Equatable {
     /// about what the user wants to read and has to survive the close. It lives
     /// here rather than in `server.json` because it changes what is rendered
     /// and nothing about what is metered.
-    var usagePeriod: UsagePeriod = .today
+    ///
+    /// A preset is stored as the bare string it always was, so a file written
+    /// before a window could be picked on the calendar reads the same choice.
+    /// Read it through `period(now:)`, which retires a picked window.
+    var usagePeriod: UsageRange = .preset(.today)
+    /// When the window in `usagePeriod` was picked on the calendar, nil for a
+    /// preset. A picked window is a question about some days, asked once,
+    /// and it stops being the panel's reading a day after it was asked: a
+    /// panel opened the next morning on last Tuesday reads as a stale one.
+    var usagePeriodPickedAt: Date?
     /// Which end of a rate-limit window its gauge prints. Here for the reason
     /// `usagePeriod` is: it changes what is rendered and nothing about what is
     /// metered. `used` is the vendor's own end and the one Sissy has always
@@ -31,13 +40,30 @@ struct Preferences: Codable, Equatable {
     init(
         sissyMotion: Bool = true,
         retiredServerAgent: Bool = false,
-        usagePeriod: UsagePeriod = .today,
+        usagePeriod: UsageRange = .preset(.today),
+        usagePeriodPickedAt: Date? = nil,
         limitsReading: LimitsReading = .used,
     ) {
         self.sissyMotion = sissyMotion
         self.retiredServerAgent = retiredServerAgent
         self.usagePeriod = usagePeriod
+        self.usagePeriodPickedAt = usagePeriodPickedAt
         self.limitsReading = limitsReading
+    }
+
+    /// How long a window picked on the calendar stays the panel's period.
+    static let pickedPeriodLifetime: TimeInterval = 24 * 60 * 60
+
+    /// The window the panel reads over at `now`: the stored one, or today once
+    /// a picked window has outlived `pickedPeriodLifetime`. A picked window
+    /// with no instant beside it is one this build cannot age, and is retired
+    /// the same way rather than kept for ever.
+    func period(now: Date = Date()) -> UsageRange {
+        guard case .days = usagePeriod else { return usagePeriod }
+        guard let pickedAt = usagePeriodPickedAt,
+            now.timeIntervalSince(pickedAt) < Self.pickedPeriodLifetime
+        else { return .preset(.today) }
+        return usagePeriod
     }
 
     /// Backwards-compatible decoder so a `preferences.json` written by an
@@ -47,7 +73,8 @@ struct Preferences: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         sissyMotion = Self.decodeSissyMotion(from: decoder)
         retiredServerAgent = (try? c.decode(Bool.self, forKey: .retiredServerAgent)) ?? false
-        usagePeriod = (try? c.decode(UsagePeriod.self, forKey: .usagePeriod)) ?? .today
+        usagePeriod = (try? c.decode(UsageRange.self, forKey: .usagePeriod)) ?? .preset(.today)
+        usagePeriodPickedAt = try? c.decode(Date.self, forKey: .usagePeriodPickedAt)
         limitsReading = (try? c.decode(LimitsReading.self, forKey: .limitsReading)) ?? .used
     }
 
