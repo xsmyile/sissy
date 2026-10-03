@@ -770,33 +770,44 @@ struct UsagePanelView: View {
     ///
     /// Disabled on Mac, Disk and Network, which read the moment and have no
     /// window, rather than hidden: a header whose controls come and go with
-    /// the tab moves under the pointer. Absent while the archive answers
-    /// nothing but today, since a control whose every option answers the
-    /// number on screen is a control about a feature.
+    /// the tab moves under the pointer. The presets go with it: `.disabled`
+    /// reaches the button and not a `.contextMenu` laid outside it, so the
+    /// menu is attached only where the period applies rather than relied on
+    /// to inherit the state. Absent while the archive answers nothing but
+    /// today, since a control whose every option answers the number on
+    /// screen is a control about a feature.
     @ViewBuilder
     private func periodButton(_ periods: [UsagePeriod], chosen: UsageRange) -> some View {
         if periods.count > 1 {
-            let picked = chosen.isPicked
-            Button {
-                page = .calendar
-            } label: {
-                Image(systemName: "calendar")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
-                    .foregroundStyle(picked ? Color.accentColor : Color.secondary)
-                    .contentShape(.circle)
+            let button = periodFace(chosen)
+            if readsTheMoment {
+                button
+            } else {
+                button.contextMenu { periodMenu(periods, chosen: chosen) }
             }
-            .buttonStyle(.plain)
-            .glassEffect(
-                picked ? .regular.tint(.accentColor.opacity(Self.heldGlassTint)) : .regular,
-                in: .circle
-            )
-            .disabled(readsTheMoment)
-            .help(readsTheMoment ? UsageFormat.periodHelpMoment : UsageFormat.periodHelp(chosen))
-            .contextMenu { periodMenu(periods, chosen: chosen) }
-            .accessibilityLabel("Period")
-            .accessibilityValue(UsageFormat.periodHeading(chosen))
         }
+    }
+
+    private func periodFace(_ chosen: UsageRange) -> some View {
+        let picked = chosen.isPicked
+        return Button {
+            page = .calendar
+        } label: {
+            Image(systemName: "calendar")
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+                .foregroundStyle(picked ? Color.accentColor : Color.secondary)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(
+            picked ? .regular.tint(.accentColor.opacity(Self.heldGlassTint)) : .regular,
+            in: .circle
+        )
+        .disabled(readsTheMoment)
+        .help(readsTheMoment ? UsageFormat.periodHelpMoment : UsageFormat.periodHelp(chosen))
+        .accessibilityLabel("Period")
+        .accessibilityValue(UsageFormat.periodHeading(chosen))
     }
 
     /// The presets as checked items, a picked window above them while one is
