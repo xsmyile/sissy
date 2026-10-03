@@ -58,10 +58,17 @@ struct Preferences: Codable, Equatable {
     /// a picked window has outlived `pickedPeriodLifetime`. A picked window
     /// with no instant beside it is one this build cannot age, and is retired
     /// the same way rather than kept for ever.
+    ///
+    /// The age has a floor as well as a ceiling: a `pickedAt` after `now` is a
+    /// clock set back since the pick, or a file written on another machine,
+    /// and an age that cannot be read retires the window rather than keeping
+    /// it until the clock catches up. So does a window whose last day has come
+    /// to be after today, which a flight west makes of one that ended today.
     func period(now: Date = Date()) -> UsageRange {
-        guard case .days = usagePeriod else { return usagePeriod }
+        guard case .days(let span) = usagePeriod else { return usagePeriod }
         guard let pickedAt = usagePeriodPickedAt,
-            now.timeIntervalSince(pickedAt) < Self.pickedPeriodLifetime
+            (0..<Self.pickedPeriodLifetime).contains(now.timeIntervalSince(pickedAt)),
+            span.to <= Calendar.current.startOfDay(for: now)
         else { return .preset(.today) }
         return usagePeriod
     }
