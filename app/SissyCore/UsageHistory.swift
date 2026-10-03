@@ -678,12 +678,21 @@ enum UsageRange: Hashable, Sendable, Codable {
         }
     }
 
+    /// A bare string is a preset or nothing: one this build does not offer is
+    /// refused as the string it is, rather than tried as a span and refused
+    /// for a key it never had, so a preference written by a later build reads
+    /// as an unknown window the caller falls back from.
     init(from decoder: Decoder) throws {
-        if let period = try? decoder.singleValueContainer().decode(UsagePeriod.self) {
-            self = .preset(period)
-        } else {
+        let single = try decoder.singleValueContainer()
+        guard let name = try? single.decode(String.self) else {
             self = .days(try UsageDaySpan(from: decoder))
+            return
         }
+        guard let period = UsagePeriod(rawValue: name) else {
+            throw DecodingError.dataCorruptedError(
+                in: single, debugDescription: "'\(name)' is not a window this build offers")
+        }
+        self = .preset(period)
     }
 
     func encode(to encoder: Encoder) throws {

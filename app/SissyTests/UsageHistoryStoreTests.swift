@@ -813,6 +813,20 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertEqual(keys, ["from": day(-9), "to": day(-2)])
     }
 
+    /// A preference written by a later build can name a window this one does
+    /// not offer, and it has to be refused as that rather than as a span
+    /// missing its keys, so the caller can tell and fall back.
+    func testAnUnknownStoredWindowIsRefusedAsAnUnknownPreset() throws {
+        let stored = try JSONEncoder().encode("14d")
+
+        XCTAssertThrowsError(try JSONDecoder().decode(UsageRange.self, from: stored)) { error in
+            guard case DecodingError.dataCorrupted(let context) = error else {
+                return XCTFail("refused as \(error) rather than as an unknown window")
+            }
+            XCTAssertTrue(context.debugDescription.contains("14d"), context.debugDescription)
+        }
+    }
+
     /// A stored span is held to today as the clock reads it when it is read
     /// back, not as it read when it was picked, so a window that has come to
     /// name a day after today is refused rather than read.
