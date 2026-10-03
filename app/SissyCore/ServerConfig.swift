@@ -136,6 +136,20 @@ struct ServerConfig: Sendable, Codable {
     /// assertion keeps the work going. A `server.json` written before this key
     /// existed lands on the default, which is the behaviour it already had.
     var keepScreenAwake: Bool
+    /// Whether a hold keeps the Mac working with its lid closed.
+    ///
+    /// Off unless the user asks for it, and asked only through a confirmation
+    /// that says what it costs: it is the one part of the hold that outlives
+    /// a crash, and a closed Mac on battery in a bag cannot shed its heat.
+    var keepAwakeWithLidClosed: Bool
+    /// Whether the clamshell switch may still be set by this install.
+    ///
+    /// Written before the switch is set and cleared only once it is clear, the
+    /// way `agentHooksRemovalPending` brackets the hook: the switch is kernel
+    /// state that a crash leaves behind, and this is how the next launch
+    /// learns to clear it. Without it Sissy could not tell its own switch from
+    /// one another app set, and clearing that one is not Sissy's to do.
+    var lidHoldPending: Bool
     /// Whether Sissy registers a `SessionStart` hook with the CLIs it meters,
     /// so a session writes down which repository its directory belongs to
     /// while that directory still exists.
@@ -203,6 +217,8 @@ struct ServerConfig: Sendable, Codable {
         keepAwake: .off,
         keepAwakeCeiling: .eightHours,
         keepScreenAwake: true,
+        keepAwakeWithLidClosed: false,
+        lidHoldPending: false,
         agentHooks: false,
         agentHooksRemovalPending: false,
         forgeCounters: nil,
@@ -381,6 +397,9 @@ extension ServerConfig {
         keepAwake = keys.lenient(.keepAwake) ?? defaults.keepAwake
         keepAwakeCeiling = keys.lenient(.keepAwakeCeiling) ?? defaults.keepAwakeCeiling
         keepScreenAwake = keys.lenient(.keepScreenAwake) ?? defaults.keepScreenAwake
+        keepAwakeWithLidClosed =
+            keys.lenient(.keepAwakeWithLidClosed) ?? defaults.keepAwakeWithLidClosed
+        lidHoldPending = keys.lenient(.lidHoldPending) ?? defaults.lidHoldPending
         agentHooks = keys.lenient(.agentHooks) ?? defaults.agentHooks
         agentHooksRemovalPending =
             keys.lenient(.agentHooksRemovalPending) ?? defaults.agentHooksRemovalPending

@@ -115,8 +115,10 @@ project row's right-click menu opens the same page on that repository.
 **Keep awake** is the cup in the panel header: *Never*, *While agents are
 working* (holds the Mac while turns land, lets go ten minutes after they stop),
 or *Always* (eight hours, then off; Settings makes that one to twelve hours,
-or no limit at all). Neither overrides a closed lid, and the hold dies with
-Sissy. Quit and the Mac sleeps normally, with nothing to undo.
+or no limit at all). On a MacBook, *Keep working with the lid closed* in
+Settings lets a hold survive the lid too; it is off until you switch it on, and
+it says what that costs before it does. The hold dies with Sissy: quit and the
+Mac sleeps normally, lid included, with nothing to undo.
 
 **Settings** is ⌘, or the gear: General, Providers, Mac, Forge, About. **Copy
 diagnostics** lives in About and is what a bug report needs.
@@ -247,6 +249,7 @@ Settings.
 | `keepAwake` | `off` | `auto` holds while agents work, releasing after 10 min of silence; `on` holds for `keepAwakeCeiling` ▸ |
 | `keepAwakeCeiling` | `8h` | how long `on` holds before switching itself off: `1h`, `2h`, `4h`, `8h`, `12h` or `never` ▸ |
 | `keepScreenAwake` | `true` | whether that hold covers the screen ▸ |
+| `keepAwakeWithLidClosed` | `false` | whether that hold survives closing the lid, on battery too ▸ |
 | `agentHooks` | `false` | register the `SessionStart` hook with both CLIs ▸ |
 | `historyRetentionDays` | `90` | days of history kept; `0` records none ▸ |
 | `remotePricing` | `true` | fetch rates at runtime; `false` pins to the built-in snapshot |

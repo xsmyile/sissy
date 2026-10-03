@@ -699,9 +699,10 @@ final class UsageFormatTests: XCTestCase {
         }
     }
 
-    /// Every wording that claims the Mac stays up has to name the lid: closing
-    /// a MacBook sleeps it under all three modes, and someone who finds that
-    /// out from a lost overnight run blames Sissy for it.
+    /// Every wording that claims the Mac stays up has to name the lid: unless
+    /// the lid half is on, closing a MacBook sleeps it under all three modes,
+    /// and someone who finds that out from a lost overnight run blames Sissy
+    /// for it.
     func testEveryKeepAwakeTooltipNamesTheLid() {
         let states = [
             KeepAwakeState.off,
@@ -715,6 +716,25 @@ final class UsageFormatTests: XCTestCase {
                 UsageFormat.keepAwakeHelp(state, arming: .on).contains("lid"),
                 "\(state.mode)/\(state.active) promises a Mac that stays up without naming the lid")
         }
+    }
+
+    /// A hold in force words the lid from what the kernel took, and a state
+    /// holding nothing yet from what a hold would take.
+    func testTheTooltipSaysWhatTheLidWillDo() {
+        let covered = KeepAwakeState(mode: .on, active: true, since: Date(), coversLid: true)
+        let refused = KeepAwakeState(mode: .on, active: true, since: Date())
+
+        XCTAssertTrue(
+            UsageFormat.keepAwakeHelp(covered, arming: .on, lidClosedSetting: true)
+                .contains("keeps it working"))
+        XCTAssertTrue(
+            UsageFormat.keepAwakeHelp(refused, arming: .on, lidClosedSetting: true)
+                .contains("sleeps it anyway"))
+        XCTAssertTrue(
+            UsageFormat.keepAwakeHelp(.off, arming: .on, lidClosedSetting: true)
+                .contains("keeps it working"))
+        XCTAssertTrue(
+            UsageFormat.keepAwakeHelp(.off, arming: .on).contains("sleeps it anyway"))
     }
 
     /// The switch reaches Claude Code's own credential, so the confirmation

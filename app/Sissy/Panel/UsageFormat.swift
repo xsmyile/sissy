@@ -208,14 +208,21 @@ enum UsageFormat {
     /// worded twice reads as two.
     static let keepScreenAwakeTitle = "Keep the screen on too"
 
+    /// What the lid half of the hold is called, in Settings and in the
+    /// confirmation that switches it on.
+    static let keepAwakeWithLidClosedTitle = "Keep working with the lid closed"
+
     /// The keep-awake button's tooltip: what the Mac is doing, what a click
     /// would do to it, and where the modes a click cannot reach are, together
     /// with the screen switch that hangs beside them.
     ///
     /// Names the lid in every wording that claims the Mac stays up, because
-    /// the assertion holds off *idle* sleep and nothing else: a MacBook closed
-    /// on a running agent sleeps anyway, and someone who learns that from a
-    /// lost run blames Sissy for it.
+    /// the assertions hold off *idle* sleep and nothing else: unless the lid
+    /// half is in force, a MacBook closed on a running agent sleeps anyway,
+    /// and someone who learns that from a lost run blames Sissy for it. A
+    /// running hold words the lid from `coversLid`, which is the effect; the
+    /// states holding nothing yet word it from `lidClosedSetting`, which is
+    /// what a hold would take.
     ///
     /// The screen clause follows `coversScreen`, which is the effect and not
     /// the setting, so a display assertion power management refused stops this
@@ -232,22 +239,26 @@ enum UsageFormat {
     /// two is named on every state, and named as the right-click rather than
     /// the press — "hold" is the verb this whole control already uses for what
     /// it does to the Mac.
-    static func keepAwakeHelp(_ state: KeepAwakeState, arming: KeepAwakeMode) -> String {
+    static func keepAwakeHelp(
+        _ state: KeepAwakeState, arming: KeepAwakeMode, lidClosedSetting: Bool = false
+    ) -> String {
         let modes = " · right-click for the other modes and the screen"
+        let lid = lidClosedSetting ? "closing the lid keeps it working" : "closing the lid sleeps it anyway"
         switch (state.mode, state.active) {
         case (.off, _):
-            return "Keep this Mac awake, \(keepAwakeTitle(arming).lowercased()) · "
-                + "closing the lid still sleeps it" + modes
+            return "Keep this Mac awake, \(keepAwakeTitle(arming).lowercased()) · " + lid + modes
         case (_, true):
             let since = state.since.map { " since " + clock($0) } ?? ""
             let what =
                 state.coversScreen
                 ? "Keeping this Mac and its screen awake\(since), so it will not lock."
                 : "Keeping this Mac awake\(since). The screen still sleeps and locks."
-            return what + " Closing the lid sleeps it anyway · click to allow sleep" + modes
+            let held =
+                state.coversLid
+                ? " Closing the lid keeps it working" : " Closing the lid sleeps it anyway"
+            return what + held + " · click to allow sleep" + modes
         case (.auto, false):
-            return "Waiting for the agents · the Mac will be held while they work · "
-                + "closing the lid sleeps it anyway" + modes
+            return "Waiting for the agents · the Mac will be held while they work · " + lid + modes
         case (.on, false):
             return "Switched on · the Mac is not being held awake" + modes
         }

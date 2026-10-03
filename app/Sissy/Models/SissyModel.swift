@@ -261,7 +261,8 @@ final class SissyModel {
             mode: pending.mode,
             active: reported.active,
             since: reported.since,
-            coversScreen: reported.coversScreen)
+            coversScreen: reported.coversScreen,
+            coversLid: reported.coversLid)
     }
 
     /// Which armed mode the panel's button puts the switch back into.

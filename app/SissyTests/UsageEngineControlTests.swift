@@ -44,6 +44,9 @@ final class UsageEngineControlTests: XCTestCase {
         keepAwake: KeepAwakeMode = .off,
         keepAwakeCeiling: KeepAwakeCeiling = .eightHours,
         keepAwakePolicy: KeepAwakePolicy = .default,
+        keepAwakeWithLidClosed: Bool = false,
+        lidHoldPending: Bool = false,
+        clamshell: ClamshellSwitchRecorder = ClamshellSwitchRecorder(),
         pollIntervalSeconds: Double = 60,
         macHealth: Bool = false,
         healthMonitor: SystemHealthMonitor? = nil,
@@ -55,6 +58,8 @@ final class UsageEngineControlTests: XCTestCase {
         config.providers = ProviderToggles(claudeCode: claudeCode, codex: codex)
         config.keepAwake = keepAwake
         config.keepAwakeCeiling = keepAwakeCeiling
+        config.keepAwakeWithLidClosed = keepAwakeWithLidClosed
+        config.lidHoldPending = lidHoldPending
         config.macHealth = macHealth
         config.disk = disk
         return UsageEngine(
@@ -64,7 +69,8 @@ final class UsageEngineControlTests: XCTestCase {
             claudeAccounts: .inert(),
             healthMonitor: healthMonitor,
             diskMonitor: diskMonitor,
-            keepAwakePolicy: keepAwakePolicy
+            keepAwakePolicy: keepAwakePolicy,
+            clamshell: clamshell.clamshellSwitch
         )
     }
 
@@ -542,6 +548,62 @@ final class UsageEngineControlTests: XCTestCase {
         await fulfillment(of: [expired], timeout: 5)
 
         XCTAssertEqual(try ServerConfig.load(from: configURL).keepAwakeCeiling, .oneHour)
+    }
+
+    /// The switch outlives a crash, so the record that sends the next launch
+    /// back for it is on disk before the switch is set, and comes off only
+    /// once the switch is clear.
+    func testTheLidIsRecordedBeforeItIsSetAndForgottenOnceClear() async throws {
+        try writeClaudeTurn()
+        let recorder = ClamshellSwitchRecorder()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false, keepAwake: .on, keepAwakeWithLidClosed: true, clamshell: recorder)
+        let held = frames.expectation("the lid is held") { $0.keepAwake.coversLid }
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [held], timeout: 5)
+
+        XCTAssertTrue(recorder.isSet)
+        XCTAssertTrue(try ServerConfig.load(from: configURL).lidHoldPending)
+
+        await engine.stop()
+
+        XCTAssertEqual(recorder.calls.last, false)
+        XCTAssertFalse(try ServerConfig.load(from: configURL).lidHoldPending)
+    }
+
+    /// A record a previous run left means a switch it never cleared, and a
+    /// launch with no hold to give it clears it before anything else holds.
+    func testAStrandedLidIsClearedAtLaunch() async throws {
+        let recorder = ClamshellSwitchRecorder()
+        let engine = makeEngine(codex: false, lidHoldPending: true, clamshell: recorder)
+
+        await engine.start { _ in }
+        addTeardownBlock { await engine.stop() }
+
+        XCTAssertEqual(recorder.calls, [false])
+        XCTAssertFalse(try ServerConfig.load(from: configURL).lidHoldPending)
+    }
+
+    /// The lid is a setting like the screen, so switching it off under a
+    /// running hold clears the switch and leaves the Mac held.
+    func testSwitchingTheLidOffUnderAHoldClearsItAndKeepsTheHold() async throws {
+        try writeClaudeTurn()
+        let recorder = ClamshellSwitchRecorder()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false, keepAwake: .on, keepAwakeWithLidClosed: true, clamshell: recorder)
+        let held = frames.expectation("the lid is held") { $0.keepAwake.coversLid }
+        await engine.start { frames.record($0) }
+        addTeardownBlock { await engine.stop() }
+        await fulfillment(of: [held], timeout: 5)
+
+        let dropped = frames.expectation("the lid is dropped") { !$0.keepAwake.coversLid }
+        await engine.setKeepAwakeWithLidClosed(enabled: false)
+        await fulfillment(of: [dropped], timeout: 5)
+
+        XCTAssertFalse(recorder.isSet)
+        XCTAssertEqual(frames.all.last?.keepAwake.active, true)
     }
 
     func testAModeTheEngineDoesNotKnowIsIgnored() async {

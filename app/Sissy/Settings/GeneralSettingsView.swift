@@ -3,6 +3,23 @@ import SwiftUI
 
 /// What the switch that writes into the CLIs' own configuration has to say for
 /// itself before it is flipped.
+/// What the lid switch says before it is switched on.
+///
+/// It is the one part of the hold that outlives Sissy, so it is the one that
+/// asks: the confirmation says what changes, what it costs on battery and in
+/// a bag, and what a crash leaves behind, which is the admission the rule it
+/// is an exception to asks for.
+enum KeepAwakeLidCopy {
+    static let confirmTitle = "Keep the Mac working with the lid closed?"
+
+    static let confirmMessage =
+        "While Sissy holds the Mac awake, closing the lid will not put it to sleep, on battery too. "
+        + "Only a nearly empty battery or overheating will. A closed Mac in a bag cannot shed its "
+        + "heat, so leave it somewhere open. If Sissy quits normally the lid works as usual again; "
+        + "if it crashes, the Mac keeps ignoring the lid until Sissy is opened again or the Mac "
+        + "restarts."
+}
+
 enum AgentHookCopy {
     static let title = "Name projects even when Sissy is off"
 
@@ -59,17 +76,31 @@ struct GeneralSettingsView: View {
     let model: SissyModel
 
     @State private var confirmingDelete = false
+    @State private var confirmingLidClosed = false
+
+    /// Read once: whether the Mac has a lid does not change under a running
+    /// app, and the registry is not worth asking on every redraw.
+    private static let machineHasLid = ClamshellSleepSwitch.machineHasLid
 
     /// What the automatic mode costs. The name and the bound are read rather
     /// than written out: a caption that says ten minutes while the shipped
     /// policy waits fifteen, or that calls a mode by a name the picker above
     /// it no longer uses, is worse than no caption. This and the ceiling row
-    /// under it are the only places the app says when a hold ends, and this
-    /// is the only one that says what a closed lid does to one.
+    /// under it are the only places the app says when a hold ends.
+    ///
+    /// What a closed lid does to a hold is the lid row's to say, and on a Mac
+    /// with no lid row there is no lid to say it about.
     private var keepAwakeCaption: String {
         let idle = UsageFormat.countdown(KeepAwakePolicy.default.idleWindow)
-        return "\(UsageFormat.keepAwakeTitle(.auto)) lets go \(idle) after the last turn. "
-            + "Closing the lid sleeps the Mac either way."
+        return "\(UsageFormat.keepAwakeTitle(.auto)) lets go \(idle) after the last turn."
+    }
+
+    /// Both positions say what a closed lid does, because off is the answer
+    /// macOS gives and on is the one a user has to have asked for.
+    private var keepAwakeWithLidClosedCaption: String {
+        model.engine.keepAwakeWithLidClosed
+            ? "While a hold is in force, closing the lid does not sleep the Mac, on battery too."
+            : "Off, closing the lid sleeps the Mac whatever the mode."
     }
 
     /// What happens when the chosen ceiling is reached, and for `never` that
@@ -142,12 +173,27 @@ struct GeneralSettingsView: View {
                 keepAwake
                 keepAwakeCeiling
                 keepScreenAwake
+                if Self.machineHasLid {
+                    keepAwakeWithLidClosed
+                }
             }
 
             Section {
                 files
                 usageHistory
             }
+        }
+        .confirmationDialog(
+            KeepAwakeLidCopy.confirmTitle,
+            isPresented: $confirmingLidClosed,
+            titleVisibility: .visible
+        ) {
+            Button(UsageFormat.keepAwakeWithLidClosedTitle) {
+                model.engine.setKeepAwakeWithLidClosed(true)
+            }
+            Button(DialogCopy.cancel, role: .cancel) {}
+        } message: {
+            Text(KeepAwakeLidCopy.confirmMessage)
         }
         .confirmationDialog(
             "Delete the usage history Sissy has recorded?",
@@ -276,6 +322,13 @@ struct GeneralSettingsView: View {
 
     private static let keepAwakeCeilingLabel = "\(UsageFormat.keepAwakeTitle(.on)) stops after"
 
+    private var keepAwakeWithLidClosed: some View {
+        SettingsSwitchRow(
+            UsageFormat.keepAwakeWithLidClosedTitle,
+            caption: keepAwakeWithLidClosedCaption,
+            isOn: keepAwakeWithLidClosedBinding)
+    }
+
     private var keepScreenAwake: some View {
         SettingsSwitchRow(
             UsageFormat.keepScreenAwakeTitle,
@@ -336,6 +389,22 @@ struct GeneralSettingsView: View {
         Binding(
             get: { model.engine.keepAwakeCeiling },
             set: { model.engine.setKeepAwakeCeiling($0) }
+        )
+    }
+
+    /// Switching on asks first and switching off does not: on is the
+    /// position that outlives a crash and warms a closed bag, off is macOS's
+    /// own behaviour coming back.
+    private var keepAwakeWithLidClosedBinding: Binding<Bool> {
+        Binding(
+            get: { model.engine.keepAwakeWithLidClosed },
+            set: { enabled in
+                if enabled {
+                    confirmingLidClosed = true
+                } else {
+                    model.engine.setKeepAwakeWithLidClosed(false)
+                }
+            }
         )
     }
 

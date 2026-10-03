@@ -25,6 +25,8 @@ final class ServerConfigDecodingTests: XCTestCase {
         config.keepAwake = .on
         config.keepAwakeCeiling = .never
         config.keepScreenAwake = false
+        config.keepAwakeWithLidClosed = true
+        config.lidHoldPending = true
         config.agentHooks = true
         config.agentHooksRemovalPending = true
         config.forgeCounters = ForgeCounters(

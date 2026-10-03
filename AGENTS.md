@@ -93,7 +93,7 @@ Every rule is here. Where one carries a link, the measurement behind it is in
 it covers, because most of them record something already tried and removed.
 
 - **A permission is asked for when the user switches on the module that needs it, never at launch.** [Why →](docs/DECISIONS.md#a-permission-is-asked-for-when-the-user-switches-on-the-module-that-needs-it-never-at-launch)
-- **Nothing Sissy does to the machine outlives Sissy.** [Why →](docs/DECISIONS.md#nothing-sissy-does-to-the-machine-outlives-sissy)
+- **Nothing Sissy does to the machine outlives Sissy.** The session hook and the lid switch are its two declared exceptions. [Why →](docs/DECISIONS.md#nothing-sissy-does-to-the-machine-outlives-sissy)
 - **The archive is the one thing Sissy keeps, and it keeps it on terms.** [Why →](docs/DECISIONS.md#the-archive-is-the-one-thing-sissy-keeps-and-it-keeps-it-on-terms)
 - **The archive is filled in once from what the CLIs already logged, by a second pass with a cutoff of its own.** [Why →](docs/DECISIONS.md#the-archive-is-filled-in-once-from-what-the-clis-already-logged-by-a-second-pass-with-a-cutoff-of-its-own)
 - **A project is a repository, not a directory.** [Why →](docs/DECISIONS.md#a-project-is-a-repository-not-a-directory)

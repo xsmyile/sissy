@@ -108,6 +108,87 @@ final class KeepAwakeTests: XCTestCase {
             [Self.systemAssertionName, Self.displayAssertionName].sorted())
     }
 
+    /// The lid rides on a hold and goes with it: set when a hold takes it,
+    /// cleared when the hold lets go, and never touched by a hold that did
+    /// not ask for it.
+    func testTheLidIsSetWithTheHoldAndClearedWithIt() async {
+        let recorder = ClamshellSwitchRecorder()
+        let keepAwake = KeepAwake(clamshell: recorder.clamshellSwitch)
+
+        let held = await keepAwake.apply(holding: true, includingScreen: false, includingLid: true)
+        let released = await keepAwake.apply(holding: false, includingScreen: false)
+
+        XCTAssertTrue(held.lid)
+        XCTAssertEqual(released, .none)
+        XCTAssertEqual(recorder.calls, [true, false])
+    }
+
+    func testAHoldWithoutTheLidNeverTouchesTheSwitch() async {
+        let recorder = ClamshellSwitchRecorder()
+        let keepAwake = KeepAwake(clamshell: recorder.clamshellSwitch)
+
+        _ = await keepAwake.apply(holding: true, includingScreen: false)
+        _ = await keepAwake.apply(holding: false, includingScreen: false)
+
+        XCTAssertEqual(recorder.calls, [])
+    }
+
+    /// Every apply that keeps the lid sets the switch again, which is what
+    /// repairs one powerd cleared under a running hold.
+    func testKeepingTheLidSetsTheSwitchAgain() async {
+        let recorder = ClamshellSwitchRecorder()
+        let keepAwake = KeepAwake(clamshell: recorder.clamshellSwitch)
+        addTeardownBlock { _ = await keepAwake.apply(holding: false, includingScreen: false) }
+
+        _ = await keepAwake.apply(holding: true, includingScreen: false, includingLid: true)
+        _ = await keepAwake.apply(holding: true, includingScreen: false, includingLid: true)
+
+        XCTAssertEqual(recorder.calls, [true, true])
+    }
+
+    /// Dropping the lid under a running hold leaves the Mac held, the way the
+    /// screen half does.
+    func testDroppingTheLidKeepsTheMacAwake() async {
+        let recorder = ClamshellSwitchRecorder()
+        let keepAwake = KeepAwake(clamshell: recorder.clamshellSwitch)
+        let baseline = heldAssertionNames()
+        addTeardownBlock { _ = await keepAwake.apply(holding: false, includingScreen: false) }
+        _ = await keepAwake.apply(holding: true, includingScreen: false, includingLid: true)
+
+        let hold = await keepAwake.apply(holding: true, includingScreen: false, includingLid: false)
+
+        XCTAssertEqual(hold, KeepAwakeHold(system: true, screen: false))
+        XCTAssertFalse(recorder.isSet)
+        XCTAssertEqual(namesAdded(since: baseline), [Self.systemAssertionName])
+    }
+
+    /// A switch a crashed run left behind is cleared by the first apply that
+    /// does not want the lid, which is how a relaunch hands the Mac its lid
+    /// back.
+    func testAnAdoptedLidIsClearedByAHoldThatDoesNotWantIt() async {
+        let recorder = ClamshellSwitchRecorder()
+        let keepAwake = KeepAwake(clamshell: recorder.clamshellSwitch)
+        await keepAwake.adoptStrandedLid()
+
+        let hold = await keepAwake.apply(holding: false, includingScreen: false)
+
+        XCTAssertEqual(hold, .none)
+        XCTAssertEqual(recorder.calls, [false])
+    }
+
+    /// A clear the kernel refused is reported as a lid still set, so the
+    /// engine keeps the record that sends the next launch back for it.
+    func testARefusedClearIsReportedAsALidStillSet() async {
+        let recorder = ClamshellSwitchRecorder()
+        let keepAwake = KeepAwake(clamshell: recorder.clamshellSwitch)
+        _ = await keepAwake.apply(holding: true, includingScreen: false, includingLid: true)
+        recorder.refuse()
+
+        let hold = await keepAwake.apply(holding: false, includingScreen: false)
+
+        XCTAssertEqual(hold, KeepAwakeHold(system: false, screen: false, lid: true))
+    }
+
     private func heldAssertionNames() -> [String] {
         var byProcess: Unmanaged<CFDictionary>?
         guard IOPMCopyAssertionsByProcess(&byProcess) == kIOReturnSuccess,

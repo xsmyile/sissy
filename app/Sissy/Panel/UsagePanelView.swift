@@ -859,7 +859,11 @@ struct UsagePanelView: View {
             state.active ? .regular.tint(.blue.opacity(Self.heldGlassTint)) : .regular,
             in: .circle
         )
-        .help(UsageFormat.keepAwakeHelp(state, arming: model.preferredKeepAwakeMode))
+        .help(
+            UsageFormat.keepAwakeHelp(
+                state, arming: model.preferredKeepAwakeMode,
+                lidClosedSetting: model.engine.keepAwakeWithLidClosed)
+        )
         .contextMenu { keepAwakeMenu }
     }
 
