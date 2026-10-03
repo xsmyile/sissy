@@ -530,12 +530,18 @@ repository committing under an unexpected name.
 
 `Panel/PanelOverview.swift` is the Usage tab. It answers what the selected
 window cost and whether there is room to keep working: the cost, one row per
-account carrying the window that binds, and the projects. While no forge is connected the identity line is
+account carrying the window that binds while the window reaches today and one
+per provider carrying the window's spend while it does not, and the window's
+projects. While no forge is connected the identity line is
 there too, since it is all repositories have to say without one. The headline is over the panel's period, which
 the user picks with the calendar in the header and Sessions and Forge read over
-too (`UsagePeriod`: today, 7d, 30d, all), persisted in `preferences.json` because it
+too (`UsageRange`: a `UsagePeriod` preset, today, 7d, 30d or all, or a
+`UsageDaySpan` picked on `PanelCalendar`), persisted in `preferences.json` because it
 changes what is rendered and nothing about what is metered; the frame carries
-every window at once so switching costs no round trip to the engine. Today is
+every preset at once so switching costs no round trip to the engine, and a picked
+window is read through `UsageEngineHost.usageHistoryReading(over:)` while the panel
+is open. A picked window falls back to today 24 h after it was picked
+(`Preferences.period(now:)`). Today is
 never rolled up from the archive — the archive's copy of it is written behind
 the tail's flush. It replaced a fixed 7-day line at the foot of the Overview,
 which included today without saying so: measured 2026-09-15, 24.7% of that line
@@ -592,7 +598,7 @@ Forge's together behind an 11 pt reading. The window is the panel's, from
 the header, and the counted block names it; where the archive has not counted
 that window it answers for today and its label says so.
 
-Five pages sit one level in from the tabs, and the way back returns to the tab
+Six pages sit one level in from the tabs, and the way back returns to the tab
 each was opened from:
 
 | Page | File | Answers |
@@ -600,8 +606,9 @@ each was opened from:
 | `.provider` | `PanelProviderPage.swift` | that account's windows, identity and credits, beside **the CLI's** day, its split by model and its projects — the slice is per provider, since a log line names no account — and the refresh, which is a different action on each provider. The model split is a row of `ModelPill`s **under** the strip, two tiers each, because it is the caption of the day the bars are about rather than a second list in the idiom `By project` already owns — and it follows the pointer, since every `DayRow` carries its own split off bytes `UsageHistoryStore.series` had already decoded |
 | `.services` | `PanelProviderStatusPage` in `PanelProviderStatus.swift` | that vendor's own service tree, one level in from its page |
 | `.effort` | `PanelEffortPage.swift` | that vendor's week by model and effort, a bar per model, one level in from the `By effort` row on its page, which opens only when the split says more than the row |
-| `.projects` | `PanelProjectsPage.swift` | every repository the day names rather than the folded three, with the unattributed remainder as a line at the foot rather than a row in the list |
+| `.projects` | `PanelProjectsPage.swift` | every repository the panel's window names rather than the folded three (a provider's own list stays that provider's day), with the unattributed remainder as a line at the foot rather than a row in the list |
 | `.identities` | `PanelIdentities.swift` | which repositories commit under a name their forge does not expect, findings on the page and the rest behind a disclosure |
+| `.calendar` | `PanelCalendar.swift` | the presets and a month of the archive, a bar per day and a dot for a day with no file, to pick the panel's period from by a click on a day or a drag across a run of them; opened by a click on the header's calendar button |
 
 `.provider`, `.services`, `.effort` and `.projects` carry the account they were opened
 from, so the way back lands on the page that was left rather than on that
