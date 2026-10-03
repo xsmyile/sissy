@@ -78,6 +78,24 @@ struct UsagePanelView: View {
     /// What the page has once the header has taken its share.
     private var availableForPage: CGFloat { max(maxHeight - headerHeight, 0) }
 
+    /// The archive's reading of the days the panel's period covers, for a
+    /// picked window's headline and any window's strip. Fetched while the
+    /// panel is open and dropped with it, so a closed panel reads nothing.
+    @State private var spanReading: UsageSpanReading?
+    /// Each forge's counters over a picked window, fetched only while the
+    /// Forge tab is on screen over one. Each carries its own dates, so an
+    /// answer for other days is ignored rather than cleared.
+    @State private var forgeSpan: [ForgeSpanReading] = []
+
+    /// What the span fetch is keyed on: the days, and while they reach today
+    /// the archive's own total, which moves when today's file is rewritten.
+    /// A frame that changed nothing on disk re-reads nothing.
+    private struct SpanFetch: Equatable {
+        let span: UsageDaySpan?
+        let tokens: Int?
+        let cost: Decimal?
+    }
+
     enum Page: Equatable {
         /// The selected tab's own page, which is the only level the tab bar
         /// is drawn on: every case below is one level in from one of them,
@@ -110,6 +128,10 @@ struct UsagePanelView: View {
         /// repository the Overview's line names — and nil where it was opened
         /// to read the whole list.
         case identities(focus: String?)
+        /// The presets and a month of the archive to pick the panel's period
+        /// from, one level in from the header's calendar button. A pick
+        /// returns to the tab it was opened from.
+        case calendar
     }
 
     private static let controlButtonSize: CGFloat = 26
@@ -137,7 +159,7 @@ struct UsagePanelView: View {
     /// for a vendor whose Overview row is not per account.
     private var openAccount: String? {
         switch page {
-        case .overview, .identities: nil
+        case .overview, .identities, .calendar: nil
         case .provider(_, let account), .services(_, let account),
             .effort(_, let account), .projects(_, let account):
             account
@@ -151,7 +173,7 @@ struct UsagePanelView: View {
         -> UsagePanelSnapshot.ProviderRow?
     {
         switch page {
-        case .overview, .identities: return nil
+        case .overview, .identities, .calendar: return nil
         case .provider(let id, _), .services(let id, _), .effort(let id, _):
             return providers.first { $0.id == id }
         case .projects(let id, _):
@@ -177,27 +199,45 @@ struct UsagePanelView: View {
     /// The projects page's own rows, built only while that page is open.
     ///
     /// The snapshot is remade on every frame the panel is open for, and the
-    /// unfolded list is wanted on one page that usually is not — so this hangs
-    /// off the page rather than off `UsagePanelSnapshot.make`.
-    private func projectsPage(of frame: FrameData?) -> UsagePanelSnapshot.ProjectsPage? {
+    /// unfolded list is wanted on one page that usually is not, so this hangs
+    /// off the page rather than off `UsagePanelSnapshot.make`. It reads over
+    /// the snapshot's window, which is the Overview's.
+    private func projectsPage(
+        of frame: FrameData?, snapshot: UsagePanelSnapshot?
+    ) -> UsagePanelSnapshot.ProjectsPage? {
         guard case .projects(let provider, _) = page, let frame else { return nil }
-        return UsagePanelSnapshot.projectsPage(frame: frame, provider: provider)
+        return UsagePanelSnapshot.projectsPage(
+            frame: frame, provider: provider, period: snapshot?.period ?? .preset(.today),
+            window: snapshot?.window)
     }
 
     var body: some View {
         let live = model.liveFrame
+        let now = Date()
+        let history = live?.frame.history ?? [:]
+        let period = UsagePanelSnapshot.resolve(
+            model.usagePeriod, periods: UsagePanelSnapshot.availablePeriods(history))
+        let earliest = history[.all]?.earliestDay
+        let days = UsagePanelSnapshot.windowSpan(period, earliest: earliest, now: now)
         let snapshot = live.map {
             UsagePanelSnapshot.make(
                 frame: $0.frame,
-                period: model.preferences.usagePeriod,
+                period: period,
+                span: spanReading,
+                forgeSpan: forgeSpan,
                 claudeAccounts: model.engine.claudeAccounts,
-                limitsReading: model.preferences.limitsReading)
+                limitsReading: model.preferences.limitsReading,
+                now: now)
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])
         let tabs = snapshot.map { PanelTab.visible(in: $0, network: model.engine.network) } ?? [.usage]
         let liveDemand = page == .overview && tabs.contains(tab) ? tab.liveReadings : []
         let readings = PageReadings(
-            open: open, services: servicesReading(of: open), projects: projectsPage(of: live?.frame))
+            open: open, services: servicesReading(of: open),
+            projects: projectsPage(of: live?.frame, snapshot: snapshot),
+            days: period == .preset(.today) ? nil : days, earliest: earliest)
+        let spanFetch = Self.spanFetch(period, days: days, history: history, now: now)
+        let forgeFetch = forgeFetch(period)
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 header(for: page, live: live, readings: readings)
@@ -247,6 +287,37 @@ struct UsagePanelView: View {
                 page = .overview
             }
         }
+        .task(id: spanFetch) {
+            guard let span = spanFetch.span else { return }
+            let reading = await model.engine.usageHistoryReading(over: span)
+            guard !Task.isCancelled else { return }
+            spanReading = reading
+        }
+        .task(id: forgeFetch) {
+            guard let span = forgeFetch else { return }
+            let readings = await model.engine.forgeActivity(from: span.from, to: span.to)
+            guard !Task.isCancelled else { return }
+            forgeSpan = readings
+        }
+    }
+
+    /// The days the span reading is fetched for: none under the `Today`
+    /// preset, which reads the live tail, and the period's days otherwise.
+    private static func spanFetch(
+        _ period: UsageRange, days: UsageDaySpan?, history: [UsagePeriod: UsageHistoryRollup],
+        now: Date
+    ) -> SpanFetch {
+        guard period != .preset(.today) else { return SpanFetch(span: nil, tokens: nil, cost: nil) }
+        let archive = period.includesToday(now: now) ? history[.all] : nil
+        return SpanFetch(span: days, tokens: archive?.tokens, cost: archive?.cost)
+    }
+
+    /// The picked window the Forge tab is asking the forges about, nil while
+    /// that tab is not on screen or the period is a preset, which the poll
+    /// already answers.
+    private func forgeFetch(_ period: UsageRange) -> UsageDaySpan? {
+        guard page == .overview, tab == .forge, case .days(let span) = period else { return nil }
+        return span
     }
 
     // MARK: Page routing
@@ -259,6 +330,11 @@ struct UsagePanelView: View {
         let open: UsagePanelSnapshot.ProviderRow?
         let services: UsagePanelSnapshot.StatusRow?
         let projects: UsagePanelSnapshot.ProjectsPage?
+        /// The days the panel reads over, nil under the `Today` preset, for
+        /// the calendar's band.
+        let days: UsageDaySpan?
+        /// The first day the archive holds, which bounds the calendar.
+        let earliest: Date?
     }
 
     /// The header for `target`, exhaustive over every `Page` case so a case
@@ -288,6 +364,12 @@ struct UsagePanelView: View {
             }
         case .identities:
             identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt)
+        case .calendar:
+            subpageHeader(back: .overview, mark: nil, title: "Calendar") {
+                EmptyView()
+            } trailing: {
+                EmptyView()
+            }
         }
     }
 
@@ -338,6 +420,21 @@ struct UsagePanelView: View {
             }
         case .identities:
             PanelIdentities(rows: snapshot.identities, focus: Self.identityFocus(target))
+        case .calendar:
+            PanelCalendar(
+                period: snapshot.period,
+                periods: snapshot.periods,
+                reading: [
+                    UsageFormat.periodHeading(snapshot.period), "\(snapshot.tokens) tokens",
+                    snapshot.cost,
+                ].joined(separator: " · "),
+                window: readings.days,
+                earliest: readings.earliest,
+                load: { await model.engine.usageHistoryReading(over: $0) },
+                select: {
+                    model.setUsagePeriod($0)
+                    page = .overview
+                })
         }
     }
 
@@ -384,7 +481,7 @@ struct UsagePanelView: View {
         case .sessions:
             if let live {
                 PanelSessions(
-                    block: UsagePanelSnapshot.makeAgents(live.frame),
+                    block: UsagePanelSnapshot.makeAgents(live.frame, window: snapshot.window),
                     period: snapshot.period,
                     observedAt: live.frame.agentMemory?.current.observedAt,
                     refreshing: model.engine.refreshingAgents,
@@ -407,10 +504,20 @@ struct UsagePanelView: View {
         case .forge:
             PanelForge(
                 snapshot: snapshot,
-                refreshingForge: model.engine.refreshingForge,
+                refreshingForge: model.engine.refreshingForge.union(forgeAwaited(snapshot)),
                 refreshForge: { model.engine.refreshForge($0) },
                 openIdentities: { page = .identities(focus: $0) })
         }
+    }
+
+    /// The forge rows still waiting on their answer for a picked window,
+    /// which their labels word as being read rather than as a dash with no
+    /// reason beside it.
+    private func forgeAwaited(_ snapshot: UsagePanelSnapshot) -> Set<String> {
+        guard case .days(let span) = snapshot.period else { return [] }
+        let answered = Set(
+            forgeSpan.filter { $0.from == span.from && $0.to == span.to }.map(\.id))
+        return Set(snapshot.forge.map(\.id)).subtracting(answered)
     }
 
     /// The panel's home, and what every page one level in falls back to once
@@ -423,7 +530,12 @@ struct UsagePanelView: View {
             },
             openProvider: { page = .provider($0, account: $1) },
             openProjects: { page = .projects(nil, account: nil) },
-            openIdentities: { page = .identities(focus: $0) }
+            openIdentities: { page = .identities(focus: $0) },
+            resetPeriod: { model.setUsagePeriod(.preset(.today)) },
+            selectDay: { day in
+                guard let span = UsageDaySpan(from: day, to: day) else { return }
+                model.setUsagePeriod(.days(span))
+            }
         )
     }
 
@@ -576,8 +688,10 @@ struct UsagePanelView: View {
     /// provider's page: which window the panel reads over, what the Mac is
     /// doing about sleep, and the way into Settings. None is about an account.
     private func headerControls(_ live: SissyModel.LiveFrame?) -> some View {
-        HStack(spacing: 6) {
-            periodButton(live.map { UsagePanelSnapshot.availablePeriods($0.frame.history) } ?? [])
+        let periods = live.map { UsagePanelSnapshot.availablePeriods($0.frame.history) } ?? []
+        return HStack(spacing: 6) {
+            periodButton(
+                periods, chosen: UsagePanelSnapshot.resolve(model.usagePeriod, periods: periods))
             keepAwakeButton(model.keepAwake)
             settingsButton
         }
@@ -594,7 +708,16 @@ struct UsagePanelView: View {
     /// **An icon, so every reading names its window.** A circle beside the
     /// keep-awake switch costs the header no width, and the price is that its
     /// closed face does not say which window is chosen: the headline's
-    /// subline and the Sessions and Forge labels say it instead.
+    /// subline and the Sessions and Forge labels say it instead. The one
+    /// thing the face does say is that the window is a picked one rather than
+    /// a preset, in the accent, because a picked window is the one that
+    /// expires and the one a user forgets they set.
+    ///
+    /// **A click opens the calendar and a right-click the presets**, decided
+    /// 2026-10-03 (#310). The calendar is a page rather than a popover, for
+    /// the reason every page one level in is; the presets keep the menu they
+    /// had, through `.contextMenu` as the keep-awake switch beside it does,
+    /// with a picked window listed first so the menu says what is chosen.
     ///
     /// Disabled on Mac, Disk and Network, which read the moment and have no
     /// window, rather than hidden: a header whose controls come and go with
@@ -602,46 +725,52 @@ struct UsagePanelView: View {
     /// nothing but today, since a control whose every option answers the
     /// number on screen is a control about a feature.
     @ViewBuilder
-    private func periodButton(_ periods: [UsagePeriod]) -> some View {
+    private func periodButton(_ periods: [UsagePeriod], chosen: UsageRange) -> some View {
         if periods.count > 1 {
-            let chosen =
-                periods.contains(model.preferences.usagePeriod)
-                ? model.preferences.usagePeriod : .today
-            Menu {
-                Picker("Period", selection: periodBinding(chosen)) {
-                    ForEach(periods, id: \.self) { period in
-                        Text(UsageFormat.periodLabel(period)).tag(period)
-                    }
-                }
-                .pickerStyle(.inline)
+            let picked = chosen.isPicked
+            Button {
+                page = .calendar
             } label: {
                 Image(systemName: "calendar")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(picked ? Color.accentColor : Color.secondary)
                     .contentShape(.circle)
             }
-            .menuStyle(.button)
             .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .glassEffect(.regular, in: .circle)
-            .disabled(readsTheMoment)
-            .help(
-                readsTheMoment
-                    ? "This tab reads the moment and has no period"
-                    : "Period: " + UsageFormat.periodHeading(chosen)
+            .glassEffect(
+                picked ? .regular.tint(.accentColor.opacity(Self.heldGlassTint)) : .regular,
+                in: .circle
             )
+            .disabled(readsTheMoment)
+            .help(readsTheMoment ? UsageFormat.periodHelpMoment : UsageFormat.periodHelp(chosen))
+            .contextMenu { periodMenu(periods, chosen: chosen) }
             .accessibilityLabel("Period")
             .accessibilityValue(UsageFormat.periodHeading(chosen))
         }
     }
 
-    private var readsTheMoment: Bool {
-        page == .overview && !tab.readsPeriod
+    /// The presets as checked items, a picked window above them while one is
+    /// set, and the way into the calendar under them.
+    @ViewBuilder
+    private func periodMenu(_ periods: [UsagePeriod], chosen: UsageRange) -> some View {
+        if chosen.isPicked {
+            Toggle(UsageFormat.periodHeading(chosen), isOn: .constant(true))
+            Divider()
+        }
+        ForEach(periods, id: \.self) { preset in
+            Toggle(
+                UsageFormat.periodLabel(preset),
+                isOn: Binding(
+                    get: { chosen == .preset(preset) },
+                    set: { _ in model.setUsagePeriod(.preset(preset)) }))
+        }
+        Divider()
+        Button("Open Calendar") { page = .calendar }
     }
 
-    private func periodBinding(_ chosen: UsagePeriod) -> Binding<UsagePeriod> {
-        Binding(get: { chosen }, set: { model.setUsagePeriod($0) })
+    private var readsTheMoment: Bool {
+        page == .overview && !tab.readsPeriod
     }
 
     /// What the header says under its title: why there is no reading, or when
@@ -759,9 +888,10 @@ struct UsagePanelView: View {
     }
 
     /// Where the way back from a page one level in goes: the tab it was
-    /// opened from, named by what that tab is about.
+    /// opened from, named by what that tab is about. Not `today` for Usage
+    /// any more, whose page reads over whatever window the panel is set to.
     private var homeHelp: String {
-        tab == .usage ? "Back to today" : "Back to \(tab.title)"
+        "Back to \(tab.title)"
     }
 
     /// The header a provider page carries instead: the way back, whose page
