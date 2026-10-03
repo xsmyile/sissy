@@ -387,7 +387,7 @@ struct PanelCalendar: View {
             }
         }
         .accessibilityElement()
-        .accessibilityLabel("\(cell.title) · \(cell.isFuture ? "" : cell.figures)")
+        .accessibilityLabel(cell.isFuture ? cell.title : "\(cell.title) · \(cell.figures)")
         .accessibilityAddTraits(cell.isFuture ? [] : .isButton)
         .accessibilityAction {
             guard !cell.isFuture, let span = UsageDaySpan(from: cell.day, to: cell.day) else {
