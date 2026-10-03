@@ -634,7 +634,7 @@ final class UsageFormatTests: XCTestCase {
     }
 
     private func rollup(_ period: UsagePeriod, earliest: Date?) -> UsageHistoryRollup {
-        UsageHistoryRollup(period: period, earliestDay: earliest, tokens: 1, cost: 1)
+        UsageHistoryRollup(period: .preset(period), earliestDay: earliest, tokens: 1, cost: 1)
     }
 
     /// A fixed instant in a fixed zone: "same calendar day" is a question the

@@ -163,7 +163,7 @@ final class AgentStatsSnapshotTests: XCTestCase {
     func testAWiderWindowIsCountedFromTheArchiveRowsIncluded() {
         let history: [UsagePeriod: UsageHistoryRollup] = [
             .sevenDays: UsageHistoryRollup(
-                period: .sevenDays, earliestDay: Date(), tokens: 99, cost: 1,
+                period: .preset(.sevenDays), earliestDay: Date(), tokens: 99, cost: 1,
                 agents: AgentCounts(sessions: 300, agents: 120),
                 agentsByProvider: [
                     ProviderID.claudeCode: AgentCounts(sessions: 250, agents: 100),
@@ -200,7 +200,7 @@ final class AgentStatsSnapshotTests: XCTestCase {
                 tokens: 0, cost: 0, burn: nil, providers: [], keepAwake: .off,
                 history: [
                     .sevenDays: UsageHistoryRollup(
-                        period: .sevenDays, earliestDay: Date(), tokens: 1, cost: 1, cache: week)
+                        period: .preset(.sevenDays), earliestDay: Date(), tokens: 1, cost: 1, cache: week)
                 ],
                 cache: today))
 

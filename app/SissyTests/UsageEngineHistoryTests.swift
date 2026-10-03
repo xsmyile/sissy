@@ -161,6 +161,20 @@ final class UsageEngineHistoryTests: XCTestCase {
         }
     }
 
+    /// A span is answered off the archive on demand, and not at all while the
+    /// archive is switched off: no reading is not a window at zero.
+    func testASpanIsReadOnlyWhileTheArchiveIsOn() async throws {
+        try archiveYesterday()
+        let yesterday = try XCTUnwrap(UsageDaySpan(from: try yesterday(), to: try yesterday()))
+
+        let reading = await makeEngine().historyReading(over: yesterday)
+        let switchedOff = await makeEngine(retentionDays: 0).historyReading(over: yesterday)
+
+        XCTAssertEqual(reading?.rollup.tokens, Self.archivedTokens)
+        XCTAssertEqual(reading?.days.map(\.tokens), [Self.archivedTokens])
+        XCTAssertNil(switchedOff)
+    }
+
     /// Today is never a key: the archive's copy of it is written behind the
     /// tail's flush, so the headline stays on the live totals the frame already
     /// carries rather than going slower the moment today is selected.

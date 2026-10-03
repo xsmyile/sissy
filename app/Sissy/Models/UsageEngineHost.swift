@@ -977,6 +977,16 @@ final class UsageEngineHost {
             provider: provider, days: UsagePanelSnapshot.dayStripDays)
     }
 
+    /// What the archive holds for days picked on a calendar, summed and day
+    /// by day, for the window the panel reads over and for a month's grid.
+    ///
+    /// Nil while the archive is switched off and before the engine runs,
+    /// which a page draws as no reading rather than as a window at zero.
+    func usageHistoryReading(over span: UsageDaySpan) async -> UsageSpanReading? {
+        guard let engine else { return nil }
+        return await engine.historyReading(over: span)
+    }
+
     /// Deletes the archive. The engine re-emits once it is gone, which is
     /// what takes the panel's archive line away with it.
     ///

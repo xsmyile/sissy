@@ -640,6 +640,179 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertTrue(UsageHistoryStore.rollups(for: [], in: root).isEmpty)
     }
 
+    // MARK: Splits and spans
+
+    private func span(_ from: Int, _ to: Int) throws -> UsageDaySpan {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        return try XCTUnwrap(
+            UsageDaySpan(
+                from: try XCTUnwrap(cal.date(byAdding: .day, value: from, to: today)),
+                to: try XCTUnwrap(cal.date(byAdding: .day, value: to, to: today))))
+    }
+
+    private func dayDate(_ offset: Int) throws -> Date {
+        let cal = Calendar.current
+        return try XCTUnwrap(cal.date(byAdding: .day, value: offset, to: cal.startOfDay(for: Date())))
+    }
+
+    /// A directory holding a `.git`, so the resolver names it a repository.
+    private func repository(_ name: String) throws -> URL {
+        let repo = root.appendingPathComponent(name)
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        return repo
+    }
+
+    func testASpanAddsUpToTheDayFilesInsideIt() throws {
+        try write(provider: "claude-code", day: day(-5), models: ["a": totals(input: 1, cost: "1")])
+        try write(provider: "codex", day: day(-5), models: ["b": totals(input: 2, cost: "2")])
+        try write(provider: "claude-code", day: day(-2), models: ["a": totals(input: 4, cost: "4")])
+        try write(provider: "codex", day: day(-6), models: ["b": totals(input: 50, cost: "50")])
+        try write(provider: "codex", day: day(0), models: ["b": totals(input: 70, cost: "70")])
+
+        let reading = UsageHistoryStore.reading(over: try span(-5, -1), in: root)
+
+        XCTAssertEqual(reading.rollup.tokens, 7, "a day outside the span was counted")
+        XCTAssertEqual(reading.rollup.cost, Decimal(7))
+        XCTAssertEqual(reading.rollup.earliestDay, try dayDate(-5))
+        XCTAssertEqual(reading.rollup.period, .days(try span(-5, -1)))
+        XCTAssertEqual(
+            reading.rollup.spendByProvider,
+            ["claude-code": UsageSpend(tokens: 5, cost: 5), "codex": UsageSpend(tokens: 2, cost: 2)])
+    }
+
+    /// One element per day holding a file, summed across providers: a day
+    /// Sissy has no file for is no reading, and a bar at zero would be one.
+    func testADayWithNoFileIsAbsentFromTheSpansSeries() throws {
+        try write(provider: "claude-code", day: day(-5), models: ["a": totals(input: 1, cost: "1")])
+        try write(provider: "codex", day: day(-5), models: ["b": totals(input: 2, cost: "2")])
+        try write(provider: "claude-code", day: day(-2), models: ["a": totals(input: 4, cost: "4")])
+
+        let days = UsageHistoryStore.reading(over: try span(-5, -1), in: root).days
+
+        XCTAssertEqual(
+            days,
+            [
+                UsageHistoryDayTotal(day: try dayDate(-5), tokens: 3, cost: 3),
+                UsageHistoryDayTotal(day: try dayDate(-2), tokens: 4, cost: 4),
+            ])
+    }
+
+    /// What names no repository, or a path that is not one, is the residue,
+    /// and it is what brings the projects up to the headline.
+    func testTheProjectSplitAndItsResidueAddUpToTheSpan() throws {
+        let repo = try repository("repo")
+        let scratch = root.appendingPathComponent("scratch")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        try writeRows(
+            provider: "claude-code", day: day(-3),
+            rows: [
+                UsageHistoryRow(model: "a", project: repo.appendingPathComponent("app").path):
+                    totals(input: 10, cost: "1"),
+                UsageHistoryRow(model: "b", project: repo.path): totals(input: 20, cost: "2"),
+                UsageHistoryRow(model: "a", project: scratch.path): totals(input: 40, cost: "4"),
+                UsageHistoryRow(model: "a", project: nil): totals(input: 80, cost: "8"),
+            ])
+
+        let rollup = UsageHistoryStore.reading(over: try span(-3, -3), in: root).rollup
+
+        XCTAssertEqual(rollup.projects.map(\.path), [ProjectResolver().project(for: repo.path)])
+        XCTAssertEqual(rollup.projects.first?.tokens, 30)
+        XCTAssertEqual(rollup.unattributed, UsageSpend(tokens: 120, cost: 12))
+        XCTAssertEqual(
+            rollup.projects.reduce(0) { $0 + $1.tokens } + rollup.unattributed.tokens, rollup.tokens)
+        XCTAssertEqual(
+            rollup.projects.reduce(Decimal(0)) { $0 + $1.cost } + rollup.unattributed.cost, rollup.cost)
+    }
+
+    /// The presets carry the same splits, today's file included the way the
+    /// headline includes it.
+    func testAPresetCarriesItsProjectsAndProviders() throws {
+        let repo = try repository("repo")
+        try writeRows(
+            provider: "claude-code", day: day(0),
+            rows: [UsageHistoryRow(model: "a", project: repo.path): totals(input: 10, cost: "1")])
+        try writeRows(
+            provider: "codex", day: day(-3),
+            rows: [
+                UsageHistoryRow(model: "b", project: repo.path): totals(input: 20, cost: "2"),
+                UsageHistoryRow(model: "b", project: nil): totals(input: 5, cost: "1"),
+            ])
+
+        let rollup = try week(in: root)
+
+        XCTAssertEqual(rollup.projects.map(\.tokens), [30])
+        XCTAssertEqual(rollup.unattributed, UsageSpend(tokens: 5, cost: 1))
+        XCTAssertEqual(
+            rollup.spendByProvider,
+            ["claude-code": UsageSpend(tokens: 10, cost: 1), "codex": UsageSpend(tokens: 25, cost: 3)])
+    }
+
+    /// A cached day keeps its attribution, so a warm rollup splits as a cold
+    /// one does.
+    func testACachedRollupKeepsItsProjectSplit() throws {
+        let repo = try repository("repo")
+        try writeRows(
+            provider: "codex", day: day(-1),
+            rows: [UsageHistoryRow(model: "b", project: repo.path): totals(input: 20, cost: "2")])
+        let resolver = ProjectResolver()
+        var cache = UsageHistoryDayCache()
+        let cold = UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache, projects: resolver)
+
+        let warm = UsageHistoryStore.rollups(for: [.all], in: root, cache: &cache, projects: resolver)
+
+        XCTAssertEqual(warm, cold)
+        XCTAssertEqual(warm[.all]?.projects.count, 1)
+    }
+
+    /// A calendar month is one call, through today for the month in course.
+    func testAMonthIsOneSpanEndingNoLaterThanToday() throws {
+        let cal = Calendar.current
+        let now = Date()
+        let current = try XCTUnwrap(UsageDaySpan.month(containing: now, now: now))
+        let lastMonth = try XCTUnwrap(
+            UsageDaySpan.month(
+                containing: try XCTUnwrap(cal.date(byAdding: .month, value: -1, to: now)), now: now))
+
+        XCTAssertTrue(current.includesToday(now: now))
+        XCTAssertEqual(cal.component(.day, from: current.from), 1)
+        XCTAssertTrue((28...31).contains(lastMonth.dayCount()))
+        XCTAssertFalse(lastMonth.includesToday(now: now))
+        XCTAssertNil(
+            UsageDaySpan.month(
+                containing: try XCTUnwrap(cal.date(byAdding: .month, value: 1, to: now)), now: now))
+    }
+
+    func testASpanReachingPastTodayOrRunningBackwardsIsRefused() throws {
+        XCTAssertNil(UsageDaySpan(from: try dayDate(0), to: try dayDate(1)))
+        XCTAssertNil(UsageDaySpan(from: try dayDate(-1), to: try dayDate(-2)))
+    }
+
+    /// A preference written before a window could be picked is a bare
+    /// `UsagePeriod`, and it has to come back as the same choice.
+    func testAStoredPeriodDecodesAsThePresetItNamed() throws {
+        for period in UsagePeriod.allCases {
+            let stored = try JSONEncoder().encode(period)
+
+            let decoded = try JSONDecoder().decode(UsageRange.self, from: stored)
+
+            XCTAssertEqual(decoded, .preset(period))
+            XCTAssertEqual(try JSONEncoder().encode(decoded), stored)
+        }
+    }
+
+    /// A span is kept as the two days it names, so it reads back as them.
+    func testASpanRoundTripsAsItsTwoDays() throws {
+        let picked = UsageRange.days(try span(-9, -2))
+
+        let encoded = try JSONEncoder().encode(picked)
+
+        XCTAssertEqual(try JSONDecoder().decode(UsageRange.self, from: encoded), picked)
+        let keys = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: String])
+        XCTAssertEqual(keys, ["from": day(-9), "to": day(-2)])
+    }
+
     private func week(in root: URL) throws -> UsageHistoryRollup {
         try XCTUnwrap(UsageHistoryStore.rollups(for: [.sevenDays], in: root)[.sevenDays])
     }

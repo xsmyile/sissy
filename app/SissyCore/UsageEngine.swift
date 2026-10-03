@@ -34,6 +34,11 @@ actor UsageEngine {
     /// re-reads the archive's project paths through a resolver built on it.
     /// A second ledger over the same file would be a second writer to it.
     private let projectLedger: ProjectLedger
+    /// What the frame's rollups read the archive's project paths through,
+    /// kept for the life of the engine so the day cache and the answers it
+    /// holds come from one resolver. It pins an answer for that life, the
+    /// terms every tail's resolver already runs on.
+    private let historyProjects: ProjectResolver
     /// Day the archive was last pruned for. Retention is measured in days, so
     /// the answer changes only when the day does — and a Mac that stays up for
     /// a month has to keep the promise the setting makes without waiting for a
@@ -298,6 +303,7 @@ actor UsageEngine {
         // invalidates a tail's snapshot may take it with it.
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         self.projectLedger = projectLedger
+        self.historyProjects = ProjectResolver(ledger: projectLedger)
         self.identityMonitor = GitIdentityMonitor(ledger: projectLedger, activity: activity)
         let agentMonitor = AgentProcessMonitor(ledger: projectLedger)
         self.agentMonitor = agentMonitor
@@ -2108,7 +2114,8 @@ actor UsageEngine {
         let stale = now.timeIntervalSince(historyRollupAt) >= Self.historyRollupTTL
         if historyRollups.isEmpty || stale {
             historyRollups = UsageHistoryStore.rollups(
-                for: Set(UsagePeriod.archived), in: stateDir, now: now, cache: &historyDayCache)
+                for: Set(UsagePeriod.archived), in: stateDir, now: now, cache: &historyDayCache,
+                projects: historyProjects)
             historyRollupAt = now
         }
         return (historyRollups[.all]?.tokens ?? 0) > 0 ? historyRollups : [:]
@@ -2182,6 +2189,29 @@ actor UsageEngine {
         let directory = stateDir
         return await Task.detached {
             UsageHistoryStore.series(provider: provider, days: days, in: directory)
+        }.value
+    }
+
+    /// What the archive holds for days picked on a calendar, and what each
+    /// of them came to, or nil while the archive is switched off.
+    ///
+    /// Off the actor for `historySeries`' reasons, and never on the frame
+    /// path: it decodes every file the span names, which is a window the
+    /// user asked for once rather than one every frame re-reads. A resolver
+    /// of its own, as the export builds, because one that outlives the call
+    /// would be touched from a task the engine does not own.
+    ///
+    /// Nil rather than an empty reading when retention is `0`: the archive
+    /// switched off is no reading, and a window drawn at zero would be one.
+    func historyReading(over span: UsageDaySpan) async -> UsageSpanReading? {
+        guard config.resolvedHistoryRetentionDays > 0 else { return nil }
+        let directory = stateDir
+        let pricing = pricing
+        let ledger = projectLedger
+        return await Task.detached {
+            UsageHistoryStore.reading(
+                over: span, in: directory, pricing: pricing,
+                projects: ProjectResolver(ledger: ledger))
         }.value
     }
 
