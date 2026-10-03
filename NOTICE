@@ -12,7 +12,8 @@ Sissy's **name** and Sissy's **artwork** are not licensed by this repository.
 All rights to them are reserved by the copyright holder named in `LICENSE`.
 They are:
 
-- `assets/sissy-icon.png`, the app icon as shown in the README
+- `assets/sissy-icon.png` and `assets/sissy-icon-blink.png`, the app icon as
+  shown in the README, still and blinking
 - `app/Sissy/Resources/AppIcon.icon/`, the icon the app ships
 - `app/Sissy/Resources/Assets.xcassets/SissyMenuBarTemplate*.imageset/` and
   `SissyMenuBarSleepingTemplate*.imageset/`, the menu bar silhouettes

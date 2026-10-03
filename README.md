@@ -1,22 +1,23 @@
 <div align="center">
 
 <h1>
-  <img src="assets/sissy-icon.png" alt="" width="128" /><br />
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="assets/sissy-icon.png" />
+    <img src="assets/sissy-icon-blink.png" alt="" width="128" />
+  </picture><br />
   Sissy
 </h1>
 
-**The numbers you keep checking, one click away.**<br />
-The menu bar companion for developers: your agents, your Mac, your repositories.
+**Your agents, your Mac, your repos. One click away.**<br />
+The menu bar companion for developers.
 
 [![Release](https://img.shields.io/github/v/release/xsmyile/sissy?style=flat-square&color=blue)](../../releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/xsmyile/sissy/ci.yml?branch=master&style=flat-square&label=ci&logo=githubactions&logoColor=white)](../../actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple&logoColor=white)](#install)
-[![License](https://img.shields.io/github/license/xsmyile/sissy?style=flat-square&color=green)](./LICENSE)
 
 <img src="assets/sissy-demo.gif" width="100%"
   alt="Sissy's panel opening from the menu bar and stepping through its tabs: a rate-limit gauge per account, the agents running now and the memory they hold, the Mac's memory pressure and heaviest apps, the builds of removed projects taking room on the disk, the network rate, and keep awake" />
 
-[Install](#install) • [What it shows](#what-it-shows) • [What it reads](#what-it-reads) • [Privacy](#privacy) • [Uninstall](#uninstall) • [How it works](#how-it-works) • [Configuration](#configuration) • [Build](#build-from-source)
+[Install](#install) · [What it shows](#what-it-shows) · [What it reads](#what-it-reads) · [Privacy](#privacy) · [Build](#build-from-source)
 
 </div>
 
@@ -280,8 +281,8 @@ properly and covers the vendor marks Sissy draws.
 
 ## The name
 
-Named after my cat: she naps, judges, demands cuddles (A LOT of cuddles), and is,
-objectively, fabulous. The icon is her.
+Named after my cat: she naps, judges, demands cuddles (a lot of cuddles), and is,
+objectively, fabulous. The silhouette is drawn from her.
 
 ## License
 
