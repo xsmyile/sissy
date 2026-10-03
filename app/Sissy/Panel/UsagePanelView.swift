@@ -84,9 +84,8 @@ struct UsagePanelView: View {
     /// with the panel, so a closed panel reads nothing.
     @State private var spanAnswer: UsagePanelSnapshot.SpanAnswer?
     /// Each forge's counters over a picked window, fetched only while the
-    /// Forge tab is on screen over one. Each carries its own dates, so an
-    /// answer for other days is ignored rather than cleared.
-    @State private var forgeSpan: [ForgeSpanReading] = []
+    /// Forge tab is on screen over one, and held with the days it answers.
+    @State private var forgeSpan: UsagePanelSnapshot.ForgeSpanAnswer?
 
     /// What the span fetch is keyed on: the period and its days, and while
     /// they reach today the archive's own total, which moves only when a
@@ -323,7 +322,7 @@ struct UsagePanelView: View {
             guard let span = forgeFetch else { return }
             let readings = await model.engine.forgeActivity(from: span.from, to: span.to)
             guard !Task.isCancelled else { return }
-            forgeSpan = readings
+            forgeSpan = UsagePanelSnapshot.ForgeSpanAnswer(span: span, readings: readings)
         }
     }
 
@@ -549,20 +548,12 @@ struct UsagePanelView: View {
         case .forge:
             PanelForge(
                 snapshot: snapshot,
-                refreshingForge: model.engine.refreshingForge.union(forgeAwaited(snapshot)),
+                refreshingForge: model.engine.refreshingForge.union(
+                    UsagePanelSnapshot.forgeAwaited(
+                        snapshot.forge, period: snapshot.period, answer: forgeSpan)),
                 refreshForge: { model.engine.refreshForge($0) },
                 openIdentities: { page = .identities(focus: $0) })
         }
-    }
-
-    /// The forge rows still waiting on their answer for a picked window,
-    /// which their labels word as being read rather than as a dash with no
-    /// reason beside it.
-    private func forgeAwaited(_ snapshot: UsagePanelSnapshot) -> Set<String> {
-        guard case .days(let span) = snapshot.period else { return [] }
-        let answered = Set(
-            forgeSpan.filter { $0.from == span.from && $0.to == span.to }.map(\.id))
-        return Set(snapshot.forge.map(\.id)).subtracting(answered)
     }
 
     /// The panel's home, and what every page one level in falls back to once

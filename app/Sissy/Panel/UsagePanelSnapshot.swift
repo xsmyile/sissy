@@ -418,6 +418,20 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
+    /// Each forge's counters over a picked window, held with the window they
+    /// were asked for.
+    ///
+    /// Matched on the days rather than on the instants each reading carries:
+    /// those are local midnights worked out in the zone in force when the
+    /// question was asked, and the same days worked out again after a zone
+    /// change are other instants. An answer that came back empty, which is
+    /// also what a failed read answers, is still the answer: every row it
+    /// names nothing for is the absence it is rather than a row being read.
+    struct ForgeSpanAnswer: Equatable {
+        let span: UsageDaySpan
+        let readings: [ForgeSpanReading]
+    }
+
     /// How many bars the strip draws, and how many days its reader asks for.
     ///
     /// It lived on `UsageEngine` while the engine rolled a fixed week up for
@@ -1053,7 +1067,7 @@ struct UsagePanelSnapshot: Equatable {
         period: UsageRange = .preset(.today),
         archiveKept: Bool = false,
         span: SpanAnswer? = nil,
-        forgeSpan: [ForgeSpanReading] = [],
+        forgeSpan: ForgeSpanAnswer? = nil,
         claudeAccounts: ClaudeAccountRegistry.Snapshot = .init(),
         limitsReading: LimitsReading = .used,
         now: Date = Date(),
@@ -1114,7 +1128,7 @@ struct UsagePanelSnapshot: Equatable {
                 switch resolved {
                 case .preset(let preset): makeForge(frame.forge, period: preset, now: now)
                 case .days(let picked):
-                    makeForgeSpan(frame.forge, span: picked, answers: forgeSpan, now: now)
+                    makeForgeSpan(frame.forge, span: picked, answer: forgeSpan, now: now)
                 }
             }(),
             identities: makeIdentities(frame.identities),
@@ -1806,13 +1820,15 @@ struct UsagePanelSnapshot: Equatable {
     /// A counter the user switched off is left off the row, as it is under a
     /// preset; one the forge would not answer is the panel's dash, never a
     /// zero. Until the answer lands every row is a dash, and the label says
-    /// the forge is being read. The newest event and the month's Actions
-    /// answer no window, so they stay the poll's.
+    /// the forge is being read (`forgeAwaited`). A row the answer names
+    /// nothing for, an empty or failed answer included, is a dash with no
+    /// such label. The newest event and the month's Actions answer no
+    /// window, so they stay the poll's.
     private static func makeForgeSpan(
-        _ readings: [ForgeActivityReading], span: UsageDaySpan, answers: [ForgeSpanReading],
+        _ readings: [ForgeActivityReading], span: UsageDaySpan, answer: ForgeSpanAnswer?,
         now: Date
     ) -> [ForgeRow] {
-        let matching = answers.filter { $0.from == span.from && $0.to == span.to }
+        let matching = answer?.span == span ? answer?.readings ?? [] : []
         let byID = Dictionary(matching.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         var vendorCalendar = Calendar(identifier: .gregorian)
         vendorCalendar.timeZone = .gmt
@@ -1844,6 +1860,16 @@ struct UsagePanelSnapshot: Equatable {
                 commentsHelp: UsageFormat.forgeCommentsHelp(reading.kind),
                 actions: makeActions(reading.actions, now: now))
         }
+    }
+
+    /// The forge rows still waiting on their answer for a picked window,
+    /// which their labels word as being read: every row until an answer for
+    /// exactly these days has come back, and none after, whatever it held.
+    static func forgeAwaited(
+        _ rows: [ForgeRow], period: UsageRange, answer: ForgeSpanAnswer?
+    ) -> Set<String> {
+        guard case .days(let span) = period, answer?.span != span else { return [] }
+        return Set(rows.map(\.id))
     }
 
     private static func spanFigure(_ counter: ForgeSpanCounter?) -> String? {
