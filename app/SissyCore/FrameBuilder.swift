@@ -534,6 +534,10 @@ struct FrameData: Sendable, Equatable {
     /// frame's wait. `today` is never a key here — it is what `tokens` and
     /// `cost` above already are, read live rather than from an archive written
     /// behind the tail's flush.
+    ///
+    /// Each carries its window's split by repository and by provider, so a
+    /// projects block under a week reads the week rather than `projects`
+    /// below, which is today's.
     let history: [UsagePeriod: UsageHistoryRollup]
     /// Today's spend by project, summed across every provider and ordered by
     /// cost. One repository is one row wherever the work ran — a worktree

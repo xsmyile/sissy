@@ -70,7 +70,7 @@ final class ForgeRowTests: XCTestCase {
     ) -> [UsagePanelSnapshot.ForgeRow] {
         let history: [UsagePeriod: UsageHistoryRollup] = Dictionary(
             uniqueKeysWithValues: UsagePeriod.archived.map { period in
-                (period, UsageHistoryRollup(period: period, earliestDay: nil, tokens: 1, cost: 1))
+                (period, UsageHistoryRollup(period: .preset(period), earliestDay: nil, tokens: 1, cost: 1))
             })
         let frame = FrameBuilder.build(
             today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [], history: history,

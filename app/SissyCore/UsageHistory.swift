@@ -519,12 +519,225 @@ enum UsagePeriod: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// Whole local days picked on a calendar, both ends included.
+///
+/// Days rather than instants, because the archive answers at the day and a
+/// window cut mid-day would name hours no file can split. `to` is never after
+/// today: a window reaching into a day that has not happened would be a
+/// reading of nothing under the name of a day.
+///
+/// Each end is held as the date it names, never as an instant in it: a
+/// midnight is a midnight in one zone, and a window picked before a flight
+/// has to name the same two dates after it. `from` and `to` are therefore
+/// worked out on every read, as the local midnights of those dates in the
+/// zone in force at the moment, and so are the archive keys a reading looks
+/// its files up under. Encoded as the two `yyyy-MM-dd` keys the archive files
+/// its days under, for the same reason.
+struct UsageDaySpan: Hashable, Sendable, Codable {
+    private static let secondsPerDay = 86_400
+    /// The archive's keys read off the dates themselves, which is what UTC
+    /// does: a day number times a day's seconds is that date's midnight there.
+    private static let keys = DayKeyFormatter(zone: { .gmt })
+
+    /// Each end as whole days since 1 January 1970, which is a date in no
+    /// zone, and whose difference is a day count no daylight shift can bend.
+    private let first: Int
+    private let last: Int
+
+    /// The local midnight the window starts on, in the zone in force now.
+    var from: Date { Self.midnight(of: first, in: .current) }
+    /// The local midnight of the window's last day, in the zone in force now.
+    var to: Date { Self.midnight(of: last, in: .current) }
+
+    /// Nil when `from` is after `to` or `to` is after today.
+    init?(from: Date, to: Date, now: Date = Date(), calendar: Calendar = .current) {
+        self.init(
+            first: Self.date(of: from, in: calendar), last: Self.date(of: to, in: calendar),
+            today: Self.date(of: now, in: calendar))
+    }
+
+    private init?(first: Int, last: Int, today: Int) {
+        guard first <= last, last <= today else { return nil }
+        self.first = first
+        self.last = last
+    }
+
+    /// The month holding `day`, from its first day through its last or
+    /// through today, whichever comes first, which is the window a month
+    /// grid draws. Nil for a month that has not started.
+    static func month(
+        containing day: Date, now: Date = Date(), calendar: Calendar = .current
+    ) -> Self? {
+        guard let interval = calendar.dateInterval(of: .month, for: day),
+            let last = calendar.date(byAdding: .day, value: -1, to: interval.end)
+        else { return nil }
+        return Self(from: interval.start, to: min(last, now), now: now, calendar: calendar)
+    }
+
+    /// Whether the local day `day` falls on is inside the window, at any hour
+    /// of it.
+    func contains(_ day: Date) -> Bool {
+        (first...last).contains(Self.date(of: day, in: .current))
+    }
+
+    /// Whether the window reaches today, which is what decides whether the
+    /// rate-limit gauges belong beside it.
+    func includesToday(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        last == Self.date(of: now, in: calendar)
+    }
+
+    /// How many days the window spans, both ends included. The same in every
+    /// calendar and zone, since it counts dates rather than hours.
+    func dayCount(calendar: Calendar = .current) -> Int {
+        last - first + 1
+    }
+
+    /// The `yyyy-MM-dd` key of every day in the window, oldest first, which is
+    /// the name each day's file is filed under.
+    var dayKeys: [String] {
+        (first...last).map(Self.key(of:))
+    }
+
+    /// The date `instant` falls on in `calendar`'s zone, as a day number.
+    private static func date(of instant: Date, in calendar: Calendar) -> Int {
+        let offset = TimeInterval(calendar.timeZone.secondsFromGMT(for: instant))
+        return Int(((instant.timeIntervalSince1970 + offset) / TimeInterval(secondsPerDay)).rounded(.down))
+    }
+
+    /// The first instant of day `date` in `calendar`'s zone, found from the
+    /// instant whose wall clock there reads noon on it: no zone is twelve
+    /// hours from UTC on both sides of a date, and no daylight shift moves a
+    /// clock off the date it is noon on.
+    private static func midnight(of date: Int, in calendar: Calendar) -> Date {
+        let noon = TimeInterval(date * secondsPerDay + secondsPerDay / 2)
+        let offset = TimeInterval(calendar.timeZone.secondsFromGMT(for: Date(timeIntervalSince1970: noon)))
+        return calendar.startOfDay(for: Date(timeIntervalSince1970: noon - offset))
+    }
+
+    private static func key(of date: Int) -> String {
+        keys.string(from: Date(timeIntervalSince1970: TimeInterval(date * secondsPerDay)))
+    }
+
+    private static func date(ofKey key: String) -> Int? {
+        keys.date(from: key).map {
+            Int(($0.timeIntervalSince1970 / TimeInterval(secondsPerDay)).rounded(.down))
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case from, to
+    }
+
+    /// Checked against today as the clock reads it now, the rule a span
+    /// picked on a calendar is held to, so a stored window that has come to
+    /// name a day after today, a flight west having moved today back, is
+    /// refused here and the caller falls back to its default.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let first = Self.date(ofKey: try container.decode(String.self, forKey: .from)),
+            let last = Self.date(ofKey: try container.decode(String.self, forKey: .to)),
+            let span = Self(first: first, last: last, today: Self.date(of: Date(), in: .current))
+        else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .from, in: container,
+                debugDescription: "not a span of whole days ending no later than today")
+        }
+        self = span
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(Self.key(of: first), forKey: .from)
+        try container.encode(Self.key(of: last), forKey: .to)
+    }
+}
+
+/// The window the panel reads over: one of the presets, or days picked on a
+/// calendar.
+///
+/// A preset encodes exactly as a bare `UsagePeriod` always has, so every
+/// preference written before a window could be picked decodes into the same
+/// choice. A span decodes from its own keyed shape.
+enum UsageRange: Hashable, Sendable, Codable {
+    case preset(UsagePeriod)
+    case days(UsageDaySpan)
+
+    /// Width in days, nil for `all`. A span's is its own day count.
+    var days: Int? {
+        switch self {
+        case .preset(let period): period.days
+        case .days(let span): span.dayCount()
+        }
+    }
+
+    /// Whether the window reaches today. Every preset ends today.
+    func includesToday(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        switch self {
+        case .preset: true
+        case .days(let span): span.includesToday(now: now, calendar: calendar)
+        }
+    }
+
+    /// A bare string is a preset or nothing: one this build does not offer is
+    /// refused as the string it is, rather than tried as a span and refused
+    /// for a key it never had, so a preference written by a later build reads
+    /// as an unknown window the caller falls back from.
+    init(from decoder: Decoder) throws {
+        let single = try decoder.singleValueContainer()
+        guard let name = try? single.decode(String.self) else {
+            self = .days(try UsageDaySpan(from: decoder))
+            return
+        }
+        guard let period = UsagePeriod(rawValue: name) else {
+            throw DecodingError.dataCorruptedError(
+                in: single, debugDescription: "'\(name)' is not a window this build offers")
+        }
+        self = .preset(period)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .preset(let period):
+            var container = encoder.singleValueContainer()
+            try container.encode(period)
+        case .days(let span):
+            try span.encode(to: encoder)
+        }
+    }
+}
+
+/// Tokens and what they cost, the pair every split of a window is read in.
+struct UsageSpend: Sendable, Equatable {
+    var tokens: Int = 0
+    var cost: Decimal = 0
+
+    mutating func add(_ other: Self) {
+        tokens += other.tokens
+        cost += other.cost
+    }
+}
+
+/// What the archive's files for one local day came to across every provider.
+/// A day with no file has no such value, which is an absent reading rather
+/// than one of zero.
+struct UsageHistoryDayTotal: Sendable, Equatable {
+    let day: Date
+    let tokens: Int
+    let cost: Decimal
+}
+
 /// What a window of the archive adds up to.
+///
+/// Today counts as the archive holds it, for a preset and for a span alike:
+/// the file trails the live tail by up to the tail's flush, and every split
+/// below is folded from the same files the headline is, so a window's
+/// projects and providers add up to its own total rather than to a figure
+/// read somewhere else.
 struct UsageHistoryRollup: Sendable, Equatable {
     /// The window this is the total of, so a reader can name it without
-    /// re-deriving it. The period rather than a day count: `all` has no width
+    /// re-deriving it. A preset rather than a day count: `all` has no width
     /// to carry.
-    let period: UsagePeriod
+    let period: UsageRange
     /// Earliest day the archive actually holds inside that window, which is
     /// what stops a two-day-old install from presenting itself as a week.
     let earliestDay: Date?
@@ -563,12 +776,24 @@ struct UsageHistoryRollup: Sendable, Equatable {
     /// How much of the window's input the cache answered, priced model by
     /// model at the rates `rollups` was handed.
     let cache: CacheReading
+    /// What each provider spent across the window, keyed by the directory
+    /// its days are filed under. These sum to `tokens` and `cost`.
+    let spendByProvider: [String: UsageSpend]
+    /// The window's spend by repository, in `FrameBuilder.orderedProjects`'
+    /// order, every path read through the resolver when the window is
+    /// summed, the way the export reads it.
+    let projects: [ProjectTotals]
+    /// What named no repository, or names one no longer: the residue the
+    /// projects cannot reach the headline without. Kept rather than dropped,
+    /// so `projects` and this always sum to `tokens` and `cost`.
+    let unattributed: UsageSpend
 
     init(
-        period: UsagePeriod, earliestDay: Date?, tokens: Int, cost: Decimal,
+        period: UsageRange, earliestDay: Date?, tokens: Int, cost: Decimal,
         agents: AgentCounts = .none, agentsByProvider: [String: AgentCounts] = [:],
         activity: ActivityTotals = .none, activityByProvider: [String: ActivityTotals] = [:],
-        cache: CacheReading = .none
+        cache: CacheReading = .none, spendByProvider: [String: UsageSpend] = [:],
+        projects: [ProjectTotals] = [], unattributed: UsageSpend = UsageSpend()
     ) {
         self.period = period
         self.earliestDay = earliestDay
@@ -579,7 +804,27 @@ struct UsageHistoryRollup: Sendable, Equatable {
         self.activity = activity
         self.activityByProvider = activityByProvider
         self.cache = cache
+        self.spendByProvider = spendByProvider
+        self.projects = projects
+        self.unattributed = unattributed
     }
+}
+
+/// A window of days picked on a calendar: what it adds up to, and what each
+/// day in it came to.
+///
+/// A span the archive holds no file inside is still answered, and the answer
+/// says so: `days` empty and `rollup.earliestDay` nil, with every figure at
+/// zero. That is no reading rather than a window at zero, which is why
+/// `hasReading` is false for it, and a page draws it as the absence it is.
+struct UsageSpanReading: Sendable, Equatable {
+    let rollup: UsageHistoryRollup
+    /// One element per day the archive holds a file for inside the span,
+    /// summed across providers, oldest first.
+    let days: [UsageHistoryDayTotal]
+
+    /// Whether the archive holds any day inside the span at all.
+    var hasReading: Bool { !days.isEmpty }
 }
 
 /// What one archived day came to for one provider, which is the grain a
@@ -589,9 +834,9 @@ struct UsageHistoryRollup: Sendable, Equatable {
 /// decoded — every day file is one `models` array and the totals beside them
 /// are folded out of it — so keeping them costs the retain and nothing else,
 /// and the strip's pills are read off exactly the bytes its bars are. The
-/// projects are a different matter: they are the wider dimension, the panel
-/// draws them for today only, and a value holding them would be re-read on
-/// every frame for a number nobody is looking at.
+/// projects are a different matter: they are the wider dimension, and a
+/// window's split by repository is `UsageHistoryRollup`'s to carry rather than
+/// every day's.
 struct UsageHistoryDaySummary: Equatable, Sendable {
     let day: Date
     let tokens: Int
@@ -719,18 +964,37 @@ enum UsageHistoryStore {
     /// order the panel offers the windows in is `UsagePeriod.archived`'s.
     static func rollups(
         for periods: Set<UsagePeriod>, in parent: URL, now: Date = Date(),
-        pricing: ProviderPricing = .seed
+        pricing: ProviderPricing = .seed, projects: ProjectResolver = ProjectResolver()
     ) -> [UsagePeriod: UsageHistoryRollup] {
         var files = UsageHistoryDayCache(pricing: pricing)
-        return rollups(for: periods, in: parent, now: now, cache: &files)
+        return rollups(for: periods, in: parent, now: now, cache: &files, projects: projects)
     }
 
     /// The same rollups at the cache's pricing, reading only the day files
     /// `files` does not already hold as they stand now, and leaving it
     /// holding every file it read.
+    ///
+    /// The cache keeps each day's spend by the path the file wrote, and the
+    /// path is read through `projects` when the window is summed rather than
+    /// when the file was read, so the cache holds no answer of its own: a
+    /// rollup and a span read through one resolver split a repository alike
+    /// however warm the cache, and a warm rollup asks the resolver only for
+    /// answers it has already cached.
+    ///
+    /// Measured 2026-10-03 against the build before the project and provider
+    /// splits, with the resolver kept across calls as the engine keeps it: a
+    /// warm rollup over this Mac's 70 day files went from 0.66 ms to 0.86 ms
+    /// and over a 7,300-file archive from 74 ms to 75 ms, a cold one from
+    /// 9.4 ms to 9.1 ms and from 979 ms to 929 ms. A resolver built per call
+    /// doubled the warm figure on this Mac, every repository's remote read
+    /// again, which is why the engine holds one. Reading the paths at the fold
+    /// rather than at the file costs a cached lookup per path per day: measured
+    /// 2026-10-03 on a synthetic 60-day archive naming 400 distinct paths, a
+    /// warm rollup went from 2.3 ms to 3.2 ms, and one naming 100 from 1.0 ms
+    /// to 1.1 ms, the cold figures unchanged at 49 ms and 16 ms.
     static func rollups(
         for periods: Set<UsagePeriod>, in parent: URL, now: Date = Date(),
-        cache files: inout UsageHistoryDayCache
+        cache files: inout UsageHistoryDayCache, projects: ProjectResolver = ProjectResolver()
     ) -> [UsagePeriod: UsageHistoryRollup] {
         guard !periods.isEmpty else { return [:] }
         let cal = Calendar.current
@@ -739,16 +1003,8 @@ enum UsageHistoryStore {
         defer { files.files = held }
         let today = cal.startOfDay(for: now)
         let cutoffs = periods.map { ($0, $0.start(now: now, calendar: cal)) }
-        var tokens: [UsagePeriod: Int] = [:]
-        var cost: [UsagePeriod: Decimal] = [:]
-        var agents: [UsagePeriod: AgentCounts] = [:]
-        var byProvider: [UsagePeriod: [String: AgentCounts]] = [:]
-        var earliest: [UsagePeriod: Date] = [:]
-        // Held per day across providers, because a window's own figure is the
-        // union of the day's readers and only the sum of the days.
+        var tallies: [UsagePeriod: RollupTally] = [:]
         var unionByDay: [Date: AgentActivityDay] = [:]
-        var activityByProvider: [UsagePeriod: [String: ActivityTotals]] = [:]
-        var cacheReadings: [UsagePeriod: CacheReading] = [:]
         for provider in providers(in: parent) {
             for url in dayFileURLs(
                 provider: provider, in: parent, prefetching: UsageHistoryDayCache.stampKeys)
@@ -766,38 +1022,73 @@ enum UsageHistoryStore {
                     unionByDay[dayKey, default: .none].formUnion(shape)
                 }
                 for (period, cutoff) in cutoffs where cutoff.map({ dayKey >= $0 }) ?? true {
-                    tokens[period, default: 0] += day.tokens
-                    cost[period, default: 0] += day.cost
-                    agents[period, default: .none].add(day.agents)
-                    byProvider[period, default: [:]][provider, default: .none].add(day.agents)
-                    activityByProvider[period, default: [:]][provider, default: .none]
-                        .add(day.activityTotals)
-                    cacheReadings[period, default: .none].add(day.cache)
-                    earliest[period] = earliest[period].map { min($0, dayKey) } ?? dayKey
+                    tallies[period, default: RollupTally()].add(
+                        day, on: dayKey, provider: provider, projects: projects)
                 }
             }
         }
-        var activity: [UsagePeriod: ActivityTotals] = [:]
         for (dayKey, shape) in unionByDay {
             let totals = ActivityTotals(shape)
             for (period, cutoff) in cutoffs where cutoff.map({ dayKey >= $0 }) ?? true {
-                activity[period, default: .none].add(totals)
+                tallies[period, default: RollupTally()].activity.add(totals)
             }
         }
         var out: [UsagePeriod: UsageHistoryRollup] = [:]
         for period in periods {
-            out[period] = UsageHistoryRollup(
-                period: period,
-                earliestDay: earliest[period],
-                tokens: tokens[period] ?? 0,
-                cost: cost[period] ?? 0,
-                agents: agents[period] ?? .none,
-                agentsByProvider: byProvider[period] ?? [:],
-                activity: activity[period] ?? .none,
-                activityByProvider: activityByProvider[period] ?? [:],
-                cache: cacheReadings[period] ?? .none)
+            out[period] = (tallies[period] ?? RollupTally())
+                .rollup(.preset(period), projects: projects)
         }
         return out
+    }
+
+    /// What the archive holds for `span`, and what each day in it came to.
+    ///
+    /// The same reading `rollups` takes of a preset, over any run of whole
+    /// days, read off disk rather than through a cache: it answers a window
+    /// somebody picked, once, and a cache kept for it would be held for a
+    /// window nobody is looking at any more. A month is one call.
+    ///
+    /// Today counts as the archive holds it, which is the rule the presets
+    /// follow too, so a span ending today and the preset of the same width
+    /// agree. The figure the live tail holds for today runs ahead of the file
+    /// by up to the tail's flush, and mixing the two would put one day under
+    /// two readings in one window.
+    ///
+    /// The span's own files are addressed by name rather than found by
+    /// listing the directories: naming every file in the archive is most of
+    /// what a walk costs, and a span reads a handful of them. Measured
+    /// 2026-10-03, a month took 5.8 ms over this Mac's archive and 6.8 ms over
+    /// a 7,300-file one, a single day 0.7 ms and 0.3 ms, where listing the
+    /// directories had put 352 ms under that single day.
+    static func reading(
+        over span: UsageDaySpan, in parent: URL, pricing: ProviderPricing = .seed,
+        projects: ProjectResolver = ProjectResolver()
+    ) -> UsageSpanReading {
+        var tally = RollupTally()
+        var unionByDay: [Date: AgentActivityDay] = [:]
+        var byDay: [Date: UsageSpend] = [:]
+        let dayKeys = span.dayKeys.compactMap { name in dayKey(named: name).map { ($0, name) } }
+        for provider in providers(in: parent) {
+            for (dayKey, name) in dayKeys {
+                guard let decoded = decode(at: url(provider: provider, day: name, in: parent))
+                else { continue }
+                let day = UsageHistoryDayCache.Reading(decoded, provider: provider, pricing: pricing)
+                if let shape = day.activity {
+                    unionByDay[dayKey, default: .none].formUnion(shape)
+                }
+                tally.add(day, on: dayKey, provider: provider, projects: projects)
+                byDay[dayKey, default: UsageSpend()].add(UsageSpend(tokens: day.tokens, cost: day.cost))
+            }
+        }
+        for shape in unionByDay.values {
+            tally.activity.add(ActivityTotals(shape))
+        }
+        return UsageSpanReading(
+            rollup: tally.rollup(.days(span), projects: projects),
+            days:
+                byDay
+                .map { UsageHistoryDayTotal(day: $0.key, tokens: $0.value.tokens, cost: $0.value.cost) }
+                .sorted { $0.day < $1.day })
     }
 
     /// One provider's archived days inside the `days` most recent local days,
@@ -934,8 +1225,14 @@ enum UsageHistoryStore {
     /// The local midnight a day file's name stands for, or nil for a name
     /// that is not a day.
     private static func dayKey(of url: URL) -> Date? {
-        UsageReaderShared.dayFormatter.date(from: url.deletingPathExtension().lastPathComponent)
-            .map { Calendar.current.startOfDay(for: $0) }
+        dayKey(named: url.deletingPathExtension().lastPathComponent)
+    }
+
+    /// The local midnight a `yyyy-MM-dd` key stands for, the one instant both
+    /// a listed file and a span's named one are keyed by, so a day keys the
+    /// same whichever way it was found.
+    private static func dayKey(named name: String) -> Date? {
+        UsageReaderShared.dayFormatter.date(from: name).map { Calendar.current.startOfDay(for: $0) }
     }
 
     private static func decode(at url: URL) -> UsageHistoryDay? {
@@ -986,15 +1283,25 @@ struct UsageHistoryDayCache: Sendable {
         let agents: AgentCounts
         let activity: AgentActivityDay?
         let activityTotals: ActivityTotals
+        /// The day's spend by the working directory each row wrote, nil keying
+        /// what named none. Folded across models, so a day holds a key per path
+        /// rather than a row per model too. Kept as written rather than
+        /// resolved: what a path means is the resolver's answer when a window
+        /// is summed, and an answer kept here would outlive it.
+        let spendByPath: [String?: UsageSpend]
 
         /// `provider` is the directory the file was found in.
         init(_ day: UsageHistoryDay, provider: String, pricing: ProviderPricing) {
             var tokens = 0
             var cost: Decimal = 0
             var cache = CacheReading.none
+            var spendByPath: [String?: UsageSpend] = [:]
             for entry in day.models {
-                tokens += entry.totalTokens
-                cost += Decimal(string: entry.cost) ?? 0
+                let spend = UsageSpend(
+                    tokens: entry.totalTokens, cost: Decimal(string: entry.cost) ?? 0)
+                tokens += spend.tokens
+                cost += spend.cost
+                spendByPath[entry.project, default: UsageSpend()].add(spend)
                 cache.add(
                     provider: provider, model: entry.model, totals: entry.totals,
                     pricing: pricing)
@@ -1005,6 +1312,7 @@ struct UsageHistoryDayCache: Sendable {
             self.agents = day.agents ?? .none
             self.activity = day.activity
             self.activityTotals = day.activity.map(ActivityTotals.init) ?? .none
+            self.spendByPath = spendByPath
         }
     }
 
@@ -1054,5 +1362,66 @@ struct UsageHistoryDayCache: Sendable {
         else { return nil }
         held[url] = Entry(modified: modified, size: size, dayKey: key, reading: reading)
         return (key, reading)
+    }
+}
+
+/// One window's sums as the days in it are added, which is the one fold both
+/// a preset's rollup and a span's go through.
+private struct RollupTally {
+    var spend = UsageSpend()
+    var agents = AgentCounts.none
+    var agentsByProvider: [String: AgentCounts] = [:]
+    /// Added by the caller from each day's providers unioned, never per file:
+    /// two CLIs in one minute are one minute of the day.
+    var activity = ActivityTotals.none
+    var activityByProvider: [String: ActivityTotals] = [:]
+    var cache = CacheReading.none
+    var spendByProvider: [String: UsageSpend] = [:]
+    var projects: [String: UsageSpend] = [:]
+    var unattributed = UsageSpend()
+    var earliest: Date?
+
+    /// Each path the day wrote is read through `resolver` here, so every
+    /// window summed through one resolver splits a repository the same way.
+    mutating func add(
+        _ day: UsageHistoryDayCache.Reading, on dayKey: Date, provider: String,
+        projects resolver: ProjectResolver
+    ) {
+        let spend = UsageSpend(tokens: day.tokens, cost: day.cost)
+        self.spend.add(spend)
+        agents.add(day.agents)
+        agentsByProvider[provider, default: .none].add(day.agents)
+        activityByProvider[provider, default: .none].add(day.activityTotals)
+        cache.add(day.cache)
+        spendByProvider[provider, default: UsageSpend()].add(spend)
+        for (path, share) in day.spendByPath {
+            guard let project = path.flatMap(resolver.project(for:)) else {
+                unattributed.add(share)
+                continue
+            }
+            projects[project, default: UsageSpend()].add(share)
+        }
+        earliest = earliest.map { min($0, dayKey) } ?? dayKey
+    }
+
+    func rollup(_ period: UsageRange, projects resolver: ProjectResolver) -> UsageHistoryRollup {
+        UsageHistoryRollup(
+            period: period,
+            earliestDay: earliest,
+            tokens: spend.tokens,
+            cost: spend.cost,
+            agents: agents,
+            agentsByProvider: agentsByProvider,
+            activity: activity,
+            activityByProvider: activityByProvider,
+            cache: cache,
+            spendByProvider: spendByProvider,
+            projects: FrameBuilder.orderedProjects(
+                projects.map { path, share in
+                    ProjectTotals(
+                        path: path, tokens: share.tokens, cost: share.cost,
+                        remote: resolver.repositoryRemote(for: path))
+                }),
+            unattributed: unattributed)
     }
 }
