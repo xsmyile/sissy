@@ -619,7 +619,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
 
     private func rollup(_ period: UsagePeriod, earliestOffset: Int) -> UsageHistoryRollup {
         UsageHistoryRollup(
-            period: period,
+            period: .preset(period),
             earliestDay: Calendar.current.date(
                 byAdding: .day, value: earliestOffset,
                 to: Calendar.current.startOfDay(for: Self.now)),

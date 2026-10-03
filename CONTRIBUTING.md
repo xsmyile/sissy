@@ -114,10 +114,10 @@ that", and it is worth grepping before proposing a change. The short version:
   asks for nothing; a module that is off must not exist as far as the system is
   concerned.
 - Anything that outlives Sissy on the machine, or writes outside its own
-  folder. There are exactly three exceptions today: the usage archive, the
-  session hooks and the archived Claude credentials. The first two are
-  reversible from Settings; the third is not yet, which is a gap rather than a
-  precedent to build on.
+  folder. There are exactly four exceptions today: the usage archive, the
+  session hooks, the lid switch and the archived Claude credentials. The first
+  three are reversible from Settings; the fourth is not yet, which is a gap
+  rather than a precedent to build on.
 - Anything that opens a port, a socket or a second process.
 - A hand-maintained price table. Rates come from LiteLLM at runtime with a
   generated seed as the floor; a new model must not need a release.

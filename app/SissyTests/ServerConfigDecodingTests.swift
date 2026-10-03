@@ -23,7 +23,10 @@ final class ServerConfigDecodingTests: XCTestCase {
         config.providers = ProviderToggles(claudeCode: false, codex: true)
         config.historyRetentionDays = 30
         config.keepAwake = .on
+        config.keepAwakeCeiling = .never
         config.keepScreenAwake = false
+        config.keepAwakeWithLidClosed = true
+        config.lidHoldPending = true
         config.agentHooks = true
         config.agentHooksRemovalPending = true
         config.forgeCounters = ForgeCounters(
@@ -71,6 +74,18 @@ final class ServerConfigDecodingTests: XCTestCase {
 
         XCTAssertNil(config.forgeCounters?.merged)
         XCTAssertEqual(config.forgeCounters?.issues, false)
+    }
+
+    /// A file written before the ceiling could be chosen holds for the eight
+    /// hours it always did, and one naming a ceiling the list does not offer
+    /// lands there too without taking the mode beside it along.
+    func testACeilingAbsentOrUnknownReadsAsEightHours() throws {
+        XCTAssertEqual(try decode(#"{"keepAwake": "on"}"#).keepAwakeCeiling, .eightHours)
+
+        let config = try decode(#"{"keepAwake": "on", "keepAwakeCeiling": "3h"}"#)
+
+        XCTAssertEqual(config.keepAwakeCeiling, .eightHours)
+        XCTAssertEqual(config.keepAwake, .on)
     }
 
     /// A file written before the Actions switch existed keeps every switch it

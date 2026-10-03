@@ -82,11 +82,14 @@ struct ProjectRemote: Sendable, Equatable {
 /// about checkouts is the ledger's, and shared, because two memories answer
 /// the same deleted path differently as soon as one of them has seen it alive.
 ///
-/// An instance is only ever touched from inside one actor — a provider's for
-/// the tail's, the engine's for the one an export builds and drops — which is
-/// what lets it hold plain mutable caches, the same arrangement `SourceAdapter`
-/// has. What is shared between those actors is the ledger, which carries its
-/// own lock; a resolver is never handed from one to another.
+/// An instance is only ever touched from inside one isolation domain — a
+/// provider's actor for the tail's, `UsageHistoryReader` for the archive's,
+/// the export's own call for the one it builds and drops — which is what lets
+/// it hold plain mutable caches, the same arrangement `SourceAdapter` has. It
+/// is not `Sendable`, so the compiler holds every one of them to that: each is
+/// built inside the domain that uses it. What is shared between those domains
+/// is the ledger, which carries its own lock; a resolver is never handed from
+/// one to another.
 final class ProjectResolver {
     /// What a worktree's `.git` file points at, and the only shape that says
     /// where the main checkout is.
@@ -136,9 +139,17 @@ final class ProjectResolver {
     /// Nil whenever the answer would be invented. A repository with no
     /// `origin`, one whose `origin` is a path on this Mac rather than a forge,
     /// and a checkout that has since been deleted all answer nothing, and the
-    /// row keeps the name it has today. Read fresh rather than persisted: a
-    /// remote can be renamed or removed, and what a path means is today's
-    /// answer.
+    /// row keeps the name it has today. Read from the repository rather than
+    /// persisted: a remote can be renamed or removed, and what a path means is
+    /// today's answer.
+    ///
+    /// Cached on the terms the walk's answers are, for the resolver's life and
+    /// bounded the same way, so the two never disagree about how fresh they
+    /// are: a long-lived resolver shows a remote renamed after it first read
+    /// it from the next launch, which costs a row its owner's label and never
+    /// a total its tokens. Re-reading it per rollup was measured 2026-10-03 to
+    /// double a warm archive rollup on this Mac, every repository's
+    /// `.git/config` read again, for an answer that changes about never.
     ///
     /// A forge that nests groups — `gitlab.com/group/sub/repo` — answers
     /// `sub` for the owner, which is the account the repository sits directly

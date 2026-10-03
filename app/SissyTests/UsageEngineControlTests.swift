@@ -42,7 +42,11 @@ final class UsageEngineControlTests: XCTestCase {
         claudeCode: Bool? = nil,
         codex: Bool? = nil,
         keepAwake: KeepAwakeMode = .off,
+        keepAwakeCeiling: KeepAwakeCeiling = .eightHours,
         keepAwakePolicy: KeepAwakePolicy = .default,
+        keepAwakeWithLidClosed: Bool = false,
+        lidHoldPending: Bool = false,
+        clamshell: ClamshellSwitchRecorder = ClamshellSwitchRecorder(),
         pollIntervalSeconds: Double = 60,
         macHealth: Bool = false,
         healthMonitor: SystemHealthMonitor? = nil,
@@ -53,6 +57,9 @@ final class UsageEngineControlTests: XCTestCase {
         config.pollIntervalSeconds = pollIntervalSeconds
         config.providers = ProviderToggles(claudeCode: claudeCode, codex: codex)
         config.keepAwake = keepAwake
+        config.keepAwakeCeiling = keepAwakeCeiling
+        config.keepAwakeWithLidClosed = keepAwakeWithLidClosed
+        config.lidHoldPending = lidHoldPending
         config.macHealth = macHealth
         config.disk = disk
         return UsageEngine(
@@ -62,7 +69,8 @@ final class UsageEngineControlTests: XCTestCase {
             claudeAccounts: .inert(),
             healthMonitor: healthMonitor,
             diskMonitor: diskMonitor,
-            keepAwakePolicy: keepAwakePolicy
+            keepAwakePolicy: keepAwakePolicy,
+            clamshell: clamshell.clamshellSwitch
         )
     }
 
@@ -453,7 +461,7 @@ final class UsageEngineControlTests: XCTestCase {
         let engine = makeEngine(
             codex: false,
             keepAwake: .auto,
-            keepAwakePolicy: KeepAwakePolicy(idleWindow: 0.4, manualCeiling: 3600),
+            keepAwakePolicy: KeepAwakePolicy(idleWindow: 0.4, ceilingHour: 3600),
             pollIntervalSeconds: 1)
         let cold = frames.expectation(forFrameCount: 1)
         await engine.start { frames.record($0) }
@@ -482,7 +490,8 @@ final class UsageEngineControlTests: XCTestCase {
         let engine = makeEngine(
             codex: false,
             keepAwake: .on,
-            keepAwakePolicy: KeepAwakePolicy(idleWindow: 600, manualCeiling: 0.4))
+            keepAwakeCeiling: .oneHour,
+            keepAwakePolicy: KeepAwakePolicy(idleWindow: 600, ceilingHour: 0.4))
         let baseline = heldSystemAssertions()
         let expired = frames.expectation("the ceiling switches it off") { $0.keepAwake.mode == .off }
         await engine.start { frames.record($0) }
@@ -493,6 +502,108 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertFalse(state.active)
         XCTAssertEqual(try ServerConfig.load(from: configURL).keepAwake, .off)
         XCTAssertEqual(heldSystemAssertions(), baseline, "the ceiling left the Mac held awake")
+    }
+
+    /// `never` sets no deadline at all, so the hold is still in force at a
+    /// point where any of the other ceilings, at this policy's hour, would
+    /// have switched it off several times over.
+    func testAManualHoldWithNoCeilingStaysOn() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false,
+            keepAwake: .on,
+            keepAwakeCeiling: .never,
+            keepAwakePolicy: KeepAwakePolicy(idleWindow: 600, ceilingHour: 0.05))
+        let held = frames.expectation("the hold is taken") { $0.keepAwake.active }
+        await engine.start { frames.record($0) }
+        addTeardownBlock { await engine.stop() }
+        await fulfillment(of: [held], timeout: 5)
+
+        try await Task.sleep(for: .seconds(1))
+
+        let mode = await engine.config.keepAwake
+        XCTAssertEqual(mode, .on)
+        XCTAssertEqual(frames.all.last?.keepAwake.active, true)
+    }
+
+    /// A ceiling chosen under a running hold applies to it, so one the hold
+    /// has already outlived ends it at once rather than at the old deadline.
+    func testAShorterCeilingEndsAHoldThatOutlivedIt() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false,
+            keepAwake: .on,
+            keepAwakeCeiling: .never,
+            keepAwakePolicy: KeepAwakePolicy(idleWindow: 600, ceilingHour: 0.2))
+        let held = frames.expectation("the hold is taken") { $0.keepAwake.active }
+        await engine.start { frames.record($0) }
+        addTeardownBlock { await engine.stop() }
+        await fulfillment(of: [held], timeout: 5)
+        try await Task.sleep(for: .seconds(0.4))
+
+        let expired = frames.expectation("the new ceiling switches it off") { $0.keepAwake.mode == .off }
+        await engine.setKeepAwakeCeiling(.oneHour)
+        await fulfillment(of: [expired], timeout: 5)
+
+        XCTAssertEqual(try ServerConfig.load(from: configURL).keepAwakeCeiling, .oneHour)
+    }
+
+    /// The switch outlives a crash, so the record that sends the next launch
+    /// back for it is on disk before the switch is set, and comes off only
+    /// once the switch is clear.
+    func testTheLidIsRecordedBeforeItIsSetAndForgottenOnceClear() async throws {
+        try writeClaudeTurn()
+        let recorder = ClamshellSwitchRecorder()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false, keepAwake: .on, keepAwakeWithLidClosed: true, clamshell: recorder)
+        let held = frames.expectation("the lid is held") { $0.keepAwake.coversLid }
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [held], timeout: 5)
+
+        XCTAssertTrue(recorder.isSet)
+        XCTAssertTrue(try ServerConfig.load(from: configURL).lidHoldPending)
+
+        await engine.stop()
+
+        XCTAssertEqual(recorder.calls.last, false)
+        XCTAssertFalse(try ServerConfig.load(from: configURL).lidHoldPending)
+    }
+
+    /// A record a previous run left means a switch it never cleared, and a
+    /// launch with no hold to give it clears it before anything else holds.
+    func testAStrandedLidIsClearedAtLaunch() async throws {
+        let recorder = ClamshellSwitchRecorder()
+        let engine = makeEngine(codex: false, lidHoldPending: true, clamshell: recorder)
+
+        await engine.start { _ in }
+        addTeardownBlock { await engine.stop() }
+
+        XCTAssertEqual(recorder.calls, [false])
+        XCTAssertFalse(try ServerConfig.load(from: configURL).lidHoldPending)
+    }
+
+    /// The lid is a setting like the screen, so switching it off under a
+    /// running hold clears the switch and leaves the Mac held.
+    func testSwitchingTheLidOffUnderAHoldClearsItAndKeepsTheHold() async throws {
+        try writeClaudeTurn()
+        let recorder = ClamshellSwitchRecorder()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false, keepAwake: .on, keepAwakeWithLidClosed: true, clamshell: recorder)
+        let held = frames.expectation("the lid is held") { $0.keepAwake.coversLid }
+        await engine.start { frames.record($0) }
+        addTeardownBlock { await engine.stop() }
+        await fulfillment(of: [held], timeout: 5)
+
+        let dropped = frames.expectation("the lid is dropped") { !$0.keepAwake.coversLid }
+        await engine.setKeepAwakeWithLidClosed(enabled: false)
+        await fulfillment(of: [dropped], timeout: 5)
+
+        XCTAssertFalse(recorder.isSet)
+        XCTAssertEqual(frames.all.last?.keepAwake.active, true)
     }
 
     func testAModeTheEngineDoesNotKnowIsIgnored() async {

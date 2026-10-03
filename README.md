@@ -114,10 +114,15 @@ project row's right-click menu opens the same page on that repository.
 
 **Keep awake** is the cup in the panel header: *Never*, *While agents are
 working* (holds the Mac while turns land, lets go ten minutes after they stop),
-or *Always* (eight hours, then off). Neither overrides a closed lid, and the
-hold dies with Sissy. Quit and the Mac sleeps normally, with nothing to undo.
+or *Always* (eight hours, then off; Settings makes that one to twelve hours, or
+no limit at all), with the screen and, on a MacBook, *Keep working with the lid
+closed* beside them: the cup's menu and Settings' Awake tab carry both. The lid
+is off until you switch it on, and the first time it says what that costs
+before it does. The hold dies with Sissy: quit and the Mac sleeps normally, lid
+included, with nothing to undo. After a crash the lid stays ignored until Sissy
+is opened again or the Mac restarts.
 
-**Settings** is ⌘, or the gear: General, Providers, Mac, Forge, About. **Copy
+**Settings** is ⌘, or the gear: General, Providers, Mac, Awake, Forge, About. **Copy
 diagnostics** lives in About and is what a bug report needs.
 
 ## What it reads
@@ -243,8 +248,10 @@ Settings.
 | `claudeDataDir`, `codexDataDir` | `~/.claude/projects`, `~/.codex/sessions` | where to look |
 | `forgeCounters` | all on | which of `merged` / `issues` / `comments` a forge row reads; one off is not fetched ▸ |
 | `statusChecks` | `true` | read each vendor's public status page ▸ |
-| `keepAwake` | `off` | `auto` holds while agents work, releasing after 10 min of silence; `on` holds for 8 hours ▸ |
+| `keepAwake` | `off` | `auto` holds while agents work, releasing after 10 min of silence; `on` holds for `keepAwakeCeiling` ▸ |
+| `keepAwakeCeiling` | `8h` | how long `on` holds before switching itself off: `1h`, `2h`, `4h`, `8h`, `12h` or `never` ▸ |
 | `keepScreenAwake` | `true` | whether that hold covers the screen ▸ |
+| `keepAwakeWithLidClosed` | `false` | whether that hold survives closing the lid, on battery too ▸ |
 | `agentHooks` | `false` | register the `SessionStart` hook with both CLIs ▸ |
 | `historyRetentionDays` | `90` | days of history kept; `0` records none ▸ |
 | `remotePricing` | `true` | fetch rates at runtime; `false` pins to the built-in snapshot |

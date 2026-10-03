@@ -12,6 +12,14 @@ final class SissyModel {
     var lastFrameAt: Date? = nil
     var preferences: Preferences
     var settingsTab: SettingsTab = .general
+    /// Whether the Awake tab should be showing the lid's confirmation. Held
+    /// here rather than by the tab, because the cup's menu in the panel is
+    /// where the request usually starts, and the tab is not open yet then.
+    var lidConfirmationRequested = false
+
+    /// Whether this Mac has a lid at all, read once: it does not change under
+    /// a running app, and the registry is not worth asking on every redraw.
+    static let machineHasLid = ClamshellSleepSwitch.machineHasLid
 
     private let supportDirectory: URL
     let engine: UsageEngineHost
@@ -261,7 +269,8 @@ final class SissyModel {
             mode: pending.mode,
             active: reported.active,
             since: reported.since,
-            coversScreen: reported.coversScreen)
+            coversScreen: reported.coversScreen,
+            coversLid: reported.coversLid)
     }
 
     /// Which armed mode the panel's button puts the switch back into.
@@ -315,6 +324,36 @@ final class SissyModel {
     func clearFrame() {
         currentFrame = nil
         lastFrameAt = nil
+    }
+
+    /// Switches the lid half of the hold, and answers whether the switch is
+    /// waiting on a confirmation the Awake tab shows instead.
+    ///
+    /// The first switch-on asks and every later one does not: the warning is
+    /// the same each time, and the moment the switch is most needed is the
+    /// moment someone is closing the Mac to leave with it, from the cup's
+    /// menu. Switching off never asks, because off is macOS's own behaviour
+    /// coming back.
+    @discardableResult
+    func setKeepAwakeWithLidClosed(_ enabled: Bool) -> Bool {
+        guard enabled, !preferences.lidClosedConfirmed else {
+            engine.setKeepAwakeWithLidClosed(enabled)
+            return false
+        }
+        settingsTab = .awake
+        lidConfirmationRequested = true
+        return true
+    }
+
+    /// Remembered only once the engine has taken the switch, so a
+    /// confirmation given before metering started is asked again rather than
+    /// spent on a switch that never went on.
+    func confirmKeepAwakeWithLidClosed() {
+        lidConfirmationRequested = false
+        engine.setKeepAwakeWithLidClosed(true)
+        guard engine.keepAwakeWithLidClosed, !preferences.lidClosedConfirmed else { return }
+        preferences.lidClosedConfirmed = true
+        savePreferences()
     }
 
     func setSissyMotion(_ enabled: Bool) {
