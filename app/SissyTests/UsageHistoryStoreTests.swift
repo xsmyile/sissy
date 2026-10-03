@@ -813,6 +813,102 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertEqual(keys, ["from": day(-9), "to": day(-2)])
     }
 
+    /// A stored span is held to today as the clock reads it when it is read
+    /// back, not as it read when it was picked, so a window that has come to
+    /// name a day after today is refused rather than read.
+    func testAStoredSpanEndingAfterTodayIsRefused() throws {
+        let future = try JSONEncoder().encode(["from": day(-1), "to": day(1)])
+        let past = try JSONEncoder().encode(["from": day(-3), "to": day(-1)])
+
+        XCTAssertThrowsError(try JSONDecoder().decode(UsageRange.self, from: future))
+        XCTAssertEqual(
+            try JSONDecoder().decode(UsageRange.self, from: past), .days(try span(-3, -1)))
+    }
+
+    /// The two dates a span was picked as are what it names after the Mac
+    /// changes zone: its midnights, what it contains and whether it reaches
+    /// today all follow the zone in force, as the archive's keys do.
+    func testASpanNamesTheSameDatesAfterTheZoneMoves() throws {
+        let launchZone = NSTimeZone.default
+        defer { NSTimeZone.default = launchZone }
+        let rome = try XCTUnwrap(TimeZone(identifier: "Europe/Rome"))
+        let newYork = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        NSTimeZone.default = rome
+        let picked = try XCTUnwrap(
+            UsageDaySpan(
+                from: try instant(2026, 9, 10, hour: 0, in: rome),
+                to: try instant(2026, 9, 12, hour: 0, in: rome),
+                now: try instant(2026, 9, 20, hour: 12, in: rome)))
+
+        NSTimeZone.default = newYork
+
+        XCTAssertEqual(picked.dayKeys, ["2026-09-10", "2026-09-11", "2026-09-12"])
+        XCTAssertEqual(picked.from, try instant(2026, 9, 10, hour: 0, in: newYork))
+        XCTAssertEqual(picked.to, try instant(2026, 9, 12, hour: 0, in: newYork))
+        XCTAssertTrue(picked.contains(try instant(2026, 9, 12, hour: 23, in: newYork)))
+        XCTAssertFalse(picked.contains(try instant(2026, 9, 13, hour: 0, in: newYork)))
+        XCTAssertTrue(picked.includesToday(now: try instant(2026, 9, 12, hour: 20, in: newYork)))
+        XCTAssertEqual(picked.dayCount(), 3)
+    }
+
+    /// The zones furthest from UTC on either side, and Auckland on the day
+    /// its clocks go forward, each name the date the instant falls on and
+    /// start it at that date's own first instant.
+    func testASpanFindsItsMidnightInTheZonesFurthestFromUTC() throws {
+        let launchZone = NSTimeZone.default
+        defer { NSTimeZone.default = launchZone }
+        for (identifier, day) in [
+            ("Pacific/Kiritimati", 27), ("Etc/GMT+12", 27), ("Pacific/Auckland", 27),
+        ] {
+            let zone = try XCTUnwrap(TimeZone(identifier: identifier))
+            NSTimeZone.default = zone
+            let noon = try instant(2026, 9, day, hour: 12, in: zone)
+
+            let picked = try XCTUnwrap(UsageDaySpan(from: noon, to: noon, now: noon))
+
+            XCTAssertEqual(picked.dayKeys, ["2026-09-\(day)"], identifier)
+            XCTAssertEqual(picked.from, Calendar.current.startOfDay(for: noon), identifier)
+            XCTAssertTrue(picked.contains(picked.from), identifier)
+        }
+    }
+
+    /// Santiago's clocks skip from Saturday 23:59 to Sunday 01:00 on 6
+    /// September 2026, so that day has no midnight. A span across it keys
+    /// every day as the preset of the same days does, and contains each.
+    func testASpanAcrossAMidnightThatDoesNotExistKeysItsDaysAsThePresetDoes() throws {
+        let launchZone = NSTimeZone.default
+        defer { NSTimeZone.default = launchZone }
+        let santiago = try XCTUnwrap(TimeZone(identifier: "America/Santiago"))
+        NSTimeZone.default = santiago
+        for name in ["2026-09-05", "2026-09-06", "2026-09-07"] {
+            try write(provider: "codex", day: name, models: ["a": totals(input: 1, cost: "1")])
+        }
+        let now = try instant(2026, 9, 7, hour: 12, in: santiago)
+        let picked = try XCTUnwrap(
+            UsageDaySpan(from: try instant(2026, 9, 1, hour: 12, in: santiago), to: now, now: now))
+
+        let reading = UsageHistoryStore.reading(over: picked, in: root)
+        let week = try XCTUnwrap(
+            UsageHistoryStore.rollups(for: [.sevenDays], in: root, now: now)[.sevenDays])
+
+        let cal = Calendar.current
+        XCTAssertEqual(
+            reading.days.map(\.day),
+            try [5, 6, 7].map { cal.startOfDay(for: try instant(2026, 9, $0, hour: 12, in: santiago)) })
+        XCTAssertTrue(reading.days.allSatisfy { picked.contains($0.day) })
+        XCTAssertEqual(reading.rollup.tokens, week.tokens)
+        XCTAssertEqual(reading.rollup.earliestDay, week.earliestDay)
+    }
+
+    private func instant(_ year: Int, _ month: Int, _ day: Int, hour: Int, in zone: TimeZone)
+        throws -> Date
+    {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = zone
+        return try XCTUnwrap(
+            cal.date(from: DateComponents(year: year, month: month, day: day, hour: hour)))
+    }
+
     private func week(in root: URL) throws -> UsageHistoryRollup {
         try XCTUnwrap(UsageHistoryStore.rollups(for: [.sevenDays], in: root)[.sevenDays])
     }

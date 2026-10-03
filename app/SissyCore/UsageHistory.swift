@@ -522,24 +522,44 @@ enum UsagePeriod: String, Codable, CaseIterable, Sendable {
 /// Whole local days picked on a calendar, both ends included.
 ///
 /// Days rather than instants, because the archive answers at the day and a
-/// window cut mid-day would name hours no file can split. Both ends are local
-/// midnights and `to` is never after today: a window reaching into a day that
-/// has not happened would be a reading of nothing under the name of a day.
+/// window cut mid-day would name hours no file can split. `to` is never after
+/// today: a window reaching into a day that has not happened would be a
+/// reading of nothing under the name of a day.
 ///
-/// Encoded as the two `yyyy-MM-dd` keys the archive files its days under,
-/// not as instants: a midnight is a midnight in one zone, and a window read
-/// back after a flight has to name the same two dates it was picked as.
+/// Each end is held as the date it names, never as an instant in it: a
+/// midnight is a midnight in one zone, and a window picked before a flight
+/// has to name the same two dates after it. `from` and `to` are therefore
+/// worked out on every read, as the local midnights of those dates in the
+/// zone in force at the moment, and so are the archive keys a reading looks
+/// its files up under. Encoded as the two `yyyy-MM-dd` keys the archive files
+/// its days under, for the same reason.
 struct UsageDaySpan: Hashable, Sendable, Codable {
-    let from: Date
-    let to: Date
+    private static let secondsPerDay = 86_400
+    /// The archive's keys read off the dates themselves, which is what UTC
+    /// does: a day number times a day's seconds is that date's midnight there.
+    private static let keys = DayKeyFormatter(zone: { .gmt })
+
+    /// Each end as whole days since 1 January 1970, which is a date in no
+    /// zone, and whose difference is a day count no daylight shift can bend.
+    private let first: Int
+    private let last: Int
+
+    /// The local midnight the window starts on, in the zone in force now.
+    var from: Date { Self.midnight(of: first, in: .current) }
+    /// The local midnight of the window's last day, in the zone in force now.
+    var to: Date { Self.midnight(of: last, in: .current) }
 
     /// Nil when `from` is after `to` or `to` is after today.
     init?(from: Date, to: Date, now: Date = Date(), calendar: Calendar = .current) {
-        let first = calendar.startOfDay(for: from)
-        let last = calendar.startOfDay(for: to)
-        guard first <= last, last <= calendar.startOfDay(for: now) else { return nil }
-        self.from = first
-        self.to = last
+        self.init(
+            first: Self.date(of: from, in: calendar), last: Self.date(of: to, in: calendar),
+            today: Self.date(of: now, in: calendar))
+    }
+
+    private init?(first: Int, last: Int, today: Int) {
+        guard first <= last, last <= today else { return nil }
+        self.first = first
+        self.last = last
     }
 
     /// The month holding `day`, from its first day through its last or
@@ -554,40 +574,81 @@ struct UsageDaySpan: Hashable, Sendable, Codable {
         return Self(from: interval.start, to: min(last, now), now: now, calendar: calendar)
     }
 
-    func contains(_ day: Date) -> Bool { from <= day && day <= to }
+    /// Whether the local day `day` falls on is inside the window, at any hour
+    /// of it.
+    func contains(_ day: Date) -> Bool {
+        (first...last).contains(Self.date(of: day, in: .current))
+    }
 
     /// Whether the window reaches today, which is what decides whether the
     /// rate-limit gauges belong beside it.
     func includesToday(now: Date = Date(), calendar: Calendar = .current) -> Bool {
-        to == calendar.startOfDay(for: now)
+        last == Self.date(of: now, in: calendar)
     }
 
-    /// How many days the window spans, both ends included.
+    /// How many days the window spans, both ends included. The same in every
+    /// calendar and zone, since it counts dates rather than hours.
     func dayCount(calendar: Calendar = .current) -> Int {
-        (calendar.dateComponents([.day], from: from, to: to).day ?? 0) + 1
+        last - first + 1
+    }
+
+    /// The `yyyy-MM-dd` key of every day in the window, oldest first, which is
+    /// the name each day's file is filed under.
+    var dayKeys: [String] {
+        (first...last).map(Self.key(of:))
+    }
+
+    /// The date `instant` falls on in `calendar`'s zone, as a day number.
+    private static func date(of instant: Date, in calendar: Calendar) -> Int {
+        let offset = TimeInterval(calendar.timeZone.secondsFromGMT(for: instant))
+        return Int(((instant.timeIntervalSince1970 + offset) / TimeInterval(secondsPerDay)).rounded(.down))
+    }
+
+    /// The first instant of day `date` in `calendar`'s zone, found from the
+    /// instant whose wall clock there reads noon on it: no zone is twelve
+    /// hours from UTC on both sides of a date, and no daylight shift moves a
+    /// clock off the date it is noon on.
+    private static func midnight(of date: Int, in calendar: Calendar) -> Date {
+        let noon = TimeInterval(date * secondsPerDay + secondsPerDay / 2)
+        let offset = TimeInterval(calendar.timeZone.secondsFromGMT(for: Date(timeIntervalSince1970: noon)))
+        return calendar.startOfDay(for: Date(timeIntervalSince1970: noon - offset))
+    }
+
+    private static func key(of date: Int) -> String {
+        keys.string(from: Date(timeIntervalSince1970: TimeInterval(date * secondsPerDay)))
+    }
+
+    private static func date(ofKey key: String) -> Int? {
+        keys.date(from: key).map {
+            Int(($0.timeIntervalSince1970 / TimeInterval(secondsPerDay)).rounded(.down))
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
         case from, to
     }
 
+    /// Checked against today as the clock reads it now, the rule a span
+    /// picked on a calendar is held to, so a stored window that has come to
+    /// name a day after today, a flight west having moved today back, is
+    /// refused here and the caller falls back to its default.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let keys = UsageReaderShared.dayFormatter
-        guard let first = keys.date(from: try container.decode(String.self, forKey: .from)),
-            let last = keys.date(from: try container.decode(String.self, forKey: .to)),
-            let span = Self(from: first, to: last, now: last)
+        guard let first = Self.date(ofKey: try container.decode(String.self, forKey: .from)),
+            let last = Self.date(ofKey: try container.decode(String.self, forKey: .to)),
+            let span = Self(first: first, last: last, today: Self.date(of: Date(), in: .current))
         else {
             throw DecodingError.dataCorruptedError(
-                forKey: .from, in: container, debugDescription: "not a span of whole days")
+                forKey: .from, in: container,
+                debugDescription: "not a span of whole days ending no later than today")
         }
         self = span
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(UsageReaderShared.dayFormatter.string(from: from), forKey: .from)
-        try container.encode(UsageReaderShared.dayFormatter.string(from: to), forKey: .to)
+        try container.encode(Self.key(of: first), forKey: .from)
+        try container.encode(Self.key(of: last), forKey: .to)
     }
 }
 
@@ -981,13 +1042,10 @@ enum UsageHistoryStore {
         over span: UsageDaySpan, in parent: URL, pricing: ProviderPricing = .seed,
         projects: ProjectResolver = ProjectResolver()
     ) -> UsageSpanReading {
-        let cal = Calendar.current
         var tally = RollupTally()
         var unionByDay: [Date: AgentActivityDay] = [:]
         var byDay: [Date: UsageSpend] = [:]
-        let dayKeys = sequence(first: span.from) { cal.date(byAdding: .day, value: 1, to: $0) }
-            .prefix { $0 <= span.to }
-            .map { ($0, UsageReaderShared.dayFormatter.string(from: $0)) }
+        let dayKeys = span.dayKeys.compactMap { name in dayKey(named: name).map { ($0, name) } }
         for provider in providers(in: parent) {
             for (dayKey, name) in dayKeys {
                 guard let decoded = decode(at: url(provider: provider, day: name, in: parent))
@@ -1146,8 +1204,14 @@ enum UsageHistoryStore {
     /// The local midnight a day file's name stands for, or nil for a name
     /// that is not a day.
     private static func dayKey(of url: URL) -> Date? {
-        UsageReaderShared.dayFormatter.date(from: url.deletingPathExtension().lastPathComponent)
-            .map { Calendar.current.startOfDay(for: $0) }
+        dayKey(named: url.deletingPathExtension().lastPathComponent)
+    }
+
+    /// The local midnight a `yyyy-MM-dd` key stands for, the one instant both
+    /// a listed file and a span's named one are keyed by, so a day keys the
+    /// same whichever way it was found.
+    private static func dayKey(named name: String) -> Date? {
+        UsageReaderShared.dayFormatter.date(from: name).map { Calendar.current.startOfDay(for: $0) }
     }
 
     private static func decode(at url: URL) -> UsageHistoryDay? {
