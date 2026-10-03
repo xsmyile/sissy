@@ -2250,6 +2250,8 @@ actor UsageEngine {
     ///
     /// Nil rather than an empty reading when retention is `0`: the archive
     /// switched off is no reading, and a window drawn at zero would be one.
+    /// A span the archive holds no file inside is answered, and says so
+    /// through `UsageSpanReading.hasReading`.
     func historyReading(over span: UsageDaySpan) async -> UsageSpanReading? {
         guard config.resolvedHistoryRetentionDays > 0 else { return nil }
         return await historyReader.reading(over: span, pricing: pricing)

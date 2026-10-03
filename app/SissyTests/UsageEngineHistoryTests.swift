@@ -191,6 +191,24 @@ final class UsageEngineHistoryTests: XCTestCase {
         XCTAssertNil(switchedOff)
     }
 
+    /// A span the archive holds no file inside is answered, and the answer is
+    /// an absence rather than a window at zero.
+    func testASpanWithNoFileInsideItIsAnAnswerThatHoldsNoReading() async throws {
+        try archiveYesterday()
+        let cal = Calendar.current
+        let weekAgo = try XCTUnwrap(cal.date(byAdding: .day, value: -7, to: try yesterday()))
+        let empty = try XCTUnwrap(UsageDaySpan(from: weekAgo, to: weekAgo))
+
+        let answered = await makeEngine().historyReading(over: empty)
+
+        let reading = try XCTUnwrap(answered)
+
+        XCTAssertFalse(reading.hasReading)
+        XCTAssertEqual(reading.days, [])
+        XCTAssertNil(reading.rollup.earliestDay)
+        XCTAssertEqual(reading.rollup.tokens, 0)
+    }
+
     /// Today is never a key: the archive's copy of it is written behind the
     /// tail's flush, so the headline stays on the live totals the frame already
     /// carries rather than going slower the moment today is selected.

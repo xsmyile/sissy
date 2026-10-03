@@ -812,11 +812,19 @@ struct UsageHistoryRollup: Sendable, Equatable {
 
 /// A window of days picked on a calendar: what it adds up to, and what each
 /// day in it came to.
+///
+/// A span the archive holds no file inside is still answered, and the answer
+/// says so: `days` empty and `rollup.earliestDay` nil, with every figure at
+/// zero. That is no reading rather than a window at zero, which is why
+/// `hasReading` is false for it, and a page draws it as the absence it is.
 struct UsageSpanReading: Sendable, Equatable {
     let rollup: UsageHistoryRollup
     /// One element per day the archive holds a file for inside the span,
     /// summed across providers, oldest first.
     let days: [UsageHistoryDayTotal]
+
+    /// Whether the archive holds any day inside the span at all.
+    var hasReading: Bool { !days.isEmpty }
 }
 
 /// What one archived day came to for one provider, which is the grain a
