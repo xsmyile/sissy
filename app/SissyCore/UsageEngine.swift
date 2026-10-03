@@ -1194,7 +1194,7 @@ actor UsageEngine {
         keepAwakeSince = keepAwakeActive ? (keepAwakeSince ?? Date()) : nil
         if !hold.lid, config.lidHoldPending {
             config.lidHoldPending = false
-            persistConfig("lidHoldPending")
+            if !persistConfig("lidHoldPending") { config.lidHoldPending = true }
         }
         sissyLog(
             "sissy: keep-awake \(config.keepAwake.rawValue) — "

@@ -247,6 +247,9 @@ actor KeepAwake {
     /// The power-source registration that sets the switch again when the
     /// source changes, held only while the lid is.
     private var powerSourceToken: Int32?
+    /// The two writes one change of power source asks for, owned so that
+    /// letting the lid go cancels a second write still waiting to land.
+    private var powerSourceRepair: Task<Void, Never>?
 
     /// How long after a change of power source the switch is set a second
     /// time. powerd re-evaluates the lid on the same notification this
@@ -257,6 +260,15 @@ actor KeepAwake {
     init(clamshell: ClamshellSleepSwitch = .rootDomain, lidReassertInterval: TimeInterval = 60) {
         self.clamshell = clamshell
         self.lidReassertInterval = lidReassertInterval
+    }
+
+    /// A `KeepAwake` dropped without a release still owes the system its
+    /// notification registration. The switch itself is the engine's record to
+    /// answer for, not this.
+    deinit {
+        lidKeeper?.cancel()
+        powerSourceRepair?.cancel()
+        if let token = powerSourceToken { notify_cancel(token) }
     }
 
     /// The system assertion is the hold; the display one is an addition on
@@ -348,15 +360,19 @@ actor KeepAwake {
         release(&system, named: Self.systemName)
     }
 
+    /// Starts the repairs whenever none is running rather than only when the
+    /// lid goes from free to held: an adopted lid, or one a refused clear left
+    /// set, is already held and still has to be defended against powerd.
     private func takeLid() {
         guard clamshell.set(true) else { return }
-        guard !lid else { return }
         lid = true
-        keepLid()
+        if lidKeeper == nil { keepLid() }
     }
 
-    /// A clear the kernel refused leaves `lid` set, so the engine keeps its
-    /// record and the next `apply`, or the next launch, goes back for it.
+    /// The repairs stop first whatever the kernel answers, because they set
+    /// the switch and the caller asked for it clear. A clear the kernel
+    /// refused leaves `lid` set, so the engine keeps its record and the next
+    /// `apply`, or the next launch, goes back for it.
     private func releaseLid() {
         guard lid else { return }
         stopKeepingLid()
@@ -368,10 +384,14 @@ actor KeepAwake {
         _ = clamshell.set(true)
     }
 
-    private func powerSourceChanged() async {
+    private func powerSourceChanged() {
         reassertLid()
-        try? await Task.sleep(for: Self.powerSourceSettle)
-        reassertLid()
+        powerSourceRepair?.cancel()
+        powerSourceRepair = Task { [weak self] in
+            try? await Task.sleep(for: Self.powerSourceSettle)
+            guard !Task.isCancelled else { return }
+            await self?.reassertLid()
+        }
     }
 
     private func keepLid() {
@@ -399,6 +419,8 @@ actor KeepAwake {
     private func stopKeepingLid() {
         lidKeeper?.cancel()
         lidKeeper = nil
+        powerSourceRepair?.cancel()
+        powerSourceRepair = nil
         if let token = powerSourceToken { notify_cancel(token) }
         powerSourceToken = nil
     }

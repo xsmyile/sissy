@@ -148,7 +148,10 @@ struct ServerConfig: Sendable, Codable {
     /// way `agentHooksRemovalPending` brackets the hook: the switch is kernel
     /// state that a crash leaves behind, and this is how the next launch
     /// learns to clear it. Without it Sissy could not tell its own switch from
-    /// one another app set, and clearing that one is not Sissy's to do.
+    /// one another app set, and clearing that one is not Sissy's to do. A
+    /// `server.json` that will not parse reads it as false, and there is no
+    /// second witness: the kernel cannot be asked who set the switch. That
+    /// switch then lasts until the Mac restarts.
     var lidHoldPending: Bool
     /// Whether Sissy registers a `SessionStart` hook with the CLIs it meters,
     /// so a session writes down which repository its directory belongs to

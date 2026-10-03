@@ -1,8 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// What the switch that writes into the CLIs' own configuration has to say for
-/// itself before it is flipped.
 /// What the lid switch says before it is switched on.
 ///
 /// It is the one part of the hold that outlives Sissy, so it is the one that
@@ -20,6 +18,8 @@ enum KeepAwakeLidCopy {
         + "restarts."
 }
 
+/// What the switch that writes into the CLIs' own configuration has to say for
+/// itself before it is flipped.
 enum AgentHookCopy {
     static let title = "Name projects even when Sissy is off"
 

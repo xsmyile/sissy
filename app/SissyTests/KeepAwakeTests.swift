@@ -176,6 +176,21 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertEqual(recorder.calls, [false])
     }
 
+    /// A lid already held when the hold takes it, adopted from a crashed run,
+    /// is defended against powerd like one this run set: the backstop keeps
+    /// setting it again.
+    func testAnAdoptedLidThatIsKeptIsSetAgainOnTheBackstop() async throws {
+        let recorder = ClamshellSwitchRecorder()
+        let keepAwake = KeepAwake(clamshell: recorder.clamshellSwitch, lidReassertInterval: 0.05)
+        addTeardownBlock { _ = await keepAwake.apply(holding: false, includingScreen: false) }
+        await keepAwake.adoptStrandedLid()
+
+        _ = await keepAwake.apply(holding: true, includingScreen: false, includingLid: true)
+        try await Task.sleep(for: .seconds(0.4))
+
+        XCTAssertGreaterThan(recorder.calls.filter { $0 }.count, 1)
+    }
+
     /// A clear the kernel refused is reported as a lid still set, so the
     /// engine keeps the record that sends the next launch back for it.
     func testARefusedClearIsReportedAsALidStillSet() async {
