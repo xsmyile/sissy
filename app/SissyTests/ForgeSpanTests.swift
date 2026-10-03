@@ -34,11 +34,13 @@ final class ForgeSpanTests: XCTestCase {
         let query = ForgeSpanFeed.gitlabDocument(
             from: Self.from, to: Self.to, now: Self.now, counters: ForgeCounter.all, calendar: Self.calendar)
         XCTAssertTrue(query.contains("mergedAfter: \"2026-09-17T00:00:00Z\""))
-        XCTAssertTrue(query.contains("mergedBefore: \"2026-09-20T00:00:00Z\""))
+        XCTAssertTrue(query.contains("mergedBefore: \"2026-09-19T23:59:59Z\""))
+        XCTAssertFalse(query.contains("2026-09-20"))
         let issues = ForgeSpanFeed.gitlabIssuesDocument(
             from: Self.from, to: Self.to, now: Self.now, calendar: Self.calendar)
         XCTAssertTrue(issues.contains("createdAfter: \"2026-09-17T00:00:00Z\""))
-        XCTAssertTrue(issues.contains("createdBefore: \"2026-09-20T00:00:00Z\""))
+        XCTAssertTrue(issues.contains("createdBefore: \"2026-09-19T23:59:59.999Z\""))
+        XCTAssertFalse(issues.contains("2026-09-20"))
         XCTAssertTrue(issues.contains("authorUsername: $author"))
         let url = try XCTUnwrap(
             ForgeSpanFeed.gitlabEventsURL(
@@ -214,8 +216,9 @@ final class ForgeSpanTests: XCTestCase {
         let calls = LockedValue(0)
         let monitor = ForgeActivityMonitor(
             connections: [Self.github, Self.gitlab], token: { _, _ in .found("fixture") })
-        let task = Task {
-            try await monitor.readSpan(from: Self.from, to: Self.to, now: Self.now) { _, _, _, _, _, _ in
+        let (from, to, now) = (Self.from, Self.to, Self.now)
+        let task = Task { [monitor, calls, began] in
+            try await monitor.readSpan(from: from, to: to, now: now) { _, _, _, _, _, _ in
                 calls.update { $0 += 1 }
                 began.store(true)
                 try await Task.sleep(for: .seconds(10))
@@ -251,8 +254,9 @@ final class ForgeSpanTests: XCTestCase {
         XCTAssertEqual(missing.first?.counters[.contributions], .unavailable(.failure(.noCredential)))
         let active = ForgeActivityMonitor(connections: [Self.github], token: { _, _ in .found("fixture") })
         let began = LockedValue(false)
-        let task = Task {
-            try await active.readSpan(from: Self.from, to: Self.to, now: Self.now) { _, _, _, _, _, _ in
+        let (from, to, now) = (Self.from, Self.to, Self.now)
+        let task = Task { [active, began] in
+            try await active.readSpan(from: from, to: to, now: now) { _, _, _, _, _, _ in
                 began.store(true)
                 try await Task.sleep(for: .seconds(10))
                 throw ForgeReadFailure.unreachable
@@ -321,14 +325,15 @@ final class ForgeSpanTests: XCTestCase {
                     return .unavailable(
                         connection, dates: (from, to), now: now, enabled: enabled, reason: .missingScope)
                 }
-        let first = Task {
-            try await monitor.readSpan(from: Self.from, to: Self.to, now: Self.now, fetch: fetch)
+        let (from, to, now) = (Self.from, Self.to, Self.now)
+        let first = Task { [monitor, fetch] in
+            try await monitor.readSpan(from: from, to: to, now: now, fetch: fetch)
         }
         while !began.load() { await Task.yield() }
-        let second = Task {
+        let second = Task { [monitor, fetch] in
             try await monitor.readSpan(
-                from: Self.from.addingTimeInterval(3600),
-                to: Self.to.addingTimeInterval(3600), now: Self.now, fetch: fetch)
+                from: from.addingTimeInterval(3600),
+                to: to.addingTimeInterval(3600), now: now, fetch: fetch)
         }
         _ = try await first.value
         _ = try await second.value
@@ -336,6 +341,62 @@ final class ForgeSpanTests: XCTestCase {
             from: Self.from.addingTimeInterval(7200),
             to: Self.to.addingTimeInterval(7200), now: Self.now, fetch: fetch)
         XCTAssertEqual(calls.load(), 1)
+    }
+
+    func testSpanEndingTodaySharesInflightFetchAndCacheAcrossCallTimes() async throws {
+        let calls = LockedValue(0)
+        let began = LockedValue(false)
+        let monitor = ForgeActivityMonitor(connections: [Self.github], token: { _, _ in .found("fixture") })
+        let fetch:
+            @Sendable (ForgeConnection, String, Set<ForgeCounter>, Date, Date, Date) async throws ->
+                ForgeSpanReading = {
+                    connection, _, enabled, from, to, now in
+                    calls.update { $0 += 1 }
+                    began.store(true)
+                    try await Task.sleep(for: .milliseconds(100))
+                    return .unavailable(
+                        connection, dates: (from, to), now: now, enabled: enabled, reason: .missingScope)
+                }
+        let (from, today, now) = (Self.from, Self.date("2026-10-03T00:00:00+02:00"), Self.now)
+        let first = Task { [monitor, fetch] in
+            try await monitor.readSpan(from: from, to: today, now: now, fetch: fetch)
+        }
+        while !began.load() { await Task.yield() }
+        let second = Task { [monitor, fetch] in
+            try await monitor.readSpan(from: from, to: today, now: now.addingTimeInterval(5), fetch: fetch)
+        }
+        _ = try await first.value
+        _ = try await second.value
+        _ = try await monitor.readSpan(from: from, to: today, now: now.addingTimeInterval(30), fetch: fetch)
+        XCTAssertEqual(calls.load(), 1)
+    }
+
+    func testGraphQLRateLimitAnsweredWithA200PersistsItsDeadline() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("refusals.json")
+        let reset = Date().addingTimeInterval(1800).timeIntervalSince1970.rounded()
+        let response = try XCTUnwrap(
+            HTTPURLResponse(
+                url: Self.github.root!, statusCode: 200,
+                httpVersion: nil, headerFields: ["X-RateLimit-Reset": "\(Int(reset))"]))
+        let store = ForgeRefusalStore(url: url)
+        let healthy: [String: Any] = ["data": ["viewer": ["login": "vendor"]]]
+        XCTAssertNil(
+            ForgeActivityFeed.fileGraphQLRefusal(
+                healthy, reply: response, url: Self.github.root, token: "fixture", store: store))
+        XCTAssertNil(store.failure(url: Self.github.root, token: "fixture"))
+        let refused: [String: Any] = [
+            "errors": [["type": "RATE_LIMITED", "message": "API rate limit exceeded"]]
+        ]
+        XCTAssertEqual(
+            ForgeActivityFeed.fileGraphQLRefusal(
+                refused, reply: response, url: Self.github.root, token: "fixture", store: store),
+            .rateLimited)
+        let restored = ForgeRefusalStore(url: url)
+        XCTAssertEqual(restored.failure(url: Self.github.root, token: "fixture"), .rateLimited)
+        XCTAssertEqual(
+            restored.deadline(url: Self.github.root, token: "fixture"), Date(timeIntervalSince1970: reset))
     }
 
     func testTodayAcceptsTimesWithinTheNamedDayAndLongSpansAreInvalid() throws {

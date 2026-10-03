@@ -352,10 +352,11 @@ enum ForgeActivityFeed {
         request.httpBody = try? JSONSerialization.data(
             withJSONObject: ["query": query, "variables": variables])
         guard request.httpBody != nil else { throw ForgeReadFailure.malformed }
-        let (data, _) = try await send(request)
+        let (data, response) = try await send(request)
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ForgeReadFailure.malformed
         }
+        fileGraphQLRefusal(root, reply: response, url: url, token: token)
         // A GraphQL endpoint answers 200 for a query it refused, with the
         // reason in `errors` — so a document that came back without `data` is
         // an error however healthy the status line was.
@@ -363,6 +364,22 @@ enum ForgeActivityFeed {
             throw Self.refusal(root) ?? ForgeReadFailure.malformed
         }
         return payload
+    }
+
+    /// A rate limit a GraphQL endpoint answered with a 200, filed against the
+    /// credential with the reply's deadline the way a refused status is, so a
+    /// rebuilt monitor or a relaunch does not ask again before the reset.
+    /// GitHub documents that 200 for an exhausted GraphQL quota; `send` has
+    /// already cleared the credential by then, on the status line alone.
+    @discardableResult
+    static func fileGraphQLRefusal(
+        _ root: [String: Any], reply: HTTPURLResponse, url: URL?, token: String,
+        store: ForgeRefusalStore = .shared
+    ) -> ForgeReadFailure? {
+        let types = (root["errors"] as? [[String: Any]] ?? []).compactMap { $0["type"] as? String }
+        guard types.contains("RATE_LIMITED") else { return nil }
+        store.record(.rateLimited, url: url, token: token, until: ForgeRefusalStore.retryDeadline(reply))
+        return .rateLimited
     }
 
     /// The failure a GraphQL `errors` array names, where it names one this
