@@ -99,6 +99,20 @@ struct UsagePanelView: View {
         let cost: Decimal?
     }
 
+    /// What the forge fetch is keyed on: the picked days, the newest poll, and
+    /// whether a row is being refreshed, so the counters are asked again once
+    /// a poll or a refresh has read the forge rather than holding the answer
+    /// the tab first got. The poll moves the key for a past window too: an
+    /// answer that came back empty, which is what a monitor rebuilt mid-read
+    /// or an engine not yet running answers, is drawn as the absence it is
+    /// and asked again on the next poll rather than kept for as long as the
+    /// tab is open.
+    private struct ForgeFetch: Equatable {
+        let span: UsageDaySpan
+        let polledAt: Date?
+        let refreshing: Bool
+    }
+
     enum Page: Equatable {
         /// The selected tab's own page, which is the only level the tab bar
         /// is drawn on: every case below is one level in from one of them,
@@ -246,7 +260,7 @@ struct UsagePanelView: View {
             days: period == .preset(.today) ? nil : days, earliest: earliest, period: period)
         let spanFetch = Self.spanFetch(
             period, days: drawsSpan(period) ? days : nil, history: history, now: now)
-        let forgeFetch = forgeFetch(period)
+        let forgeFetch = forgeFetch(period, forge: live?.frame.forge ?? [])
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 header(for: page, live: live, readings: readings)
@@ -319,10 +333,10 @@ struct UsagePanelView: View {
             }
         }
         .task(id: forgeFetch) {
-            guard let span = forgeFetch else { return }
-            let readings = await model.engine.forgeActivity(from: span.from, to: span.to)
+            guard let fetch = forgeFetch, !fetch.refreshing else { return }
+            let readings = await model.engine.forgeActivity(from: fetch.span.from, to: fetch.span.to)
             guard !Task.isCancelled else { return }
-            forgeSpan = UsagePanelSnapshot.ForgeSpanAnswer(span: span, readings: readings)
+            forgeSpan = UsagePanelSnapshot.ForgeSpanAnswer(span: fetch.span, readings: readings)
         }
     }
 
@@ -357,9 +371,12 @@ struct UsagePanelView: View {
     /// The picked window the Forge tab is asking the forges about, nil while
     /// that tab is not on screen or the period is a preset, which the poll
     /// already answers.
-    private func forgeFetch(_ period: UsageRange) -> UsageDaySpan? {
+    private func forgeFetch(_ period: UsageRange, forge: [ForgeActivityReading]) -> ForgeFetch? {
         guard page == .overview, tab == .forge, case .days(let span) = period else { return nil }
-        return span
+        return ForgeFetch(
+            span: span,
+            polledAt: forge.map(\.readAt).max(),
+            refreshing: !model.engine.refreshingForge.isEmpty)
     }
 
     // MARK: Page routing
