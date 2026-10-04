@@ -312,6 +312,10 @@ final class ForgeSpanTests: XCTestCase {
     }
 
     func testEquivalentVendorDatesShareCacheAndInflightFetch() async throws {
+        let local = Calendar.current
+        let from = try XCTUnwrap(local.date(from: DateComponents(year: 2026, month: 9, day: 17)))
+        let to = try XCTUnwrap(local.date(from: DateComponents(year: 2026, month: 9, day: 19)))
+        let now = Self.now
         let calls = LockedValue(0)
         let began = LockedValue(false)
         let monitor = ForgeActivityMonitor(connections: [Self.github], token: { _, _ in .found("fixture") })
@@ -325,7 +329,6 @@ final class ForgeSpanTests: XCTestCase {
                     return .unavailable(
                         connection, dates: (from, to), now: now, enabled: enabled, reason: .missingScope)
                 }
-        let (from, to, now) = (Self.from, Self.to, Self.now)
         let first = Task { [monitor, fetch] in
             try await monitor.readSpan(from: from, to: to, now: now, fetch: fetch)
         }
@@ -338,8 +341,8 @@ final class ForgeSpanTests: XCTestCase {
         _ = try await first.value
         _ = try await second.value
         _ = try await monitor.readSpan(
-            from: Self.from.addingTimeInterval(7200),
-            to: Self.to.addingTimeInterval(7200), now: Self.now, fetch: fetch)
+            from: from.addingTimeInterval(7200),
+            to: to.addingTimeInterval(7200), now: now, fetch: fetch)
         XCTAssertEqual(calls.load(), 1)
     }
 
@@ -357,7 +360,9 @@ final class ForgeSpanTests: XCTestCase {
                     return .unavailable(
                         connection, dates: (from, to), now: now, enabled: enabled, reason: .missingScope)
                 }
-        let (from, today, now) = (Self.from, Self.date("2026-10-03T00:00:00+02:00"), Self.now)
+        let now = Self.now
+        let today = Calendar.current.startOfDay(for: now)
+        let from = today.addingTimeInterval(-14 * 86400)
         let first = Task { [monitor, fetch] in
             try await monitor.readSpan(from: from, to: today, now: now, fetch: fetch)
         }
