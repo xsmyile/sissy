@@ -78,7 +78,7 @@ final class PreferencesTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let prefs = Preferences(
-            sissyMotion: false, retiredServerAgent: true, usagePeriod: .thirtyDays)
+            sissyMotion: false, retiredServerAgent: true, usagePeriod: .preset(.thirtyDays))
 
         prefs.save(to: dir)
 
@@ -96,7 +96,101 @@ final class PreferencesTests: XCTestCase {
             defer { try? FileManager.default.removeItem(at: dir) }
             try Data(json.utf8).write(to: dir.appendingPathComponent(Preferences.fileName))
 
-            XCTAssertEqual(Preferences.load(from: dir).usagePeriod, .today, json)
+            XCTAssertEqual(Preferences.load(from: dir).usagePeriod, .preset(.today), json)
         }
+    }
+    /// A file written before a window could be picked stored the preset as a
+    /// bare string, and it reads back as that same preset.
+    func testAnOldPresetDecodesUnchanged() throws {
+        let decoded = try JSONDecoder().decode(
+            Preferences.self, from: Data("{\"usagePeriod\":\"7d\"}".utf8))
+
+        XCTAssertEqual(decoded.usagePeriod, .preset(.sevenDays))
+        XCTAssertNil(decoded.usagePeriodPickedAt)
+        XCTAssertEqual(decoded.period(), .preset(.sevenDays))
+    }
+
+    /// A picked window survives the round trip with the instant it was picked.
+    func testAPickedWindowRoundTrips() throws {
+        let now = Date()
+        let span = try XCTUnwrap(
+            UsageDaySpan(from: now.addingTimeInterval(-3 * 86_400), to: now, now: now))
+        let prefs = Preferences(usagePeriod: .days(span), usagePeriodPickedAt: now)
+
+        let decoded = try JSONDecoder().decode(
+            Preferences.self, from: JSONEncoder().encode(prefs))
+
+        XCTAssertEqual(decoded.usagePeriod, .days(span))
+        XCTAssertEqual(
+            try XCTUnwrap(decoded.usagePeriodPickedAt).timeIntervalSince1970,
+            now.timeIntervalSince1970, accuracy: 0.001)
+    }
+
+    /// A picked window is the panel's period for a day after it was picked and
+    /// today from then on; one with no instant beside it cannot be aged and
+    /// reads as today.
+    func testAPickedWindowFallsBackToTodayAfterADay() throws {
+        let pickedAt = Date()
+        let span = try XCTUnwrap(
+            UsageDaySpan(
+                from: pickedAt.addingTimeInterval(-2 * 86_400),
+                to: pickedAt.addingTimeInterval(-86_400), now: pickedAt))
+        let prefs = Preferences(usagePeriod: .days(span), usagePeriodPickedAt: pickedAt)
+        let unstamped = Preferences(usagePeriod: .days(span))
+
+        XCTAssertEqual(prefs.period(now: pickedAt.addingTimeInterval(23 * 3_600)), .days(span))
+        XCTAssertEqual(
+            prefs.period(now: pickedAt.addingTimeInterval(Preferences.pickedPeriodLifetime)),
+            .preset(.today))
+        XCTAssertEqual(unstamped.period(now: pickedAt), .preset(.today))
+    }
+
+    /// An age that cannot be read retires the window: a `pickedAt` after now
+    /// is a clock set back since the pick, and keeping the window until the
+    /// clock catches up could keep it for far longer than a day.
+    func testAPickedWindowStampedInTheFutureReadsAsToday() throws {
+        let now = Date()
+        let span = try XCTUnwrap(
+            UsageDaySpan(
+                from: now.addingTimeInterval(-2 * 86_400), to: now.addingTimeInterval(-86_400),
+                now: now))
+        let prefs = Preferences(usagePeriod: .days(span), usagePeriodPickedAt: now.addingTimeInterval(60))
+
+        XCTAssertEqual(prefs.period(now: now), .preset(.today))
+        XCTAssertNil(prefs.pickedPeriodExpiry(now: now))
+    }
+
+    /// A stored window whose last day has come to be after today, which a
+    /// flight west makes of one that ended today, reads as today rather than
+    /// naming a day that has not happened here.
+    func testAPickedWindowEndingAfterTodayReadsAsToday() throws {
+        let now = Date()
+        let tomorrow = now.addingTimeInterval(86_400)
+        let ahead = try XCTUnwrap(UsageDaySpan(from: now, to: tomorrow, now: tomorrow))
+        let endingToday = try XCTUnwrap(
+            UsageDaySpan(from: now.addingTimeInterval(-86_400), to: now, now: now))
+
+        XCTAssertEqual(
+            Preferences(usagePeriod: .days(ahead), usagePeriodPickedAt: now).period(now: now),
+            .preset(.today))
+        XCTAssertEqual(
+            Preferences(usagePeriod: .days(endingToday), usagePeriodPickedAt: now).period(now: now),
+            .days(endingToday))
+    }
+
+    /// The expiry is the instant the pick turns a day old, and nothing for a
+    /// preset.
+    func testAPickedWindowExpiresADayAfterItWasPicked() throws {
+        let pickedAt = Date()
+        let span = try XCTUnwrap(
+            UsageDaySpan(
+                from: pickedAt.addingTimeInterval(-86_400), to: pickedAt.addingTimeInterval(-86_400),
+                now: pickedAt))
+        let prefs = Preferences(usagePeriod: .days(span), usagePeriodPickedAt: pickedAt)
+
+        XCTAssertEqual(
+            prefs.pickedPeriodExpiry(now: pickedAt),
+            pickedAt.addingTimeInterval(Preferences.pickedPeriodLifetime))
+        XCTAssertNil(Preferences(usagePeriod: .preset(.sevenDays)).pickedPeriodExpiry(now: pickedAt))
     }
 }

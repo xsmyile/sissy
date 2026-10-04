@@ -9,11 +9,22 @@ import Foundation
 struct UsagePanelSnapshot: Equatable {
     /// The window `tokens` and `cost` are over. Resolved rather than requested:
     /// a preference naming a period this archive cannot answer falls back to
-    /// today instead of rendering a blank.
-    let period: UsagePeriod
-    /// The windows the control may offer, `[.today]` alone when there is no
+    /// today instead of rendering a blank, and a picked window needs the
+    /// archive switched on to be answered at all.
+    let period: UsageRange
+    /// The presets the control may offer, `[.today]` alone when there is no
     /// archive behind the others and the control therefore does not appear.
     let periods: [UsagePeriod]
+    /// What the archive holds for `period`, nil for the `Today` preset, which
+    /// is the live tail's, and for a picked window whose reading has not
+    /// landed yet.
+    let window: UsageHistoryRollup?
+    /// Whether `period` reaches today, which decides whether the rate-limit
+    /// gauges belong beside it: a gauge is pressure now, and a window of past
+    /// days has no now to be under.
+    let includesToday: Bool
+    /// The window's cost and tokens, or the panel's dash for a picked window
+    /// that has not been read yet and for one whose days hold no file.
     let tokens: String
     let cost: String
     /// Tokens per hour so far today, nil on a day nothing has been spent on and
@@ -21,21 +32,34 @@ struct UsagePanelSnapshot: Equatable {
     /// pace, and the slot it would take is the one that says how far back the
     /// archive actually reaches.
     let burn: String?
+    /// How long a picked window was worked, nil for a preset, whose subline
+    /// reads as it did before a window could be picked, and for one the
+    /// archive measured no minute of.
+    let worked: String?
     /// How far back the archive reaches when it falls short of the window on
     /// screen, nil when it covers it — the control already names the period, so
     /// this speaks only to admit that the number under it is of fewer days than
     /// its name claims.
     let coverage: String?
     let providers: [ProviderRow]
+    /// One row per provider the window's days name, in place of the gauges
+    /// while the window does not reach today. Empty while it does.
+    let spendRows: [SpendRow]
+    /// The window's days as bars under the headline, nil on a one-day window,
+    /// where a single bar is the figure above it drawn as a rectangle, and
+    /// before its days have been read.
+    let strip: DayStrip?
     /// How many of those rows have spent anything today. The rows themselves
     /// are every provider Sissy is metering — a row is also where a plan, an
     /// account and the rate-limit gauges ride, none of which stop existing
     /// because the day's total is zero.
     let usedToday: Int
-    /// Today's spend by project, the busiest first, the tail folded into one
-    /// row and whatever named no repository in a last row of its own. Empty
-    /// when nothing today names a project, and the panel then draws no section
-    /// rather than a heading over nothing.
+    /// The window's spend by project, the busiest first and the tail folded
+    /// into one row. Today's live split under the `Today` preset and the
+    /// archive's for every other window, presets included: a projects block
+    /// reading today under a headline over a week answered two windows at
+    /// once. Empty when nothing in the window names a project, and the panel
+    /// then draws no section rather than a heading over nothing.
     let projects: [ProjectRow]
     /// How many repositories the day names, which is what the section's own
     /// row offers to open — the fold is a row about the rest of the list and
@@ -45,6 +69,16 @@ struct UsagePanelSnapshot: Equatable {
     /// Empty until the user connects one, and the panel then draws no section
     /// rather than a heading over nothing.
     let forge: [ForgeRow]
+
+    /// One provider's spend over a window of past days, where its gauges
+    /// would be: the window's tokens and cost, and under them its sessions,
+    /// sub-agents and worked time, all from the archive's split by provider.
+    struct SpendRow: Equatable, Identifiable {
+        let id: String
+        let name: String
+        let spend: String
+        let work: String
+    }
 
     /// One connected forge's two counters, as the Overview prints them.
     ///
@@ -339,6 +373,10 @@ struct UsagePanelSnapshot: Equatable {
         /// reading is not a reading of zero, and the pills say nothing rather
         /// than keeping the last day that had some.
         let models: [ModelRow]
+        /// The days a click on this bar reads, nil on a strip that is a
+        /// picture rather than a way in. A day, or the week, month or year a
+        /// wide window's bar stands for.
+        let span: UsageDaySpan?
     }
 
     /// A provider's recent days, with the window they cover named.
@@ -348,6 +386,50 @@ struct UsagePanelSnapshot: Equatable {
         /// the window it actually covers.
         let label: String
         let total: String
+    }
+
+    /// The archive's reading of the days a period covers, with the strip
+    /// drawn from it.
+    ///
+    /// The strip is made here, once, when the reading lands, rather than by
+    /// `make` on every frame the panel draws: `All` over an archive kept for
+    /// years is thousands of days, and each one formatted per frame was a
+    /// cost paid for a reading that had not changed.
+    struct SpanAnswer: Equatable {
+        /// The period the reading was asked for, which names the strip and
+        /// tells two presets over the same days apart.
+        let period: UsageRange
+        let reading: UsageSpanReading
+        let strip: DayStrip?
+
+        init(
+            _ reading: UsageSpanReading, period: UsageRange, now: Date = Date(),
+            calendar: Calendar = .current
+        ) {
+            self.period = period
+            self.reading = reading
+            guard case .days(let span) = reading.rollup.period else {
+                strip = nil
+                return
+            }
+            strip = windowStrip(
+                reading, span: span, named: UsageFormat.periodHeading(period, now: now, calendar: calendar),
+                now: now, calendar: calendar)
+        }
+    }
+
+    /// Each forge's counters over a picked window, held with the window they
+    /// were asked for.
+    ///
+    /// Matched on the days rather than on the instants each reading carries:
+    /// those are local midnights worked out in the zone in force when the
+    /// question was asked, and the same days worked out again after a zone
+    /// change are other instants. An answer that came back empty, which is
+    /// also what a failed read answers, is still the answer: every row it
+    /// names nothing for is the absence it is rather than a row being read.
+    struct ForgeSpanAnswer: Equatable {
+        let span: UsageDaySpan
+        let readings: [ForgeSpanReading]
     }
 
     /// How many bars the strip draws, and how many days its reader asks for.
@@ -423,7 +505,8 @@ struct UsagePanelSnapshot: Equatable {
                 fraction: Self.share(cost, of: peak),
                 title: UsageFormat.dayTitle(day),
                 figures: UsageFormat.dayFigures(tokens: tokens, cost: cost),
-                models: models)
+                models: models,
+                span: nil)
         }
         let covered = rows.count { $0.cost != nil }
         return DayStrip(
@@ -964,12 +1047,31 @@ struct UsagePanelSnapshot: Equatable {
         var isOverPace: Bool { deltaPercent > 0 }
     }
 
+    /// The snapshot for `frame` over `period`.
+    ///
+    /// `span` is the archive's reading of the days `windowSpan` names for the
+    /// period, with the strip drawn from it, fetched by the panel while it is
+    /// open and handed in rather than read here: it is what a picked window's
+    /// headline is and what any window's strip is. An answer for another
+    /// period or other days is ignored, so a reply that lands after the
+    /// period moved cannot answer for the new one. `forgeSpan` is the forge's
+    /// answer for a picked window, by the same rule.
+    ///
+    /// `archiveKept` is whether the archive is switched on, which the frame
+    /// cannot say: it carries no windows both while the archive is off and
+    /// in the moment after launch before the engine's first rollup lands.
+    /// With the archive on, a chosen window is kept through that moment and
+    /// reads as the dash rather than as today's figure under its name.
     static func make(
         frame: FrameData,
-        period: UsagePeriod = .today,
+        period: UsageRange = .preset(.today),
+        archiveKept: Bool = false,
+        span: SpanAnswer? = nil,
+        forgeSpan: ForgeSpanAnswer? = nil,
         claudeAccounts: ClaudeAccountRegistry.Snapshot = .init(),
         limitsReading: LimitsReading = .used,
-        now: Date = Date()
+        now: Date = Date(),
+        calendar: Calendar = .current
     ) -> Self {
         let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
@@ -977,25 +1079,202 @@ struct UsagePanelSnapshot: Equatable {
             frame.providers, claudeAccounts: claudeAccounts, status: frame.providerStatus,
             totalTokens: totalTokens, limitsReading: limitsReading, now: now)
         let periods = availablePeriods(frame.history)
-        let resolved = periods.contains(period) ? period : .today
-        let rollup = frame.history[resolved]
+        let resolved = resolve(period, periods: periods, archiveKept: archiveKept)
+        let days = windowSpan(
+            resolved, earliest: frame.history[.all]?.earliestDay, now: now, calendar: calendar)
+        let answer = span.flatMap {
+            $0.period == resolved && days.map(UsageRange.days) == $0.reading.rollup.period ? $0 : nil
+        }
+        let reading = answer?.reading
+        let window: UsageHistoryRollup? =
+            switch resolved {
+            case .preset(.today): nil
+            case .preset(let preset): frame.history[preset]
+            case .days: reading?.rollup
+            }
+        let isToday = resolved == .preset(.today)
+        let unread =
+            resolved.isPicked ? reading?.hasReading != true : !isToday && window == nil
+        let includesToday = resolved.includesToday(now: now, calendar: calendar)
         return Self(
             period: resolved,
             periods: periods,
-            tokens: UsageFormat.tokens(rollup?.tokens ?? frame.tokens),
-            cost: UsageFormat.cost(rollup?.cost ?? frame.cost),
-            burn: resolved == .today ? frame.burn.map(UsageFormat.burn) : nil,
-            coverage: rollup.flatMap { UsageFormat.periodCoverage($0, now: now) },
+            window: window,
+            includesToday: includesToday,
+            tokens: unread ? "—" : UsageFormat.tokens(window?.tokens ?? frame.tokens),
+            cost: unread ? "—" : UsageFormat.cost(window?.cost ?? frame.cost),
+            burn: isToday ? frame.burn.map(UsageFormat.burn) : nil,
+            worked: !resolved.isPicked
+                ? nil
+                : window.flatMap {
+                    $0.activity.activeMinutes > 0
+                        ? UsageFormat.workedDuration(minutes: $0.activity.activeMinutes) + " active"
+                        : nil
+                },
+            coverage: window.flatMap {
+                UsageFormat.periodCoverage(
+                    $0, archiveStart: frame.history[.all]?.earliestDay, now: now,
+                    calendar: calendar)
+            },
             providers: rows,
+            spendRows: includesToday ? [] : window.map(makeSpendRows) ?? [],
+            strip: answer?.strip,
             usedToday: frame.providers.count { $0.tokens > 0 },
-            projects: makeProjects(frame.projects, totalCost: totalCost),
-            projectCount: frame.projects.count,
-            forge: makeForge(frame.forge, period: resolved, now: now),
+            projects: isToday
+                ? makeProjects(frame.projects, totalCost: totalCost)
+                : makeProjects(window?.projects ?? [], totalCost: window?.cost ?? 0),
+            projectCount: isToday ? frame.projects.count : window?.projects.count ?? 0,
+            forge: {
+                switch resolved {
+                case .preset(let preset): makeForge(frame.forge, period: preset, now: now)
+                case .days(let picked):
+                    makeForgeSpan(frame.forge, span: picked, answer: forgeSpan, now: now)
+                }
+            }(),
             identities: makeIdentities(frame.identities),
             identityLine: makeIdentityLine(frame.identities),
             mac: frame.mac.map(makeMac),
             disk: frame.disk.map(makeDisk)
         )
+    }
+
+    /// The period the panel can answer: a preset the archive carries, a
+    /// picked window while there is an archive to read it from, and today
+    /// otherwise.
+    ///
+    /// A frame carrying no window at all with the archive kept is one whose
+    /// rollups have not landed yet, so the chosen window stands and its figure
+    /// waits; a frame carrying some windows but not the chosen one answers
+    /// for an archive that cannot reach it, and falls back.
+    static func resolve(
+        _ period: UsageRange, periods: [UsagePeriod], archiveKept: Bool = false
+    ) -> UsageRange {
+        let pending = archiveKept && periods.count == 1
+        switch period {
+        case .preset(let preset):
+            return periods.contains(preset) || pending ? period : .preset(.today)
+        case .days:
+            return periods.count > 1 || archiveKept ? period : .preset(.today)
+        }
+    }
+
+    /// The days a period covers, which is what the panel asks the archive for
+    /// to draw its strip and, for a picked window, its headline. `All` starts
+    /// on the first day the archive holds.
+    static func windowSpan(
+        _ period: UsageRange, earliest: Date?, now: Date, calendar: Calendar = .current
+    ) -> UsageDaySpan? {
+        switch period {
+        case .days(let span):
+            return span
+        case .preset(let preset):
+            let start = preset.start(now: now, calendar: calendar) ?? earliest ?? now
+            return UsageDaySpan(from: start, to: now, now: now, calendar: calendar)
+        }
+    }
+
+    /// One row per provider the window names, in the panel's provider order.
+    private static func makeSpendRows(_ window: UsageHistoryRollup) -> [SpendRow] {
+        Set(window.spendByProvider.keys).union(window.agentsByProvider.keys)
+            .sorted {
+                (FrameBuilder.providerSortOrder($0), $0) < (FrameBuilder.providerSortOrder($1), $1)
+            }
+            .map { id in
+                let spend = window.spendByProvider[id] ?? UsageSpend()
+                return SpendRow(
+                    id: id,
+                    name: UsageFormat.providerName(id),
+                    spend: UsageFormat.providerSpend(tokens: spend.tokens, cost: spend.cost),
+                    work: UsageFormat.providerWork(
+                        window.agentsByProvider[id] ?? .none,
+                        activity: window.activityByProvider[id] ?? .none))
+            }
+    }
+
+    /// The window's days as bars, one per day from its first to its last,
+    /// summed across providers, a stretch with no file drawn as the strip's
+    /// dot.
+    ///
+    /// Read off the archive for every day, today included, so the bars sum to
+    /// the headline over the same window rather than to a figure read
+    /// somewhere else. Weekdays label the bars while a week's worth fits under
+    /// them (`DayBarGeometry`'s measurement); a wider strip names its days on
+    /// hover alone.
+    ///
+    /// **A bar a day for as long as `DayBarGeometry.maxBars` days fit**, and
+    /// past that a bar per week, then per month, then per year, whichever is
+    /// the shortest that fits: a strip of years drawn a day at a time is bars
+    /// narrower than the dot for a day with no reading, and a hover target
+    /// for each. The first and last bar cover only the days of their week or
+    /// month the window holds, and the hover names exactly those days.
+    static func windowStrip(
+        _ reading: UsageSpanReading, span: UsageDaySpan, named name: String,
+        now: Date = Date(), calendar: Calendar = .current
+    ) -> DayStrip? {
+        let count = span.dayCount(calendar: calendar)
+        guard count > 1 else { return nil }
+        let unit = stripUnit(span, count: count, now: now, calendar: calendar)
+        let buckets = stripBuckets(span, by: unit, now: now, calendar: calendar)
+        let bucketStart = { (day: Date) -> Date in
+            max(calendar.dateInterval(of: unit, for: day)?.start ?? day, span.from)
+        }
+        var sums: [Date: (tokens: Int, cost: Decimal)] = [:]
+        var filed = Set<Date>()
+        for total in reading.days where span.contains(total.day) {
+            filed.insert(calendar.startOfDay(for: total.day))
+            let sum = sums[bucketStart(total.day), default: (0, 0)]
+            sums[bucketStart(total.day)] = (sum.tokens + total.tokens, sum.cost + total.cost)
+        }
+        let peak = sums.values.map(\.cost).max() ?? 0
+        let labelled = count <= dayStripDays
+        let rows: [DayRow] = buckets.map { bucket in
+            let sum = sums[bucket.from]
+            let isToday = bucket.includesToday(now: now, calendar: calendar)
+            return DayRow(
+                id: UsageReaderShared.dayFormatter.string(from: bucket.from),
+                label: !labelled
+                    ? "" : isToday ? "Today" : bucket.from.formatted(.dateTime.weekday(.abbreviated)),
+                isToday: isToday,
+                cost: sum?.cost,
+                fraction: share(sum?.cost, of: peak),
+                title: UsageFormat.stripBucketTitle(bucket, unit: unit, now: now, calendar: calendar),
+                figures: UsageFormat.dayFigures(tokens: sum?.tokens, cost: sum?.cost),
+                models: [],
+                span: bucket)
+        }
+        return DayStrip(
+            rows: rows,
+            label: UsageFormat.spanStripLabel(name, covered: filed.count, days: count),
+            total: UsageFormat.cost(sums.values.reduce(Decimal(0)) { $0 + $1.cost }))
+    }
+
+    /// The shortest stretch a bar can stand for and still fit the strip.
+    /// Years are the last resort and are taken however many there are.
+    private static func stripUnit(
+        _ span: UsageDaySpan, count: Int, now: Date, calendar: Calendar
+    ) -> Calendar.Component {
+        guard count > DayBarGeometry.maxBars else { return .day }
+        return [Calendar.Component.weekOfYear, .month].first {
+            stripBuckets(span, by: $0, now: now, calendar: calendar).count <= DayBarGeometry.maxBars
+        } ?? .year
+    }
+
+    /// `span` cut at every boundary of `unit`, oldest first, the first and
+    /// last piece clipped to the window.
+    private static func stripBuckets(
+        _ span: UsageDaySpan, by unit: Calendar.Component, now: Date, calendar: Calendar
+    ) -> [UsageDaySpan] {
+        var buckets: [UsageDaySpan] = []
+        var start = span.from
+        while start <= span.to,
+            let interval = calendar.dateInterval(of: unit, for: start),
+            let last = calendar.date(byAdding: .day, value: -1, to: interval.end),
+            let bucket = UsageDaySpan(from: start, to: min(last, span.to), now: now, calendar: calendar)
+        {
+            buckets.append(bucket)
+            start = interval.end
+        }
+        return buckets
     }
 
     static func makeMac(_ reading: MacHealthReading) -> MacBlock {
@@ -1070,6 +1349,18 @@ struct UsagePanelSnapshot: Equatable {
         /// window the archive has not counted has no entry, and the tab then
         /// answers for today and says so.
         let counted: [UsagePeriod: Window]
+        /// The window picked on the calendar, when that is the panel's period
+        /// and its reading has landed. Keyed by its days so a reading of other
+        /// days cannot answer for it.
+        let picked: [UsageDaySpan: Window]
+
+        /// The counts over `period`, nil where nothing has counted it.
+        func window(for period: UsageRange) -> Window? {
+            switch period {
+            case .preset(let preset): counted[preset]
+            case .days(let span): picked[span]
+            }
+        }
 
         /// One window's counts, whole and split by provider.
         struct Window: Equatable {
@@ -1286,7 +1577,15 @@ struct UsagePanelSnapshot: Equatable {
     /// the one beside it. Every other window is the archive's, **including its
     /// per-provider split** — a row taken from the slices under a thirty-day
     /// heading would be today's figure wearing another window's label.
-    static func makeAgents(_ frame: FrameData, now: Date = Date()) -> AgentsBlock {
+    ///
+    /// `window` is the archive's reading of a picked window, which the panel
+    /// fetches while a picked window is its period; it carries the same
+    /// split by provider every preset's rollup does. One the archive holds no
+    /// day inside answers no window at all, so the tab draws the absence the
+    /// headline does rather than counts of zero.
+    static func makeAgents(
+        _ frame: FrameData, window: UsageHistoryRollup? = nil, now: Date = Date()
+    ) -> AgentsBlock {
         let running = frame.agentMemory?.current.agents ?? []
         // Unioned rather than summed, because two CLIs working in the same
         // minute are one minute of the day.
@@ -1306,9 +1605,8 @@ struct UsagePanelSnapshot: Equatable {
             shape: AgentsBlock.DayShape(
                 blocks: shape.blocks, dayMinutes: Self.minutesInDay(containing: now)),
             cache: frame.cache)
-        var counted: [UsagePeriod: AgentsBlock.Window] = [.today: today]
-        for (period, rollup) in frame.history {
-            counted[period] = AgentsBlock.Window(
+        let counts = { (rollup: UsageHistoryRollup) in
+            AgentsBlock.Window(
                 counts: rollup.agents,
                 byProvider: rollup.agentsByProvider
                     .map { id, counts in
@@ -1318,10 +1616,19 @@ struct UsagePanelSnapshot: Equatable {
                             activity: rollup.activityByProvider[id] ?? .none)
                     }
                     .sorted { $0.name < $1.name },
-                coverage: UsageFormat.periodCoverage(rollup, now: now),
+                coverage: UsageFormat.periodCoverage(
+                    rollup, archiveStart: frame.history[.all]?.earliestDay, now: now),
                 activity: rollup.activity,
                 cost: rollup.cost,
                 cache: rollup.cache)
+        }
+        var counted: [UsagePeriod: AgentsBlock.Window] = [.today: today]
+        for (period, rollup) in frame.history {
+            counted[period] = counts(rollup)
+        }
+        var picked: [UsageDaySpan: AgentsBlock.Window] = [:]
+        if let window, case .days(let span) = window.period, window.earliestDay != nil {
+            picked[span] = counts(window)
         }
         return AgentsBlock(
             live: frame.agentMemory.map { memory in
@@ -1342,7 +1649,8 @@ struct UsagePanelSnapshot: Equatable {
                     countedSince: memory.countedSince
                 ).charted(memory)
             },
-            counted: counted)
+            counted: counted,
+            picked: picked)
     }
 
     /// How many minutes the local day holding `instant` is made of, which is
@@ -1364,16 +1672,37 @@ struct UsagePanelSnapshot: Equatable {
     /// snapshot per frame while it is open, and the full list is wanted on one
     /// page that is usually closed.
     ///
-    /// **Today, and no period of its own.** The rows come from the day buckets
-    /// — `UsageHistoryRollup` carries a period's total and deliberately no
-    /// project split — so a control here would name a window the rows are not
-    /// of. What a project cost over a month is #81, closed: the export already
-    /// answers it from rows the archive holds.
+    /// **The panel's window, on the combined page.** `window` is the archive's
+    /// rollup for the period the Overview reads over, which carries the
+    /// window's split by repository and what named none, so the page lists
+    /// what the Overview's block folded. The `Today` preset passes none and
+    /// keeps the live day buckets, which run ahead of the archive's copy of
+    /// today by the tail's flush. A window's rows carry no split by CLI: the
+    /// archive sums a repository across providers before it reaches here.
+    ///
+    /// **Today on a provider's own page.** The archive keeps no split by
+    /// repository per provider, and that page is about the provider's day.
     ///
     /// `provider` nil sums every CLI and gives each row its split; naming one
     /// takes that provider's own day, where the split would repeat the page's
     /// title on every row.
-    static func projectsPage(frame: FrameData, provider: String?) -> ProjectsPage {
+    static func projectsPage(
+        frame: FrameData, provider: String?, period: UsageRange = .preset(.today),
+        window: UsageHistoryRollup? = nil
+    ) -> ProjectsPage {
+        if provider == nil, let window {
+            let unattributed = window.unattributed
+            return ProjectsPage(
+                provider: nil,
+                rows: makeProjects(window.projects, totalCost: window.cost, limit: nil),
+                residue: unattributed.tokens > 0
+                    ? ProjectsResidue(
+                        tokens: UsageFormat.tokens(unattributed.tokens),
+                        cost: UsageFormat.cost(unattributed.cost), providers: [])
+                    : nil,
+                subtitle: UsageFormat.projectsSubtitle(
+                    count: window.projects.count, cost: window.cost, period: period))
+        }
         let slices =
             provider.map { id in frame.providers.filter { $0.id == id } } ?? frame.providers
         let projects = provider == nil ? frame.projects : slices.first?.projects ?? []
@@ -1400,8 +1729,8 @@ struct UsagePanelSnapshot: Equatable {
         /// reach it without this, so the line carries the figure rather than
         /// only the fact.
         let residue: ProjectsResidue?
-        /// When, how many, and how much — today's own total rather than the
-        /// headline's, which is over whatever period the user picked.
+        /// When, how many, and how much: the window the rows are over and
+        /// their own total.
         let subtitle: String
     }
 
@@ -1463,7 +1792,7 @@ struct UsagePanelSnapshot: Equatable {
                 id: reading.id,
                 kind: reading.kind,
                 host: reading.host,
-                title: UsageFormat.forgeSectionLabel(name, period: period),
+                title: UsageFormat.forgeSectionLabel(name, period: .preset(period)),
                 login: reading.login,
                 contributions: contributions,
                 merged: merged,
@@ -1474,7 +1803,7 @@ struct UsagePanelSnapshot: Equatable {
                 opensAt: opensAt,
                 latest: reading.latest,
                 tooltip: UsageFormat.forgeTooltip(
-                    reading.kind, host: reading.host, login: reading.login, period: period,
+                    reading.kind, host: reading.host, login: reading.login, period: .preset(period),
                     boundedToOneYear: reading.activity.contributionsBoundedToOneYear,
                     vendorDayStart: vendorDayStart)
                     + (floored ? "\n" + UsageFormat.forgeFloorNote : ""),
@@ -1483,6 +1812,81 @@ struct UsagePanelSnapshot: Equatable {
                 commentsHelp: UsageFormat.forgeCommentsHelp(reading.kind),
                 actions: makeActions(reading.actions, now: now))
         }
+    }
+
+    /// The forge rows over days picked on the calendar, from the forge's own
+    /// answer for those days.
+    ///
+    /// A counter the user switched off is left off the row, as it is under a
+    /// preset; one the forge would not answer is the panel's dash, never a
+    /// zero. Until the answer lands every row is a dash, and the label says
+    /// the forge is being read (`forgeAwaited`). A row the answer names
+    /// nothing for, an empty or failed answer included, is a dash with no
+    /// such label. The newest event and the month's Actions answer no
+    /// window, so they stay the poll's.
+    private static func makeForgeSpan(
+        _ readings: [ForgeActivityReading], span: UsageDaySpan, answer: ForgeSpanAnswer?,
+        now: Date
+    ) -> [ForgeRow] {
+        let matching = answer?.span == span ? answer?.readings ?? [] : []
+        let byID = Dictionary(matching.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        var vendorCalendar = Calendar(identifier: .gregorian)
+        vendorCalendar.timeZone = .gmt
+        let vendorDayStart = vendorCalendar.startOfDay(for: now)
+        let shared = Set(Dictionary(grouping: readings, by: \.kind).filter { $0.value.count > 1 }.keys)
+        return readings.map { reading in
+            let name = shared.contains(reading.kind) ? reading.host : UsageFormat.forgeName(reading.kind)
+            let answer = byID[reading.id]
+            let login = answer?.login ?? reading.login
+            return ForgeRow(
+                id: reading.id,
+                kind: reading.kind,
+                host: reading.host,
+                title: UsageFormat.forgeSectionLabel(name, period: .days(span)),
+                login: login,
+                contributions: answer.flatMap { spanFigure($0.counters[.contributions]) },
+                merged: answer.flatMap { spanFigure($0.counters[.merged]) },
+                issues: answer.flatMap { spanFigure($0.counters[.issues]) },
+                comments: answer.flatMap { spanFigure($0.counters[.comments]) },
+                readAt: answer?.readAt,
+                failure: answer.flatMap(spanFailure),
+                opensAt: nil,
+                latest: reading.latest,
+                tooltip: UsageFormat.forgeTooltip(
+                    reading.kind, host: reading.host, login: login, period: .days(span),
+                    boundedToOneYear: false, vendorDayStart: vendorDayStart),
+                mergedHelp: UsageFormat.forgeMergedHelp(reading.kind),
+                issuesHelp: UsageFormat.forgeIssuesHelp(reading.kind),
+                commentsHelp: UsageFormat.forgeCommentsHelp(reading.kind),
+                actions: makeActions(reading.actions, now: now))
+        }
+    }
+
+    /// The forge rows still waiting on their answer for a picked window,
+    /// which their labels word as being read: every row until an answer for
+    /// exactly these days has come back, and none after, whatever it held.
+    static func forgeAwaited(
+        _ rows: [ForgeRow], period: UsageRange, answer: ForgeSpanAnswer?
+    ) -> Set<String> {
+        guard case .days(let span) = period, answer?.span != span else { return [] }
+        return Set(rows.map(\.id))
+    }
+
+    private static func spanFigure(_ counter: ForgeSpanCounter?) -> String? {
+        switch counter {
+        case .counted(let count): UsageFormat.forgeCount(count.value, atLeast: count.isFloor)
+        case .unavailable(.switchedOff), nil: nil
+        case .unavailable: "—"
+        }
+    }
+
+    private static func spanFailure(_ answer: ForgeSpanReading) -> ForgeReadFailure? {
+        ForgeSpanFeed.counters.lazy.compactMap { metric -> ForgeReadFailure? in
+            guard case .unavailable(.failure(let failure)) = answer.counters[metric] else {
+                return nil
+            }
+            return failure
+        }.first
     }
 
     /// The Actions block, nil where there is nothing to draw in it.
@@ -2476,5 +2880,15 @@ extension UsagePanelSnapshot.AgentsBlock.Live {
             return row
         }
         return out
+    }
+}
+
+extension UsageRange {
+    /// Whether this is days picked on the calendar rather than a preset: the
+    /// window that expires, that the header tints for, and whose figures are
+    /// fetched rather than carried on the frame.
+    var isPicked: Bool {
+        if case .days = self { return true }
+        return false
     }
 }

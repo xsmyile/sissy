@@ -633,6 +633,31 @@ final class UsageFormatTests: XCTestCase {
         }
     }
 
+    /// A past window is measured against the archive's first day, not against
+    /// a width counted back from today, which would call every past week
+    /// whole, nor against its own first filed day, which would call a window
+    /// opening on an idle day short.
+    func testAPastWindowAdmitsOnlyWhatTheArchiveMisses() throws {
+        let clock = try fixedClock()
+        let from = try XCTUnwrap(clock.calendar.date(byAdding: .day, value: -40, to: clock.now))
+        let to = try XCTUnwrap(clock.calendar.date(byAdding: .day, value: -34, to: clock.now))
+        let span = try XCTUnwrap(
+            UsageDaySpan(from: from, to: to, now: clock.now, calendar: clock.calendar))
+        let later = try XCTUnwrap(clock.calendar.date(byAdding: .day, value: 2, to: span.from))
+        let earlier = try XCTUnwrap(clock.calendar.date(byAdding: .day, value: -9, to: span.from))
+        let coverage = { (filed: Date?, archiveStart: Date) in
+            UsageFormat.periodCoverage(
+                UsageHistoryRollup(period: .days(span), earliestDay: filed, tokens: 1, cost: 1),
+                archiveStart: archiveStart, now: clock.now, calendar: clock.calendar)
+        }
+
+        XCTAssertNil(coverage(later, earlier))
+        XCTAssertEqual(
+            coverage(later, later),
+            "since \(later.formatted(.dateTime.day().month(.abbreviated)))")
+        XCTAssertEqual(coverage(nil, earlier), UsageFormat.notRunning)
+    }
+
     private func rollup(_ period: UsagePeriod, earliest: Date?) -> UsageHistoryRollup {
         UsageHistoryRollup(period: .preset(period), earliestDay: earliest, tokens: 1, cost: 1)
     }

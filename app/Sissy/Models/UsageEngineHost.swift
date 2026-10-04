@@ -995,6 +995,18 @@ final class UsageEngineHost {
         return await engine.historyReading(over: span)
     }
 
+    /// Each connected forge's counters over days picked on a calendar, asked
+    /// only while the Forge tab is on screen over such a window.
+    ///
+    /// Empty before the engine runs, and when the caller was cancelled,
+    /// which is the one thing the engine throws for: a page that moved on is
+    /// not a forge that failed, and a refusal comes back as a reading whose
+    /// counters say why.
+    func forgeActivity(from: Date, to: Date) async -> [ForgeSpanReading] {
+        guard let engine else { return [] }
+        return (try? await engine.forgeActivity(from: from, to: to)) ?? []
+    }
+
     /// Deletes the archive. The engine re-emits once it is gone, which is
     /// what takes the panel's archive line away with it.
     ///

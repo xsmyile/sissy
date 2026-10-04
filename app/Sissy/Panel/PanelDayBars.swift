@@ -23,6 +23,17 @@ enum DayBarGeometry {
     /// no reading at all.
     static let minBarHeight: CGFloat = 2
     static let absentDotSize: CGFloat = 2
+    /// The most bars a strip draws a day each, past which a bar stands for a
+    /// week, a month or a year (`UsagePanelSnapshot.windowStrip`).
+    ///
+    /// Worked out 2026-10-03 from `PanelMetrics`: the strip spans the 312 pt
+    /// inside the gutters and a bar is 62% of its slot, so up to 96 bars each
+    /// one is at least as wide as the 2 pt dot that marks a day with no
+    /// reading (3.25 pt slot, 2.0 pt bar). One more and a day with a reading
+    /// draws narrower than a day without one. Ninety days, the archive's
+    /// default retention, still draws a bar a day at 3.47 pt a slot.
+    static let maxBars = Int(
+        (PanelMetrics.width - 2 * PanelMetrics.gutter) * barWidthRatio / absentDotSize)
     /// Today is still being counted, so it is drawn as a bar that has not
     /// finished rather than as one of the closed days beside it.
     static let todayOpacity: Double = 0.45
@@ -67,6 +78,11 @@ struct PanelDayBars: View {
     /// would let the caption name one day while the pills answered for
     /// another.
     @Binding var hovered: String?
+    /// Reads the clicked bar's days, where the strip is a way into them: the
+    /// Overview's strip sets the panel's period to that day, week, month or
+    /// year, and a provider's page, whose strip is a picture of its week,
+    /// passes none.
+    var select: ((UsageDaySpan) -> Void)?
 
     private var pointed: UsagePanelSnapshot.DayRow? {
         hovered.flatMap { key in strip.rows.first { $0.id == key } }
@@ -117,7 +133,13 @@ struct PanelDayBars: View {
     /// slot, and a pointer between two bars is still pointing at one of them.
     private func day(_ row: UsagePanelSnapshot.DayRow, slot: CGFloat) -> some View {
         let isPointed = hovered == row.id
-        return VStack(spacing: DayBarGeometry.plotLabelGap) {
+        return selectable(row, column(row, slot: slot, isPointed: isPointed))
+    }
+
+    private func column(
+        _ row: UsagePanelSnapshot.DayRow, slot: CGFloat, isPointed: Bool
+    ) -> some View {
+        VStack(spacing: DayBarGeometry.plotLabelGap) {
             ZStack(alignment: .bottom) {
                 Color.clear
                 mark(row, width: slot * DayBarGeometry.barWidthRatio, isPointed: isPointed)
@@ -140,6 +162,20 @@ struct PanelDayBars: View {
         }
         .accessibilityElement()
         .accessibilityLabel("\(row.title) · \(row.figures)")
+    }
+
+    /// The click, only on a strip that is a way in and a bar that names its
+    /// days, and announced as a button exactly there.
+    @ViewBuilder
+    private func selectable(_ row: UsagePanelSnapshot.DayRow, _ content: some View) -> some View {
+        if let select, let span = row.span {
+            content
+                .onTapGesture { select(span) }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { select(span) }
+        } else {
+            content
+        }
     }
 
     /// The pointed day's own label comes forward, which is what pairs the bar

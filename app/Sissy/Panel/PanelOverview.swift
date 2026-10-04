@@ -26,7 +26,8 @@ enum PanelModule: CaseIterable, Hashable {
 
     private func isVisible(in snapshot: UsagePanelSnapshot) -> Bool {
         switch self {
-        case .providers: return !snapshot.gaugeRows.isEmpty
+        case .providers:
+            return snapshot.includesToday ? !snapshot.gaugeRows.isEmpty : !snapshot.spendRows.isEmpty
         case .projects: return !snapshot.projects.isEmpty
         case .identities: return !PanelTab.forge.isVisible(in: snapshot)
         }
@@ -66,6 +67,13 @@ struct PanelOverview: View {
     /// Opens the identities page, on the repository named or on the whole
     /// list where none is.
     let openIdentities: (String?) -> Void
+    /// Puts the panel's period back on the `Today` preset.
+    let resetPeriod: () -> Void
+    /// Puts the panel's period on a bar's days, from a bar of the strip.
+    let selectDays: (UsageDaySpan) -> Void
+
+    /// The strip's bar under the pointer, which swaps its caption.
+    @State private var pointedDay: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
@@ -106,33 +114,72 @@ struct PanelOverview: View {
     /// **On a platter, like every block under the tab bar**, decided
     /// 2026-09-28. It stood flat on the popover as the page's heading, which
     /// left the one figure the panel is judged by the only thing on the tab
-    /// without depth. **And with no control beside it.** The period popup sat
+    /// without depth. **And with no period control beside it.** The period popup sat
     /// on this row until the period became the whole panel's, one control in
     /// the header that Sessions and Forge follow too; the subline names the
     /// window instead, which is what the popup's closed face used to say.
+    ///
+    /// **A way back to today beside the figure** whenever the period is not
+    /// the `Today` preset: the control that set it is an icon in the header,
+    /// and a window picked yesterday afternoon is one click from the reading
+    /// the panel is opened for rather than two and a menu.
+    ///
+    /// **A window of more than one day draws its days under the figure**, the
+    /// strip a provider's page carries for its week, so a total over thirty
+    /// days says which of them it was spent on. A bar is a way into its day.
     private var headline: some View {
         PanelGroup {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(snapshot.cost)
-                    .font(
-                        .system(size: PanelMetrics.headlineNumber, weight: .bold, design: .rounded)
-                    )
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                Text(subline)
-                    .font(.system(size: PanelMetrics.headlineMeta))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            VStack(alignment: .leading, spacing: DayBarGeometry.headerGap) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(snapshot.cost)
+                            .font(
+                                .system(
+                                    size: PanelMetrics.headlineNumber, weight: .bold,
+                                    design: .rounded)
+                            )
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                        Text(subline)
+                            .font(.system(size: PanelMetrics.headlineMeta))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Spacer(minLength: 0)
+                    if snapshot.period != .preset(.today) {
+                        todayButton
+                    }
+                }
+                if let strip = snapshot.strip {
+                    PanelDayBars(
+                        strip: strip, tint: .accentColor, hovered: $pointedDay, select: selectDays)
+                }
             }
         }
         .animation(.default, value: snapshot.cost)
     }
 
-    /// The window always, tokens always, the pace only on today, and how far
-    /// back the archive reaches only when it falls short of the window.
+    private var todayButton: some View {
+        Button(action: resetPeriod) {
+            Text(UsageFormat.periodLabel(.today))
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(.quaternary))
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help("Read today")
+    }
+
+    /// The window always, tokens always, the pace only on today, how long a
+    /// picked window was worked, and how far back the archive reaches only
+    /// when it falls short of the window.
     private var subline: String {
         var parts = [UsageFormat.periodHeading(snapshot.period), "\(snapshot.tokens) tokens"]
         if let burn = snapshot.burn { parts.append("\(burn)/h") }
+        if let worked = snapshot.worked { parts.append(worked) }
         if let coverage = snapshot.coverage { parts.append(coverage) }
         return parts.joined(separator: " · ")
     }
@@ -142,6 +189,11 @@ struct PanelOverview: View {
     /// One row per provider, each carrying the window it is closest to running
     /// out of. A row opens that provider's page, which is where its other
     /// windows, its plan, its account, its day and its own projects live.
+    ///
+    /// **Only while the window reaches today.** A gauge is pressure now, and
+    /// beside a window of past days it answers a question the window is not
+    /// about; there the rows say what each provider spent over those days and
+    /// how it was worked instead.
     private var providers: some View {
         PanelGroup {
             SectionLabel(text: providersTitle)
@@ -149,23 +201,73 @@ struct PanelOverview: View {
                 .truncationMode(.tail)
         } content: {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(snapshot.gaugeRows) { row in
-                    Button {
-                        openProvider(row.provider, row.account)
-                    } label: {
-                        providerRow(row)
+                if snapshot.includesToday {
+                    ForEach(snapshot.gaugeRows) { row in
+                        Button {
+                            openProvider(row.provider, row.account)
+                        } label: {
+                            providerRow(row)
+                        }
+                        .buttonStyle(.plain)
+                        .help(Self.legendHelp(row))
                     }
-                    .buttonStyle(.plain)
-                    .help(Self.legendHelp(row))
+                } else {
+                    ForEach(snapshot.spendRows) { row in
+                        spendRow(row)
+                    }
                 }
             }
         }
     }
 
+    /// One provider's spend over a window of past days. A door to its page
+    /// while it still has one, which is while Sissy meters it.
+    @ViewBuilder
+    private func spendRow(_ row: UsagePanelSnapshot.SpendRow) -> some View {
+        let opens = snapshot.providers.contains { $0.id == row.id }
+        let label = VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                ProviderMark(id: row.id)
+                Text(row.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(row.spend)
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                if opens { Chevron(isOpen: false) }
+            }
+            Text(row.work)
+                .font(.system(size: 10))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .contentShape(.rect)
+        if opens {
+            Button {
+                openProvider(row.id, nil)
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
+            .help("Open \(row.name)")
+        } else {
+            label
+        }
+    }
+
     /// The block's label, with the day's recap folded into it rather than
     /// given a row: "did I use both of them today" is a question about the
-    /// list underneath, not a line that stands on its own.
+    /// list underneath, not a line that stands on its own. Over past days it
+    /// names the window instead, which is what the rows are over.
     private var providersTitle: String {
+        guard snapshot.includesToday else {
+            return "By provider · " + UsageFormat.periodInline(snapshot.period)
+        }
         guard
             let recap = UsageFormat.providersRecap(
                 used: snapshot.usedToday, metering: meteringProviders)
@@ -344,19 +446,17 @@ struct PanelOverview: View {
 
     // MARK: Projects
 
-    /// Where the day's money went. The reason the app exists, so it sits below
-    /// nothing but the day's own numbers.
+    /// Where the window's money went. The reason the app exists, so it sits
+    /// below nothing but the window's own numbers.
     ///
-    /// Today's, under a headline that may be over a month — so the label says
-    /// `today` rather than leaving the reader to pair it with the window above.
-    /// The block that names its own day is the one that does not follow the
-    /// control; the provider rows above it say the same word for the same
-    /// reason.
+    /// Over the panel's window, presets included, and the label names it. It
+    /// read today under every window until the archive carried a split by
+    /// repository, which left a week's headline over one day's rows.
     ///
-    /// The archive carries the project on its rows, but only from the day the
-    /// dimension landed: the days before it name no repository at all, and a
-    /// window reaching back across them would put an unattributed row above
-    /// real ones.
+    /// The archive carries the project on its rows only from the day the
+    /// dimension landed: the days before it name no repository, and what they
+    /// spent is the residue the projects page carries under its rows rather
+    /// than a row above real ones.
     ///
     /// **The section's own label is the way to the whole list**, not the
     /// folded row under it. The fold exists only past three repositories, so a
@@ -369,7 +469,9 @@ struct PanelOverview: View {
     private var projects: some View {
         PanelGroup {
             Button(action: openProjects) {
-                ProjectsSectionLabel(text: "By project · today", count: snapshot.projectCount)
+                ProjectsSectionLabel(
+                    text: UsageFormat.projectsSectionLabel(snapshot.period),
+                    count: snapshot.projectCount)
             }
             .buttonStyle(.plain)
             .help("Show every project")

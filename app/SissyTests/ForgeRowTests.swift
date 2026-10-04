@@ -75,7 +75,7 @@ final class ForgeRowTests: XCTestCase {
         let frame = FrameBuilder.build(
             today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [], history: history,
             forge: readings)
-        return UsagePanelSnapshot.make(frame: frame, period: period, now: now).forge
+        return UsagePanelSnapshot.make(frame: frame, period: .preset(period), now: now).forge
     }
 
     /// The caption the row draws, which the view words on its own clock rather
@@ -108,7 +108,7 @@ final class ForgeRowTests: XCTestCase {
     func testTheHoverNamesWhenTheVendorsDayStartsHere() {
         let dayStart = Self.readAt.addingTimeInterval(59 * 60)
         let tooltip = UsageFormat.forgeTooltip(
-            .gitLab, host: Self.gitLab.host, login: "davide", period: .today,
+            .gitLab, host: Self.gitLab.host, login: "davide", period: .preset(.today),
             boundedToOneYear: false, vendorDayStart: dayStart)
         XCTAssertTrue(
             tooltip.contains(
@@ -161,8 +161,8 @@ final class ForgeRowTests: XCTestCase {
                 Self.reading(
                     Self.gitHub, login: "xsmyile", contributions: 128, merged: 28, issues: 7)
             ])
-        let snapshot = UsagePanelSnapshot.make(frame: frame, period: .all, now: Self.readAt)
-        XCTAssertEqual(snapshot.period, .today)
+        let snapshot = UsagePanelSnapshot.make(frame: frame, period: .preset(.all), now: Self.readAt)
+        XCTAssertEqual(snapshot.period, .preset(.today))
         XCTAssertEqual(snapshot.forge.first?.contributions, "128")
     }
 
@@ -415,5 +415,84 @@ final class ForgeRowTests: XCTestCase {
         let row = try XCTUnwrap(rows([exact], period: .all).first)
         XCTAssertEqual(row.contributions, UsageFormat.forgeCount(GitLabActivityFeed.countCeiling))
         XCTAssertFalse(row.tooltip.contains("stops counting at"), row.tooltip)
+    }
+
+    // MARK: A picked window
+
+    /// The day before `midday`, picked on the calendar.
+    private static func pickedDay() throws -> UsageDaySpan {
+        let day = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: -1, to: midday))
+        return try XCTUnwrap(UsageDaySpan(from: day, to: day, now: midday))
+    }
+
+    /// The rows over `span` and the ones whose labels say they are being
+    /// read, with `answer` as what the forges have said so far.
+    private func spanRows(
+        _ readings: [ForgeActivityReading], span: UsageDaySpan,
+        answer: UsagePanelSnapshot.ForgeSpanAnswer?
+    ) -> (rows: [UsagePanelSnapshot.ForgeRow], awaited: Set<String>) {
+        let history: [UsagePeriod: UsageHistoryRollup] = Dictionary(
+            uniqueKeysWithValues: UsagePeriod.archived.map { period in
+                (period, UsageHistoryRollup(period: .preset(period), earliestDay: nil, tokens: 1, cost: 1))
+            })
+        let frame = FrameBuilder.build(
+            today: DayTotals(totalTokens: 0, totalCost: 0), hoursElapsed: 1, providers: [], history: history,
+            forge: readings)
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame, period: .days(span), forgeSpan: answer, now: Self.midday)
+        return (
+            snapshot.forge,
+            UsagePanelSnapshot.forgeAwaited(snapshot.forge, period: snapshot.period, answer: answer)
+        )
+    }
+
+    private static func spanReading(
+        _ connection: ForgeConnection, from: Date, to: Date, contributions: Int
+    ) -> ForgeSpanReading {
+        ForgeSpanReading(
+            id: connection.id, kind: connection.kind, host: connection.host, login: "xsmyile",
+            from: from, to: to, readAt: midday,
+            counters: [.contributions: .counted(.exact(contributions))])
+    }
+
+    /// Until an answer for these days lands, every row is being read.
+    func testEveryRowIsReadUntilTheAnswerForThoseDaysLands() throws {
+        let picked = try Self.pickedDay()
+        let other = try XCTUnwrap(
+            UsageDaySpan(from: picked.from.addingTimeInterval(-86_400), to: picked.to, now: Self.midday))
+        let readings = [Self.reading(Self.gitHub, login: "xsmyile", contributions: 3, merged: 1, issues: 0)]
+
+        XCTAssertEqual(spanRows(readings, span: picked, answer: nil).awaited, [Self.gitHub.id])
+        XCTAssertEqual(
+            spanRows(readings, span: picked, answer: .init(span: other, readings: [])).awaited,
+            [Self.gitHub.id])
+    }
+
+    /// An empty answer, which is also what a failed read comes back as, ends
+    /// the wait: the row is the dash an absence draws, never a spinner that
+    /// never stops.
+    func testAnEmptyAnswerIsAnAbsenceRatherThanAnEndlessRead() throws {
+        let picked = try Self.pickedDay()
+        let readings = [Self.reading(Self.gitHub, login: "xsmyile", contributions: 3, merged: 1, issues: 0)]
+        let result = spanRows(readings, span: picked, answer: .init(span: picked, readings: []))
+
+        XCTAssertTrue(result.awaited.isEmpty)
+        let row = try XCTUnwrap(result.rows.first)
+        XCTAssertFalse(row.hasFigures)
+    }
+
+    /// The answer is matched on its days, not on the instants each reading
+    /// carries: the same days worked out after a zone change are other
+    /// midnights, and the answer still belongs to them.
+    func testAnAnswerIsMatchedOnItsDaysNotOnItsInstants() throws {
+        let picked = try Self.pickedDay()
+        let shifted = Self.spanReading(
+            Self.gitHub, from: picked.from.addingTimeInterval(3_600),
+            to: picked.to.addingTimeInterval(3_600), contributions: 42)
+        let readings = [Self.reading(Self.gitHub, login: "xsmyile", contributions: 3, merged: 1, issues: 0)]
+        let result = spanRows(readings, span: picked, answer: .init(span: picked, readings: [shifted]))
+
+        XCTAssertTrue(result.awaited.isEmpty)
+        XCTAssertEqual(result.rows.first?.contributions, UsageFormat.forgeCount(42))
     }
 }

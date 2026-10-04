@@ -444,16 +444,37 @@ enum UsageFormat {
     /// `all` always names its first day: that day is the whole of what
     /// "everything kept" means, and without it the widest window is the one
     /// reading on the panel that never says what it covers.
+    ///
+    /// A picked window is measured against `archiveStart`, the first day the
+    /// whole archive holds, rather than against a width ending today, which
+    /// would call every past window whole, or against the window's own first
+    /// filed day, which would call a window opening on an idle Saturday short.
+    /// One whose days hold no file at all says so, since its zero is no
+    /// reading rather than a quiet window.
     static func periodCoverage(
         _ rollup: UsageHistoryRollup,
+        archiveStart: Date? = nil,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> String? {
-        shortfall(
-            days: rollup.period.days, earliestDay: rollup.earliestDay,
-            now: now, calendar: calendar
-        ).map(since)
+        switch rollup.period {
+        case .preset(let period):
+            return shortfall(
+                days: period.days, earliestDay: rollup.earliestDay,
+                now: now, calendar: calendar
+            ).map(since)
+        case .days(let span):
+            guard rollup.earliestDay != nil else { return notRunning }
+            guard let archiveStart, calendar.startOfDay(for: archiveStart) > span.from else {
+                return nil
+            }
+            return since(archiveStart)
+        }
     }
+
+    /// What a window or a day the archive holds no file for says in place of
+    /// a figure.
+    static let notRunning = "Sissy was not running"
 
     /// Names the window a reading covers: its width while the archive reaches
     /// back across all of it, and the first day it holds once it does not.
@@ -539,6 +560,99 @@ enum UsageFormat {
         period == .all ? "All time" : periodLabel(period)
     }
 
+    /// Any window as its reading names it: a preset by its heading, days
+    /// picked on the calendar by their dates, `Wed 1 Oct` or `22 Sept to 2 Oct`.
+    static func periodHeading(
+        _ range: UsageRange, now: Date = Date(), calendar: Calendar = .current
+    ) -> String {
+        switch range {
+        case .preset(let period): periodHeading(period)
+        case .days(let span): spanHeading(span, now: now, calendar: calendar)
+        }
+    }
+
+    /// The same window mid-line, after a separator: a preset lowercased the
+    /// way a section's heading has always carried it, and dates as they are,
+    /// since a lowercased weekday reads as a typo.
+    static func periodInline(
+        _ range: UsageRange, now: Date = Date(), calendar: Calendar = .current
+    ) -> String {
+        switch range {
+        case .preset(let period): periodHeading(period).lowercased()
+        case .days(let span): spanHeading(span, now: now, calendar: calendar)
+        }
+    }
+
+    /// Days picked on the calendar: one day by its weekday and date, a run by
+    /// its two ends. The year is said only when the window is not this year's,
+    /// which an archive kept long enough can reach.
+    static func spanHeading(
+        _ span: UsageDaySpan, now: Date = Date(), calendar: Calendar = .current
+    ) -> String {
+        let withYear =
+            !calendar.isDate(span.from, equalTo: now, toGranularity: .year)
+            || !calendar.isDate(span.to, equalTo: now, toGranularity: .year)
+        var day = Date.FormatStyle.dateTime.day().month(.abbreviated)
+        day.timeZone = calendar.timeZone
+        if withYear { day = day.year() }
+        guard span.from != span.to else { return day.weekday(.abbreviated).format(span.from) }
+        return day.format(span.from) + " to " + day.format(span.to)
+    }
+
+    /// The period control's hover: the window it is set to and both of its
+    /// gestures, since nothing on a 26 pt circle can show that it has two.
+    static func periodHelp(_ range: UsageRange, now: Date = Date()) -> String {
+        "Period: " + periodHeading(range, now: now)
+            + "\nClick for the calendar, right-click for the presets"
+    }
+
+    /// The help on a tab whose page reads the moment, where the control is
+    /// disabled rather than hidden.
+    static let periodHelpMoment = "This tab reads the moment and has no period"
+
+    /// The calendar's caption over a month it has not been pointed into: the
+    /// month, and how many of its days so far the archive holds. The count is
+    /// left off while the month is being read, where `0 of 31` would claim an
+    /// empty archive for a reading that has not landed.
+    static func calendarMonth(
+        _ month: Date, covered: Int?, days: Int, now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        var style = Date.FormatStyle.dateTime.month(.wide)
+        style.timeZone = calendar.timeZone
+        if !calendar.isDate(month, equalTo: now, toGranularity: .year) { style = style.year() }
+        guard let covered else { return style.format(month) }
+        return "\(style.format(month)) · \(covered) of \(days) days"
+    }
+
+    /// A strip over a window of days: the window as its headline names it,
+    /// and how many of its days the archive holds where it does not hold
+    /// them all.
+    static func spanStripLabel(_ window: String, covered: Int, days: Int) -> String {
+        guard covered < days else { return window }
+        return "\(window) · \(covered) of \(days) days"
+    }
+
+    /// A provider's spend over a window that does not reach today, where the
+    /// row has no gauge to draw.
+    static func providerSpend(tokens: Int, cost: Decimal) -> String {
+        "\(self.tokens(tokens)) · \(self.cost(cost))"
+    }
+
+    /// What the window's sessions came to for one provider, under its spend:
+    /// the two counts and how long it was worked, the last only where the
+    /// archive measured any.
+    static func providerWork(_ counts: AgentCounts, activity: ActivityTotals) -> String {
+        var parts = [
+            counts.sessions == 1 ? "1 session" : "\(counts.sessions) sessions",
+            counts.agents == 1 ? "1 sub-agent" : "\(counts.agents) sub-agents",
+        ]
+        if activity.activeMinutes > 0 {
+            parts.append(workedDuration(minutes: activity.activeMinutes) + " active")
+        }
+        return parts.joined(separator: " · ")
+    }
+
     /// Names the window a strip of day bars covers, and says how much of it
     /// the archive actually answers for.
     ///
@@ -566,6 +680,30 @@ enum UsageFormat {
         day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 
+    /// A strip bar's own name when it stands for more than a day: a whole
+    /// month or year by its name, and any other stretch, a week or the part
+    /// of a month or year the window cuts into, by its two ends, so the hover
+    /// names exactly the days the figure beside it sums.
+    static func stripBucketTitle(
+        _ bucket: UsageDaySpan, unit: Calendar.Component, now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        guard bucket.from != bucket.to else { return dayTitle(bucket.from) }
+        let whole = calendar.dateInterval(of: unit, for: bucket.from).map {
+            $0.start == bucket.from && calendar.date(byAdding: .day, value: -1, to: $0.end) == bucket.to
+        }
+        switch unit {
+        case .month where whole == true:
+            return calendarMonth(bucket.from, covered: nil, days: 0, now: now, calendar: calendar)
+        case .year where whole == true:
+            var style = Date.FormatStyle.dateTime.year()
+            style.timeZone = calendar.timeZone
+            return style.format(bucket.from)
+        default:
+            return spanHeading(bucket, now: now, calendar: calendar)
+        }
+    }
+
     /// A day bar's own figures, since the strip carries no axis to read one
     /// off.
     ///
@@ -573,7 +711,7 @@ enum UsageFormat {
     /// the archive holds nothing for a day Sissy was not running, and "—"
     /// there would read as a day that cost nothing.
     static func dayFigures(tokens: Int?, cost: Decimal?) -> String {
-        guard let tokens, let cost else { return "Sissy was not running" }
+        guard let tokens, let cost else { return notRunning }
         return "\(self.tokens(tokens)) · \(self.cost(cost))"
     }
 
@@ -1141,21 +1279,30 @@ enum UsageFormat {
         count == 1 ? "1 project" : "\(count) projects"
     }
 
-    /// What the projects page says under its title: the day it is of, how many
-    /// repositories it names, and what that day came to.
+    /// What the projects page says under its title: the window it is of, how
+    /// many repositories it names, and what that window came to.
     ///
-    /// The day's own total rather than the headline's. The headline is over
-    /// whatever period the control is set to and these rows are today's alone,
-    /// so repeating it here would put one window's money over another's rows.
-    static func projectsSubtitle(count: Int, cost: Decimal) -> String {
-        "today · \(projectsCount(count)) · \(self.cost(cost))"
+    /// The rows' own total, which is the headline's only on the combined page:
+    /// a provider's page lists that provider's day, and the archive keeps no
+    /// split by repository per provider, so its rows are today's whatever the
+    /// panel's period is and the subtitle names today for them.
+    static func projectsSubtitle(
+        count: Int, cost: Decimal, period: UsageRange = .preset(.today)
+    ) -> String {
+        "\(periodInline(period)) · \(projectsCount(count)) · \(self.cost(cost))"
     }
 
-    /// The projects page with nothing on it, which is a day that has spent
+    /// The Overview's projects heading, naming the window its rows are over.
+    static func projectsSectionLabel(_ period: UsageRange) -> String {
+        "By project · " + periodInline(period)
+    }
+
+    /// The projects page with nothing on it, which is a window that has spent
     /// nothing yet rather than a page that failed to load. Reachable only by
-    /// a day rolling over under an open page, since the row that opens it
-    /// belongs to a section that does not exist while the list is empty.
-    static let projectsEmpty = "Nothing today names a repository yet."
+    /// a day rolling over under an open page, or by a picked window ending
+    /// while it is open, since the row that opens it belongs to a section that
+    /// does not exist while the list is empty.
+    static let projectsEmpty = "Nothing in this window names a repository."
 
     /// What the rest of the day is called when no row can name it, as the line
     /// under the list says it. Deliberately not a name: the money was counted,
@@ -2046,7 +2193,7 @@ extension UsageFormat {
     /// heading above it re-reads the clock, and a line gated on the day not
     /// having started would outlive the start by up to a whole poll.
     static func forgeTooltip(
-        _ kind: ForgeKind, host: String, login: String?, period: UsagePeriod,
+        _ kind: ForgeKind, host: String, login: String?, period: UsageRange,
         boundedToOneYear: Bool, vendorDayStart: Date
     ) -> String {
         var lines = [forgeName(kind) + " · " + host]
@@ -2058,7 +2205,7 @@ extension UsageFormat {
         case .gitLab:
             lines.append("Events GitLab recorded for you, " + days)
         }
-        if period == .all, boundedToOneYear {
+        if period == .preset(.all), boundedToOneYear {
             lines.append("Contributions reach back one year; the counts beside them are every one")
         }
         lines.append("Right-click to refresh now")
@@ -2087,8 +2234,8 @@ extension UsageFormat {
     ///
     /// `name` is the vendor's name, or the host where two connections are to
     /// the same vendor, which `UsagePanelSnapshot.makeForge` decides.
-    static func forgeSectionLabel(_ name: String, period: UsagePeriod) -> String {
-        name + " · " + periodHeading(period).lowercased()
+    static func forgeSectionLabel(_ name: String, period: UsageRange) -> String {
+        name + " · " + periodInline(period)
     }
 
     /// The Actions block's heading, naming the month the allowance is for:
@@ -2158,8 +2305,8 @@ extension UsageFormat {
 
     /// The heading over the Sessions tab's counted half, for the reason the
     /// forge's names its window.
-    static func sessionsSectionLabel(_ period: UsagePeriod) -> String {
-        "Sessions and sub-agents · " + periodHeading(period).lowercased()
+    static func sessionsSectionLabel(_ period: UsageRange) -> String {
+        "Sessions and sub-agents · " + periodInline(period)
     }
 }
 

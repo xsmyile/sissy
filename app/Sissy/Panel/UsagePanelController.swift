@@ -110,6 +110,7 @@ final class UsagePanelController: NSObject {
     /// raises rather than returns on a view outside a window.
     func show(relativeTo button: NSStatusBarButton) {
         guard !popover.isShown, button.window != nil else { return }
+        model.retireExpiredUsagePeriod()
         self.cleanup?.cancel()
         let cleanup = DiskCleanupModel(host: model.diskCleanup)
         self.cleanup = cleanup
