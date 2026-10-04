@@ -47,6 +47,15 @@ final class UsageEngineLifecycleTests: XCTestCase {
         )
     }
 
+    func testForgeActivityIsEmptyBeforeStartAndAfterStop() async throws {
+        let engine = makeEngine()
+        let idle = try await engine.forgeActivity(from: Date(), to: Date())
+        XCTAssertTrue(idle.isEmpty)
+        await engine.stop()
+        let stopped = try await engine.forgeActivity(from: Date(), to: Date())
+        XCTAssertTrue(stopped.isEmpty)
+    }
+
     /// A monitor whose every fetch fulfils the expectation handed to it.
     ///
     /// Inverted at the call sites, because what these tests assert is that

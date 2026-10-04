@@ -231,9 +231,12 @@ enum ForgeActivityFeed {
     /// Who the token belongs to, asked of whichever forge the connection
     /// names. It is what a connect is held on before anything is filed.
     static func probe(_ connection: ForgeConnection, token: String) async throws -> String {
+        if ForgeRefusalStore.shared.failure(url: connection.root, token: token) == .unauthorized {
+            ForgeRefusalStore.shared.record(nil, url: connection.root, token: token)
+        }
         switch connection.kind {
-        case .gitHub: try await GitHubActivityFeed.probe(connection, token: token)
-        case .gitLab: try await GitLabActivityFeed.probe(connection, token: token)
+        case .gitHub: return try await GitHubActivityFeed.probe(connection, token: token)
+        case .gitLab: return try await GitLabActivityFeed.probe(connection, token: token)
         }
     }
 
@@ -243,6 +246,10 @@ enum ForgeActivityFeed {
     /// call site, so a 401 from GitHub and a 401 from GitLab reach the row as
     /// the same sentence.
     static func send(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse) {
+        let token =
+            request.value(forHTTPHeaderField: "Authorization")?.replacingOccurrences(of: "Bearer ", with: "")
+            ?? request.value(forHTTPHeaderField: "PRIVATE-TOKEN") ?? ""
+        if let failure = ForgeRefusalStore.shared.failure(url: request.url, token: token) { throw failure }
         let data: Data
         let response: URLResponse
         do {
@@ -251,7 +258,13 @@ enum ForgeActivityFeed {
             throw failure(thrown: error)
         }
         guard let http = response as? HTTPURLResponse else { throw ForgeReadFailure.malformed }
-        if let failure = failure(of: http, addressedTo: request.url) { throw failure }
+        if let failure = failure(of: http, addressedTo: request.url) {
+            ForgeRefusalStore.shared.record(
+                failure, url: request.url, token: token,
+                until: ForgeRefusalStore.retryDeadline(http))
+            throw failure
+        }
+        ForgeRefusalStore.shared.record(nil, url: request.url, token: token)
         return (data, http)
     }
 
@@ -339,10 +352,11 @@ enum ForgeActivityFeed {
         request.httpBody = try? JSONSerialization.data(
             withJSONObject: ["query": query, "variables": variables])
         guard request.httpBody != nil else { throw ForgeReadFailure.malformed }
-        let (data, _) = try await send(request)
+        let (data, response) = try await send(request)
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ForgeReadFailure.malformed
         }
+        fileGraphQLRefusal(root, reply: response, url: url, token: token)
         // A GraphQL endpoint answers 200 for a query it refused, with the
         // reason in `errors` — so a document that came back without `data` is
         // an error however healthy the status line was.
@@ -350,6 +364,22 @@ enum ForgeActivityFeed {
             throw Self.refusal(root) ?? ForgeReadFailure.malformed
         }
         return payload
+    }
+
+    /// A rate limit a GraphQL endpoint answered with a 200, filed against the
+    /// credential with the reply's deadline the way a refused status is, so a
+    /// rebuilt monitor or a relaunch does not ask again before the reset.
+    /// GitHub documents that 200 for an exhausted GraphQL quota; `send` has
+    /// already cleared the credential by then, on the status line alone.
+    @discardableResult
+    static func fileGraphQLRefusal(
+        _ root: [String: Any], reply: HTTPURLResponse, url: URL?, token: String,
+        store: ForgeRefusalStore = .shared
+    ) -> ForgeReadFailure? {
+        let types = (root["errors"] as? [[String: Any]] ?? []).compactMap { $0["type"] as? String }
+        guard types.contains("RATE_LIMITED") else { return nil }
+        store.record(.rateLimited, url: url, token: token, until: ForgeRefusalStore.retryDeadline(reply))
+        return .rateLimited
     }
 
     /// The failure a GraphQL `errors` array names, where it names one this
