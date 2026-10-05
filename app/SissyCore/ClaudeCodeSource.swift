@@ -254,12 +254,18 @@ struct ClaudeCodeSignals: SourceSignals {
     ///
     /// Static and taking its inputs so the rule is testable without two
     /// actors, which is what it was missing when it was wrong.
+    ///
+    /// The resets are the probe's whichever reader wins the windows, because it
+    /// is the one reader that can spend them: claude.ai's reply is not asked
+    /// for them, and a count beside a button that a session could not press is
+    /// a row that fails.
     static func merge(
         profile: ProviderSignals,
         web: ProviderSignals?,
         probe: ProviderSignals?
     ) -> ProviderSignals {
         var reading = profile
+        reading.resets = probe?.resets
         let readings = [probe, web].compactMap { $0 }
         guard let live = answering(among: readings) else { return reading }
         reading.windows = live.windows

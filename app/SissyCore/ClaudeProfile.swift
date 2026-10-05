@@ -76,7 +76,16 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
         var signals = ProviderSignals()
         var profileOwner: String?
         var creditsOwner: String?
+        /// The CLI version the file last recorded, which is the one the usage
+        /// request has to name for Anthropic to offer the account's resets.
+        var cliVersion: String?
     }
+
+    /// Where the CLI records the last version whose release notes it showed,
+    /// which it rewrites on the first launch of every upgrade. Measured
+    /// 2026-10-05, `2.1.289` beside a `~/.local/bin/claude` linked to that
+    /// same version, with no other key in the file naming the running build.
+    private static let cliVersionKey = "lastReleaseNotesSeen"
 
     /// Keys of the cached usage payload, which is the endpoint's answer stored
     /// verbatim. Named here rather than inline because the same shape is what
@@ -161,7 +170,10 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
                     plan: profile?.plan, planTier: profile?.tier,
                     account: profile?.account, credits: billed),
                 profileOwner: profile?.owner,
-                creditsOwner: billedOwner)
+                creditsOwner: billedOwner,
+                cliVersion: (root[Self.cliVersionKey] as? String).flatMap {
+                    ClaudeResetGrants.isVersion($0) ? $0 : nil
+                })
             lastParsedAt = now
             lastMTime = mtime
         }

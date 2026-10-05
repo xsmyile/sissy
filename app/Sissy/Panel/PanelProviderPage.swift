@@ -27,7 +27,7 @@ struct PanelProviderPage: View {
     /// The account a switch is running for, or nil when none is. Named rather
     /// than a flag so the page can say which account it is moving to.
     let switchingAccount: String?
-    /// The account a Codex reset is being spent for, nil while none is.
+    /// The account a reset is being spent for, nil while none is.
     let resetSpending: LimitResetTarget?
     /// How the last reset press ended, which the page words for the account
     /// it was made for and for no other.
@@ -180,7 +180,7 @@ struct PanelProviderPage: View {
 
     // MARK: Platters
 
-    /// Limits, Codex resets and Credits, on one platter: all three answer how
+    /// Limits, resets and Credits, on one platter: all three answer how
     /// much capacity is left, with a hairline between whichever of them are
     /// showing rather than a divider for the page.
     private var capacityGroup: some View {
@@ -670,8 +670,9 @@ struct PanelProviderPage: View {
                 .font(.system(size: 12, weight: .medium))
             resetCaption(
                 LimitResetCopy.confirmBody(
-                    available: resets.available, naturalReset: naturalReset,
-                    appliesNow: resets.appliesNow))
+                    available: resets.available, clears: resets.clears,
+                    naturalReset: naturalReset, appliesNow: resets.appliesNow,
+                    provider: target.provider))
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 Button(DialogCopy.cancel) { confirmingReset = nil }
@@ -702,7 +703,7 @@ struct PanelProviderPage: View {
     @ViewBuilder
     private func resetOutcome(_ report: LimitResetReport) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            resetCaption(LimitResetCopy.outcome(report.outcome))
+            resetCaption(LimitResetCopy.outcome(report.outcome, provider: report.target.provider))
                 .frame(maxWidth: .infinity, alignment: .leading)
             if report.outcome == .unconfirmed {
                 Button(LimitResetCopy.retry) { useReset(report.target) }

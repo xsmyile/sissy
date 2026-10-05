@@ -693,10 +693,10 @@ struct UsagePanelSnapshot: Equatable {
         /// has never turned credits on.
         let credits: CreditsRow?
         /// The resets the vendor lets this account spend on its windows. Nil
-        /// for every provider but Codex, and for an account that holds none.
+        /// for a provider that offers none, and for an account that holds none.
         let resets: ResetsRow?
-        /// Whose credential a reset press on this row spends, nil for every
-        /// provider but Codex. Beside the row rather than on it, because the
+        /// Whose credential a reset press on this row spends, nil for a
+        /// provider that offers none. Beside the row rather than on it, because the
         /// press that spends the last reset takes the row away, and its answer
         /// still has to be said somewhere.
         let resetTarget: LimitResetTarget?
@@ -786,6 +786,10 @@ struct UsagePanelSnapshot: Equatable {
         let appliesNow: Bool
         /// How many a press is spending from, for the confirmation's arithmetic.
         let available: Int
+        /// The windows the reset puts back to zero, by the label the page gives
+        /// them, shortest first. Empty where the vendor does not say, which the
+        /// confirmation words as both.
+        let clears: [String]
     }
 
     /// An account as the provider page prints it: the address on its own
@@ -2096,8 +2100,7 @@ struct UsagePanelSnapshot: Equatable {
                 effort: slice.effort,
                 credits: makeCredits(slice.credits, now: now),
                 resets: makeResets(slice.resets),
-                resetTarget: slice.id == ProviderID.codex
-                    ? rowResetTarget(slice.signals.accounts) : nil,
+                resetTarget: rowResetTarget(provider: slice.id, slice.signals.accounts),
                 status: makeStatus(status[slice.id], provider: slice.id)
             )
         }
@@ -2221,9 +2224,7 @@ struct UsagePanelSnapshot: Equatable {
                 },
                 credits: makeCredits(reading?.credits, now: now),
                 resets: makeResets(reading?.resets),
-                resetTarget: provider == ProviderID.codex
-                    ? LimitResetTarget(
-                        provider: provider, account: reading?.isSignedIn == false ? id : nil) : nil,
+                resetTarget: accountResetTarget(provider: provider, id: id, reading: reading),
                 notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet, provider: provider),
                 isReadable: reading != nil,
                 isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID),
@@ -2247,12 +2248,45 @@ struct UsagePanelSnapshot: Equatable {
             headline: LimitResetCopy.available(resets.available),
             caption: LimitResetCopy.caption(title: resets.title, expiresAt: resets.nextExpiry),
             appliesNow: resets.appliesNow,
-            available: resets.available)
+            available: resets.available,
+            clears: resets.clears.sorted().map { UsageFormat.windowLabel(minutes: $0) })
+    }
+
+    /// Whose credential a press on one account's entry spends: that account's
+    /// own for Codex, which reads every account it links, and the CLI's for
+    /// the one Claude Code account it is signed in as.
+    static func accountResetTarget(provider: String, id: String, reading: AccountSignals?)
+        -> LimitResetTarget?
+    {
+        switch provider {
+        case ProviderID.codex:
+            return LimitResetTarget(
+                provider: provider, account: reading?.isSignedIn == false ? id : nil)
+        case ProviderID.claudeCode:
+            return claudeResetTarget(isSignedIn: reading?.isSignedIn == true)
+        default:
+            return nil
+        }
+    }
+
+    /// Whose credential a press on a Claude Code row or account spends: the
+    /// CLI's own, which is the one reader that can, and only for the account
+    /// it is signed in as.
+    static func claudeResetTarget(isSignedIn: Bool) -> LimitResetTarget? {
+        isSignedIn ? LimitResetTarget(provider: ProviderID.claudeCode, account: nil) : nil
     }
 
     /// Whose credential a press on the row itself spends: the CLI's, unless
     /// the only account Sissy reads is a linked one, which is the reading
     /// `CodexSignals.row` falls back to on a Mac whose `codex` is signed out.
+    static func rowResetTarget(provider: String, _ accounts: [AccountSignals])
+        -> LimitResetTarget?
+    {
+        if provider == ProviderID.claudeCode { return claudeResetTarget(isSignedIn: true) }
+        guard provider == ProviderID.codex else { return nil }
+        return rowResetTarget(accounts)
+    }
+
     static func rowResetTarget(_ accounts: [AccountSignals]) -> LimitResetTarget {
         guard accounts.count == 1, let only = accounts.first, !only.isSignedIn else {
             return LimitResetTarget(provider: ProviderID.codex, account: nil)

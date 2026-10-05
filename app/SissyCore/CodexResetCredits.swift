@@ -106,23 +106,7 @@ enum CodexResetCredits {
     }
 }
 
-/// How spending a reset ended, as the panel words it.
-enum LimitResetOutcome: Sendable, Equatable {
-    /// The windows are back to zero. `already_redeemed` lands here too: it is
-    /// the vendor saying an earlier attempt under the same request id did it.
-    case reset
-    /// Nothing was spent: OpenAI says the account does not need a reset now.
-    case nothingToReset
-    /// The account had no reset left to spend, or the one asked for lapsed.
-    case noCredit
-    /// No answer Sissy could read, so it may or may not have happened. Trying
-    /// again sends the same request id, which is what makes that safe.
-    case unconfirmed
-    /// OpenAI refused the credential. The request was never taken.
-    case refused
-    /// There was no credential to send, or no reader for the account.
-    case unavailable
-
+extension LimitResetOutcome {
     init(_ answer: CodexResetCredits.Answer) {
         switch answer {
         case .reset, .alreadyRedeemed: self = .reset

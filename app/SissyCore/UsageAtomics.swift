@@ -106,9 +106,9 @@ struct ProviderSignals: Sendable, Equatable {
     /// publish one. Nil for every other, and for an account that has never
     /// enabled the facility.
     var credits: ProviderCredits?
-    /// Resets the vendor lets this account spend on its windows, for the one
-    /// vendor that offers them. Nil for every other, and until a live reader
-    /// has answered: the rollouts do not carry the count.
+    /// Resets the vendor lets this account spend on its windows, for the
+    /// vendors that offer them. Nil for every other, and until a live reader
+    /// has answered: neither the rollouts nor `.claude.json` carry the count.
     var resets: LimitResets?
     /// Why the windows are missing, when they are and when the user can do
     /// something about it.

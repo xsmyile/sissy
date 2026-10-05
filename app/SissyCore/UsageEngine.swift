@@ -430,6 +430,7 @@ actor UsageEngine {
                 // cooperative thread once every five minutes per home.
                 // Off-pool is also what gives the timeout the probe already
                 // passes something to bound.
+                let profile = ClaudeProfileSource(url: home.claudeProfileURL)
                 let probe =
                     limitsProbe
                     ?? ClaudeLimitsProbe(
@@ -437,6 +438,10 @@ actor UsageEngine {
                             await ClaudeCredentialsStore.loadOffPool(timeout: timeout) {
                                 ClaudeCodeCredentials.load(slot: claudeSlot)
                             }
+                        },
+                        cliVersion: {
+                            profile.refresh()
+                            return profile.currentAttributed().cliVersion
                         },
                         backoff: limitsBackoff.slot(for: LimitsBackoffLedger.claudeCLIKey))
                 ownLimits = probe
@@ -451,7 +456,7 @@ actor UsageEngine {
                         limitsProbe: probe,
                         webSources: self.claudeWebSources,
                         webLinks: self.claudeWebLinks,
-                        profile: ClaudeProfileSource(url: home.claudeProfileURL),
+                        profile: profile,
                         accounts: accountRegistry,
                         ledger: projectLedger
                     ))
@@ -1076,18 +1081,31 @@ actor UsageEngine {
         await reemit()
     }
 
-    /// Spends one of a Codex account's resets, for the button on its page.
+    /// Spends one of an account's resets, for the button on its provider's
+    /// page.
     ///
-    /// `account` names a linked account's reader, and nil the CLI's own, which
-    /// is the reader behind the row and behind the signed-in account's entry.
-    /// The frame is rebuilt before this returns, so the answer and the cleared
-    /// windows reach the panel together.
-    func useCodexReset(account: String?) async -> LimitResetOutcome {
-        guard lifecycle == .running,
-            let reader = codexSources.load().first(where: { $0.account == account })
-        else { return .unavailable }
+    /// For Codex `account` names a linked account's reader, and nil the CLI's
+    /// own, which is the reader behind the row and behind the signed-in
+    /// account's entry. Claude Code has one reader that can spend, the CLI's
+    /// own credential, so a Claude press names no account. The frame is
+    /// rebuilt before this returns, so the answer and the cleared windows
+    /// reach the panel together.
+    func useReset(provider: String, account: String?) async -> LimitResetOutcome {
+        guard lifecycle == .running else { return .unavailable }
         let me = self
-        let outcome = await reader.useReset { await me.reemit() }
+        let outcome: LimitResetOutcome
+        switch provider {
+        case ProviderID.codex:
+            guard let reader = codexSources.load().first(where: { $0.account == account }) else {
+                return .unavailable
+            }
+            outcome = await reader.useReset { await me.reemit() }
+        case ProviderID.claudeCode:
+            guard account == nil, let probe = claudeOwnLimits else { return .unavailable }
+            outcome = await probe.useReset { await me.reemit() }
+        default:
+            return .unavailable
+        }
         await reemit()
         return outcome
     }

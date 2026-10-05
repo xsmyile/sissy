@@ -754,7 +754,9 @@ final class UsageEngineHost {
         spendingReset = target
         resetReport = nil
         Task { [weak self] in
-            let outcome = await Self.holdingFloor { await engine.useCodexReset(account: target.account) }
+            let outcome = await Self.holdingFloor {
+                await engine.useReset(provider: target.provider, account: target.account)
+            }
             self?.resetReport = LimitResetReport(target: target, outcome: outcome)
             self?.spendingReset = nil
         }

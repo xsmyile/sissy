@@ -12,8 +12,10 @@ import Foundation
 /// shape is measured, never inferred: the buckets meter in percent and report
 /// their dollar fields as null.
 actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
+    /// Asked for with the account's resets (`ClaudeResetGrants.usageQuery`),
+    /// which costs no second request: measured 2026-10-05, the one reply
+    /// carries both the `spend` block and the `cedar_ember` one.
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    private static let betaHeader = "oauth-2025-04-20"
     private static let requestTimeout: TimeInterval = 10
     static let refreshInterval: Duration = .seconds(300)
     static let vendor = "the Claude usage endpoint"
@@ -55,6 +57,14 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     /// The network half, injectable for the same reason: a test of the refresh
     /// contract must not reach Anthropic to observe it.
     private let fetchSource: @Sendable (String) async throws -> Reading
+    /// The organisation a token belongs to and the spend addressed to it,
+    /// injectable for the reason the fetch is: a test of the rules around a
+    /// spend must not spend a reset to observe them.
+    private let organizationSource: @Sendable (String, String?) async throws -> String
+    private let spendSource: @Sendable (ResetSpend) async throws -> ClaudeResetGrants.Answer
+    /// The CLI version every request names, read each time it is needed so an
+    /// upgrade reaches the next poll.
+    private let cliVersion: @Sendable () -> String?
     /// Where a refusal is written down so the next run honours it. Nil is a
     /// probe that forgets its block when the process ends, which is every
     /// test that has no opinion about one.
@@ -72,8 +82,41 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     struct Reading: Sendable, Equatable {
         let windows: [UsageWindow]
         let credits: ProviderCredits?
+        /// The resets the reply offers and the grant a press would spend,
+        /// nil where it offers none.
+        var resets: ClaudeResetGrants.Status?
     }
+
+    /// One spend as it goes to the vendor.
+    struct ResetSpend: Sendable, Equatable {
+        let token: String
+        let userAgent: String?
+        let organization: String
+        let grantID: String
+        let requestID: String
+    }
+
+    /// A spend the vendor has not answered, kept so every press after it sends
+    /// the same request id.
+    ///
+    /// Keyed by the organisation and the grant rather than by the token: a
+    /// Claude access token rotates every few hours, and an attempt dropped
+    /// because the token that sent it was renewed is a fresh request id that
+    /// can spend a second reset. Another organisation's grant, or another
+    /// grant, is not this attempt.
+    private struct Attempt {
+        let requestID: String
+        let grantID: String
+        let organization: String
+    }
+
     var loop = LimitsLoop()
+    /// The grant the last reading names next, which is the one a press spends.
+    private var nextGrant: String?
+    private var unanswered: Attempt?
+    /// Whether a spend is in flight, so a second press cannot resend the same
+    /// attempt beside it and read its answer twice.
+    private var spending = false
 
     /// `credentials` leads so a trailing closure still names the read: it is
     /// the half nearly every test answers for.
@@ -83,15 +126,33 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     /// is the only read on this path that could ever raise the legacy
     /// keychain's Allow/Deny panel — a default nothing takes is a dialog
     /// waiting for the first caller that forgets to.
+    ///
+    /// `cliVersion` is the version the CLI last recorded, which the default
+    /// fetch and spend name in their agent; nil sends none, and the reply then
+    /// offers no resets.
     init(
         credentials: @escaping @Sendable (Duration) async -> ClaudeCredentialsLookup,
-        fetch: @escaping @Sendable (String) async throws -> Reading = {
-            try await ClaudeLimitsProbe.fetch(token: $0)
-        },
+        fetch: (@Sendable (String) async throws -> Reading)? = nil,
+        organization: (@Sendable (String, String?) async throws -> String)? = nil,
+        spend: (@Sendable (ResetSpend) async throws -> ClaudeResetGrants.Answer)? = nil,
+        cliVersion: @escaping @Sendable () -> String? = { nil },
         backoff: LimitsBackoffSlot? = nil
     ) {
         credentialsSource = credentials
-        fetchSource = fetch
+        fetchSource =
+            fetch ?? {
+                try await ClaudeLimitsProbe.fetch(
+                    token: $0, userAgent: ClaudeResetGrants.userAgent(cliVersion: cliVersion()))
+            }
+        organizationSource =
+            organization ?? { try await ClaudeResetGrants.organization(token: $0, userAgent: $1) }
+        spendSource =
+            spend ?? {
+                try await ClaudeResetGrants.claim(
+                    token: $0.token, userAgent: $0.userAgent, organization: $0.organization,
+                    grantID: $0.grantID, requestID: $0.requestID)
+            }
+        self.cliVersion = cliVersion
         self.backoff = backoff
     }
 
@@ -143,9 +204,11 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
         published.update {
             $0.signals.windows = []
             $0.signals.credits = nil
+            $0.signals.resets = nil
             $0.credential = nil
             if clearingState { $0.signals.limitsState = .quiet }
         }
+        nextGrant = nil
         loop.lastReported = nil
     }
 
@@ -273,10 +336,12 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
             published.update {
                 $0.signals.windows = reading.windows
                 $0.signals.credits = reading.credits
+                $0.signals.resets = reading.resets?.resets
                 $0.signals.limitsState = .quiet
                 $0.signals.limitsObservedAt = Date()
                 $0.credential = ClaudeCredentialBlob.fingerprint(of: credentials.accessToken)
             }
+            nextGrant = reading.resets?.grantID
             await backoff?.record(nil)
             return Self.refreshInterval
         } catch {
@@ -316,17 +381,18 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
             $0.signals.limitsState = state
             $0.signals.windows = []
             $0.signals.credits = nil
+            $0.signals.resets = nil
             $0.signals.limitsObservedAt = nil
             $0.credential = nil
         }
+        nextGrant = nil
     }
 
-    private static func fetch(token: String) async throws -> Reading {
-        var request = URLRequest(url: usageURL, timeoutInterval: requestTimeout)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+    private static func fetch(token: String, userAgent: String?) async throws -> Reading {
+        var request = ClaudeResetGrants.request(
+            usageURL.appending(queryItems: [ClaudeResetGrants.usageQuery]), token: token,
+            userAgent: userAgent)
+        request.timeoutInterval = requestTimeout
         return parse(try await UsageRequestError.object(answering: request), observedAt: Date())
     }
 
@@ -337,7 +403,91 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     static func parse(_ payload: [String: Any], observedAt: Date = Date()) -> Reading {
         Reading(
             windows: ClaudeUsagePayload.windows(payload),
-            credits: ClaudeUsagePayload.credits(payload, observedAt: observedAt)
+            credits: ClaudeUsagePayload.credits(payload, observedAt: observedAt),
+            resets: ClaudeResetGrants.status(payload, now: observedAt)
         )
+    }
+
+    // MARK: - Spending a reset
+
+    /// Spends the reset the last reading named next, then reads the account
+    /// again so the windows the vendor just cleared reach the panel with the
+    /// answer.
+    ///
+    /// The rules are the Codex reader's: a press and nothing else, the
+    /// credential read the way a poll reads it, an attempt nobody heard the
+    /// answer to sent again under the same request id by every press after
+    /// it, and a spend that landed taking one off the count at once. The
+    /// token is never renewed here either, because Anthropic's refresh tokens
+    /// rotate and spending one would sign the terminal out: a token past its
+    /// life is a press with nothing to send.
+    ///
+    /// Only a running probe spends, and only a grant its last reading named:
+    /// a probe switched off holds no reading to have offered a reset from, and
+    /// an earlier attempt that landed is a grant the next reading no longer
+    /// names, so there is nothing left to resend it for. The organisation is
+    /// asked before an attempt exists, because a press that never reached the
+    /// spend is not an attempt anybody has to resend.
+    func useReset(onRefresh: @Sendable @escaping () async -> Void) async -> LimitResetOutcome {
+        guard !spending, loop.pollTask != nil else { return .unavailable }
+        spending = true
+        defer { spending = false }
+        let stamp = loop.generation
+        guard case .found(let credentials) = await credentialsSource(Self.keychainTimeout),
+            credentials.expiresAt.map({ $0 > Date() }) ?? true
+        else { return .unavailable }
+        guard let grantID = nextGrant else { return .noCredit }
+        let agent = ClaudeResetGrants.userAgent(cliVersion: cliVersion())
+        let organization: String
+        do {
+            organization = try await organizationSource(credentials.accessToken, agent)
+        } catch {
+            report("the Claude organisation to spend a reset for could not be read: \(error)")
+            return Self.isRefusal(error) ? .refused : .unavailable
+        }
+        let (attempt, retrying) = attempt(grantID: grantID, organization: organization)
+        let outcome: LimitResetOutcome
+        do {
+            let answer = try await spendSource(
+                ResetSpend(
+                    token: credentials.accessToken, userAgent: agent, organization: organization,
+                    grantID: attempt.grantID, requestID: attempt.requestID))
+            outcome = LimitResetOutcome(answer, retrying: retrying)
+            if outcome != .unconfirmed { unanswered = nil }
+        } catch {
+            if Self.isRefusal(error) {
+                if !retrying { unanswered = nil }
+                outcome = .refused
+            } else {
+                outcome = .unconfirmed
+            }
+            report("spending a Claude reset did not get an answer: \(error)")
+        }
+        if outcome == .reset {
+            nextGrant = nil
+            published.update { $0.signals.resets = $0.signals.resets?.spendingOne() }
+        }
+        if isCurrent(stamp) { await refresh(onRefresh: onRefresh) }
+        return outcome
+    }
+
+    /// The attempt a press sends: the unanswered one when it was for this
+    /// grant of this organisation, and a fresh one otherwise, held from here
+    /// until the vendor answers it.
+    private func attempt(grantID: String, organization: String) -> (Attempt, retrying: Bool) {
+        if let held = unanswered, held.grantID == grantID, held.organization == organization {
+            return (held, true)
+        }
+        let fresh = Attempt(
+            requestID: UUID().uuidString, grantID: grantID, organization: organization)
+        unanswered = fresh
+        return (fresh, false)
+    }
+
+    /// A refusal is a request the vendor never took. On a resend it says
+    /// nothing about the first attempt, which is why that one keeps its id.
+    private static func isRefusal(_ error: Error) -> Bool {
+        guard case UsageRequestError.badStatus(let code) = error else { return false }
+        return code == 401 || code == 403
     }
 }
