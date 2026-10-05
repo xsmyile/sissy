@@ -1951,7 +1951,7 @@ enum ClaudeAccountSwitchCopy {
 /// the reader: a reset spent needs nothing, one that was not needed needs
 /// patience, and one whose answer never arrived needs the one retry that is
 /// safe to make.
-enum CodexResetCopy {
+enum LimitResetCopy {
     static let section = "Resets"
     static let use = "Use…"
     static let useHelp = "Spend one reset to put this account's windows back to zero"
@@ -1991,7 +1991,7 @@ enum CodexResetCopy {
         return sentences.joined(separator: " ")
     }
 
-    static func outcome(_ outcome: CodexResetOutcome) -> String {
+    static func outcome(_ outcome: LimitResetOutcome) -> String {
         switch outcome {
         case .reset: return "Done. Both windows are back to zero."
         case .nothingToReset:

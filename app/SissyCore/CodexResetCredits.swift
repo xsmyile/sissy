@@ -107,7 +107,7 @@ enum CodexResetCredits {
 }
 
 /// How spending a reset ended, as the panel words it.
-enum CodexResetOutcome: Sendable, Equatable {
+enum LimitResetOutcome: Sendable, Equatable {
     /// The windows are back to zero. `already_redeemed` lands here too: it is
     /// the vendor saying an earlier attempt under the same request id did it.
     case reset
