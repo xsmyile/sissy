@@ -78,7 +78,8 @@ enum ClaudeResetGrants {
     /// usable now, not paused, and either usable any time or the account at a
     /// limit, which is the CLI's own reading of the same fields. An
     /// account the vendor calls ineligible gets no row, because what it says
-    /// about why is not something the user can act on.
+    /// about why is not something the user can act on, and neither does a
+    /// grant that clears no window the page draws: nothing on it would move.
     static func status(_ body: [String: Any], now: Date) -> Status? {
         guard let block = body[statusKey] as? [String: Any],
             block["eligible"] as? Bool == true,
@@ -98,14 +99,17 @@ enum ClaudeResetGrants {
         let usable =
             next["usable_now"] as? Bool == true && next["paused"] as? Bool != true
             && (next["use_requires_limit"] as? Bool == false || atLimit)
-        let clears = (next["clears"] as? [Any])?.compactMap { ($0 as? String).flatMap { windowMinutes[$0] } }
+        let clears = Set(
+            (next["clears"] as? [Any])?.compactMap { ($0 as? String).flatMap { windowMinutes[$0] } }
+                ?? [])
+        guard !clears.isEmpty else { return nil }
         return Status(
             resets: LimitResets(
                 available: available,
                 applicable: usable ? count(next["resets_left"]) : 0,
                 nextExpiry: date(next["ends_at"]),
                 title: UsageReaderShared.sanitizedDisplayText(next["label"] as? String),
-                clears: Set(clears ?? [])),
+                clears: clears),
             grantID: nextID)
     }
 

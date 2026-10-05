@@ -2024,7 +2024,7 @@ enum LimitResetCopy {
             return "Nothing was spent: another reset was just started on this account. Try again "
                 + "in a minute."
         case .mayHaveLanded:
-            return "The earlier try may have gone through. The windows above are read again."
+            return "The earlier try may have gone through. The windows above say whether it did."
         case .unconfirmed:
             return "No answer from \(vendor). Trying again cannot spend a second reset."
         case .refused: return "\(vendor) refused \(credential). Sign in again, then retry."

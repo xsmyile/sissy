@@ -58,6 +58,17 @@ final class ClaudeResetGrantsTests: XCTestCase {
             ClaudeResetGrants.status(block(endsAt: "2026-09-01T00:00:00+00:00"), now: Self.now))
     }
 
+    /// A reset that clears no window the page draws has nothing on it to move.
+    func testAGrantClearingNoDrawnWindowOffersNothing() throws {
+        var body = block()
+        var status = try XCTUnwrap(body["cedar_ember"] as? [String: Any])
+        var grants = try XCTUnwrap(status["grants"] as? [[String: Any]])
+        grants[0]["clears"] = ["seven_day_overage_included"]
+        status["grants"] = grants
+        body["cedar_ember"] = status
+        XCTAssertNil(ClaudeResetGrants.status(body, now: Self.now))
+    }
+
     /// A grant usable only at a limit keeps its row away from one, and says the
     /// vendor would not apply it yet.
     func testAGrantForALimitDoesNotApplyBeforeOne() throws {
@@ -185,6 +196,43 @@ final class ClaudeResetGrantsTests: XCTestCase {
         XCTAssertEqual(refused, .refused)
         XCTAssertNotEqual(spends.requests[0].requestID, spends.requests[1].requestID)
         await probe.stop()
+    }
+
+    /// A grant read with one account's token is not spent with another's
+    /// without reading the account again: the press re-reads with the token
+    /// it will spend, and spends what that reading names.
+    func testATokenTheGrantWasNotReadWithIsReadAgainBeforeTheSpend() async {
+        let spends = Spends([.success(.reset)])
+        let slot = Slot()
+        let fetched = Fetches()
+        let reading = ClaudeLimitsProbe.parse(block(), observedAt: Self.now)
+        let probe = ClaudeLimitsProbe(
+            credentials: { _ in
+                .found(ClaudeCredentials(accessToken: slot.token, expiresAt: .distantFuture))
+            },
+            fetch: { token in
+                fetched.record(token)
+                return reading
+            },
+            organization: { _, _ in Self.organization },
+            spend: { try spends.answer($0) },
+            cliVersion: { "2.1.289" })
+        await probe.refresh {}
+        slot.token = "another-account"
+
+        let outcome = await probe.useReset {}
+
+        XCTAssertEqual(outcome, .reset)
+        XCTAssertEqual(Array(fetched.tokens.prefix(2)), ["t1", "another-account"])
+        XCTAssertEqual(spends.requests.map(\.token), ["another-account"])
+        await probe.stop()
+    }
+
+    private final class Fetches: @unchecked Sendable {
+        private let lock = NSLock()
+        private var seen: [String] = []
+        func record(_ token: String) { lock.withLock { seen.append(token) } }
+        var tokens: [String] { lock.withLock { seen } }
     }
 
     /// A probe switched off holds no reading to have offered a reset from.
