@@ -15,7 +15,7 @@ The menu bar companion for developers.
 [![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple&logoColor=white)](#install)
 
 <img src="assets/sissy-demo.gif" width="100%"
-  alt="Sissy's panel opening from the menu bar and stepping through its tabs: a rate-limit gauge per account, the agents running now and the memory they hold, the Mac's memory pressure and heaviest apps, the builds of removed projects taking room on the disk, the network rate, and keep awake" />
+  alt="Sissy's panel opening from the menu bar and stepping through its tabs: a rate-limit gauge per account, the agents running now and the memory they hold, the Mac's memory pressure and heaviest apps, the disk's free space and activity, the network rate, and keep awake" />
 
 [Install](#install) · [What it shows](#what-it-shows) · [What it reads](#what-it-reads) · [Privacy](#privacy) · [Build](#build-from-source)
 
@@ -37,7 +37,7 @@ The menu bar companion for developers.
   repository commits under the wrong name.
 - **Mac**: memory pressure as the kernel grades it, swap, load and uptime.
 - **Disk**: free space graded against the Mac's RAM, read and write activity,
-  and the developer caches you can clear, such as Xcode DerivedData.
+  and every other local volume.
 - **Network**: what the links carry now and over the last two minutes, what
   they carried since boot, and the Wi-Fi signal.
 

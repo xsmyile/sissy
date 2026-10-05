@@ -80,11 +80,6 @@ final class UsagePanelController: NSObject {
     /// so a menu opened inside the panel cannot dismiss the panel it belongs
     /// to.
     private var ownWindowObserver: (any NSObjectProtocol)?
-    /// The showing's cleanup rows, held here so the close can stop their
-    /// sizing: a host dropped from a closed popover is not promised an
-    /// `onDisappear`. A removal the panel confirmed is `DiskCleanupHost`'s and
-    /// is not stopped.
-    private var cleanup: DiskCleanupModel?
 
     init(model: SissyModel) {
         self.model = model
@@ -111,14 +106,10 @@ final class UsagePanelController: NSObject {
     func show(relativeTo button: NSStatusBarButton) {
         guard !popover.isShown, button.window != nil else { return }
         model.retireExpiredUsagePeriod()
-        self.cleanup?.cancel()
-        let cleanup = DiskCleanupModel(host: model.diskCleanup)
-        self.cleanup = cleanup
         let host = NSHostingController(
             rootView: UsagePanelView(
                 model: model,
-                maxHeight: PanelMetrics.maxHeight(on: button.window?.screen),
-                cleanup: cleanup))
+                maxHeight: PanelMetrics.maxHeight(on: button.window?.screen)))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
         host.view.layoutSubtreeIfNeeded()
@@ -205,8 +196,6 @@ extension UsagePanelController: NSPopoverDelegate {
         guard !popover.isShown else { return }
         stopWatchingForDismissal()
         popover.contentViewController = nil
-        cleanup?.cancel()
-        cleanup = nil
         model.engine.setLiveDemand([])
         model.engine.dismissResetReport()
     }

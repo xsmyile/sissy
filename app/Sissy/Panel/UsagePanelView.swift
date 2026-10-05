@@ -38,10 +38,6 @@ struct UsagePanelView: View {
     /// this and scrolls at it — a ceiling rather than a height, so a short
     /// page is exactly as tall as it was before there was one.
     let maxHeight: CGFloat
-    /// The Disk tab's cleanup rows, made by the controller for this showing
-    /// and cancelled when it closes, so a size lives exactly as long as the
-    /// panel it was measured for.
-    let cleanup: DiskCleanupModel
 
     /// Which surface is on screen. Local to the view rather than on the model:
     /// the panel is dropped when it closes, and a page selection that outlived
@@ -557,7 +553,7 @@ struct UsagePanelView: View {
             }
         case .disk:
             if let disk = snapshot.disk {
-                PanelDisk(block: disk, engine: model.engine, cleanup: cleanup)
+                PanelDisk(block: disk, engine: model.engine)
             } else {
                 overview(snapshot)
             }
