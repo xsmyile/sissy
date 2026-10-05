@@ -108,8 +108,8 @@ final class CodexResetCreditsTests: XCTestCase {
     /// `already_redeemed` is the vendor saying an earlier attempt under the
     /// same request id already did it.
     func testAnAlreadyRedeemedRequestIsAReset() {
-        XCTAssertEqual(CodexResetOutcome(.alreadyRedeemed), .reset)
-        XCTAssertEqual(CodexResetOutcome(.reset), .reset)
+        XCTAssertEqual(LimitResetOutcome(.alreadyRedeemed), .reset)
+        XCTAssertEqual(LimitResetOutcome(.reset), .reset)
     }
 
     // MARK: - Which reading the row takes

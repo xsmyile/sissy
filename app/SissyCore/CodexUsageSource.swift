@@ -296,16 +296,16 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
     /// than as a notice about the limits. A spend that landed takes one off
     /// the count at once, as OpenAI's desktop client does, so the button does
     /// not outlive the reset it spent when the read after it cannot run.
-    func useReset(onRefresh: @Sendable @escaping () async -> Void) async -> CodexResetOutcome {
+    func useReset(onRefresh: @Sendable @escaping () async -> Void) async -> LimitResetOutcome {
         guard !retired else { return .unavailable }
         guard case .found(let credential) = await credentialSource(false),
             !credential.isExpired()
         else { return .unavailable }
         let attempt = unanswered ?? (requestID: UUID().uuidString, creditID: nextCredit)
         unanswered = attempt
-        let outcome: CodexResetOutcome
+        let outcome: LimitResetOutcome
         do {
-            outcome = CodexResetOutcome(
+            outcome = LimitResetOutcome(
                 try await consumeSource(credential, attempt.requestID, attempt.creditID))
             unanswered = nil
         } catch {

@@ -77,7 +77,7 @@ final class CodexResetRowTests: XCTestCase {
         let row = codex(
             resets: LimitResets(available: 1, applicable: 1),
             accounts: [account("user-1", signedIn: true, resets: nil)])
-        XCTAssertEqual(row.resetTarget, CodexResetTarget(account: nil))
+        XCTAssertEqual(row.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: nil))
     }
 
     /// On a Mac whose `codex` is signed out the row is the lone linked
@@ -86,7 +86,7 @@ final class CodexResetRowTests: XCTestCase {
         let row = codex(
             resets: LimitResets(available: 1, applicable: 1),
             accounts: [account("user-2", signedIn: false, resets: nil)])
-        XCTAssertEqual(row.resetTarget, CodexResetTarget(account: "user-2"))
+        XCTAssertEqual(row.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: "user-2"))
     }
 
     func testEachAccountEntrySpendsItsOwnCredential() {
@@ -100,13 +100,15 @@ final class CodexResetRowTests: XCTestCase {
             reading: .used,
             now: Date())
         let byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
-        XCTAssertEqual(byID["user-1"]?.resetTarget, CodexResetTarget(account: nil))
-        XCTAssertEqual(byID["user-2"]?.resetTarget, CodexResetTarget(account: "user-2"))
+        XCTAssertEqual(
+            byID["user-1"]?.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: nil))
+        XCTAssertEqual(
+            byID["user-2"]?.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: "user-2"))
         XCTAssertEqual(byID["user-2"]?.resets?.headline, "3 available")
     }
 
     func testAProviderWithoutResetsHasNoTarget() {
-        let slice = ProviderSlice(id: ProviderID.claudeCode, tokens: 0, cost: 0)
+        let slice = ProviderSlice(id: "opencode", tokens: 0, cost: 0)
         XCTAssertNil(UsagePanelSnapshot.make(frame: frame(slice)).providers[0].resetTarget)
     }
 
@@ -114,35 +116,40 @@ final class CodexResetRowTests: XCTestCase {
 
     func testTheConfirmationSaysWhatWaitingWouldCost() {
         XCTAssertEqual(
-            CodexResetCopy.confirmBody(
+            LimitResetCopy.confirmBody(
                 available: 2, naturalReset: (label: "Weekly", countdown: "in 3d 4h"),
-                appliesNow: true),
+                appliesNow: true, provider: ProviderID.codex),
             "Both windows go back to zero. This spends 1 of 2. Weekly resets on its own in 3d 4h.")
         XCTAssertEqual(
-            CodexResetCopy.confirmBody(available: 1, naturalReset: nil, appliesNow: true),
+            LimitResetCopy.confirmBody(
+                available: 1, naturalReset: nil, appliesNow: true, provider: ProviderID.codex),
             "Both windows go back to zero. This spends 1 of 1.")
     }
 
     func testTheConfirmationSaysWhenOpenAICountsNoneNeeded() {
         XCTAssertEqual(
-            CodexResetCopy.confirmBody(
+            LimitResetCopy.confirmBody(
                 available: 1, naturalReset: (label: "Weekly", countdown: "in 1d 12h"),
-                appliesNow: false),
+                appliesNow: false, provider: ProviderID.codex),
             "Both windows go back to zero. This spends 1 of 1. Weekly resets on its own in 1d 12h. "
                 + "OpenAI does not count one as needed yet and may decline it, which spends nothing.")
     }
 
     func testEachAnswerIsItsOwnSentence() {
-        let outcomes: [CodexResetOutcome] = [
+        let outcomes: [LimitResetOutcome] = [
             .reset, .nothingToReset, .noCredit, .unconfirmed, .refused, .unavailable,
         ]
-        XCTAssertEqual(Set(outcomes.map(CodexResetCopy.outcome)).count, outcomes.count)
-        XCTAssertEqual(CodexResetCopy.outcome(.reset), "Done. Both windows are back to zero.")
         XCTAssertEqual(
-            CodexResetCopy.outcome(.nothingToReset),
+            Set(outcomes.map { LimitResetCopy.outcome($0, provider: ProviderID.codex) }).count, outcomes.count
+        )
+        XCTAssertEqual(
+            LimitResetCopy.outcome(.reset, provider: ProviderID.codex), "Done. Both windows are back to zero."
+        )
+        XCTAssertEqual(
+            LimitResetCopy.outcome(.nothingToReset, provider: ProviderID.codex),
             "Nothing was spent: OpenAI says this account does not need a reset right now.")
         XCTAssertEqual(
-            CodexResetCopy.outcome(.unconfirmed),
+            LimitResetCopy.outcome(.unconfirmed, provider: ProviderID.codex),
             "No answer from OpenAI. Trying again cannot spend a second reset.")
     }
 }

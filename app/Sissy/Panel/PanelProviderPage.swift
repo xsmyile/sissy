@@ -27,15 +27,15 @@ struct PanelProviderPage: View {
     /// The account a switch is running for, or nil when none is. Named rather
     /// than a flag so the page can say which account it is moving to.
     let switchingAccount: String?
-    /// The account a Codex reset is being spent for, nil while none is.
-    let resetSpending: CodexResetTarget?
+    /// The account a reset is being spent for, nil while none is.
+    let resetSpending: LimitResetTarget?
     /// How the last reset press ended, which the page words for the account
     /// it was made for and for no other.
-    let resetReport: CodexResetReport?
+    let resetReport: LimitResetReport?
     /// Spends a reset with that account's credential. A press after an
     /// answer that never arrived sends that same attempt again, which the
     /// reader decides rather than this page.
-    let useReset: (CodexResetTarget) -> Void
+    let useReset: (LimitResetTarget) -> Void
     let refresh: () -> Void
     /// Opens the vendor's services, which are a page of the panel rather than
     /// a surface of this one's: the panel owns which page is on screen, so the
@@ -84,7 +84,7 @@ struct PanelProviderPage: View {
     /// The account whose reset the page is asking about, before anything is
     /// spent. A press proposes and the confirmation commits, because the
     /// spend cannot be undone and the reset it spends has a date on it.
-    @State private var confirmingReset: CodexResetTarget?
+    @State private var confirmingReset: LimitResetTarget?
 
     /// The account the page is reading, or nil while there is one account and
     /// the row's own fields are it.
@@ -113,7 +113,7 @@ struct PanelProviderPage: View {
         viewed.map(\.resets) ?? row.resets
     }
 
-    private var shownResetTarget: CodexResetTarget? {
+    private var shownResetTarget: LimitResetTarget? {
         viewed.map(\.resetTarget) ?? row.resetTarget
     }
 
@@ -180,7 +180,7 @@ struct PanelProviderPage: View {
 
     // MARK: Platters
 
-    /// Limits, Codex resets and Credits, on one platter: all three answer how
+    /// Limits, resets and Credits, on one platter: all three answer how
     /// much capacity is left, with a hairline between whichever of them are
     /// showing rather than a divider for the page.
     private var capacityGroup: some View {
@@ -582,14 +582,14 @@ struct PanelProviderPage: View {
     /// Whether a press for this account is running or has an answer to say,
     /// which keeps the block on the page after the last reset is spent and
     /// the count that drew it has gone.
-    private func hasResetActivity(_ target: CodexResetTarget) -> Bool {
+    private func hasResetActivity(_ target: LimitResetTarget) -> Bool {
         resetSpending == target || resetReport?.target == target
     }
 
     /// Whether this account's last press got no answer, which leaves `Try
     /// again` as the one control: both would send the same attempt, and two
     /// buttons for one request read as two different things to do.
-    private func awaitsRetry(_ target: CodexResetTarget) -> Bool {
+    private func awaitsRetry(_ target: LimitResetTarget) -> Bool {
         resetReport?.target == target && resetReport?.outcome == .unconfirmed
     }
 
@@ -604,12 +604,12 @@ struct PanelProviderPage: View {
     /// needed yet: whether to spend it is the user's call, and whether it
     /// applies is the vendor's.
     @ViewBuilder
-    private func resets(_ resets: UsagePanelSnapshot.ResetsRow?, target: CodexResetTarget)
+    private func resets(_ resets: UsagePanelSnapshot.ResetsRow?, target: LimitResetTarget)
         -> some View
     {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                SectionLabel(text: CodexResetCopy.section)
+                SectionLabel(text: LimitResetCopy.section)
                 Spacer(minLength: 0)
                 if let resets {
                     Text(resets.headline)
@@ -628,9 +628,9 @@ struct PanelProviderPage: View {
                         .truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if resetSpending == nil, confirmingReset != target, !awaitsRetry(target) {
-                        Button(CodexResetCopy.use) { confirmingReset = target }
+                        Button(LimitResetCopy.use) { confirmingReset = target }
                             .controlSize(.small)
-                            .help(CodexResetCopy.useHelp)
+                            .help(LimitResetCopy.useHelp)
                     }
                 }
                 if confirmingReset == target, resetSpending == nil {
@@ -642,7 +642,7 @@ struct PanelProviderPage: View {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
-                    resetCaption(CodexResetCopy.spending)
+                    resetCaption(LimitResetCopy.spending)
                 }
                 .padding(.top, 4)
             } else if let report = resetReport, report.target == target {
@@ -663,20 +663,21 @@ struct PanelProviderPage: View {
     /// action, so the spend is reached by aiming at it and never by a return
     /// key pressed at a panel.
     private func resetConfirmation(
-        _ resets: UsagePanelSnapshot.ResetsRow, target: CodexResetTarget
+        _ resets: UsagePanelSnapshot.ResetsRow, target: LimitResetTarget
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(CodexResetCopy.confirmTitle)
+            Text(LimitResetCopy.confirmTitle)
                 .font(.system(size: 12, weight: .medium))
             resetCaption(
-                CodexResetCopy.confirmBody(
-                    available: resets.available, naturalReset: naturalReset,
-                    appliesNow: resets.appliesNow))
+                LimitResetCopy.confirmBody(
+                    available: resets.available, clears: resets.clears,
+                    naturalReset: naturalReset, appliesNow: resets.appliesNow,
+                    provider: target.provider))
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 Button(DialogCopy.cancel) { confirmingReset = nil }
                     .keyboardShortcut(.cancelAction)
-                Button(CodexResetCopy.confirmAction) {
+                Button(LimitResetCopy.confirmAction) {
                     confirmingReset = nil
                     useReset(target)
                 }
@@ -700,12 +701,12 @@ struct PanelProviderPage: View {
     }
 
     @ViewBuilder
-    private func resetOutcome(_ report: CodexResetReport) -> some View {
+    private func resetOutcome(_ report: LimitResetReport) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            resetCaption(CodexResetCopy.outcome(report.outcome))
+            resetCaption(LimitResetCopy.outcome(report.outcome, provider: report.target.provider))
                 .frame(maxWidth: .infinity, alignment: .leading)
             if report.outcome == .unconfirmed {
-                Button(CodexResetCopy.retry) { useReset(report.target) }
+                Button(LimitResetCopy.retry) { useReset(report.target) }
                     .controlSize(.small)
             }
         }

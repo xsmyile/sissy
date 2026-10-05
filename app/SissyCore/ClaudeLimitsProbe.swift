@@ -12,8 +12,10 @@ import Foundation
 /// shape is measured, never inferred: the buckets meter in percent and report
 /// their dollar fields as null.
 actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
+    /// Asked for with the account's resets (`ClaudeResetGrants.usageQuery`),
+    /// which costs no second request: measured 2026-10-05, the one reply
+    /// carries both the `spend` block and the `cedar_ember` one.
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    private static let betaHeader = "oauth-2025-04-20"
     private static let requestTimeout: TimeInterval = 10
     static let refreshInterval: Duration = .seconds(300)
     static let vendor = "the Claude usage endpoint"
@@ -55,6 +57,14 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     /// The network half, injectable for the same reason: a test of the refresh
     /// contract must not reach Anthropic to observe it.
     private let fetchSource: @Sendable (String) async throws -> Reading
+    /// Whose a token is and the spend addressed to them, injectable for the
+    /// reason the fetch is: a test of the rules around a spend must not spend
+    /// a reset to observe them.
+    private let ownerSource: @Sendable (String, String?) async throws -> ClaudeResetGrants.Owner
+    private let spendSource: @Sendable (ResetSpend) async throws -> ClaudeResetGrants.Answer
+    /// The CLI version every request names, read each time it is needed so an
+    /// upgrade reaches the next poll.
+    private let cliVersion: @Sendable () -> String?
     /// Where a refusal is written down so the next run honours it. Nil is a
     /// probe that forgets its block when the process ends, which is every
     /// test that has no opinion about one.
@@ -72,8 +82,46 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     struct Reading: Sendable, Equatable {
         let windows: [UsageWindow]
         let credits: ProviderCredits?
+        /// The resets the reply offers and the grant a press would spend,
+        /// nil where it offers none.
+        var resets: ClaudeResetGrants.Status?
     }
+
+    /// One spend as it goes to the vendor.
+    struct ResetSpend: Sendable, Equatable {
+        let token: String
+        let userAgent: String?
+        let organization: String
+        let grantID: String
+        let requestID: String
+    }
+
+    /// A spend the vendor has not answered, kept so every press after it sends
+    /// the same request id for the same grant.
+    private struct Attempt {
+        let requestID: String
+        let grantID: String
+        let owner: ClaudeResetGrants.Owner
+    }
+
     var loop = LimitsLoop()
+    /// The grant the last reading names next, which is the one a press spends,
+    /// with the fingerprint of the token that read it: a grant read for one
+    /// account is not one to spend with another's token after a switch.
+    private var nextGrant: (id: String, credential: String)?
+    /// The attempts nobody heard an answer to, by whose they are.
+    ///
+    /// Keyed by the account rather than by the token, because a Claude access
+    /// token rotates every few hours and an attempt dropped with the token
+    /// that sent it is a fresh request id that can spend a second reset. And
+    /// held whatever grant a later reading names: a reading taken after a
+    /// timeout can name the next grant precisely because the first attempt
+    /// landed, and spending that one under `Try again` is the second reset the
+    /// retry promises it cannot spend.
+    private var unanswered: [ClaudeResetGrants.Owner: Attempt] = [:]
+    /// Whether a spend is in flight, so a second press cannot resend the same
+    /// attempt beside it and read its answer twice.
+    private var spending = false
 
     /// `credentials` leads so a trailing closure still names the read: it is
     /// the half nearly every test answers for.
@@ -83,15 +131,32 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     /// is the only read on this path that could ever raise the legacy
     /// keychain's Allow/Deny panel — a default nothing takes is a dialog
     /// waiting for the first caller that forgets to.
+    ///
+    /// `cliVersion` is the version the CLI last recorded, which the default
+    /// fetch and spend name in their agent; nil sends none, and the reply then
+    /// offers no resets.
     init(
         credentials: @escaping @Sendable (Duration) async -> ClaudeCredentialsLookup,
-        fetch: @escaping @Sendable (String) async throws -> Reading = {
-            try await ClaudeLimitsProbe.fetch(token: $0)
-        },
+        fetch: (@Sendable (String) async throws -> Reading)? = nil,
+        owner: (@Sendable (String, String?) async throws -> ClaudeResetGrants.Owner)? = nil,
+        spend: (@Sendable (ResetSpend) async throws -> ClaudeResetGrants.Answer)? = nil,
+        cliVersion: @escaping @Sendable () -> String? = { nil },
         backoff: LimitsBackoffSlot? = nil
     ) {
         credentialsSource = credentials
-        fetchSource = fetch
+        fetchSource =
+            fetch ?? {
+                try await ClaudeLimitsProbe.fetch(
+                    token: $0, userAgent: ClaudeResetGrants.userAgent(cliVersion: cliVersion()))
+            }
+        ownerSource = owner ?? { try await ClaudeResetGrants.owner(token: $0, userAgent: $1) }
+        spendSource =
+            spend ?? {
+                try await ClaudeResetGrants.claim(
+                    token: $0.token, userAgent: $0.userAgent, organization: $0.organization,
+                    grantID: $0.grantID, requestID: $0.requestID)
+            }
+        self.cliVersion = cliVersion
         self.backoff = backoff
     }
 
@@ -143,9 +208,11 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
         published.update {
             $0.signals.windows = []
             $0.signals.credits = nil
+            $0.signals.resets = nil
             $0.credential = nil
             if clearingState { $0.signals.limitsState = .quiet }
         }
+        nextGrant = nil
         loop.lastReported = nil
     }
 
@@ -273,9 +340,13 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
             published.update {
                 $0.signals.windows = reading.windows
                 $0.signals.credits = reading.credits
+                $0.signals.resets = reading.resets?.resets
                 $0.signals.limitsState = .quiet
                 $0.signals.limitsObservedAt = Date()
                 $0.credential = ClaudeCredentialBlob.fingerprint(of: credentials.accessToken)
+            }
+            nextGrant = reading.resets.map {
+                ($0.grantID, ClaudeCredentialBlob.fingerprint(of: credentials.accessToken))
             }
             await backoff?.record(nil)
             return Self.refreshInterval
@@ -316,17 +387,18 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
             $0.signals.limitsState = state
             $0.signals.windows = []
             $0.signals.credits = nil
+            $0.signals.resets = nil
             $0.signals.limitsObservedAt = nil
             $0.credential = nil
         }
+        nextGrant = nil
     }
 
-    private static func fetch(token: String) async throws -> Reading {
-        var request = URLRequest(url: usageURL, timeoutInterval: requestTimeout)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+    private static func fetch(token: String, userAgent: String?) async throws -> Reading {
+        var request = ClaudeResetGrants.request(
+            usageURL.appending(queryItems: [ClaudeResetGrants.usageQuery]), token: token,
+            userAgent: userAgent)
+        request.timeoutInterval = requestTimeout
         return parse(try await UsageRequestError.object(answering: request), observedAt: Date())
     }
 
@@ -337,7 +409,146 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     static func parse(_ payload: [String: Any], observedAt: Date = Date()) -> Reading {
         Reading(
             windows: ClaudeUsagePayload.windows(payload),
-            credits: ClaudeUsagePayload.credits(payload, observedAt: observedAt)
+            credits: ClaudeUsagePayload.credits(payload, observedAt: observedAt),
+            resets: ClaudeResetGrants.status(payload, now: observedAt)
         )
+    }
+
+    // MARK: - Spending a reset
+
+    /// Spends the reset the page offered `account`, then reads the account
+    /// again so the windows the vendor just cleared reach the panel with the
+    /// answer.
+    ///
+    /// The rules are the Codex reader's: a press and nothing else, the
+    /// credential read the way a poll reads it, an attempt nobody heard the
+    /// answer to sent again under the same request id by every press after
+    /// it, and a spend that landed taking one off the count at once. The
+    /// token is never renewed here either, because Anthropic's refresh tokens
+    /// rotate and spending one would sign the terminal out: a token past its
+    /// life is a press with nothing to send.
+    ///
+    /// Whose the token is now is asked before anything is spent, because the
+    /// CLI's slot can change between the offer and the press: a renewed token
+    /// is the same account and spends, a `/login` elsewhere is another account
+    /// and spends nothing, whatever that account holds. `account` is the
+    /// Anthropic account uuid the page showed the reset under; with none, the
+    /// press spends only with the token the reading was taken with.
+    func useReset(
+        offeredTo account: String?, onRefresh: @Sendable @escaping () async -> Void
+    ) async -> LimitResetOutcome {
+        guard !spending, loop.pollTask != nil else { return .unavailable }
+        spending = true
+        defer { spending = false }
+        guard case .found(let credentials) = await credentialsSource(Self.keychainTimeout),
+            credentials.expiresAt.map({ $0 > Date() }) ?? true
+        else { return .unavailable }
+        let agent = ClaudeResetGrants.userAgent(cliVersion: cliVersion())
+        let owner: ClaudeResetGrants.Owner
+        do {
+            owner = try await ownerSource(credentials.accessToken, agent)
+        } catch {
+            report("whose Claude token would spend the reset could not be read: \(error)")
+            return Self.isRefusal(error) ? .refused : .unavailable
+        }
+        guard account.map({ $0 == owner.account }) ?? true else { return .offerChanged }
+        let (attempt, retrying): (Attempt, Bool)
+        switch await select(for: owner, readWith: credentials, offeredTo: account, onRefresh: onRefresh) {
+        case .send(let chosen, let resend): (attempt, retrying) = (chosen, resend)
+        case .stop(let outcome): return outcome
+        }
+        guard loop.pollTask != nil else { return .unavailable }
+        let stamp = loop.generation
+        let outcome = await send(
+            attempt, retrying: retrying, token: credentials.accessToken, userAgent: agent)
+        if outcome == .reset {
+            published.update { $0.signals.resets = $0.signals.resets?.spendingOne() }
+        }
+        if isCurrent(stamp) { await refresh(onRefresh: onRefresh) }
+        return outcome
+    }
+
+    /// One attempt to the vendor, and what its answer does to the attempt
+    /// held: answered, it is settled; unheard, it is resent by the next
+    /// press; refused, it was never taken, which on a resend says nothing
+    /// about the first try and so keeps it.
+    private func send(
+        _ attempt: Attempt, retrying: Bool, token: String, userAgent: String?
+    ) async -> LimitResetOutcome {
+        do {
+            let answer = try await spendSource(
+                ResetSpend(
+                    token: token, userAgent: userAgent, organization: attempt.owner.organization,
+                    grantID: attempt.grantID, requestID: attempt.requestID))
+            let outcome = LimitResetOutcome(answer, retrying: retrying)
+            if outcome != .unconfirmed { unanswered[attempt.owner] = nil }
+            return outcome
+        } catch {
+            report("spending a Claude reset did not get an answer: \(error)")
+            guard Self.isRefusal(error) else { return .unconfirmed }
+            if !retrying { unanswered[attempt.owner] = nil }
+            return .refused
+        }
+    }
+
+    /// What a press sends, or why it sends nothing.
+    private enum Selection {
+        case send(Attempt, resend: Bool)
+        case stop(LimitResetOutcome)
+    }
+
+    /// The attempt this account has held since an answer went missing, and a
+    /// fresh one for the grant on offer otherwise, held from here until the
+    /// vendor answers it.
+    private func select(
+        for owner: ClaudeResetGrants.Owner, readWith credentials: ClaudeCredentials,
+        offeredTo account: String?, onRefresh: @Sendable @escaping () async -> Void
+    ) async -> Selection {
+        if let held = unanswered[owner] { return .send(held, resend: true) }
+        switch await grant(readWith: credentials, offeredTo: account, onRefresh: onRefresh) {
+        case .spend(let grantID):
+            let fresh = Attempt(requestID: UUID().uuidString, grantID: grantID, owner: owner)
+            unanswered[owner] = fresh
+            return .send(fresh, resend: false)
+        case .none: return .stop(.noCredit)
+        case .changed: return .stop(.offerChanged)
+        }
+    }
+
+    /// What a fresh press may spend.
+    private enum Offer {
+        case spend(String)
+        case none
+        /// The token is not the one the page's reading was taken with, and
+        /// nothing names whose the page's reading was.
+        case changed
+    }
+
+    /// The grant to spend with this token: the last reading's when it was read
+    /// with it, and the one a reading made now names when it was not.
+    ///
+    /// The CLI renews its token every few hours, so a reading taken with
+    /// another token is usually the same account under a renewed one, which
+    /// the caller has already established by asking whose the token is.
+    /// Refusing that press until the next poll told a user holding a reset
+    /// that they had none. Where the page named no account there is nothing
+    /// to establish it against, and a changed token spends nothing.
+    private func grant(
+        readWith credentials: ClaudeCredentials, offeredTo account: String?,
+        onRefresh: @Sendable @escaping () async -> Void
+    ) async -> Offer {
+        let fingerprint = ClaudeCredentialBlob.fingerprint(of: credentials.accessToken)
+        if let next = nextGrant, next.credential == fingerprint { return .spend(next.id) }
+        guard account != nil else { return nextGrant == nil ? .none : .changed }
+        await refresh(onRefresh: onRefresh)
+        guard let next = nextGrant, next.credential == fingerprint else { return .none }
+        return .spend(next.id)
+    }
+
+    /// A refusal is a request the vendor never took. On a resend it says
+    /// nothing about the first attempt, which is why that one keeps its id.
+    private static func isRefusal(_ error: Error) -> Bool {
+        guard case UsageRequestError.badStatus(let code) = error else { return false }
+        return code == 401 || code == 403
     }
 }

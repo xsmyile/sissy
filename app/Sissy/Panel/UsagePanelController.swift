@@ -208,6 +208,6 @@ extension UsagePanelController: NSPopoverDelegate {
         cleanup?.cancel()
         cleanup = nil
         model.engine.setLiveDemand([])
-        model.engine.dismissCodexResetReport()
+        model.engine.dismissResetReport()
     }
 }

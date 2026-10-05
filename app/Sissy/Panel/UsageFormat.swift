@@ -1944,14 +1944,14 @@ enum ClaudeAccountSwitchCopy {
         + "missing here · they come back as each one signs in"
 }
 
-/// What spending a Codex reset says, from the count on the page to the answer
-/// OpenAI gave.
+/// What spending a reset says, from the count on the page to the answer the
+/// vendor gave.
 ///
 /// Each answer is its own sentence because each asks something different of
 /// the reader: a reset spent needs nothing, one that was not needed needs
 /// patience, and one whose answer never arrived needs the one retry that is
 /// safe to make.
-enum CodexResetCopy {
+enum LimitResetCopy {
     static let section = "Resets"
     static let use = "Use…"
     static let useHelp = "Spend one reset to put this account's windows back to zero"
@@ -1962,10 +1962,6 @@ enum CodexResetCopy {
     /// What the vendor calls the only kind of reset measured, when a reset
     /// arrives without a title of its own.
     static let defaultTitle = "Full reset"
-    /// Added to the confirmation while OpenAI counts no reset as needed, so
-    /// the press is made knowing the vendor may decline it.
-    static let notNeededYet =
-        "OpenAI does not count one as needed yet and may decline it, which spends nothing."
 
     static func available(_ count: Int) -> String { "\(count) available" }
 
@@ -1976,30 +1972,70 @@ enum CodexResetCopy {
         return "\(name) · expires \(expiresAt.formatted(.dateTime.day().month(.abbreviated)))"
     }
 
+    /// Who answers for the reset, by the name the user pays.
+    private static func vendor(_ provider: String) -> String {
+        provider == ProviderID.codex ? "OpenAI" : "Anthropic"
+    }
+
+    /// Added to the confirmation while the vendor counts no reset as usable,
+    /// so the press is made knowing the vendor may decline it.
+    static func notNeededYet(provider: String) -> String {
+        "\(vendor(provider)) does not count one as needed yet and may decline it, which spends "
+            + "nothing."
+    }
+
+    /// The windows a reset puts back to zero, as a sentence: both where the
+    /// vendor does not say which, and by name where it does.
+    private static func cleared(_ clears: [String]) -> String {
+        guard !clears.isEmpty else { return "Both windows go back to zero." }
+        guard clears.count > 1 else { return "\(clears[0]) goes back to zero." }
+        return "\(clears.dropLast().joined(separator: ", ")) and \(clears[clears.count - 1]) go "
+            + "back to zero."
+    }
+
     /// The spend, and what waiting instead would cost: `naturalReset` is the
     /// longest window's own label and countdown, which is the one figure that
     /// tells a reset worth spending from one that buys an hour. `appliesNow`
-    /// false adds that OpenAI may decline it.
+    /// false adds that the vendor may decline it.
     static func confirmBody(
-        available: Int, naturalReset: (label: String, countdown: String)?, appliesNow: Bool
+        available: Int, clears: [String] = [], naturalReset: (label: String, countdown: String)?,
+        appliesNow: Bool, provider: String
     ) -> String {
-        var sentences = ["Both windows go back to zero. This spends 1 of \(available)."]
+        var sentences = ["\(cleared(clears)) This spends 1 of \(available)."]
         if let naturalReset {
             sentences.append("\(naturalReset.label) resets on its own \(naturalReset.countdown).")
         }
-        if !appliesNow { sentences.append(notNeededYet) }
+        if !appliesNow { sentences.append(notNeededYet(provider: provider)) }
         return sentences.joined(separator: " ")
     }
 
-    static func outcome(_ outcome: CodexResetOutcome) -> String {
+    static func outcome(_ outcome: LimitResetOutcome, provider: String) -> String {
+        let vendor = vendor(provider)
+        let credential = provider == ProviderID.codex ? "the Codex credential" : "Claude Code's sign-in"
         switch outcome {
-        case .reset: return "Done. Both windows are back to zero."
+        case .reset:
+            return provider == ProviderID.codex
+                ? "Done. Both windows are back to zero."
+                : "Done. The windows it covers are back to zero."
         case .nothingToReset:
-            return "Nothing was spent: OpenAI says this account does not need a reset right now."
+            return "Nothing was spent: \(vendor) says this account does not need a reset right now."
         case .noCredit: return "No reset left to spend on this account."
-        case .unconfirmed: return "No answer from OpenAI. Trying again cannot spend a second reset."
-        case .refused: return "OpenAI refused the Codex credential. Sign in again, then retry."
-        case .unavailable: return "Sissy has no Codex credential to spend a reset with."
+        case .cooldown:
+            return "Nothing was spent: another reset was just started on this account. Try again "
+                + "in a minute."
+        case .offerChanged:
+            return "Nothing was spent: Claude Code is signed in to another account now. Its "
+                + "resets are on this page once it reads them."
+        case .mayHaveLanded:
+            return "The earlier try may have gone through. The windows above say whether it did."
+        case .unconfirmed:
+            return "No answer from \(vendor). Trying again cannot spend a second reset."
+        case .refused: return "\(vendor) refused \(credential). Sign in again, then retry."
+        case .unavailable:
+            return provider == ProviderID.codex
+                ? "Sissy has no Codex credential to spend a reset with."
+                : "Sissy has no current Claude Code sign-in to spend a reset with. Run claude, "
+                    + "then retry."
         }
     }
 }

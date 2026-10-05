@@ -387,12 +387,12 @@ final class UsageEngineHost {
     private(set) var claudeWebUnlinkFailure: AccountUnlink.Report?
     /// The same, for the last Unlink of a Codex account.
     private(set) var codexUnlinkFailure: AccountUnlink.Report?
-    /// The account a Codex reset is being spent for, nil while none is. One
-    /// at a time across every account: each press is a request that spends
+    /// The account a reset is being spent for, nil while none is. One at a
+    /// time across every account of every provider: each press is a request that spends
     /// something, and two in flight is what the button exists to rule out.
-    private(set) var spendingCodexReset: CodexResetTarget?
+    private(set) var spendingReset: LimitResetTarget?
     /// How the last reset press ended, until the page that made it goes away.
-    private(set) var codexResetReport: CodexResetReport?
+    private(set) var resetReport: LimitResetReport?
     /// Keychain items Claude Code filed for config homes Sissy does not read,
     /// by service name. Settings says so, because `CLAUDE_CONFIG_DIR` is not
     /// followed and a user who set it would otherwise meet a missing account
@@ -744,20 +744,21 @@ final class UsageEngineHost {
         }
     }
 
-    /// Spends one of a Codex account's resets, after the page has asked.
+    /// Spends one of an account's resets, after the page has asked.
     ///
     /// A press after an answer that never arrived sends that attempt again,
     /// whichever button made it: the reader holds the request id, so no
     /// state here or on the page can mint a second one.
-    func useCodexReset(account: String?) {
-        guard let engine, spendingCodexReset == nil else { return }
-        let target = CodexResetTarget(account: account)
-        spendingCodexReset = target
-        codexResetReport = nil
+    func useReset(_ target: LimitResetTarget) {
+        guard let engine, spendingReset == nil else { return }
+        spendingReset = target
+        resetReport = nil
         Task { [weak self] in
-            let outcome = await Self.holdingFloor { await engine.useCodexReset(account: account) }
-            self?.codexResetReport = CodexResetReport(target: target, outcome: outcome)
-            self?.spendingCodexReset = nil
+            let outcome = await Self.holdingFloor {
+                await engine.useReset(provider: target.provider, account: target.account)
+            }
+            self?.resetReport = LimitResetReport(target: target, outcome: outcome)
+            self?.spendingReset = nil
         }
     }
 
@@ -765,8 +766,8 @@ final class UsageEngineHost {
     /// Not when the page does: the provider page gives way to its own
     /// services, projects and effort pages, and a `Done` that vanished on the
     /// way to one of them read as a press that had never happened.
-    func dismissCodexResetReport() {
-        codexResetReport = nil
+    func dismissResetReport() {
+        resetReport = nil
     }
 
     /// Re-reads one provider's out-of-band state: every limits reader it has,
@@ -905,7 +906,7 @@ final class UsageEngineHost {
     /// before it clears its own flag, for the ones whose task `releaseEngine()`
     /// holds and cancels: a cancelled one belongs to an engine already let go
     /// of. The reset spend runs in a task nothing cancels, so it has nothing
-    /// to ask: a teardown leaves `spendingCodexReset` standing, so no newer
+    /// to ask: a teardown leaves `spendingReset` standing, so no newer
     /// press can start for its answer to land over.
     @discardableResult
     private static func holdingFloor<Result>(_ work: () async -> Result) async -> Result {
@@ -1444,15 +1445,18 @@ struct OrphanedForgeToken: Identifiable, Equatable {
     }
 }
 
-/// Which Codex account a reset press is for: a linked account's id, or nil
-/// for the CLI's own credential, which is the reader behind the row.
-struct CodexResetTarget: Equatable {
+/// Which account a reset press is for: the provider's page it was made on,
+/// and for Codex a linked account's id or nil for the CLI's own credential,
+/// which is the reader behind the row. For Claude Code it is the account the
+/// CLI was signed in as when the page offered the reset.
+struct LimitResetTarget: Equatable {
+    let provider: String
     let account: String?
 }
 
 /// How one reset press ended, and for which account, so only the page that
 /// made it words the answer.
-struct CodexResetReport: Equatable {
-    let target: CodexResetTarget
-    let outcome: CodexResetOutcome
+struct LimitResetReport: Equatable {
+    let target: LimitResetTarget
+    let outcome: LimitResetOutcome
 }

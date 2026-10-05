@@ -384,12 +384,15 @@ struct ProviderCredits: Sendable, Equatable, Codable {
 /// The resets a vendor lets an account spend to put its windows back to zero
 /// ahead of their own reset, as the vendor counted them.
 ///
-/// Only Codex publishes any: `wham/usage` carries `rate_limit_reset_credits`,
+/// Codex publishes them on `wham/usage` as `rate_limit_reset_credits`,
 /// measured 2026-09-24 as `{"available_count": 1,
 /// "applicable_available_count": 0}` on an account holding one reset with its
-/// windows at 29% and 83%. Nil is not a count of zero: the block is absent on
-/// a reply that predates it, and that is an account nobody knows about, where
-/// a zero is one the vendor has answered for.
+/// windows at 29% and 83%. Claude publishes them on its usage reply as
+/// `cedar_ember` when asked for, measured 2026-10-05 as one grant with
+/// `resets_left: 1` clearing `five_hour` and `seven_day`. Nil is not a count
+/// of zero: the block is absent on a reply that predates it, and that is an
+/// account nobody knows about, where a zero is one the vendor has answered
+/// for.
 struct LimitResets: Sendable, Equatable {
     /// Resets the account holds.
     let available: Int
@@ -402,6 +405,10 @@ struct LimitResets: Sendable, Equatable {
     var nextExpiry: Date?
     /// The vendor's own name for that reset, `Full reset (Weekly + 5 hr)`.
     var title: String?
+    /// The length in minutes of each window the reset puts back to zero,
+    /// empty where the vendor does not say. Codex does not, and its one kind
+    /// of reset clears both windows; Claude names them on every grant.
+    var clears: Set<Int> = []
 
     /// Whether the vendor counts a reset as needed now: its applicable count,
     /// and the whole inventory where the reply names none. It words the
@@ -416,8 +423,39 @@ struct LimitResets: Sendable, Equatable {
     func spendingOne() -> LimitResets {
         LimitResets(
             available: max(0, available - 1), applicable: applicable.map { max(0, $0 - 1) },
-            nextExpiry: nil, title: nil)
+            nextExpiry: nil, title: nil, clears: clears)
     }
+}
+
+/// How spending a reset ended, as the panel words it.
+enum LimitResetOutcome: Sendable, Equatable {
+    /// The windows are back to zero. A vendor saying an earlier attempt under
+    /// the same request id already did it lands here too.
+    case reset
+    /// Nothing was spent: the vendor says the account does not need a reset
+    /// now.
+    case nothingToReset
+    /// The account had no reset left to spend, or the one asked for lapsed.
+    case noCredit
+    /// Nothing was spent because another reset was started on the account a
+    /// moment ago. Claude's alone.
+    case cooldown
+    /// A retry of an attempt nobody heard the answer to met an account that no
+    /// longer needs or holds the reset, which is what the first attempt
+    /// landing looks like and is not proof of it. Claude's alone: the read
+    /// after the press is what says.
+    case mayHaveLanded
+    /// Nothing was spent because the credential now answers for another
+    /// account than the one the page offered the reset under. Claude's alone:
+    /// the CLI's slot is the one credential its reader spends with.
+    case offerChanged
+    /// No answer Sissy could read, so it may or may not have happened. Trying
+    /// again sends the same request id, which is what makes that safe.
+    case unconfirmed
+    /// The vendor refused the credential. The request was never taken.
+    case refused
+    /// There was no credential to send, or no reader for the account.
+    case unavailable
 }
 
 /// One provider's share of the day, and everything else its own files answer
