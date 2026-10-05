@@ -445,6 +445,10 @@ enum LimitResetOutcome: Sendable, Equatable {
     /// landing looks like and is not proof of it. Claude's alone: the read
     /// after the press is what says.
     case mayHaveLanded
+    /// Nothing was spent because the credential now answers for another
+    /// account than the one the page offered the reset under. Claude's alone:
+    /// the CLI's slot is the one credential its reader spends with.
+    case offerChanged
     /// No answer Sissy could read, so it may or may not have happened. Trying
     /// again sends the same request id, which is what makes that safe.
     case unconfirmed

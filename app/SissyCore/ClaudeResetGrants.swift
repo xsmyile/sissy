@@ -151,19 +151,30 @@ enum ClaudeResetGrants {
         (body["result"] as? String).flatMap(Answer.init(rawValue:))
     }
 
-    /// The organisation a token belongs to, which the spend is addressed to.
-    ///
+    /// Whose a token is: the account the page names its rows by, and the
+    /// organisation the spend is addressed to.
+    struct Owner: Sendable, Hashable {
+        let account: String
+        let organization: String
+    }
+
     /// Asked of the vendor with the token that will spend, rather than read
     /// off `.claude.json`: that file is the CLI's and can name the account
     /// the CLI was on before a switch, and a reset addressed to another
-    /// organisation is a spend on an account the user is not looking at.
-    static func organization(token: String, userAgent: String?) async throws -> String {
+    /// account is a spend on one the user is not looking at.
+    static func owner(token: String, userAgent: String?) async throws -> Owner {
         let profile = try await UsageRequestError.object(
             answering: request(profileURL, token: token, userAgent: userAgent))
-        guard let organization = profile["organization"] as? [String: Any],
-            let uuid = organization["uuid"] as? String, UUID(uuidString: uuid) != nil
+        return try owner(profile)
+    }
+
+    static func owner(_ profile: [String: Any]) throws -> Owner {
+        guard let account = (profile["account"] as? [String: Any])?["uuid"] as? String,
+            !account.isEmpty,
+            let organization = (profile["organization"] as? [String: Any])?["uuid"] as? String,
+            UUID(uuidString: organization) != nil
         else { throw UsageRequestError.malformedPayload }
-        return uuid
+        return Owner(account: account, organization: organization)
     }
 
     /// Spends the grant named. `requestID` is what makes the call safe to

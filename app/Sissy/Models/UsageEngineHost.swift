@@ -1446,8 +1446,9 @@ struct OrphanedForgeToken: Identifiable, Equatable {
 }
 
 /// Which account a reset press is for: the provider's page it was made on,
-/// and a linked account's id or nil for the CLI's own credential, which is
-/// the reader behind the row.
+/// and for Codex a linked account's id or nil for the CLI's own credential,
+/// which is the reader behind the row. For Claude Code it is the account the
+/// CLI was signed in as when the page offered the reset.
 struct LimitResetTarget: Equatable {
     let provider: String
     let account: String?

@@ -2263,7 +2263,7 @@ struct UsagePanelSnapshot: Equatable {
             return LimitResetTarget(
                 provider: provider, account: reading?.isSignedIn == false ? id : nil)
         case ProviderID.claudeCode:
-            return claudeResetTarget(isSignedIn: reading?.isSignedIn == true)
+            return claudeResetTarget(account: id, isSignedIn: reading?.isSignedIn == true)
         default:
             return nil
         }
@@ -2271,9 +2271,10 @@ struct UsagePanelSnapshot: Equatable {
 
     /// Whose credential a press on a Claude Code row or account spends: the
     /// CLI's own, which is the one reader that can, and only for the account
-    /// it is signed in as.
-    static func claudeResetTarget(isSignedIn: Bool) -> LimitResetTarget? {
-        isSignedIn ? LimitResetTarget(provider: ProviderID.claudeCode, account: nil) : nil
+    /// it is signed in as. The account rides the target so the reader can
+    /// refuse a press whose credential has since moved to another one.
+    static func claudeResetTarget(account: String?, isSignedIn: Bool) -> LimitResetTarget? {
+        isSignedIn ? LimitResetTarget(provider: ProviderID.claudeCode, account: account) : nil
     }
 
     /// Whose credential a press on the row itself spends: the CLI's, unless
@@ -2282,7 +2283,9 @@ struct UsagePanelSnapshot: Equatable {
     static func rowResetTarget(provider: String, _ accounts: [AccountSignals])
         -> LimitResetTarget?
     {
-        if provider == ProviderID.claudeCode { return claudeResetTarget(isSignedIn: true) }
+        if provider == ProviderID.claudeCode {
+            return claudeResetTarget(account: accounts.first(where: \.isSignedIn)?.id, isSignedIn: true)
+        }
         guard provider == ProviderID.codex else { return nil }
         return rowResetTarget(accounts)
     }

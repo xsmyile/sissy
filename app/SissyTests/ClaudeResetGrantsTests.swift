@@ -108,6 +108,14 @@ final class ClaudeResetGrantsTests: XCTestCase {
 
     // MARK: - The spend
 
+    func testTheProfileNamesTheAccountAndTheOrganisation() throws {
+        let owner = try ClaudeResetGrants.owner([
+            "account": ["uuid": "user-1"], "organization": ["uuid": Self.organization],
+        ])
+        XCTAssertEqual(owner, ClaudeResetGrants.Owner(account: "user-1", organization: Self.organization))
+        XCTAssertThrowsError(try ClaudeResetGrants.owner(["account": ["uuid": "user-1"]]))
+    }
+
     private final class Spends: @unchecked Sendable {
         private let lock = NSLock()
         private var sent: [ClaudeLimitsProbe.ResetSpend] = []
@@ -126,29 +134,61 @@ final class ClaudeResetGrantsTests: XCTestCase {
         var requests: [ClaudeLimitsProbe.ResetSpend] { lock.withLock { sent } }
     }
 
-    /// The token the CLI's slot holds, which a test can rotate under the probe.
-    private final class Slot: @unchecked Sendable {
+    /// Mutable state a test changes under a running probe: the token in the
+    /// CLI's slot, whose account it is, and which grant the vendor names next.
+    private final class World: @unchecked Sendable {
         private let lock = NSLock()
-        private var held = "t1"
+        private var state = (token: "t1", account: "user-1", grant: ClaudeResetGrantsTests.grantID)
+        private var failOwner = false
+
         var token: String {
-            get { lock.withLock { held } }
-            set { lock.withLock { held = newValue } }
+            get { lock.withLock { state.token } }
+            set { lock.withLock { state.token = newValue } }
+        }
+        var account: String {
+            get { lock.withLock { state.account } }
+            set { lock.withLock { state.account = newValue } }
+        }
+        var grant: String {
+            get { lock.withLock { state.grant } }
+            set { lock.withLock { state.grant = newValue } }
+        }
+        var failsOwnerOnce: Bool {
+            get { lock.withLock { failOwner } }
+            set { lock.withLock { failOwner = newValue } }
         }
     }
 
     private static let organization = "1001DDB9-0000-4000-8000-000000000000"
 
-    private func probe(
-        _ spends: Spends, slot: Slot = Slot(),
-        organization: @escaping @Sendable () throws -> String = { organization }
-    ) -> ClaudeLimitsProbe {
-        let reading = ClaudeLimitsProbe.parse(block(), observedAt: Self.now)
+    private func reading(grant: String) -> ClaudeLimitsProbe.Reading {
+        var body = block()
+        if var status = body["cedar_ember"] as? [String: Any],
+            var grants = status["grants"] as? [[String: Any]]
+        {
+            grants[0]["id"] = grant
+            status["grants"] = grants
+            status["next_grant_id"] = grant
+            body["cedar_ember"] = status
+        }
+        return ClaudeLimitsProbe.parse(body, observedAt: Self.now)
+    }
+
+    private func probe(_ spends: Spends, world: World = World()) -> ClaudeLimitsProbe {
+        let first = reading(grant: Self.grantID)
+        let second = reading(grant: "second-grant")
         return ClaudeLimitsProbe(
             credentials: { _ in
-                .found(ClaudeCredentials(accessToken: slot.token, expiresAt: .distantFuture))
+                .found(ClaudeCredentials(accessToken: world.token, expiresAt: .distantFuture))
             },
-            fetch: { _ in reading },
-            organization: { _, _ in try organization() },
+            fetch: { _ in world.grant == Self.grantID ? first : second },
+            owner: { _, _ in
+                if world.failsOwnerOnce {
+                    world.failsOwnerOnce = false
+                    throw URLError(.timedOut)
+                }
+                return ClaudeResetGrants.Owner(account: world.account, organization: Self.organization)
+            },
             spend: { try spends.answer($0) },
             cliVersion: { "2.1.289" })
     }
@@ -168,9 +208,9 @@ final class ClaudeResetGrantsTests: XCTestCase {
         let probe = probe(spends)
         await probe.refresh {}
 
-        let first = await probe.useReset {}
-        let second = await probe.useReset {}
-        let third = await probe.useReset {}
+        let first = await probe.useReset(offeredTo: "user-1") {}
+        let second = await probe.useReset(offeredTo: "user-1") {}
+        let third = await probe.useReset(offeredTo: "user-1") {}
 
         XCTAssertEqual(first, .unconfirmed)
         XCTAssertEqual(second, .reset)
@@ -180,6 +220,26 @@ final class ClaudeResetGrantsTests: XCTestCase {
         XCTAssertEqual(sent[0].requestID, sent[1].requestID)
         XCTAssertNotEqual(sent[1].requestID, sent[2].requestID)
         XCTAssertEqual(sent[0].userAgent, "claude-cli/2.1.289 (external, cli)")
+        XCTAssertEqual(sent[0].organization, Self.organization)
+        await probe.stop()
+    }
+
+    /// A reading taken after a timeout can name the next grant precisely
+    /// because the first attempt landed: `Try again` resends the first, and
+    /// spends nothing of the second.
+    func testARetryResendsTheFirstGrantWhenTheReadingNamesAnother() async {
+        let spends = Spends([.failure(URLError(.timedOut)), .success(.alreadyUsed)])
+        let world = World()
+        let probe = probe(spends, world: world)
+        await probe.refresh {}
+        world.grant = "second-grant"
+
+        _ = await probe.useReset(offeredTo: "user-1") {}
+        let retried = await probe.useReset(offeredTo: "user-1") {}
+
+        XCTAssertEqual(retried, .reset)
+        XCTAssertEqual(spends.requests.map(\.grantID), [Self.grantID, Self.grantID])
+        XCTAssertEqual(spends.requests[0].requestID, spends.requests[1].requestID)
         await probe.stop()
     }
 
@@ -190,49 +250,77 @@ final class ClaudeResetGrantsTests: XCTestCase {
         let probe = probe(spends)
         await probe.refresh {}
 
-        let refused = await probe.useReset {}
-        _ = await probe.useReset {}
+        let refused = await probe.useReset(offeredTo: "user-1") {}
+        _ = await probe.useReset(offeredTo: "user-1") {}
 
         XCTAssertEqual(refused, .refused)
         XCTAssertNotEqual(spends.requests[0].requestID, spends.requests[1].requestID)
         await probe.stop()
     }
 
-    /// A grant read with one account's token is not spent with another's
-    /// without reading the account again: the press re-reads with the token
-    /// it will spend, and spends what that reading names.
-    func testATokenTheGrantWasNotReadWithIsReadAgainBeforeTheSpend() async {
+    /// The CLI renews its token every few hours: the same account under a
+    /// renewed token is read again and spends.
+    func testARenewedTokenOfTheSameAccountSpends() async {
         let spends = Spends([.success(.reset)])
-        let slot = Slot()
-        let fetched = Fetches()
-        let reading = ClaudeLimitsProbe.parse(block(), observedAt: Self.now)
-        let probe = ClaudeLimitsProbe(
-            credentials: { _ in
-                .found(ClaudeCredentials(accessToken: slot.token, expiresAt: .distantFuture))
-            },
-            fetch: { token in
-                fetched.record(token)
-                return reading
-            },
-            organization: { _, _ in Self.organization },
-            spend: { try spends.answer($0) },
-            cliVersion: { "2.1.289" })
+        let world = World()
+        let probe = probe(spends, world: world)
         await probe.refresh {}
-        slot.token = "another-account"
+        world.token = "t2"
 
-        let outcome = await probe.useReset {}
+        let outcome = await probe.useReset(offeredTo: "user-1") {}
 
         XCTAssertEqual(outcome, .reset)
-        XCTAssertEqual(Array(fetched.tokens.prefix(2)), ["t1", "another-account"])
-        XCTAssertEqual(spends.requests.map(\.token), ["another-account"])
+        XCTAssertEqual(spends.requests.map(\.token), ["t2"])
         await probe.stop()
     }
 
-    private final class Fetches: @unchecked Sendable {
-        private let lock = NSLock()
-        private var seen: [String] = []
-        func record(_ token: String) { lock.withLock { seen.append(token) } }
-        var tokens: [String] { lock.withLock { seen } }
+    func testARenewedTokenResendsTheUnansweredAttempt() async {
+        let spends = Spends([.failure(URLError(.timedOut)), .success(.reset)])
+        let world = World()
+        let probe = probe(spends, world: world)
+        await probe.refresh {}
+
+        _ = await probe.useReset(offeredTo: "user-1") {}
+        world.token = "t2"
+        let resent = await probe.useReset(offeredTo: "user-1") {}
+
+        XCTAssertEqual(resent, .reset)
+        XCTAssertEqual(spends.requests[0].requestID, spends.requests[1].requestID)
+        XCTAssertEqual(spends.requests[1].token, "t2")
+        await probe.stop()
+    }
+
+    /// A `/login` to another account between the offer and the press spends
+    /// nothing, whatever that account holds.
+    func testAnAccountSwitchSinceTheOfferSpendsNothing() async {
+        let spends = Spends([])
+        let world = World()
+        let probe = probe(spends, world: world)
+        await probe.refresh {}
+        world.token = "t-other"
+        world.account = "user-2"
+
+        let outcome = await probe.useReset(offeredTo: "user-1") {}
+
+        XCTAssertEqual(outcome, .offerChanged)
+        XCTAssertTrue(spends.requests.isEmpty)
+        await probe.stop()
+    }
+
+    /// With no account on the page there is nothing to check a changed token
+    /// against, so only the token the reading was taken with spends.
+    func testWithNoAccountNamedAChangedTokenSpendsNothing() async {
+        let spends = Spends([])
+        let world = World()
+        let probe = probe(spends, world: world)
+        await probe.refresh {}
+        world.token = "t2"
+
+        let outcome = await probe.useReset(offeredTo: nil) {}
+
+        XCTAssertEqual(outcome, .offerChanged)
+        XCTAssertTrue(spends.requests.isEmpty)
+        await probe.stop()
     }
 
     /// A probe switched off holds no reading to have offered a reset from.
@@ -241,45 +329,23 @@ final class ClaudeResetGrantsTests: XCTestCase {
         let probe = probe(spends)
         await probe.refresh {}
         await probe.stop()
-        let outcome = await probe.useReset {}
+        let outcome = await probe.useReset(offeredTo: "user-1") {}
         XCTAssertEqual(outcome, .unavailable)
         XCTAssertTrue(spends.requests.isEmpty)
     }
 
-    /// The CLI renews its token every few hours, and the attempt is the
-    /// account's rather than the token's: a renewed token resends it.
-    func testARenewedTokenResendsTheUnansweredAttempt() async {
-        let spends = Spends([.failure(URLError(.timedOut)), .success(.reset)])
-        let slot = Slot()
-        let probe = probe(spends, slot: slot)
-        await probe.refresh {}
-
-        _ = await probe.useReset {}
-        slot.token = "t2"
-        let resent = await probe.useReset {}
-
-        XCTAssertEqual(resent, .reset)
-        XCTAssertEqual(spends.requests[0].requestID, spends.requests[1].requestID)
-        XCTAssertEqual(spends.requests[1].token, "t2")
-        await probe.stop()
-    }
-
-    /// A press that could not learn the organisation never reached the spend,
-    /// so the next one is a fresh attempt and its answers are not a resend's.
-    func testAnOrganisationThatCannotBeReadIsNoAttempt() async {
+    /// A press that could not learn whose the token is never reached the
+    /// spend, so the next one is a fresh attempt and its answers are not a
+    /// resend's.
+    func testAnOwnerThatCannotBeReadIsNoAttempt() async {
         let spends = Spends([.success(.notLimited)])
-        let reads = Slot()
-        let probe = probe(spends) {
-            if reads.token == "t1" {
-                reads.token = "read"
-                throw URLError(.timedOut)
-            }
-            return Self.organization
-        }
+        let world = World()
+        world.failsOwnerOnce = true
+        let probe = probe(spends, world: world)
         await probe.refresh {}
 
-        let first = await probe.useReset {}
-        let second = await probe.useReset {}
+        let first = await probe.useReset(offeredTo: "user-1") {}
+        let second = await probe.useReset(offeredTo: "user-1") {}
 
         XCTAssertEqual(first, .unavailable)
         XCTAssertEqual(second, .nothingToReset)
@@ -297,7 +363,8 @@ final class ClaudeResetGrantsTests: XCTestCase {
             tokens: 0, cost: 0, burn: nil, providers: [slice], keepAwake: .off, history: [:],
             projects: [])
         let row = UsagePanelSnapshot.make(frame: frame).providers[0]
-        XCTAssertEqual(row.resetTarget, LimitResetTarget(provider: ProviderID.claudeCode, account: nil))
+        XCTAssertEqual(
+            row.resetTarget, LimitResetTarget(provider: ProviderID.claudeCode, account: nil))
         XCTAssertEqual(row.resets?.clears, ["Session", "Weekly"])
         XCTAssertEqual(
             LimitResetCopy.confirmBody(
@@ -320,6 +387,6 @@ final class ClaudeResetGrantsTests: XCTestCase {
         XCTAssertEqual(
             UsagePanelSnapshot.accountResetTarget(
                 provider: ProviderID.claudeCode, id: "user-1", reading: account(signedIn: true)),
-            LimitResetTarget(provider: ProviderID.claudeCode, account: nil))
+            LimitResetTarget(provider: ProviderID.claudeCode, account: "user-1"))
     }
 }

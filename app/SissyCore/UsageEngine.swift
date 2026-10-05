@@ -1087,7 +1087,8 @@ actor UsageEngine {
     /// For Codex `account` names a linked account's reader, and nil the CLI's
     /// own, which is the reader behind the row and behind the signed-in
     /// account's entry. Claude Code has one reader that can spend, the CLI's
-    /// own credential, so a Claude press names no account. The frame is
+    /// own credential, and `account` is the account the page offered the
+    /// reset under, which that credential must still answer for. The frame is
     /// rebuilt before this returns, so the answer and the cleared windows
     /// reach the panel together.
     func useReset(provider: String, account: String?) async -> LimitResetOutcome {
@@ -1101,8 +1102,8 @@ actor UsageEngine {
             }
             outcome = await reader.useReset { await me.reemit() }
         case ProviderID.claudeCode:
-            guard account == nil, let probe = claudeOwnLimits else { return .unavailable }
-            outcome = await probe.useReset { await me.reemit() }
+            guard let probe = claudeOwnLimits else { return .unavailable }
+            outcome = await probe.useReset(offeredTo: account) { await me.reemit() }
         default:
             return .unavailable
         }
