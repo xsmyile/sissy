@@ -1,6 +1,6 @@
 import Foundation
 
-/// One mounted volume, in the figures Finder shows for it.
+/// One mounted volume, in the figures a write on it meets.
 struct DiskVolume: Sendable, Equatable, Identifiable {
     /// The volume's UUID where it has one, which is what tells the home
     /// volume apart from `/` through the firmlink between them, and the mount
@@ -8,8 +8,16 @@ struct DiskVolume: Sendable, Equatable, Identifiable {
     let id: String
     let name: String
     let total: Int64
-    /// What an important write could have, purgeable space included, or the
-    /// plain available capacity on a volume that answers no such figure.
+    /// What a write can have right now: the plain available capacity, the
+    /// figure `df` prints, purgeable space left out.
+    ///
+    /// Not the important-usage figure Finder shows, which counts the space
+    /// macOS would free if asked. Measured 2026-10-06, a burst of writes on
+    /// this Mac ran Docker, Postgres and the build tools out of space while
+    /// `df` read 7.7 GB and falling: what is purgeable comes back only as fast
+    /// as macOS gets round to freeing it, and a write that arrives first fails
+    /// for want of space whatever Finder says. Through 0.3.3 the headline and the
+    /// level read that larger figure.
     let free: Int64
 
     var used: Int64 { max(total - free, 0) }
@@ -41,9 +49,11 @@ struct DiskReading: Sendable, Equatable {
     let observedAt: Date
     /// The volume holding the home directory, nil where it would not answer.
     let home: DiskVolume?
-    /// What the system would hand back from the home volume under pressure:
-    /// the important-usage figure less the plain available one. Measured
-    /// 2026-09-28 on a 494 GB volume, 9.5 GB.
+    /// What macOS would free on the home volume on its own when space runs
+    /// low, local snapshots and caches: the important-usage figure less the
+    /// plain available one. Measured 2026-09-28 on a 494 GB volume, 9.5 GB,
+    /// and 1.5 GB on the same volume 2026-10-07. Shown beside the free space
+    /// and never counted in it.
     let purgeable: Int64?
     /// What the level is graded against.
     let physicalMemory: UInt64
@@ -129,11 +139,11 @@ enum DiskVolumes {
         volume.isLocal && volume.isBrowsable && volume.id != homeID
     }
 
-    /// The volume as the page reads it, preferring the important-usage figure
-    /// Finder shows to the plain available one.
-    static func volume(_ attributes: DiskVolumeAttributes, importantFree: Int64?) -> DiskVolume? {
+    /// The volume as the page reads it, its free space the plain available
+    /// figure a write meets.
+    static func volume(_ attributes: DiskVolumeAttributes) -> DiskVolume? {
         guard let total = attributes.total, total > 0,
-            let free = importantFree ?? attributes.available.map(Int64.init)
+            let free = attributes.available.map(Int64.init)
         else { return nil }
         let name = attributes.name ?? (attributes.path as NSString).lastPathComponent
         return DiskVolume(id: attributes.id, name: name, total: Int64(total), free: free)
@@ -156,8 +166,9 @@ enum DiskReader {
     ///
     /// **The important-usage figure is the dear one.** Measured 2026-09-28,
     /// it costs 6.7 ms of CPU per volume where every other key here together
-    /// costs 0.07 ms for the whole mount list, so the list is read with the
-    /// cheap keys first and the dear one is asked only of the volumes kept.
+    /// costs 0.07 ms for the whole mount list, so it is asked of the home
+    /// volume alone, for the purgeable space, and never of the volumes listed
+    /// under it.
     ///
     /// **The home directory goes through the mount table too.** One table is
     /// taken per read, and the home volume is asked for resource values only
@@ -171,12 +182,10 @@ enum DiskReader {
     ) -> DiskReading {
         let table = mounts ?? mountTable()
         let home = DiskVolumes.isHomeReadable(homePath, in: table) ? homeVolume(at: homePath) : nil
-        let homeVolume = home.flatMap { DiskVolumes.volume($0.attributes, importantFree: $0.important) }
+        let homeVolume = home.flatMap { DiskVolumes.volume($0.attributes) }
         let volumes = mountedVolumes(in: table)
             .filter { DiskVolumes.isListed($0, homeID: home?.attributes.id) }
-            .compactMap {
-                DiskVolumes.volume($0, importantFree: importantFree(at: URL(fileURLWithPath: $0.path)))
-            }
+            .compactMap(DiskVolumes.volume)
         return DiskReading(
             observedAt: now,
             home: homeVolume,
