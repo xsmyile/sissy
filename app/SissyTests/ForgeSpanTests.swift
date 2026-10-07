@@ -26,45 +26,54 @@ final class ForgeSpanTests: XCTestCase {
             calendar: Self.calendar)
         XCTAssertTrue(query.contains("from: \"2026-09-17T00:00:00Z\""))
         XCTAssertTrue(query.contains("to: \"2026-09-17T23:59:59Z\""))
-        XCTAssertTrue(query.contains("merged:2026-09-17T00:00:00Z..2026-09-17T23:59:59Z"))
-        XCTAssertTrue(query.contains("created:2026-09-17T00:00:00Z..2026-09-17T23:59:59Z"))
+        XCTAssertTrue(query.contains("merged:2026-09-16T22:00:00Z..2026-09-17T21:59:59Z"))
+        XCTAssertTrue(query.contains("created:2026-09-16T22:00:00Z..2026-09-17T21:59:59Z"))
         XCTAssertFalse(query.contains("merged:>="))
         XCTAssertFalse(query.contains("created:<"))
     }
 
-    func testRangeBoundsEveryGitLabRequest() throws {
+    /// A past span's merges are those after its start less those after its
+    /// end, because `mergedBefore` widens to the end of the UTC day.
+    func testRangeBoundsEveryGitLabRequestOnTheLocalDays() throws {
         let query = ForgeSpanFeed.gitlabDocument(
             from: Self.from, to: Self.to, now: Self.now, counters: ForgeCounter.all, calendar: Self.calendar)
-        XCTAssertTrue(query.contains("mergedAfter: \"2026-09-17T00:00:00Z\""))
-        XCTAssertTrue(query.contains("mergedBefore: \"2026-09-19T23:59:59Z\""))
-        XCTAssertFalse(query.contains("2026-09-20"))
+        XCTAssertTrue(
+            query.contains(
+                "merged: authoredMergeRequests(state: merged, mergedAfter: \"2026-09-16T22:00:00Z\")"))
+        XCTAssertTrue(
+            query.contains(
+                "\(ForgeSpanFeed.mergedLaterAlias): authoredMergeRequests(state: merged, mergedAfter: \"2026-09-19T22:00:00Z\")"
+            ))
+        XCTAssertFalse(query.contains("mergedBefore"))
         let issues = ForgeSpanFeed.gitlabIssuesDocument(
             from: Self.from, to: Self.to, now: Self.now, calendar: Self.calendar)
-        XCTAssertTrue(issues.contains("createdAfter: \"2026-09-17T00:00:00Z\""))
-        XCTAssertTrue(issues.contains("createdBefore: \"2026-09-19T23:59:59.999Z\""))
-        XCTAssertFalse(issues.contains("2026-09-20"))
+        XCTAssertTrue(issues.contains("createdAfter: \"2026-09-16T22:00:00Z\""))
+        XCTAssertTrue(issues.contains("createdBefore: \"2026-09-19T21:59:59.999Z\""))
         XCTAssertTrue(issues.contains("authorUsername: $author"))
-        let url = try XCTUnwrap(
-            ForgeSpanFeed.gitlabEventsURL(
-                Self.gitlab, dates: (Self.from, Self.to), now: Self.now,
-                action: GitLabActivityFeed.commentedAction, calendar: Self.calendar))
-        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
-        XCTAssertEqual(items.first { $0.name == "after" }?.value, "2026-09-16")
-        XCTAssertEqual(items.first { $0.name == "before" }?.value, "2026-09-20")
-        XCTAssertEqual(items.first { $0.name == "action" }?.value, "commented")
-        let request = ForgeActivityFeed.request(url, token: "fixture", header: "PRIVATE-TOKEN", scheme: nil)
-        XCTAssertEqual(request.timeoutInterval, ForgeActivityFeed.requestTimeout)
+    }
+
+    /// A closed span whose second merge count did not come back has no
+    /// figure: the first count alone is every merge since the start.
+    func testAClosedGitLabSpanNeedsBothMergeCounts() {
+        let both: [String: Any] = ["merged": ["count": 79], ForgeSpanFeed.mergedLaterAlias: ["count": 4]]
+        XCTAssertEqual(ForgeSpanFeed.gitlabMerged(both, failures: [:], isOpen: false), .counted(.exact(75)))
+        let missing: [String: Any] = ["merged": ["count": 79]]
+        XCTAssertEqual(
+            ForgeSpanFeed.gitlabMerged(missing, failures: [:], isOpen: false),
+            .unavailable(.failure(.malformed)))
+        XCTAssertEqual(ForgeSpanFeed.gitlabMerged(missing, failures: [:], isOpen: true), .counted(.exact(79)))
     }
 
     func testRangeEndingTodayCapsInstantFiltersAtNow() {
         let today = Self.date("2026-10-03T00:00:00+02:00")
         let github = ForgeSpanFeed.githubDocument(
             from: Self.from, to: today, now: Self.now, counters: ForgeCounter.all, calendar: Self.calendar)
-        XCTAssertTrue(github.contains("to: \"2026-10-03T12:00:00Z\""))
-        XCTAssertTrue(github.contains("merged:2026-09-17T00:00:00Z..2026-10-03T12:00:00Z"))
+        XCTAssertTrue(github.contains("to: \"2026-10-03T23:59:59Z\""))
+        XCTAssertTrue(github.contains("merged:2026-09-16T22:00:00Z..2026-10-03T12:00:00Z"))
         let gitlab = ForgeSpanFeed.gitlabDocument(
             from: Self.from, to: today, now: Self.now, counters: ForgeCounter.all, calendar: Self.calendar)
-        XCTAssertTrue(gitlab.contains("mergedBefore: \"2026-10-03T12:00:00Z\""))
+        XCTAssertTrue(gitlab.contains("mergedAfter: \"2026-09-16T22:00:00Z\""))
+        XCTAssertFalse(gitlab.contains(ForgeSpanFeed.mergedLaterAlias))
     }
 
     func testOffCountersDoNotAppearInDocuments() {
@@ -82,10 +91,10 @@ final class ForgeSpanTests: XCTestCase {
     func testMultiYearContributionsUseNonoverlappingYearSizedFields() {
         let from = Self.date("2023-09-17T00:00:00+02:00")
         let bounds = ForgeSpanFeed.bounds(from: from, to: Self.to, now: Self.now, calendar: Self.calendar)!
-        let ranges = ForgeSpanFeed.contributionRanges(start: bounds.start, end: bounds.end)
+        let ranges = ForgeSpanFeed.contributionRanges(start: bounds.calendarStart, end: bounds.calendarEnd)
         XCTAssertGreaterThan(ranges.count, 3)
-        XCTAssertEqual(ranges.first?.0, bounds.start)
-        XCTAssertEqual(ranges.last?.1, bounds.end)
+        XCTAssertEqual(ranges.first?.0, bounds.calendarStart)
+        XCTAssertEqual(ranges.last?.1, bounds.calendarEnd)
         for index in ranges.indices {
             XCTAssertLessThan(ranges[index].1.timeIntervalSince(ranges[index].0), 365 * 86400)
             if index > 0 {
@@ -101,14 +110,16 @@ final class ForgeSpanTests: XCTestCase {
         let bounds = try XCTUnwrap(
             ForgeSpanFeed.bounds(
                 from: westDay, to: westDay, now: Self.now, calendar: west))
-        XCTAssertEqual(bounds.start, Self.date("2026-09-17T00:00:00Z"))
+        XCTAssertEqual(bounds.start, westDay)
+        XCTAssertEqual(bounds.calendarStart, Self.date("2026-09-17T00:00:00Z"))
         var cairo = Calendar(identifier: .gregorian)
         cairo.timeZone = TimeZone(identifier: "Africa/Cairo")!
         let firstInstant = Self.date("2026-04-24T01:00:00+03:00")
         let dst = try XCTUnwrap(
             ForgeSpanFeed.bounds(
                 from: firstInstant, to: firstInstant, now: Self.now, calendar: cairo))
-        XCTAssertEqual(dst.start, Self.date("2026-04-24T00:00:00Z"))
+        XCTAssertEqual(dst.start, firstInstant)
+        XCTAssertEqual(dst.calendarStart, Self.date("2026-04-24T00:00:00Z"))
     }
 
     func testGitHubParsesZeroAndCountsOnlyCommentsInsideSpan() throws {
@@ -247,7 +258,9 @@ final class ForgeSpanTests: XCTestCase {
             ForgeSpanFeed.bounds(
                 from: today, to: today, now: early,
                 calendar: Self.calendar))
-        XCTAssertGreaterThan(bounds.start, early)
+        XCTAssertLessThan(bounds.start, early)
+        XCTAssertEqual(bounds.end, early)
+        XCTAssertTrue(bounds.isOpen)
     }
 
     func testCancelledFetchIsNotCachedAndMissingTokenIsAbsent() async throws {
@@ -422,10 +435,10 @@ final class ForgeSpanTests: XCTestCase {
                 start: Self.from, end: Self.from.addingTimeInterval(3650 * 86400)
             ).isEmpty)
         let reading = try ForgeSpanFeed.parseGitHub(
-            ["viewer": ["login": "vendor"]],
+            ["viewer": ["login": "vendor", "contrib0": ["contributionCalendar": ["totalContributions": 5]]]],
             connection: Self.github, dates: (today, today), now: Self.date("2026-10-03T01:00:00+02:00"),
             counters: [], calendar: Self.calendar)
-        XCTAssertEqual(reading.counters[.contributions], .unavailable(.invalidDates))
+        XCTAssertEqual(reading.counters[.contributions], .counted(.exact(5)))
     }
 
     func testParentGraphQLErrorsKeepTheirScopeReasonAndTypeWinsOverText() throws {

@@ -2156,38 +2156,13 @@ extension UsageFormat {
     /// `readAt` is nil for a connection that has never once answered. There is
     /// no reading to date — `ForgeActivityReading.unavailable` stamps the
     /// attempt, not a read — so that row gets the reason by itself.
-    ///
-    /// **A window the vendor has not started counting says so instead of its
-    /// age**, which is `ForgeWindow.opens` and only ever `today`. Both forges
-    /// bucket in whole UTC days named by the local date, so east of Greenwich
-    /// the row spends the length of the offset over a day the vendor has not
-    /// opened: measured 2026-09-19 at 01:01+02:00, GitLab answered `x-total: 0`
-    /// for it against 8 events it had already recorded since local midnight,
-    /// all of them filed under the previous UTC day. The figures are absent
-    /// there rather than zero, so without this the row is a bare dash under an
-    /// account that is working — the one state on this line a user reads as a
-    /// fault. It is worded before the age and after the failure: an age dates a
-    /// reading this window has none of, and a token the vendor is refusing is
-    /// the more actionable of the two.
-    ///
-    /// **It names the vendor and a clock time, and never the mechanism.** The
-    /// sentence it replaced, `counted in UTC days · today opens in 1h 27m`, was
-    /// the implementation read aloud: "today opens" at half past midnight is a
-    /// contradiction on its face, and a countdown is arithmetic the reader has
-    /// to redo every minute. `GitHub's day starts at 02:00` says the one thing
-    /// the dash needs, that the vendor's day is not the user's, and the UTC
-    /// explanation moves to the hover for whoever wants it.
     static func forgeNotice(
-        _ kind: ForgeKind, failure: ForgeReadFailure?, readAt: Date?, opensAt: Date? = nil,
-        refreshing: Bool, now: Date = Date()
+        failure: ForgeReadFailure?, readAt: Date?, refreshing: Bool, now: Date = Date()
     ) -> String? {
         if refreshing { return "refreshing…" }
         guard let readAt else { return failure.map(forgeFailure) }
         let read = age(now.timeIntervalSince(readAt))
         if let failure { return forgeFailure(failure) + " · last read " + read }
-        if let opensAt, opensAt > now {
-            return forgeName(kind) + "'s day starts at " + clock(opensAt)
-        }
         return "read " + read
     }
 
@@ -2220,26 +2195,17 @@ extension UsageFormat {
     /// own and for the same reason: a gesture nothing advertises is a feature
     /// only whoever wrote it can find, and this row has nowhere to put a
     /// button: 312 pt already has the login truncating before the figures do.
-    ///
-    /// **The vendor's day is named by the clock time it starts at here**, which
-    /// is what the heading's `GitHub's day starts at 02:00` leans on: "whole
-    /// UTC days" alone left the reader to work out the offset. It is a fact
-    /// about the zone rather than about the moment, so it holds at any hour
-    /// the hover is read — the snapshot builds this once per frame while the
-    /// heading above it re-reads the clock, and a line gated on the day not
-    /// having started would outlive the start by up to a whole poll.
     static func forgeTooltip(
         _ kind: ForgeKind, host: String, login: String?, period: UsageRange,
-        boundedToOneYear: Bool, vendorDayStart: Date
+        boundedToOneYear: Bool
     ) -> String {
         var lines = [forgeName(kind) + " · " + host]
         if let login { lines.append("Read as \(login)") }
-        let days = "in UTC days that start at " + clock(vendorDayStart) + " here"
         switch kind {
         case .gitHub:
-            lines.append("Contributions as GitHub counts them, " + days)
+            lines.append("Contributions as GitHub counts them")
         case .gitLab:
-            lines.append("Events GitLab recorded for you, " + days)
+            lines.append("Events GitLab recorded for you")
         }
         if period == .preset(.all), boundedToOneYear {
             lines.append("Contributions reach back one year; the counts beside them are every one")

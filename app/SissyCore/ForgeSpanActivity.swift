@@ -29,7 +29,6 @@ enum ForgeSpanAbsence: Error, Sendable, Equatable {
     case switchedOff
     case missingScope
     case incomplete
-    case notOpened
     case invalidDates
     case deadlineExceeded
     case monitorChanged
@@ -73,29 +72,44 @@ struct ForgeSpanReading: Sendable, Equatable, Identifiable {
 
 /// On-demand counters only: no event line, billing request, or change to periodic readings.
 enum ForgeSpanFeed {
-    /// UTC request boundaries, not the engine's selected-window value.
+    /// A picked span in the forms each vendor takes it, all over the local
+    /// days the user picked.
     struct VendorBounds: Hashable {
+        /// The local midnight the first day starts at.
         let start: Date
+        /// The local midnight after the last day, or now where that is sooner.
         let end: Date
-        let after: String
-        let before: String
-        let upper: Date
+        /// Whether the span reaches now, so `end` is the instant of the read
+        /// rather than an exclusive midnight.
+        let isOpen: Bool
+        /// The first and last local dates, `yyyy-MM-dd`.
+        let firstDay: String
+        let lastDay: String
+        /// The same two dates as GitHub's contribution calendar reads them:
+        /// the first at midnight `Z`, the last at its final second.
+        let calendarStart: Date
+        let calendarEnd: Date
+
+        /// The last instant an inclusive filter may name.
+        var lastInstant: Date { isOpen ? end : end.addingTimeInterval(-1) }
     }
     static let counters: [ForgeSpanMetric] = [.contributions, .merged, .issues, .comments]
 
-    /// Dates follow the mapping measured by ForgeWindow on 2026-09-17.
-    /// Verified with constructed requests 2026-10-03: a past span stops before
-    /// the following UTC midnight. GitHub's calendar and its searches both end
-    /// at 23:59:59 UTC on the named final date: a search takes the window as
-    /// one inclusive `A..B` range, because measured 2026-10-07 GitHub ORs a
-    /// repeated qualifier, and `merged:>=A merged:<B` counted every merged
-    /// pull request the account ever authored (975) where the range counted 8.
-    /// Today's end is capped at now. GitLab events use the following date as
-    /// their proposed exclusive before boundary and the preceding date as after.
-    /// GitLab's GraphQL upper filters are inclusive, read in its source on
-    /// 2026-10-03: `mergedBefore` widens a time to the end of its UTC day and
-    /// `createdBefore` compares with `<=`, so both take the final date's last
-    /// instant rather than the exclusive next midnight.
+    /// Every figure is over the local days picked, from local midnight to
+    /// local midnight, because that is how the vendors date the work: GitHub
+    /// files a contribution on the account's own day and its calendar takes the
+    /// dates (`ForgeWindow.vendorDay`), while its searches, GitLab's GraphQL
+    /// filters and GitLab's event rows compare instants (`ForgeWindow.instant`,
+    /// `GitLabDaySplit`). Today's end is capped at now.
+    ///
+    /// GitHub's search takes the span as one inclusive `A..B` range: measured
+    /// 2026-10-07, it ORs a repeated qualifier, and `merged:>=A merged:<B`
+    /// counted every merged pull request the account ever authored (975)
+    /// where the range counted 8. GitLab's `mergedBefore` widens an instant to
+    /// the end of its UTC day (read in its source 2026-10-03, measured
+    /// 2026-10-07: 78 merges before `21:59:59Z` against the 75 there were), so
+    /// a past span's merges are the count after its start less the count after
+    /// its end, both of which `mergedAfter` takes to the second.
     static func bounds(
         from: Date, to: Date, now: Date, calendar: Calendar = .current
     ) -> VendorBounds? {
@@ -104,28 +118,22 @@ enum ForgeSpanFeed {
         guard firstDay <= lastDay, lastDay <= calendar.startOfDay(for: now),
             let days = calendar.dateComponents([.day], from: firstDay, to: lastDay).day,
             days < 3650,
-            let zone = TimeZone(secondsFromGMT: 0)
+            let next = calendar.date(byAdding: .day, value: 1, to: lastDay)
         else { return nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = calendar.timeZone
+        formatter.timeZone = .gmt
         formatter.dateFormat = "yyyy-MM-dd"
-        let startName = formatter.string(from: from)
-        let endName = formatter.string(from: to)
-        formatter.timeZone = zone
-        guard let start = formatter.date(from: startName),
-            let last = formatter.date(from: endName)
-        else { return nil }
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = zone
-        guard let next = utc.date(byAdding: .day, value: 1, to: last),
-            let previous = utc.date(byAdding: .day, value: -1, to: start)
+        let firstName = ForgeWindow.dayName(from, calendar: calendar)
+        let lastName = ForgeWindow.dayName(to, calendar: calendar)
+        guard let calendarStart = formatter.date(from: firstName),
+            let calendarLast = formatter.date(from: lastName)
         else { return nil }
         return VendorBounds(
-            start: start, end: min(next.addingTimeInterval(-1), now),
-            after: formatter.string(from: previous), before: formatter.string(from: next),
-            upper: min(next, now))
+            start: firstDay, end: min(next, now), isOpen: next > now,
+            firstDay: firstName, lastDay: lastName,
+            calendarStart: calendarStart, calendarEnd: calendarLast.addingTimeInterval(86_399))
     }
 
     static func read(
@@ -136,11 +144,6 @@ enum ForgeSpanFeed {
             return .unavailable(
                 connection, dates: (from, to), now: now,
                 enabled: enabled, reason: .invalidDates)
-        }
-        guard bounds.start <= now else {
-            return .unavailable(
-                connection, dates: (from, to), now: now,
-                enabled: enabled, reason: .notOpened)
         }
         switch connection.kind {
         case .gitHub:
@@ -180,8 +183,9 @@ enum ForgeSpanFeed {
             id: reading.id, kind: reading.kind, host: reading.host, login: login,
             from: from, to: to, readAt: now, counters: reading.counters)
         if enabled.contains(.merged) {
-            let user = reply.data["currentUser"] as? [String: Any] ?? [:]
-            reading.counters[.merged] = count(user, alias: "merged", failures: reply.failures)
+            reading.counters[.merged] = gitlabMerged(
+                reply.data["currentUser"] as? [String: Any] ?? [:], failures: reply.failures,
+                isOpen: bounds(from: from, to: to, now: now)?.isOpen ?? true)
         }
         if enabled.contains(.issues) {
             do {
@@ -197,19 +201,12 @@ enum ForgeSpanFeed {
                 reading.counters[.issues] = .unavailable(absence(error))
             }
         }
+        guard let bounds = bounds(from: from, to: to, now: now) else { return reading }
         for counter in [ForgeSpanMetric.contributions, .comments] where counter.isEnabled(in: enabled) {
             do {
-                guard
-                    let url = gitlabEventsURL(
-                        connection, dates: dates, now: now,
-                        action: counter == .comments ? GitLabActivityFeed.commentedAction : nil)
-                else { throw ForgeReadFailure.malformed }
-                let request = ForgeActivityFeed.request(
-                    url, token: token, header: "PRIVATE-TOKEN", scheme: nil)
-                let response = try await ForgeActivityFeed.send(request).response
-                reading.counters[counter] =
-                    GitLabActivityFeed.count(of: response)
-                    .map(ForgeSpanCounter.counted) ?? .unavailable(.failure(.malformed))
+                reading.counters[counter] = try await gitlabEvents(
+                    connection, token: token, bounds: bounds,
+                    action: counter == .comments ? GitLabActivityFeed.commentedAction : nil)
             } catch {
                 try Task.checkCancellation()
                 reading.counters[counter] = .unavailable(absence(error))
@@ -240,13 +237,14 @@ enum ForgeSpanFeed {
         from: Date, to: Date, now: Date, counters enabled: Set<ForgeCounter>,
         calendar: Calendar = .current
     ) -> String {
-        guard let bounds = bounds(from: from, to: to, now: now, calendar: calendar),
-            bounds.start <= bounds.end
+        guard let bounds = bounds(from: from, to: to, now: now, calendar: calendar)
         else { return GitHubActivityFeed.probeDocument }
         let iso = ISO8601DateFormatter()
         var viewer = ["login"]
         do {
-            for (index, range) in contributionRanges(start: bounds.start, end: bounds.end).enumerated() {
+            for (index, range) in contributionRanges(start: bounds.calendarStart, end: bounds.calendarEnd)
+                .enumerated()
+            {
                 viewer.append(
                     "contrib\(index): contributionsCollection(from: \"\(iso.string(from: range.0))\", to: \"\(iso.string(from: range.1))\") { contributionCalendar { totalContributions } }"
                 )
@@ -262,7 +260,8 @@ enum ForgeSpanFeed {
             (ForgeSpanMetric.merged, "is:pr author:@me is:merged", "merged"),
             (.issues, "is:issue author:@me", "created"),
         ] where counter.isEnabled(in: enabled) {
-            let dates = "\(qualifier):\(iso.string(from: bounds.start))..\(iso.string(from: bounds.end))"
+            let dates =
+                "\(qualifier):\(ForgeWindow.instant(bounds.start))..\(ForgeWindow.instant(bounds.lastInstant))"
             fields.append(
                 "\(counter.rawValue): search(query: \"\(terms) \(dates)\", type: ISSUE, first: 1) { issueCount }"
             )
@@ -278,9 +277,12 @@ enum ForgeSpanFeed {
         if enabled.contains(.merged),
             let bounds = bounds(from: from, to: to, now: now, calendar: calendar)
         {
-            let iso = ISO8601DateFormatter()
             fields =
-                "merged: authoredMergeRequests(state: merged, mergedAfter: \"\(iso.string(from: bounds.start))\", mergedBefore: \"\(iso.string(from: bounds.end))\") { count }"
+                "merged: authoredMergeRequests(state: merged, mergedAfter: \"\(ForgeWindow.instant(bounds.start))\") { count }"
+            if !bounds.isOpen {
+                fields +=
+                    " \(mergedLaterAlias): authoredMergeRequests(state: merged, mergedAfter: \"\(ForgeWindow.instant(bounds.end))\") { count }"
+            }
         }
         return "query { currentUser { username \(fields) } }"
     }
@@ -289,31 +291,53 @@ enum ForgeSpanFeed {
         from: Date, to: Date, now: Date, calendar: Calendar = .current
     ) -> String {
         guard let bounds = bounds(from: from, to: to, now: now, calendar: calendar) else { return "" }
-        let iso = ISO8601DateFormatter()
         let last = ISO8601DateFormatter()
         last.formatOptions.insert(.withFractionalSeconds)
-        let upper = bounds.upper == now ? now : bounds.upper.addingTimeInterval(-0.001)
+        let upper = bounds.isOpen ? now : bounds.end.addingTimeInterval(-0.001)
         return
-            "query($author: String!) { issues: issues(authorUsername: $author, createdAfter: \"\(iso.string(from: bounds.start))\", createdBefore: \"\(last.string(from: upper))\") { count } }"
+            "query($author: String!) { issues: issues(authorUsername: $author, createdAfter: \"\(ForgeWindow.instant(bounds.start))\", createdBefore: \"\(last.string(from: upper))\") { count } }"
     }
 
-    static func gitlabEventsURL(
-        _ connection: ForgeConnection, dates: (Date, Date), now: Date,
-        action: String? = nil, calendar: Calendar = .current
-    ) -> URL? {
-        guard let root = connection.root,
-            let bounds = bounds(from: dates.0, to: dates.1, now: now, calendar: calendar),
-            var parts = URLComponents(
-                url: root.appendingPathComponent("/api/v4/events"),
-                resolvingAgainstBaseURL: false)
-        else { return nil }
-        parts.queryItems = [
-            URLQueryItem(name: "per_page", value: "1"),
-            URLQueryItem(name: "after", value: bounds.after),
-            URLQueryItem(name: "before", value: bounds.before),
-        ]
-        if let action { parts.queryItems?.append(URLQueryItem(name: "action", value: action)) }
-        return parts.url
+    /// The alias the merges after a past span's end come back under.
+    static let mergedLaterAlias = "mergedLater"
+
+    /// A span's merges: the count after its start, less the count after its
+    /// end for a span that has ended. A missing second count is no figure,
+    /// never the first count standing in for the span.
+    static func gitlabMerged(
+        _ user: [String: Any], failures: [String: ForgeSpanAbsence], isOpen: Bool
+    ) -> ForgeSpanCounter {
+        let since = count(user, alias: "merged", failures: failures)
+        if isOpen { return since }
+        switch (since, count(user, alias: mergedLaterAlias, failures: failures)) {
+        case (.counted(.exact(let all)), .counted(.exact(let after))) where all >= after:
+            return .counted(.exact(all - after))
+        case (.unavailable(let reason), _), (_, .unavailable(let reason)):
+            return .unavailable(reason)
+        default:
+            return .unavailable(.incomplete)
+        }
+    }
+
+    /// The events over a span: those since its start less those since its end,
+    /// each counted from its own instant by `GitLabActivityFeed.events`.
+    private static func gitlabEvents(
+        _ connection: ForgeConnection, token: String, bounds: VendorBounds, action: String?
+    ) async throws -> ForgeSpanCounter {
+        let since = try await GitLabActivityFeed.events(
+            connection, token: token, since: bounds.start, action: action
+        ).count
+        guard let since else { return .unavailable(.failure(.malformed)) }
+        if bounds.isOpen { return .counted(since) }
+        let after = try await GitLabActivityFeed.events(
+            connection, token: token, since: bounds.end, action: action
+        ).count
+        switch after {
+        case .exact(let later):
+            return since.adding(-later).map(ForgeSpanCounter.counted) ?? .unavailable(.incomplete)
+        case .atLeast: return .unavailable(.incomplete)
+        case nil: return .unavailable(.failure(.malformed))
+        }
     }
 
     static func parseGitHub(
@@ -323,7 +347,7 @@ enum ForgeSpanFeed {
     ) throws -> ForgeSpanReading {
         let (from, to) = dates
         guard let bounds = bounds(from: from, to: to, now: now, calendar: calendar),
-            !contributionRanges(start: bounds.start, end: bounds.end).isEmpty
+            !contributionRanges(start: bounds.calendarStart, end: bounds.calendarEnd).isEmpty
         else {
             return .unavailable(connection, dates: dates, now: now, enabled: enabled, reason: .invalidDates)
         }
@@ -341,7 +365,7 @@ enum ForgeSpanFeed {
         do {
             var total = 0
             var missing: ForgeSpanAbsence?
-            for index in contributionRanges(start: bounds.start, end: bounds.end).indices {
+            for index in contributionRanges(start: bounds.calendarStart, end: bounds.calendarEnd).indices {
                 let alias = "contrib\(index)"
                 guard let block = viewer[alias] as? [String: Any],
                     let contribution = block["contributionCalendar"] as? [String: Any],
@@ -368,7 +392,7 @@ enum ForgeSpanFeed {
                 (failures["comments"] ?? failures["viewer"] ?? failures["*"]).map(
                     ForgeSpanCounter.unavailable)
                 ?? commentCount(
-                    viewer, start: bounds.start, end: bounds.upper, inclusiveEnd: bounds.upper == now)
+                    viewer, start: bounds.start, end: bounds.end, inclusiveEnd: bounds.isOpen)
         }
         return reading
     }

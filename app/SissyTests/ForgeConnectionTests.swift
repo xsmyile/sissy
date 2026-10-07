@@ -85,7 +85,7 @@ final class ForgeConnectionTests: XCTestCase {
         XCTAssertEqual(connection.basePath, "/gitlab")
         XCTAssertEqual(connection.root?.absoluteString, "https://corp.example/gitlab")
         let events = try XCTUnwrap(
-            GitLabActivityFeed.eventsURL(connection, period: .all, now: Date()))
+            GitLabActivityFeed.eventsURL(connection, from: nil))
         XCTAssertTrue(
             events.absoluteString.hasPrefix("https://corp.example/gitlab/api/v4/events"),
             events.absoluteString)

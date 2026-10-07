@@ -155,7 +155,7 @@ struct ForgeSectionLabel: View {
             Spacer(minLength: 8)
             TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
                 if let notice = UsageFormat.forgeNotice(
-                    row.kind, failure: row.failure, readAt: row.readAt, opensAt: row.opensAt,
+                    failure: row.failure, readAt: row.readAt,
                     refreshing: refreshing, now: context.date)
                 {
                     Text(notice)

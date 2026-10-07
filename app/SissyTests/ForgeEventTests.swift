@@ -243,12 +243,10 @@ final class ForgeEventTests: XCTestCase {
     /// is a longer page on a request already made, never a request of its own.
     func testGitLabAsksForAPageOnlyWhereTheFeedIsWanted() throws {
         let gitLab = ForgeConnection(kind: .gitLab, host: "gitlab.example.com")
-        let now = try Self.instant("2026-09-28T12:00:00Z")
         let page = try XCTUnwrap(
-            GitLabActivityFeed.eventsURL(
-                gitLab, period: .all, now: now, rows: GitLabActivityFeed.latestPage))
+            GitLabActivityFeed.eventsURL(gitLab, from: nil, rows: GitLabActivityFeed.latestPage))
         XCTAssertTrue(page.absoluteString.contains("per_page=\(GitLabActivityFeed.latestPage)"))
-        let count = try XCTUnwrap(GitLabActivityFeed.eventsURL(gitLab, period: .all, now: now))
+        let count = try XCTUnwrap(GitLabActivityFeed.eventsURL(gitLab, from: nil))
         XCTAssertTrue(count.absoluteString.contains("per_page=1"))
         XCTAssertEqual(
             GitLabActivityFeed.projectURL(gitLab, id: 562)?.absoluteString,

@@ -13,150 +13,58 @@ enum ForgeWindow {
         period.start(now: now, calendar: calendar)
     }
 
-    /// A day in the `YYYY-MM-DD` form GitLab's `after` takes, in the **local**
-    /// calendar.
+    /// The date GitHub's `contributionsCollection` reads off an argument,
+    /// written at midnight `Z`.
     ///
-    /// Local because `start` is a local start-of-day and this renders that same
-    /// day, not the instant it happens to be in UTC. Formatting it in UTC put
-    /// every window a day early east of Greenwich: measured, a start of
-    /// 2026-09-17 00:00+02:00 rendered `2026-09-16`, which asks for a window
-    /// one day wider than the one the money above it is over. The endpoint
-    /// takes no time part, so a day in the user's own calendar is the closest
-    /// this gets to the instant the rest of the block is over.
-    /// `en_US_POSIX` so the digits are digits whatever the user's locale does
-    /// to a calendar.
-    static let day: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
-    /// The instant a vendor's own day bucket opens on the date a window starts
-    /// on: that local date at midnight **UTC**.
+    /// **GitHub dates each contribution on the account's own day, and reads an
+    /// argument as the UTC date it falls on.** Measured 2026-09-17 from
+    /// Europe/Rome: a local midnight sent as the instant it is,
+    /// `2026-09-16T22:00:00Z`, bought the whole of the 16th, 326 contributions
+    /// where the profile's square for the 17th read 128, so an argument is a
+    /// date rather than an instant. Measured 2026-10-07: pull requests opened
+    /// at 00:34 Rome time, 22:34Z the day before, are counted under the local
+    /// date, and the collection's own default window ends at `21:59:59Z`, the
+    /// account's midnight. So a window is its local date written at midnight
+    /// `Z`, which GitHub reads back as that same date, and it is open from the
+    /// first second of the local day. Through 0.3.3 this read the second half the
+    /// other way round, took the vendor's day for the UTC one, and left every
+    /// row blank from local midnight until the UTC one.
     ///
-    /// **Both forges count in whole UTC days, and neither takes an instant.**
-    /// Measured 2026-09-17 from Europe/Rome, GitHub's `contributionCalendar`
-    /// snaps `from` down to the start of the UTC day holding it, so a local
-    /// midnight rendered as the instant it is — `2026-09-16T22:00:00Z` — bought
-    /// the whole of the 16th: 326 contributions where the profile's own square
-    /// for the 17th read 128, and 773 over seven days where the seven squares
-    /// came to 704. Asked from `2026-09-17T00:00:00Z` it answers 128, and from
-    /// noon or 23:00 on that same date it still answers 128, which is what
-    /// proves the bucket is the day rather than the instant. It is also why the
-    /// error is invisible at 30 days on some accounts and not others — it is
-    /// worth whatever the extra day held, which was 0 on 2026-08-18 and 198 on
-    /// 2026-09-16.
-    ///
-    /// So a window is named by its **date** and every figure on the row takes
-    /// the same form, including the two that are genuinely instant filters:
-    /// GitHub's `merged:>=` qualifier and GitLab's `mergedAfter` would
-    /// otherwise sit on a window two hours wider than the contributions beside
-    /// them — measured the same day, 156 merges against the 155 that fall in
-    /// the seven UTC days the contribution figure is over. One row, one window,
-    /// in the calendar the user is reading the heatmap in.
-    ///
-    /// The local date rather than the UTC one, because that is the day the user
-    /// is having: west of Greenwich the two agree for most of the day and east
-    /// of it the local date is the later one, and in both the square the
-    /// heatmap labels with today's date is the UTC day of the same name.
-    static func vendorDay(_ start: Date) -> String { day.string(from: start) + utcMidnight }
-
-    /// The instant `vendorDay` names, as a date rather than as text.
-    ///
-    /// The one counter no forge will total is counted here instead of at the
-    /// vendor, so it needs that same boundary as something comparable. It is
-    /// **`vendorDay`'s own day, read back** rather than recomputed, which is
-    /// the only construction under which the two cannot disagree.
-    ///
-    /// Recomputing it is what the obvious version did, and it was wrong on a
-    /// Mac whose calendar is not Gregorian: taking `year`/`month`/`day` off
-    /// `Calendar.current` and building a Gregorian date from them turned a
-    /// Buddhist 2026-09-18 into a boundary in **2569**, which every comment
-    /// falls before — so every bounded window reported 0 *and* looked proven
-    /// doing it, since an oldest reading of 2026 duly precedes a boundary five
-    /// centuries out. `day` pins its own calendar and locale for exactly this
-    /// reason and this now inherits that rather than restating it.
-    static func vendorInstant(_ start: Date) -> Date? { utcDay.date(from: day.string(from: start)) }
-
-    /// When the vendor day a window starts on begins, nil for one already
-    /// begun.
-    ///
-    /// **A window can name a day that does not exist yet.** Every figure on
-    /// this row is bucketed by the vendor in whole UTC days and named by the
-    /// local date, so east of Greenwich the local day opens before the UTC day
-    /// of the same name does, by the length of the offset. Measured
-    /// 2026-09-19 at 01:01+02:00, which is 23:01 UTC on the 18th: the day's
-    /// query answered `x-total: 0` against the 8 events GitLab had already
-    /// recorded since local midnight, every one of them filed under the 18th in
-    /// UTC. The endpoint cannot be narrowed to recover them either — measured
-    /// the same minute, naming an instant inside the 18th answered 0 exactly as
-    /// naming the date did, so the filter is a whole UTC day whatever time is
-    /// put on it.
-    ///
-    /// So a window this answers for has no reading rather than a reading of
-    /// zero, which is the rule the whole panel is on, and the periods it names
-    /// are not asked for at all — a request saved on the one window whose
-    /// answer could only have been 0.
-    ///
-    /// The instant is the window's own local date read at midnight UTC, which
-    /// is what `vendorInstant` reads back out of `vendorDay` — rebuilt here
-    /// rather than borrowed because those formatters are pinned to the
-    /// machine's zone, so a test holding a zone the machine is not in would be
-    /// measuring the machine.
-    ///
-    /// **The date, never the offset.** Shifting `start` by its own day's offset
-    /// is the same instant on every ordinary day and an hour out on the zones
-    /// whose clocks go forward *at* midnight — `Calendar.startOfDay` answers
-    /// 01:00 there, midnight not having existed. Measured across the whole 2026
-    /// database, eight identifiers and five distinct zones do it:
-    /// `Africa/Cairo` on 2026-04-24, `Asia/Beirut` on 2026-03-29,
-    /// `America/Santiago` on 2026-09-06, `America/Havana` on 2026-03-08 and
-    /// `Atlantic/Azores` on 2026-03-29, each of which would hold the row's dash
-    /// an hour past the moment the vendor began counting.
-    ///
-    /// Gregorian on both sides, which is the trap `vendorInstant` documents
-    /// from the other end: the components come off a Gregorian calendar in the
-    /// window's own zone rather than off `Calendar.current`, so a Mac set to a
-    /// Buddhist calendar cannot hand a year of 2569 to a boundary every reading
-    /// then falls before.
-    static func opens(_ period: UsagePeriod, now: Date, calendar: Calendar = .current) -> Date? {
-        guard let start = start(of: period, now: now, calendar: calendar),
-            let utc = TimeZone(secondsFromGMT: 0)
-        else { return nil }
-        var local = Calendar(identifier: .gregorian)
-        local.timeZone = calendar.timeZone
-        var vendor = Calendar(identifier: .gregorian)
-        vendor.timeZone = utc
-        let date = local.dateComponents([.year, .month, .day], from: start)
-        guard let opens = vendor.date(from: date) else { return nil }
-        return opens > now ? opens : nil
+    /// Gregorian whatever the system calendar is: taking the components off
+    /// `Calendar.current` on a Mac set to a Buddhist calendar named 2569.
+    static func vendorDay(_ instant: Date, calendar: Calendar = .current) -> String {
+        dayName(instant, calendar: calendar) + "T00:00:00Z"
     }
 
-    /// Whether the vendor has begun counting the window at all.
-    static func hasOpened(_ period: UsagePeriod, now: Date, calendar: Calendar = .current) -> Bool {
-        opens(period, now: now, calendar: calendar) == nil
+    /// The last second of the local date `instant` falls on, in the form
+    /// `vendorDay` names a start in: the `to` every bounded collection takes.
+    ///
+    /// Left out, `to` is the instant of the request, whose UTC date is still
+    /// yesterday's for the first hours of a day east of Greenwich. A window
+    /// ending in the future is no refusal: measured 2026-10-07, one ending
+    /// tomorrow answered 0 with no error.
+    static func vendorDayEnd(_ instant: Date, calendar: Calendar = .current) -> String {
+        dayName(instant, calendar: calendar) + "T23:59:59Z"
     }
 
-    /// Every period the vendor has begun counting, which is every one but a
-    /// `today` whose own day has not opened yet.
-    static func openPeriods(now: Date, calendar: Calendar = .current) -> [UsagePeriod] {
-        UsagePeriod.allCases.filter { hasOpened($0, now: now, calendar: calendar) }
+    /// An instant as GitHub's search qualifiers and GitLab's GraphQL filters
+    /// take it.
+    ///
+    /// Both compare instants rather than dates, so a window starting at local
+    /// midnight is asked for from the local midnight. Measured 2026-10-07 from
+    /// Europe/Rome: `merged:>=` at the Rome midnight counted 15 merges where
+    /// midnight `Z` counted 5, and GitLab's `mergedAfter: "2026-10-06T22:00:00Z"`
+    /// counted the 4 merges after that instant out of the day's 79.
+    static func instant(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
+
+    /// `yyyy-MM-dd` for the date `instant` falls on in `calendar`'s zone, off
+    /// a Gregorian calendar.
+    static func dayName(_ instant: Date, calendar: Calendar = .current) -> String {
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        let parts = gregorian.dateComponents([.year, .month, .day], from: instant)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
-
-    /// `day`'s format read in UTC, which is what turns its local date into the
-    /// midnight `Z` the query strings name.
-    private static let utcDay: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
-    private static let utcMidnight = "T00:00:00Z"
 }
 
 /// The field names the aliased documents use for each period.
@@ -192,7 +100,8 @@ enum ForgeAlias {
 /// two GraphQL documents — the second only because the login the first returns
 /// is what the root `issues` field filters on — plus two `x-total` header reads
 /// per period, the activity total and the same filtered to `commented`, which
-/// is ten small requests. A reader that asked per repository would be spending
+/// is ten small requests, and away from UTC a page of the feed more for each
+/// bounded read, the stretch `GitLabDaySplit` counts. A reader that asked per repository would be spending
 /// a request on each of the thirty-odd repositories a real day touches, for
 /// four numbers.
 ///
@@ -599,19 +508,21 @@ enum GitHubActivityFeed {
     static func document(
         now: Date, counters: Set<ForgeCounter> = ForgeCounter.all, calendar: Calendar = .current
     ) -> String {
-        let periods = ForgeWindow.openPeriods(now: now, calendar: calendar)
+        let periods = UsagePeriod.allCases
+        let end = ForgeWindow.vendorDayEnd(now, calendar: calendar)
         let contributions =
             periods.map { period in
                 let range =
                     ForgeWindow.start(of: period, now: now, calendar: calendar)
-                    .map { "(from: \"\(ForgeWindow.vendorDay($0))\")" } ?? ""
+                    .map { "(from: \"\(ForgeWindow.vendorDay($0, calendar: calendar))\", to: \"\(end)\")" }
+                    ?? ""
                 let alias = ForgeAlias.contributions(period)
                 return "\(alias): contributionsCollection\(range) { \(calendarField) }"
             } + (counters.contains(.comments) ? [commentField] : [])
         let searches = periods.flatMap { period -> [String] in
             let since =
                 ForgeWindow.start(of: period, now: now, calendar: calendar)
-                .map(ForgeWindow.vendorDay) ?? ""
+                .map(ForgeWindow.instant) ?? ""
             var fields: [String] = []
             if counters.contains(.merged) {
                 fields.append(
@@ -731,12 +642,11 @@ enum GitHubActivityFeed {
         let everyNodeRead = nodes.map { stamps.count == $0.count } ?? false
         let oldestRead = stamps.map(\.updated).min()
         var counts: [UsagePeriod: Int] = [:]
-        for period in ForgeWindow.openPeriods(now: now, calendar: calendar) {
-            guard let start = ForgeWindow.start(of: period, now: now, calendar: calendar) else {
+        for period in UsagePeriod.allCases {
+            guard let boundary = ForgeWindow.start(of: period, now: now, calendar: calendar) else {
                 counts[period] = total
                 continue
             }
-            guard let boundary = ForgeWindow.vendorInstant(start) else { continue }
             guard everyNodeRead,
                 !unread || (oldestRead.map { $0 < boundary } ?? false)
             else { continue }
@@ -842,13 +752,14 @@ enum GitLabActivityFeed {
         // instance that is reached over a tunnel and is the slow half of this
         // reader already. A period is still awaited before the next starts, so
         // the instance sees two requests at a time rather than eight.
-        for period in UsagePeriod.allCases where ForgeWindow.hasOpened(period, now: now) {
+        for period in UsagePeriod.allCases {
             let feed = period == .all && counters.contains(.latest)
+            let start = ForgeWindow.start(of: period, now: now)
             async let total = events(
-                connection, token: token, period: period, now: now, rows: feed ? latestPage : onePage)
+                connection, token: token, since: start, rows: feed ? latestPage : onePage)
             async let commented =
                 counters.contains(.comments)
-                ? commentEvents(connection, token: token, period: period, now: now) : nil
+                ? commentEvents(connection, token: token, since: start) : nil
             let counted = try await total
             let commentCount = await commented
             contributions[period] = counted.count?.value
@@ -1021,10 +932,10 @@ enum GitLabActivityFeed {
     ) -> String {
         let fields =
             counters.contains(.merged)
-            ? ForgeWindow.openPeriods(now: now, calendar: calendar).map { period -> String in
+            ? UsagePeriod.allCases.map { period -> String in
                 let scope =
                     ForgeWindow.start(of: period, now: now, calendar: calendar)
-                    .map { ", mergedAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
+                    .map { ", mergedAfter: \"\(ForgeWindow.instant($0))\"" } ?? ""
                 return
                     "\(ForgeAlias.merged(period)): authoredMergeRequests(state: merged\(scope)) { count }"
             } : []
@@ -1045,11 +956,11 @@ enum GitLabActivityFeed {
     /// cannot be fed from another field in the same document, so this is one
     /// more request and not a rearrangement of the one before it.
     static func issuesDocument(now: Date, calendar: Calendar = .current) -> String {
-        let fields = ForgeWindow.openPeriods(now: now, calendar: calendar)
+        let fields = UsagePeriod.allCases
             .map { period -> String in
                 let scope =
                     ForgeWindow.start(of: period, now: now, calendar: calendar)
-                    .map { ", createdAfter: \"\(ForgeWindow.vendorDay($0))\"" } ?? ""
+                    .map { ", createdAfter: \"\(ForgeWindow.instant($0))\"" } ?? ""
                 return "\(ForgeAlias.issues(period)): issues(authorUsername: $author\(scope)) { count }"
             }
         return """
@@ -1095,39 +1006,60 @@ enum GitLabActivityFeed {
         return counts
     }
 
-    /// One period's event count, read from the header rather than the body.
+    /// The URL a count from a UTC midnight is asked for, every event for nil.
     ///
     /// A page of one row is requested because the count is what is wanted and
     /// the rows are not: measured 2026-09-17, thirty days of this user's
     /// activity is 986 events over ten pages, so counting them by reading them
     /// would be ten requests for a number the first reply already carries.
-    /// The URL one period's count is asked for.
     ///
-    /// Internal so a test can hold the off-by-one: `after` is **exclusive**, so
-    /// a window starting on a day is asked for by naming the day before it.
-    /// Measured 2026-09-17, `after=2026-09-17` answered `x-total: 0` on a day
-    /// that had 95 events.
+    /// `after` is **exclusive**, so the count from a UTC midnight names the
+    /// day before it. Measured 2026-09-17, `after=2026-09-17` answered
+    /// `x-total: 0` on a day that had 95 events.
     static func eventsURL(
-        _ connection: ForgeConnection, period: UsagePeriod, now: Date, action: String? = nil,
-        rows: Int = onePage
+        _ connection: ForgeConnection, from midnight: Date?, action: String? = nil, rows: Int = onePage
     ) -> URL? {
+        var query = [URLQueryItem(name: "per_page", value: String(rows))]
+        if let midnight {
+            query.append(URLQueryItem(name: "after", value: GitLabDaySplit.name(midnight, days: -1)))
+        }
+        if let action { query.append(URLQueryItem(name: "action", value: action)) }
+        return eventsURL(connection, query: query)
+    }
+
+    private static func eventsURL(_ connection: ForgeConnection, query: [URLQueryItem]) -> URL? {
         guard let root = connection.root,
             var components = URLComponents(
                 url: root.appendingPathComponent(apiPath), resolvingAgainstBaseURL: false)
         else { return nil }
-        let calendar = Calendar.current
-        var query = [URLQueryItem(name: "per_page", value: String(rows))]
-        if let start = ForgeWindow.start(of: period, now: now, calendar: calendar),
-            let exclusive = calendar.date(byAdding: .day, value: -1, to: start)
-        {
-            query.append(URLQueryItem(name: "after", value: ForgeWindow.day.string(from: exclusive)))
-        }
-        if let action { query.append(URLQueryItem(name: "action", value: action)) }
         components.queryItems = query
         return components.url
     }
 
-    /// One period's comment count, off the same header as the events total.
+    /// One page of a UTC day's feed, oldest or newest first, which is where the
+    /// stretch between a window's start and GitLab's midnight is counted.
+    static func sliverURL(
+        _ connection: ForgeConnection, split: GitLabDaySplit, action: String? = nil, page: Int
+    ) -> URL? {
+        let day = split.sliver.start
+        var query = [
+            URLQueryItem(name: "after", value: GitLabDaySplit.name(day, days: -1)),
+            URLQueryItem(name: "before", value: GitLabDaySplit.name(day, days: 1)),
+            URLQueryItem(name: "per_page", value: String(sliverPage)),
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "sort", value: split.adds ? "desc" : "asc"),
+        ]
+        if let action { query.append(URLQueryItem(name: "action", value: action)) }
+        return eventsURL(connection, query: query)
+    }
+
+    /// The rows one stretch page carries, which is the most GitLab serves.
+    static let sliverPage = 100
+    /// How many pages a stretch is read through before it is given up as
+    /// absent: a thousand events in at most twelve hours.
+    static let sliverPageLimit = 10
+
+    /// One window's comment count, off the same header as the events total.
     ///
     /// GitLab files a comment as an event, so the count is the contributions
     /// query with one filter on it — which also means it is a **part of** the
@@ -1140,11 +1072,11 @@ enum GitLabActivityFeed {
     /// contributions, the merges, the issues and the account over its newest
     /// counter. A period that could not be read is absent, never zero.
     private static func commentEvents(
-        _ connection: ForgeConnection, token: String, period: UsagePeriod, now: Date
+        _ connection: ForgeConnection, token: String, since start: Date?
     ) async -> ForgeEventCount? {
         guard
             let read = try? await events(
-                connection, token: token, period: period, now: now, action: commentedAction)
+                connection, token: token, since: start, action: commentedAction)
         else { return nil }
         return read.count
     }
@@ -1152,13 +1084,33 @@ enum GitLabActivityFeed {
     /// GitLab's own name for the event a comment files.
     static let commentedAction = "commented"
 
-    /// One period's count, and the page of the feed it came with.
-    private static func events(
-        _ connection: ForgeConnection, token: String, period: UsagePeriod, now: Date,
+    /// The events since `start`, every one for nil, and the page of the feed
+    /// the count came with.
+    ///
+    /// **The count is GitLab's for whole UTC days and the feed's for the
+    /// rest.** `after` takes a date and filters by the UTC day — measured
+    /// 2026-09-19, naming an instant inside the day answered as naming the
+    /// date did — but every row carries its `created_at` to the millisecond.
+    /// So the header counts from the UTC midnight nearest the start, and the
+    /// stretch between the two, two hours in Rome, is counted off the rows of
+    /// that one UTC day (`GitLabDaySplit`). Measured 2026-10-07: 16 of the
+    /// events GitLab filed under the 6th were the first minutes of the 7th in
+    /// Rome, which is what the row read blank over through 0.3.3. A stretch
+    /// that does not fit `sliverPageLimit` pages, or that outnumbers the
+    /// header count it corrects, leaves the count absent rather than short; a
+    /// refusal or a cancellation on its pages throws like the header read.
+    ///
+    /// The stretch's day is taken in UTC. An instance whose own timezone is
+    /// not UTC applies `after` and `before` in that zone instead, and the one
+    /// residual nothing here closes is the part of the stretch that zone moves
+    /// to the neighbouring date: measured 2026-10-07 on a 19.4 instance, the
+    /// split counted the 40 events a full read since the Rome midnight did.
+    static func events(
+        _ connection: ForgeConnection, token: String, since start: Date?,
         action: String? = nil, rows: Int = onePage
     ) async throws -> (count: ForgeEventCount?, body: Data) {
-        guard let url = eventsURL(connection, period: period, now: now, action: action, rows: rows)
-        else {
+        let split = start.map(GitLabDaySplit.init)
+        guard let url = eventsURL(connection, from: split?.midnight, action: action, rows: rows) else {
             throw ForgeReadFailure.malformed
         }
         let request = ForgeActivityFeed.request(
@@ -1167,7 +1119,42 @@ enum GitLabActivityFeed {
         // the GraphQL one does: the count is in a header rather than the body,
         // which is the only thing different about it.
         let (body, response) = try await ForgeActivityFeed.send(request)
-        return (count(of: response), body)
+        let counted = count(of: response)
+        guard let counted, let split, split.sliver.duration > 0 else { return (counted, body) }
+        guard let edge = try await sliverCount(connection, token: token, split: split, action: action)
+        else { return (nil, body) }
+        return (counted.adding(split.adds ? edge : -edge), body)
+    }
+
+    private static func sliverCount(
+        _ connection: ForgeConnection, token: String, split: GitLabDaySplit, action: String?
+    ) async throws -> Int? {
+        var total = 0
+        for page in 1...sliverPageLimit {
+            guard let url = sliverURL(connection, split: split, action: action, page: page) else {
+                throw ForgeReadFailure.malformed
+            }
+            let request = ForgeActivityFeed.request(
+                url, token: token, header: tokenHeader, scheme: nil)
+            let (body, response) = try await ForgeActivityFeed.send(request)
+            guard let rows = (try? JSONSerialization.jsonObject(with: body)) as? [[String: Any]]
+            else { return nil }
+            let stamps = rows.compactMap {
+                ($0["created_at"] as? String).flatMap(UsageReaderShared.parseTimestamp)
+            }
+            guard stamps.count == rows.count else { return nil }
+            let tally = split.tally(stamps)
+            total += tally.count
+            if tally.finished || isLastPage(response) { return total }
+        }
+        return nil
+    }
+
+    /// Whether a page of the feed is its last, by GitLab's own header rather
+    /// than by the rows it carries: GitLab paginates first and then drops the
+    /// events the token may not see, so a short page can still have a next one.
+    static func isLastPage(_ response: HTTPURLResponse) -> Bool {
+        (response.value(forHTTPHeaderField: nextPageHeader) ?? "").isEmpty
     }
 
     /// The count a reply's headers carry, nil where they carry none.
@@ -1202,4 +1189,69 @@ enum ForgeEventCount: Sendable, Equatable {
         if case .atLeast = self { return true }
         return false
     }
+
+    /// The same count moved by `delta`, which keeps a floor a floor: what is
+    /// at least `n` from one instant is at least `n + delta` from another.
+    /// Nil where the move would go below zero, which only two reads that
+    /// disagree can produce, and which is no count at all rather than a zero.
+    func adding(_ delta: Int) -> Self? {
+        switch self {
+        case .exact(let count): count + delta < 0 ? nil : .exact(count + delta)
+        case .atLeast(let count): count + delta < 0 ? nil : .atLeast(count + delta)
+        }
+    }
+}
+
+/// Where a window's local start meets GitLab's UTC days.
+///
+/// GitLab's events count whole UTC days, so a window is counted from the UTC
+/// midnight nearest its start and the stretch between them is counted off the
+/// feed: added when the start falls before that midnight, as it does east of
+/// Greenwich, and taken off when it falls after it. Nearest, so the stretch is
+/// at most twelve hours of one UTC day whatever the zone.
+struct GitLabDaySplit: Sendable, Equatable {
+    /// The midnight the header count runs from.
+    let midnight: Date
+    /// The stretch between the window's start and that midnight.
+    let sliver: DateInterval
+    /// Whether the stretch is inside the window, so its events are added.
+    let adds: Bool
+
+    init(start: Date) {
+        let floor = Self.utc.startOfDay(for: start)
+        let ceiling = Self.utc.date(byAdding: .day, value: 1, to: floor) ?? floor
+        if start.timeIntervalSince(floor) <= ceiling.timeIntervalSince(start) {
+            midnight = floor
+            sliver = DateInterval(start: floor, end: start)
+            adds = false
+        } else {
+            midnight = ceiling
+            sliver = DateInterval(start: start, end: ceiling)
+            adds = true
+        }
+    }
+
+    /// How many of one page's stamps fall in the stretch, and whether the page
+    /// has already passed it in the order it was asked for: newest first for a
+    /// stretch at the end of its day, oldest first for one at the start.
+    func tally(_ stamps: [Date]) -> (count: Int, finished: Bool) {
+        var count = 0
+        for stamp in stamps {
+            if adds ? stamp < sliver.start : stamp >= sliver.end { return (count, true) }
+            if stamp >= sliver.start, stamp < sliver.end { count += 1 }
+        }
+        return (count, false)
+    }
+
+    /// The UTC date `days` away from the one `instant` falls on, as GitLab's
+    /// `after` and `before` take it.
+    static func name(_ instant: Date, days: Int) -> String {
+        ForgeWindow.dayName(utc.date(byAdding: .day, value: days, to: instant) ?? instant, calendar: utc)
+    }
+
+    private static let utc: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        return calendar
+    }()
 }
