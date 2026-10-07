@@ -26,8 +26,10 @@ final class ForgeSpanTests: XCTestCase {
             calendar: Self.calendar)
         XCTAssertTrue(query.contains("from: \"2026-09-17T00:00:00Z\""))
         XCTAssertTrue(query.contains("to: \"2026-09-17T23:59:59Z\""))
-        XCTAssertTrue(query.contains("merged:>=2026-09-17T00:00:00Z merged:<2026-09-18T00:00:00Z"))
-        XCTAssertTrue(query.contains("created:>=2026-09-17T00:00:00Z created:<2026-09-18T00:00:00Z"))
+        XCTAssertTrue(query.contains("merged:2026-09-17T00:00:00Z..2026-09-17T23:59:59Z"))
+        XCTAssertTrue(query.contains("created:2026-09-17T00:00:00Z..2026-09-17T23:59:59Z"))
+        XCTAssertFalse(query.contains("merged:>="))
+        XCTAssertFalse(query.contains("created:<"))
     }
 
     func testRangeBoundsEveryGitLabRequest() throws {
@@ -59,7 +61,7 @@ final class ForgeSpanTests: XCTestCase {
         let github = ForgeSpanFeed.githubDocument(
             from: Self.from, to: today, now: Self.now, counters: ForgeCounter.all, calendar: Self.calendar)
         XCTAssertTrue(github.contains("to: \"2026-10-03T12:00:00Z\""))
-        XCTAssertTrue(github.contains("merged:<=2026-10-03T12:00:00Z"))
+        XCTAssertTrue(github.contains("merged:2026-09-17T00:00:00Z..2026-10-03T12:00:00Z"))
         let gitlab = ForgeSpanFeed.gitlabDocument(
             from: Self.from, to: today, now: Self.now, counters: ForgeCounter.all, calendar: Self.calendar)
         XCTAssertTrue(gitlab.contains("mergedBefore: \"2026-10-03T12:00:00Z\""))

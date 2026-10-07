@@ -85,8 +85,11 @@ enum ForgeSpanFeed {
 
     /// Dates follow the mapping measured by ForgeWindow on 2026-09-17.
     /// Verified with constructed requests 2026-10-03: a past span stops before
-    /// the following UTC midnight. GitHub's calendar ends at 23:59:59 UTC on
-    /// the named final date; instant filters use the exclusive next midnight.
+    /// the following UTC midnight. GitHub's calendar and its searches both end
+    /// at 23:59:59 UTC on the named final date: a search takes the window as
+    /// one inclusive `A..B` range, because measured 2026-10-07 GitHub ORs a
+    /// repeated qualifier, and `merged:>=A merged:<B` counted every merged
+    /// pull request the account ever authored (975) where the range counted 8.
     /// Today's end is capped at now. GitLab events use the following date as
     /// their proposed exclusive before boundary and the preceding date as after.
     /// GitLab's GraphQL upper filters are inclusive, read in its source on
@@ -259,9 +262,7 @@ enum ForgeSpanFeed {
             (ForgeSpanMetric.merged, "is:pr author:@me is:merged", "merged"),
             (.issues, "is:issue author:@me", "created"),
         ] where counter.isEnabled(in: enabled) {
-            let comparison = bounds.upper == now ? "<=" : "<"
-            let dates =
-                "\(qualifier):>=\(iso.string(from: bounds.start)) \(qualifier):\(comparison)\(iso.string(from: bounds.upper))"
+            let dates = "\(qualifier):\(iso.string(from: bounds.start))..\(iso.string(from: bounds.end))"
             fields.append(
                 "\(counter.rawValue): search(query: \"\(terms) \(dates)\", type: ISSUE, first: 1) { issueCount }"
             )
