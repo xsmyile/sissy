@@ -93,6 +93,9 @@ actor ClaudeAccountRegistry {
 
     private let store: ClaudeAccountStore
     private let slot: ClaudeCLISlot
+    /// The CLI's config file, which names the account beside the credential
+    /// and has to be moved with it.
+    private let profile: ClaudeCLIProfile
     /// Resolves a token to its owner. Injected so a test can exercise the
     /// capture without reaching Anthropic — the network is the only part of
     /// this that cannot be stood in for by the keychain.
@@ -102,6 +105,11 @@ actor ClaudeAccountRegistry {
     /// it unchanged costs nothing. Only a token Sissy has not already filed
     /// buys a request.
     private var lastSeenToken: String?
+    /// The account `lastSeenToken` was identified as or written for, set and
+    /// cleared with it. What the config file is reconciled with, rather than
+    /// the index's active id: that is a note on disk, and one that failed to
+    /// save would pair the next account's token with the previous name.
+    private var lastSeenAccount: String?
     /// Whether the archive has been read for the refresh expiries the index
     /// lacks. Once a run, deferred to the first capture rather than done at
     /// construction, which runs on whatever thread builds the engine.
@@ -136,6 +144,7 @@ actor ClaudeAccountRegistry {
     init(
         store: ClaudeAccountStore,
         slot: ClaudeCLISlot,
+        profile: ClaudeCLIProfile = .inert,
         identify: @escaping @Sendable (String) async throws -> ClaudeAccountIdentity = {
             try await ClaudeAccountProfile.resolve(token: $0)
         },
@@ -143,6 +152,7 @@ actor ClaudeAccountRegistry {
     ) {
         self.store = store
         self.slot = slot
+        self.profile = profile
         self.now = now
         self.identify = identify
         let index = Self.loadIndex(store) ?? ClaudeAccountStore.Index()
@@ -185,7 +195,9 @@ actor ClaudeAccountRegistry {
         guard !capturing else { return false }
         capturing = true
         defer { capturing = false }
-        return await refreshActive()
+        let moved = await refreshActive()
+        reconcileProfile()
+        return moved
     }
 
     @discardableResult
@@ -205,6 +217,7 @@ actor ClaudeAccountRegistry {
         }
         guard let current else {
             lastSeenToken = nil
+            lastSeenAccount = nil
             let shown = published.load()
             if shown.activeUUID != nil || shown.activeCredential != nil { setActive(nil, cause: .signedOut) }
             return published.load() != before
@@ -284,8 +297,53 @@ actor ClaudeAccountRegistry {
         }
         if let failure = write(credential, to: targets, over: before) { throw failure }
         lastSeenToken = ClaudeCredentialBlob.credentials(in: credential)?.accessToken
+        lastSeenAccount = uuid
         sissyLog("sissy: wrote the Claude Code credential for \(uuid) into the CLI's slots")
         setActive(uuid, cause: .switched)
+        reconcileProfile()
+    }
+
+    /// Points the CLI's config file at the account the slot holds, after a
+    /// switch and on every capture.
+    ///
+    /// After the credential and never instead of it: the credential is what
+    /// the CLI signs in with, so a file that would not take the write leaves a
+    /// switch that holds, where undoing the switch over it would refuse the
+    /// user the account they asked for. The next capture tries again, and the
+    /// same pass repairs a file left behind by a switch made before this
+    /// existed or across a relaunch.
+    ///
+    /// Only for the pair this run verified, `lastSeenToken` and the account it
+    /// was identified as, and only while the slot still holds that token: once
+    /// here, and once more under the config file's lock just before the file
+    /// is replaced. A `/login` as someone else that has not been identified
+    /// yet, or that lands while the lock is being waited for, has put another
+    /// token there, and the block it writes names the account really signed
+    /// in; writing the previous one over it would be this fix's bug the other
+    /// way round. The file is read without the lock first, so a pass that
+    /// finds it in agreement takes nothing from the CLI.
+    private func reconcileProfile() {
+        guard !Task.isCancelled, let token = lastSeenToken, let uuid = lastSeenAccount,
+            holds(token)
+        else { return }
+        guard let identity = Self.loadIndex(store)?.accounts.first(where: { $0.uuid == uuid })
+        else {
+            sissyLog("sissy: no identity to point Claude Code's config file at \(uuid)")
+            return
+        }
+        do {
+            if try profile.adopt(identity, { holds(token) }) {
+                sissyLog("sissy: pointed Claude Code's config file at \(uuid)")
+            }
+        } catch {
+            sissyLog("sissy: could not point Claude Code's config file at \(uuid): \(error)")
+        }
+    }
+
+    /// Whether the slot the CLI reads holds this access token now.
+    private func holds(_ token: String) -> Bool {
+        guard let current = try? slot.current()?.data else { return false }
+        return ClaudeCredentialBlob.credentials(in: current)?.accessToken == token
     }
 
     /// Makes sure nothing any name holds is lost by the write: every account
@@ -444,6 +502,7 @@ actor ClaudeAccountRegistry {
             return true
         }
         lastSeenToken = parsed.accessToken
+        lastSeenAccount = identity.uuid
         setActive(identity.uuid, cause: .seenInSlot)
         return true
     }
