@@ -93,6 +93,15 @@ final class ClaudeAccountProfileTests: XCTestCase {
         XCTAssertEqual(identity.seat, "team_tier_1")
     }
 
+    /// The organisation's id is what a switch hands the CLI's config file.
+    func testParseTakesTheOrganisationsId() throws {
+        let identity = try ClaudeAccountProfile.parse([
+            "account": ["uuid": "u-1"], "organization": ["uuid": "org-1", "name": "Acme Srl"],
+        ])
+
+        XCTAssertEqual(identity.organizationUUID, "org-1")
+    }
+
     /// A personal account names no organisation, and that is not a failure.
     func testParseSurvivesAnAccountWithNoOrganisation() throws {
         let identity = try ClaudeAccountProfile.parse(["account": ["uuid": "u-2"]])
@@ -283,13 +292,14 @@ final class ClaudeAccountRegistryTests: XCTestCase {
 
     private func makeRegistry(
         _ vault: Vault,
+        profile: ClaudeCLIProfile = .inert,
         now: @escaping @Sendable () -> Date = { Date() },
         identify: @escaping @Sendable (String) async throws -> ClaudeAccountIdentity
     ) -> ClaudeAccountRegistry {
         var store = ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: tempDir))
         store.secrets = vault.secrets()
         return ClaudeAccountRegistry(
-            store: store, slot: vault.slot(), identify: identify, now: now)
+            store: store, slot: vault.slot(), profile: profile, identify: identify, now: now)
     }
 
     private static func byToken(_ token: String) -> ClaudeAccountIdentity {
@@ -386,6 +396,146 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         guard case .success = outcome else { return XCTFail("switching back failed") }
         XCTAssertEqual(vault.active, credential("tok-a"))
         XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-a")
+    }
+
+    /// Stands in for the CLI's config file: which account its block names,
+    /// every account a write pointed it at, and how many writes in a row the
+    /// CLI's lock refuses.
+    private final class ConfigFile: @unchecked Sendable {
+        let named = LockedValue<String?>(nil)
+        let writes = LockedValue<[String]>([])
+        let refusals = LockedValue(0)
+
+        /// Runs inside a write, before it asks whether it is still wanted:
+        /// where a test puts a `/login` that lands while the lock is waited for.
+        var duringWrite: @Sendable () -> Void = {}
+
+        func profile() -> ClaudeCLIProfile {
+            ClaudeCLIProfile(adopt: { [self] identity, stillWanted in
+                if refusals.load() > 0 {
+                    refusals.update { $0 -= 1 }
+                    throw ClaudeCLIProfile.Failure.locked
+                }
+                guard named.load() != identity.uuid else { return false }
+                duringWrite()
+                guard stillWanted() else { return false }
+                named.update { $0 = identity.uuid }
+                writes.update { $0.append(identity.uuid) }
+                return true
+            })
+        }
+    }
+
+    /// The config file names the account beside the credential, and the CLI
+    /// never moves it off the previous one by itself.
+    func testASwitchPointsTheConfigFileAtTheAccountItWrote() async {
+        let vault = Vault()
+        let config = ConfigFile()
+        let registry = makeRegistry(vault, profile: config.profile()) { Self.byToken($0) }
+        await archiveTwo(vault, registry)
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .success = outcome else { return XCTFail("expected the switch to succeed") }
+        XCTAssertEqual(config.named.load(), "u-tok-b")
+        XCTAssertEqual(config.writes.load().last, "u-tok-b")
+    }
+
+    /// The credential is what the CLI signs in with, so a config file that
+    /// will not take the write does not undo a switch that landed.
+    func testAConfigFileThatRefusesDoesNotUndoTheSwitch() async {
+        let vault = Vault()
+        let config = ConfigFile()
+        let registry = makeRegistry(vault, profile: config.profile()) { Self.byToken($0) }
+        await archiveTwo(vault, registry)
+        config.refusals.update { $0 = 1 }
+
+        let outcome = await registry.activate(uuid: "u-tok-b")
+
+        guard case .success = outcome else { return XCTFail("expected the switch to succeed") }
+        XCTAssertEqual(vault.active, credential("tok-b"))
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-tok-b")
+        XCTAssertEqual(config.named.load(), "u-tok-a")
+    }
+
+    /// A lock the CLI happened to hold must not leave the block on the
+    /// previous account until the next `/login`.
+    func testAConfigFileThatRefusedIsPointedOnTheNextCapture() async {
+        let vault = Vault()
+        let config = ConfigFile()
+        let registry = makeRegistry(vault, profile: config.profile()) { Self.byToken($0) }
+        await archiveTwo(vault, registry)
+        config.refusals.update { $0 = 1 }
+        _ = await registry.activate(uuid: "u-tok-b")
+
+        await registry.captureActive()
+
+        XCTAssertEqual(config.named.load(), "u-tok-b")
+    }
+
+    /// A file a switch left behind, before this existed or across a relaunch,
+    /// is repaired by the first capture that identifies the active account.
+    func testACaptureRepairsAFileNamingAnotherAccount() async {
+        let vault = Vault()
+        let config = ConfigFile()
+        config.named.update { $0 = "u-elsewhere" }
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(vault, profile: config.profile()) { Self.byToken($0) }
+
+        await registry.captureActive()
+
+        XCTAssertEqual(config.named.load(), "u-tok-a")
+    }
+
+    /// A `/login` the vendor has not answered for yet put a token in the slot
+    /// that is not the one identified, and the block it wrote names the
+    /// account really signed in: the previous one must not go back over it.
+    func testALoginNotYetIdentifiedKeepsTheBlockItWrote() async {
+        let vault = Vault()
+        let config = ConfigFile()
+        let registry = makeRegistry(vault, profile: config.profile()) { token in
+            if token == "tok-z" { throw UsageRequestError.malformedPayload }
+            return Self.byToken(token)
+        }
+        await archiveTwo(vault, registry)
+        vault.active = credential("tok-z")
+        config.named.update { $0 = "u-z" }
+
+        await registry.captureActive()
+
+        XCTAssertEqual(registry.currentSnapshot().activeUUID, "u-tok-a")
+        XCTAssertEqual(config.named.load(), "u-z")
+    }
+
+    /// A `/login` that lands while the lock is waited for is the account
+    /// really signed in, and its block is not written over.
+    func testALoginLandingDuringTheWriteKeepsTheBlockItWrote() async {
+        let vault = Vault()
+        let config = ConfigFile()
+        config.named.update { $0 = "u-elsewhere" }
+        vault.active = credential("tok-a")
+        config.duringWrite = { [vault] in
+            vault.active = Data(#"{"claudeAiOauth":{"accessToken":"tok-z"}}"#.utf8)
+        }
+        let registry = makeRegistry(vault, profile: config.profile()) { Self.byToken($0) }
+
+        await registry.captureActive()
+
+        XCTAssertEqual(config.named.load(), "u-elsewhere")
+    }
+
+    /// A switch that is refused writes no config file either.
+    func testARefusedSwitchLeavesTheConfigFileAlone() async {
+        let vault = Vault()
+        let config = ConfigFile()
+        let registry = makeRegistry(vault, profile: config.profile()) { Self.byToken($0) }
+        await archiveTwo(vault, registry)
+        let before = config.writes.load()
+        vault.writeFailures[Vault.primary] = ClaudeKeychainCLI.Failure.tool(1)
+
+        _ = await registry.activate(uuid: "u-tok-b")
+
+        XCTAssertEqual(config.writes.load(), before)
     }
 
     /// Re-affirming the account already in use writes what the slot itself

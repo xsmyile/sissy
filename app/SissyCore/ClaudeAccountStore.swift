@@ -41,6 +41,15 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     /// Optional on a type two JSON files hold, so an index written before this
     /// decodes with a nil rather than being quarantined.
     let seat: String?
+    /// The id of the organisation the seat belongs to, as `api/oauth/profile`
+    /// answers it.
+    ///
+    /// Recorded for one reader: a switch writes it into the CLI's config file
+    /// (`ClaudeCLIProfile`), where Claude Code takes it as the organisation
+    /// every organisation-scoped request is made for. Optional for the reason
+    /// `seat` is, and nil on an account archived before it was recorded, which
+    /// that writer leaves out rather than guesses.
+    let organizationUUID: String?
 
     init(
         uuid: String,
@@ -49,7 +58,8 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
         organization: String?,
         organizationType: String?,
         rateLimitTier: String?,
-        seat: String? = nil
+        seat: String? = nil,
+        organizationUUID: String? = nil
     ) {
         self.uuid = uuid
         self.email = email
@@ -58,6 +68,7 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
         self.organizationType = organizationType
         self.rateLimitTier = rateLimitTier
         self.seat = seat
+        self.organizationUUID = organizationUUID
     }
 
     var id: String { uuid }
@@ -164,7 +175,8 @@ enum ClaudeAccountProfile {
             organization: organization?["name"] as? String,
             organizationType: organization?["organization_type"] as? String,
             rateLimitTier: organization?["rate_limit_tier"] as? String,
-            seat: UsageReaderShared.sanitizedPlanToken(organization?[seatKey] as? String)
+            seat: UsageReaderShared.sanitizedPlanToken(organization?[seatKey] as? String),
+            organizationUUID: organization?["uuid"] as? String
         )
     }
 }

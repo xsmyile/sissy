@@ -372,7 +372,7 @@ actor UsageEngine {
             claudeAccounts
             ?? ClaudeAccountRegistry(
                 store: ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: stateDir)),
-                slot: claudeSlot)
+                slot: claudeSlot, profile: .live(home: claudeHome))
         self.claudeAccounts = accountRegistry
         let webIndex = ClaudeWebSessionIndex(
             url: ClaudeWebSessionIndex.defaultURL(in: stateDir))

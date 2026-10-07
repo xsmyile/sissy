@@ -326,8 +326,14 @@ rotating a token — and files a copy under that account's uuid in a keychain it
 Sissy owns, with an index beside it holding identities and never a token. That
 archive is what makes switching safe: the CLI's own slots are scratch, rewritten
 with whichever account is active, so a switch that wrote them without an archive
-destroyed the account it switched away from. Nothing here is attributed per
-account — a log line carries no account id, so the spend is the CLI's.
+destroyed the account it switched away from. A switch also points the
+`oauthAccount` block of the CLI's config file at the new account
+(`ClaudeCLIProfile`), because the CLI never moves that block off the previous
+one by itself and takes the organisation its requests are made for from it;
+each capture after that points it at the active account again whenever it
+names another and the slot still holds the token that capture identified.
+Nothing here is attributed per account — a log line carries no account id, so
+the spend is the CLI's.
 
 `keepAwake` carries `{mode, active, since}` and is never optional, including when
 off: the panel draws its control from this, and "off" and "nothing reported" must
@@ -428,6 +434,7 @@ compiled into the app too.
 | `ProviderAccounts.swift`        | `ProviderHome` — the one config home per vendor Sissy meters, and every path resolved from it, so a credential and a log tree can never be read out of two different places |
 | `ClaudeCredentials.swift`       | `ClaudeCredentials`, its lookup outcome, and `loadOffPool`, the one-at-a-time bounded read behind the limits probe. Never writes a credential and never refreshes one: Anthropic's refresh tokens rotate on use, so spending one would sign the user out of their own terminal |
 | `KeychainAccess.swift`          | The vendor-neutral half of a keychain read: `CredentialLookup`, the query with its two suppressors, `copyMatching` with the process-wide third, `suppressingInteraction`'s bounded lock, the outcome table `classify`, and `offPool`. Also `SissyKeychainItems`, the save, load, delete and listing every item Sissy files under a service of its own goes through (the claude.ai sessions, the linked Codex accounts, the forge tokens) |
+| `ClaudeCLIProfile.swift`       | The `oauthAccount` block of the CLI's config file, which a switch replaces with the new account's identity under the CLI's own lock, leaving the CLI to fill back what Sissy does not hold |
 | `ClaudeCLISlot.swift`          | Every place Claude Code keeps one home's credential (the keychain items and `<home>/.credentials.json`), the one the CLI is using, and `ClaudeCredentialBlob`, the account half a switch archives and merges. `ClaudeCodeCredentials` reads the same lookup for the limits probe |
 | `ClaudeProfile.swift`           | Reads the plan, the tier, the account and the vendor's own cached credits reply out of the CLI's own `.claude.json` (`CLAUDE_CONFIG_DIR` or `$HOME`); no keychain and no network. A cached reading carries the vendor's own `fetchedAt`, which the panel prints beside it |
 | `ClaudeUsagePayload.swift`      | The one parser for the usage body Anthropic answers with, wherever it was read — the OAuth endpoint, claude.ai, or the CLI's cached copy of one. Measured to be the same object in all three, so there is no second reading of `spend` to drift |
