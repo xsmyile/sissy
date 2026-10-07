@@ -113,6 +113,24 @@ enum ClaudeResetGrants {
             grantID: nextID)
     }
 
+    /// What one reply says about the account's resets, for the log: how many
+    /// it offers, or why it offers none, in the vendor's own words where it
+    /// gives any. The row only ever shows a count, so a reply that drew none
+    /// left nothing behind to say whether the vendor refused the account, the
+    /// agent, or simply had no grant left.
+    static func note(_ body: [String: Any], now: Date) -> String {
+        guard let block = body[statusKey] as? [String: Any] else {
+            return "the reply carried no reset block"
+        }
+        guard block["eligible"] as? Bool == true else {
+            let reason = UsageReaderShared.sanitizedDisplayText(block["ineligible_reason"] as? String)
+            return "ineligible (\(reason ?? "no reason given"))"
+        }
+        guard let offered = status(body, now: now) else { return "no grant left that clears a window" }
+        let usable = offered.resets.applicable.map { "\($0) usable now" } ?? "usable now unknown"
+        return "\(offered.resets.available) available, " + usable
+    }
+
     /// Three dot-separated runs of digits, which is every version the CLI
     /// has shipped under.
     static func isVersion(_ text: String) -> Bool {

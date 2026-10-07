@@ -52,6 +52,28 @@ final class ClaudeResetGrantsTests: XCTestCase {
         XCTAssertNil(ClaudeResetGrants.status(block(eligible: false), now: Self.now))
     }
 
+    /// The log says why a reply drew no row, in the vendor's words where it
+    /// gives any: a missing block, a refused account and a spent grant are
+    /// three different things to do about it.
+    func testTheNoteSaysWhyAReplyOffersNoReset() {
+        XCTAssertEqual(ClaudeResetGrants.note([:], now: Self.now), "the reply carried no reset block")
+        var refused = block(eligible: false)
+        refused["cedar_ember"] = ["eligible": false, "ineligible_reason": "surface"]
+        XCTAssertEqual(ClaudeResetGrants.note(refused, now: Self.now), "ineligible (surface)")
+        XCTAssertEqual(
+            ClaudeResetGrants.note(block(left: 0), now: Self.now), "no grant left that clears a window")
+        XCTAssertEqual(ClaudeResetGrants.note(block(), now: Self.now), "1 available, 1 usable now")
+    }
+
+    /// Every log line leads with the instant it was written, offset included,
+    /// so a switch and the reading after it can be put on the clock.
+    func testALogLineLeadsWithItsInstant() throws {
+        let rome = try XCTUnwrap(TimeZone(identifier: "Europe/Rome"))
+        XCTAssertEqual(
+            SissyLogLine.stamped("sissy: hello\nforged", at: Self.now, zone: rome),
+            "2026-09-21T16:13:20+02:00 sissy: hello\\nforged")
+    }
+
     func testASpentOrLapsedGrantOffersNothing() {
         XCTAssertNil(ClaudeResetGrants.status(block(left: 0), now: Self.now))
         XCTAssertNil(
