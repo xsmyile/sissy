@@ -213,13 +213,25 @@ enum SissyLogLine {
         }
         return out.count > maxCharacters ? String(out.prefix(maxCharacters)) + "…" : out
     }
+
+    /// `message` as one line, led by the instant it was written in the Mac's
+    /// own zone, with the offset, to the second.
+    ///
+    /// Until 0.3.4 the lines carried no time at all, so a switch, a refusal
+    /// and the reading that followed them could be put in order but never on
+    /// the clock: a missing reset on 2026-10-06 could not be matched to the
+    /// account the CLI was on at that hour.
+    static func stamped(_ message: String, at instant: Date, zone: TimeZone = .current) -> String {
+        Date.ISO8601FormatStyle(timeZoneSeparator: .colon, timeZone: zone).format(instant) + " "
+            + single(message)
+    }
 }
 
 let logFile = SissyLogFile(directory: SissyPaths.logsDir)
 let standardErrorLog = SissyLogStream(handle: .standardError)
 
 func sissyLog(_ message: String) {
-    let data = Data((SissyLogLine.single(message) + "\n").utf8)
+    let data = Data((SissyLogLine.stamped(message, at: Date()) + "\n").utf8)
     standardErrorLog.write(data)
     logFile.write(data)
 }

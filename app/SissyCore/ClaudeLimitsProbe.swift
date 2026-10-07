@@ -85,6 +85,8 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
         /// The resets the reply offers and the grant a press would spend,
         /// nil where it offers none.
         var resets: ClaudeResetGrants.Status?
+        /// `ClaudeResetGrants.note` of the same reply, for the log.
+        var resetsNote: String?
     }
 
     /// One spend as it goes to the vendor.
@@ -122,6 +124,11 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     /// Whether a spend is in flight, so a second press cannot resend the same
     /// attempt beside it and read its answer twice.
     private var spending = false
+    /// The last resets note logged and the credential that read it, so a
+    /// reading that says the same thing as the one before it adds no line,
+    /// while the first reading after a switch always does: two accounts can
+    /// answer the same words, and the log must still show the second was read.
+    private var lastResetsNote: (credential: String, note: String)?
 
     /// `credentials` leads so a trailing closure still names the read: it is
     /// the half nearly every test answers for.
@@ -348,6 +355,13 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
             nextGrant = reading.resets.map {
                 ($0.grantID, ClaudeCredentialBlob.fingerprint(of: credentials.accessToken))
             }
+            let credential = ClaudeCredentialBlob.fingerprint(of: credentials.accessToken)
+            if let note = reading.resetsNote,
+                lastResetsNote?.note != note || lastResetsNote?.credential != credential
+            {
+                lastResetsNote = (credential, note)
+                sissyLog("sissy: Claude Code resets: \(note)")
+            }
             await backoff?.record(nil)
             return Self.refreshInterval
         } catch {
@@ -410,7 +424,8 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
         Reading(
             windows: ClaudeUsagePayload.windows(payload),
             credits: ClaudeUsagePayload.credits(payload, observedAt: observedAt),
-            resets: ClaudeResetGrants.status(payload, now: observedAt)
+            resets: ClaudeResetGrants.status(payload, now: observedAt),
+            resetsNote: ClaudeResetGrants.note(payload, now: observedAt)
         )
     }
 

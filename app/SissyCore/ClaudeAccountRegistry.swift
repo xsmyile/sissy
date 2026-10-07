@@ -206,7 +206,7 @@ actor ClaudeAccountRegistry {
         guard let current else {
             lastSeenToken = nil
             let shown = published.load()
-            if shown.activeUUID != nil || shown.activeCredential != nil { setActive(nil) }
+            if shown.activeUUID != nil || shown.activeCredential != nil { setActive(nil, cause: .signedOut) }
             return published.load() != before
         }
         guard let parsed = ClaudeCredentialBlob.credentials(in: current),
@@ -284,8 +284,8 @@ actor ClaudeAccountRegistry {
         }
         if let failure = write(credential, to: targets, over: before) { throw failure }
         lastSeenToken = ClaudeCredentialBlob.credentials(in: credential)?.accessToken
-        setActive(uuid)
         sissyLog("sissy: wrote the Claude Code credential for \(uuid) into the CLI's slots")
+        setActive(uuid, cause: .switched)
     }
 
     /// Makes sure nothing any name holds is lost by the write: every account
@@ -444,7 +444,7 @@ actor ClaudeAccountRegistry {
             return true
         }
         lastSeenToken = parsed.accessToken
-        setActive(identity.uuid)
+        setActive(identity.uuid, cause: .seenInSlot)
         return true
     }
 
@@ -550,8 +550,26 @@ actor ClaudeAccountRegistry {
         }
     }
 
-    private func setActive(_ uuid: String?) {
+    /// What moved the active account, which is what the log line says.
+    private enum ActiveCause: String {
+        case switched = "switched by Sissy"
+        case seenInSlot = "found in the CLI's credential"
+        case signedOut = "the CLI's credential is empty"
+    }
+
+    /// Records the active account, and logs it whenever it moves.
+    ///
+    /// The line says which account it moved from and what moved it, because a
+    /// switch that did not hold is otherwise invisible: on 2026-10-06 the
+    /// CLI's slot changed after a switch without any line saying to whom, and
+    /// a capture that found another account was not logged at all.
+    private func setActive(_ uuid: String?, cause: ActiveCause) {
         guard var index = Self.loadIndex(store) else { return }
+        if index.activeUUID != uuid {
+            sissyLog(
+                "sissy: Claude Code is signed in as \(uuid ?? "nobody"), "
+                    + "was \(index.activeUUID ?? "nobody") (\(cause.rawValue))")
+        }
         index.activeUUID = uuid
         do {
             try store.saveIndex(index)
