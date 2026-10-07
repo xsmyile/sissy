@@ -124,9 +124,11 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     /// Whether a spend is in flight, so a second press cannot resend the same
     /// attempt beside it and read its answer twice.
     private var spending = false
-    /// The last resets note logged, so a reading that says the same thing as
-    /// the one before it adds no line.
-    private var lastResetsNote: String?
+    /// The last resets note logged and the credential that read it, so a
+    /// reading that says the same thing as the one before it adds no line,
+    /// while the first reading after a switch always does: two accounts can
+    /// answer the same words, and the log must still show the second was read.
+    private var lastResetsNote: (credential: String, note: String)?
 
     /// `credentials` leads so a trailing closure still names the read: it is
     /// the half nearly every test answers for.
@@ -353,8 +355,11 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
             nextGrant = reading.resets.map {
                 ($0.grantID, ClaudeCredentialBlob.fingerprint(of: credentials.accessToken))
             }
-            if let note = reading.resetsNote, note != lastResetsNote {
-                lastResetsNote = note
+            let credential = ClaudeCredentialBlob.fingerprint(of: credentials.accessToken)
+            if let note = reading.resetsNote,
+                lastResetsNote?.note != note || lastResetsNote?.credential != credential
+            {
+                lastResetsNote = (credential, note)
                 sissyLog("sissy: Claude Code resets: \(note)")
             }
             await backoff?.record(nil)
