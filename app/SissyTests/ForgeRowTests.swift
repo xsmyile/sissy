@@ -30,11 +30,6 @@ final class ForgeRowTests: XCTestCase {
     /// reading to be hours old *without* crossing midnight — `readAt` itself
     /// is just after 01:00, so subtracting two hours from it lands on the day
     /// before and the row would lose its figures to the roll-over rule.
-    ///
-    /// It is also the hour the age wording can be read at all: at 01:00 in this
-    /// zone the vendor day `Today` names has not opened, so the row's caption
-    /// is `ForgeWindow.opens`' sentence rather than an age. Those tests take
-    /// this instant for that reason as well.
     private static let midday =
         Calendar.current.date(
             bySettingHour: 12, minute: 0, second: 0, of: readAt) ?? readAt
@@ -86,46 +81,34 @@ final class ForgeRowTests: XCTestCase {
         now: Date = ForgeRowTests.readAt
     ) -> String? {
         UsageFormat.forgeNotice(
-            row.kind, failure: row.failure, readAt: row.readAt, opensAt: row.opensAt,
-            refreshing: refreshing, now: now)
+            failure: row.failure, readAt: row.readAt, refreshing: refreshing, now: now)
     }
 
-    /// A window the vendor has not begun counting says so, rather than dating
-    /// a reading it does not have. The dash beside it is the absence of a
-    /// figure; this is why there is one, in the vendor's name and a clock time.
-    func testAWindowTheVendorHasNotOpenedSaysWhenItsDayStarts() {
-        let opensAt = Self.readAt.addingTimeInterval(59 * 60)
+    /// Just after local midnight the row dates its reading like any other
+    /// hour: both forges count the local day from its first second, so there
+    /// is no vendor day still to open. Through 0.3.3 the caption read
+    /// `GitHub's day starts at 02:00` here, over a row with no figures.
+    func testJustAfterMidnightTheRowDatesItsReading() {
         XCTAssertEqual(
-            UsageFormat.forgeNotice(
-                .gitHub, failure: nil, readAt: Self.readAt, opensAt: opensAt,
-                refreshing: false, now: Self.readAt),
-            "GitHub's day starts at " + UsageFormat.clock(opensAt))
+            UsageFormat.forgeNotice(failure: nil, readAt: Self.readAt, refreshing: false, now: Self.readAt),
+            "read " + UsageFormat.age(0))
     }
 
-    /// The hover names the clock time the vendor's day starts at here, which is
-    /// what the caption leans on and what "whole UTC days" alone left the
-    /// reader to work out.
-    func testTheHoverNamesWhenTheVendorsDayStartsHere() {
-        let dayStart = Self.readAt.addingTimeInterval(59 * 60)
+    /// The hover says what each vendor counts and no longer names UTC days,
+    /// which the figures under it are not over.
+    func testTheHoverNamesWhatEachVendorCounts() {
         let tooltip = UsageFormat.forgeTooltip(
             .gitLab, host: Self.gitLab.host, login: "davide", period: .preset(.today),
-            boundedToOneYear: false, vendorDayStart: dayStart)
-        XCTAssertTrue(
-            tooltip.contains(
-                "Events GitLab recorded for you, in UTC days that start at "
-                    + UsageFormat.clock(dayStart) + " here"),
-            tooltip)
+            boundedToOneYear: false)
+        XCTAssertTrue(tooltip.contains("Events GitLab recorded for you"), tooltip)
+        XCTAssertFalse(tooltip.contains("UTC"), tooltip)
     }
 
-    /// A refused token outranks it: nobody can read a window whose credential
-    /// the vendor is turning away, and that one has something to do about it.
-    func testARefusalOutranksAWindowThatHasNotOpened() throws {
+    /// A refused token says so beside the age of the last reading it had.
+    func testARefusalSaysSoBesideTheLastReading() throws {
         let notice = try XCTUnwrap(
             UsageFormat.forgeNotice(
-                .gitHub, failure: .unauthorized, readAt: Self.readAt,
-                opensAt: Self.readAt.addingTimeInterval(59 * 60), refreshing: false,
-                now: Self.readAt))
-        XCTAssertFalse(notice.contains("day starts"), notice)
+                failure: .unauthorized, readAt: Self.readAt, refreshing: false, now: Self.readAt))
         XCTAssertTrue(notice.contains("last read"), notice)
     }
 

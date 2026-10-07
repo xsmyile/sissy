@@ -122,16 +122,6 @@ struct UsagePanelSnapshot: Equatable {
         let readAt: Date?
         /// Why the last read did not work, nil on one that did.
         let failure: ForgeReadFailure?
-        /// When the vendor starts counting the window this row is over, nil
-        /// for one it is already counting.
-        ///
-        /// Only ever `today`, and only east of Greenwich: the row is over the
-        /// vendor's whole UTC day of the local date's name, which opens after
-        /// the local day does by the length of the offset. The row has no
-        /// figures for that hour or two — the reading is absent rather than
-        /// zero — and this is what lets the caption say why instead of leaving
-        /// a dash that reads as a vendor which answered nothing.
-        let opensAt: Date?
         /// The newest thing the account did, the event rather than a sentence
         /// for the reason `readAt` is a date: its age is worded on the view's
         /// own clock.
@@ -1774,10 +1764,6 @@ struct UsagePanelSnapshot: Equatable {
         _ readings: [ForgeActivityReading], period: UsagePeriod, now: Date,
         calendar: Calendar = .current
     ) -> [ForgeRow] {
-        let opensAt = ForgeWindow.opens(period, now: now, calendar: calendar)
-        var vendorCalendar = Calendar(identifier: .gregorian)
-        vendorCalendar.timeZone = .gmt
-        let vendorDayStart = vendorCalendar.startOfDay(for: now)
         let shared = Set(Dictionary(grouping: readings, by: \.kind).filter { $0.value.count > 1 }.keys)
         return readings.map { reading in
             let name = shared.contains(reading.kind) ? reading.host : UsageFormat.forgeName(reading.kind)
@@ -1804,12 +1790,10 @@ struct UsagePanelSnapshot: Equatable {
                 comments: comments,
                 readAt: reading.hasEverRead ? reading.readAt : nil,
                 failure: reading.failure,
-                opensAt: opensAt,
                 latest: reading.latest,
                 tooltip: UsageFormat.forgeTooltip(
                     reading.kind, host: reading.host, login: reading.login, period: .preset(period),
-                    boundedToOneYear: reading.activity.contributionsBoundedToOneYear,
-                    vendorDayStart: vendorDayStart)
+                    boundedToOneYear: reading.activity.contributionsBoundedToOneYear)
                     + (floored ? "\n" + UsageFormat.forgeFloorNote : ""),
                 mergedHelp: UsageFormat.forgeMergedHelp(reading.kind),
                 issuesHelp: UsageFormat.forgeIssuesHelp(reading.kind),
@@ -1834,9 +1818,6 @@ struct UsagePanelSnapshot: Equatable {
     ) -> [ForgeRow] {
         let matching = answer?.span == span ? answer?.readings ?? [] : []
         let byID = Dictionary(matching.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
-        var vendorCalendar = Calendar(identifier: .gregorian)
-        vendorCalendar.timeZone = .gmt
-        let vendorDayStart = vendorCalendar.startOfDay(for: now)
         let shared = Set(Dictionary(grouping: readings, by: \.kind).filter { $0.value.count > 1 }.keys)
         return readings.map { reading in
             let name = shared.contains(reading.kind) ? reading.host : UsageFormat.forgeName(reading.kind)
@@ -1854,11 +1835,10 @@ struct UsagePanelSnapshot: Equatable {
                 comments: answer.flatMap { spanFigure($0.counters[.comments]) },
                 readAt: answer?.readAt,
                 failure: answer.flatMap(spanFailure),
-                opensAt: nil,
                 latest: reading.latest,
                 tooltip: UsageFormat.forgeTooltip(
                     reading.kind, host: reading.host, login: login, period: .days(span),
-                    boundedToOneYear: false, vendorDayStart: vendorDayStart),
+                    boundedToOneYear: false),
                 mergedHelp: UsageFormat.forgeMergedHelp(reading.kind),
                 issuesHelp: UsageFormat.forgeIssuesHelp(reading.kind),
                 commentsHelp: UsageFormat.forgeCommentsHelp(reading.kind),

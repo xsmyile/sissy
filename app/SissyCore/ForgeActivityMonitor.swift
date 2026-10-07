@@ -109,13 +109,14 @@ actor ForgeActivityMonitor {
     /// Bumped by every stop, so a request in flight when the monitor was torn
     /// down cannot publish over the run that replaced it.
     private var generation = 0
-    /// The selected vendor days, never the bounds themselves: a span ending
+    /// The selected local days and their zone, never the bounds themselves: a span ending
     /// today caps its end at each call's own `now`, so keying on it shared
     /// nothing between two reads of the same dates.
     private struct SpanKey: Hashable {
         let connection: String
-        let after: String
-        let before: String
+        let firstDay: String
+        let lastDay: String
+        let zone: String
     }
     private struct SpanRunning {
         let id: UUID
@@ -172,14 +173,15 @@ actor ForgeActivityMonitor {
         guard let bounds = ForgeSpanFeed.bounds(from: from, to: to, now: now) else {
             return absent(.invalidDates)
         }
-        guard bounds.start <= bounds.end else { return absent(.notOpened) }
         if let failure = spanBlock(connection.id, now: now) { return absent(.failure(failure)) }
         let lookup = tokenSource(connection.id, false)
         guard case .found(let token) = lookup else { return absent(.failure(Self.credentialFailure(lookup))) }
         if let failure = ForgeRefusalStore.shared.failure(url: connection.root, token: token, now: now) {
             return absent(.failure(failure))
         }
-        let key = SpanKey(connection: connection.id, after: bounds.after, before: bounds.before)
+        let key = SpanKey(
+            connection: connection.id, firstDay: bounds.firstDay, lastDay: bounds.lastDay,
+            zone: Calendar.current.timeZone.identifier)
         let waiter = UUID()
         if let cached = spanCache[key], now.timeIntervalSince(cached.readAt) < Self.spanCacheTTL {
             return cached
