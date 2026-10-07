@@ -1136,7 +1136,7 @@ enum GitLabActivityFeed {
             }
             let request = ForgeActivityFeed.request(
                 url, token: token, header: tokenHeader, scheme: nil)
-            let body = try await ForgeActivityFeed.send(request).data
+            let (body, response) = try await ForgeActivityFeed.send(request)
             guard let rows = (try? JSONSerialization.jsonObject(with: body)) as? [[String: Any]]
             else { return nil }
             let stamps = rows.compactMap {
@@ -1145,9 +1145,16 @@ enum GitLabActivityFeed {
             guard stamps.count == rows.count else { return nil }
             let tally = split.tally(stamps)
             total += tally.count
-            if tally.finished || rows.count < sliverPage { return total }
+            if tally.finished || isLastPage(response) { return total }
         }
         return nil
+    }
+
+    /// Whether a page of the feed is its last, by GitLab's own header rather
+    /// than by the rows it carries: GitLab paginates first and then drops the
+    /// events the token may not see, so a short page can still have a next one.
+    static func isLastPage(_ response: HTTPURLResponse) -> Bool {
+        (response.value(forHTTPHeaderField: nextPageHeader) ?? "").isEmpty
     }
 
     /// The count a reply's headers carry, nil where they carry none.

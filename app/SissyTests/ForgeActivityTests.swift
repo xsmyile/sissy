@@ -223,6 +223,14 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertTrue(west.tally(oldestFirst).finished)
     }
 
+    /// A short page is not the last one: GitLab drops the events the token may
+    /// not see after paginating, so only an empty `x-next-page` ends the feed.
+    func testOnlyTheNextPageHeaderEndsTheStretch() throws {
+        XCTAssertFalse(GitLabActivityFeed.isLastPage(try Self.eventsReply(["x-next-page": "2"])))
+        XCTAssertTrue(GitLabActivityFeed.isLastPage(try Self.eventsReply(["x-next-page": ""])))
+        XCTAssertTrue(GitLabActivityFeed.isLastPage(try Self.eventsReply([:])))
+    }
+
     /// A count moved by a stretch keeps its kind: a floor stays a floor.
     func testACountMovedByAStretchKeepsItsKind() {
         XCTAssertEqual(ForgeEventCount.exact(533).adding(-4), .exact(529))
