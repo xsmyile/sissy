@@ -86,22 +86,18 @@ final class DiskVolumesTests: XCTestCase {
         XCTAssertEqual(attributes(uuid: nil).id, "/Volumes/Backup")
     }
 
-    func testTheImportantUsageFigureIsPreferred() {
-        let volume = DiskVolumes.volume(attributes(), importantFree: 900)
-        XCTAssertEqual(volume, DiskVolume(id: "B", name: "Backup", total: 2_000, free: 900))
-        XCTAssertEqual(volume?.used, 1_100)
-    }
-
-    /// A volume that answers no important-usage figure, which is what a
-    /// non-APFS drive does, falls back to the plain available one.
-    func testAVolumeWithoutTheImportantFigureFallsBackToAvailable() {
-        XCTAssertEqual(DiskVolumes.volume(attributes(), importantFree: nil)?.free, 800)
+    /// The free space is what a write meets, the figure `df` prints, never
+    /// the larger one Finder shows with the purgeable space in it.
+    func testTheFreeSpaceIsThePlainAvailableFigure() {
+        let volume = DiskVolumes.volume(attributes())
+        XCTAssertEqual(volume, DiskVolume(id: "B", name: "Backup", total: 2_000, free: 800))
+        XCTAssertEqual(volume?.used, 1_200)
     }
 
     func testAVolumeWithNoCapacityIsNotAVolume() {
-        XCTAssertNil(DiskVolumes.volume(attributes(total: nil), importantFree: 1))
-        XCTAssertNil(DiskVolumes.volume(attributes(total: 0), importantFree: 1))
-        XCTAssertNil(DiskVolumes.volume(attributes(available: nil), importantFree: nil))
+        XCTAssertNil(DiskVolumes.volume(attributes(total: nil)))
+        XCTAssertNil(DiskVolumes.volume(attributes(total: 0)))
+        XCTAssertNil(DiskVolumes.volume(attributes(available: nil)))
     }
 
     func testPurgeableIsTheImportantFigureLessTheAvailableOne() {
@@ -117,7 +113,7 @@ final class DiskVolumesTests: XCTestCase {
     }
 
     func testAnUnnamedVolumeIsNamedByItsMountPoint() {
-        XCTAssertEqual(DiskVolumes.volume(attributes(name: nil), importantFree: 1)?.name, "Backup")
+        XCTAssertEqual(DiskVolumes.volume(attributes(name: nil))?.name, "Backup")
     }
 
     func testVolumesAreOrderedByName() {

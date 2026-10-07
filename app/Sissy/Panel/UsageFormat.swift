@@ -2415,6 +2415,12 @@ extension UsageFormat {
             + " · critical under " + storage(physicalMemory * MacHealthLevel.diskCriticalMultiple)
     }
 
+    /// The hover on what macOS can free: what it is, and why the free space
+    /// above leaves it out.
+    static let diskPurgeableHelp =
+        "Snapshots and caches macOS deletes on its own when space runs low. "
+        + "Not counted as free: a large write can fail before macOS gets to it."
+
     /// `9.4 GB`, the purgeable space, and a dash where it could not be read.
     static func diskPurgeable(_ purgeable: Int64?) -> String {
         purgeable.map { storage(clampedBytes($0)) } ?? "—"

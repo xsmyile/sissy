@@ -9,7 +9,7 @@ import SwiftUI
 /// disk's alone, while the menu bar's dot still wears the worse of the two.
 ///
 /// Laid out like `PanelMac`: the headline leads the first platter above the
-/// bar it captions, the purgeable space sits under a divider, and the volumes
+/// bar it captions, what macOS can free sits under a divider, and the volumes
 /// stand on a platter of their own. Swap is the Mac tab's, which samples it
 /// with the memory. The host goes with the popover when it closes, so
 /// the caption's clock costs nothing while nobody is looking.
@@ -43,7 +43,8 @@ struct PanelDisk: View {
                     .accessibilityLabel(block.free.text)
                     .accessibilityValue(block.thresholds)
                     Divider()
-                    PanelFigureRow(label: "Purgeable", value: block.purgeable)
+                    PanelFigureRow(label: "macOS can free", value: block.purgeable)
+                        .help(UsageFormat.diskPurgeableHelp)
                 }
             }
             DiskActivityPlatter(engine: engine)
