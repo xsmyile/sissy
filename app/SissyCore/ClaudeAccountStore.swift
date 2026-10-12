@@ -257,6 +257,46 @@ struct ClaudeAccountStore: Sendable {
         /// one it can switch to without reading every archived secret on each
         /// publish. Optional so an index written before it decodes as it was.
         var refreshExpiries: [String: Date]?
+        /// `ClaudeCredentialBlob.fingerprint(of:)` of every access token
+        /// archived under each account, oldest first, at most `lineageLimit`
+        /// of them. An index written before it decodes with none recorded.
+        ///
+        /// What lets a switch recognise an older rotation of an account it
+        /// holds. A renewal that reaches only the name the CLI reads leaves
+        /// the others on the token the switch wrote while the archive moves
+        /// on with the renewed one. Measured 2026-10-10: five presses
+        /// refused in a row, each on a sibling whose access token had expired
+        /// and that Anthropic therefore answered 401 for, while the account
+        /// it belonged to was archived and current. A hash is not a token:
+        /// it cannot be spent, so the index still holds no secret.
+        var lineage: [String: [String]] = [:]
+
+        /// How many of an account's rotations the lineage keeps. The CLI
+        /// renews about every eight hours, so this reaches back days rather
+        /// than weeks: a sibling older than that has a refresh token long
+        /// since spent, and is refused as it always was.
+        static let lineageLimit = 32
+
+        /// The index with this access token recorded under the account, the
+        /// oldest dropped past `lineageLimit`.
+        func recording(_ accessToken: String, for uuid: String) -> Self {
+            let fingerprint = ClaudeCredentialBlob.fingerprint(of: accessToken)
+            var known = lineage[uuid] ?? []
+            guard !known.contains(fingerprint) else { return self }
+            known.append(fingerprint)
+            var updated = self
+            updated.lineage[uuid] = Array(known.suffix(Self.lineageLimit))
+            return updated
+        }
+
+        /// The account this access token was archived under, and nil when
+        /// none was or more than one claims it: an owner picked out of two
+        /// would be whichever the dictionary listed first.
+        func account(archiving accessToken: String) -> String? {
+            let fingerprint = ClaudeCredentialBlob.fingerprint(of: accessToken)
+            let owners = lineage.filter { $0.value.contains(fingerprint) }.keys
+            return owners.count == 1 ? owners.first : nil
+        }
     }
 
     /// Why the store would not do what it was asked.
@@ -368,11 +408,18 @@ struct ClaudeAccountStore: Sendable {
     /// live one instead of going stale behind it. Only the account half is
     /// kept: whatever else the CLI's blob carries is the CLI's as it is now,
     /// and a copy of it frozen here is what a switch used to roll back.
+    ///
+    /// The token joins the account's lineage whether or not it is the copy
+    /// kept, because an older one offered here has still been identified as
+    /// this account.
     func remember(_ identity: ClaudeAccountIdentity, credential: Data) throws {
         var index = try loadIndex()
-        guard let account = ClaudeCredentialBlob.accountOnly(credential) else {
+        guard let account = ClaudeCredentialBlob.accountOnly(credential),
+            let token = ClaudeCredentialBlob.credentials(in: account)?.accessToken
+        else {
             throw StoreError.noAccount
         }
+        index = index.recording(token, for: identity.uuid)
         if try !holdsFresherCredential(than: account, for: identity.uuid) {
             try secrets.write(identity.uuid, account)
             var expiries = index.refreshExpiries ?? [:]
@@ -485,5 +532,17 @@ enum ClaudeWebAccountProfile {
         return memberships.first {
             ($0[organizationKey] as? [String: Any])?[idKey] as? String == uuid
         }
+    }
+}
+
+extension ClaudeAccountStore.Index {
+    /// The synthesized decoder's reading, except that a missing `lineage` is
+    /// an empty one rather than a file that will not read.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accounts = try container.decode([ClaudeAccountIdentity].self, forKey: .accounts)
+        activeUUID = try container.decodeIfPresent(String.self, forKey: .activeUUID)
+        refreshExpiries = try container.decodeIfPresent([String: Date].self, forKey: .refreshExpiries)
+        lineage = try container.decodeIfPresent([String: [String]].self, forKey: .lineage) ?? [:]
     }
 }

@@ -164,6 +164,15 @@ struct ClaudeCLISlot: Sendable {
     enum Name: Hashable, Sendable {
         case keychain(String)
         case file
+
+        /// The name as a log line carries it: the keychain service, or the
+        /// mirror's file name. Neither is a secret.
+        var label: String {
+            switch self {
+            case .keychain(let service): return service
+            case .file: return ".credentials.json"
+            }
+        }
     }
 
     /// Every name, in the order the CLI reads them. Computed on each call,
