@@ -186,8 +186,9 @@ struct PanelOverview: View {
 
     // MARK: Providers
 
-    /// One row per provider, each carrying the window it is closest to running
-    /// out of. A row opens that provider's page, which is where its other
+    /// One row per provider account, each carrying the window it is closest
+    /// to running out of, gathered under one label per vendor that has more
+    /// than one. A row opens that provider's page, which is where its other
     /// windows, its plan, its account, its day and its own projects live.
     ///
     /// **Only while the window reaches today.** A gauge is pressure now, and
@@ -202,14 +203,19 @@ struct PanelOverview: View {
         } content: {
             VStack(alignment: .leading, spacing: 10) {
                 if snapshot.includesToday {
-                    ForEach(snapshot.gaugeRows) { row in
-                        Button {
-                            openProvider(row.provider, row.account)
-                        } label: {
-                            providerRow(row)
+                    ForEach(Self.vendorGroups(snapshot.gaugeRows)) { group in
+                        if group.rows.count > 1 {
+                            vendorHeader(group)
                         }
-                        .buttonStyle(.plain)
-                        .help(Self.legendHelp(row))
+                        ForEach(group.rows) { row in
+                            Button {
+                                openProvider(row.provider, row.account)
+                            } label: {
+                                providerRow(row, grouped: group.rows.count > 1)
+                            }
+                            .buttonStyle(.plain)
+                            .help(Self.legendHelp(row))
+                        }
                     }
                 } else {
                     ForEach(snapshot.spendRows) { row in
@@ -323,12 +329,68 @@ struct PanelOverview: View {
         return ProviderPalette.statusTint(status.indicator)
     }
 
-    /// The row's name as one run, so the account cannot wrap away from the
-    /// vendor it qualifies, with the status tint on the vendor's half alone.
-    private static func rowName(_ row: UsagePanelSnapshot.GaugeRow) -> Text {
-        let name = Text(row.name).foregroundStyle(nameTint(row.status))
-        guard let qualifier = row.qualifier else { return name }
-        return Text("\(name) · \(qualifier)")
+    /// One vendor's rows, in the order the snapshot lists them.
+    struct VendorGroup: Identifiable {
+        let id: String
+        let rows: [UsagePanelSnapshot.GaugeRow]
+    }
+
+    /// The rows gathered by vendor, so a vendor with several accounts is
+    /// named once rather than once a row.
+    ///
+    /// Measured 2026-10-12 on a Mac about to add a third Claude account:
+    /// three rows reading `Claude · …` said the vendor three times and, with
+    /// its status degraded, coloured one incident three times.
+    static func vendorGroups(_ rows: [UsagePanelSnapshot.GaugeRow]) -> [VendorGroup] {
+        var order: [String] = []
+        var byVendor: [String: [UsagePanelSnapshot.GaugeRow]] = [:]
+        for row in rows {
+            if byVendor[row.provider] == nil { order.append(row.provider) }
+            byVendor[row.provider, default: []].append(row)
+        }
+        return order.map { VendorGroup(id: $0, rows: byVendor[$0] ?? []) }
+    }
+
+    /// The label over a vendor's accounts: its mark, its name in the status
+    /// tint, and how many accounts follow.
+    ///
+    /// A label and not a row, so nothing under it is indented: every
+    /// account's name and bar start at the gutter a single-account vendor's
+    /// do, and the bars stay comparable down the whole block, which is the
+    /// reason they are stacked. Rejected 2026-10-12 with the accounts set in
+    /// under the label, where three bars started further right than the one
+    /// beside them.
+    private func vendorHeader(_ group: VendorGroup) -> some View {
+        let status = group.rows.first?.status
+        let name = group.rows.first?.name ?? group.id
+        return HStack(spacing: 6) {
+            ProviderMark(id: group.id)
+            Text(name)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Self.nameTint(status))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(UsageFormat.accountsCaption(group.rows.count))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+        .help(status.map { Self.statusHelp(group.id, $0) } ?? name)
+    }
+
+    private static func statusHelp(_ provider: String, _ status: UsagePanelSnapshot.StatusRow)
+        -> String
+    {
+        guard status.indicator.isDegraded else { return UsageFormat.providerName(provider) }
+        return UsageFormat.statusSummary(provider: provider, label: status.label, checkedAt: nil)
+    }
+
+    /// What the row is called: the vendor in its status tint when it is the
+    /// vendor's only row, the account alone under a vendor's label.
+    private static func rowName(_ row: UsagePanelSnapshot.GaugeRow, grouped: Bool) -> Text {
+        guard grouped else { return Text(row.name).foregroundStyle(nameTint(row.status)) }
+        return Text(row.qualifier ?? row.name)
     }
 
     /// What the row hovers: the vendor's own sentence when there is one worth
@@ -373,12 +435,29 @@ struct PanelOverview: View {
     /// at the gutter and runs the full width on every row by construction, the
     /// name has the panel rather than a column, and the reading sits on the
     /// text line where three digits fit. It costs 8 pt a row.
-    private func providerRow(_ row: UsagePanelSnapshot.GaugeRow) -> some View {
+    ///
+    /// **The leading window's reset sits under its bar**, so how long until a
+    /// full account is usable again is read without opening its page. Only
+    /// that window's, because it is the one the row's figure is of. The row
+    /// ticks for the reason `WindowRowView` does: the line is a duration, and
+    /// one built with the body goes stale while the engine coalesces emits.
+    private func providerRow(_ row: UsagePanelSnapshot.GaugeRow, grouped: Bool) -> some View {
         let binding = UsagePanelSnapshot.binding(row.windows)
-        return VStack(alignment: .leading, spacing: 3) {
+        return TimelineView(.periodic(from: .now, by: Self.resetTick)) { context in
+            providerRowBody(row, grouped: grouped, binding: binding, now: context.date)
+        }
+    }
+
+    private static let resetTick: TimeInterval = 60
+
+    private func providerRowBody(
+        _ row: UsagePanelSnapshot.GaugeRow, grouped: Bool,
+        binding: UsagePanelSnapshot.WindowRow?, now: Date
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                ProviderMark(id: row.provider)
-                Self.rowName(row)
+                if !grouped { ProviderMark(id: row.provider) }
+                Self.rowName(row, grouped: grouped)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -399,6 +478,15 @@ struct PanelOverview: View {
                     tint: ProviderPalette.tint(for: row.provider),
                     pace: binding.pace
                 )
+                if let resetsAt = binding.resetsAt,
+                    let label = UsageFormat.resetLabel(resetsAt, now: now)
+                {
+                    Text("resets " + label)
+                        .font(.system(size: 10, weight: binding.percent >= 100 ? .semibold : .regular))
+                        .monospacedDigit()
+                        .foregroundStyle(binding.percent >= 100 ? .primary : .secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .contentShape(.rect)

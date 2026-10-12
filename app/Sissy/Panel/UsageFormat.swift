@@ -1425,6 +1425,11 @@ enum UsageFormat {
 
 /// How the panel words an account of a vendor that has more than one.
 extension UsageFormat {
+    /// The count beside a vendor's name over its accounts, `3 accounts`.
+    static func accountsCaption(_ count: Int) -> String {
+        agentCount(count, singular: "account", plural: "accounts")
+    }
+
     /// Said on the page of an account Sissy knows but holds no reading for:
     /// it has an archived credential and no live source, which is every
     /// account signed into this CLI that has not had a session linked to it.
