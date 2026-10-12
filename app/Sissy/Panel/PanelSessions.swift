@@ -219,8 +219,9 @@ struct PanelSessions: View {
     /// When the day was worked, as blocks along a bar of the whole day.
     ///
     /// The picture answers what the figure cannot — whether twelve hours were
-    /// one stretch or seven — and it is drawn only for today, because a window
-    /// of thirty days has no single day to be a picture of.
+    /// one stretch or seven — and it is drawn only for a window of one day,
+    /// today or a past one, because a window of thirty days has no single day
+    /// to be a picture of.
     ///
     /// One intensity, not two. Inside a block the session's own turns and its
     /// sub-agents' alternate every few minutes, and across a bar this wide
@@ -249,7 +250,8 @@ struct PanelSessions: View {
                     }
                 }
                 .frame(height: Self.stripHeight)
-                .accessibilityLabel("Worked \(shape.blocks.count) times today")
+                .accessibilityLabel(
+                    UsageFormat.workedBlocksLabel(shape.blocks.count, period: shownPeriod))
             }
             Text(UsageFormat.activityCaption(window.activity, cost: window.cost))
                 .font(.system(size: Self.captionSize))

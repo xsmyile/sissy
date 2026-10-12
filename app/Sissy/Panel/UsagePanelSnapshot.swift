@@ -1386,12 +1386,13 @@ struct UsagePanelSnapshot: Equatable {
             let cost: Decimal
             /// The day's own shape, for the strip.
             ///
-            /// **Today only.** A strip is a picture of one day, and a window
-            /// of thirty has no single day to draw — a strip per day is the
-            /// spend bar this panel already removed, and one strip averaging
-            /// thirty is a day nobody worked. The caption under it reads
-            /// `activity` instead, which carries its block count for every
-            /// window.
+            /// **A window of one day only**: today, or a single day picked on
+            /// the calendar whose archived file carries its minutes. A strip
+            /// is a picture of one day, and a window of thirty has no single
+            /// day to draw — a strip per day is the spend bar this panel
+            /// already removed, and one strip averaging thirty is a day nobody
+            /// worked. The caption under it reads `activity` instead, which
+            /// carries its block count for every window.
             let shape: DayShape?
             /// How much of the window's input the cache answered, for the
             /// section that follows this window's picker.
@@ -1628,6 +1629,12 @@ struct UsagePanelSnapshot: Equatable {
                     rollup, archiveStart: frame.history[.all]?.earliestDay, now: now),
                 activity: rollup.activity,
                 cost: rollup.cost,
+                shape: rollup.earliestDay.flatMap { day in
+                    rollup.dayActivity.map {
+                        AgentsBlock.DayShape(
+                            blocks: $0.blocks, dayMinutes: Self.minutesInDay(containing: day))
+                    }
+                },
                 cache: rollup.cache)
         }
         var counted: [UsagePeriod: AgentsBlock.Window] = [.today: today]
