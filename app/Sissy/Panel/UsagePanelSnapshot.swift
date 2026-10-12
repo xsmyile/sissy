@@ -577,10 +577,24 @@ struct UsagePanelSnapshot: Equatable {
         /// on the one that was clicked. Nil for a vendor drawing one row,
         /// where the page's own fields are already that account's.
         let account: String?
+        /// The vendor's own name, which is what a degraded status colours.
         let name: String
+        /// Which of the vendor's accounts this row is, for a vendor drawing
+        /// more than one: the organisation rather than the address, since it
+        /// is shorter, it is what the user calls the account, and an email
+        /// would push every track right by however long that address happens
+        /// to be. The label is the fallback for a personal account, which
+        /// names no organisation. Nil for a vendor drawing one row.
+        let qualifier: String?
         let windows: [WindowRow]
         let notice: LimitsNotice?
         let status: StatusRow?
+
+        /// The row as one string, `Claude · Acme Srl`, for the hover and the
+        /// accessibility label that name it whole.
+        var title: String {
+            qualifier.map { "\(name) · \($0)" } ?? name
+        }
     }
 
     /// One account of a vendor, as the panel knows it.
@@ -2124,7 +2138,7 @@ struct UsagePanelSnapshot: Equatable {
             guard readable.count > 1 else {
                 return [
                     GaugeRow(
-                        id: row.id, provider: row.id, account: nil, name: row.name,
+                        id: row.id, provider: row.id, account: nil, name: row.name, qualifier: nil,
                         windows: row.windows, notice: row.notice, status: row.status)
                 ]
             }
@@ -2133,8 +2147,8 @@ struct UsagePanelSnapshot: Equatable {
                     id: "\(row.id)#\(account.id)",
                     provider: row.id,
                     account: account.id,
-                    name: UsageFormat.accountQualifiedName(
-                        row.name, organization: account.organization, fallback: account.label),
+                    name: row.name,
+                    qualifier: account.organization ?? account.label,
                     windows: account.windows,
                     notice: account.notice,
                     status: row.status)

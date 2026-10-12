@@ -1419,19 +1419,6 @@ enum UsageFormat {
 
 /// How the panel words an account of a vendor that has more than one.
 extension UsageFormat {
-    /// A vendor's name with the account qualifying it, for the Overview row
-    /// that has to tell two accounts of one vendor apart.
-    ///
-    /// The organisation rather than the address: it is shorter, it is what the
-    /// user calls the account, and an email would push every track right by
-    /// however long that address happens to be. The label is the fallback for
-    /// a personal account, which names no organisation.
-    static func accountQualifiedName(
-        _ provider: String, organization: String?, fallback: String
-    ) -> String {
-        "\(provider) · \(organization ?? fallback)"
-    }
-
     /// Said on the page of an account Sissy knows but holds no reading for:
     /// it has an archived credential and no live source, which is every
     /// account signed into this CLI that has not had a session linked to it.

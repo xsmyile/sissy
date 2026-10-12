@@ -297,4 +297,36 @@ final class ClaudeAccountRowsTests: XCTestCase {
                 now: now
             ).isEmpty)
     }
+
+    /// Two readable accounts are two Overview rows, each the vendor's name
+    /// with its organisation kept apart, so a degraded status can colour the
+    /// vendor without colouring the account.
+    func testAGaugeRowKeepsTheVendorApartFromTheAccount() {
+        let now = Date()
+        func account(_ uuid: String, organization: String) -> AccountSignals {
+            AccountSignals(
+                id: uuid,
+                account: ProviderAccount(
+                    email: "\(uuid)@example.com", organization: organization, seat: nil),
+                plan: "team", planTier: nil, windows: [window(18)], limitsObservedAt: now,
+                isSignedIn: uuid == signedInUUID)
+        }
+        var signals = reading(observedAt: now)
+        signals.accounts = [
+            account(signedInUUID, organization: "Acme Srl"),
+            account(archivedUUID, organization: "Radon Forge"),
+        ]
+        let frame = FrameData(
+            tokens: 1, cost: 1, burn: nil,
+            providers: [
+                ProviderSlice(id: ProviderID.claudeCode, tokens: 1, cost: 1, signals: signals)
+            ],
+            keepAwake: .off)
+
+        let rows = UsagePanelSnapshot.make(frame: frame, now: now).gaugeRows
+
+        XCTAssertEqual(rows.map(\.name), ["Claude", "Claude"])
+        XCTAssertEqual(rows.map(\.qualifier), ["Acme Srl", "Radon Forge"])
+        XCTAssertEqual(rows.map(\.title), ["Claude · Acme Srl", "Claude · Radon Forge"])
+    }
 }
