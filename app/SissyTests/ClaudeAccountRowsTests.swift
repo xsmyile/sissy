@@ -329,4 +329,20 @@ final class ClaudeAccountRowsTests: XCTestCase {
         XCTAssertEqual(rows.map(\.qualifier), ["Acme Srl", "Radon Forge"])
         XCTAssertEqual(rows.map(\.title), ["Claude · Acme Srl", "Claude · Radon Forge"])
     }
+
+    /// The Overview names a vendor once over all its accounts, and keeps the
+    /// order the snapshot gave both the vendors and the accounts in.
+    func testRowsAreGatheredByVendorInTheirOwnOrder() {
+        func row(_ provider: String, _ account: String?) -> UsagePanelSnapshot.GaugeRow {
+            UsagePanelSnapshot.GaugeRow(
+                id: "\(provider)#\(account ?? "-")", provider: provider, account: account,
+                name: provider, qualifier: account, windows: [], notice: nil, status: nil)
+        }
+        let rows = [row("claude", "a"), row("claude", "b"), row("codex", nil), row("claude", "c")]
+
+        let groups = PanelOverview.vendorGroups(rows)
+
+        XCTAssertEqual(groups.map(\.id), ["claude", "codex"])
+        XCTAssertEqual(groups.map { $0.rows.map(\.account) }, [["a", "b", "c"], [nil]])
+    }
 }
