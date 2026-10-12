@@ -1899,8 +1899,8 @@ enum ClaudeAccountSwitchCopy {
             return "Sissy has no saved sign-in for that account yet. Sign into it once with claude /login"
         case .activeAccountUnknown:
             return
-                "Sissy could not confirm which account Claude Code is signed in as, so it left "
-                + "the credential alone. Try the switch again in a minute"
+                "One of Claude Code's saved sign-ins belongs to an account Sissy has not seen, "
+                + "so it left them alone. Run claude once, or sign in again with claude /login"
         case .slotUnreadable:
             return
                 "Sissy could not read one of Claude Code's saved sign-ins, so it changed nothing. "

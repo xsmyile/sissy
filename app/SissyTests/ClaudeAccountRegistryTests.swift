@@ -845,6 +845,106 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertEqual(vault.active, credential("rotated-by-the-cli"))
     }
 
+    /// Identifies `a1` and `a2` as one account and `b` as another, and
+    /// answers 401 for every token in `expired`.
+    private func lineageRegistry(
+        _ vault: Vault, expired: LockedValue<Set<String>>
+    ) -> ClaudeAccountRegistry {
+        makeRegistry(vault) { token in
+            guard !expired.load().contains(token) else { throw UsageRequestError.badStatus(401) }
+            return ClaudeAccountIdentity(
+                uuid: token.hasPrefix("a") ? "u-a" : "u-\(token)", email: nil,
+                organization: nil, organizationType: nil, rateLimitTier: nil)
+        }
+    }
+
+    /// A renewal that reaches only the name the CLI reads leaves the others
+    /// one rotation behind the archive, and once that token expires the
+    /// vendor will not say whose it is. The archive still holds the account,
+    /// so the switch goes ahead.
+    func testASiblingOneRotationBehindTheArchiveDoesNotRefuseTheSwitch() async {
+        let vault = Vault()
+        let expired = LockedValue<Set<String>>([])
+        let registry = lineageRegistry(vault, expired: expired)
+        vault.active = credential("b")
+        await registry.captureActive()
+        vault.active = credential("a1", expiresAt: 4_102_444_700_000)
+        await registry.captureActive()
+        vault.siblings = [credential("a1", expiresAt: 4_102_444_700_000)]
+        vault.active = credential("a2", expiresAt: 4_102_444_800_000)
+        await registry.captureActive()
+        expired.update { $0.insert("a1") }
+
+        let outcome = await registry.activate(uuid: "u-b")
+
+        guard case .success = outcome else { return XCTFail("expected the switch to succeed") }
+        XCTAssertEqual(vault.active, credential("b"))
+        XCTAssertEqual(vault.siblings, [credential("b")])
+        XCTAssertEqual(token(vault.secret("u-a")), "a2")
+    }
+
+    /// The same holds across a relaunch on an index written before the
+    /// lineage existed: the archive it holds is recorded on the first pass.
+    func testAnIndexFromBeforeTheLineageRecognisesTheRotationsItArchived() async throws {
+        let vault = Vault()
+        let expired = LockedValue<Set<String>>([])
+        let first = lineageRegistry(vault, expired: expired)
+        vault.active = credential("b")
+        await first.captureActive()
+        vault.active = credential("a1", expiresAt: 4_102_444_700_000)
+        await first.captureActive()
+        let url = ClaudeAccountStore.defaultURL(in: tempDir)
+        var index = try JSONDecoder().decode(
+            ClaudeAccountStore.Index.self, from: Data(contentsOf: url))
+        index.lineage = [:]
+        try JSONEncoder().encode(index).write(to: url)
+        vault.siblings = [credential("a1", expiresAt: 4_102_444_700_000)]
+        vault.active = credential("a2", expiresAt: 4_102_444_800_000)
+
+        let relaunched = lineageRegistry(vault, expired: expired)
+        await relaunched.captureActive()
+        expired.update { $0.insert("a1") }
+        let outcome = await relaunched.activate(uuid: "u-b")
+
+        guard case .success = outcome else { return XCTFail("expected the switch to succeed") }
+        XCTAssertEqual(vault.siblings, [credential("b")])
+    }
+
+    /// The lineage names an account, not a licence: a token recorded for an
+    /// account whose archive has since gone is refused like any other.
+    func testALineageEntryWithNoArchiveBehindItStillRefuses() async {
+        let vault = Vault()
+        let expired = LockedValue<Set<String>>([])
+        let registry = lineageRegistry(vault, expired: expired)
+        vault.active = credential("b")
+        await registry.captureActive()
+        vault.active = credential("a1", expiresAt: 4_102_444_700_000)
+        await registry.captureActive()
+        vault.dropSecret("u-a")
+        vault.siblings = [credential("a1", expiresAt: 4_102_444_700_000)]
+        vault.active = credential("b")
+        await registry.captureActive()
+        expired.update { $0.insert("a1") }
+
+        let outcome = await registry.activate(uuid: "u-b")
+
+        guard case .failure(.activeAccountUnknown) = outcome else {
+            return XCTFail("expected the unaccounted sibling to be refused")
+        }
+        XCTAssertEqual(vault.siblings, [credential("a1", expiresAt: 4_102_444_700_000)])
+    }
+
+    func testTheLineageKeepsOnlyTheNewestRotations() {
+        var index = ClaudeAccountStore.Index()
+        for rotation in 0...ClaudeAccountStore.Index.lineageLimit {
+            index = index.recording("tok-\(rotation)", for: "u-a")
+        }
+
+        XCTAssertEqual(index.lineage["u-a"]?.count, ClaudeAccountStore.Index.lineageLimit)
+        XCTAssertNil(index.account(archiving: "tok-0"))
+        XCTAssertEqual(index.account(archiving: "tok-\(ClaudeAccountStore.Index.lineageLimit)"), "u-a")
+    }
+
     func testSwitchingToAnUnknownAccountSaysSoAndWritesNothing() async {
         let vault = Vault()
         let registry = makeRegistry(vault) { _ in

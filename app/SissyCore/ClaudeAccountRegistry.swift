@@ -205,12 +205,12 @@ actor ClaudeAccountRegistry {
         let before = published.load()
         if !reconciled {
             reconciled = true
-            recordMissingRefreshExpiries()
+            reconcileIndexWithArchive()
         }
         publishIndex()
-        let current: Data?
+        let current: (name: ClaudeCLISlot.Name, data: Data)?
         do {
-            current = try slot.current()?.data
+            current = try slot.current()
         } catch {
             sissyLog("sissy: could not read Claude Code's credential: \(error)")
             return published.load() != before
@@ -222,10 +222,10 @@ actor ClaudeAccountRegistry {
             if shown.activeUUID != nil || shown.activeCredential != nil { setActive(nil, cause: .signedOut) }
             return published.load() != before
         }
-        guard let parsed = ClaudeCredentialBlob.credentials(in: current),
+        guard let parsed = ClaudeCredentialBlob.credentials(in: current.data),
             parsed.accessToken != lastSeenToken
         else { return published.load() != before }
-        await file(credential: current, markActive: true)
+        await file(credential: current.data, from: current.name, markActive: true)
         return published.load() != before
     }
 
@@ -367,7 +367,8 @@ actor ClaudeAccountRegistry {
             guard ClaudeCredentialBlob.oauth(in: bytes) != nil, !isAccountedFor(bytes) else {
                 continue
             }
-            guard name != reading, await file(credential: bytes, markActive: false) else {
+            guard name != reading, await file(credential: bytes, from: name, markActive: false)
+            else {
                 throw .activeAccountUnknown
             }
         }
@@ -462,6 +463,10 @@ actor ClaudeAccountRegistry {
     /// left alone rather than filed under a guess, and the next poll tries
     /// again.
     ///
+    /// A refusal is logged with the name the bytes came from. On 2026-10-10
+    /// it was not, and which of three names held the token a switch refused
+    /// on could only be deduced afterwards.
+    ///
     /// Marking it active waits on the slot still holding it once the
     /// identification is back. That is a network turn, and the actor is free
     /// for the length of it: a switch that ran in the gap has already written
@@ -473,7 +478,9 @@ actor ClaudeAccountRegistry {
     /// toggle, so one resuming after its replacement started wrote the
     /// archive and the index behind the new one's back.
     @discardableResult
-    private func file(credential: Data, markActive: Bool) async -> Bool {
+    private func file(
+        credential: Data, from name: ClaudeCLISlot.Name, markActive: Bool
+    ) async -> Bool {
         guard let parsed = ClaudeCredentialBlob.credentials(in: credential) else { return false }
         if let until = identifyRefusedUntil, until > now() { return false }
         let identity: ClaudeAccountIdentity
@@ -485,7 +492,7 @@ actor ClaudeAccountRegistry {
                 identifyRefusedUntil = now().addingTimeInterval(
                     UsageRequestError.backoffSeconds(retryAfter: retryAfter))
             }
-            sissyLog("sissy: could not identify a Claude credential: \(error)")
+            sissyLog("sissy: could not identify the Claude credential in \(name.label): \(error)")
             return false
         }
         guard !Task.isCancelled, Self.loadIndex(store) != nil else { return false }
@@ -509,10 +516,15 @@ actor ClaudeAccountRegistry {
 
     /// Whether overwriting these bytes would lose anything.
     ///
-    /// Two answers, and each is sufficient on its own. This run identified
+    /// Three answers, and each is sufficient on its own. This run identified
     /// them, so the archive holds that account at least as fresh; or the
     /// archive already holds this exact credential, which is proof that cost
-    /// no network turn and cannot expire. The second is what keeps an archived
+    /// no network turn and cannot expire; or the token is in an account's
+    /// lineage and that account's archive is no older than it, so the bytes
+    /// are an earlier rotation of a credential Sissy still holds. The third
+    /// is for a renewal that reached only the name the CLI reads: every other
+    /// name a switch wrote is then one rotation behind the archive and, once
+    /// its access token expires, can no longer be identified either. The second is what keeps an archived
     /// account switchable on a Mac whose CLI has not run for hours: its access
     /// token has expired, the profile endpoint answers 401 to it, and
     /// re-identifying it is the one thing that cannot be done — while the
@@ -529,6 +541,14 @@ actor ClaudeAccountRegistry {
             return true
         }
         guard let index = try? store.loadIndex() else { return false }
+        if let offered = ClaudeCredentialBlob.credentials(in: credential),
+            let owner = index.account(archiving: offered.accessToken),
+            let held = try? store.credential(uuid: owner).flatMap(ClaudeCredentialBlob.credentials(in:)),
+            let heldExpiry = held.expiresAt, let offeredExpiry = offered.expiresAt,
+            heldExpiry >= offeredExpiry
+        {
+            return true
+        }
         return index.accounts.contains { account in
             guard let held = try? store.credential(uuid: account.uuid) else { return false }
             return ClaudeCredentialBlob.sameAccountCredential(held, credential)
@@ -578,34 +598,43 @@ actor ClaudeAccountRegistry {
         Set((index.refreshExpiries ?? [:]).filter { $0.value <= now }.keys)
     }
 
-    /// Reads the refresh expiry off each archived credential the index holds
-    /// none for, once a run.
+    /// Reads the refresh expiry and the lineage entry off each archived
+    /// credential the index lacks them for, once a run.
+    ///
+    /// The lineage half is what makes an index written before it existed
+    /// recognise the rotations its archive already holds.
     ///
     /// `refreshExpiries` is filled by `ClaudeAccountStore.remember`, so an
     /// index written before it existed has archives and no dates, and an
     /// account whose refresh token had already died stayed offered until its
     /// click answered with `needsLogin`. An archive that would not read is
     /// logged and left without a date rather than recorded as having none.
-    private func recordMissingRefreshExpiries() {
-        guard var index = Self.loadIndex(store) else { return }
+    private func reconcileIndexWithArchive() {
+        guard let loaded = Self.loadIndex(store) else { return }
+        var index = loaded
         var expiries = index.refreshExpiries ?? [:]
-        for account in index.accounts where expiries[account.uuid] == nil {
+        for account in index.accounts {
             do {
-                guard let held = try store.credential(uuid: account.uuid),
+                guard let held = try store.credential(uuid: account.uuid) else { continue }
+                if expiries[account.uuid] == nil,
                     let expiry = ClaudeCredentialBlob.refreshExpiresAt(in: held)
-                else { continue }
-                expiries[account.uuid] = expiry
+                {
+                    expiries[account.uuid] = expiry
+                }
+                if let token = ClaudeCredentialBlob.credentials(in: held)?.accessToken {
+                    index = index.recording(token, for: account.uuid)
+                }
             } catch {
                 sissyLog(
                     "sissy: could not read the archived Claude account \(account.uuid): \(error)")
             }
         }
-        guard expiries != (index.refreshExpiries ?? [:]) else { return }
-        index.refreshExpiries = expiries
+        index.refreshExpiries = expiries.isEmpty ? loaded.refreshExpiries : expiries
+        guard index != loaded else { return }
         do {
             try store.saveIndex(index)
         } catch {
-            sissyLog("sissy: could not record the Claude refresh expiries: \(error)")
+            sissyLog("sissy: could not record what the Claude archive holds: \(error)")
         }
     }
 
