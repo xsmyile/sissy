@@ -180,6 +180,25 @@ actor UsageEngine {
     /// already in force keeps the instant it started from, so what the panel
     /// counts up from is the Mac's, never the last time this ran.
     private var keepAwakeSince: Date?
+    /// What the ceiling on `on` counts from, which is not always `since`.
+    ///
+    /// It starts with the hold and starts again whenever the user asks for a
+    /// run from now under one: a ceiling picked, the lid switched on, or the
+    /// mode switched to `on` under an automatic hold. Counted from the hold
+    /// instead, a ceiling picked under it ended it in seconds on two nights,
+    /// see `setKeepAwakeCeiling`. `since` keeps the older instant, because
+    /// what the panel counts up from is how long the Mac has been held, and
+    /// that did not change.
+    private var keepAwakeCeilingFrom: Date?
+    /// Whether the lid half is being let go because the battery fell below
+    /// `config.lidBatteryFloor`, held so the release and the return are each
+    /// logged once rather than on every apply.
+    private var lidReleasedForBattery = false
+    /// Reads where the power comes from, for the battery floor.
+    private let powerSource: PowerSourceGauge
+    /// Asks for the floor to be read again on every change of power source,
+    /// held only while a lid hold with a floor is wanted.
+    private var powerSourceWatch: PowerSourceWatch?
     /// Whether the screen is being held lit too, as opposed to whether the
     /// user asked for it — which is `config.keepScreenAwake`. Same split as
     /// `keepAwakeActive` draws against the mode, for the same reason.
@@ -287,7 +306,8 @@ actor UsageEngine {
         networkMonitor: NetworkMonitor? = nil,
         diskActivityMonitor: DiskActivityMonitor? = nil,
         keepAwakePolicy: KeepAwakePolicy = .default,
-        clamshell: ClamshellSleepSwitch = .rootDomain
+        clamshell: ClamshellSleepSwitch = .rootDomain,
+        powerSource: PowerSourceGauge = .ioKit
     ) {
         self.config = config
         self.pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: nil)
@@ -295,6 +315,7 @@ actor UsageEngine {
         self.configIsWritable = configIsWritable
         self.keepAwakePolicy = keepAwakePolicy
         self.keepAwake = KeepAwake(clamshell: clamshell)
+        self.powerSource = powerSource
         let activity = statusMonitor?.activity ?? ActivityClock()
         self.activity = activity
 
@@ -1117,6 +1138,7 @@ actor UsageEngine {
         guard let mode = KeepAwakeMode(rawValue: raw), mode != config.keepAwake else { return }
         config.keepAwake = mode
         persistConfig("keepAwake")
+        if mode == .on, keepAwakeActive { keepAwakeCeilingFrom = Date() }
         await applyKeepAwake()
         await reemit()
     }
@@ -1145,13 +1167,21 @@ actor UsageEngine {
 
     /// Switch how long `on` holds and persist it.
     ///
-    /// Re-arms the deadline under a running hold rather than waiting for the
-    /// next one, so a hold that has already outlived a shorter ceiling ends
-    /// now, the way it would have had that ceiling been chosen first.
+    /// Under a running hold the ceiling counts from the pick, because a
+    /// length chosen now is read as a length from now. Until 2026-10-12 it
+    /// counted from the hold, so a hold that had outlived the new ceiling
+    /// ended on the spot, and that is what ended two nights' holds in the
+    /// middle of a session in Settings: measured from the log, a hold taken
+    /// 2026-10-07 23:21:11 under an eight-hour ceiling ended 2026-10-08
+    /// 01:54:33, eleven seconds after the lid was switched on, and one taken
+    /// 2026-10-09 21:45:18 ended 2026-10-10 02:39:06, with the Mac awake
+    /// throughout (no sleep in `pmset -g log` between). Only a change of
+    /// ceiling moves a deadline earlier, so both were a pick.
     func setKeepAwakeCeiling(_ ceiling: KeepAwakeCeiling) async {
         guard ceiling != config.keepAwakeCeiling else { return }
         config.keepAwakeCeiling = ceiling
         persistConfig("keepAwakeCeiling")
+        if keepAwakeActive { keepAwakeCeilingFrom = Date() }
         rearmKeepAwakeDeadline()
     }
 
@@ -1169,10 +1199,35 @@ actor UsageEngine {
     /// Switch whether a hold keeps the Mac working with its lid closed, and
     /// persist it. Applied through the same path as the screen, so the lid is
     /// added or dropped under a running hold without touching the assertions.
+    ///
+    /// Switching it on starts the ceiling again, see `keepAwakeCeilingFrom`.
     func setKeepAwakeWithLidClosed(enabled: Bool) async {
         guard enabled != config.keepAwakeWithLidClosed else { return }
         config.keepAwakeWithLidClosed = enabled
         persistConfig("keepAwakeWithLidClosed")
+        if enabled, keepAwakeActive { keepAwakeCeilingFrom = Date() }
+        await applyKeepAwake()
+        await reemit()
+    }
+
+    /// Switch the charge below which a lid hold on battery lets the lid go,
+    /// and persist it. Applied at once, so a floor raised above the charge a
+    /// Mac on battery already has releases the lid now.
+    func setLidBatteryFloor(_ floor: LidBatteryFloor) async {
+        guard floor != config.lidBatteryFloor else { return }
+        config.lidBatteryFloor = floor
+        persistConfig("lidBatteryFloor")
+        await applyKeepAwake()
+        await reemit()
+    }
+
+    /// What a change of power source does: reads the floor again, and drives
+    /// the hold only when the answer moved, because the notification behind it
+    /// fires on every battery attribute and nearly all of them change nothing.
+    func powerSourceChanged() async {
+        guard lifecycle == .running, keepAwakeWanted, config.keepAwakeWithLidClosed else { return }
+        guard config.lidBatteryFloor.isReached(by: powerSource.read()) != lidReleasedForBattery
+        else { return }
         await applyKeepAwake()
         await reemit()
     }
@@ -1213,7 +1268,13 @@ actor UsageEngine {
         keepAwakeGeneration &+= 1
         let generation = keepAwakeGeneration
         let wanted = keepAwakeWanted
-        let lidWanted = wanted && config.keepAwakeWithLidClosed && recordLidHold()
+        let lidAsked = wanted && config.keepAwakeWithLidClosed
+        let floorWatched = lidAsked && config.lidBatteryFloor != .never
+        watchPowerSource(floorWatched)
+        let reading = floorWatched ? powerSource.read() : nil
+        let floorReached = config.lidBatteryFloor.isReached(by: reading)
+        noteBatteryFloor(floorReached, reading: reading, logged: lidAsked)
+        let lidWanted = lidAsked && !floorReached && recordLidHold()
         let hold = await keepAwake.apply(
             holding: wanted, includingScreen: config.keepScreenAwake, includingLid: lidWanted)
         guard generation == keepAwakeGeneration else { return }
@@ -1221,6 +1282,7 @@ actor UsageEngine {
         keepAwakeCoversScreen = hold.screen && wanted
         keepAwakeCoversLid = hold.lid && wanted
         keepAwakeSince = keepAwakeActive ? (keepAwakeSince ?? Date()) : nil
+        keepAwakeCeilingFrom = keepAwakeActive ? (keepAwakeCeilingFrom ?? Date()) : nil
         if !hold.lid, config.lidHoldPending {
             config.lidHoldPending = false
             if !persistConfig("lidHoldPending") { config.lidHoldPending = true }
@@ -1231,6 +1293,42 @@ actor UsageEngine {
                 + (keepAwakeCoversScreen ? ", screen on" : "")
                 + (keepAwakeCoversLid ? ", lid closed too" : ""))
         rearmKeepAwakeDeadline()
+    }
+
+    /// Records whether the floor is holding the lid back, and logs its release
+    /// and its return once each. Not logged when the lid is no longer asked
+    /// for at all: a hold that ended is not a lid taken back.
+    ///
+    /// The reading is taken fresh on every apply rather than cached, because
+    /// it is one IPC and a cached one is how a lid would be held on a charge
+    /// that had already fallen.
+    private func noteBatteryFloor(_ reached: Bool, reading: PowerSourceReading?, logged: Bool) {
+        guard reached != lidReleasedForBattery else { return }
+        lidReleasedForBattery = reached
+        guard logged else { return }
+        let charge = reading?.batteryPercent.map { "\($0)%" } ?? "unknown"
+        if reached {
+            sissyLog(
+                "sissy: keep-awake let the lid go: on battery at \(charge), "
+                    + "below the \(config.lidBatteryFloor.rawValue)% floor")
+        } else {
+            sissyLog(
+                "sissy: keep-awake takes the lid back: battery at \(charge), "
+                    + (reading?.onBattery == true ? "on battery" : "on power"))
+        }
+    }
+
+    /// Starts or stops listening for power-source changes, which only a lid
+    /// hold with a floor needs.
+    private func watchPowerSource(_ wanted: Bool) {
+        guard wanted != (powerSourceWatch != nil) else { return }
+        guard wanted else {
+            powerSourceWatch = nil
+            return
+        }
+        powerSourceWatch = PowerSourceWatch { [weak self] in
+            Task { await self?.powerSourceChanged() }
+        }
     }
 
     /// Writes down that the clamshell switch is about to be set, and answers
@@ -1253,14 +1351,24 @@ actor UsageEngine {
 
     /// When the hold in force runs out on its own, and `nil` when nothing is
     /// holding or nothing would end it.
+    ///
+    /// The clock is the wall's, sleep included: the deadline is a `Date`,
+    /// and the task waiting on it sleeps on the continuous clock, which keeps
+    /// counting while the Mac is asleep, so a ceiling that passed during a
+    /// sleep ends the hold at the next wake. That is deliberate. A ceiling is
+    /// a bound on how long the user agreed to have the Mac held, and one that
+    /// paused while the Mac slept would stretch an hour's hold across a night
+    /// of naps; the restarts in `keepAwakeCeilingFrom` are what keep a run the
+    /// user asked for from inheriting an older one's clock.
     private var keepAwakeDeadline: Date? {
         guard keepAwakeActive, let since = keepAwakeSince else { return nil }
         switch config.keepAwake {
         case .off: return nil
         case .auto: return (lastAgentActivityAt ?? since) + keepAwakePolicy.idleWindow
         case .on:
+            let from = keepAwakeCeilingFrom ?? since
             return config.keepAwakeCeiling.hours.map {
-                since + TimeInterval($0) * keepAwakePolicy.ceilingHour
+                from + TimeInterval($0) * keepAwakePolicy.ceilingHour
             }
         }
     }

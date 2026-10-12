@@ -142,6 +142,13 @@ struct ServerConfig: Sendable, Codable {
     /// that says what it costs: it is the one part of the hold that outlives
     /// a crash, and a closed Mac on battery in a bag cannot shed its heat.
     var keepAwakeWithLidClosed: Bool
+    /// The charge below which that lid lets go while the Mac is on battery.
+    ///
+    /// On at fifteen percent, so a `server.json` written before this key
+    /// existed gains the floor rather than keeping a lid that runs the battery
+    /// flat: the switch it guards is off by default, so nothing changes for a
+    /// Mac whose lid was never held.
+    var lidBatteryFloor: LidBatteryFloor
     /// Whether the clamshell switch may still be set by this install.
     ///
     /// Written before the switch is set and cleared only once it is clear, the
@@ -221,6 +228,7 @@ struct ServerConfig: Sendable, Codable {
         keepAwakeCeiling: .eightHours,
         keepScreenAwake: true,
         keepAwakeWithLidClosed: false,
+        lidBatteryFloor: .fifteenPercent,
         lidHoldPending: false,
         agentHooks: false,
         agentHooksRemovalPending: false,
@@ -402,6 +410,7 @@ extension ServerConfig {
         keepScreenAwake = keys.lenient(.keepScreenAwake) ?? defaults.keepScreenAwake
         keepAwakeWithLidClosed =
             keys.lenient(.keepAwakeWithLidClosed) ?? defaults.keepAwakeWithLidClosed
+        lidBatteryFloor = keys.lenient(.lidBatteryFloor) ?? defaults.lidBatteryFloor
         lidHoldPending = keys.lenient(.lidHoldPending) ?? defaults.lidHoldPending
         agentHooks = keys.lenient(.agentHooks) ?? defaults.agentHooks
         agentHooksRemovalPending =

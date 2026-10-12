@@ -47,6 +47,7 @@ final class UsageEngineControlTests: XCTestCase {
         keepAwakeWithLidClosed: Bool = false,
         lidHoldPending: Bool = false,
         clamshell: ClamshellSwitchRecorder = ClamshellSwitchRecorder(),
+        powerSource: PowerSourceStub = PowerSourceStub(),
         pollIntervalSeconds: Double = 60,
         macHealth: Bool = false,
         healthMonitor: SystemHealthMonitor? = nil,
@@ -70,7 +71,8 @@ final class UsageEngineControlTests: XCTestCase {
             healthMonitor: healthMonitor,
             diskMonitor: diskMonitor,
             keepAwakePolicy: keepAwakePolicy,
-            clamshell: clamshell.clamshellSwitch
+            clamshell: clamshell.clamshellSwitch,
+            powerSource: powerSource.gauge
         )
     }
 
@@ -527,27 +529,141 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertEqual(frames.all.last?.keepAwake.active, true)
     }
 
-    /// A ceiling chosen under a running hold applies to it, so one the hold
-    /// has already outlived ends it at once rather than at the old deadline.
-    func testAShorterCeilingEndsAHoldThatOutlivedIt() async throws {
+    /// A ceiling chosen under a running hold counts from the choice, so one
+    /// the hold has already outlived does not end it on the spot: it runs its
+    /// length from the pick, and then ends it.
+    func testACeilingPickedUnderAHoldCountsFromThePick() async throws {
         try writeClaudeTurn()
         let frames = FrameRecorder()
         let engine = makeEngine(
             codex: false,
             keepAwake: .on,
             keepAwakeCeiling: .never,
-            keepAwakePolicy: KeepAwakePolicy(idleWindow: 600, ceilingHour: 0.2))
+            keepAwakePolicy: KeepAwakePolicy(idleWindow: 600, ceilingHour: 3))
         let held = frames.expectation("the hold is taken") { $0.keepAwake.active }
         await engine.start { frames.record($0) }
         addTeardownBlock { await engine.stop() }
         await fulfillment(of: [held], timeout: 5)
-        try await Task.sleep(for: .seconds(0.4))
+        try await Task.sleep(for: .seconds(3.5))
 
-        let expired = frames.expectation("the new ceiling switches it off") { $0.keepAwake.mode == .off }
         await engine.setKeepAwakeCeiling(.oneHour)
-        await fulfillment(of: [expired], timeout: 5)
+        try await Task.sleep(for: .seconds(1))
 
+        let mode = await engine.config.keepAwake
+        XCTAssertEqual(mode, .on, "a ceiling the hold had outlived ended it at once")
         XCTAssertEqual(try ServerConfig.load(from: configURL).keepAwakeCeiling, .oneHour)
+        let expired = frames.expectation("the picked ceiling switches it off") {
+            $0.keepAwake.mode == .off
+        }
+        await fulfillment(of: [expired], timeout: 5)
+    }
+
+    /// Switching the lid on is asking for a run from now, so the ceiling counts
+    /// again from that instant rather than from a hold taken long before it,
+    /// which ended one 11 s after the lid was asked for (2026-10-08).
+    func testSwitchingTheLidOnStartsTheCeilingAgain() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false,
+            keepAwake: .on,
+            keepAwakeCeiling: .oneHour,
+            keepAwakePolicy: KeepAwakePolicy(idleWindow: 600, ceilingHour: 4))
+        let held = frames.expectation("the hold is taken") { $0.keepAwake.active }
+        await engine.start { frames.record($0) }
+        addTeardownBlock { await engine.stop() }
+        await fulfillment(of: [held], timeout: 5)
+        let since = try XCTUnwrap(frames.all.last?.keepAwake.since)
+        try await Task.sleep(for: .seconds(2))
+
+        await engine.setKeepAwakeWithLidClosed(enabled: true)
+        try await Task.sleep(for: .seconds(3))
+
+        let mode = await engine.config.keepAwake
+        XCTAssertEqual(mode, .on, "the ceiling still counted from the older hold")
+        XCTAssertEqual(frames.all.last?.keepAwake.since, since, "the panel's count restarted too")
+        let expired = frames.expectation("the restarted ceiling switches it off") {
+            $0.keepAwake.mode == .off
+        }
+        await fulfillment(of: [expired], timeout: 5)
+    }
+
+    /// The ceiling belongs to `on`, so switching to it under an automatic hold
+    /// counts it from the switch, not from the turn that earned the hold.
+    func testSwitchingToOnUnderAnAutomaticHoldStartsTheCeiling() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false,
+            keepAwake: .auto,
+            keepAwakeCeiling: .oneHour,
+            keepAwakePolicy: KeepAwakePolicy(idleWindow: 600, ceilingHour: 4),
+            pollIntervalSeconds: 1)
+        let cold = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        addTeardownBlock { await engine.stop() }
+        await fulfillment(of: [cold], timeout: 5)
+        let held = frames.expectation("the hold is taken") { $0.keepAwake.active }
+        try writeClaudeTurn(requestId: "r2", file: "b.jsonl")
+        await fulfillment(of: [held], timeout: 5)
+        try await Task.sleep(for: .seconds(2))
+
+        await engine.setKeepAwake(mode: KeepAwakeMode.on.rawValue)
+        try await Task.sleep(for: .seconds(3))
+
+        let mode = await engine.config.keepAwake
+        XCTAssertEqual(mode, .on, "the ceiling counted from the automatic hold")
+    }
+
+    /// On battery below the floor the lid is not set at all, and the rest of
+    /// the hold is: the Mac is still held, only a closed lid sleeps it.
+    func testALidHoldBelowTheFloorOnBatteryLeavesTheLidFree() async throws {
+        try writeClaudeTurn()
+        let recorder = ClamshellSwitchRecorder()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false, keepAwake: .on, keepAwakeWithLidClosed: true, clamshell: recorder,
+            powerSource: PowerSourceStub(PowerSourceReading(onBattery: true, batteryPercent: 10)))
+        let held = frames.expectation("the hold is taken") { $0.keepAwake.active }
+        await engine.start { frames.record($0) }
+        addTeardownBlock { await engine.stop() }
+        await fulfillment(of: [held], timeout: 5)
+
+        XCTAssertFalse(recorder.isSet)
+        XCTAssertEqual(frames.all.last?.keepAwake.coversLid, false)
+        let setting = await engine.config.keepAwakeWithLidClosed
+        XCTAssertTrue(setting, "the floor switched the user's setting off")
+    }
+
+    /// A charge falling through the floor lets the lid go under a running
+    /// hold, and power coming back takes it again.
+    func testTheFloorLetsTheLidGoAndPowerTakesItBack() async throws {
+        try writeClaudeTurn()
+        let recorder = ClamshellSwitchRecorder()
+        let power = PowerSourceStub(PowerSourceReading(onBattery: true, batteryPercent: 50))
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false, keepAwake: .on, keepAwakeWithLidClosed: true, clamshell: recorder,
+            powerSource: power)
+        let held = frames.expectation("the lid is held") { $0.keepAwake.coversLid }
+        await engine.start { frames.record($0) }
+        addTeardownBlock { await engine.stop() }
+        await fulfillment(of: [held], timeout: 5)
+
+        power.reading = PowerSourceReading(onBattery: true, batteryPercent: 14)
+        let released = frames.expectation("the floor lets the lid go") { !$0.keepAwake.coversLid }
+        await engine.powerSourceChanged()
+        await fulfillment(of: [released], timeout: 5)
+
+        XCTAssertFalse(recorder.isSet)
+        XCTAssertEqual(frames.all.last?.keepAwake.active, true)
+
+        power.reading = PowerSourceReading(onBattery: false, batteryPercent: 14)
+        let retaken = frames.expectation("power takes the lid back") { $0.keepAwake.coversLid }
+        await engine.powerSourceChanged()
+        await fulfillment(of: [retaken], timeout: 5)
+
+        XCTAssertTrue(recorder.isSet)
     }
 
     /// The switch outlives a crash, so the record that sends the next launch

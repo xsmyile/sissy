@@ -203,6 +203,12 @@ enum UsageFormat {
         return hours == 1 ? "1 hour" : "\(hours) hours"
     }
 
+    /// What each battery floor is called, in the picker Settings offers them
+    /// from.
+    static func lidBatteryFloorTitle(_ floor: LidBatteryFloor) -> String {
+        floor.percent.map { "\($0)%" } ?? "Never"
+    }
+
     /// What the screen half of the hold is called, in Settings and in the
     /// cup's menu, for the reason `keepAwakeTitle` is one switch: one setting
     /// worded twice reads as two.
