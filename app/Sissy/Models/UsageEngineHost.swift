@@ -312,6 +312,11 @@ final class UsageEngineHost {
     /// Why the last account switch did not happen, or nil when none has
     /// failed. Published because a switch that silently does nothing leaves
     /// the user typing `claude` and meeting the account they just left.
+    ///
+    /// Cleared when the signed-in account moves, whoever moved it: a
+    /// `/login` or another tool's switch answers the question the warning
+    /// asked. Measured 2026-10-11, one survived 27 h and a switch made
+    /// elsewhere in between, because only the next press cleared it.
     private(set) var accountSwitchFailure: String?
     /// Every Claude Code account Sissy has archived, and which one is signed
     /// in. Refreshed from the engine rather than held here, so the app keeps
@@ -1376,6 +1381,7 @@ final class UsageEngineHost {
         guard let engine else { return }
         let snapshot = engine.claudeAccountSnapshot
         guard snapshot != claudeAccounts else { return }
+        if snapshot.activeUUID != claudeAccounts.activeUUID { accountSwitchFailure = nil }
         claudeAccounts = snapshot
         linkedClaudeAccounts = engine.linkedClaudeAccounts
         settleUnlinkFailures()
