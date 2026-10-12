@@ -313,9 +313,22 @@ struct PanelOverview: View {
     /// Only a degraded vendor colours. `unknown` does not: that is Sissy
     /// having no reading, which is not news about the vendor, and the page
     /// says so in words.
+    ///
+    /// The vendor's name and not the account after it. A status is the
+    /// vendor's, the same for every account it serves, so `Claude · Acme Srl`
+    /// lit whole put the outage on the organisation, and two accounts of one
+    /// vendor read as two incidents.
     private static func nameTint(_ status: UsagePanelSnapshot.StatusRow?) -> Color {
         guard let status, status.indicator.isDegraded else { return .primary }
         return ProviderPalette.statusTint(status.indicator)
+    }
+
+    /// The row's name as one run, so the account cannot wrap away from the
+    /// vendor it qualifies, with the status tint on the vendor's half alone.
+    private static func rowName(_ row: UsagePanelSnapshot.GaugeRow) -> Text {
+        let name = Text(row.name).foregroundStyle(nameTint(row.status))
+        guard let qualifier = row.qualifier else { return name }
+        return Text("\(name) · \(qualifier)")
     }
 
     /// What the row hovers: the vendor's own sentence when there is one worth
@@ -326,7 +339,7 @@ struct PanelOverview: View {
     /// frame rather than as old as the reading.
     private static func legendHelp(_ row: UsagePanelSnapshot.GaugeRow) -> String {
         guard let status = row.status, status.indicator.isDegraded else {
-            return "Open \(row.name)"
+            return "Open \(row.title)"
         }
         return UsageFormat.statusSummary(
             provider: row.provider, label: status.label, checkedAt: nil)
@@ -365,11 +378,10 @@ struct PanelOverview: View {
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 ProviderMark(id: row.provider)
-                Text(row.name)
+                Self.rowName(row)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .foregroundStyle(Self.nameTint(row.status))
                     .accessibilityLabel(Self.legendHelp(row))
                 if let notice = row.notice {
                     Image(systemName: "exclamationmark.triangle.fill")
