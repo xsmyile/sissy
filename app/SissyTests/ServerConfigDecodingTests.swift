@@ -26,6 +26,7 @@ final class ServerConfigDecodingTests: XCTestCase {
         config.keepAwakeCeiling = .never
         config.keepScreenAwake = false
         config.keepAwakeWithLidClosed = true
+        config.lidBatteryFloor = .thirtyPercent
         config.lidHoldPending = true
         config.agentHooks = true
         config.agentHooksRemovalPending = true
@@ -86,6 +87,18 @@ final class ServerConfigDecodingTests: XCTestCase {
 
         XCTAssertEqual(config.keepAwakeCeiling, .eightHours)
         XCTAssertEqual(config.keepAwake, .on)
+    }
+
+    /// A file written before the floor existed gains it at fifteen percent,
+    /// and one naming a floor the list does not offer lands there too.
+    func testABatteryFloorAbsentOrUnknownReadsAsFifteenPercent() throws {
+        XCTAssertEqual(
+            try decode(#"{"keepAwakeWithLidClosed": true}"#).lidBatteryFloor, .fifteenPercent)
+
+        let config = try decode(#"{"keepAwakeWithLidClosed": true, "lidBatteryFloor": 25}"#)
+
+        XCTAssertEqual(config.lidBatteryFloor, .fifteenPercent)
+        XCTAssertTrue(config.keepAwakeWithLidClosed)
     }
 
     /// A file written before the Actions switch existed keeps every switch it

@@ -9,13 +9,21 @@ import SwiftUI
 enum KeepAwakeLidCopy {
     static let confirmTitle = "Keep the Mac working with the lid closed?"
 
-    static let confirmMessage =
-        "While Sissy holds the Mac awake, closing the lid will not put it to sleep, on battery too. "
-        + "Only a nearly empty battery or overheating will, and so can unplugging an external "
-        + "display or the charger once the lid is already closed: unplug first, then close it. A "
-        + "closed Mac in a bag cannot shed its heat, so leave it somewhere open. If Sissy quits normally the lid works as usual again; "
-        + "if it crashes, the Mac keeps ignoring the lid until Sissy is opened again or the Mac "
-        + "restarts."
+    /// Names the battery floor in force, because it is the one way a closed
+    /// Mac on battery sleeps that the user chose rather than macOS.
+    static func confirmMessage(floor: LidBatteryFloor) -> String {
+        let battery =
+            floor.percent.map {
+                "On battery the lid lets go below \($0)%, which Settings can change. Overheating will "
+                    + "still sleep it"
+            } ?? "Only a nearly empty battery or overheating will"
+        return "While Sissy holds the Mac awake, closing the lid will not put it to sleep, on battery too. "
+            + battery + ", and so can unplugging an external "
+            + "display or the charger once the lid is already closed: unplug first, then close it. A "
+            + "closed Mac in a bag cannot shed its heat, so leave it somewhere open. If Sissy quits normally the lid works as usual again; "
+            + "if it crashes, the Mac keeps ignoring the lid until Sissy is opened again or the Mac "
+            + "restarts."
+    }
 }
 
 /// Everything about holding the Mac awake: the mode, how long `Always` lasts,
@@ -42,6 +50,7 @@ struct AwakeSettingsView: View {
                 screen
                 if SissyModel.machineHasLid {
                     lid
+                    batteryFloor
                 }
             }
         }
@@ -54,7 +63,7 @@ struct AwakeSettingsView: View {
             Button(UsageFormat.keepAwakeWithLidClosedTitle) { model.confirmKeepAwakeWithLidClosed() }
             Button(DialogCopy.cancel, role: .cancel) {}
         } message: {
-            Text(KeepAwakeLidCopy.confirmMessage)
+            Text(KeepAwakeLidCopy.confirmMessage(floor: model.engine.lidBatteryFloor))
         }
         .task(id: model.lidConfirmationRequested) { await presentRequestedConfirmation() }
     }
@@ -75,6 +84,8 @@ struct AwakeSettingsView: View {
     private static let coversSection = "What a hold covers"
 
     private static let ceilingLabel = "\(UsageFormat.keepAwakeTitle(.on)) stops after"
+
+    private static let batteryFloorLabel = "On battery, let the lid go below"
 
     /// What the automatic mode costs. The name and the bound are read rather
     /// than written out: a caption that says ten minutes while the shipped
@@ -101,6 +112,14 @@ struct AwakeSettingsView: View {
         model.engine.keepAwakeWithLidClosed
             ? "While a hold is in force, closing the lid does not sleep the Mac, on battery too."
             : "Off, closing the lid sleeps the Mac whatever the mode."
+    }
+
+    /// What the floor does, and for `never` what is left to stop a closed Mac
+    /// on battery, which is macOS alone.
+    private var batteryFloorCaption: String {
+        model.engine.lidBatteryFloor.percent == nil
+            ? "A closed Mac on battery runs until macOS sleeps it nearly empty."
+            : "Then closing the lid sleeps the Mac again, until it is back on power."
     }
 
     private var mode: some View {
@@ -149,6 +168,31 @@ struct AwakeSettingsView: View {
             isOn: Binding(
                 get: { model.engine.keepAwakeWithLidClosed },
                 set: { model.setKeepAwakeWithLidClosed($0) }))
+    }
+
+    /// Greyed out with the lid switch off rather than hidden, so the floor can
+    /// be read before the lid is ever held.
+    private var batteryFloor: some View {
+        LabeledContent {
+            Picker(Self.batteryFloorLabel, selection: batteryFloorBinding) {
+                ForEach(LidBatteryFloor.allCases, id: \.self) { floor in
+                    Text(UsageFormat.lidBatteryFloorTitle(floor)).tag(floor)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        } label: {
+            Text(Self.batteryFloorLabel)
+            Text(batteryFloorCaption)
+        }
+        .disabled(!model.engine.keepAwakeWithLidClosed)
+    }
+
+    private var batteryFloorBinding: Binding<LidBatteryFloor> {
+        Binding(
+            get: { model.engine.lidBatteryFloor },
+            set: { model.engine.setLidBatteryFloor($0) }
+        )
     }
 
     private var modeBinding: Binding<KeepAwakeMode> {

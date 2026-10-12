@@ -43,6 +43,9 @@ final class UsageEngineHost {
     /// Whether a hold keeps the Mac working with its lid closed, read from
     /// `server.json` for the same reason as `keepScreenAwake`.
     private(set) var keepAwakeWithLidClosed: Bool = false
+    /// The charge below which that lid lets go on battery, read from
+    /// `server.json` for the same reason as `keepScreenAwake`.
+    private(set) var lidBatteryFloor: LidBatteryFloor = ServerConfig.defaults.lidBatteryFloor
     /// Whether Sissy reads each vendor's own status page. Read from
     /// `server.json` for the reason the rest of these are: the engine owns the
     /// file and owns the poll, and a copy kept in the app could say the
@@ -179,6 +182,7 @@ final class UsageEngineHost {
         keepScreenAwake = config.keepScreenAwake
         keepAwakeCeiling = config.keepAwakeCeiling
         keepAwakeWithLidClosed = config.keepAwakeWithLidClosed
+        lidBatteryFloor = config.lidBatteryFloor
         statusChecks = config.statusChecks
         macHealth = config.macHealth
         disk = config.disk
@@ -1147,6 +1151,12 @@ final class UsageEngineHost {
         guard let engine, enabled != keepAwakeWithLidClosed else { return }
         keepAwakeWithLidClosed = enabled
         Task { await engine.setKeepAwakeWithLidClosed(enabled: enabled) }
+    }
+
+    func setLidBatteryFloor(_ floor: LidBatteryFloor) {
+        guard let engine, floor != lidBatteryFloor else { return }
+        lidBatteryFloor = floor
+        Task { await engine.setLidBatteryFloor(floor) }
     }
 
     func setKeepAwakeCeiling(_ ceiling: KeepAwakeCeiling) {
