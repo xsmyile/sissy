@@ -787,13 +787,19 @@ struct UsageHistoryRollup: Sendable, Equatable {
     /// projects cannot reach the headline without. Kept rather than dropped,
     /// so `projects` and this always sum to `tokens` and `cost`.
     let unattributed: UsageSpend
+    /// The minutes the window's one day was worked in, every provider's
+    /// unioned, for a window of exactly one day the archive holds a shape
+    /// for. Nil for a wider window: two days' bitmaps index different days
+    /// and cannot be drawn as one.
+    let dayActivity: AgentActivityDay?
 
     init(
         period: UsageRange, earliestDay: Date?, tokens: Int, cost: Decimal,
         agents: AgentCounts = .none, agentsByProvider: [String: AgentCounts] = [:],
         activity: ActivityTotals = .none, activityByProvider: [String: ActivityTotals] = [:],
         cache: CacheReading = .none, spendByProvider: [String: UsageSpend] = [:],
-        projects: [ProjectTotals] = [], unattributed: UsageSpend = UsageSpend()
+        projects: [ProjectTotals] = [], unattributed: UsageSpend = UsageSpend(),
+        dayActivity: AgentActivityDay? = nil
     ) {
         self.period = period
         self.earliestDay = earliestDay
@@ -807,6 +813,7 @@ struct UsageHistoryRollup: Sendable, Equatable {
         self.spendByProvider = spendByProvider
         self.projects = projects
         self.unattributed = unattributed
+        self.dayActivity = dayActivity
     }
 }
 
@@ -1084,7 +1091,9 @@ enum UsageHistoryStore {
             tally.activity.add(ActivityTotals(shape))
         }
         return UsageSpanReading(
-            rollup: tally.rollup(.days(span), projects: projects),
+            rollup: tally.rollup(
+                .days(span), projects: projects,
+                dayActivity: span.dayCount() == 1 ? unionByDay.values.first : nil),
             days:
                 byDay
                 .map { UsageHistoryDayTotal(day: $0.key, tokens: $0.value.tokens, cost: $0.value.cost) }
@@ -1404,7 +1413,10 @@ private struct RollupTally {
         earliest = earliest.map { min($0, dayKey) } ?? dayKey
     }
 
-    func rollup(_ period: UsageRange, projects resolver: ProjectResolver) -> UsageHistoryRollup {
+    func rollup(
+        _ period: UsageRange, projects resolver: ProjectResolver,
+        dayActivity: AgentActivityDay? = nil
+    ) -> UsageHistoryRollup {
         UsageHistoryRollup(
             period: period,
             earliestDay: earliest,
@@ -1422,6 +1434,7 @@ private struct RollupTally {
                         path: path, tokens: share.tokens, cost: share.cost,
                         remote: resolver.repositoryRemote(for: path))
                 }),
-            unattributed: unattributed)
+            unattributed: unattributed,
+            dayActivity: dayActivity)
     }
 }

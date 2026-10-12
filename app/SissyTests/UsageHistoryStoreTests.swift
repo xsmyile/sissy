@@ -699,6 +699,25 @@ final class UsageHistoryStoreTests: XCTestCase {
             ])
     }
 
+    /// A span of one day carries that day's minutes, every provider's unioned,
+    /// so the Sessions tab can draw its strip; a wider span carries none.
+    func testASpanOfOneDayCarriesItsShape() throws {
+        let rows = [UsageHistoryRow(model: "a", project: nil): totals(input: 1, cost: "1")]
+        for (provider, minutes) in [("claude-code", Array(540...600)), ("codex", Array(900...930))] {
+            try UsageHistoryStore.save(
+                UsageHistoryDay(
+                    day: day(-1), provider: provider, updatedAt: Date(), totals: rows,
+                    activity: AgentActivityDay(turns: ActivityMinutes(minutes: minutes))),
+                in: root)
+        }
+
+        let one = UsageHistoryStore.reading(over: try span(-1, -1), in: root).rollup
+        let two = UsageHistoryStore.reading(over: try span(-2, -1), in: root).rollup
+
+        XCTAssertEqual(one.dayActivity?.blocks, [540...600, 900...930])
+        XCTAssertNil(two.dayActivity, "a window of two days drew one day's shape")
+    }
+
     /// What names no repository, or a path that is not one, is the residue,
     /// and it is what brings the projects up to the headline.
     func testTheProjectSplitAndItsResidueAddUpToTheSpan() throws {

@@ -2310,6 +2310,13 @@ extension UsageFormat {
     static func sessionsSectionLabel(_ period: UsageRange) -> String {
         "Sessions and sub-agents · " + periodInline(period)
     }
+
+    /// What the day strip says to VoiceOver, `Worked in 4 blocks · Sun 11 Oct`,
+    /// naming its day because the strip is drawn for past days as well.
+    static func workedBlocksLabel(_ blocks: Int, period: UsageRange) -> String {
+        "Worked in " + agentCount(blocks, singular: "block", plural: "blocks") + " · "
+            + periodInline(period)
+    }
 }
 
 // MARK: Mac
