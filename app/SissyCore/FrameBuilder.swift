@@ -254,6 +254,10 @@ enum ProviderLimitsState: Sendable, Equatable {
 struct ProviderAccount: Sendable, Equatable {
     /// The address the CLI is signed in as.
     let email: String?
+    /// What the account's owner calls themselves, where the vendor answers
+    /// with one. Through `UsageReaderShared.sanitizedDisplayText` for the
+    /// reason the organisation is.
+    let name: String?
     /// Organisation the seat belongs to, where the vendor names one. Nil
     /// rather than empty: both readers take it through
     /// `UsageReaderShared.sanitizedDisplayText`, and the panel prints it
@@ -267,13 +271,15 @@ struct ProviderAccount: Sendable, Equatable {
     /// and "no account line" are the same absence rather than an empty row.
     init?(
         email: String? = nil,
+        name: String? = nil,
         organization: String? = nil,
         seat: String? = nil
     ) {
-        guard email != nil || organization != nil || seat != nil else {
+        guard email != nil || name != nil || organization != nil || seat != nil else {
             return nil
         }
         self.email = email
+        self.name = name
         self.organization = organization
         self.seat = seat
     }

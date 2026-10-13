@@ -422,6 +422,23 @@ final class SissyModel {
         savePreferences()
     }
 
+    /// How every account is named, and what one account is called once the
+    /// user renamed it. Wordings, so they reach the panel through
+    /// `UsagePanelSnapshot` the way `limitsReading` does.
+    func setAccountNameFormat(_ format: AccountNameFormat) {
+        guard format != preferences.accountNaming.format else { return }
+        preferences.accountNaming.format = format
+        savePreferences()
+    }
+
+    func renameAccount(_ id: String, to name: String) {
+        var naming = preferences.accountNaming
+        naming.rename(id, to: name)
+        guard naming != preferences.accountNaming else { return }
+        preferences.accountNaming = naming
+        savePreferences()
+    }
+
     /// Registers or removes the app's own login item. Failures are the
     /// user's to see rather than the caller's to handle: the switch has no
     /// second way to get the app opened at login.

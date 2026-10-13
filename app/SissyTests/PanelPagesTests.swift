@@ -290,7 +290,7 @@ final class PanelPagesTests: XCTestCase {
                 slice("claude-code", account: ProviderAccount(email: "someone@example.com"))
             ]))
 
-        XCTAssertEqual(try XCTUnwrap(snapshot.providers.first?.account).email, "someone@example.com")
+        XCTAssertEqual(try XCTUnwrap(snapshot.providers.first?.account).name, "someone@example.com")
     }
 
     /// The badge above the line already says the seat, so an account that

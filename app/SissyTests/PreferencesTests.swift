@@ -20,9 +20,18 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(prefs.limitsReading, .used)
     }
 
+    /// A file written before accounts could be named keeps the automatic names
+    /// and carries no renames.
+    func testAFileWithoutTheNamingKeyNamesAccountsAutomatically() throws {
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data("{}".utf8))
+
+        XCTAssertEqual(prefs.accountNaming, AccountNaming())
+    }
+
     func testRoundTripJSON() throws {
         let original = Preferences(
-            sissyMotion: false, retiredServerAgent: true, limitsReading: .left)
+            sissyMotion: false, retiredServerAgent: true, limitsReading: .left,
+            accountNaming: AccountNaming(format: .email, custom: ["a1b2": "Work"]))
         let data = try JSONEncoder().encode(original)
 
         XCTAssertEqual(try JSONDecoder().decode(Preferences.self, from: data), original)

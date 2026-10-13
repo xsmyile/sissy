@@ -4,79 +4,71 @@ import XCTest
 
 /// How a linked account is named in Settings, and what it falls back to.
 ///
-/// The fallbacks are the substance of the row: only one of the two sources
-/// Sissy identifies an account through is measured to answer with a name, so
-/// every install has to read correctly without one.
+/// The row takes the panel's own `AccountNaming`, so these hold the list to
+/// being a preview of the panel: the same title, and a caption that says only
+/// what the title leaves out.
 final class LinkedAccountRowTests: XCTestCase {
     private let uuid = "a1b2c3d4"
 
-    private func account(
+    private func row(
         name: String? = nil,
         email: String? = "smyile@example.com",
-        organization: String? = "Acme Srl"
-    ) -> ClaudeWebAccount {
-        ClaudeWebAccount(
+        organization: String? = "Acme Srl",
+        plan: String? = "team",
+        naming: AccountNaming = AccountNaming()
+    ) -> LinkedAccountRowSnapshot {
+        LinkedAccountRowSnapshot.make(
             id: uuid,
-            identity: ClaudeAccountIdentity(
-                uuid: uuid,
-                email: email,
-                name: name,
-                organization: organization,
-                organizationType: "claude_team",
-                rateLimitTier: nil))
+            account: ProviderAccount(email: email, name: name, organization: organization),
+            plan: plan,
+            naming: naming)
     }
 
-    /// The name leads and the address sits beside it, because the address is
-    /// what the account is keyed by and the name is what it is recognised by.
-    func testANamedAccountLeadsOnItsNameWithTheAddressBeside() {
-        let row = LinkedAccountRowSnapshot.make(account(name: "Davide"))
+    /// A team seat leads on its organisation, with the address under it.
+    func testATeamSeatLeadsOnItsOrganisationWithTheAddressUnder() {
+        let row = row(name: "Davide")
+
+        XCTAssertEqual(row.title, "Acme Srl")
+        XCTAssertEqual(row.subtitle, "smyile@example.com")
+    }
+
+    /// A personal plan leads on its owner and never on the organisation
+    /// claude.ai generated for it.
+    func testAPersonalPlanLeadsOnItsOwnerAndDropsTheGeneratedOrganisation() {
+        let row = row(
+            name: "Davide", organization: "smyile@example.com's Organization", plan: "max")
 
         XCTAssertEqual(row.title, "Davide")
-        XCTAssertEqual(row.address, "smyile@example.com")
-        XCTAssertEqual(row.organization, "Acme Srl")
-    }
-
-    /// The row every account had before a name could be read, which is still
-    /// every account claude.ai does not name.
-    func testAnUnnamedAccountKeepsTheAddressAsItsTitle() {
-        let row = LinkedAccountRowSnapshot.make(account())
-
-        XCTAssertEqual(row.title, "smyile@example.com")
-        XCTAssertNil(row.address)
-        XCTAssertEqual(row.organization, "Acme Srl")
+        XCTAssertEqual(row.subtitle, "smyile@example.com")
     }
 
     /// A row that said the same thing twice would read as two different facts.
     func testTheAddressIsNotRepeatedUnderItself() {
-        let row = LinkedAccountRowSnapshot.make(account(name: nil, organization: nil))
+        let row = row(organization: nil, plan: "max")
 
         XCTAssertEqual(row.title, "smyile@example.com")
-        XCTAssertNil(row.address)
-        XCTAssertNil(row.organization)
+        XCTAssertNil(row.subtitle)
     }
 
-    /// An account the vendor named neither for falls to the organisation, and
-    /// then to the uuid it is filed under: a poor label and the only honest
-    /// one, and a row under it is what makes that session removable.
-    ///
-    /// The organisation that became the title takes its caption with it. A row
-    /// printing "Acme Srl" over "Acme Srl" reads as two facts.
-    func testAnAccountWithNoAddressFallsToTheOrganisationAndThenTheKey() {
-        let organisationOnly = LinkedAccountRowSnapshot.make(account(email: nil))
-        XCTAssertEqual(organisationOnly.title, "Acme Srl")
-        XCTAssertNil(organisationOnly.address)
-        XCTAssertNil(organisationOnly.organization)
+    /// A rename shows in the list the moment it is made, with everything the
+    /// new name leaves out under it.
+    func testARenameTakesTheTitleAndKeepsTheRestUnder() {
+        var naming = AccountNaming()
+        naming.rename(uuid, to: "Radon")
 
-        let nameless = LinkedAccountRowSnapshot.make(account(email: nil, organization: nil))
-        XCTAssertEqual(nameless.title, uuid)
+        let row = row(naming: naming)
+
+        XCTAssertEqual(row.title, "Radon")
+        XCTAssertEqual(row.subtitle, "smyile@example.com · Acme Srl")
     }
 
-    /// A session filed before anything could name it still gets a row.
-    func testAnUnidentifiedSessionIsNamedByItsKey() {
-        let row = LinkedAccountRowSnapshot.make(ClaudeWebAccount(id: uuid, identity: nil))
+    /// A credential filed before anything could name it still gets a row,
+    /// under the key it is filed by.
+    func testAnUnidentifiedAccountIsNamedByItsKey() {
+        let row = LinkedAccountRowSnapshot.make(
+            id: uuid, account: nil, plan: nil, naming: AccountNaming())
 
         XCTAssertEqual(row.title, uuid)
-        XCTAssertNil(row.address)
-        XCTAssertNil(row.organization)
+        XCTAssertNil(row.subtitle)
     }
 }

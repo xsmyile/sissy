@@ -75,7 +75,7 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
 
     /// The account as a row carries it.
     var providerAccount: ProviderAccount? {
-        ProviderAccount(email: email, organization: organization, seat: seat)
+        ProviderAccount(email: email, name: name, organization: organization, seat: seat)
     }
 
     /// The plan and its tier in the vocabulary the frame carries: `team`

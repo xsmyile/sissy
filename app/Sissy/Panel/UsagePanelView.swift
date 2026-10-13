@@ -246,6 +246,7 @@ struct UsagePanelView: View {
                 forgeSpan: forgeSpan,
                 claudeAccounts: model.engine.claudeAccounts,
                 limitsReading: model.preferences.limitsReading,
+                accountNaming: model.preferences.accountNaming,
                 now: now)
         }
         let open = Self.openRow(page, in: snapshot?.providers ?? [])

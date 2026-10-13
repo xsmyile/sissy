@@ -56,6 +56,8 @@ struct ProviderRowSnapshot: Equatable {
 /// only things the two vendors' rows differ in.
 private struct LinkedRowContent {
     let provider: String
+    /// The key the account is filed under, which is what a rename is kept by.
+    let id: String
     let title: String
     let subtitle: String?
     /// What the monogram's initials are taken from.
@@ -64,6 +66,26 @@ private struct LinkedRowContent {
     /// What the row's menu copies and names the unlink by.
     let address: String
     let unlinkHelp: String
+}
+
+/// What naming an account says: the format picker under the account lists and
+/// the rename their rows offer.
+enum AccountNamingCopy {
+    static let label = "Account names"
+    static let caption = "How the panel names each account. Rename one from its ⋯ menu."
+    static let renameItem = "Rename…"
+    static let renameTitle = "Rename account"
+    static let renameField = "Name"
+    static let renameConfirm = "Rename"
+    static let renameMessage = "Leave it empty to go back to the name Sissy picks."
+
+    static func title(_ format: AccountNameFormat) -> String {
+        switch format {
+        case .automatic: return "Automatic"
+        case .email: return "Email"
+        case .nameAndOrganization: return "Name and organisation"
+        }
+    }
 }
 
 /// What linking an account says whichever vendor it is with: the words the
@@ -278,30 +300,22 @@ enum ClaudeUnsupportedHomesCopy {
 /// the fallbacks are the whole substance of this row and they are worth holding
 /// without a window.
 ///
-/// The person's name leads where there is one, with the address beside it in
-/// secondary text and the organisation underneath. The address leads where
-/// there is no name, which is exactly the row every account had before — the
-/// fallback is the old shape rather than a second one to maintain.
-///
-/// Nothing on the row repeats itself. An account named by its address carries
-/// no second copy of it, and one the vendor named no address for is titled by
-/// its organisation and then keeps no caption — a row that says the same thing
-/// twice reads as two different facts.
+/// The title is the name the panel gives the account, through the same
+/// `AccountNaming`, so the list is the preview of the format picked under it
+/// and a rename shows here the moment it is made. The caption is what that
+/// name leaves out, so nothing on the row repeats itself. An account nothing
+/// names is titled by the key it is filed under: a poor label and the only
+/// honest one, and a row under it is what makes that credential removable.
 struct LinkedAccountRowSnapshot: Equatable {
     let title: String
-    /// The address, only where it is not already the title.
-    let address: String?
-    let organization: String?
+    let subtitle: String?
 
-    static func make(_ account: ClaudeWebAccount) -> Self {
-        guard let identity = account.identity else {
-            return Self(title: account.id, address: nil, organization: nil)
-        }
-        let title = identity.name ?? UsageFormat.accountLabel(identity)
+    static func make(
+        id: String, account: ProviderAccount?, plan: String?, naming: AccountNaming
+    ) -> Self {
+        let title = naming.name(id: id, account: account, plan: plan) ?? id
         return Self(
-            title: title,
-            address: identity.name == nil ? nil : identity.email,
-            organization: identity.organization == title ? nil : identity.organization)
+            title: title, subtitle: naming.detail(name: title, account: account, plan: plan))
     }
 }
 
@@ -329,6 +343,9 @@ struct ProvidersSettingsView: View {
     /// credential the user cannot read back and never typed is not a click to
     /// get wrong.
     @State private var unlinkingCodex: CodexLinkedAccount?
+    /// The account a rename is open for, and the name being typed for it.
+    @State private var renaming: LinkedRowContent?
+    @State private var renameDraft = ""
 
     private static let markSize: CGFloat = 18
 
@@ -354,10 +371,25 @@ struct ProvidersSettingsView: View {
                 }
             }
             Section {
+                accountNames
                 statusChecks
             }
         }
         .formStyle(.grouped)
+        .alert(
+            AccountNamingCopy.renameTitle,
+            isPresented: Binding(
+                get: { renaming != nil }, set: { if !$0 { renaming = nil } }),
+            presenting: renaming
+        ) { content in
+            TextField(AccountNamingCopy.renameField, text: $renameDraft)
+            Button(DialogCopy.cancel, role: .cancel) {}
+            Button(AccountNamingCopy.renameConfirm) {
+                model.renameAccount(content.id, to: renameDraft)
+            }
+        } message: { _ in
+            Text(AccountNamingCopy.renameMessage)
+        }
         .confirmRemoval(
             of: $unlinking,
             title: { ClaudeAccountLinkCopy.unlinkTitle(Self.label(of: $0)) },
@@ -378,6 +410,31 @@ struct ProvidersSettingsView: View {
             model.engine.refreshProviders()
             model.engine.refreshUnsupportedClaudeHomes()
         }
+    }
+
+    /// Which words every account is called by, on the panel and in the lists
+    /// above, which are its preview: they redraw under the format as it is
+    /// picked.
+    private var accountNames: some View {
+        LabeledContent {
+            Picker(AccountNamingCopy.label, selection: accountNameFormatBinding) {
+                ForEach(AccountNameFormat.allCases, id: \.self) { format in
+                    Text(AccountNamingCopy.title(format)).tag(format)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        } label: {
+            Text(AccountNamingCopy.label)
+            Text(AccountNamingCopy.caption)
+        }
+    }
+
+    private var accountNameFormatBinding: Binding<AccountNameFormat> {
+        Binding(
+            get: { model.preferences.accountNaming.format },
+            set: { model.setAccountNameFormat($0) }
+        )
     }
 
     /// Whether Sissy reads each vendor's own status page.
@@ -593,14 +650,38 @@ struct ProvidersSettingsView: View {
     /// are keyed by, which is the order the engine deliberately does not have:
     /// the words are this layer's.
     ///
-    /// The address breaks a tie, because one person holding two seats is the
-    /// case this list exists for and their rows lead on the same word.
+    /// The caption breaks a tie, because one person holding two seats is the
+    /// case this list exists for and their rows can lead on the same word.
     private var sortedAccounts: [ClaudeWebAccount] {
         model.engine.linkedClaudeAccounts.sorted { lhs, rhs in
-            let left = LinkedAccountRowSnapshot.make(lhs)
-            let right = LinkedAccountRowSnapshot.make(rhs)
-            return (left.title, left.address ?? "") < (right.title, right.address ?? "")
+            let left = snapshot(of: lhs)
+            let right = snapshot(of: rhs)
+            return (left.title, left.subtitle ?? "") < (right.title, right.subtitle ?? "")
         }
+    }
+
+    /// A Claude account as its row names it: off its own reading where the
+    /// engine has one, off the identity it was linked with where it has not.
+    private func snapshot(of account: ClaudeWebAccount) -> LinkedAccountRowSnapshot {
+        let signals = self.signals(of: account.id, provider: ProviderID.claudeCode)
+        return LinkedAccountRowSnapshot.make(
+            id: account.id,
+            account: signals?.account ?? account.identity?.providerAccount,
+            plan: signals?.plan ?? account.identity?.plan,
+            naming: model.preferences.accountNaming)
+    }
+
+    /// A Codex account as its row names it, by the rule the Claude rows take.
+    private func snapshot(of account: CodexLinkedAccount) -> LinkedAccountRowSnapshot {
+        let signals = self.signals(of: account.id, provider: ProviderID.codex)
+        return LinkedAccountRowSnapshot.make(
+            id: account.id,
+            account: signals?.account
+                ?? ProviderAccount(
+                    email: account.link?.identity.email,
+                    organization: account.link?.workspace?.name),
+            plan: signals?.plan ?? account.link?.identity.plan,
+            naming: model.preferences.accountNaming)
     }
 
     /// What the confirmation and the screen reader call an account, which is
@@ -631,26 +712,19 @@ struct ProvidersSettingsView: View {
     /// to do with an account was delete it, and what it deletes is a session
     /// the user cannot read back.
     private func linkedAccount(_ account: ClaudeWebAccount) -> some View {
-        let row = LinkedAccountRowSnapshot.make(account)
+        let row = snapshot(of: account)
         let signals = self.signals(of: account.id, provider: ProviderID.claudeCode)
         let content = LinkedRowContent(
             provider: ProviderID.claudeCode,
+            id: account.id,
             title: row.title,
-            subtitle: Self.subtitle(row),
-            monogram: row.organization ?? row.title,
+            subtitle: row.subtitle,
+            monogram: row.title,
             plan: UsageFormat.plan(
                 signals?.plan, tier: signals?.planTier, seat: signals?.account?.seat),
             address: Self.label(of: account),
             unlinkHelp: ClaudeAccountLinkCopy.unlinkHelp)
         return linkedRow(content, signals: signals) { unlinking = account }
-    }
-
-    /// The address and the organisation on one line, either of which can be
-    /// the only one there — and neither, for a session filed before anything
-    /// could name it.
-    private static func subtitle(_ row: LinkedAccountRowSnapshot) -> String? {
-        let parts = [row.address, row.organization].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// Links another Codex account, which is the only way to read one the CLI
@@ -674,7 +748,7 @@ struct ProvidersSettingsView: View {
     /// keyed by, which is the order the engine deliberately does not have.
     private var sortedCodexAccounts: [CodexLinkedAccount] {
         model.engine.linkedCodexAccounts.sorted {
-            (Self.label(of: $0), $0.id) < (Self.label(of: $1), $1.id)
+            (snapshot(of: $0).title, $0.id) < (snapshot(of: $1).title, $1.id)
         }
     }
 
@@ -691,16 +765,16 @@ struct ProvidersSettingsView: View {
     /// two row shapes for it would be two places for the same reading to be
     /// drawn differently.
     private func codexAccount(_ account: CodexLinkedAccount) -> some View {
-        let title = Self.label(of: account)
-        let workspace = account.link?.workspace.map(UsageFormat.workspaceLabel)
+        let row = snapshot(of: account)
         let signals = self.signals(of: account.id, provider: ProviderID.codex)
         let content = LinkedRowContent(
             provider: ProviderID.codex,
-            title: title,
-            subtitle: workspace,
-            monogram: workspace ?? title,
+            id: account.id,
+            title: row.title,
+            subtitle: row.subtitle,
+            monogram: row.title,
             plan: UsageFormat.plan(signals?.plan, tier: signals?.planTier),
-            address: title,
+            address: Self.label(of: account),
             unlinkHelp: CodexAccountLinkCopy.unlinkHelp)
         return linkedRow(content, signals: signals) { unlinkingCodex = account }
     }
@@ -728,6 +802,10 @@ struct ProvidersSettingsView: View {
             CredentialRowMenu(
                 label: VendorLinkCopy.unlink(content.address), help: content.unlinkHelp
             ) {
+                Button(AccountNamingCopy.renameItem) {
+                    renameDraft = model.preferences.accountNaming.custom[content.id] ?? content.title
+                    renaming = content
+                }
                 CredentialCopyButton(CredentialRowCopy.copyAddress, of: content.address)
                 Divider()
                 Button(VendorLinkCopy.unlinkItem, role: .destructive, action: unlink)

@@ -244,6 +244,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         var reading = ProviderSignals()
         reading.account = ProviderAccount(
             email: "davide@example.com", organization: "Radon Forge", seat: "team_tier_1")
+        reading.plan = "team"
 
         let rows = entries(
             readings: ClaudeCodeSignals.perAccount(
@@ -258,9 +259,8 @@ final class ClaudeAccountRowsTests: XCTestCase {
             now: now)
 
         let signedIn = rows.first { $0.id == signedInUUID }
-        XCTAssertEqual(signedIn?.label, "davide@example.com")
-        XCTAssertEqual(signedIn?.email, "davide@example.com")
-        XCTAssertEqual(signedIn?.organization, "Radon Forge")
+        XCTAssertEqual(signedIn?.label, "Radon Forge")
+        XCTAssertEqual(signedIn?.detail, "davide@example.com")
     }
 
     /// An account with no reading has only the archive to be named from, which
@@ -275,10 +275,9 @@ final class ClaudeAccountRowsTests: XCTestCase {
             ],
             now: now)
 
-        XCTAssertEqual(
-            rows.first { $0.id == archivedUUID }?.email,
-            identity(archivedUUID, organization: "Radon Forge").email)
-        XCTAssertEqual(rows.first { $0.id == archivedUUID }?.organization, "Radon Forge")
+        let archived = rows.first { $0.id == archivedUUID }
+        XCTAssertEqual(archived?.label, "Radon Forge")
+        XCTAssertEqual(archived?.detail, identity(archivedUUID, organization: "Radon Forge").email)
     }
 
     /// One account is no list: the picker is a control over a choice, and a

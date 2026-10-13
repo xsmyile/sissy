@@ -580,11 +580,9 @@ struct UsagePanelSnapshot: Equatable {
         /// The vendor's own name, which is what a degraded status colours.
         let name: String
         /// Which of the vendor's accounts this row is, for a vendor drawing
-        /// more than one: the organisation rather than the address, since it
-        /// is shorter, it is what the user calls the account, and an email
-        /// would push every track right by however long that address happens
-        /// to be. The label is the fallback for a personal account, which
-        /// names no organisation. Nil for a vendor drawing one row.
+        /// more than one: the account's name as `AccountNaming` words it,
+        /// which by default is a team seat's organisation and a personal
+        /// plan's owner. Nil for a vendor drawing one row.
         let qualifier: String?
         let windows: [WindowRow]
         let notice: LimitsNotice?
@@ -613,10 +611,12 @@ struct UsagePanelSnapshot: Equatable {
     struct AccountEntry: Equatable, Identifiable {
         let id: String
         /// What the picker calls it, and what qualifies the Overview's row
-        /// once there is more than one.
+        /// once there is more than one: the name `AccountNaming` gives it, or
+        /// its id where the vendor answered for nothing that names it.
         let label: String
-        let email: String?
-        let organization: String?
+        /// The address and organisation the label leaves out, for the line
+        /// under it on the provider page.
+        let detail: String?
         let plan: String?
         let planTier: String?
         /// Shortest window first, and empty for an account Sissy cannot read.
@@ -796,16 +796,16 @@ struct UsagePanelSnapshot: Equatable {
         let clears: [String]
     }
 
-    /// An account as the provider page prints it: the address on its own
-    /// line, the organisation under it.
+    /// An account as the provider page prints it: its name on its own line,
+    /// and under it whatever of the address and the organisation the name
+    /// leaves out.
     ///
     /// The seat is deliberately absent — `UsageFormat.plan` has already
     /// folded it into the badge for the one vendor that publishes one, and a
     /// line repeating what the badge above it says is a line nobody reads.
     struct AccountRow: Equatable {
-        let email: String?
-        /// Organisation the seat belongs to. Nil when the vendor named none.
-        let organization: String?
+        let name: String
+        let detail: String?
     }
 
     /// A limits problem worded, with whether a refresh can do anything about
@@ -1078,14 +1078,14 @@ struct UsagePanelSnapshot: Equatable {
         forgeSpan: ForgeSpanAnswer? = nil,
         claudeAccounts: ClaudeAccountRegistry.Snapshot = .init(),
         limitsReading: LimitsReading = .used,
+        accountNaming: AccountNaming = AccountNaming(),
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> Self {
-        let totalTokens = frame.providers.reduce(0) { $0 + $1.tokens }
         let totalCost = frame.providers.reduce(Decimal(0)) { $0 + $1.cost }
         let rows = makeRows(
             frame.providers, claudeAccounts: claudeAccounts, status: frame.providerStatus,
-            totalTokens: totalTokens, limitsReading: limitsReading, now: now)
+            limitsReading: limitsReading, naming: accountNaming, now: now)
         let periods = availablePeriods(frame.history)
         let resolved = resolve(period, periods: periods, archiveKept: archiveKept)
         let days = windowSpan(
@@ -2055,8 +2055,8 @@ struct UsagePanelSnapshot: Equatable {
         _ slices: [ProviderSlice],
         claudeAccounts: ClaudeAccountRegistry.Snapshot,
         status: [String: ProviderStatusReading],
-        totalTokens: Int,
         limitsReading: LimitsReading,
+        naming: AccountNaming,
         now: Date
     ) -> [ProviderRow] {
         slices.map { slice in
@@ -2074,7 +2074,7 @@ struct UsagePanelSnapshot: Equatable {
                     known: slice.id == ProviderID.claudeCode
                         ? claudeAccounts : ClaudeAccountRegistry.Snapshot(),
                     provider: slice.id,
-                    reading: limitsReading, now: now),
+                    reading: limitsReading, naming: naming, now: now),
                 accountsNotice: slice.id == ProviderID.claudeCode && claudeAccounts.indexSetAside
                     ? ClaudeAccountSwitchCopy.indexSetAside : nil,
                 plan: plan?.label,
@@ -2092,7 +2092,9 @@ struct UsagePanelSnapshot: Equatable {
                         UsageFormat.windowsCaption(observedAt: $0, now: now)
                     },
                 notice: UsageFormat.limitsNotice(slice.limitsState, provider: slice.id),
-                account: makeAccount(slice.account),
+                account: makeAccount(
+                    slice.account, id: slice.signals.accounts.first(where: \.isSignedIn)?.id,
+                    plan: slice.plan, naming: naming),
                 projects: makeProjects(slice.projects, totalCost: slice.cost),
                 projectCount: slice.projects.count,
                 models: makeModels(
@@ -2155,7 +2157,7 @@ struct UsagePanelSnapshot: Equatable {
                     provider: row.id,
                     account: account.id,
                     name: row.name,
-                    qualifier: account.organization ?? account.label,
+                    qualifier: account.label,
                     windows: account.windows,
                     notice: account.notice,
                     status: row.status)
@@ -2194,6 +2196,7 @@ struct UsagePanelSnapshot: Equatable {
         known: ClaudeAccountRegistry.Snapshot,
         provider: String,
         reading limitsReading: LimitsReading,
+        naming: AccountNaming = AccountNaming(),
         now: Date
     ) -> [AccountEntry] {
         let byID = Dictionary(readings.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -2204,16 +2207,17 @@ struct UsagePanelSnapshot: Equatable {
             let reading = byID[id]
             let identity = known.accounts.first { $0.uuid == id }
             let account = reading?.account ?? identity?.providerAccount
+            let planToken = reading?.plan ?? identity?.plan
             let plan = UsageFormat.plan(
-                reading?.plan ?? identity?.plan,
+                planToken,
                 tier: reading?.planTier ?? identity?.planTier,
                 seat: account?.seat)
             let observedAt = reading?.limitsObservedAt
+            let label = naming.name(id: id, account: account, plan: planToken) ?? id
             return AccountEntry(
                 id: id,
-                label: UsageFormat.accountLabel(account) ?? id,
-                email: account?.email,
-                organization: account?.organization,
+                label: label,
+                detail: naming.detail(name: label, account: account, plan: planToken),
                 plan: plan?.label,
                 planTier: plan?.tier,
                 windows: (reading?.windows ?? []).map {
@@ -2328,9 +2332,12 @@ struct UsagePanelSnapshot: Equatable {
     /// The account as a page prints it, or nil when the vendor answered for
     /// nothing a page would show. An account carrying only a seat is that
     /// case: the badge above already says it.
-    private static func makeAccount(_ account: ProviderAccount?) -> AccountRow? {
-        guard let account, account.email != nil || account.organization != nil else { return nil }
-        return AccountRow(email: account.email, organization: account.organization)
+    private static func makeAccount(
+        _ account: ProviderAccount?, id: String?, plan: String?, naming: AccountNaming
+    ) -> AccountRow? {
+        guard let name = naming.name(id: id, account: account, plan: plan) else { return nil }
+        return AccountRow(
+            name: name, detail: naming.detail(name: name, account: account, plan: plan))
     }
 
     /// Rows a popover can hold. Past this the answer is a report, and a

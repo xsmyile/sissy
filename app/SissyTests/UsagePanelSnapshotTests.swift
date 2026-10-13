@@ -269,7 +269,9 @@ final class UsagePanelSnapshotTests: XCTestCase {
 
     // MARK: Account
 
-    func testTheAccountRowCarriesTheOrganisationUnderTheAddress() {
+    /// A personal plan names no organisation of its own, so the row leads on
+    /// the address and keeps nothing under it.
+    func testTheAccountRowLeadsOnTheAddressWithNoPlanToNameAnOrganisation() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [
                 slice(
@@ -277,7 +279,34 @@ final class UsagePanelSnapshotTests: XCTestCase {
                     account: ProviderAccount(email: "someone@example.com", organization: "Radon Forge"))
             ])
         )
-        XCTAssertEqual(snapshot.providers.first?.account?.organization, "Radon Forge")
+        XCTAssertEqual(
+            snapshot.providers.first?.account,
+            UsagePanelSnapshot.AccountRow(name: "someone@example.com", detail: nil))
+    }
+
+    /// A rename reaches the single account's row through the id the engine
+    /// filed its reading under.
+    func testARenameNamesTheSingleAccountRow() {
+        var signals = ProviderSignals()
+        signals.account = ProviderAccount(email: "someone@example.com")
+        signals.accounts = [
+            AccountSignals(
+                id: "a1b2", account: signals.account, plan: nil, planTier: nil, isSignedIn: true)
+        ]
+        var naming = AccountNaming()
+        naming.rename("a1b2", to: "Home")
+        let frame = FrameData(
+            tokens: 1, cost: 1, burn: nil,
+            providers: [
+                ProviderSlice(id: ProviderID.claudeCode, tokens: 1, cost: 1, signals: signals)
+            ],
+            keepAwake: .off)
+
+        let row = UsagePanelSnapshot.make(frame: frame, accountNaming: naming).providers.first
+
+        XCTAssertEqual(
+            row?.account,
+            UsagePanelSnapshot.AccountRow(name: "Home", detail: "someone@example.com"))
     }
 
     /// The badge above the line already says the seat, so an account that
