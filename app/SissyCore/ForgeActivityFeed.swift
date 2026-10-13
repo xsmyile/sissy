@@ -308,12 +308,18 @@ enum ForgeActivityFeed {
 /// GitHub's half: one GraphQL document for every count on the row, and the
 /// account's event feed for the latest event.
 ///
-/// The contributions figure is `contributionCalendar.totalContributions`, which
-/// is the number on the profile's own squares and therefore the one the user
-/// recognises. It is deliberately not the sum of the breakdown beside it —
-/// measured 2026-09-17, the calendar read 115 for a day whose commit, pull
-/// request and issue counts came to 44, the difference being contributions to
-/// private repositories the breakdown does not itemise.
+/// The contributions figure on `github.com` is the profile's own squares, read
+/// by `GitHubProfileCalendar`, because that is the number the user recognises.
+/// It used to be `contributionCalendar.totalContributions`, on the claim that
+/// this was the profile's number, and measured 2026-10-13 it is not: 133
+/// against the profile's 145 on 11 Oct and 6 896 against 7 026 over the year,
+/// the difference all private work. The token's calendar is still asked, for
+/// the comparison that tells a profile hiding private work, and on an
+/// Enterprise install, where it stays the figure. Either is deliberately not
+/// the sum of the breakdown beside it — measured 2026-09-17, the calendar read
+/// 115 for a day whose commit, pull request and issue counts came to 44, the
+/// difference being contributions to private repositories the breakdown does
+/// not itemise.
 ///
 /// `all` omits the range rather than widening it: the query refuses a window
 /// longer than a year, so the widest contributions figure GitHub will answer is
@@ -364,9 +370,17 @@ enum GitHubActivityFeed {
             throw ForgeReadFailure.malformed
         }
         let payload = try await ForgeActivityFeed.graphQL(
-            endpoint, query: document(now: now, counters: counters), token: token,
-            header: authorizationHeader, scheme: authorizationScheme)
+            endpoint,
+            query: document(
+                now: now, counters: counters, profileCheck: connection.isVendorHosted),
+            token: token, header: authorizationHeader, scheme: authorizationScheme)
         var reading = try parse(payload, connection: connection, now: now)
+        if connection.isVendorHosted, let login = reading.login {
+            reading.activity.contributions = await profileContributions(
+                login: login, viewer: payload["viewer"] as? [String: Any] ?? [:],
+                tokenFigures: reading.activity.contributions, now: now)
+            try Task.checkCancellation()
+        }
         if counters.contains(.latest), let login = reading.login {
             reading.latest = await latestEvent(connection, token: token, login: login)
             try Task.checkCancellation()
@@ -377,6 +391,38 @@ enum GitHubActivityFeed {
             try Task.checkCancellation()
         }
         return reading
+    }
+
+    /// Each period's figure off the profile's own squares, the token's
+    /// calendar where the profile hides private work, and none at all where
+    /// the profile would not read: see `GitHubProfileCalendar`.
+    ///
+    /// Non-throwing for the reason `latestEvent` is, and logged, because an
+    /// absent figure on its own says nothing about why.
+    private static func profileContributions(
+        login: String, viewer: [String: Any], tokenFigures: [UsagePeriod: Int], now: Date,
+        calendar: Calendar = .current
+    ) async -> [UsagePeriod: Int] {
+        let today = ForgeWindow.dayName(now, calendar: calendar)
+        let firstDays = UsagePeriod.allCases.map { period in
+            ForgeWindow.start(of: period, now: now, calendar: calendar)
+                .map { ForgeWindow.dayName($0, calendar: calendar) }
+        }
+        do {
+            guard
+                let squares = try await GitHubProfileCalendar.read(
+                    login: login, from: firstDays.compactMap { $0 }.min() ?? today, through: today,
+                    tokenCount: GitHubProfileCalendar.tokenCount(viewer), now: now, calendar: calendar)
+            else { return tokenFigures }
+            var figures: [UsagePeriod: Int] = [:]
+            for (period, first) in zip(UsagePeriod.allCases, firstDays) {
+                figures[period] = squares.total(from: first ?? squares.lastYearFrom, through: today)
+            }
+            return figures
+        } catch {
+            if !Task.isCancelled { sissyLog("sissy: GitHub profile contributions unreadable: \(error)") }
+            return [:]
+        }
     }
 
     static let dotComREST = URL(string: "https://api.github.com")!
@@ -506,7 +552,8 @@ enum GitHubActivityFeed {
     /// Re-measured 2026-09-18 with a hundred-comment page added to the same
     /// `viewer`: still 1 point.
     static func document(
-        now: Date, counters: Set<ForgeCounter> = ForgeCounter.all, calendar: Calendar = .current
+        now: Date, counters: Set<ForgeCounter> = ForgeCounter.all, profileCheck: Bool = true,
+        calendar: Calendar = .current
     ) -> String {
         let periods = UsagePeriod.allCases
         let end = ForgeWindow.vendorDayEnd(now, calendar: calendar)
@@ -518,7 +565,10 @@ enum GitHubActivityFeed {
                     ?? ""
                 let alias = ForgeAlias.contributions(period)
                 return "\(alias): contributionsCollection\(range) { \(calendarField) }"
-            } + (counters.contains(.comments) ? [commentField] : [])
+            }
+            + [profileCheck ? GitHubProfileCalendar.checkField(now: now, calendar: calendar) : nil]
+            .compactMap { $0 }
+            + (counters.contains(.comments) ? [commentField] : [])
         let searches = periods.flatMap { period -> [String] in
             let since =
                 ForgeWindow.start(of: period, now: now, calendar: calendar)

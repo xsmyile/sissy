@@ -118,6 +118,26 @@ header of `/api/v4/events` with one row requested. Two vendors counting two
 things is two readings; adding them would invent a third belonging to neither,
 which is the rule `ProviderCredits` already holds for money in two currencies.
 
+**On `github.com` that total is the profile's own squares, not the API's
+calendar.** Measured 2026-10-13 for one account, `contributionCalendar` read 133
+against the profile's 145 on 11 Oct, 129 against 142 on 12 Oct and 6 896
+against 7 026 over the year; quiet days agreed to the unit, and on 12 Oct both
+counted the same public work while the profile drew 127 private contributions
+to the API's 114. `GitHubProfileCalendar` therefore reads
+`github.com/users/<login>/contributions`, the fragment the profile page loads:
+one request with no credential carries the profile's last year a day at a time,
+so the poll's periods and a picked span are cut out of the same squares, and
+only a day older than that year costs a calendar year's fragment more. The
+parse proves itself against the total the fragment prints, and a fragment that
+will not read leaves the figure absent rather than falling back to the API's,
+which would put the lower number back with nothing to say why. The profile
+counts private work only while its owner lets it, and the fragment does not say
+whether they do: so the same poll asks the token's calendar for the 365 days
+ending yesterday, and a profile reading less than that over those days is
+hiding work, whereupon the token's figure answers for that reading. An
+Enterprise install serves the page behind its own sign-in, so there the token's
+calendar stays the figure.
+
 GitLab stops counting at 10 000 records: past that the reply keeps a next page
 and drops `x-total` (GitLab's REST documentation, read 2026-09-23). The widest
 window of an account that has worked for months crosses it, so such a reply is
@@ -460,6 +480,7 @@ compiled into the app too.
 | `ForgeTokenImport.swift`        | Reads the tokens `gh` and `glab` already hold, on the press that offers them and nowhere else. `gh`'s is in the login keychain as `go-keyring-base64:<base64>` and is read through `/usr/bin/security` because that tool is on the item's ACL and this process is not — measured 2026-09-17, no dialog. `glab`'s is plaintext in its own config. Neither CLI's storage is ever written |
 | `ForgeActivityFeed.swift`       | `ForgeWindow` (the archive's own window arithmetic, plus `vendorDay`/`vendorDayEnd`, which render a local date the way GitHub's calendar reads one, and `instant` for the filters that compare instants), `GitLabDaySplit` (the stretch between a local start and GitLab's UTC day) and one reader per forge. GitHub answers every period's contributions, merges, opened issues **and comments** in one GraphQL document costing 1 point of 5000/h — the comments as a page of the account's own, counted here rather than at the vendor, which totals no such thing; the page proves its own coverage against the window's local start, and a window it cannot prove is absent rather than a lower bound. GitLab takes two documents — the second only because the root `issues` field filters on the login the first returns, and that login travels as a GraphQL **variable** rather than spliced into a query — plus two header reads per period, the activity total and the same filtered to `commented`, and away from UTC a page of the feed for each bounded one. Each optional reading is asked for only while its switch is on, keyed by `ForgeCounter`. The latest event is GitHub's `/users/<login>/events` as a request of its own, newest by stamp rather than by row, and on GitLab a page of twenty on the widest window's own read plus one `/api/v4/projects/<id>` for the path. `after` on GitLab's events is **exclusive**, measured, so a count from a UTC midnight names the day before it. A `403` is told from a refused token by two headers rather than one: an exhausted hourly quota leaves a remaining count of zero, a secondary limit leaves the quota alone and sends a retry deadline, and reading only the count filed a throttled account as a refusal that parks |
 | `ActionsQuota.swift`            | The month's GitHub Actions bill per owner: `ActionsQuota`, `ActionsReading`, `ActionsAllowance` (the minutes each plan includes, the one figure kept by hand because GitHub no longer publishes it) and `GitHubActionsFeed`, which reads every owner's usage report, counts private repositories only and asks the budget of an organisation that spent it all. A refused report is an owner the token may not read, and the account's own is the `user` scope missing |
+| `GitHubProfileCalendar.swift`   | `GitHubProfileCalendar`: the squares of a `github.com` profile, read from the fragment the profile page loads, a year a day at a time. The parse must add up to the total the fragment prints or it is no figure; a profile that reads less than the token's own calendar over the 365 days ending yesterday is hiding private work, and the token's figure answers instead. Both the poll and a picked span cut their windows out of it. |
 | `ForgeActivityMonitor.swift`    | The poll: 5 min while agents are working, 30 min once nothing has, jittered, one value published for every connection. A failure keeps the last figures **and their age** — republishing would date a reading nobody took — and a refused or missing token parks the connection until the user acts, which is what separates this loop from `ProviderStatusMonitor`'s. `refreshOnce(id:onRefresh:)` is that user: it reaches a parked connection, and the parking then follows the answer rather than accumulating. Both entry points go through one per-connection fetch, so a click landing mid-round joins it — two requests would answer at two moments and the row would keep whichever finished last rather than whichever was asked last. The fetches are unstructured, so `stop()` cancels them itself and the generation decides what may still publish. `nextDelay` caps its wait at the next local midnight, since every window is worked out from the instant it was asked for, and `wait` takes that delay in `activityCheck` slices so work starting mid-wait is not made to sit out an interval chosen before it began |
 | `FSWatcher.swift`               | Wraps `FSEventStreamCreate` (CoreServices); drives per-provider reader wakes |
 | `FrameBuilder.swift`            | `FrameData` / `ProviderSlice` / `UsageWindow` / `ProviderAccount` / `ProviderCredits` / `ModelTotals`, the burn rate, and the slice, project and model ordering — models by cost, then by tokens, so a day nothing has a rate for still leads with its largest. No formatters: the frame carries raw numbers and the app words them. `history` is one rollup per `UsagePeriod` the archive answers for, never keyed by `today` — the headline reads that off the live totals beside it, and each carries its window's split by repository and by provider |

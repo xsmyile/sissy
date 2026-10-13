@@ -67,7 +67,7 @@ enum ForgeCounter: String, Sendable, Codable, CaseIterable {
 /// a vendor that starts refusing one window must not report it as a quiet day.
 struct ForgeActivity: Sendable, Equatable {
     /// The vendor's own activity total, by the window the panel is showing.
-    let contributions: [UsagePeriod: Int]
+    var contributions: [UsagePeriod: Int]
     /// Pull requests or merge requests this account authored and had merged in
     /// the window. Authored rather than merged-by: it is the figure the user
     /// recognises from their own profile, and "merged by me" on a team counts
@@ -227,7 +227,7 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     /// Who the token turned out to belong to, nil for a connection that has
     /// never answered.
     let login: String?
-    let activity: ForgeActivity
+    var activity: ForgeActivity
     /// When Sissy read it, never a stamp from the payload. The same rule
     /// `ProviderStatusMonitor` follows: a vendor's own timestamp moves on
     /// events rather than on polls, so dating a row from it tells a healthy

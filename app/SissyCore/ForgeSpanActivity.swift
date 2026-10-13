@@ -153,14 +153,45 @@ enum ForgeSpanFeed {
             let reply = try await graphQL(
                 endpoint,
                 query: githubDocument(
-                    from: from, to: to, now: now, counters: enabled), token: token, kind: .gitHub)
-            return try parseGitHub(
+                    from: from, to: to, now: now, counters: enabled,
+                    profileCheck: connection.isVendorHosted), token: token, kind: .gitHub)
+            var reading = try parseGitHub(
                 reply.data, failures: reply.failures, connection: connection,
                 dates: (from, to), now: now, counters: enabled)
+            if connection.isVendorHosted, let login = reading.login,
+                let figure = reading.counters[.contributions], case .counted = figure
+            {
+                reading.counters[.contributions] = await profileContributions(
+                    login: login, viewer: reply.data["viewer"] as? [String: Any] ?? [:],
+                    bounds: bounds, tokenFigure: figure, now: now)
+                try Task.checkCancellation()
+            }
+            return reading
         case .gitLab:
             return try await readGitLab(
                 connection, token: token, counters: enabled,
                 dates: (from, to), now: now)
+        }
+    }
+
+    /// The span off the profile's own squares, the token's calendar where the
+    /// profile hides private work, and the reason where it would not read: the
+    /// poll's rule, `GitHubProfileCalendar`'s.
+    private static func profileContributions(
+        login: String, viewer: [String: Any], bounds: VendorBounds, tokenFigure: ForgeSpanCounter,
+        now: Date
+    ) async -> ForgeSpanCounter {
+        do {
+            guard
+                let squares = try await GitHubProfileCalendar.read(
+                    login: login, from: bounds.firstDay, through: bounds.lastDay,
+                    tokenCount: GitHubProfileCalendar.tokenCount(viewer), now: now)
+            else { return tokenFigure }
+            return squares.total(from: bounds.firstDay, through: bounds.lastDay)
+                .map { .counted(.exact($0)) } ?? .unavailable(.incomplete)
+        } catch {
+            if !Task.isCancelled { sissyLog("sissy: GitHub profile contributions unreadable: \(error)") }
+            return .unavailable(absence(error))
         }
     }
 
@@ -235,7 +266,7 @@ enum ForgeSpanFeed {
 
     static func githubDocument(
         from: Date, to: Date, now: Date, counters enabled: Set<ForgeCounter>,
-        calendar: Calendar = .current
+        profileCheck: Bool = true, calendar: Calendar = .current
     ) -> String {
         guard let bounds = bounds(from: from, to: to, now: now, calendar: calendar)
         else { return GitHubActivityFeed.probeDocument }
@@ -249,6 +280,9 @@ enum ForgeSpanFeed {
                     "contrib\(index): contributionsCollection(from: \"\(iso.string(from: range.0))\", to: \"\(iso.string(from: range.1))\") { contributionCalendar { totalContributions } }"
                 )
             }
+        }
+        if profileCheck, let check = GitHubProfileCalendar.checkField(now: now, calendar: calendar) {
+            viewer.append(check)
         }
         if enabled.contains(.comments) {
             viewer.append(
