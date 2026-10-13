@@ -26,10 +26,11 @@ struct AccountNaming: Codable, Equatable, Sendable {
     var format: AccountNameFormat = .automatic
     var custom: [String: String] = [:]
 
-    /// The plan tokens that name a seat in an organisation rather than a
-    /// personal subscription, as both vendors spell them once
-    /// `ClaudeAccountIdentity.planPrefix` is off.
-    static let organizationPlans: Set<String> = ["team", "enterprise", "business", "edu"]
+    /// The words in a plan token that name a seat in an organisation rather
+    /// than a personal subscription. Matched as words of the token rather than
+    /// as the whole of it, because OpenAI spells the same plans with
+    /// qualifiers: `self_serve_business_usage_based`, `education`.
+    static let organizationPlanWords = ["team", "enterprise", "business", "edu"]
 
     /// What an account is called, nil when nothing the vendor answered names
     /// it, so the caller falls back to whatever key it holds. A nil `id` is an
@@ -45,17 +46,18 @@ struct AccountNaming: Codable, Equatable, Sendable {
             return account?.email ?? organization ?? person
         case .nameAndOrganization:
             let parts = [person, organization].compactMap { $0 }
-            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+            return parts.isEmpty ? nil : parts.joined(separator: Self.separator)
         }
     }
 
     /// What the name leaves out: the address and a team seat's organisation,
-    /// each only where the name does not already say it.
+    /// each only where it is not already one of the name's own parts.
     func detail(name: String, account: ProviderAccount?, plan: String?) -> String? {
+        let said = Set(name.components(separatedBy: Self.separator).map { $0.lowercased() })
         let parts = [account?.email, Self.organization(of: account, plan: plan)]
             .compactMap { $0 }
-            .filter { !name.contains($0) }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+            .filter { !said.contains($0.lowercased()) }
+        return parts.isEmpty ? nil : parts.joined(separator: Self.separator)
     }
 
     /// A rename, or the account handed back to the format when the field is
@@ -65,8 +67,15 @@ struct AccountNaming: Codable, Equatable, Sendable {
         custom[id] = trimmed.isEmpty ? nil : trimmed
     }
 
+    private static let separator = " · "
+
     private static func organization(of account: ProviderAccount?, plan: String?) -> String? {
-        guard let plan, organizationPlans.contains(plan) else { return nil }
+        guard let plan, isOrganizationPlan(plan) else { return nil }
         return account?.organization
+    }
+
+    private static func isOrganizationPlan(_ plan: String) -> Bool {
+        let words = plan.lowercased().split { !$0.isLetter }
+        return words.contains { word in organizationPlanWords.contains { word.hasPrefix($0) } }
     }
 }

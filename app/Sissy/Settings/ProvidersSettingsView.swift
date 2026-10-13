@@ -75,7 +75,6 @@ enum AccountNamingCopy {
     static let caption = "How the panel names each account. Rename one from its ⋯ menu."
     static let renameItem = "Rename…"
     static let renameTitle = "Rename account"
-    static let renameField = "Name"
     static let renameConfirm = "Rename"
     static let renameMessage = "Leave it empty to go back to the name Sissy picks."
 
@@ -382,7 +381,7 @@ struct ProvidersSettingsView: View {
                 get: { renaming != nil }, set: { if !$0 { renaming = nil } }),
             presenting: renaming
         ) { content in
-            TextField(AccountNamingCopy.renameField, text: $renameDraft)
+            TextField(content.title, text: $renameDraft)
             Button(DialogCopy.cancel, role: .cancel) {}
             Button(AccountNamingCopy.renameConfirm) {
                 model.renameAccount(content.id, to: renameDraft)
@@ -803,7 +802,7 @@ struct ProvidersSettingsView: View {
                 label: VendorLinkCopy.unlink(content.address), help: content.unlinkHelp
             ) {
                 Button(AccountNamingCopy.renameItem) {
-                    renameDraft = model.preferences.accountNaming.custom[content.id] ?? content.title
+                    renameDraft = model.preferences.accountNaming.custom[content.id] ?? ""
                     renaming = content
                 }
                 CredentialCopyButton(CredentialRowCopy.copyAddress, of: content.address)

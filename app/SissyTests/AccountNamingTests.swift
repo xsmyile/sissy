@@ -31,6 +31,26 @@ final class AccountNamingTests: XCTestCase {
         XCTAssertEqual(AccountNaming().name(id: "a", account: team, plan: nil), "Davide")
     }
 
+    /// OpenAI spells its organisation plans with qualifiers around the word.
+    func testAQualifiedOrganisationPlanStillLeadsOnTheOrganisation() {
+        let naming = AccountNaming()
+
+        for plan in ["self_serve_business_usage_based", "enterprise_cbp_usage_based", "education"] {
+            XCTAssertEqual(naming.name(id: "a", account: team, plan: plan), "Acme Srl", plan)
+        }
+    }
+
+    /// The detail drops only what the name says whole, not what it happens to
+    /// contain.
+    func testTheDetailComparesWholePartsIgnoringCase() {
+        let naming = AccountNaming()
+        let acme = ProviderAccount(email: "d@acme.example", organization: "Acme")
+
+        XCTAssertEqual(
+            naming.detail(name: "Acmeron", account: acme, plan: "team"), "d@acme.example · Acme")
+        XCTAssertEqual(naming.detail(name: "ACME", account: acme, plan: "team"), "d@acme.example")
+    }
+
     func testEmailNamesEveryAccountByItsAddress() {
         let naming = AccountNaming(format: .email)
 

@@ -10,6 +10,7 @@ final class DiagnosticsReportTests: XCTestCase {
     func testAReportNamesNothingPersonalOffTheSlice() {
         let account = ProviderAccount(
             email: "someone@example.com",
+            name: "Someone Real",
             organization: "Example Ltd",
             seat: "team_tier_1"
         )
@@ -39,7 +40,7 @@ final class DiagnosticsReportTests: XCTestCase {
 
         XCTAssertTrue(report.contains("Sissy 0.1.9 (12)"), report)
         XCTAssertTrue(report.contains("claude-code 1000 tokens"), report)
-        for secret in ["someone@example.com", "Example Ltd", "acme", "team_tier_1"] {
+        for secret in ["someone@example.com", "Someone Real", "Example Ltd", "acme", "team_tier_1"] {
             XCTAssertFalse(report.contains(secret), "the report carried \(secret)")
         }
     }

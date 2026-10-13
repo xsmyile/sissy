@@ -2093,7 +2093,7 @@ struct UsagePanelSnapshot: Equatable {
                     },
                 notice: UsageFormat.limitsNotice(slice.limitsState, provider: slice.id),
                 account: makeAccount(
-                    slice.account, id: slice.signals.accounts.first(where: \.isSignedIn)?.id,
+                    slice.account, id: soleAccountID(slice.signals.accounts),
                     plan: slice.plan, naming: naming),
                 projects: makeProjects(slice.projects, totalCost: slice.cost),
                 projectCount: slice.projects.count,
@@ -2237,7 +2237,7 @@ struct UsagePanelSnapshot: Equatable {
                 needsLogin: known.needsLogin.contains(id))
         }
         return entries.sorted { lhs, rhs in
-            (lhs.isSignedIn ? 0 : 1, lhs.label) < (rhs.isSignedIn ? 0 : 1, rhs.label)
+            (lhs.isSignedIn ? 0 : 1, lhs.label, lhs.id) < (rhs.isSignedIn ? 0 : 1, rhs.label, rhs.id)
         }
     }
 
@@ -2332,6 +2332,13 @@ struct UsagePanelSnapshot: Equatable {
     /// The account as a page prints it, or nil when the vendor answered for
     /// nothing a page would show. An account carrying only a seat is that
     /// case: the badge above already says it.
+    /// The id a vendor's one account is filed under, which is what a rename
+    /// made in Settings is kept by: the signed-in entry, or the only entry
+    /// where none says it is signed in.
+    private static func soleAccountID(_ accounts: [AccountSignals]) -> String? {
+        accounts.first(where: \.isSignedIn)?.id ?? (accounts.count == 1 ? accounts.first?.id : nil)
+    }
+
     private static func makeAccount(
         _ account: ProviderAccount?, id: String?, plan: String?, naming: AccountNaming
     ) -> AccountRow? {
