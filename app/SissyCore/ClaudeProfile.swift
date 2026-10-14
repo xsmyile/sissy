@@ -41,6 +41,13 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     /// as `fullName` and `displayName`. The full name leads, for the reason
     /// `ClaudeAccountIdentity.name(in:)` gives.
     private static let nameKeys = ["fullName", "displayName"]
+    /// The limit tier, which Claude Code files under either key: measured
+    /// 2026-10-13 on 2.1.296, a Max 20x account carried
+    /// `organizationRateLimitTier: default_claude_max_20x` beside a null
+    /// `userRateLimitTier`, which is how the badge came to read plain "Max".
+    /// The user's own tier leads where both answer, since it is the account's
+    /// rather than its organisation's.
+    private static let tierKeys = ["userRateLimitTier", "organizationRateLimitTier"]
 
     /// Whose account the block is about. Both blocks this type reads name it
     /// under the same key, and they are not the same answer.
@@ -212,11 +219,11 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
                     from: account["organizationType"] as? String)
             )
         else { return .absent }
-        let tier = UsageReaderShared.sanitizedPlanToken(
-            ClaudeAccountIdentity.stripping(
-                ClaudeAccountIdentity.tierPrefix,
-                from: account["userRateLimitTier"] as? String)
-        )
+        let tier = tierKeys.lazy.compactMap {
+            UsageReaderShared.sanitizedPlanToken(
+                ClaudeAccountIdentity.stripping(
+                    ClaudeAccountIdentity.tierPrefix, from: account[$0] as? String))
+        }.first
         return .found(
             Profile(
                 plan: plan,
