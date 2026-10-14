@@ -221,7 +221,7 @@ struct PanelOverview: View {
                     }
                 }
             } else {
-                VStack(alignment: .leading, spacing: Self.vendorGap) {
+                VStack(alignment: .leading, spacing: Self.spendGap) {
                     ForEach(snapshot.spendRows) { row in
                         spendRow(row)
                     }
@@ -236,6 +236,7 @@ struct PanelOverview: View {
     /// last account was from the next vendor (2026-10-14), so nothing grouped.
     private static let vendorGap: CGFloat = 14
     private static let accountGap: CGFloat = 8
+    private static let spendGap: CGFloat = 10
 
     /// One provider's spend over a window of past days. A door to its page
     /// while it still has one, which is while Sissy meters it.
@@ -467,11 +468,13 @@ struct PanelOverview: View {
     private static let resetTick: TimeInterval = 60
 
     /// The line under a row's bar: the leading window's countdown, or when it
-    /// starts if the vendor has not started it, so every account's row is the
-    /// same three lines.
+    /// starts if the vendor has not started it, so a row with a bar is the
+    /// same three lines whether or not its window is running.
     private static func resetLine(_ window: UsagePanelSnapshot.WindowRow, now: Date) -> String? {
-        guard let resetsAt = window.resetsAt else { return UsageFormat.unstartedCaption }
-        return UsageFormat.resetLabel(resetsAt, now: now).map { "resets " + $0 }
+        if window.isUnstarted { return UsageFormat.unstartedCaption }
+        return window.resetsAt
+            .flatMap { UsageFormat.resetLabel($0, now: now) }
+            .map { "resets " + $0 }
     }
 
     private func providerRowBody(

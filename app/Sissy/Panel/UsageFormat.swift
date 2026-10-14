@@ -353,7 +353,7 @@ enum UsageFormat {
             let rolled = observedLabel(resetsAt, now: now, calendar: calendar)
             return "rolled over \(rolled) · awaiting a reading"
         }
-        guard window.resetsAt != nil else { return unstartedCaption }
+        if window.isUnstarted { return unstartedCaption }
         var parts: [String] = []
         if let pace = window.pace {
             parts.append(
