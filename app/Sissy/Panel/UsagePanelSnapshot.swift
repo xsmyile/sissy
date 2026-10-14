@@ -584,6 +584,11 @@ struct UsagePanelSnapshot: Equatable {
         /// which by default is a team seat's organisation and a personal
         /// plan's owner. Nil for a vendor drawing one row.
         let qualifier: String?
+        /// The account's plan, worded, for the badge a row under a vendor's
+        /// label carries. Nil for a vendor drawing one row, whose plan is on
+        /// its page.
+        var plan: String?
+        var planTier: String?
         let windows: [WindowRow]
         let notice: LimitsNotice?
         let status: StatusRow?
@@ -2158,6 +2163,8 @@ struct UsagePanelSnapshot: Equatable {
                     account: account.id,
                     name: row.name,
                     qualifier: account.label,
+                    plan: account.plan,
+                    planTier: account.planTier,
                     windows: account.windows,
                     notice: account.notice,
                     status: row.status)

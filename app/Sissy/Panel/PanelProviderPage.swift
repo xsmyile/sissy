@@ -286,17 +286,17 @@ struct PanelProviderPage: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
-                            if let name = shownName {
-                                Text(name)
-                                    .font(.system(size: 12, weight: .medium))
+                            nameLine
+                            if let detail = shownDetail {
+                                Text(detail)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
-                                    .textSelection(.enabled)
+                                    .help(detail)
                             }
-                            organisation
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        useInCLI
                         accountPicker
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -390,11 +390,12 @@ struct PanelProviderPage: View {
             Menu {
                 Picker("Account", selection: accountBinding) {
                     ForEach(row.accounts) { choice in
-                        Text(choice.label).tag(choice.id)
+                        Text(menuLabel(choice)).tag(choice.id)
                     }
                 }
                 .pickerStyle(.inline)
                 Divider()
+                useInCLI
                 addAccount
             } label: {
                 Image(systemName: "person.2")
@@ -429,6 +430,11 @@ struct PanelProviderPage: View {
         )
     }
 
+    private func menuLabel(_ choice: UsagePanelSnapshot.AccountEntry) -> String {
+        choice.isSignedIn && row.accounts.count > 1
+            ? choice.label + ClaudeAccountSwitchCopy.signedInSuffix : choice.label
+    }
+
     /// Links another account, from where someone looking at their accounts
     /// already is.
     ///
@@ -459,7 +465,9 @@ struct PanelProviderPage: View {
     static let readOnlyPickerHelp =
         "Choose which account to read. Codex stays on the account it is signed into."
 
-    /// Signs Claude Code in as the account being read.
+    /// Signs Claude Code in as the account being read, from the account menu
+    /// rather than the card: on the card it shared the name's line, and a long
+    /// name lost to it what a control used once in a while had no claim to.
     ///
     /// Present only while that is not the account it is already on, so it
     /// cannot fire for the one in use and the accident it used to be is gone
@@ -471,35 +479,27 @@ struct PanelProviderPage: View {
         if let viewed, !viewed.isSignedIn, viewed.isSwitchable,
             pendingAccount == nil, switchingAccount == nil
         {
-            Button(ClaudeAccountSwitchCopy.useInCLI) { pendingAccount = viewed }
-                .controlSize(.small)
-                .help(Self.useInCLIHelp)
+            Button(ClaudeAccountSwitchCopy.useInCLI(viewed.label)) { pendingAccount = viewed }
         }
     }
 
-    static let useInCLIHelp =
-        "Sign Claude Code in as this account. Sissy keeps the one you are leaving."
-
-    /// What the name leaves out and the plan on one line, either of which can
-    /// be the only one there: a name can already say all of it, and an
-    /// API-key user is on no plan.
+    /// The account's name with its plan beside it, the shape the Overview's
+    /// rows take. The badge never gives way, so a long name truncates instead:
+    /// the plan used to share the line under the name with the organisation,
+    /// where a long one squeezed it to an ellipsis.
     @ViewBuilder
-    private var organisation: some View {
-        if shownDetail != nil || shownPlan != nil {
+    private var nameLine: some View {
+        if shownName != nil || shownPlan != nil {
             HStack(spacing: 6) {
-                if let detail = shownDetail {
-                    Text(detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                if let name = shownName {
+                    Text(name)
+                        .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
                 }
                 if let plan = shownPlan {
                     PlanBadge(plan: plan, tier: shownPlanTier)
-                }
-                if let viewed, viewed.isSignedIn, row.accounts.count > 1 {
-                    Text(ClaudeAccountSwitchCopy.signedInBadge)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
                 }
             }
         }
