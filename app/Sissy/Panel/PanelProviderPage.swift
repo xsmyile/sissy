@@ -117,11 +117,9 @@ struct PanelProviderPage: View {
         viewed.map(\.resetTarget) ?? row.resetTarget
     }
 
-    private var shownEmail: String? { viewed.map(\.email) ?? row.account?.email }
+    private var shownName: String? { viewed.map(\.label) ?? row.account?.name }
 
-    private var shownOrganization: String? {
-        viewed.map(\.organization) ?? row.account?.organization
-    }
+    private var shownDetail: String? { viewed.map(\.detail) ?? row.account?.detail }
 
     private var shownPlan: String? { viewed.map(\.plan) ?? row.plan }
 
@@ -269,9 +267,9 @@ struct PanelProviderPage: View {
 
     // MARK: Identity
 
-    /// Who this is, under the name the header already prints: the address the
-    /// CLI is signed in as, the organisation where the vendor names one, and
-    /// the plan that account is on. Every field comes off a file the
+    /// Who this is, under the name the header already prints: the account's
+    /// name as `AccountNaming` words it, the address and organisation that
+    /// name leaves out, and the plan that account is on. Every field comes off a file the
     /// adapter was already reading, so the block costs no new source and no
     /// permission.
     ///
@@ -288,8 +286,8 @@ struct PanelProviderPage: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
-                            if let email = shownEmail {
-                                Text(email)
+                            if let name = shownName {
+                                Text(name)
                                     .font(.system(size: 12, weight: .medium))
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -482,15 +480,15 @@ struct PanelProviderPage: View {
     static let useInCLIHelp =
         "Sign Claude Code in as this account. Sissy keeps the one you are leaving."
 
-    /// The organisation and the plan on one line, either of which can be the
-    /// only one there: a personal account names no organisation, and an
+    /// What the name leaves out and the plan on one line, either of which can
+    /// be the only one there: a name can already say all of it, and an
     /// API-key user is on no plan.
     @ViewBuilder
     private var organisation: some View {
-        if row.account?.organization != nil || row.plan != nil {
+        if shownDetail != nil || shownPlan != nil {
             HStack(spacing: 6) {
-                if let organization = shownOrganization {
-                    Text(organization)
+                if let detail = shownDetail {
+                    Text(detail)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

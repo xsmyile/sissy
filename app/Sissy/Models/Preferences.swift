@@ -42,6 +42,10 @@ struct Preferences: Codable, Equatable {
     /// is where it is reached for. Here rather than in `server.json` because
     /// it is about what the app asks, not about what the engine holds.
     var lidClosedConfirmed: Bool = false
+    /// What the panel and Settings call each account. Here for the reason
+    /// `limitsReading` is: it changes what is rendered and nothing about what
+    /// is metered.
+    var accountNaming = AccountNaming()
 
     init(
         sissyMotion: Bool = true,
@@ -50,6 +54,7 @@ struct Preferences: Codable, Equatable {
         usagePeriodPickedAt: Date? = nil,
         limitsReading: LimitsReading = .used,
         lidClosedConfirmed: Bool = false,
+        accountNaming: AccountNaming = AccountNaming(),
     ) {
         self.sissyMotion = sissyMotion
         self.retiredServerAgent = retiredServerAgent
@@ -57,6 +62,7 @@ struct Preferences: Codable, Equatable {
         self.usagePeriodPickedAt = usagePeriodPickedAt
         self.limitsReading = limitsReading
         self.lidClosedConfirmed = lidClosedConfirmed
+        self.accountNaming = accountNaming
     }
 
     /// How long a window picked on the calendar stays the panel's period.
@@ -101,6 +107,7 @@ struct Preferences: Codable, Equatable {
         usagePeriodPickedAt = try? c.decode(Date.self, forKey: .usagePeriodPickedAt)
         limitsReading = (try? c.decode(LimitsReading.self, forKey: .limitsReading)) ?? .used
         lidClosedConfirmed = (try? c.decode(Bool.self, forKey: .lidClosedConfirmed)) ?? false
+        accountNaming = (try? c.decode(AccountNaming.self, forKey: .accountNaming)) ?? AccountNaming()
     }
 
     /// `sissyMotion` was persisted as `mascotMotion` up to and including

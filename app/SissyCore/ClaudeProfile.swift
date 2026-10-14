@@ -36,6 +36,11 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     private static let seatKey = "seatTier"
     private static let emailKey = "emailAddress"
     private static let organizationKey = "organizationName"
+    /// The owner's name, under the two keys the OAuth profile answers in snake
+    /// case: measured 2026-10-13, Claude Code copies both into `oauthAccount`
+    /// as `fullName` and `displayName`. The full name leads, for the reason
+    /// `ClaudeAccountIdentity.name(in:)` gives.
+    private static let nameKeys = ["fullName", "displayName"]
 
     /// Whose account the block is about. Both blocks this type reads name it
     /// under the same key, and they are not the same answer.
@@ -218,6 +223,9 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
                 tier: tier,
                 account: ProviderAccount(
                     email: UsageReaderShared.sanitizedDisplayText(account[emailKey] as? String),
+                    name: nameKeys.lazy.compactMap {
+                        UsageReaderShared.sanitizedDisplayText(account[$0] as? String)
+                    }.first,
                     organization: UsageReaderShared.sanitizedDisplayText(
                         account[organizationKey] as? String),
                     seat: UsageReaderShared.sanitizedPlanToken(account[seatKey] as? String)
