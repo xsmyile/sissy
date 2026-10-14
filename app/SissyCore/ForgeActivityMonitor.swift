@@ -533,6 +533,7 @@ actor ForgeActivityMonitor {
             spanRefusals[connection.id] = nil
             published.update { map in
                 if let previous = map[connection.id], previous.login == reading.login {
+                    reading = reading.carryingContributions(from: previous)
                     reading.latest = ForgeEvent.merged(reading.latest, over: previous.latest)
                     reading.actions = ActionsReading.merged(reading.actions, over: previous.actions)
                 }

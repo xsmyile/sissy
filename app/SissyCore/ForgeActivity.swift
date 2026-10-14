@@ -67,7 +67,7 @@ enum ForgeCounter: String, Sendable, Codable, CaseIterable {
 /// a vendor that starts refusing one window must not report it as a quiet day.
 struct ForgeActivity: Sendable, Equatable {
     /// The vendor's own activity total, by the window the panel is showing.
-    let contributions: [UsagePeriod: Int]
+    var contributions: [UsagePeriod: Int]
     /// Pull requests or merge requests this account authored and had merged in
     /// the window. Authored rather than merged-by: it is the figure the user
     /// recognises from their own profile, and "merged by me" on a team counts
@@ -227,7 +227,7 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     /// Who the token turned out to belong to, nil for a connection that has
     /// never answered.
     let login: String?
-    let activity: ForgeActivity
+    var activity: ForgeActivity
     /// When Sissy read it, never a stamp from the payload. The same rule
     /// `ProviderStatusMonitor` follows: a vendor's own timestamp moves on
     /// events rather than on polls, so dating a row from it tells a healthy
@@ -251,6 +251,11 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     /// where it is switched off, the forge has none to read, or it would not
     /// answer. Absent rather than a failure, for the reason `latest` is.
     var actions: ActionsReading?
+    /// Whether the contributions figure missed this round for a reason the
+    /// next one can change, `GitHubProfileCalendar.isTransient`'s. The figure
+    /// rides a request of its own, so a profile that drops one GET must not
+    /// blank a row the document before it already answered.
+    var contributionsUnread = false
 
     /// A connection that has answered nothing at all. Distinct from a zero:
     /// a day with no contributions is a reading, and this is the absence of
@@ -280,6 +285,20 @@ struct ForgeActivityReading: Sendable, Equatable, Identifiable {
     func hasFigures(for period: UsagePeriod) -> Bool {
         contributions(for: period) != nil || merged(for: period) != nil
             || issues(for: period) != nil || comments(for: period) != nil
+    }
+
+    /// This reading with `previous`'s contributions where its own missed the
+    /// round: the same account, read on the same local day, since every
+    /// window is cut from the day it was read on and yesterday's `today` is
+    /// not today's.
+    func carryingContributions(from previous: Self, calendar: Calendar = .current) -> Self {
+        guard contributionsUnread, previous.login == login,
+            calendar.isDate(previous.readAt, inSameDayAs: readAt)
+        else { return self }
+        var carried = self
+        carried.activity.contributions = previous.activity.contributions
+        carried.activity.contributionsAtLeast = previous.activity.contributionsAtLeast
+        return carried
     }
 
     func contributions(for period: UsagePeriod) -> Int? { activity.contributions[period] }
