@@ -130,7 +130,12 @@ so the poll's periods and a picked span are cut out of the same squares, and
 only a day older than that year costs a calendar year's fragment more. The
 parse proves itself against the total the fragment prints, and a fragment that
 will not read leaves the figure absent rather than falling back to the API's,
-which would put the lower number back with nothing to say why. The profile
+which would put the lower number back with nothing to say why. A profile that
+did not answer at all, for the network, a rate limit or a redirect, leaves the
+figure the row already had for the same local day, because that request rides
+beside the document and the next poll can change it; on a picked span it is an
+absence of its own, so a limit on the credential-free web route never holds the
+token's counters back. The profile
 counts private work only while its owner lets it, and the fragment does not say
 whether they do: so the same poll asks the token's calendar for the 365 days
 ending yesterday, and a profile reading less than that over those days is

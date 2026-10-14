@@ -129,6 +129,78 @@ final class GitHubProfileCalendarTests: XCTestCase {
         XCTAssertNil(GitHubProfileCalendar.tokenCount([:]))
     }
 
+    private static let gmt: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        return calendar
+    }()
+
+    /// 2026-10-14 12:00 UTC.
+    private static let noon = Date(timeIntervalSince1970: 1_791_979_200)
+
+    /// A stand-in for the profile: the last year as 371 days of one
+    /// contribution each, every calendar year asked for as its days at two.
+    private static func profile(asked: LockedValue<[String]>) -> GitHubProfileCalendar.Load {
+        { url in
+            asked.update { $0.append(url.absoluteString) }
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            guard let from = query.first(where: { $0.name == "from" })?.value,
+                let to = query.first(where: { $0.name == "to" })?.value
+            else {
+                let days = GitHubProfileCalendar.dayNames(from: "2025-10-09", through: "2026-10-14")
+                return Dictionary(uniqueKeysWithValues: days.map { ($0, 1) })
+            }
+            let days = GitHubProfileCalendar.dayNames(from: from, through: to)
+            return Dictionary(uniqueKeysWithValues: days.map { ($0, 2) })
+        }
+    }
+
+    func testATokenCalendarThatDidNotAnswerAsksNothingOfTheProfile() async throws {
+        let asked = LockedValue<[String]>([])
+        let squares = try await GitHubProfileCalendar.read(
+            login: "gh", from: "2026-10-14", through: "2026-10-14", tokenCount: nil, now: Self.noon,
+            calendar: Self.gmt, load: Self.profile(asked: asked))
+        XCTAssertNil(squares)
+        XCTAssertEqual(asked.load(), [])
+    }
+
+    func testAProfileReadingBelowTheTokenLeavesTheTokensFigure() async throws {
+        let asked = LockedValue<[String]>([])
+        let squares = try await GitHubProfileCalendar.read(
+            login: "gh", from: "2026-10-14", through: "2026-10-14", tokenCount: 366, now: Self.noon,
+            calendar: Self.gmt, load: Self.profile(asked: asked))
+        XCTAssertNil(squares)
+        XCTAssertEqual(asked.load(), ["https://github.com/users/gh/contributions"])
+    }
+
+    /// A span reaching past the last year costs one request per calendar year
+    /// it touches, and the last year wins on the days both drew.
+    func testASpanPastTheLastYearFetchesEachYearItTouches() async throws {
+        let asked = LockedValue<[String]>([])
+        let squares = try await GitHubProfileCalendar.read(
+            login: "gh", from: "2024-12-30", through: "2025-10-10", tokenCount: 365, now: Self.noon,
+            calendar: Self.gmt, load: Self.profile(asked: asked))
+        let read = try XCTUnwrap(squares)
+        XCTAssertEqual(read.lastYearFrom, "2025-10-09")
+        XCTAssertEqual(read.total(from: "2024-12-30", through: "2024-12-31"), 4)
+        XCTAssertEqual(read.total(from: "2025-10-08", through: "2025-10-09"), 3)
+        XCTAssertEqual(
+            Set(asked.load()),
+            [
+                "https://github.com/users/gh/contributions",
+                "https://github.com/users/gh/contributions?from=2024-01-01&to=2024-12-31",
+                "https://github.com/users/gh/contributions?from=2025-01-01&to=2025-12-31",
+            ])
+    }
+
+    func testOnlyANetworkARateLimitOrARedirectLeavesThePreviousFigure() {
+        XCTAssertTrue(GitHubProfileCalendar.isTransient(ForgeReadFailure.unreachable))
+        XCTAssertTrue(GitHubProfileCalendar.isTransient(ForgeReadFailure.rateLimited))
+        XCTAssertTrue(GitHubProfileCalendar.isTransient(ForgeReadFailure.redirected))
+        XCTAssertFalse(GitHubProfileCalendar.isTransient(ForgeReadFailure.malformed))
+        XCTAssertFalse(GitHubProfileCalendar.isTransient(CancellationError()))
+    }
+
     /// An Enterprise install keeps the token's calendar as its figure, so its
     /// document carries no comparison to make.
     func testAnEnterpriseDocumentAsksForNoComparison() {

@@ -121,7 +121,7 @@ enum GitHubProfileCalendar {
     /// is the API's failure rather than the profile's.
     static func read(
         login: String, from first: String, through last: String, tokenCount: Int?,
-        now: Date, calendar: Calendar = .current
+        now: Date, calendar: Calendar = .current, load: @escaping Load = days(at:)
     ) async throws -> Squares? {
         guard let tokenCount else { return nil }
         guard let check = checkRange(now: now, calendar: calendar) else {
@@ -130,7 +130,7 @@ enum GitHubProfileCalendar {
         let checkFirst = ForgeWindow.dayName(check.first, calendar: calendar)
         let checkLast = ForgeWindow.dayName(check.last, calendar: calendar)
         let squares = try await fetch(
-            login: login, from: min(first, checkFirst), through: max(last, checkLast))
+            login: login, from: min(first, checkFirst), through: max(last, checkLast), load: load)
         guard let profileCount = squares.total(from: checkFirst, through: checkLast) else {
             throw ForgeReadFailure.malformed
         }
@@ -142,28 +142,48 @@ enum GitHubProfileCalendar {
         profileCount >= tokenCount ? squares : nil
     }
 
+    /// Whether a failed read is one a later poll can change: the network, a
+    /// rate limit or a redirect. Those leave the previous figure standing,
+    /// where a fragment this build cannot read leaves none.
+    static func isTransient(_ error: Error) -> Bool {
+        guard let failure = error as? ForgeReadFailure else { return false }
+        return failure == .unreachable || failure == .rateLimited || failure == .redirected
+    }
+
+    /// One fragment's squares by date: `days(at:)`, or a test's stand-in.
+    typealias Load = @Sendable (URL) async throws -> [String: Int]
+
     /// The last year, and every calendar year a day of `first...last` falls in
-    /// that the last year does not reach.
-    private static func fetch(login: String, from first: String, through last: String)
+    /// that the last year does not reach, those fetched side by side because a
+    /// picked span reads under `ForgeActivityMonitor.spanDeadline`.
+    static func fetch(login: String, from first: String, through last: String, load: @escaping Load)
         async throws -> Squares
     {
         guard let page = url(login: login) else { throw ForgeReadFailure.malformed }
-        let lastYear = try await days(at: page)
+        let lastYear = try await load(page)
         guard let lastYearFrom = lastYear.keys.min() else { throw ForgeReadFailure.malformed }
         let years = Set(
             dayNames(from: first, through: last).filter { lastYear[$0] == nil }
                 .compactMap { Int($0.prefix(4)) })
         guard years.count <= yearLimit else { throw ForgeReadFailure.malformed }
-        var days = lastYear
-        for year in years.sorted() {
+        let pages = try years.sorted().map { year in
             guard let page = url(login: login, year: year) else { throw ForgeReadFailure.malformed }
-            days.merge(try await self.days(at: page)) { kept, _ in kept }
-            try Task.checkCancellation()
+            return page
         }
+        var days = lastYear
+        try await withThrowingTaskGroup(of: [String: Int].self) { group in
+            for page in pages {
+                group.addTask { try await load(page) }
+            }
+            for try await year in group {
+                days.merge(year) { kept, _ in kept }
+            }
+        }
+        try Task.checkCancellation()
         return Squares(days: days, lastYearFrom: lastYearFrom)
     }
 
-    private static func days(at url: URL) async throws -> [String: Int] {
+    @Sendable private static func days(at url: URL) async throws -> [String: Int] {
         var request = URLRequest(url: url, timeoutInterval: ForgeActivityFeed.requestTimeout)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("text/html", forHTTPHeaderField: "Accept")

@@ -32,6 +32,11 @@ enum ForgeSpanAbsence: Error, Sendable, Equatable {
     case invalidDates
     case deadlineExceeded
     case monitorChanged
+    /// The profile's squares would not read. Its own case rather than a
+    /// `failure`, because that request carries no token: a rate limit on
+    /// `github.com/users` is not the API's, and read as one it would hold every
+    /// counter on the connection behind a deadline the token never earned.
+    case profileUnreadable
     case failure(ForgeReadFailure)
 }
 
@@ -50,7 +55,9 @@ struct ForgeSpanReading: Sendable, Equatable, Identifiable {
     var isCacheable: Bool {
         !counters.values.contains { counter in
             switch counter {
-            case .unavailable(.failure), .unavailable(.deadlineExceeded), .unavailable(.monitorChanged): true
+            case .unavailable(.failure), .unavailable(.deadlineExceeded), .unavailable(.monitorChanged),
+                .unavailable(.profileUnreadable):
+                true
             default: false
             }
         }
@@ -175,8 +182,8 @@ enum ForgeSpanFeed {
     }
 
     /// The span off the profile's own squares, the token's calendar where the
-    /// profile hides private work, and the reason where it would not read: the
-    /// poll's rule, `GitHubProfileCalendar`'s.
+    /// profile hides private work, and `ForgeSpanAbsence.profileUnreadable`
+    /// where it would not read: the poll's rule, `GitHubProfileCalendar`'s.
     private static func profileContributions(
         login: String, viewer: [String: Any], bounds: VendorBounds, tokenFigure: ForgeSpanCounter,
         now: Date
@@ -191,7 +198,7 @@ enum ForgeSpanFeed {
                 .map { .counted(.exact($0)) } ?? .unavailable(.incomplete)
         } catch {
             if !Task.isCancelled { sissyLog("sissy: GitHub profile contributions unreadable: \(error)") }
-            return .unavailable(absence(error))
+            return .unavailable(.profileUnreadable)
         }
     }
 

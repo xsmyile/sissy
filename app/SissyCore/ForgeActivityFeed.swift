@@ -376,10 +376,12 @@ enum GitHubActivityFeed {
             token: token, header: authorizationHeader, scheme: authorizationScheme)
         var reading = try parse(payload, connection: connection, now: now)
         if connection.isVendorHosted, let login = reading.login {
-            reading.activity.contributions = await profileContributions(
+            let profile = await profileContributions(
                 login: login, viewer: payload["viewer"] as? [String: Any] ?? [:],
                 tokenFigures: reading.activity.contributions, now: now)
             try Task.checkCancellation()
+            reading.activity.contributions = profile.figures
+            reading.contributionsUnread = profile.unread
         }
         if counters.contains(.latest), let login = reading.login {
             reading.latest = await latestEvent(connection, token: token, login: login)
@@ -394,15 +396,17 @@ enum GitHubActivityFeed {
     }
 
     /// Each period's figure off the profile's own squares, the token's
-    /// calendar where the profile hides private work, and none at all where
-    /// the profile would not read: see `GitHubProfileCalendar`.
+    /// calendar where the profile hides private work, and none at all where the
+    /// profile would not read, `unread` where that was for a reason the next
+    /// round can change, so the row keeps what it had: see
+    /// `GitHubProfileCalendar`.
     ///
     /// Non-throwing for the reason `latestEvent` is, and logged, because an
     /// absent figure on its own says nothing about why.
     private static func profileContributions(
         login: String, viewer: [String: Any], tokenFigures: [UsagePeriod: Int], now: Date,
         calendar: Calendar = .current
-    ) async -> [UsagePeriod: Int] {
+    ) async -> (figures: [UsagePeriod: Int], unread: Bool) {
         let today = ForgeWindow.dayName(now, calendar: calendar)
         let firstDays = UsagePeriod.allCases.map { period in
             ForgeWindow.start(of: period, now: now, calendar: calendar)
@@ -413,15 +417,15 @@ enum GitHubActivityFeed {
                 let squares = try await GitHubProfileCalendar.read(
                     login: login, from: firstDays.compactMap { $0 }.min() ?? today, through: today,
                     tokenCount: GitHubProfileCalendar.tokenCount(viewer), now: now, calendar: calendar)
-            else { return tokenFigures }
+            else { return (tokenFigures, false) }
             var figures: [UsagePeriod: Int] = [:]
             for (period, first) in zip(UsagePeriod.allCases, firstDays) {
                 figures[period] = squares.total(from: first ?? squares.lastYearFrom, through: today)
             }
-            return figures
+            return (figures, false)
         } catch {
             if !Task.isCancelled { sissyLog("sissy: GitHub profile contributions unreadable: \(error)") }
-            return [:]
+            return ([:], GitHubProfileCalendar.isTransient(error))
         }
     }
 

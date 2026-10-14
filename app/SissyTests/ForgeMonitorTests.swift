@@ -206,6 +206,47 @@ final class ForgeMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.currentReadings().first?.actions, actions)
     }
 
+    /// The profile's squares ride a request of their own: one that missed a
+    /// round for a reason the next can change leaves the row's figure, and one
+    /// this build could not read leaves none.
+    func testARoundWhoseProfileMissedKeepsTheRowsContributions() async {
+        let missed = LockedValue<Bool>(false)
+        let monitor = ForgeActivityMonitor(
+            connections: [Self.gitHub],
+            fetch: { connection, _, _, _ in
+                var reading = Self.reading(connection, login: "gh", contributions: 42, merged: 7)
+                if missed.load() {
+                    reading.activity.contributions = [:]
+                    reading.contributionsUnread = true
+                }
+                return reading
+            },
+            token: { _, _ in .found("token") })
+        _ = await monitor.refreshOnce {}
+        missed.store(true)
+        _ = await monitor.refreshOnce {}
+        XCTAssertEqual(monitor.currentReadings().first?.contributions(for: .today), 42)
+        XCTAssertEqual(monitor.currentReadings().first?.merged(for: .today), 7)
+    }
+
+    /// A figure carried past midnight would put yesterday's day under today's,
+    /// and a profile this build could not read carries nothing at all.
+    func testAMissedProfileCarriesNoFigureIntoANewDay() throws {
+        var gmt = Calendar(identifier: .gregorian)
+        gmt.timeZone = .gmt
+        let previous = Self.reading(Self.gitHub, login: "gh", contributions: 42, merged: 7)
+        var fresh = Self.reading(
+            Self.gitHub, login: "gh", contributions: 0, merged: 0,
+            at: try XCTUnwrap(gmt.date(byAdding: .day, value: 1, to: Self.readAt)))
+        fresh.activity.contributions = [:]
+        fresh.contributionsUnread = true
+        XCTAssertNil(fresh.carryingContributions(from: previous, calendar: gmt).contributions(for: .today))
+        var unreadable = Self.reading(Self.gitHub, login: "gh", contributions: 0, merged: 0)
+        unreadable.activity.contributions = [:]
+        XCTAssertNil(
+            unreadable.carryingContributions(from: previous, calendar: gmt).contributions(for: .today))
+    }
+
     /// A refused token cannot be fixed by asking again in five minutes, so the
     /// connection is parked and the next round spends no request on it.
     func testARefusedTokenParksTheConnectionUntilTheUserActs() async {
