@@ -461,9 +461,19 @@ struct WindowRowView: View {
 
 /// The account's plan, badged rather than set as plain text beside the name:
 /// "Codex Plus" reads as a product OpenAI sells, and the pill is what says the
-/// word is an attribute of the account instead. It yields its width first — of
-/// the three things on that line, the plan is the one a reader can still infer
-/// once it is gone.
+/// word is an attribute of the account instead.
+///
+/// It never truncates; the name beside it does. It used to yield its width
+/// first, and measured 2026-10-13 on a personal account whose organisation
+/// claude.ai had named after its address, the badge on the provider page
+/// shrank to an ellipsis: a pill reading `…` says nothing, where a name cut
+/// short still says most of itself.
+///
+/// Neutral rather than in the vendor's tint, because on the Overview it sits
+/// beside a bar and a percentage that carry the vendor's colour, and a third
+/// tinted mark read as a third reading. Its row centres it on the name: on
+/// the text baseline the capsule, shorter than a 12 pt line, read as sitting
+/// below it (2026-10-13), and a 9 pt badge read as too small to bother with.
 ///
 /// `tier` is present only when the account is metered at some other plan's
 /// limits, which is a sentence and not a badge.
@@ -476,10 +486,10 @@ struct PlanBadge: View {
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(.secondary)
             .lineLimit(1)
-            .padding(.horizontal, 5)
+            .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .background(Capsule().fill(.quaternary))
-            .layoutPriority(-1)
+            .fixedSize()
             .help(tier.map { "\($0) rate limits" } ?? plan)
     }
 }

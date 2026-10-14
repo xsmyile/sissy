@@ -332,9 +332,10 @@ enum UsageFormat {
     /// until the window rolls over, joined. Both halves are durations off the
     /// same `now`, which is what lets them be read against each other.
     ///
-    /// Nil for a window the vendor has not started, which has neither — the
-    /// bar at zero is the whole statement, and a caption saying so twice is
-    /// noise on the one row that has nothing to report.
+    /// A window the vendor has not started has neither, and says when it
+    /// will: its period runs from the first message. It used to say nothing,
+    /// and on the Overview that left one account's row a line short of the
+    /// rows around it with no reason given (2026-10-14).
     ///
     /// A window that has rolled over since the reading says so instead, and in
     /// the past tense: everything else on that row describes the period that
@@ -352,6 +353,7 @@ enum UsageFormat {
             let rolled = observedLabel(resetsAt, now: now, calendar: calendar)
             return "rolled over \(rolled) · awaiting a reading"
         }
+        if window.isUnstarted { return unstartedCaption }
         var parts: [String] = []
         if let pace = window.pace {
             parts.append(
@@ -363,6 +365,8 @@ enum UsageFormat {
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
+
+    static let unstartedCaption = "starts on first use"
 
     /// How long a window has left, rather than the moment it ends.
     ///
@@ -1878,10 +1882,15 @@ enum ClaudeAccountSwitchCopy {
     /// lost, which is the whole reason this is safe to offer at all.
     static let confirmReassurance = "Sissy keeps the account you are leaving."
 
-    static let useInCLI = "Use in CLI"
-    /// Marks the account the CLI is on, which is the one whose future spend
-    /// lands in the day beside it. Only shown once there is more than one.
-    static let signedInBadge = "· in CLI"
+    /// The account menu's item for the account being read, with an ellipsis
+    /// because it asks before it writes anything.
+    static func useInCLI(_ label: String) -> String {
+        "Use \(label) in CLI…"
+    }
+
+    /// Set after the account the CLI is on in the account menu, the one place
+    /// that answers which it is. Only once there is more than one.
+    static let signedInSuffix = " · in CLI"
     static let confirmAction = "Switch"
 
     /// Shown while the credential is written and the reading behind it

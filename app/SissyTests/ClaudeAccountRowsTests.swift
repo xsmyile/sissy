@@ -327,6 +327,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         XCTAssertEqual(rows.map(\.name), ["Claude", "Claude"])
         XCTAssertEqual(rows.map(\.qualifier), ["Acme Srl", "Radon Forge"])
         XCTAssertEqual(rows.map(\.title), ["Claude · Acme Srl", "Claude · Radon Forge"])
+        XCTAssertEqual(rows.map(\.plan), ["Team", "Team"])
     }
 
     /// The Overview names a vendor once over all its accounts, and keeps the

@@ -156,6 +156,34 @@ final class UsagePanelSnapshotTests: XCTestCase {
         )
     }
 
+    /// A window the vendor has not started has no reset to count down to and
+    /// says when it will have one, rather than leaving its row a line short.
+    func testAnUnstartedWindowSaysItStartsOnFirstUse() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let window = try XCTUnwrap(UsageWindow(minutes: 300, usedPercent: 0, resetsAt: nil))
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window])]),
+            now: now
+        )
+        let row = try XCTUnwrap(snapshot.providers.first?.windows.first)
+
+        XCTAssertEqual(UsageFormat.windowCaption(row, now: now), "starts on first use")
+    }
+
+    /// Spend with no reset named is a reading missing its date, and saying
+    /// the window starts on first use would contradict the bar above it.
+    func testASpentWindowWithNoResetDoesNotClaimToBeUnstarted() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let window = try XCTUnwrap(UsageWindow(minutes: 300, usedPercent: 12, resetsAt: nil))
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window])]),
+            now: now
+        )
+        let row = try XCTUnwrap(snapshot.providers.first?.windows.first)
+
+        XCTAssertNil(UsageFormat.windowCaption(row, now: now))
+    }
+
     /// A window past 100% has no headroom left to project, and a reading in
     /// the past is not a projection the caption can count down to.
     func testAnExhaustedWindowRunsOutNow() throws {

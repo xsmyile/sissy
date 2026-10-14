@@ -584,6 +584,11 @@ struct UsagePanelSnapshot: Equatable {
         /// which by default is a team seat's organisation and a personal
         /// plan's owner. Nil for a vendor drawing one row.
         let qualifier: String?
+        /// The account's plan, worded, for the badge a row under a vendor's
+        /// label carries. Nil for a vendor drawing one row, whose plan is on
+        /// its page.
+        var plan: String?
+        var planTier: String?
         let windows: [WindowRow]
         let notice: LimitsNotice?
         let status: StatusRow?
@@ -1013,6 +1018,11 @@ struct UsagePanelSnapshot: Equatable {
         /// Nil for a window the vendor has not started, which is a bar at
         /// zero with nothing to count down to.
         let resetsAt: Date?
+
+        /// A window nothing has been spent in and no reset is named for, which
+        /// is one the vendor starts on the first message. Spend without a
+        /// reset is a reading missing its date rather than a window waiting.
+        var isUnstarted: Bool { resetsAt == nil && fraction == 0 }
         /// Nil in the window's first minutes, where the projection is noise.
         let pace: Pace?
         /// Whether the period turned over after the vendor last answered for
@@ -2158,6 +2168,8 @@ struct UsagePanelSnapshot: Equatable {
                     account: account.id,
                     name: row.name,
                     qualifier: account.label,
+                    plan: account.plan,
+                    planTier: account.planTier,
                     windows: account.windows,
                     notice: account.notice,
                     status: row.status)

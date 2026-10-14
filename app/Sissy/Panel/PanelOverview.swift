@@ -201,23 +201,27 @@ struct PanelOverview: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         } content: {
-            VStack(alignment: .leading, spacing: 10) {
-                if snapshot.includesToday {
+            if snapshot.includesToday {
+                VStack(alignment: .leading, spacing: Self.vendorGap) {
                     ForEach(Self.vendorGroups(snapshot.gaugeRows)) { group in
-                        if group.rows.count > 1 {
-                            vendorHeader(group)
-                        }
-                        ForEach(group.rows) { row in
-                            Button {
-                                openProvider(row.provider, row.account)
-                            } label: {
-                                providerRow(row, grouped: group.rows.count > 1)
+                        VStack(alignment: .leading, spacing: Self.accountGap) {
+                            if group.rows.count > 1 {
+                                vendorHeader(group)
                             }
-                            .buttonStyle(.plain)
-                            .help(Self.legendHelp(row))
+                            ForEach(group.rows) { row in
+                                Button {
+                                    openProvider(row.provider, row.account)
+                                } label: {
+                                    providerRow(row, grouped: group.rows.count > 1)
+                                }
+                                .buttonStyle(.plain)
+                                .help(Self.legendHelp(row))
+                            }
                         }
                     }
-                } else {
+                }
+            } else {
+                VStack(alignment: .leading, spacing: Self.spendGap) {
                     ForEach(snapshot.spendRows) { row in
                         spendRow(row)
                     }
@@ -225,6 +229,14 @@ struct PanelOverview: View {
             }
         }
     }
+
+    /// Between two vendors, and between one vendor's accounts. The second is
+    /// the tighter so the accounts read as one block under their label: one
+    /// 10 pt gap for both put the label as far from its first account as the
+    /// last account was from the next vendor (2026-10-14), so nothing grouped.
+    private static let vendorGap: CGFloat = 14
+    private static let accountGap: CGFloat = 8
+    private static let spendGap: CGFloat = 10
 
     /// One provider's spend over a window of past days. A door to its page
     /// while it still has one, which is while Sissy meters it.
@@ -416,9 +428,14 @@ struct PanelOverview: View {
     /// went blank. The mark is the affordance; the row is already a click away
     /// from the wording and the fix.
     ///
-    /// The plan badge is not here. It is identity rather than a reading — it
-    /// says what the account pays for, not what it has left, and it is the
-    /// same word tomorrow. The page leads with it.
+    /// A row under a vendor's label carries its plan badge. Since 0.2.0 the
+    /// badge was identity the Overview left to the page, and that held while a
+    /// vendor had one row: with several accounts of one vendor stacked, the
+    /// plan is what tells a Max seat from a Team one at a glance. A vendor's
+    /// only row still carries none. Which account the CLI is signed into is
+    /// not here: it does not change how a gauge is read, and every mark tried
+    /// for it on this row (2026-10-13) cost the name more than it said. The
+    /// page's account menu says it.
     ///
     /// **Two lines, and the bar has one to itself.** Everything used to sit on
     /// one, behind floors that were meant to start every track at the same x —
@@ -450,11 +467,21 @@ struct PanelOverview: View {
 
     private static let resetTick: TimeInterval = 60
 
+    /// The line under a row's bar: the leading window's countdown, or when it
+    /// starts if the vendor has not started it, so a row with a bar is the
+    /// same three lines whether or not its window is running.
+    private static func resetLine(_ window: UsagePanelSnapshot.WindowRow, now: Date) -> String? {
+        if window.isUnstarted { return UsageFormat.unstartedCaption }
+        return window.resetsAt
+            .flatMap { UsageFormat.resetLabel($0, now: now) }
+            .map { "resets " + $0 }
+    }
+
     private func providerRowBody(
         _ row: UsagePanelSnapshot.GaugeRow, grouped: Bool,
         binding: UsagePanelSnapshot.WindowRow?, now: Date
     ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 if !grouped { ProviderMark(id: row.provider) }
                 Self.rowName(row, grouped: grouped)
@@ -462,6 +489,9 @@ struct PanelOverview: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .accessibilityLabel(Self.legendHelp(row))
+                if grouped, let plan = row.plan {
+                    PlanBadge(plan: plan, tier: row.planTier)
+                }
                 if let notice = row.notice {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 10))
@@ -473,19 +503,19 @@ struct PanelOverview: View {
                 Chevron(isOpen: false)
             }
             if let binding {
-                ShareBar(
-                    share: binding.fraction,
-                    tint: ProviderPalette.tint(for: row.provider),
-                    pace: binding.pace
-                )
-                if let resetsAt = binding.resetsAt,
-                    let label = UsageFormat.resetLabel(resetsAt, now: now)
-                {
-                    Text("resets " + label)
-                        .font(.system(size: 10, weight: binding.percent >= 100 ? .semibold : .regular))
-                        .monospacedDigit()
-                        .foregroundStyle(binding.percent >= 100 ? .primary : .secondary)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    ShareBar(
+                        share: binding.fraction,
+                        tint: ProviderPalette.tint(for: row.provider),
+                        pace: binding.pace
+                    )
+                    if let line = Self.resetLine(binding, now: now) {
+                        Text(line)
+                            .font(.system(size: 10))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
