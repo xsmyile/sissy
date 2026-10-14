@@ -1281,16 +1281,20 @@ actor LocalUsageProvider: UsageProvider {
     /// the offset it was saved at; dropped, having aged out of the retain
     /// window; or stale, rotated or truncated since the save, which refuses
     /// the whole snapshot. A file that is gone is kept until it ages out, for
-    /// the reason `loadAndApplyPersistedState` gives.
+    /// the reason `loadAndApplyPersistedState` gives; gone means the disk says
+    /// there is no such file, and a file it will not let Sissy read is stale.
     private static func fate(
         of entry: UsageStateSnapshot.FileEntry, cutoff: Date
     ) -> SnapshotFileFate {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: entry.path) else {
+        let attrs: [FileAttributeKey: Any]
+        do {
+            attrs = try FileManager.default.attributesOfItem(atPath: entry.path)
+        } catch CocoaError.fileReadNoSuchFile {
             return entry.mtimeUnix >= cutoff.timeIntervalSince1970 ? .keep : .drop
+        } catch {
+            return .stale
         }
-        guard let attrs = try? fm.attributesOfItem(atPath: entry.path),
-            let mtimeDate = attrs[.modificationDate] as? Date,
+        guard let mtimeDate = attrs[.modificationDate] as? Date,
             let size = (attrs[.size] as? NSNumber)?.uint64Value
         else { return .stale }
         guard mtimeDate >= cutoff else { return .drop }
