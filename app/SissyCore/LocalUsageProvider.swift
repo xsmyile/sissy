@@ -1273,11 +1273,48 @@ actor LocalUsageProvider: UsageProvider {
         return anyIngested
     }
 
+    private enum SnapshotFileFate {
+        case keep, drop, stale
+    }
+
+    /// What one file the snapshot names is worth against the disk: kept, at
+    /// the offset it was saved at; dropped, having aged out of the retain
+    /// window; or stale, rotated or truncated since the save, which refuses
+    /// the whole snapshot. A file that is gone is kept until it ages out, for
+    /// the reason `loadAndApplyPersistedState` gives.
+    private static func fate(
+        of entry: UsageStateSnapshot.FileEntry, cutoff: Date
+    ) -> SnapshotFileFate {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: entry.path) else {
+            return entry.mtimeUnix >= cutoff.timeIntervalSince1970 ? .keep : .drop
+        }
+        guard let attrs = try? fm.attributesOfItem(atPath: entry.path),
+            let mtimeDate = attrs[.modificationDate] as? Date,
+            let size = (attrs[.size] as? NSNumber)?.uint64Value
+        else { return .stale }
+        guard mtimeDate >= cutoff else { return .drop }
+        let diskMTime = mtimeDate.timeIntervalSince1970
+        if diskMTime + UsageReaderShared.mtimeTolerance < entry.mtimeUnix || size < entry.offset {
+            return .stale
+        }
+        return .keep
+    }
+
     /// Reads the persisted snapshot and applies it if every per-file mtime
     /// still matches the disk, and the adapter accepts its own slice of it.
-    /// Any mismatch (rotation, truncation, deleted file) discards the snapshot
-    /// entirely and falls back to a cold rescan — cheap enough (<1 s on a
-    /// 350 MB tree) that partial reconciliation isn't worth the complexity.
+    /// A rotation or a truncation discards the snapshot entirely and falls
+    /// back to a cold rescan — cheap enough (<1 s on a 350 MB tree) that
+    /// partial reconciliation isn't worth the complexity.
+    ///
+    /// A file that is gone is not a mismatch: what it held is already in the
+    /// totals beside it, and nothing will be appended to a file that is not
+    /// there. It keeps its offset until it ages out, so one that comes back
+    /// whole resumes where it stopped instead of being counted twice. Codex
+    /// moves a rollout it archives out of the tree, and refusing the snapshot
+    /// over it cost the tail every turn that file held: measured 2026-10-14, a
+    /// relaunch after two archived Codex sessions came back with no Codex
+    /// totals and, with nothing left in the window to read, no row at all.
     private func loadAndApplyPersistedState() -> Bool {
         guard let url = persistenceURL else { return false }
         let outcome = UsageStatePersistence.load(from: url)
@@ -1293,37 +1330,19 @@ actor LocalUsageProvider: UsageProvider {
         guard snapshot.claudeDataDirHash == expectedHash else { return false }
         guard snapshot.retainDays == retainDays else { return false }
 
-        let fm = FileManager.default
         let cutoffDate = retainWindowStart
         var newOffsets: [URL: UInt64] = [:]
         var newMTimes: [URL: TimeInterval] = [:]
-        var stale = false
         for entry in snapshot.files {
-            let fileURL = URL(fileURLWithPath: entry.path)
-            guard let attrs = try? fm.attributesOfItem(atPath: fileURL.path),
-                let mtimeDate = attrs[.modificationDate] as? Date,
-                let size = (attrs[.size] as? NSNumber)?.uint64Value
-            else {
-                // File referenced by snapshot no longer exists. Its events
-                // are baked into dailyTotals so we can't reuse the totals
-                // without also keeping its row — bail.
-                stale = true
-                break
+            switch Self.fate(of: entry, cutoff: cutoffDate) {
+            case .stale: return false
+            case .drop: continue
+            case .keep:
+                let fileURL = URL(fileURLWithPath: entry.path)
+                newOffsets[fileURL] = entry.offset
+                newMTimes[fileURL] = entry.mtimeUnix
             }
-            if mtimeDate < cutoffDate {
-                // File aged out of the retain window — drop without staling.
-                continue
-            }
-            let diskMTime = mtimeDate.timeIntervalSince1970
-            if diskMTime + UsageReaderShared.mtimeTolerance < entry.mtimeUnix || size < entry.offset {
-                // Rotated or truncated since save.
-                stale = true
-                break
-            }
-            newOffsets[fileURL] = entry.offset
-            newMTimes[fileURL] = entry.mtimeUnix
         }
-        if stale { return false }
 
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
