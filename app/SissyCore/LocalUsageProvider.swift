@@ -773,12 +773,16 @@ actor LocalUsageProvider: UsageProvider {
     /// before this the panel kept showing the old one until the next turn
     /// landed, which on the day a keychain grant expires may be never.
     ///
-    /// False until something has actually been published. A provider that read
-    /// nothing has no reading to contradict, and emitting a frame for it would
-    /// take the panel off the one sentence a user with no session logs at all
-    /// can act on.
+    /// Before anything has been published, true only once the vendor has
+    /// answered for an account. A provider that read nothing has no reading to
+    /// contradict, and emitting a frame for it would take the panel off the
+    /// one sentence a user with no session logs at all can act on. One whose
+    /// CLI is signed in has read something even with no turn in the window,
+    /// and staying silent there kept its row off the panel until the next
+    /// turn: measured 2026-10-14, a Codex account with live limits and a plan
+    /// had no row for as long as Codex went unused after a relaunch.
     private var signalsChanged: Bool {
-        guard let lastPublishedSignals else { return false }
+        guard let lastPublishedSignals else { return currentSignals().answersForAnAccount }
         return currentSignals() != lastPublishedSignals
     }
 

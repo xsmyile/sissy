@@ -140,6 +140,13 @@ struct ProviderSignals: Sendable, Equatable {
     /// it too, so nothing has to special-case the first one.
     var accounts: [AccountSignals] = []
 
+    /// Whether the vendor has said anything about an account: who it is,
+    /// what it pays for, or what it has left. Not the limits state, which
+    /// can describe a credential that answers for nobody.
+    var answersForAnAccount: Bool {
+        account != nil || plan != nil || !windows.isEmpty || credits != nil || !accounts.isEmpty
+    }
+
     /// The same reading ordered by the period each bucket measures, and every
     /// account's reading behind it given the same treatment — one of them is
     /// this same reading under its own name, and two rows drawn from one
