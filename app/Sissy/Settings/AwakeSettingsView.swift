@@ -14,7 +14,7 @@ enum KeepAwakeLidCopy {
     static func confirmMessage(floor: LidBatteryFloor) -> String {
         let battery =
             floor.percent.map {
-                "On battery the lid lets go below \($0)%, which Settings can change. Overheating will "
+                "Below \($0)% on battery it will, which Settings can change. Overheating will "
                     + "still sleep it"
             } ?? "Only a nearly empty battery or overheating will"
         return "While Sissy holds the Mac awake, closing the lid will not put it to sleep, on battery too. "
@@ -85,7 +85,7 @@ struct AwakeSettingsView: View {
 
     private static let ceilingLabel = "\(UsageFormat.keepAwakeTitle(.on)) stops after"
 
-    private static let batteryFloorLabel = "On battery, let the lid go below"
+    private static let batteryFloorLabel = "On battery, stop the closed-lid hold below"
 
     /// What the automatic mode costs. The name and the bound are read rather
     /// than written out: a caption that says ten minutes while the shipped
