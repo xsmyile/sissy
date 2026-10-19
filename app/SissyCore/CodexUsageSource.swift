@@ -408,6 +408,10 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
         return Self.refreshInterval
     }
 
+    /// Publishes why the reading is missing and takes it down, stamp
+    /// included: the stamp names the moment a reading was taken, and an
+    /// account's entry still carrying it captioned an empty row with the age
+    /// of windows that are no longer on it.
     private func publishFailure(_ state: ProviderLimitsState) {
         nextCredit = nil
         published.update {
@@ -415,6 +419,7 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
             $0.windows = []
             $0.credits = nil
             $0.resets = nil
+            $0.limitsObservedAt = nil
         }
     }
 

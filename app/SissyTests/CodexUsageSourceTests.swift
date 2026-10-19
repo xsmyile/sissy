@@ -425,4 +425,21 @@ final class CodexUsageSourceTests: XCTestCase {
         XCTAssertEqual(source.currentSignals().limitsState, .signedOut)
         XCTAssertTrue(source.currentSignals().windows.isEmpty)
     }
+
+    /// A failure withdraws the stamp along with the windows, because the
+    /// stamp names the moment a reading was taken and there is no longer one.
+    func testASignOutAfterAReadingWithdrawsItsStamp() async {
+        let signedIn = LockedValue(true)
+        let source = Self.source(
+            credential: { _ in signedIn.load() ? .found(Self.credential()) : .signedOut },
+            fetch: { _ in CodexUsagePayload.reading(Self.reply(), observedAt: Date()) })
+        _ = await source.refreshOnce {}
+        XCTAssertNotNil(source.currentSignals().limitsObservedAt)
+
+        signedIn.store(false)
+        _ = await source.refreshOnce {}
+
+        XCTAssertEqual(source.currentSignals().limitsState, .signedOut)
+        XCTAssertNil(source.currentSignals().limitsObservedAt)
+    }
 }

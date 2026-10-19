@@ -135,6 +135,41 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertTrue(source.currentSignals().windows.isEmpty)
     }
 
+    /// A session that read and then failed does not take the row from a
+    /// blocked probe on the stamp of a reading it has already taken down.
+    ///
+    /// The merge hands a blocked probe's row to whichever reader read later,
+    /// so a stamp kept past the failure outranked the probe's real windows
+    /// with an empty failure state. The probe's reading is dated far in the
+    /// past so the session's own read is the later one whatever the clock.
+    func testAFailedSessionDoesNotOutrankABlockedProbe() async {
+        let refuse = LockedValue(false)
+        let source = source(
+            lookup: { _ in Self.found(Self.session) },
+            fetch: { _, _ in
+                if refuse.load() { throw UsageRequestError.badStatus(401) }
+                return ClaudeWebSource.Reading(
+                    organization: "org", windows: [Self.window(300, 21)], credits: nil)
+            })
+        _ = await source.refreshOnce {}
+        refuse.store(true)
+        _ = await source.refreshOnce {}
+        let web = source.currentSignals()
+        XCTAssertNil(web.limitsObservedAt, "a withdrawn reading kept its stamp")
+
+        let now = Date()
+        let blocked = ProviderLimitsState.rateLimited(until: now.addingTimeInterval(3600))
+        let merged = ClaudeCodeSignals.merge(
+            profile: ProviderSignals(),
+            web: web,
+            probe: ProviderSignals(
+                windows: [Self.window(300, 46)], limitsState: blocked,
+                limitsObservedAt: Date(timeIntervalSinceReferenceDate: 0)))
+
+        XCTAssertEqual(merged.windows.map(\.usedPercent), [46])
+        XCTAssertEqual(merged.limitsState, blocked)
+    }
+
     /// And it drops the held copy, so the next poll reads the item again
     /// rather than spending a session that is already closed.
     func testASessionThatEndedIsReadAgainOnTheNextPoll() async {
