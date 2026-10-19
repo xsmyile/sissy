@@ -448,20 +448,19 @@ struct PanelProviderPage: View {
         Button(VendorLinkCopy.addTitle, action: onAddAccount)
     }
 
-    /// What the picker does, which is not the same sentence for both vendors.
+    private var accountPickerHelp: String {
+        Self.accountPickerHelp(for: row.id)
+    }
+
+    /// What the picker does, which is a different sentence for each vendor.
     ///
     /// On Claude Code an account in this menu is one Sissy can sign the CLI in
     /// as, so the tooltip says so rather than selling a credential change as a
     /// filter. On Codex there is no such control — a linked account is read
     /// and never signed in with — so the same words would promise something
-    /// the page cannot do.
-    private var accountPickerHelp: String {
-        Self.accountPickerHelp(for: row.id)
-    }
-
-    /// The picker's tooltip for `provider`, neutral for a provider Sissy
-    /// knows no account mechanics of: switching is something only Claude
-    /// Code's picker can do, so it is never the sentence a new id inherits.
+    /// the page cannot do. A provider Sissy knows no account mechanics of
+    /// gets the sentence that promises nothing and names no vendor, because
+    /// switching is the one claim a new id must not inherit.
     static func accountPickerHelp(for provider: String) -> String {
         switch provider {
         case ProviderID.claudeCode: switchablePickerHelp
