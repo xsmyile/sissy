@@ -449,6 +449,9 @@ private struct PanelSessionsLive: View {
     private func processRow(_ row: UsagePanelSnapshot.AgentsBlock.Process) -> some View {
         HStack(spacing: 6) {
             ProviderMark(id: row.provider)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(UsageFormat.providerName(row.provider))
+                .accessibilityHidden(row.project == nil)
             Text(UsageFormat.agentProcessName(row))
                 .font(.system(size: PanelMetrics.rowText))
                 .lineLimit(1)

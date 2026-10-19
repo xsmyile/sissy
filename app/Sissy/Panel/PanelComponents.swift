@@ -823,6 +823,8 @@ struct ProjectRowView: View {
             ForEach(row.providers) { provider in
                 ProviderMark(id: provider.id)
                     .help(UsageFormat.providerName(provider.id))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(UsageFormat.providerName(provider.id))
             }
         }
     }

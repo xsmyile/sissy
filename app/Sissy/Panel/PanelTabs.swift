@@ -236,6 +236,7 @@ struct PanelTabBar: View {
         .keyboardShortcut(tab.shortcut, modifiers: .command)
         .help(help(tab))
         .accessibilityLabel(tab.title)
+        .accessibilityValue(badge?.reason ?? "")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

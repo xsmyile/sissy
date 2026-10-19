@@ -497,6 +497,7 @@ struct PanelOverview: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.orange)
                         .help(notice.message)
+                        .accessibilityLabel(notice.message)
                 }
                 Spacer(minLength: 8)
                 gauge(row, binding: binding)

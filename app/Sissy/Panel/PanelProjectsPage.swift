@@ -91,6 +91,8 @@ private struct ProjectsResidueLine: View {
         if residue.providers.count == 1, let only = residue.providers.first {
             ProviderMark(id: only.id, textSize: 11)
                 .help(UsageFormat.providerName(only.id))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(UsageFormat.providerName(only.id))
         } else {
             ForEach(residue.providers) { provider in
                 HStack(spacing: 3) {
@@ -101,6 +103,9 @@ private struct ProjectsResidueLine: View {
                         .foregroundStyle(.secondary)
                 }
                 .help(UsageFormat.providerName(provider.id))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(UsageFormat.providerName(provider.id))
+                .accessibilityValue(provider.cost)
             }
         }
     }

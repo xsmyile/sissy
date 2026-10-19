@@ -134,10 +134,15 @@ enum ProviderPalette {
     /// file serves the panel, the page header and Settings. Nil is the answer
     /// for anything unrecognised, which is what keeps a provider a future
     /// release adds renderable without an asset of its own.
+    ///
+    /// Decorative, because an image's default VoiceOver label is its asset
+    /// name and the combined row it sits in would open on `ProviderMarkClaude`.
+    /// Where the mark is the only thing naming the provider, the caller gives
+    /// it the provider's name.
     static func mark(for id: String) -> Image? {
         switch id {
-        case ProviderID.claudeCode: return Image("ProviderMarkClaude")
-        case ProviderID.codex: return Image("ProviderMarkCodex")
+        case ProviderID.claudeCode: return Image(decorative: "ProviderMarkClaude")
+        case ProviderID.codex: return Image(decorative: "ProviderMarkCodex")
         default: return nil
         }
     }

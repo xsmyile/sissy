@@ -106,8 +106,11 @@ struct PanelSissy: View {
         }
     }
 
+    /// Decorative, so VoiceOver does not land on four layers named after their
+    /// assets: the header's title and the keep-awake control say in words what
+    /// the pose and the eye say here.
     private func layer(_ assetName: String, tint: some ShapeStyle) -> some View {
-        Image(assetName)
+        Image(decorative: assetName)
             .renderingMode(.template)
             .resizable()
             .scaledToFit()
