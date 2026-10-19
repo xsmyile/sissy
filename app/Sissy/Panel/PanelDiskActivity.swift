@@ -18,8 +18,6 @@ import SwiftUI
 struct DiskActivityPlatter: View {
     let engine: UsageEngineHost
 
-    @State private var hovered: Int?
-
     /// 1 MB/s, under which the plot does not rescale: a disk answering its
     /// own housekeeping stays on the baseline rather than drawing it at full
     /// height.
@@ -57,8 +55,7 @@ struct DiskActivityPlatter: View {
                     figures: {
                         UsageFormat.diskRead(rates[$0].rate.read) + " · "
                             + UsageFormat.diskWrite(rates[$0].rate.written)
-                    },
-                    hovered: $hovered)
+                    })
                 Text(UsageFormat.liveWindowCaption)
                     .font(.system(size: Self.captionSize))
                     .foregroundStyle(.tertiary)

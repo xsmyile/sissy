@@ -843,6 +843,24 @@ final class RateSparklineTests: XCTestCase {
         XCTAssertEqual(RateSparkline.index(at: width, of: times, now: now, width: width), 5)
     }
 
+    /// Why the plot keeps the pointer's x and resolves it on every render:
+    /// a second later every point sits a second further left and the oldest
+    /// has gone, so the index the pointer named before names another sample,
+    /// while the same x resolved again still names the one under it.
+    func testAStillPointerResolvesToTheSampleUnderItAfterTheSeriesMoves() throws {
+        let ages: [TimeInterval] = [100, 95, 90, 2, 1, 0]
+        let pointer = x(90)
+        let before = ages.map { now - $0 }
+        let stored = try XCTUnwrap(
+            RateSparkline.index(at: pointer, of: before, now: now, width: width))
+        XCTAssertEqual(before[stored], now - 90)
+        let later = now + 1
+        let after = ages.dropFirst().map { now - $0 } + [later]
+        XCTAssertEqual(after[stored], now - 2)
+        let resolved = RateSparkline.index(at: pointer, of: after, now: later, width: width)
+        XCTAssertEqual(resolved.map { after[$0] }, now - 90)
+    }
+
     /// Left of the oldest point is minutes the series never saw.
     func testTheHoverLeftOfTheSeriesPicksNothing() {
         let times = [100, 95].map { now - TimeInterval($0) }

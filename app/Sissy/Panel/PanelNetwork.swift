@@ -36,8 +36,6 @@ import SwiftUI
 struct PanelNetwork: View {
     let engine: UsageEngineHost
 
-    @State private var hovered: Int?
-
     private static let rowSpacing: CGFloat = 7
     private static let captionSize: CGFloat = 11
 
@@ -47,7 +45,7 @@ struct PanelNetwork: View {
             VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
                 headline(reading)
                 NetworkSparkline(
-                    rates: reading?.rates ?? [], now: reading?.observedAt ?? Date(), hovered: $hovered)
+                    rates: reading?.rates ?? [], now: reading?.observedAt ?? Date())
                 Divider()
                 VStack(alignment: .leading, spacing: Self.rowSpacing) {
                     PanelFigureRow(
@@ -106,7 +104,6 @@ struct PanelNetwork: View {
 struct NetworkSparkline: View {
     let rates: [RatePoint<NetworkRate>]
     let now: Date
-    @Binding var hovered: Int?
 
     static let downTint = Color.blue
     static let upTint = Color.cyan
@@ -123,7 +120,6 @@ struct NetworkSparkline: View {
             figures: {
                 UsageFormat.networkDown(rates[$0].rate.received) + " · "
                     + UsageFormat.networkUp(rates[$0].rate.sent)
-            },
-            hovered: $hovered)
+            })
     }
 }
