@@ -20,6 +20,21 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.cacheShare(0.99999), "99.9%")
     }
 
+    /// The unit is chosen on the printed figure, so a count that rounds up to
+    /// a thousand of one unit reads as one of the next.
+    func testATokenCountStepsUpWhenItsPrintedFigureReachesAThousand() {
+        XCTAssertEqual(UsageFormat.tokens(999), "999")
+        XCTAssertEqual(UsageFormat.tokens(999_949), "999.9K")
+        XCTAssertEqual(UsageFormat.tokens(999_950), "1.0M")
+        XCTAssertEqual(UsageFormat.tokens(999_949_999), "999.9M")
+        XCTAssertEqual(UsageFormat.tokens(999_950_000), "1.0B")
+    }
+
+    /// Cache reads run to billions a month on a busy account.
+    func testATokenCountInTheBillionsReadsInBillions() {
+        XCTAssertEqual(UsageFormat.tokens(1_234_567_890), "1.2B")
+    }
+
     func testAgeUnderFiveSecondsReadsAsJustNow() {
         XCTAssertEqual(UsageFormat.age(4), "just now")
     }

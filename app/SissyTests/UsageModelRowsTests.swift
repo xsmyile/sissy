@@ -150,6 +150,13 @@ final class UsageModelRowsTests: XCTestCase {
         XCTAssertEqual(rows.last?.reading, "<1% · $0.40")
     }
 
+    /// The floor's other end: a share short of the whole does not print as the
+    /// whole beside a `<1%` pill on the same row.
+    func testAShareShortOfTheWholeIsWordedRatherThanRoundedUp() {
+        XCTAssertEqual(UsageFormat.modelReading(share: 0.996, cost: "$8.12"), ">99% · $8.12")
+        XCTAssertEqual(UsageFormat.modelReading(share: 0.994, cost: "$8.12"), "99% · $8.12")
+    }
+
     /// A model that genuinely spent nothing on a day that did keeps its `0%`:
     /// zero is a reading, and only a share that is not zero may not print as
     /// one.

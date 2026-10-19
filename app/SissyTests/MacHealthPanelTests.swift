@@ -59,6 +59,17 @@ final class MacHealthPanelTests: XCTestCase {
         XCTAssertEqual(UsageFormat.storage(999_000_000_000), "999 GB")
     }
 
+    /// Each step is taken on the printed figure, so no boundary reads as a
+    /// thousand of the unit below or as `10.0 GB`.
+    func testStorageStepsOnThePrintedFigure() {
+        XCTAssertEqual(UsageFormat.storage(999_400_000), "999 MB")
+        XCTAssertEqual(UsageFormat.storage(999_600_000), "1.0 GB")
+        XCTAssertEqual(UsageFormat.storage(9_940_000_000), "9.9 GB")
+        XCTAssertEqual(UsageFormat.storage(9_960_000_000), "10 GB")
+        XCTAssertEqual(UsageFormat.storage(999_400_000_000), "999 GB")
+        XCTAssertEqual(UsageFormat.storage(999_600_000_000), "1.0 TB")
+    }
+
     func testSwapIsTheSwapInUseOrTheDash() {
         XCTAssertEqual(UsageFormat.macSwap(MacSwapUsage(used: 1_200_000_000, total: 2_000_000_000)), "1.2 GB")
         XCTAssertEqual(UsageFormat.macSwap(nil), "—")
