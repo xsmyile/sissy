@@ -121,6 +121,9 @@ final class VendorLoginWindow: NSObject {
         case declined(String)
         /// A page of the sign-in did not load.
         case unreachable
+        /// WebKit killed the process drawing the page, which says nothing
+        /// about the network: memory pressure or a crash.
+        case terminated
     }
 
     /// What a request for a new window becomes, in a window that has only
@@ -491,16 +494,30 @@ extension VendorLoginWindow: WKNavigationDelegate {
         failed(webView, with: error)
     }
 
-    /// A load error ends the sign-in when it is the page's. A popup's is the
+    /// A web view whose content process was killed, by memory pressure while
+    /// the user is off reading an email code or by a crash, is blank and
+    /// reports no load error: without this the window stays white with no
+    /// way forward but closing it. It ends the sign-in the way a load error
+    /// does, so the caller can offer the login again.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        sissyLog("sissy: the \(vendor.logName) login lost its web content process")
+        failed(webView, as: .terminated)
+    }
+
+    private func failed(_ webView: WKWebView, with error: Error) {
+        guard let failure = Self.pageFailure(for: error) else { return }
+        failed(webView, as: failure)
+    }
+
+    /// A failure ends the sign-in when it is the page's. A popup's is the
     /// popup's alone: it comes down and the page it covered is what the window
     /// shows again, which is where the sign-in can still be finished another
     /// way.
-    private func failed(_ webView: WKWebView, with error: Error) {
-        guard let failure = Self.pageFailure(for: error) else { return }
+    private func failed(_ webView: WKWebView, as failure: PageFailure) {
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard popups?.dismiss(webView) != true else {
-                sissyLog("sissy: the \(vendor.logName) login popup did not load and was closed")
+                sissyLog("sissy: the \(vendor.logName) login popup failed and was closed")
                 return
             }
             fail(failure)
