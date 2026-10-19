@@ -126,14 +126,23 @@ final class VendorLoginWindow: NSObject {
     /// What a request for a new window becomes, in a window that has only
     /// the one.
     enum PopupRoute: Equatable {
-        /// A popup over the page, in this window.
+        /// Loaded in this window: a popup over the page, or the page itself
+        /// for a link that navigates it.
         case open
         /// A link off the vendor's own hosts, handed to the default browser
         /// as the navigation delegate hands every other one.
         case openInBrowser(URL)
+        /// A link to an address that is not a web page, which is cancelled
+        /// rather than handed to whichever app registered its scheme: a
+        /// browser asks before launching one, and this window has no prompt
+        /// to ask with.
+        case drop
     }
 
     nonisolated private static let webSchemes: Set<String> = ["http", "https"]
+    /// Schemes WebKit resolves inside the page rather than through an app,
+    /// which a link may load here as it always could.
+    nonisolated private static let pageSchemes: Set<String> = ["about", "blob", "data"]
 
     /// WebKit's code for a load it abandoned because the navigation delegate
     /// cancelled it, which is every redirect this window takes a code from.
@@ -407,7 +416,8 @@ final class VendorLoginWindow: NSObject {
 
     /// What a load error means for the sign-in, and nil for the errors a
     /// navigation this window cancelled reports on its way out: the code
-    /// redirect, the decline and every link handed to the default browser.
+    /// redirect, the decline and every link handed to the default browser or
+    /// dropped.
     nonisolated static func pageFailure(for error: Error) -> PageFailure? {
         let failure = error as NSError
         if failure.domain == NSURLErrorDomain, failure.code == NSURLErrorCancelled { return nil }
@@ -428,10 +438,26 @@ final class VendorLoginWindow: NSObject {
         for url: URL?, linkActivated: Bool, isInternal: (String) -> Bool
     ) -> PopupRoute {
         guard linkActivated, let url else { return .open }
-        guard let scheme = url.scheme?.lowercased(), webSchemes.contains(scheme),
-            let host = url.host()
-        else { return .openInBrowser(url) }
+        return linkRoute(for: url, isInternal: isInternal)
+    }
+
+    /// Where a link the user clicked goes, whether it was aimed at this
+    /// window or at a new one: the vendor's own pages and what WebKit
+    /// resolves in the page load here, any other web page goes to the default
+    /// browser, and nothing else, a web address with no host included, leaves
+    /// the window at all.
+    nonisolated static func linkRoute(for url: URL, isInternal: (String) -> Bool) -> PopupRoute {
+        guard let scheme = url.scheme?.lowercased() else { return .drop }
+        if pageSchemes.contains(scheme) { return .open }
+        guard webSchemes.contains(scheme), let host = url.host() else { return .drop }
         return isInternal(host) ? .open : .openInBrowser(url)
+    }
+
+    /// Logs a dropped link by its scheme alone, since its path and query can
+    /// carry whatever the page put there.
+    private func drop(_ url: URL) {
+        let scheme = url.scheme ?? "schemeless"
+        sissyLog("sissy: the \(vendor.logName) login dropped a link to a \(scheme) address")
     }
 }
 
@@ -466,12 +492,17 @@ extension VendorLoginWindow: WKNavigationDelegate {
             Task { @MainActor [weak self] in self?.fail(.declined(reason)) }
             return .cancel
         }
-        guard navigationAction.navigationType == .linkActivated,
-            let host = url.host(),
-            !vendor.isInternal(host)
-        else { return .allow }
-        NSWorkspace.shared.open(url)
-        return .cancel
+        guard navigationAction.navigationType == .linkActivated else { return .allow }
+        switch Self.linkRoute(for: url, isInternal: vendor.isInternal) {
+        case .open:
+            return .allow
+        case .openInBrowser(let url):
+            NSWorkspace.shared.open(url)
+            return .cancel
+        case .drop:
+            drop(url)
+            return .cancel
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
@@ -527,6 +558,9 @@ extension VendorLoginWindow: WKUIDelegate {
             return popups.present(configuration: configuration, delegate: self)
         case .openInBrowser(let url):
             NSWorkspace.shared.open(url)
+            return nil
+        case .drop:
+            if let url = navigationAction.request.url { drop(url) }
             return nil
         }
     }
