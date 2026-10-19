@@ -136,6 +136,31 @@ final class ClaudeResetGrantsTests: XCTestCase {
         ])
         XCTAssertEqual(owner, ClaudeResetGrants.Owner(account: "user-1", organization: Self.organization))
         XCTAssertThrowsError(try ClaudeResetGrants.owner(["account": ["uuid": "user-1"]]))
+        XCTAssertThrowsError(
+            try ClaudeResetGrants.owner([
+                "account": ["uuid": "user-1"], "organization": ["uuid": "not-a-uuid"],
+            ]))
+        XCTAssertThrowsError(
+            try ClaudeResetGrants.owner([
+                "account": ["uuid": ""], "organization": ["uuid": Self.organization],
+            ]))
+    }
+
+    /// The profile, the poll and the spend all go through this builder, and
+    /// the timeout and the agent are the only parts each caller chooses.
+    func testTheRequestCarriesTheCLIsHeadersAndTheCallersTimeout() throws {
+        let url = try XCTUnwrap(URL(string: "https://api.anthropic.com/api/oauth/profile"))
+        let named = ClaudeResetGrants.request(url, token: "t1", userAgent: "claude-cli/2.1.289", timeout: 25)
+        XCTAssertEqual(named.timeoutInterval, 25)
+        XCTAssertEqual(named.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(named.value(forHTTPHeaderField: "Authorization"), "Bearer t1")
+        XCTAssertEqual(named.value(forHTTPHeaderField: "anthropic-beta"), "oauth-2025-04-20")
+        XCTAssertEqual(named.value(forHTTPHeaderField: "Accept"), "application/json")
+        XCTAssertEqual(named.value(forHTTPHeaderField: "User-Agent"), "claude-cli/2.1.289")
+
+        let anonymous = ClaudeResetGrants.request(url, token: "t1", userAgent: nil, timeout: 10)
+        XCTAssertEqual(anonymous.timeoutInterval, 10)
+        XCTAssertNil(anonymous.value(forHTTPHeaderField: "User-Agent"))
     }
 
     private final class Spends: @unchecked Sendable {

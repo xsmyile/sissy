@@ -409,10 +409,9 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     }
 
     private static func fetch(token: String, userAgent: String?) async throws -> Reading {
-        var request = ClaudeResetGrants.request(
+        let request = ClaudeResetGrants.request(
             usageURL.appending(queryItems: [ClaudeResetGrants.usageQuery]), token: token,
-            userAgent: userAgent)
-        request.timeoutInterval = requestTimeout
+            userAgent: userAgent, timeout: requestTimeout)
         return parse(try await UsageRequestError.object(answering: request), observedAt: Date())
     }
 

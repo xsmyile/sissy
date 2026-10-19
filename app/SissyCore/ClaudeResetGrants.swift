@@ -29,7 +29,6 @@ enum ClaudeResetGrants {
     private static let program = "cedar_ember"
     private static let claimHost = "https://api.anthropic.com/api/organizations/"
     private static let claimPath = "/reset_rate_limits"
-    private static let profileURL = URL(string: "https://api.anthropic.com/api/oauth/profile")!
     private static let betaHeader = "oauth-2025-04-20"
     private static let requestTimeout: TimeInterval = 25
 
@@ -182,17 +181,21 @@ enum ClaudeResetGrants {
     /// account is a spend on one the user is not looking at.
     static func owner(token: String, userAgent: String?) async throws -> Owner {
         let profile = try await UsageRequestError.object(
-            answering: request(profileURL, token: token, userAgent: userAgent))
+            answering: request(
+                ClaudeAccountProfile.profileURL, token: token, userAgent: userAgent,
+                timeout: requestTimeout))
         return try owner(profile)
     }
 
+    /// The profile read through `ClaudeAccountProfile.parse`, so the two
+    /// readers of one reply cannot come to disagree about whose it is; only
+    /// the organisation's shape is checked here, because a spend is addressed
+    /// to it.
     static func owner(_ profile: [String: Any]) throws -> Owner {
-        guard let account = (profile["account"] as? [String: Any])?["uuid"] as? String,
-            !account.isEmpty,
-            let organization = (profile["organization"] as? [String: Any])?["uuid"] as? String,
-            UUID(uuidString: organization) != nil
+        let identity = try ClaudeAccountProfile.parse(profile)
+        guard let organization = identity.organizationUUID, UUID(uuidString: organization) != nil
         else { throw UsageRequestError.malformedPayload }
-        return Owner(account: account, organization: organization)
+        return Owner(account: identity.uuid, organization: organization)
     }
 
     /// Spends the grant named. `requestID` is what makes the call safe to
@@ -209,7 +212,7 @@ enum ClaudeResetGrants {
         else {
             throw UsageRequestError.malformedPayload
         }
-        var request = request(url, token: token, userAgent: userAgent)
+        var request = request(url, token: token, userAgent: userAgent, timeout: requestTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
@@ -222,9 +225,12 @@ enum ClaudeResetGrants {
     }
 
     /// A request carrying the CLI's own headers, which is what every call
-    /// here and the usage poll send.
-    static func request(_ url: URL, token: String, userAgent: String?) -> URLRequest {
-        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
+    /// here, the usage poll and `ClaudeAccountProfile.resolve` send. The
+    /// timeout is the caller's: a spend waits longer than a poll.
+    static func request(
+        _ url: URL, token: String, userAgent: String?, timeout: TimeInterval
+    ) -> URLRequest {
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")

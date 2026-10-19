@@ -142,8 +142,7 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
 
 /// Resolves an access token to the account that owns it.
 enum ClaudeAccountProfile {
-    private static let profileURL = URL(string: "https://api.anthropic.com/api/oauth/profile")!
-    private static let betaHeader = "oauth-2025-04-20"
+    static let profileURL = URL(string: "https://api.anthropic.com/api/oauth/profile")!
     private static let requestTimeout: TimeInterval = 10
 
     /// The seat, on the organisation beside the plan and the tier. claude.ai
@@ -152,11 +151,8 @@ enum ClaudeAccountProfile {
     private static let seatKey = "seat_tier"
 
     static func resolve(token: String) async throws -> ClaudeAccountIdentity {
-        var request = URLRequest(url: profileURL, timeoutInterval: requestTimeout)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let request = ClaudeResetGrants.request(
+            profileURL, token: token, userAgent: nil, timeout: requestTimeout)
         return try parse(await UsageRequestError.object(answering: request))
     }
 
