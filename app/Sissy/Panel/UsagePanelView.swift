@@ -149,6 +149,9 @@ struct UsagePanelView: View {
     }
 
     private static let controlButtonSize: CGFloat = 26
+    /// Between the header's glass circles, and the distance their container
+    /// is told they sit apart, so the two cannot drift.
+    private static let controlSpacing: CGFloat = 6
     /// The back chevron's target, smaller than the round controls opposite it:
     /// it is a glyph on the text line rather than a button on glass, and a
     /// 26 pt box around it would make the header's left edge read as heavier
@@ -702,7 +705,7 @@ struct UsagePanelView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .glassEffect(.regular, in: .circle)
+        .glassEffect(.regular.interactive(), in: .circle)
         .help(help)
         .accessibilityLabel("Refresh")
     }
@@ -738,10 +741,12 @@ struct UsagePanelView: View {
     /// doing about sleep, and the way into Settings. None is about an account.
     private func headerControls(_ live: SissyModel.LiveFrame?, chosen: UsageRange) -> some View {
         let periods = live.map { UsagePanelSnapshot.availablePeriods($0.frame.history) } ?? []
-        return HStack(spacing: 6) {
-            periodButton(periods, chosen: chosen)
-            keepAwakeButton(model.keepAwake)
-            settingsButton
+        return GlassEffectContainer(spacing: Self.controlSpacing) {
+            HStack(spacing: Self.controlSpacing) {
+                periodButton(periods, chosen: chosen)
+                keepAwakeButton(model.keepAwake)
+                settingsButton
+            }
         }
     }
 
@@ -800,7 +805,9 @@ struct UsagePanelView: View {
         }
         .buttonStyle(.plain)
         .glassEffect(
-            picked ? .regular.tint(.accentColor.opacity(Self.heldGlassTint)) : .regular,
+            picked
+                ? .regular.tint(.accentColor.opacity(Self.heldGlassTint)).interactive()
+                : .regular.interactive(),
             in: .circle
         )
         .disabled(readsTheMoment)
@@ -1059,7 +1066,9 @@ struct UsagePanelView: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .glassEffect(
-            state.active ? .regular.tint(.blue.opacity(Self.heldGlassTint)) : .regular,
+            state.active
+                ? .regular.tint(.blue.opacity(Self.heldGlassTint)).interactive()
+                : .regular.interactive(),
             in: .circle
         )
         .help(
@@ -1099,7 +1108,7 @@ struct UsagePanelView: View {
                 .contentShape(.circle)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: .circle)
+        .glassEffect(.regular.interactive(), in: .circle)
         .help("Settings")
         .accessibilityLabel("Settings")
         .simultaneousGesture(TapGesture().onEnded { model.settingsTab = .general })
