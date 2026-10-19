@@ -120,6 +120,8 @@ enum VendorLinkCopy {
         case .unreachable:
             return "The \(vendor) sign-in page could not be loaded. Check the connection and "
                 + "try again."
+        case .terminated:
+            return "The \(vendor) sign-in page stopped before it finished. Try again."
         }
     }
 }
