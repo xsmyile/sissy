@@ -216,21 +216,24 @@ final class UsageEngineHost {
     /// Terminal, which is what a provider switch landing against a quit needs:
     /// the rebuild reads this back and leaves the engine down rather than
     /// building a new one behind an app that is going away.
+    ///
+    /// **Only a real stop waits for the hooks pass.** It writes two other
+    /// programs' configuration files, with no bound on those writes, and
+    /// spawns `sh -n` to check what it is about to write, which
+    /// `BoundedProcess` ends after `parseTimeoutSeconds` plus
+    /// `killGraceSeconds`, about 7 s at worst. Joining it is a debt a process
+    /// that is going away can afford and a provider switch cannot: a rebuild
+    /// waiting here would leave `switchingProvider` true and every toggle dead
+    /// for as long as the pass runs. A rebuild is not going anywhere, so it
+    /// lets the pass finish on its own.
+    ///
+    /// The handle is re-read rather than assumed: this is a suspension on the
+    /// main actor and the Settings switch is reachable across it, so clearing
+    /// whatever is there would drop a pass nothing awaits and nothing can
+    /// cancel. `isStopped` is what makes that unreachable; the re-read is what
+    /// keeps it unreachable if it ever stops being.
     func stop() async {
         isStopped = true
-        // Only a real stop waits for the hooks pass. It writes two other
-        // programs' configuration files and spawns `sh -n` to check what it is
-        // about to write, with no bound on either, so joining it is a debt a
-        // process that is going away can afford and a provider switch cannot:
-        // a rebuild waiting here would leave `switchingProvider` true and
-        // every toggle dead for the rest of the session. A rebuild is not
-        // going anywhere, so it lets the pass finish on its own.
-        //
-        // The handle is re-read rather than assumed: this is a suspension on
-        // the main actor and the Settings switch is reachable across it, so
-        // clearing whatever is there would drop a pass nothing awaits and
-        // nothing can cancel. `isStopped` is what makes that unreachable;
-        // this is what keeps it unreachable if it ever stops being.
         let joined = agentHooksTask
         await joined?.value
         if agentHooksTask == joined { agentHooksTask = nil }
@@ -291,10 +294,18 @@ final class UsageEngineHost {
     /// Re-reads what each provider is doing. The readiness poll below stops
     /// once the scan is warm, so a surface that opens later asks for itself
     /// rather than keeping a timer alive for the whole session.
+    ///
+    /// The answer is applied only while the engine that gave it is still the
+    /// running one: a provider switch landing across the await would otherwise
+    /// put the old engine's providers back over the new engine's.
     func refreshProviders() {
         guard let engine else { return }
         let host = self
-        Task { host.apply(await engine.providerReadiness()) }
+        Task {
+            let readiness = await engine.providerReadiness()
+            guard host.engine === engine else { return }
+            host.apply(readiness)
+        }
     }
 
     /// Looks for Claude Code credentials filed for homes Sissy does not read.
@@ -302,12 +313,14 @@ final class UsageEngineHost {
     /// Asked when the Providers tab opens and at no other time: the listing
     /// is a keychain query, cheap but not free, and the answer changes only
     /// when somebody signs a `claude` in under another `CLAUDE_CONFIG_DIR`.
-    /// Off the main actor for the reason the token import is.
+    /// Off the main actor for the reason the token import is, and kept only
+    /// while the engine that answered is still the running one.
     func refreshUnsupportedClaudeHomes() {
         guard let engine else { return }
         let host = self
         Task {
             let found = await Task.detached { engine.unsupportedClaudeHomes() }.value
+            guard host.engine === engine else { return }
             host.claudeConfigHome = engine.claudeConfigHome
             host.unsupportedClaudeHomes = found
         }
@@ -1424,13 +1437,19 @@ final class UsageEngineHost {
         isWarm = scans.allSatisfy(\.isWarm)
     }
 
+    /// Polls the engine running when it was started, and stops once another
+    /// replaces it: cancelling does not interrupt a readiness call already in
+    /// flight, so the identity is what keeps its answer off the new engine's
+    /// providers.
     private func pollReadiness() {
         readinessTask?.cancel()
+        guard let engine else { return }
         let host = self
         readinessTask = Task {
             while !Task.isCancelled {
-                guard let engine = host.engine else { return }
-                host.apply(await engine.providerReadiness())
+                let readiness = await engine.providerReadiness()
+                guard host.engine === engine else { return }
+                host.apply(readiness)
                 if host.isWarm { return }
                 try? await Task.sleep(for: Self.readinessPollInterval)
             }
