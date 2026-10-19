@@ -38,10 +38,35 @@ final class VendorLoginPopupTests: XCTestCase {
         XCTAssertEqual(route(url.absoluteString, linkActivated: true), .openInBrowser(url))
     }
 
-    func testALinkToAnAddressThatIsNotAWebPageGoesToTheDefaultBrowser() throws {
-        let url = try XCTUnwrap(URL(string: "mailto:support@example.com"))
+    /// A browser asks before launching the app a scheme belongs to, and this
+    /// window cannot, so such a link opens nothing.
+    func testANewTabLinkToAnAddressThatIsNotAWebPageIsDropped() {
+        XCTAssertEqual(route("mailto:support@example.com", linkActivated: true), .drop)
+        XCTAssertEqual(route("zoommtg://zoom.us/x", linkActivated: true), .drop)
+        XCTAssertEqual(route("ZOOMMTG://zoom.us/x", linkActivated: true), .drop)
+        XCTAssertEqual(route("https:///x", linkActivated: true), .drop)
+    }
 
-        XCTAssertEqual(route(url.absoluteString, linkActivated: true), .openInBrowser(url))
+    /// What WebKit resolves inside the page launches no app, so a link to it
+    /// stays in the window as it did before any scheme was dropped.
+    func testALinkToAnAddressWebKitResolvesInThePageStays() {
+        XCTAssertEqual(route("about:blank", linkActivated: true), .open)
+        XCTAssertEqual(route("blob:https://claude.ai/0c1d", linkActivated: true), .open)
+        XCTAssertEqual(route("data:text/plain,signed%20in", linkActivated: true), .open)
+    }
+
+    /// The same rule for a link aimed at this window, which the navigation
+    /// delegate routes through the same function.
+    func testALinkInThePageRoutesAsANewTabLinkDoes() throws {
+        let page = try XCTUnwrap(URL(string: "https://claude.ai/login/help"))
+        let away = try XCTUnwrap(URL(string: "https://www.anthropic.com/legal/privacy"))
+        let app = try XCTUnwrap(URL(string: "zoommtg://zoom.us/x"))
+
+        let route = { VendorLoginWindow.linkRoute(for: $0, isInternal: Self.isInternal) }
+
+        XCTAssertEqual(route(page), .open)
+        XCTAssertEqual(route(away), .openInBrowser(away))
+        XCTAssertEqual(route(app), .drop)
     }
 
     /// The shape a popup sign-in takes when the page opens the window first
