@@ -1326,7 +1326,9 @@ actor UsageEngine {
             powerSourceWatch = nil
             return
         }
-        powerSourceWatch = PowerSourceWatch { [weak self] in
+        powerSourceWatch = PowerSourceWatch(
+            fallback: "the battery floor is read only when the hold changes"
+        ) { [weak self] in
             Task { await self?.powerSourceChanged() }
         }
     }

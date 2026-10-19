@@ -1,7 +1,6 @@
 import Foundation
 import IOKit.ps
 import IOKit.pwr_mgt
-import notify
 
 /// What the user asked Sissy to do about sleep.
 ///
@@ -251,7 +250,7 @@ actor KeepAwake {
     private var lidKeeper: Task<Void, Never>?
     /// The power-source registration that sets the switch again when the
     /// source changes, held only while the lid is.
-    private var powerSourceToken: Int32?
+    private var powerSourceWatch: PowerSourceWatch?
     /// The two writes one change of power source asks for, owned so that
     /// letting the lid go cancels a second write still waiting to land.
     private var powerSourceRepair: Task<Void, Never>?
@@ -267,13 +266,12 @@ actor KeepAwake {
         self.lidReassertInterval = lidReassertInterval
     }
 
-    /// A `KeepAwake` dropped without a release still owes the system its
-    /// notification registration. The switch itself is the engine's record to
-    /// answer for, not this.
+    /// A `KeepAwake` dropped without a release still owes its two tasks a
+    /// cancel; the notification registration goes with `powerSourceWatch`.
+    /// The switch itself is the engine's record to answer for, not this.
     deinit {
         lidKeeper?.cancel()
         powerSourceRepair?.cancel()
-        if let token = powerSourceToken { notify_cancel(token) }
     }
 
     /// The system assertion is the hold; the display one is an addition on
@@ -408,16 +406,10 @@ actor KeepAwake {
                 await self?.reassertLid()
             }
         }
-        var token: Int32 = 0
-        let handler: notify_handler_t = { [weak self] _ in
+        powerSourceWatch = PowerSourceWatch(
+            key: kIOPSNotifyPowerSource, fallback: "the lid relies on the backstop"
+        ) { [weak self] in
             Task { await self?.powerSourceChanged() }
-        }
-        let status = notify_register_dispatch(
-            kIOPSNotifyPowerSource, &token, .global(qos: .utility), handler)
-        if status == NOTIFY_STATUS_OK {
-            powerSourceToken = token
-        } else {
-            sissyLog("sissy: no power-source notification (\(status)); the lid relies on the backstop")
         }
     }
 
@@ -426,8 +418,7 @@ actor KeepAwake {
         lidKeeper = nil
         powerSourceRepair?.cancel()
         powerSourceRepair = nil
-        if let token = powerSourceToken { notify_cancel(token) }
-        powerSourceToken = nil
+        powerSourceWatch = nil
     }
 
     private func create(_ type: String, named name: String) -> IOPMAssertionID? {

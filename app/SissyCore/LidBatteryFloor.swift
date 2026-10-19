@@ -71,30 +71,34 @@ struct PowerSourceGauge: Sendable {
     }
 }
 
-/// Calls `onChange` whenever any attribute of any power source changes, the
-/// battery's charge and the source it is drawing from included, until it is
-/// dropped.
+/// Calls `onChange` whenever IOKit posts `key`, until it is dropped.
 ///
-/// `kIOPSNotifyAnyPowerSource` rather than the quieter source and
-/// time-remaining keys, because neither of those is documented to fire on a
-/// change of charge, which is the one this exists to see. Measured 2026-10-12
-/// on AC power over three minutes: this key fired every 60 s and the other two
-/// not once. Its cost is one read of the snapshot a minute, paid only while a
-/// lid hold with a floor is wanted, which is the only time anything listens.
+/// The default, `kIOPSNotifyAnyPowerSource`, posts on any attribute of any
+/// power source, the battery's charge included, which is what the battery
+/// floor reads it for: the quieter source and time-remaining keys are not
+/// documented to fire on a change of charge. Measured 2026-10-12 on AC power
+/// over three minutes: this key fired every 60 s and the other two not once.
+/// Its cost is one read of the snapshot a minute, paid only while a lid hold
+/// with a floor is wanted. The lid keeper passes `kIOPSNotifyPowerSource`
+/// instead, the quieter source key of that same measurement: it answers each
+/// post with two writes of the clamshell switch, and it is meant to write on
+/// a change of the source drawn from rather than once a minute.
+///
+/// `fallback` finishes the log line a refused registration writes, naming
+/// what the caller does without one.
 final class PowerSourceWatch: Sendable {
     private let token: Int32?
 
-    init(onChange: @escaping @Sendable () -> Void) {
+    init(
+        key: String = kIOPSNotifyAnyPowerSource, fallback: String,
+        onChange: @escaping @Sendable () -> Void
+    ) {
         var token: Int32 = 0
-        let status = notify_register_dispatch(
-            kIOPSNotifyAnyPowerSource, &token, .global(qos: .utility)
-        ) { _ in onChange() }
+        let status = notify_register_dispatch(key, &token, .global(qos: .utility)) { _ in onChange() }
         if status == NOTIFY_STATUS_OK {
             self.token = token
         } else {
-            sissyLog(
-                "sissy: no power-source notification (\(status)); "
-                    + "the battery floor is read only when the hold changes")
+            sissyLog("sissy: no power-source notification (\(status)); \(fallback)")
             self.token = nil
         }
     }
