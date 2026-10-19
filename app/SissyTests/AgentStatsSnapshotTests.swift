@@ -287,6 +287,13 @@ final class AgentFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.bytes(512_000), "512 KB")
     }
 
+    func testBytesStepOnThePrintedFigure() {
+        XCTAssertEqual(UsageFormat.bytes(999_400), "999 KB")
+        XCTAssertEqual(UsageFormat.bytes(999_600), "1 MB")
+        XCTAssertEqual(UsageFormat.bytes(999_400_000), "999 MB")
+        XCTAssertEqual(UsageFormat.bytes(999_600_000), "1.00 GB")
+    }
+
     func testOneAgentIsNotPluralised() {
         XCTAssertEqual(UsageFormat.agentsRunning(1, footprint: 1_000_000_000), "1 session · 1.00 GB")
         XCTAssertEqual(

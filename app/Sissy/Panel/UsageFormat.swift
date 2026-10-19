@@ -24,14 +24,39 @@ enum LimitsReading: String, Codable, CaseIterable, Sendable {
 /// — which is what let the engine stop shipping a second set of formatters
 /// shaped for a 128×64 display nothing renders to any more.
 enum UsageFormat {
+    /// A token count to one decimal of the largest unit it reaches: thousands,
+    /// millions or billions.
+    ///
+    /// Each step is taken on the figure as it will be printed, `networkRate`'s
+    /// rule, so a count never reads `1000.0K` or `1000.0M`. Billions are there
+    /// because cache reads on a busy Claude Code account run to billions
+    /// over a month, and the `30 days` and `All` headlines would otherwise
+    /// print thousands of millions.
     static func tokens(_ tokens: Int) -> String {
-        if tokens >= 1_000_000 {
-            return String(format: "%.1fM", Double(tokens) / 1_000_000)
+        let value = Double(tokens)
+        if oneDecimal(value / tokensPerMillion) >= unitStepLimit {
+            return String(format: "%.1fB", value / tokensPerBillion)
         }
-        if tokens >= 1_000 {
-            return String(format: "%.1fK", Double(tokens) / 1_000)
+        if oneDecimal(value / tokensPerThousand) >= unitStepLimit {
+            return String(format: "%.1fM", value / tokensPerMillion)
+        }
+        if value >= tokensPerThousand {
+            return String(format: "%.1fK", value / tokensPerThousand)
         }
         return "\(tokens)"
+    }
+
+    private static let tokensPerThousand: Double = 1_000
+    private static let tokensPerMillion: Double = 1_000_000
+    private static let tokensPerBillion: Double = 1_000_000_000
+
+    /// The figure a unit cascade compares against the next step: a step is
+    /// taken once the printed figure would reach it.
+    private static let unitStepLimit: Double = 1_000
+
+    /// A value as `%.1f` prints it, for deciding a unit on what will be read.
+    private static func oneDecimal(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
     }
 
     static func cost(_ cost: Decimal) -> String {
@@ -1207,11 +1232,12 @@ enum UsageFormat {
     /// worth 0.4% of the day to `0%` prints nothing spent beside a cost that
     /// says otherwise, which is what `BarGeometry.fillWidth` already refuses
     /// to do for a bar too short to draw. A share of exactly zero is a real
-    /// reading and keeps its `0%`.
+    /// reading and keeps its `0%`. The other end holds the same rule: a share
+    /// short of the whole reads `>99%`, since `100%` beside a `<1%` pill on
+    /// the same row claims the whole day for one model while the other says
+    /// it was not.
     static func modelReading(share: Double, cost: String) -> String {
-        let percent = Int((share * 100).rounded())
-        guard percent > 0 || share <= 0 else { return "<1% · \(cost)" }
-        return "\(percent)% · \(cost)"
+        "\(percentShare(share)) · \(cost)"
     }
 
     /// One model row's hover and its accessibility label: the id as the vendor
@@ -1259,16 +1285,24 @@ enum UsageFormat {
     /// the model pills above it — of the tokens instead as soon as any model
     /// in the window has tokens and no cost, the rule `makeModels` already
     /// holds for the same reason. `<1%` rather than `0%` for that block's
-    /// reason too: a share too small to round is not a share of nothing.
+    /// reason too: a share too small to round is not a share of nothing, and
+    /// `>99%` rather than `100%` for one short of the whole.
     /// Nil is the spend whose lines named no effort, worded with the term the
     /// projects list already uses for a reading that resolves to nothing. It
     /// is what lets the run reach the pill above it rather than describing a
     /// fraction of it as the whole.
     static func effortShare(_ effort: String?, share: Double) -> String {
-        let name = effort ?? effortUnattributed
+        "\(effort ?? effortUnattributed) \(percentShare(share))"
+    }
+
+    /// A share in whole points that never rounds to either end it has not
+    /// reached: `<1%` for one that is not zero, `>99%` for one that is not
+    /// the whole.
+    private static func percentShare(_ share: Double) -> String {
         let percent = Int((share * 100).rounded())
-        guard percent > 0 || share <= 0 else { return "\(name) <1%" }
-        return "\(name) \(percent)%"
+        if percent <= 0, share > 0 { return "<1%" }
+        if percent >= 100, share < 1 { return ">99%" }
+        return "\(percent)%"
     }
 
     /// What the run calls spend the lines named no effort for.
@@ -1670,16 +1704,18 @@ extension UsageFormat {
     /// Base ten rather than base two, because this is the figure sitting
     /// beside Activity Monitor's and macOS has counted in base ten since
     /// 10.6. A reading that said `1.81 GB` where the system says `1.94 GB`
-    /// would look like Sissy measuring something else.
+    /// would look like Sissy measuring something else. Each step is taken on
+    /// the figure as it will be printed, `networkRate`'s rule, so a footprint
+    /// never reads `1000 MB`.
     static func bytes(_ bytes: UInt64) -> String {
         let value = Double(bytes)
-        if value >= 1_000_000_000 {
-            return String(format: "%.2f GB", value / 1_000_000_000)
+        if (value / bytesPerMegabyte).rounded() >= unitStepLimit {
+            return String(format: "%.2f GB", value / bytesPerGigabyte)
         }
-        if value >= 1_000_000 {
-            return String(format: "%.0f MB", value / 1_000_000)
+        if (value / bytesPerKilobyte).rounded() >= unitStepLimit {
+            return String(format: "%.0f MB", value / bytesPerMegabyte)
         }
-        return String(format: "%.0f KB", value / 1_000)
+        return String(format: "%.0f KB", value / bytesPerKilobyte)
     }
 
     /// The headline of the Sessions tab's live half.
@@ -2387,18 +2423,21 @@ extension UsageFormat {
     /// Activity Monitor's: `77.00 GB free` claims a precision a volume that
     /// moves by the gigabyte as swap grows does not have, and `0 KB swap`
     /// reads as a small amount rather than none. Base ten for `bytes`'s
-    /// reason, which is also Finder's.
+    /// reason, which is also Finder's. Each step is taken on the figure as it
+    /// will be printed, `networkRate`'s rule, so a volume never reads
+    /// `1000 GB` and a free space just short of ten never reads `10.0 GB`.
     static func storage(_ bytes: UInt64) -> String {
         let value = Double(bytes)
         if bytes == 0 { return "0 B" }
-        if value >= bytesPerTerabyte {
+        let gigabytes = value / bytesPerGigabyte
+        if gigabytes.rounded() >= unitStepLimit {
             return String(format: "%.1f TB", value / bytesPerTerabyte)
         }
-        if value >= storageWholeGigabytes * bytesPerGigabyte {
-            return String(format: "%.0f GB", value / bytesPerGigabyte)
+        if oneDecimal(gigabytes) >= storageWholeGigabytes {
+            return String(format: "%.0f GB", gigabytes)
         }
-        if value >= bytesPerGigabyte {
-            return String(format: "%.1f GB", value / bytesPerGigabyte)
+        if (value / bytesPerMegabyte).rounded() >= unitStepLimit {
+            return String(format: "%.1f GB", gigabytes)
         }
         return String(format: "%.0f MB", value / bytesPerMegabyte)
     }
@@ -2508,12 +2547,12 @@ extension UsageFormat {
     static func networkRate(_ bytesPerSecond: Double) -> String {
         let value = max(bytesPerSecond, 0)
         let kilobytes = (value / bytesPerKilobyte).rounded()
-        if kilobytes < rateStepLimit { return String(format: "%.0f KB/s", kilobytes) }
+        if kilobytes < unitStepLimit { return String(format: "%.0f KB/s", kilobytes) }
         let megabytes = value / bytesPerMegabyte
-        if (megabytes * 10).rounded() / 10 < rateWholeMegabytes {
+        if oneDecimal(megabytes) < rateWholeMegabytes {
             return String(format: "%.1f MB/s", megabytes)
         }
-        if megabytes.rounded() < rateStepLimit { return String(format: "%.0f MB/s", megabytes) }
+        if megabytes.rounded() < unitStepLimit { return String(format: "%.0f MB/s", megabytes) }
         return String(format: "%.1f GB/s", value / bytesPerGigabyte)
     }
 
@@ -2578,5 +2617,4 @@ extension UsageFormat {
 
     private static let bytesPerKilobyte: Double = 1_000
     private static let rateWholeMegabytes: Double = 10
-    private static let rateStepLimit: Double = 1_000
 }

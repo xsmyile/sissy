@@ -47,14 +47,14 @@ final class UsageEffortRowsTests: XCTestCase {
         XCTAssertEqual(out.first?.run, "ultra 90% · medium 10%")
     }
 
-    /// A share too small to round is not a share of nothing, which is the
-    /// rule the model pills already hold.
+    /// A share too small to round is not a share of nothing, and one short of
+    /// the whole is not the whole, which are the rules the model pills hold.
     func testAShareTooSmallToRoundIsWordedRatherThanRoundedAway() {
         let out = rows([
             split("astra", "medium", turns: 500, cost: "100.00"),
             split("astra", "ultra", turns: 1, cost: "0.20"),
         ])
-        XCTAssertEqual(out.first?.run, "medium 100% · ultra <1%")
+        XCTAssertEqual(out.first?.run, "medium >99% · ultra <1%")
     }
 
     /// A model the pricing sources do not know books tokens at a cost of zero,
