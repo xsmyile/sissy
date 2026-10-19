@@ -115,11 +115,12 @@ enum KeychainAccess {
     /// good: the items Sissy owns are read without `loadOffPool`'s budget, so
     /// this lock's wait is the only bound they have. That is a worse failure
     /// than the overlap this exists to prevent. The claude.ai session poll
-    /// (`ClaudeWebSource`) goes through `offPool` and the linked Codex
-    /// accounts' reads through `CodexRenewal`'s own queue, so the wait parks a
-    /// dispatch thread. Two reads still run on the cooperative pool. The
-    /// forge token read, which `ForgeActivityMonitor` makes inside its request
-    /// task. And `ClaudeWebSessionAdoption`'s, deliberately: it checks that an
+    /// (`ClaudeWebSource`) and the forge token reads (`ForgeActivityMonitor`)
+    /// go through `offPool` and the linked Codex accounts' reads through
+    /// `CodexRenewal`'s own queue, so the wait parks a dispatch thread. Two
+    /// reads still run on the cooperative pool. `ForgeConnector`'s look for a
+    /// token already filed, once per press of Connect. And
+    /// `ClaudeWebSessionAdoption`'s, deliberately: it checks that an
     /// account has no session filed and then writes one, and a suspension
     /// between the two let a session linked in the gap be overwritten with
     /// the older unkeyed one.

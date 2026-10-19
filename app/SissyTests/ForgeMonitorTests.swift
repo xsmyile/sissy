@@ -663,6 +663,59 @@ final class ForgeMonitorTests: XCTestCase {
         await joiner
     }
 
+    /// **A token read that has not answered holds no other caller.** The
+    /// lookup can wait out `suppressorTimeout` behind another keychain reader,
+    /// or a dialog for as long as it is up on the row's own refresh, so it is
+    /// a suspension: a second connection's refresh answers while the first is
+    /// still waiting on its keychain.
+    func testATokenReadStillWaitingHoldsNoOtherConnection() async {
+        let keychain = FetchGate()
+        let monitor = ForgeActivityMonitor(
+            connections: [Self.gitHub, Self.gitLab],
+            fetch: { connection, _, _, _ in
+                Self.reading(connection, login: connection.id, contributions: 1, merged: 0)
+            },
+            token: { id, _ in
+                if id == Self.gitHub.id { await keychain.arrive() }
+                return .found("token")
+            })
+        async let waiting: Void = monitor.refreshOnce(id: Self.gitHub.id) {}
+        await keychain.waitForStart()
+        await monitor.refreshOnce(id: Self.gitLab.id) {}
+        XCTAssertEqual(monitor.currentReadings().map(\.id), [Self.gitLab.id])
+        await keychain.letGo()
+        await waiting
+        XCTAssertEqual(monitor.currentReadings().map(\.id), [Self.gitHub.id, Self.gitLab.id])
+    }
+
+    /// **A span whose token read outlives a stop fetches nothing.** The
+    /// generation is taken before the lookup and checked after it, so a
+    /// `stop()` landing while the keychain is still answering is a monitor
+    /// change rather than a fetch under the generation that replaced it.
+    func testASpanStoppedDuringItsTokenReadFetchesNothing() async throws {
+        let keychain = FetchGate()
+        let fetches = LockedValue(0)
+        let monitor = ForgeActivityMonitor(
+            connections: [Self.gitHub],
+            token: { _, _ in
+                await keychain.arrive()
+                return .found("token")
+            })
+        let from = Self.readAt.addingTimeInterval(-2 * 86_400)
+        let span = Task { [monitor, fetches] in
+            try await monitor.readSpan(from: from, to: Self.readAt, now: Self.readAt) { _, _, _, _, _, _ in
+                fetches.update { $0 += 1 }
+                throw ForgeReadFailure.unreachable
+            }
+        }
+        await keychain.waitForStart()
+        await monitor.stop()
+        await keychain.letGo()
+        let readings = try await span.value
+        XCTAssertEqual(fetches.load(), 0)
+        XCTAssertEqual(readings.first?.counters[.contributions], .unavailable(.monitorChanged))
+    }
+
     /// A refresh for a connection this monitor was not built with is a no-op
     /// rather than a row: the connections are what it was constructed from, and
     /// a rebuild is what a change to them produces.

@@ -65,7 +65,12 @@ actor ForgeActivityMonitor {
     /// The `Bool` is whether this read may raise the keychain dialog, and it is
     /// the same parameter `ClaudeWebSource` passes its session store: a
     /// scheduled round reads silently, and only the gesture on the row asks.
-    private let tokenSource: @Sendable (String, Bool) -> CredentialLookup<String>
+    ///
+    /// Async because the production read runs through `KeychainAccess.offPool`:
+    /// it waits on the keychain's interaction lock and, for the row's gesture,
+    /// on a dialog, and either wait held every other caller of this actor
+    /// while the read ran on it.
+    private let tokenSource: @Sendable (String, Bool) async -> CredentialLookup<String>
     private var pollTask: Task<Void, Never>?
     /// Connections whose last failure needs the user. They keep their row and
     /// their last figures; what they stop costing is a request per round.
@@ -159,6 +164,12 @@ actor ForgeActivityMonitor {
         }
     }
 
+    /// One connection's span, joined to any read of the same bounds in flight.
+    ///
+    /// The token read suspends, so what was checked before it is checked again
+    /// after it: a `stop()` in the gap answers `monitorChanged` rather than
+    /// fetching under the generation that replaced it, and a connection parked
+    /// or rate-limited in the gap is not fetched.
     private func span(
         _ connection: ForgeConnection, dates: (Date, Date), now: Date,
         expires: ContinuousClock.Instant,
@@ -174,7 +185,11 @@ actor ForgeActivityMonitor {
             return absent(.invalidDates)
         }
         if let failure = spanBlock(connection.id, now: now) { return absent(.failure(failure)) }
-        let lookup = tokenSource(connection.id, false)
+        let started = generation
+        let lookup = await tokenSource(connection.id, false)
+        try Task.checkCancellation()
+        guard started == generation else { return absent(.monitorChanged) }
+        if let failure = spanBlock(connection.id, now: now) { return absent(.failure(failure)) }
         guard case .found(let token) = lookup else { return absent(.failure(Self.credentialFailure(lookup))) }
         if let failure = ForgeRefusalStore.shared.failure(url: connection.root, token: token, now: now) {
             return absent(.failure(failure))
@@ -213,7 +228,7 @@ actor ForgeActivityMonitor {
                     group.cancelAll()
                     return first
                 }
-                return self.finishSpan(reading, key: key, id: id, stamp: stamp)
+                return self.finishSpan(reading, key: key, id: id, stamp: stamp, token: token)
             }
             running = SpanRunning(id: id, task: task, waiters: [waiter])
             spanTasks[key] = running
@@ -228,9 +243,12 @@ actor ForgeActivityMonitor {
         return reading
     }
 
-    private func retryDeadline(id: String, now: Date) -> Date {
-        if let connection = connections.first(where: { $0.id == id }),
-            case .found(let token) = tokenSource(id, false),
+    /// When a rate-limited connection may be asked again. The token is the one
+    /// the refused request carried, handed in rather than read again, so the
+    /// deadline costs no second keychain read and is filed under the token the
+    /// vendor actually refused.
+    private func retryDeadline(id: String, token: String?, now: Date) -> Date {
+        if let connection = connections.first(where: { $0.id == id }), let token,
             let until = ForgeRefusalStore.shared.deadline(url: connection.root, token: token)
         {
             return until
@@ -256,9 +274,9 @@ actor ForgeActivityMonitor {
         }
     }
 
-    private func finishSpan(_ reading: ForgeSpanReading, key: SpanKey, id: UUID, stamp: Int)
-        -> ForgeSpanReading
-    {
+    private func finishSpan(
+        _ reading: ForgeSpanReading, key: SpanKey, id: UUID, stamp: Int, token: String
+    ) -> ForgeSpanReading {
         guard stamp == generation else {
             guard let connection = connections.first(where: { $0.id == key.connection }) else {
                 return reading
@@ -273,7 +291,8 @@ actor ForgeActivityMonitor {
             guard case .unavailable(.failure(let failure)) = counter else { continue }
             if failure.needsTheUser { spanRefusals[key.connection] = failure }
             if failure == .rateLimited {
-                retryUntil[key.connection] = retryDeadline(id: key.connection, now: reading.readAt)
+                retryUntil[key.connection] = retryDeadline(
+                    id: key.connection, token: token, now: reading.readAt)
             }
         }
         if reading.isCacheable {
@@ -294,8 +313,8 @@ actor ForgeActivityMonitor {
             ForgeActivityReading = {
                 try await ForgeActivityFeed.read($0, token: $1, counters: $2, now: $3)
             },
-        token: @escaping @Sendable (String, Bool) -> CredentialLookup<String> = {
-            ForgeTokenStore.load(connection: $0, allowingInteraction: $1)
+        token: @escaping @Sendable (String, Bool) async -> CredentialLookup<String> = { id, ask in
+            await KeychainAccess.offPool { ForgeTokenStore.load(connection: id, allowingInteraction: ask) }
         }
     ) {
         self.connections = connections
@@ -436,8 +455,9 @@ actor ForgeActivityMonitor {
         let counters = counters
         let task = Task { [weak self] in
             let outcome: Result<ForgeActivityReading, Error>
-            let lookup = token(connection.id, allowingInteraction)
-            if case .found(let secret) = lookup {
+            let lookup = await token(connection.id, allowingInteraction)
+            let secret: String? = if case .found(let found) = lookup { found } else { nil }
+            if let secret {
                 if allowingInteraction,
                     ForgeRefusalStore.shared.failure(url: connection.root, token: secret) == .unauthorized
                 {
@@ -451,7 +471,7 @@ actor ForgeActivityMonitor {
             } else {
                 outcome = .failure(Self.credentialFailure(lookup))
             }
-            await self?.finish(outcome, for: connection, stamp: stamp, seq: seq)
+            await self?.finish(outcome, for: connection, token: secret, stamp: stamp, seq: seq)
         }
         inFlight[connection.id] = Running(task: task, seq: seq, mayInteract: allowingInteraction)
         return task
@@ -480,11 +500,11 @@ actor ForgeActivityMonitor {
     /// against it is the same question as "is this still mine".
     private func finish(
         _ outcome: Result<ForgeActivityReading, Error>, for connection: ForgeConnection,
-        stamp: Int, seq: Int
+        token: String?, stamp: Int, seq: Int
     ) {
         guard stamp == generation, inFlight[connection.id]?.seq == seq else { return }
         inFlight[connection.id] = nil
-        apply(outcome, for: connection)
+        apply(outcome, for: connection, token: token)
     }
 
     /// What a keychain outcome that is not a token means to a row.
@@ -525,7 +545,9 @@ actor ForgeActivityMonitor {
     /// parking was for is not what the vendor said this time, and leaving it
     /// parked would strand a connection on the one answer nobody can act on —
     /// a click made off the VPN, which is this user's ordinary state.
-    private func apply(_ outcome: Result<ForgeActivityReading, Error>, for connection: ForgeConnection) {
+    private func apply(
+        _ outcome: Result<ForgeActivityReading, Error>, for connection: ForgeConnection, token: String?
+    ) {
         switch outcome {
         case .success(var reading):
             parked.remove(connection.id)
@@ -542,7 +564,7 @@ actor ForgeActivityMonitor {
         case .failure(let error):
             let failure = (error as? ForgeReadFailure) ?? .malformed
             if failure == .rateLimited {
-                retryUntil[connection.id] = retryDeadline(id: connection.id, now: Date())
+                retryUntil[connection.id] = retryDeadline(id: connection.id, token: token, now: Date())
             }
             if failure.needsTheUser {
                 parked.insert(connection.id)
