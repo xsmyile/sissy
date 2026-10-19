@@ -54,9 +54,9 @@ enum GitHubProfileCalendar {
     /// How many days the comparison with the token's calendar runs over, which
     /// is the widest window that calendar takes in one field.
     static let checkDays = 365
-    /// How many calendar years one reading may fetch beyond the last year,
-    /// which a picked span of `ForgeSpanFeed`'s ten years at most stays inside.
-    static let yearLimit = 11
+    /// How many calendar years one reading may fetch beyond the last year:
+    /// as many as a span of `ForgeSpanFeed.maxSpanDays` can touch.
+    static let yearLimit = ForgeSpanFeed.maxSpanDays / ForgeSpanFeed.fieldDays + 1
     /// The alias the token's count over the comparison days comes back under.
     static let checkAlias = "profileCheck"
 
@@ -253,11 +253,7 @@ enum GitHubProfileCalendar {
 
     /// `yyyy-MM-dd` for every day from `first` through `last`, inclusive.
     static func dayNames(from first: String, through last: String) -> [String] {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .gmt
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = ForgeWindow.gmtDays
         var gregorian = Calendar(identifier: .gregorian)
         gregorian.timeZone = .gmt
         guard var cursor = formatter.date(from: first), let end = formatter.date(from: last) else {

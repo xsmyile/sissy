@@ -489,12 +489,42 @@ final class ForgeSpanTests: XCTestCase {
         let until = ForgeRefusalStore.retryDeadline(response, now: Self.now)
         XCTAssertEqual(until, Self.now.addingTimeInterval(900))
         ForgeRefusalStore(url: url).record(
-            .rateLimited, url: Self.github.root, token: "fixture", until: until)
-        let restored = ForgeRefusalStore(url: url)
+            .rateLimited, url: Self.github.root, token: "fixture", until: until, now: Self.now)
+        let restored = ForgeRefusalStore(url: url, now: Self.now)
         XCTAssertEqual(restored.failure(url: Self.github.root, token: "fixture", now: Self.now), .rateLimited)
         XCTAssertNil(restored.failure(url: Self.github.root, token: "other", now: Self.now))
         XCTAssertNil(restored.failure(url: Self.github.root, token: "fixture", now: until))
         XCTAssertFalse(try String(contentsOf: url, encoding: .utf8).contains("fixture"))
+    }
+
+    func testARateLimitIsHeldToTheCeilingWhateverTheFileSays() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("refusals.json")
+        ForgeRefusalStore(url: url, now: Self.now).record(
+            .rateLimited, url: Self.github.root, token: "slow",
+            until: Self.now.addingTimeInterval(10 * ForgeRefusalStore.deadlineCeiling), now: Self.now)
+        XCTAssertEqual(
+            ForgeRefusalStore(url: url, now: Self.now).deadline(url: Self.github.root, token: "slow"),
+            Self.now.addingTimeInterval(ForgeRefusalStore.deadlineCeiling))
+    }
+
+    func testARateLimitPastItsDeadlineLeavesTheFileAndATokenRefusalStays() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("refusals.json")
+        let until = Self.now.addingTimeInterval(900)
+        let store = ForgeRefusalStore(url: url, now: Self.now)
+        store.record(.rateLimited, url: Self.github.root, token: "slow", until: until, now: Self.now)
+        store.record(.unauthorized, url: Self.github.root, token: "refused", until: until, now: Self.now)
+        let later = until.addingTimeInterval(1)
+        let reloaded = ForgeRefusalStore(url: url, now: later)
+        XCTAssertNil(reloaded.deadline(url: Self.github.root, token: "slow"))
+        XCTAssertEqual(reloaded.failure(url: Self.github.root, token: "refused", now: later), .unauthorized)
+        store.record(.rateLimited, url: Self.gitlab.root, token: "other", now: later)
+        let written = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        XCTAssertEqual(written.count, 2)
     }
 
 }

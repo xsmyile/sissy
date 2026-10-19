@@ -57,6 +57,10 @@ enum ForgeWindow {
     /// counted the 4 merges after that instant out of the day's 79.
     static func instant(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
 
+    /// `yyyy-MM-dd` read and written as a UTC date, the form GitHub's
+    /// calendar and the profile's squares name a day in. Built once.
+    static let gmtDays = DayKeyFormatter(zone: { .gmt })
+
     /// `yyyy-MM-dd` for the date `instant` falls on in `calendar`'s zone, off
     /// a Gregorian calendar.
     static func dayName(_ instant: Date, calendar: Calendar = .current) -> String {
@@ -153,11 +157,17 @@ enum ForgeActivityFeed {
     ///
     /// Every status the vendors answer with is mapped here rather than at each
     /// call site, so a 401 from GitHub and a 401 from GitLab reach the row as
-    /// the same sentence.
-    static func send(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse) {
-        let token =
-            request.value(forHTTPHeaderField: "Authorization")?.replacingOccurrences(of: "Bearer ", with: "")
-            ?? request.value(forHTTPHeaderField: "PRIVATE-TOKEN") ?? ""
+    /// the same sentence. `token` is the credential the request carries, named
+    /// rather than read back out of its headers, because it is what the
+    /// refusal is filed under: a header spelled some other way would read as
+    /// no token and file every connection to that origin under one key.
+    ///
+    /// `answeringRefusals` hands a refusal that is an answer back to the
+    /// caller instead of throwing it: see `isAnsweredRefusal`. Nothing is filed
+    /// for one, since the token was not refused, only that resource.
+    static func send(_ request: URLRequest, token: String, answeringRefusals: Bool = false)
+        async throws -> (data: Data, response: HTTPURLResponse)
+    {
         if let failure = ForgeRefusalStore.shared.failure(url: request.url, token: token) { throw failure }
         let data: Data
         let response: URLResponse
@@ -167,6 +177,7 @@ enum ForgeActivityFeed {
             throw failure(thrown: error)
         }
         guard let http = response as? HTTPURLResponse else { throw ForgeReadFailure.malformed }
+        if answeringRefusals, isAnsweredRefusal(http, addressedTo: request.url) { return (data, http) }
         if let failure = failure(of: http, addressedTo: request.url) {
             ForgeRefusalStore.shared.record(
                 failure, url: request.url, token: token,
@@ -207,6 +218,17 @@ enum ForgeActivityFeed {
         default:
             return .malformed
         }
+    }
+
+    /// Whether a reply is the forge saying this token may not read this one
+    /// resource, which is an answer rather than a failure where the caller
+    /// asks after something the token may not own, such as a bill: a `404`, or
+    /// a `403` that is not `askedToSlowDown`, from the origin it was addressed to.
+    static func isAnsweredRefusal(_ response: HTTPURLResponse, addressedTo url: URL?) -> Bool {
+        let refused =
+            response.statusCode == 404
+            || (response.statusCode == 403 && !askedToSlowDown(response))
+        return refused && SissyHTTP.sameOrigin(url, response.url)
     }
 
     /// Whether a refusal is the vendor asking for less traffic rather than
@@ -261,7 +283,7 @@ enum ForgeActivityFeed {
         request.httpBody = try? JSONSerialization.data(
             withJSONObject: ["query": query, "variables": variables])
         guard request.httpBody != nil else { throw ForgeReadFailure.malformed }
-        let (data, response) = try await send(request)
+        let (data, response) = try await send(request, token: token)
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ForgeReadFailure.malformed
         }
@@ -477,7 +499,7 @@ enum GitHubActivityFeed {
         guard let url = eventsURL(connection, login: login) else { return nil }
         let request = ForgeActivityFeed.request(
             url, token: token, header: authorizationHeader, scheme: authorizationScheme)
-        guard let reply = try? await ForgeActivityFeed.send(request),
+        guard let reply = try? await ForgeActivityFeed.send(request, token: token),
             let rows = try? JSONSerialization.jsonObject(with: reply.data) as? [[String: Any]]
         else { return nil }
         return ForgeEvent.newest(rows.compactMap(event))
@@ -775,7 +797,7 @@ enum GitLabActivityFeed {
     private static let nextPageHeader = "x-next-page"
     private static let apiPath = "/api/v4/events"
     private static let graphQLPath = "/api/graphql"
-    private static let tokenHeader = "PRIVATE-TOKEN"
+    static let tokenHeader = "PRIVATE-TOKEN"
     private static let totalHeader = "x-total"
     private static let onePage = 1
 
@@ -933,7 +955,7 @@ enum GitLabActivityFeed {
     ) async -> String? {
         guard let url = projectURL(connection, id: id) else { return nil }
         let request = ForgeActivityFeed.request(url, token: token, header: tokenHeader, scheme: nil)
-        guard let reply = try? await ForgeActivityFeed.send(request),
+        guard let reply = try? await ForgeActivityFeed.send(request, token: token),
             let project = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
         else { return nil }
         return project["path"] as? String
@@ -1172,7 +1194,7 @@ enum GitLabActivityFeed {
         // Through the shared `send` so this path takes the same failure table
         // the GraphQL one does: the count is in a header rather than the body,
         // which is the only thing different about it.
-        let (body, response) = try await ForgeActivityFeed.send(request)
+        let (body, response) = try await ForgeActivityFeed.send(request, token: token)
         let counted = count(of: response)
         guard let counted, let split, split.sliver.duration > 0 else { return (counted, body) }
         guard let edge = try await sliverCount(connection, token: token, split: split, action: action)
@@ -1190,7 +1212,7 @@ enum GitLabActivityFeed {
             }
             let request = ForgeActivityFeed.request(
                 url, token: token, header: tokenHeader, scheme: nil)
-            let (body, response) = try await ForgeActivityFeed.send(request)
+            let (body, response) = try await ForgeActivityFeed.send(request, token: token)
             guard let rows = (try? JSONSerialization.jsonObject(with: body)) as? [[String: Any]]
             else { return nil }
             let stamps = rows.compactMap {

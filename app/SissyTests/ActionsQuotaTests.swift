@@ -35,7 +35,7 @@ final class ActionsQuotaTests: XCTestCase {
         let body = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(report.utf8)) as? [String: Any])
         let rows = try XCTUnwrap(body["usageItems"] as? [[String: Any]])
-        return rows.compactMap(ActionsItem.init)
+        return try rows.compactMap(ActionsItem.init)
     }
 
     /// One owner's month, September's measured figures by default. Shared
@@ -69,6 +69,17 @@ final class ActionsQuotaTests: XCTestCase {
         let items = try Self.items()
         XCTAssertEqual(items.count, 3)
         XCTAssertEqual(Set(items.map(\.repository)), ["try-on-buddy", "morphy.lol"])
+    }
+
+    func testAMinutesRowWithoutAFigureIsMalformedRatherThanFree() throws {
+        let row: [String: Any] = [
+            "product": "actions", "unitType": "Minutes", "sku": "Actions Linux",
+            "repositoryName": "try-on-buddy", "quantity": 10.0, "pricePerUnit": 0.006,
+            "grossAmount": 0.06, "netAmount": 0.0,
+        ]
+        XCTAssertThrowsError(try ActionsItem(row)) {
+            XCTAssertEqual($0 as? ForgeReadFailure, .malformed)
+        }
     }
 
     func testTheRunnerIsTheSystemTheSKUNames() throws {
