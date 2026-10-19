@@ -701,9 +701,9 @@ final class ForgeMonitorTests: XCTestCase {
                 await keychain.arrive()
                 return .found("token")
             })
-        let from = Self.readAt.addingTimeInterval(-2 * 86_400)
+        let (from, to) = (Self.readAt.addingTimeInterval(-2 * 86_400), Self.readAt)
         let span = Task { [monitor, fetches] in
-            try await monitor.readSpan(from: from, to: Self.readAt, now: Self.readAt) { _, _, _, _, _, _ in
+            try await monitor.readSpan(from: from, to: to, now: to) { _, _, _, _, _, _ in
                 fetches.update { $0 += 1 }
                 throw ForgeReadFailure.unreachable
             }
