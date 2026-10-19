@@ -456,7 +456,18 @@ struct PanelProviderPage: View {
     /// and never signed in with — so the same words would promise something
     /// the page cannot do.
     private var accountPickerHelp: String {
-        row.id == ProviderID.codex ? Self.readOnlyPickerHelp : Self.switchablePickerHelp
+        Self.accountPickerHelp(for: row.id)
+    }
+
+    /// The picker's tooltip for `provider`, neutral for a provider Sissy
+    /// knows no account mechanics of: switching is something only Claude
+    /// Code's picker can do, so it is never the sentence a new id inherits.
+    static func accountPickerHelp(for provider: String) -> String {
+        switch provider {
+        case ProviderID.claudeCode: switchablePickerHelp
+        case ProviderID.codex: readOnlyPickerHelp
+        default: neutralPickerHelp
+        }
     }
 
     static let switchablePickerHelp =
@@ -464,6 +475,8 @@ struct PanelProviderPage: View {
 
     static let readOnlyPickerHelp =
         "Choose which account to read. Codex stays on the account it is signed into."
+
+    static let neutralPickerHelp = "Choose which account to read."
 
     /// Signs Claude Code in as the account being read, from the account menu
     /// rather than the card: on the card it shared the name's line, and a long

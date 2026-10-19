@@ -604,4 +604,19 @@ final class PanelPagesTests: XCTestCase {
     func testAPanelWithNoScreenStillHasACeiling() {
         XCTAssertGreaterThan(PanelMetrics.maxHeight(on: nil), 0)
     }
+
+    /// Only Claude Code's picker can sign the CLI in as another account, so a
+    /// provider Sissy knows no account mechanics of must not inherit that
+    /// promise, nor Codex's sentence naming Codex.
+    func testAnUnknownProviderGetsTheNeutralPickerHelp() {
+        XCTAssertEqual(
+            PanelProviderPage.accountPickerHelp(for: ProviderID.claudeCode),
+            PanelProviderPage.switchablePickerHelp)
+        XCTAssertEqual(
+            PanelProviderPage.accountPickerHelp(for: ProviderID.codex),
+            PanelProviderPage.readOnlyPickerHelp)
+        XCTAssertEqual(
+            PanelProviderPage.accountPickerHelp(for: "gemini"),
+            PanelProviderPage.neutralPickerHelp)
+    }
 }
