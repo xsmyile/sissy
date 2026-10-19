@@ -62,6 +62,7 @@ final class StatusItemController: NSObject {
         }
         button.imagePosition = .imageOnly
         button.toolTip = "Sissy"
+        button.setAccessibilityLabel("Sissy")
         button.wantsLayer = true
         button.target = self
         button.action = #selector(handleStatusButtonClick)
@@ -177,6 +178,7 @@ final class StatusItemController: NSObject {
             animated: model.preferences.sissyMotion
         )
         sissyAnimator?.setArtwork(artwork(for: icon))
+        statusItem.button?.setAccessibilityValue(UsageFormat.statusItemValue(icon))
     }
 
     /// The lit eye and the dot are the only things on the button that are

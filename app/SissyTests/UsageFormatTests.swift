@@ -762,6 +762,32 @@ final class UsageFormatTests: XCTestCase {
             UsageFormat.keepAwakeHelp(.off, arming: .on).contains("sleeps it anyway"))
     }
 
+    /// VoiceOver hears the hold from what the Mac is doing, so a mode that
+    /// is switched on and holds nothing is never spoken as a hold.
+    func testTheKeepAwakeValueSaysWhetherTheMacIsHeld() {
+        XCTAssertEqual(UsageFormat.keepAwakeValue(.off), "Off")
+        XCTAssertEqual(
+            UsageFormat.keepAwakeValue(KeepAwakeState(mode: .auto, active: true, since: Date())),
+            "Holding this Mac awake")
+        XCTAssertEqual(
+            UsageFormat.keepAwakeValue(KeepAwakeState(mode: .auto, active: false)),
+            "Waiting for the agents")
+        XCTAssertEqual(
+            UsageFormat.keepAwakeValue(KeepAwakeState(mode: .on, active: false)),
+            "Switched on, not holding")
+    }
+
+    /// One clause per mark the menu bar icon draws, and nothing for a level
+    /// the dot does not show.
+    func testTheStatusItemValueSaysEveryMarkTheIconDraws() {
+        let resting = SissyModel.StatusIconSnapshot(isAsleep: false, isHolding: false, macLevel: .normal)
+        let everything = SissyModel.StatusIconSnapshot(isAsleep: true, isHolding: true, macLevel: .critical)
+
+        XCTAssertEqual(UsageFormat.statusItemValue(resting), "")
+        XCTAssertEqual(
+            UsageFormat.statusItemValue(everything), "Sleeping, Holding this Mac awake, Mac at critical")
+    }
+
     /// The switch reaches Claude Code's own credential, so the confirmation
     /// has to name the account rather than ask an abstract question.
     func testTheSwitchConfirmationNamesTheAccount() {

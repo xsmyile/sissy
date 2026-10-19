@@ -270,6 +270,33 @@ enum UsageFormat {
         }
     }
 
+    /// The keep-awake button's state as VoiceOver speaks it: the cup's tint is
+    /// the only thing on screen that says a hold is in force, and the tooltip
+    /// is read after a pause if at all. Said from what the Mac is doing, the
+    /// way the tooltip leads, so a mode that holds nothing yet is not heard as
+    /// a hold.
+    static func keepAwakeValue(_ state: KeepAwakeState) -> String {
+        switch (state.mode, state.active) {
+        case (.off, _): "Off"
+        case (_, true): holdingValue
+        case (.auto, false): "Waiting for the agents"
+        case (.on, false): "Switched on, not holding"
+        }
+    }
+
+    /// The status item's state as VoiceOver speaks it, one clause per mark the
+    /// icon draws: the shut eye, the lit eye and the dot. Empty when none is
+    /// drawn, since a resting Sissy has nothing to report.
+    static func statusItemValue(_ icon: SissyModel.StatusIconSnapshot) -> String {
+        var clauses: [String] = []
+        if icon.isAsleep { clauses.append("Sleeping") }
+        if icon.isHolding { clauses.append(holdingValue) }
+        if let level = icon.macLevel, level > .normal { clauses.append("Mac at " + macLevel(level)) }
+        return clauses.joined(separator: ", ")
+    }
+
+    private static let holdingValue = "Holding this Mac awake"
+
     /// A window's gauge, in the reading the user chose.
     ///
     /// `left` is floored at zero. A vendor can report past 100% and the used

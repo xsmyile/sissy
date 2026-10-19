@@ -704,6 +704,7 @@ struct UsagePanelView: View {
         .foregroundStyle(.secondary)
         .glassEffect(.regular, in: .circle)
         .help(help)
+        .accessibilityLabel("Refresh")
     }
 
     private func header(_ live: SissyModel.LiveFrame?, period: UsageRange) -> some View {
@@ -1066,6 +1067,8 @@ struct UsagePanelView: View {
                 state, arming: model.preferredKeepAwakeMode,
                 lidClosedSetting: model.engine.keepAwakeWithLidClosed)
         )
+        .accessibilityLabel("Keep awake")
+        .accessibilityValue(UsageFormat.keepAwakeValue(state))
         .contextMenu { keepAwakeMenu }
     }
 
@@ -1098,6 +1101,7 @@ struct UsagePanelView: View {
         .buttonStyle(.plain)
         .glassEffect(.regular, in: .circle)
         .help("Settings")
+        .accessibilityLabel("Settings")
         .simultaneousGesture(TapGesture().onEnded { model.settingsTab = .general })
     }
 
