@@ -448,15 +448,25 @@ struct PanelProviderPage: View {
         Button(VendorLinkCopy.addTitle, action: onAddAccount)
     }
 
-    /// What the picker does, which is not the same sentence for both vendors.
+    private var accountPickerHelp: String {
+        Self.accountPickerHelp(for: row.id)
+    }
+
+    /// What the picker does, which is a different sentence for each vendor.
     ///
     /// On Claude Code an account in this menu is one Sissy can sign the CLI in
     /// as, so the tooltip says so rather than selling a credential change as a
     /// filter. On Codex there is no such control — a linked account is read
     /// and never signed in with — so the same words would promise something
-    /// the page cannot do.
-    private var accountPickerHelp: String {
-        row.id == ProviderID.codex ? Self.readOnlyPickerHelp : Self.switchablePickerHelp
+    /// the page cannot do. A provider Sissy knows no account mechanics of
+    /// gets the sentence that promises nothing and names no vendor, because
+    /// switching is the one claim a new id must not inherit.
+    static func accountPickerHelp(for provider: String) -> String {
+        switch provider {
+        case ProviderID.claudeCode: switchablePickerHelp
+        case ProviderID.codex: readOnlyPickerHelp
+        default: neutralPickerHelp
+        }
     }
 
     static let switchablePickerHelp =
@@ -464,6 +474,8 @@ struct PanelProviderPage: View {
 
     static let readOnlyPickerHelp =
         "Choose which account to read. Codex stays on the account it is signed into."
+
+    static let neutralPickerHelp = "Choose which account to read."
 
     /// Signs Claude Code in as the account being read, from the account menu
     /// rather than the card: on the card it shared the name's line, and a long

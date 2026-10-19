@@ -604,4 +604,19 @@ final class PanelPagesTests: XCTestCase {
     func testAPanelWithNoScreenStillHasACeiling() {
         XCTAssertGreaterThan(PanelMetrics.maxHeight(on: nil), 0)
     }
+
+    /// Each vendor's picker says what it does, and only Claude Code's
+    /// promises a switch: a provider Sissy knows no account mechanics of
+    /// inherits neither that promise nor Codex's sentence naming Codex.
+    func testEachProviderGetsItsOwnPickerHelpAndAnUnknownOneTheNeutral() {
+        XCTAssertEqual(
+            PanelProviderPage.accountPickerHelp(for: ProviderID.claudeCode),
+            PanelProviderPage.switchablePickerHelp)
+        XCTAssertEqual(
+            PanelProviderPage.accountPickerHelp(for: ProviderID.codex),
+            PanelProviderPage.readOnlyPickerHelp)
+        XCTAssertEqual(
+            PanelProviderPage.accountPickerHelp(for: "gemini"),
+            PanelProviderPage.neutralPickerHelp)
+    }
 }
