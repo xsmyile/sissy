@@ -285,11 +285,19 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
     /// Publishes why the reading is missing, and takes it down with it: a
     /// gauge left standing under a sentence explaining that there is nothing
     /// behind it is worse than no gauge.
+    ///
+    /// The stamp goes with it, because it names the moment *this reading* was
+    /// taken and there is no longer one. `ClaudeCodeSignals.merge` hands a
+    /// blocked probe's row to whichever reader read later, so a session that
+    /// read after the probe's last reading and failed since outranked the
+    /// probe's real windows with an empty failure state. It is the rule
+    /// `ClaudeLimitsProbe` already follows.
     private func publishFailure(_ state: ProviderLimitsState) {
         published.update {
             $0.limitsState = state
             $0.windows = []
             $0.credits = nil
+            $0.limitsObservedAt = nil
         }
     }
 
