@@ -901,16 +901,14 @@ struct UsagePanelSnapshot: Equatable {
         /// The same id the pills above spell, so the two blocks name one model
         /// one way.
         let name: String
-        /// The efforts as one run: the vendor's word and that effort's share
-        /// of what this model spent, dearest first.
-        let run: String
         /// What each effort cost and how many turns it took. The row's hover
-        /// and its accessibility label, which are the same sentence — the run
+        /// and its accessibility label, which are the same sentence — the bar
         /// has no room for either, and anything only a pointer can reach does
         /// not exist for VoiceOver.
         let detail: String
-        /// The run again, a segment per clause in the same order, which is
-        /// what the effort page draws the model's bar from.
+        /// A segment per effort, dearest first: the vendor's word and that
+        /// effort's share of what this model spent, which is what the effort
+        /// page draws the model's bar and its legend from.
         let segments: [EffortSegment]
         /// What the model spent over the window and in how many turns.
         let total: String
@@ -2585,7 +2583,7 @@ struct UsagePanelSnapshot: Equatable {
     /// as soon as any pair has tokens and no cost, which is `makeModels`' rule
     /// for `makeModels`' reason.
     ///
-    /// **Spend the lines named no effort for is the run's last clause, never
+    /// **Spend the lines named no effort for is the bar's last segment, never
     /// its first.** It is in the denominator, because leaving it out would let
     /// a model with nine tagged turns and one untagged read `high 100%` under
     /// a pill counting all ten; and it is pinned last however large it is,
@@ -2637,7 +2635,6 @@ struct UsagePanelSnapshot: Equatable {
             return EffortRow(
                 id: model,
                 name: UsageFormat.modelName(model, on: provider),
-                run: segments.map(\.label).joined(separator: " · "),
                 detail: UsageFormat.effortDetail(detail),
                 segments: segments,
                 total: UsageFormat.effortTotal(

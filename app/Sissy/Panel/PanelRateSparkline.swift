@@ -36,7 +36,6 @@ struct RateSparkline: View {
     /// The two figures of the sample under the pointer, worded by the page
     /// that owns the unit.
     let figures: (Int) -> String
-    @Binding var hovered: Int?
 
     private static let plotHeight: CGFloat = 44
     private static let lineWidth: CGFloat = 1.5
@@ -49,8 +48,18 @@ struct RateSparkline: View {
     static let hoverSlack: TimeInterval = 0.5
 
     @State private var width: CGFloat = 0
+    /// Where the pointer rests, and never the sample under it: the series is
+    /// trimmed by time, so a stored index named a different sample once the
+    /// oldest dropped, under a pointer that had not moved.
+    @State private var pointerX: CGFloat?
 
     private var count: Int { points.count }
+
+    /// The sample under the pointer, resolved against the series on every
+    /// render so a new sample cannot slide the cursor out from under it.
+    private var hovered: Int? {
+        pointerX.flatMap { Self.index(at: $0, of: points.lazy.map(\.at), now: now, width: width) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -64,10 +73,8 @@ struct RateSparkline: View {
                 }
                 .onContinuousHover { phase in
                     switch phase {
-                    case .active(let location):
-                        hovered = Self.index(
-                            at: location.x, of: points.lazy.map(\.at), now: now, width: width)
-                    case .ended: hovered = nil
+                    case .active(let location): pointerX = location.x
+                    case .ended: pointerX = nil
                     }
                 }
             legend
@@ -83,7 +90,7 @@ struct RateSparkline: View {
     /// a hover replaces the caption and never the headline.
     @ViewBuilder
     private var legend: some View {
-        if let hovered, hovered < count {
+        if let hovered {
             Text(figures(hovered) + " · " + UsageFormat.age(now.timeIntervalSince(points[hovered].at)))
         } else {
             HStack {
@@ -141,7 +148,7 @@ struct RateSparkline: View {
                 line, with: .color(tint),
                 style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round, lineJoin: .round))
         }
-        if let hovered, hovered < count {
+        if let hovered {
             var cursor = Path()
             let at = xs[hovered]
             cursor.move(to: CGPoint(x: at, y: 0))

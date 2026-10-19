@@ -32,8 +32,8 @@ final class UsageEffortRowsTests: XCTestCase {
             split("gpt-5.6-sol", "medium", turns: 35, cost: "0.49"),
         ])
         XCTAssertEqual(out.map(\.name), ["gpt-6-astra", "gpt-5.6-sol"])
-        XCTAssertEqual(out.first?.run, "medium 56% · high 44%")
-        XCTAssertEqual(out.last?.run, "high 83% · medium 17%")
+        XCTAssertEqual(out.first?.segments.map(\.label), ["medium 56%", "high 44%"])
+        XCTAssertEqual(out.last?.segments.map(\.label), ["high 83%", "medium 17%"])
     }
 
     /// Dearest model first, and inside a row the dearest effort first.
@@ -44,7 +44,7 @@ final class UsageEffortRowsTests: XCTestCase {
             split("dear", "ultra", turns: 1, cost: "9.00"),
         ])
         XCTAssertEqual(out.map(\.name), ["dear", "cheap"])
-        XCTAssertEqual(out.first?.run, "ultra 90% · medium 10%")
+        XCTAssertEqual(out.first?.segments.map(\.label), ["ultra 90%", "medium 10%"])
     }
 
     /// A share too small to round is not a share of nothing, and one short of
@@ -54,7 +54,7 @@ final class UsageEffortRowsTests: XCTestCase {
             split("astra", "medium", turns: 500, cost: "100.00"),
             split("astra", "ultra", turns: 1, cost: "0.20"),
         ])
-        XCTAssertEqual(out.first?.run, "medium >99% · ultra <1%")
+        XCTAssertEqual(out.first?.segments.map(\.label), ["medium >99%", "ultra <1%"])
     }
 
     /// A model the pricing sources do not know books tokens at a cost of zero,
@@ -64,10 +64,10 @@ final class UsageEffortRowsTests: XCTestCase {
             split("unknown", "high", turns: 2, cost: "0", tokens: 300),
             split("unknown", "low", turns: 1, cost: "0", tokens: 100),
         ])
-        XCTAssertEqual(out.first?.run, "high 75% · low 25%")
+        XCTAssertEqual(out.first?.segments.map(\.label), ["high 75%", "low 25%"])
     }
 
-    /// The money and the turns are what the run has no room for, so they are
+    /// The money and the turns are what the bar has no room for, so they are
     /// the hover and the spoken label.
     func testTheRowCarriesTheMoneyAndTheTurnsOnItsDetail() {
         let out = rows([split("astra", "medium", turns: 545, cost: "6.10")])
@@ -112,13 +112,13 @@ final class UsageEffortRowsTests: XCTestCase {
 
     /// An event whose line named no effort still counts in the model's rows,
     /// so leaving it out here would put `high 100%` under a pill counting more
-    /// than the run accounts for.
+    /// than the bar accounts for.
     func testSpendThatNamedNoEffortStaysInTheDenominator() {
         let out = rows([
             split("astra", "high", turns: 9, cost: "9.00"),
             split("astra", nil, turns: 1, cost: "1.00"),
         ])
-        XCTAssertEqual(out.first?.run, "high 90% · unattributed 10%")
+        XCTAssertEqual(out.first?.segments.map(\.label), ["high 90%", "unattributed 10%"])
     }
 
     /// It is not an effort, so it never takes the rank a setting would: last
@@ -128,7 +128,7 @@ final class UsageEffortRowsTests: XCTestCase {
             split("astra", nil, turns: 90, cost: "90.00"),
             split("astra", "high", turns: 10, cost: "10.00"),
         ])
-        XCTAssertEqual(out.first?.run, "high 10% · unattributed 90%")
+        XCTAssertEqual(out.first?.segments.map(\.label), ["high 10%", "unattributed 90%"])
     }
 
     /// A row reading `unattributed 100%` is an absent reading dressed as one.
@@ -136,7 +136,7 @@ final class UsageEffortRowsTests: XCTestCase {
         XCTAssertTrue(rows([split("astra", nil, turns: 5, cost: "5.00")]).isEmpty)
     }
 
-    /// The hover names it too, since the run has no room for the money.
+    /// The hover names it too, since the bar has no room for the money.
     func testTheDetailNamesTheUnattributedSpend() {
         let out = rows([
             split("astra", "high", turns: 9, cost: "9.00"),
@@ -219,15 +219,15 @@ final class UsageEffortRowsTests: XCTestCase {
 
     // MARK: The page's bars
 
-    /// The bar is drawn from the same clauses the run prints, in the same
+    /// The bar and its legend are drawn from the same segments, in the same
     /// order, so the two cannot disagree.
-    func testTheSegmentsAreTheRunsClauses() throws {
+    func testTheSegmentsCarryTheBarAndItsLegend() throws {
         let row = try XCTUnwrap(
             rows([
                 split("astra", "medium", turns: 5, cost: "6.00"),
                 split("astra", "high", turns: 3, cost: "4.00"),
             ]).first)
-        XCTAssertEqual(row.segments.map(\.label).joined(separator: " · "), row.run)
+        XCTAssertEqual(row.segments.map(\.label), ["medium 60%", "high 40%"])
         XCTAssertEqual(row.segments.map(\.share), [0.6, 0.4])
     }
 
