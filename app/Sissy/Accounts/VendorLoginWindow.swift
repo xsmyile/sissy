@@ -706,9 +706,9 @@ private struct VendorLinkQuestionView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Picker("", selection: Binding(get: { picked ?? "" }, set: { picked = $0 })) {
+            Picker("", selection: $picked) {
                 ForEach(question.options) { option in
-                    Text(option.label).tag(option.id)
+                    Text(option.label).tag(Optional(option.id))
                 }
             }
             .pickerStyle(.radioGroup)
