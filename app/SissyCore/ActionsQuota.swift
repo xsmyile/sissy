@@ -146,8 +146,9 @@ enum ActionsAllowance {
 /// **Non-throwing, for the reason the latest event is**: it rides a reading
 /// whose counters have already arrived, and a billing endpoint that would not
 /// answer must not throw those away. A nil reading keeps the previous one on
-/// the row with its age, and an owner whose report alone failed keeps its
-/// previous quota through `ActionsReading.merged`.
+/// the row with its age, and is logged, because the gauge alone cannot say
+/// why it stopped; an owner whose report alone failed keeps its previous
+/// quota through `ActionsReading.merged`.
 ///
 /// **A report the token may not read is not a failure.** An organisation the
 /// account is only a member of answers `403` or `404`, and that is the answer:
@@ -217,6 +218,7 @@ enum GitHubActionsFeed {
                 quotas: quotas, ownNeedsUserScope: ownNeedsUserScope, resetsAt: month.end,
                 monthMinutes: month.minutes, unread: unread)
         } catch {
+            if !Task.isCancelled { sissyLog("sissy: GitHub Actions bill unreadable: \(error)") }
             return nil
         }
     }
@@ -349,7 +351,7 @@ enum GitHubActionsFeed {
         }
         guard let body = body as? [String: Any], let rows = body["usageItems"] as? [[String: Any]]
         else { throw ForgeReadFailure.malformed }
-        return .items(rows.compactMap(ActionsItem.init))
+        return .items(try rows.compactMap(ActionsItem.init))
     }
 
     private static func plan(_ kind: ActionsQuota.Owner, _ owner: String, token: String) async throws
@@ -454,8 +456,10 @@ enum GitHubActionsFeed {
         return components?.url
     }
 
+    /// A request whose refusal is no answer: the organisations and a plan are
+    /// the account's to read, so a `403` or `404` fails the read or the owner.
     private static func get(_ url: URL?, token: String) async throws -> Any {
-        guard case .body(let reply) = try await fetch(url, token: token, refusalIsAnswer: false)
+        guard case .body(let reply) = try await fetch(url, token: token)
         else { throw ForgeReadFailure.malformed }
         return reply
     }
@@ -468,31 +472,20 @@ enum GitHubActionsFeed {
         case refused(scopes: String?)
     }
 
-    /// One request. A `403` that is the vendor asking for less traffic is a
-    /// failure rather than a refusal, which `ForgeActivityFeed.askedToSlowDown`
-    /// tells apart.
-    private static func fetch(
-        _ url: URL?, token: String, refusalIsAnswer: Bool = true
-    ) async throws -> Reply {
+    /// One request, through `ForgeActivityFeed.send`, so a refusal the
+    /// vendor files against the token holds this read and the next poll alike.
+    /// A `403` that is the vendor asking for less traffic is a failure rather
+    /// than a refusal, which `ForgeActivityFeed.isAnsweredRefusal` tells apart.
+    private static func fetch(_ url: URL?, token: String) async throws -> Reply {
         guard let url else { throw ForgeReadFailure.malformed }
         let request = ForgeActivityFeed.request(
             url, token: token, header: GitHubActivityFeed.authorizationHeader,
             scheme: GitHubActivityFeed.authorizationScheme)
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await SissyHTTP.data(for: request)
-        } catch {
-            throw ForgeActivityFeed.failure(thrown: error)
-        }
-        guard let http = response as? HTTPURLResponse else { throw ForgeReadFailure.malformed }
-        let refused =
-            http.statusCode == 404
-            || (http.statusCode == 403 && !ForgeActivityFeed.askedToSlowDown(http))
-        if refusalIsAnswer, refused, SissyHTTP.sameOrigin(url, http.url) {
+        let (data, http) = try await ForgeActivityFeed.send(
+            request, token: token, answeringRefusals: true)
+        if ForgeActivityFeed.isAnsweredRefusal(http, addressedTo: url) {
             return .refused(scopes: http.value(forHTTPHeaderField: scopesHeader))
         }
-        if let failure = ForgeActivityFeed.failure(of: http, addressedTo: url) { throw failure }
         guard let body = try? JSONSerialization.jsonObject(with: data) else {
             throw ForgeReadFailure.malformed
         }
@@ -534,17 +527,25 @@ struct ActionsItem: Sendable, Equatable {
         self.net = net
     }
 
-    init?(_ row: [String: Any]) {
+    /// Nil for a row that is not Actions minutes; throws `malformed` for one
+    /// that is and lacks a figure, so a changed schema fails the owner, which
+    /// keeps its last quota, rather than reading as minutes that cost nothing.
+    /// Measured 2026-10-02 on radonforge's September report, every row carried
+    /// all five figures, the fully discounted ones with `netAmount` 0.0.
+    init?(_ row: [String: Any]) throws {
         guard (row["product"] as? String)?.lowercased() == Self.product,
             (row["unitType"] as? String)?.lowercased() == Self.unit,
             let repository = row["repositoryName"] as? String, !repository.isEmpty,
             let sku = row["sku"] as? String
         else { return nil }
-        func number(_ key: String) -> Double { (row[key] as? NSNumber)?.doubleValue ?? 0 }
+        func number(_ key: String) throws -> Double {
+            guard let value = row[key] as? NSNumber else { throw ForgeReadFailure.malformed }
+            return value.doubleValue
+        }
         self.init(
-            repository: repository, sku: sku, quantity: number("quantity"),
-            unitPrice: number("pricePerUnit"), gross: number("grossAmount"),
-            discount: number("discountAmount"), net: number("netAmount"))
+            repository: repository, sku: sku, quantity: try number("quantity"),
+            unitPrice: try number("pricePerUnit"), gross: try number("grossAmount"),
+            discount: try number("discountAmount"), net: try number("netAmount"))
     }
 
     private static let product = "actions"

@@ -808,6 +808,19 @@ final class ForgeActivityTests: XCTestCase {
         XCTAssertFalse(ForgeActivityFeed.askedToSlowDown(try reply([:])))
     }
 
+    /// A bill the token may not read is an answer, and a throttle on the same
+    /// status is not, so the Actions read leaves the first off the row and
+    /// files the second against the credential.
+    func testOnlyARefusalThatIsNotAThrottleAnswers() throws {
+        let url = URL(string: "https://api.github.com/graphql")
+        XCTAssertTrue(ForgeActivityFeed.isAnsweredRefusal(try reply([:]), addressedTo: url))
+        XCTAssertFalse(
+            ForgeActivityFeed.isAnsweredRefusal(try reply(["Retry-After": "60"]), addressedTo: url))
+        XCTAssertFalse(
+            ForgeActivityFeed.isAnsweredRefusal(
+                try reply([:]), addressedTo: URL(string: "https://example.com/graphql")))
+    }
+
     private static let graphQLEndpoint = "https://gitlab.example.com/api/graphql"
 
     private func answer(

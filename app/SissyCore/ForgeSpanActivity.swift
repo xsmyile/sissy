@@ -101,6 +101,14 @@ enum ForgeSpanFeed {
         var lastInstant: Date { isOpen ? end : end.addingTimeInterval(-1) }
     }
     static let counters: [ForgeSpanMetric] = [.contributions, .merged, .issues, .comments]
+    /// The longest span a pick may name, in days. Longer picks are invalid
+    /// rather than truncated, and `GitHubProfileCalendar.yearLimit` is derived
+    /// from it, so the profile fetch accepts every span the bounds do.
+    static let maxSpanDays = 3650
+    /// The days one contribution field covers: GitHub refuses a
+    /// `contributionsCollection` longer than a year.
+    static let fieldDays = 365
+    private static let secondsPerDay: TimeInterval = 86_400
 
     /// Every figure is over the local days picked, from local midnight to
     /// local midnight, because that is how the vendors date the work: GitHub
@@ -124,23 +132,18 @@ enum ForgeSpanFeed {
         let lastDay = calendar.startOfDay(for: to)
         guard firstDay <= lastDay, lastDay <= calendar.startOfDay(for: now),
             let days = calendar.dateComponents([.day], from: firstDay, to: lastDay).day,
-            days < 3650,
+            days < maxSpanDays,
             let next = calendar.date(byAdding: .day, value: 1, to: lastDay)
         else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .gmt
-        formatter.dateFormat = "yyyy-MM-dd"
         let firstName = ForgeWindow.dayName(from, calendar: calendar)
         let lastName = ForgeWindow.dayName(to, calendar: calendar)
-        guard let calendarStart = formatter.date(from: firstName),
-            let calendarLast = formatter.date(from: lastName)
+        guard let calendarStart = ForgeWindow.gmtDays.date(from: firstName),
+            let calendarLast = ForgeWindow.gmtDays.date(from: lastName)
         else { return nil }
         return VendorBounds(
             start: firstDay, end: min(next, now), isOpen: next > now,
             firstDay: firstName, lastDay: lastName,
-            calendarStart: calendarStart, calendarEnd: calendarLast.addingTimeInterval(86_399))
+            calendarStart: calendarStart, calendarEnd: calendarLast.addingTimeInterval(secondsPerDay - 1))
     }
 
     static func read(
@@ -207,6 +210,9 @@ enum ForgeSpanFeed {
         dates: (Date, Date), now: Date
     ) async throws -> ForgeSpanReading {
         let (from, to) = dates
+        guard let bounds = bounds(from: from, to: to, now: now) else {
+            return .unavailable(connection, dates: dates, now: now, enabled: enabled, reason: .invalidDates)
+        }
         var reading = ForgeSpanReading.unavailable(
             connection, dates: dates,
             now: now, enabled: enabled, reason: .failure(.malformed))
@@ -223,7 +229,7 @@ enum ForgeSpanFeed {
         if enabled.contains(.merged) {
             reading.counters[.merged] = gitlabMerged(
                 reply.data["currentUser"] as? [String: Any] ?? [:], failures: reply.failures,
-                isOpen: bounds(from: from, to: to, now: now)?.isOpen ?? true)
+                isOpen: bounds.isOpen)
         }
         if enabled.contains(.issues) {
             do {
@@ -239,7 +245,6 @@ enum ForgeSpanFeed {
                 reading.counters[.issues] = .unavailable(absence(error))
             }
         }
-        guard let bounds = bounds(from: from, to: to, now: now) else { return reading }
         for counter in [ForgeSpanMetric.contributions, .comments] where counter.isEnabled(in: enabled) {
             do {
                 reading.counters[counter] = try await gitlabEvents(
@@ -254,17 +259,19 @@ enum ForgeSpanFeed {
         return reading
     }
 
-    /// At most 365 UTC days per contribution field, so multi-year picks stay
-    /// inside GitHub's one-year limit without overlapping a calendar bucket.
-    /// Constructed three-year and 3650-day picks verified 2026-10-03; no
-    /// multi-year vendor reply was measured. At most ten year-sized fields
-    /// are requested, and longer picks are invalid rather than truncated.
+    /// At most `fieldDays` UTC days per contribution field, so multi-year
+    /// picks stay inside GitHub's one-year limit without overlapping a
+    /// calendar bucket. Constructed three-year and 3650-day picks verified
+    /// 2026-10-03; no multi-year vendor reply was measured. At most
+    /// `maxSpanDays` over `fieldDays` fields are requested, and longer picks
+    /// are invalid rather than truncated.
     static func contributionRanges(start: Date, end: Date) -> [(Date, Date)] {
-        guard start <= end, end.timeIntervalSince(start) < 3650 * 86400 else { return [] }
+        let limit = TimeInterval(maxSpanDays) * secondsPerDay
+        guard start <= end, end.timeIntervalSince(start) < limit else { return [] }
         var ranges: [(Date, Date)] = []
         var cursor = start
         while cursor <= end {
-            let last = min(cursor.addingTimeInterval(365 * 86400 - 1), end)
+            let last = min(cursor.addingTimeInterval(TimeInterval(fieldDays) * secondsPerDay - 1), end)
             ranges.append((cursor, last))
             cursor = last.addingTimeInterval(1)
         }
@@ -279,14 +286,12 @@ enum ForgeSpanFeed {
         else { return GitHubActivityFeed.probeDocument }
         let iso = ISO8601DateFormatter()
         var viewer = ["login"]
-        do {
-            for (index, range) in contributionRanges(start: bounds.calendarStart, end: bounds.calendarEnd)
-                .enumerated()
-            {
-                viewer.append(
-                    "contrib\(index): contributionsCollection(from: \"\(iso.string(from: range.0))\", to: \"\(iso.string(from: range.1))\") { contributionCalendar { totalContributions } }"
-                )
-            }
+        for (index, range) in contributionRanges(start: bounds.calendarStart, end: bounds.calendarEnd)
+            .enumerated()
+        {
+            viewer.append(
+                "contrib\(index): contributionsCollection(from: \"\(iso.string(from: range.0))\", to: \"\(iso.string(from: range.1))\") { contributionCalendar { totalContributions } }"
+            )
         }
         if profileCheck, let check = GitHubProfileCalendar.checkField(now: now, calendar: calendar) {
             viewer.append(check)
@@ -403,26 +408,24 @@ enum ForgeSpanFeed {
         reading = ForgeSpanReading(
             id: reading.id, kind: reading.kind, host: reading.host,
             login: login, from: from, to: to, readAt: now, counters: reading.counters)
-        do {
-            var total = 0
-            var missing: ForgeSpanAbsence?
-            for index in contributionRanges(start: bounds.calendarStart, end: bounds.calendarEnd).indices {
-                let alias = "contrib\(index)"
-                guard let block = viewer[alias] as? [String: Any],
-                    let contribution = block["contributionCalendar"] as? [String: Any],
-                    let value = contribution["totalContributions"] as? Int, value >= 0
-                else {
-                    missing =
-                        failures[alias] ?? failures["contributionsCollection"] ?? failures["viewer"]
-                        ?? failures["*"] ?? .failure(.malformed)
-                    break
-                }
-                total += value
+        var total = 0
+        var missing: ForgeSpanAbsence?
+        for index in contributionRanges(start: bounds.calendarStart, end: bounds.calendarEnd).indices {
+            let alias = "contrib\(index)"
+            guard let block = viewer[alias] as? [String: Any],
+                let contribution = block["contributionCalendar"] as? [String: Any],
+                let value = contribution["totalContributions"] as? Int, value >= 0
+            else {
+                missing =
+                    failures[alias] ?? failures["contributionsCollection"] ?? failures["viewer"]
+                    ?? failures["*"] ?? .failure(.malformed)
+                break
             }
-            reading.counters[.contributions] =
-                missing.map(ForgeSpanCounter.unavailable)
-                ?? .counted(.exact(total))
+            total += value
         }
+        reading.counters[.contributions] =
+            missing.map(ForgeSpanCounter.unavailable)
+            ?? .counted(.exact(total))
         for counter in [ForgeSpanMetric.merged, .issues] where counter.isEnabled(in: enabled) {
             reading.counters[counter] = count(
                 payload, alias: counter.rawValue,
@@ -508,14 +511,14 @@ enum ForgeSpanFeed {
     ) async throws -> (data: [String: Any], failures: [String: ForgeSpanAbsence]) {
         var request = ForgeActivityFeed.request(
             url, token: token,
-            header: kind == .gitHub ? "Authorization" : "PRIVATE-TOKEN",
-            scheme: kind == .gitHub ? "Bearer" : nil)
+            header: kind == .gitHub ? GitHubActivityFeed.authorizationHeader : GitLabActivityFeed.tokenHeader,
+            scheme: kind == .gitHub ? GitHubActivityFeed.authorizationScheme : nil)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "query": query, "variables": variables,
         ])
-        let reply = try await ForgeActivityFeed.send(request)
+        let reply = try await ForgeActivityFeed.send(request, token: token)
         try Task.checkCancellation()
         guard let root = try JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
         else { throw ForgeReadFailure.malformed }
