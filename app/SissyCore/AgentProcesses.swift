@@ -109,11 +109,13 @@ struct AgentProcessReading: Sendable, Equatable {
 /// the kernel agrees.
 ///
 /// **The identity is the executable's path, not its name.** Claude Code's
-/// native build runs from `~/.local/share/claude/versions/<version>`, so the
-/// process name the kernel reports *is* the version string — measured, six
-/// live sessions all answered `p_comm` of `2.1.276` or `2.1.277`. A matcher
-/// keyed on the name finds none of them; one keyed on the path finds all of
-/// them and gets the version for free.
+/// native build runs from `~/.local/share/claude/versions/<version>`, and
+/// measured 2026-09-18 the process name the kernel reported was the version
+/// string: six live sessions answered `p_comm` of `2.1.276` or `2.1.277`, so a
+/// matcher keyed on the name found none of them. Measured 2026-10-19 on 2.1.303
+/// the kernel names all 16 sessions `claude` instead, after the link they are
+/// started through, while the executable is still the versioned file; the
+/// path matches either build and gets the version for free.
 enum AgentProcessReader {
     /// Where Claude Code's native build installs each version.
     static let claudeVersionsPath = "/.local/share/claude/versions/"
