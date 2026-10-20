@@ -11,6 +11,10 @@ import SwiftUI
 /// that script writes, and one removed is a symbolset it deletes. Nothing
 /// draws a glyph by its bare name, because `Image(_:)` given a name the
 /// catalogue lacks draws nothing rather than failing.
+///
+/// A glyph is decorative: `Image(_:)` would hand VoiceOver the asset's name,
+/// `ArrowLeft01` where the system symbol said "Back", so a control drawn with
+/// nothing but a glyph names itself with `accessibilityLabel`.
 enum Glyph: String, CaseIterable {
     case dashboardSpeed02 = "DashboardSpeed02"
     case aiProgramming = "AiProgramming"
@@ -48,6 +52,16 @@ enum Glyph: String, CaseIterable {
 
 extension Image {
     init(_ glyph: Glyph) {
-        self.init(glyph.rawValue)
+        self.init(decorative: glyph.rawValue)
+    }
+}
+
+extension Label where Title == Text, Icon == Image {
+    init(_ title: String, glyph: Glyph) {
+        self.init {
+            Text(title)
+        } icon: {
+            Image(glyph)
+        }
     }
 }

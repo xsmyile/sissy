@@ -5,8 +5,9 @@ The names are the raw values of ``Glyph`` in ``app/Sissy/Panel/Glyph.swift``,
 the one list of them. Each is taken from the free Hugeicons package at the
 version pinned below, drawn as a 24-unit stroked SVG, and handed to SwiftDraw,
 which expands the strokes into an SF Symbol template. Every symbolset in the
-``Glyphs`` folder is written by this script and the folder is emptied first, so
-a glyph dropped from the enum leaves no asset behind.
+``Glyphs`` folder is written by this script, which replaces the folder whole
+once every glyph has been drawn: a glyph dropped from the enum leaves no asset
+behind, and a run that fails leaves the committed folder as it was.
 
 Every glyph has one drawing, so its weight is the stroke below and a
 ``.font(weight:)`` on it changes nothing. Scaled-stroke masters were tried and
@@ -45,6 +46,10 @@ INSETS = "3,3,3,3"
 STROKE_WIDTH = "1.75"
 INK = "#000000"
 CASE = re.compile(r'^\s*case \w+ = "(\w+)"$', re.MULTILINE)
+DECLARATION = re.compile(r"^\s*case\b", re.MULTILINE)
+NPM_TIMEOUT = 120
+SWIFTDRAW_TIMEOUT = 60
+MINIMUM_PYTHON = (3, 12)
 ELEMENT = re.compile(r'\["(\w+)", \{([^}]*)\}\]')
 ATTRIBUTE = re.compile(r'(\w+): "([^"]*)"')
 FOLDER_CONTENTS = {"info": {"author": "xcode", "version": 1}}
@@ -55,9 +60,14 @@ class GlyphError(RuntimeError):
 
 
 def names() -> list[str]:
-    found = CASE.findall(ENUM.read_text(encoding="utf-8"))
+    source = ENUM.read_text(encoding="utf-8")
+    found = CASE.findall(source)
     if not found:
         raise GlyphError(f"no `case name = \"Name\"` lines in {ENUM}")
+    if len(found) != len(DECLARATION.findall(source)):
+        raise GlyphError(f"every case in {ENUM} must read `case name = \"Name\"` on a line of its own")
+    if len(set(found)) != len(found):
+        raise GlyphError(f"{ENUM} names a glyph twice")
     return found
 
 
@@ -65,9 +75,12 @@ def fetch_package(workdir: Path) -> Path:
     subprocess.run(
         ["npm", "pack", f"{PACKAGE}@{VERSION}", "--pack-destination", str(workdir), "--silent"],
         check=True,
-        stdout=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=NPM_TIMEOUT,
     )
-    tarball = next(workdir.glob("*.tgz"))
+    tarball = next(workdir.glob("*.tgz"), None)
+    if tarball is None:
+        raise GlyphError(f"npm pack wrote no tarball for {PACKAGE}@{VERSION}")
     extracted = workdir / "package-root"
     with tarfile.open(tarball) as archive:
         archive.extractall(extracted, filter="data")
@@ -105,10 +118,10 @@ def svg(source: Path, name: str) -> str:
     )
 
 
-def symbolset(source: Path, name: str, workdir: Path) -> None:
+def symbolset(source: Path, name: str, workdir: Path, folder: Path) -> None:
     drawing = workdir / f"{name}.svg"
     drawing.write_text(svg(source, name), encoding="utf-8")
-    target = FOLDER / f"{name}.symbolset"
+    target = folder / f"{name}.symbolset"
     target.mkdir()
     subprocess.run(
         [
@@ -119,6 +132,7 @@ def symbolset(source: Path, name: str, workdir: Path) -> None:
         ],
         check=True,
         capture_output=True,
+        timeout=SWIFTDRAW_TIMEOUT,
     )
     if not (target / f"{name}.svg").exists():
         raise GlyphError(f"swiftdraw wrote no template for {name}")
@@ -127,22 +141,30 @@ def symbolset(source: Path, name: str, workdir: Path) -> None:
 
 
 def main() -> int:
+    if sys.version_info < MINIMUM_PYTHON:
+        print(f"needs Python {'.'.join(map(str, MINIMUM_PYTHON))} or later for a safe tarball extraction")
+        return 1
     for tool in ("npm", "swiftdraw"):
         if shutil.which(tool) is None:
             print(f"{tool} is not on PATH; see this script's docstring for how to install it")
             return 1
     try:
         wanted = names()
-        if FOLDER.exists():
-            shutil.rmtree(FOLDER)
-        FOLDER.mkdir()
-        (FOLDER / "Contents.json").write_text(json.dumps(FOLDER_CONTENTS, indent=2) + "\n", encoding="utf-8")
         with tempfile.TemporaryDirectory() as scratch:
             workdir = Path(scratch)
+            staged = workdir / FOLDER.name
+            staged.mkdir()
+            (staged / "Contents.json").write_text(json.dumps(FOLDER_CONTENTS, indent=2) + "\n", encoding="utf-8")
             source = fetch_package(workdir)
             for name in wanted:
-                symbolset(source, name, workdir)
-    except (GlyphError, subprocess.CalledProcessError) as error:
+                symbolset(source, name, workdir, staged)
+            if FOLDER.exists():
+                shutil.rmtree(FOLDER)
+            shutil.copytree(staged, FOLDER)
+    except subprocess.CalledProcessError as error:
+        print(f"glyph generation failed: {error}\n{error.stderr.decode('utf-8', 'replace') if error.stderr else ''}")
+        return 1
+    except (GlyphError, subprocess.TimeoutExpired) as error:
         print(f"glyph generation failed: {error}")
         return 1
     print(f"wrote {len(wanted)} symbolsets to {FOLDER.relative_to(REPO)}")

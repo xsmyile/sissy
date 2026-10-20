@@ -405,6 +405,7 @@ struct PanelProviderPage: View {
             .menuIndicator(.visible)
             .fixedSize()
             .help(accountPickerHelp)
+            .accessibilityLabel("Accounts")
         }
     }
 

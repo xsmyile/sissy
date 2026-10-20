@@ -273,6 +273,7 @@ struct PanelCalendar: View {
         .foregroundStyle(.secondary)
         .disabled(target == nil)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     /// The month before, while the archive reaches back into it.

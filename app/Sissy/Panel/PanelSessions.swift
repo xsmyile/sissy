@@ -129,6 +129,7 @@ struct PanelSessions: View {
             .foregroundStyle(.secondary)
             .disabled(refreshing)
             .help("Count the running sessions again")
+            .accessibilityLabel("Refresh")
         }
     }
 
@@ -435,7 +436,7 @@ private struct PanelSessionsLive: View {
         } label: {
             HStack(spacing: 4) {
                 Image(showsAllProcesses ? Glyph.arrowDown01 : Glyph.arrowRight01)
-                    .font(.system(size: 11))
+                    .font(.system(size: Chevron.size))
                 Text(UsageFormat.sessionsDisclosure)
                 Spacer(minLength: 0)
             }

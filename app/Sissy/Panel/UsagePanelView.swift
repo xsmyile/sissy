@@ -949,6 +949,7 @@ struct UsagePanelView: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .help(backHelp(to: destination))
+        .accessibilityLabel(backHelp(to: destination))
     }
 
     /// The way back's tooltip, named by where it lands: the vendor's page by

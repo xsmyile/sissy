@@ -642,7 +642,7 @@ struct ProvidersSettingsView: View {
     /// What the last attempt to link failed with, on a row of its own now that
     /// the caption it used to replace lives in the ⓘ.
     private func failure(_ message: String) -> some View {
-        Label(message, image: Glyph.alert02.rawValue)
+        Label(message, glyph: .alert02)
             .foregroundStyle(.red)
             .fixedSize(horizontal: false, vertical: true)
     }

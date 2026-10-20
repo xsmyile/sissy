@@ -1140,7 +1140,7 @@ struct ForgeMark: View {
 struct Chevron: View {
     let isOpen: Bool
 
-    private static let size: CGFloat = 11
+    static let size: CGFloat = 11
 
     var body: some View {
         Image(isOpen ? Glyph.arrowDown01 : Glyph.arrowRight01)

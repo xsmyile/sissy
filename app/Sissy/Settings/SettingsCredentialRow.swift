@@ -248,7 +248,7 @@ struct CredentialAddRow: View {
 
     var body: some View {
         Button(action: act) {
-            Label(title, image: Glyph.userAdd01.rawValue)
+            Label(title, glyph: .userAdd01)
                 .foregroundStyle(Color.accentColor)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(.rect)

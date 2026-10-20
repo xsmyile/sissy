@@ -105,10 +105,12 @@ struct SettingsRootView: View {
         _ tab: SettingsTab,
         @ViewBuilder content: () -> Content
     ) -> some TabContent<SettingsTab> {
-        Tab(tab.title, image: tab.glyph.rawValue, value: tab) {
+        Tab(value: tab) {
             content()
                 .frame(maxHeight: Self.maxContentHeight)
                 .navigationTitle(Self.windowTitle)
+        } label: {
+            Label(tab.title, glyph: tab.glyph)
         }
     }
 }
