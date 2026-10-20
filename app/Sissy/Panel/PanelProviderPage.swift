@@ -398,13 +398,14 @@ struct PanelProviderPage: View {
                 useInCLI
                 addAccount
             } label: {
-                Image(systemName: "person.2")
-                    .font(.system(size: 11, weight: .medium))
+                Image(Glyph.userSwitch)
+                    .font(.system(size: 11))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.visible)
             .fixedSize()
             .help(accountPickerHelp)
+            .accessibilityLabel("Accounts")
         }
     }
 

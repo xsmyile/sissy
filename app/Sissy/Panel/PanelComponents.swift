@@ -931,19 +931,14 @@ struct ForgeRowView: View {
     /// Smaller than `PanelMetrics.markSize`, which labels a whole provider: a
     /// mark that qualifies one number on a line has to read as part of that
     /// number rather than as the row's own badge.
-    private static let markSize: CGFloat = 10
-    /// Semibold rather than the body weight, and chosen per glyph rather than
-    /// once for the row.
     ///
     /// The target is the ink the marks beside it already lay down: measured
     /// 2026-09-17, `ForgeMark` at 11 pt covers 11.00 × 10.75 and `ProviderMark`
-    /// at 14 pt covers 11.12 × 11.25, which `smallcircle.filled.circle` at
-    /// 10 pt semibold hits exactly at 11.00 × 11.00 — three nominal sizes for
-    /// one optical one, because a template asset and an SF Symbol do not
-    /// measure the same at the same point size. A single weight for every mark
-    /// would be wrong in the other direction: the same circle in bold measures
-    /// 10.38, since SF redraws it rather than thickening it.
-    private static let markWeight: Font.Weight = .semibold
+    /// at 14 pt covers 11.12 × 11.25, and measured 2026-10-20 `Glyph.circleDot`
+    /// at 10 pt covers 11.00 × 11.00: three nominal sizes for one optical one,
+    /// because a template asset and a symbol do not measure the same at the
+    /// same point size. A glyph carries one weight, so none is named here.
+    private static let markSize: CGFloat = 10
     private static let markGap: CGFloat = 3
     private static let figureGap: CGFloat = 9
 
@@ -980,8 +975,8 @@ struct ForgeRowView: View {
     /// shortened in the middle could cut into either.
     private func latest(_ event: ForgeEvent) -> some View {
         HStack(spacing: 4) {
-            Image(systemName: ProviderPalette.forgeEventSymbol(event.action))
-                .font(.system(size: Self.markSize, weight: Self.markWeight))
+            Image(ProviderPalette.forgeEventGlyph(event.action))
+                .font(.system(size: Self.markSize))
                 .foregroundStyle(ProviderPalette.forgeEventTint(event.action))
             TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
                 HStack(spacing: 0) {
@@ -1021,19 +1016,19 @@ struct ForgeRowView: View {
                 if let contributions = row.contributions { count(contributions) }
                 if let merged = row.merged {
                     marked(
-                        merged, symbol: ProviderPalette.forgeSymbol(.merged),
+                        merged, glyph: ProviderPalette.forgeGlyph(.merged),
                         tint: ProviderPalette.forgeTint(.merged),
                         help: row.mergedHelp)
                 }
                 if let issues = row.issues {
                     marked(
-                        issues, symbol: ProviderPalette.forgeSymbol(.issues),
+                        issues, glyph: ProviderPalette.forgeGlyph(.issues),
                         tint: ProviderPalette.forgeTint(.issues),
                         help: row.issuesHelp)
                 }
                 if let comments = row.comments {
                     marked(
-                        comments, symbol: ProviderPalette.forgeSymbol(.comments),
+                        comments, glyph: ProviderPalette.forgeGlyph(.comments),
                         tint: ProviderPalette.forgeTint(.comments), help: row.commentsHelp)
                 }
             }
@@ -1055,11 +1050,11 @@ struct ForgeRowView: View {
     /// the hover: a glyph is recognised before it is read and read by nobody
     /// who has not met it, and this row is where someone meets it.
     private func marked(
-        _ value: String, symbol: String, tint: Color, help: String
+        _ value: String, glyph: Glyph, tint: Color, help: String
     ) -> some View {
         HStack(spacing: Self.markGap) {
-            Image(systemName: symbol)
-                .font(.system(size: Self.markSize, weight: Self.markWeight))
+            Image(glyph)
+                .font(.system(size: Self.markSize))
                 .foregroundStyle(tint)
                 .accessibilityLabel(help)
             count(value)
@@ -1074,7 +1069,7 @@ struct ForgeRowView: View {
 /// because a self-hosted GitLab is the ordinary case at work and
 /// `gitlab.example.com` is as much GitLab as `gitlab.com` is. A forge that says
 /// neither — a GitHub Enterprise on a company domain, a Gitea — gets the
-/// generic branch glyph rather than a guess between the two, which is the same
+/// generic fork glyph rather than a guess between the two, which is the same
 /// answer `ProviderMark` gives a provider it ships no asset for.
 ///
 /// Template assets, so the mark takes the colour of the line it sits on and
@@ -1106,7 +1101,7 @@ struct ForgeMark: View {
 
     private var mark: Image {
         guard let asset else {
-            return Image(systemName: Self.genericSymbol)
+            return Image(Self.genericGlyph)
         }
         return Image(asset)
     }
@@ -1132,18 +1127,24 @@ struct ForgeMark: View {
 
     private nonisolated static let gitHubName = "github"
     private nonisolated static let gitLabName = "gitlab"
-    private static let genericSymbol = "arrow.triangle.branch"
+    private static let genericGlyph = Glyph.gitFork
 }
 
 /// The one chevron the panel draws where a row opens a page or a group
 /// unfolds, so a group and the row above it cannot point different ways at
 /// the same state, and a row that opens a page reads the same on every tab.
+///
+/// At 11 pt because the glyph's chevron sits small in its square: measured
+/// 2026-10-20, `Glyph.arrowRight01` covers 4.50 × 7.75 there against the
+/// 4.75 × 8.00 the system chevron it replaced covered at 9 pt semibold.
 struct Chevron: View {
     let isOpen: Bool
 
+    static let size: CGFloat = 11
+
     var body: some View {
-        Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-            .font(.system(size: 9, weight: .semibold))
+        Image(isOpen ? Glyph.arrowDown01 : Glyph.arrowRight01)
+            .font(.system(size: Self.size))
             .foregroundStyle(.tertiary)
     }
 }

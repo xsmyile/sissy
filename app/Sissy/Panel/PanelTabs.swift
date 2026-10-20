@@ -76,14 +76,14 @@ enum PanelTab: CaseIterable, Hashable {
         }
     }
 
-    var symbol: String {
+    var glyph: Glyph {
         switch self {
-        case .usage: "gauge.with.dots.needle.33percent"
-        case .sessions: "terminal"
-        case .mac: "memorychip"
-        case .disk: "internaldrive"
-        case .network: "arrow.up.arrow.down"
-        case .forge: "arrow.triangle.branch"
+        case .usage: .dashboardSpeed02
+        case .sessions: .aiProgramming
+        case .mac: .computerActivity
+        case .disk: .hardDrive
+        case .network: .arrowDataTransferVertical
+        case .forge: .gitFork
         }
     }
 
@@ -217,8 +217,8 @@ struct PanelTabBar: View {
         return Button {
             withAnimation(reduceMotion ? nil : .snappy) { selection = tab }
         } label: {
-            Image(systemName: tab.symbol)
-                .font(.system(size: Self.symbolSize, weight: .medium))
+            Image(tab.glyph)
+                .font(.system(size: Self.symbolSize))
                 .foregroundStyle(
                     badge.map { AnyShapeStyle($0.tint) } ?? AnyShapeStyle(symbolStyle(isSelected))
                 )

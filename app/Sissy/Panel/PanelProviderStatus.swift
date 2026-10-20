@@ -184,7 +184,7 @@ struct PanelProviderStatusPage: View {
             Link(destination: page) {
                 HStack(spacing: 4) {
                     Text(host)
-                    Image(systemName: "arrow.up.forward")
+                    Image(Glyph.arrowUpRight01)
                 }
                 .font(.system(size: 10))
             }

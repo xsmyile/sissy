@@ -70,16 +70,17 @@ struct CredentialDisc<Content: View>: View {
             .accessibilityHidden(true)
     }
 
-    /// A filled symbol with its own inner colour rather than a glyph over a
-    /// disc: it reads on whatever the form draws behind it without this view
-    /// having to guess that colour.
+    /// The glyph in white on an orange disc of its own, so the badge carries
+    /// its ground with it and reads on whatever the form draws behind it
+    /// without this view having to guess that colour. The glyph is an outline,
+    /// so the disc is what a filled symbol's body used to be.
     @ViewBuilder
     private var badge: some View {
         if health != .ok {
-            Image(systemName: "exclamationmark.circle.fill")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, .orange)
-                .font(.system(size: Self.badgeSize, weight: .bold))
+            Image(Glyph.alertCircle)
+                .font(.system(size: Self.badgeSize))
+                .foregroundStyle(.white)
+                .background(Circle().fill(.orange))
                 .offset(x: Self.badgeOffset, y: Self.badgeOffset)
         }
     }
@@ -104,7 +105,7 @@ struct CredentialMonogram: View {
         CredentialDisc(tint: tint, health: health) {
             let initials = Self.initials(of: name)
             if initials.isEmpty {
-                Image(systemName: "person.fill")
+                Image(Glyph.user)
                     .font(.system(size: Self.glyphSize))
                     .foregroundStyle(tint)
             } else {
@@ -247,7 +248,7 @@ struct CredentialAddRow: View {
 
     var body: some View {
         Button(action: act) {
-            Label(title, systemImage: "plus.circle")
+            Label(title, glyph: .userAdd01)
                 .foregroundStyle(Color.accentColor)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(.rect)
@@ -294,7 +295,7 @@ struct CredentialRowMenu<Content: View>: View {
         Menu {
             content
         } label: {
-            Image(systemName: "ellipsis")
+            Image(Glyph.moreHorizontal)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -324,7 +325,7 @@ struct SettingsInfoButton: View {
         Button {
             showing = true
         } label: {
-            Image(systemName: "info.circle")
+            Image(Glyph.informationCircle)
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)

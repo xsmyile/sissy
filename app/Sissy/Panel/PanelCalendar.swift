@@ -242,7 +242,7 @@ struct PanelCalendar: View {
             figures = grid.total
         }
         return HStack(spacing: 6) {
-            pageButton("chevron.left", to: previous(grid.month), help: "Previous month")
+            pageButton(.arrowLeft01, to: previous(grid.month), help: "Previous month")
             Text(title)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
@@ -251,21 +251,21 @@ struct PanelCalendar: View {
                 .font(.system(size: 10))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-            pageButton("chevron.right", to: next(grid.month, now: now), help: "Next month")
+            pageButton(.arrowRight01, to: next(grid.month, now: now), help: "Next month")
         }
         .lineLimit(1)
         .animation(nil, value: pointed)
     }
 
-    private func pageButton(_ symbol: String, to target: Date?, help: String) -> some View {
+    private func pageButton(_ glyph: Glyph, to target: Date?, help: String) -> some View {
         Button {
             if let target {
                 month = target
                 pointed = nil
             }
         } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 10, weight: .semibold))
+            Image(glyph)
+                .font(.system(size: 12))
                 .frame(width: 16, height: 16)
                 .contentShape(.rect)
         }
@@ -273,6 +273,7 @@ struct PanelCalendar: View {
         .foregroundStyle(.secondary)
         .disabled(target == nil)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     /// The month before, while the archive reaches back into it.

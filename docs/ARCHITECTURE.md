@@ -389,9 +389,10 @@ the lid: `keepAwakeWithLidClosed` is the setting, and this is whether the
 clamshell switch (`ClamshellSleepSwitch`) took, which rides on the system
 assertion and drops with it.
 The two come apart — power management can refuse an assertion — and the panel
-renders them as two properties of one glyph, tint for the mode and fill for the
-effect, so "switched on and holding nothing" is readable at a glance rather than
-silent.
+renders them as two properties of one control, the glyph's tint for the mode and
+the glass's tint for the effect, so "switched on and holding nothing" is readable
+at a glance rather than silent. The glyph's own fill carried the effect until
+2026-10-20, when the cup became an outline with no fill to vary.
 
 `mac` is a `MacHealthReading`: the kernel's memory pressure, the free-memory
 percentage, swap, load, active cores, uptime and the three apps holding

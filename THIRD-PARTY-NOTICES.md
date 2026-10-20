@@ -1,8 +1,10 @@
 # Third-party notices
 
 Sissy.app embeds Sparkle, which checks for, downloads and installs Sissy's own
-updates. Its terms are reproduced below, verbatim from the 2.10.0 distribution.
-Everything Sissy itself is made of is covered by [LICENSE](LICENSE).
+updates, and draws its glyphs from Hugeicons. Their terms are reproduced below,
+verbatim from Sparkle's 2.10.0 distribution and from the 4.3.5 release of
+Hugeicons' free icons. Everything Sissy itself is made of is covered by
+[LICENSE](LICENSE).
 
 ## Sparkle
 
@@ -144,4 +146,34 @@ HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
 IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
+```
+
+## Hugeicons
+
+<https://github.com/hugeicons/hugeicons>, the free Stroke Rounded set
+(`@hugeicons/core-free-icons`), MIT. Sissy ships the icons it draws redrawn as
+symbol templates.
+
+```
+MIT License
+
+Copyright (c) 2025 Hugeicons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```

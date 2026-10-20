@@ -121,14 +121,15 @@ struct PanelSessions: View {
                 }
             }
             Button(action: refresh) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: Self.refreshSize, weight: .semibold))
+                Image(Glyph.refresh01)
+                    .font(.system(size: Self.refreshSize))
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .disabled(refreshing)
             .help("Count the running sessions again")
+            .accessibilityLabel("Refresh")
         }
     }
 
@@ -434,8 +435,8 @@ private struct PanelSessionsLive: View {
             showsAllProcesses.toggle()
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: showsAllProcesses ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                Image(showsAllProcesses ? Glyph.arrowDown01 : Glyph.arrowRight01)
+                    .font(.system(size: Chevron.size))
                 Text(UsageFormat.sessionsDisclosure)
                 Spacer(minLength: 0)
             }

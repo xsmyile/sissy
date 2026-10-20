@@ -236,12 +236,12 @@ struct PanelIdentityLine: View {
     private var mark: some View {
         switch line.state {
         case .findings:
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(Glyph.alert02)
                 .font(.system(size: 10))
                 .foregroundStyle(.orange)
         case .clean:
-            Image(systemName: "checkmark")
-                .font(.system(size: 10, weight: .semibold))
+            Image(Glyph.tick02)
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         case .unread:
             EmptyView()

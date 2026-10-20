@@ -30,4 +30,12 @@ final class AboutTests: XCTestCase {
         XCTAssertTrue(text.contains("EXTERNAL LICENSES"), "Expected Sparkle's external licences too")
         XCTAssertNil(Bundle.main.url(forResource: "CREDITS", withExtension: "md"))
     }
+
+    /// The glyphs are Hugeicons', redrawn, and MIT asks for its notice to go
+    /// wherever a copy of them does.
+    func testHugeiconsNoticeShipsAsAnAppResource() throws {
+        let text = try XCTUnwrap(ThirdPartyNotices.text())
+        XCTAssertTrue(
+            text.contains("Copyright (c) 2025 Hugeicons"), "Expected Hugeicons' copyright to be reproduced")
+    }
 }

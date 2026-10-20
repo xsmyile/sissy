@@ -217,7 +217,7 @@ struct AboutView: View {
             NSWorkspace.shared.open(Self.githubURL)
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "star.fill")
+                Image(Glyph.star)
                     .foregroundStyle(Self.starGradient)
                     .symbolEffect(.bounce, value: starBounce)
                 Text("Star Sissy on GitHub")

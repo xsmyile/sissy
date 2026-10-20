@@ -175,8 +175,8 @@ struct PanelIdentities: View {
             showsAll.toggle()
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: showsAll ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                Image(showsAll ? Glyph.arrowDown01 : Glyph.arrowRight01)
+                    .font(.system(size: Chevron.size))
                 Text(
                     showsAll
                         ? "Hide the rest" : UsageFormat.identityDisclosure(all: rows.count))
@@ -280,13 +280,15 @@ private struct IdentityMarkView: View {
     var body: some View {
         switch mark {
         case .agrees:
-            Image(systemName: "checkmark")
-                .font(.system(size: 10, weight: .semibold))
+            Image(Glyph.tick02)
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("Matches")
         case .unexpected:
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(Glyph.alert02)
                 .font(.system(size: 10))
                 .foregroundStyle(.orange)
+                .accessibilityLabel("Unexpected")
         case .unjudged:
             Text("—")
                 .font(.system(size: 11))

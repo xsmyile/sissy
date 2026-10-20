@@ -68,21 +68,21 @@ enum ProviderPalette {
     /// counter in words alone would be the only place the two are not
     /// obviously the same thing.
     ///
-    /// `arrow.trianglehead.merge` is SF's name for GitHub's `git-merge`
-    /// octicon, and deliberately not `arrow.trianglehead.pull`, which is
-    /// `git-pull-request` and the state *before* this one: GitHub paints that
-    /// glyph green for an open request and this one purple for a merged one, so
-    /// the pull glyph in merged purple is a pairing neither forge has. The
-    /// count is of requests that were merged, so the mark is the merge.
-    /// `smallcircle.filled.circle` is `issue-opened`. `bubble.left` is the
-    /// speech bubble both forges mark a comment with.
-    static func forgeSymbol(_ counter: ForgeCounter) -> String {
+    /// `Glyph.gitMerge` draws GitHub's `git-merge` octicon, and deliberately
+    /// not `Glyph.gitPullRequest`, which is `git-pull-request` and the state
+    /// *before* this one: GitHub paints that glyph green for an open request
+    /// and this one purple for a merged one, so the pull glyph in merged purple
+    /// is a pairing neither forge has. The count is of requests that were
+    /// merged, so the mark is the merge. `Glyph.circleDot` is `issue-opened`.
+    /// `Glyph.comment02` is the speech bubble both forges mark a comment with.
+    /// Actions takes the play in a circle GitHub marks its Actions with.
+    static func forgeGlyph(_ counter: ForgeCounter) -> Glyph {
         switch counter {
-        case .merged: "arrow.trianglehead.merge"
-        case .issues: "smallcircle.filled.circle"
-        case .comments: "bubble.left"
-        case .latest: "clock"
-        case .actions: "gearshape.2"
+        case .merged: .gitMerge
+        case .issues: .circleDot
+        case .comments: .comment02
+        case .latest: .clock01
+        case .actions: .playCircle
         }
     }
 
@@ -104,18 +104,18 @@ enum ProviderPalette {
     /// **The counters' own marks where the event is one of theirs**, so a
     /// merge on the event line is the glyph and the purple of the merged
     /// figure above it, and the two read as one thing. The events no counter
-    /// covers take a neutral glyph in the line's own grey: a push is the arrow
-    /// it sends the work up with, an opened request is
-    /// `arrow.trianglehead.pull`, which is `git-pull-request`, and a review is
-    /// the eye both forges review with.
-    static func forgeEventSymbol(_ action: ForgeEvent.Action) -> String {
+    /// covers take a neutral glyph in the line's own grey: a push is the cloud
+    /// it sends the work up to, an opened request is `Glyph.gitPullRequest`,
+    /// which is `git-pull-request`, and a review is the eye both forges review
+    /// with.
+    static func forgeEventGlyph(_ action: ForgeEvent.Action) -> Glyph {
         switch action {
-        case .pushed: "arrow.up"
-        case .opened: "arrow.trianglehead.pull"
-        case .merged: forgeSymbol(.merged)
-        case .openedIssue: forgeSymbol(.issues)
-        case .commented: forgeSymbol(.comments)
-        case .reviewed: "eye"
+        case .pushed: .cloudUpload
+        case .opened: .gitPullRequest
+        case .merged: forgeGlyph(.merged)
+        case .openedIssue: forgeGlyph(.issues)
+        case .commented: forgeGlyph(.comments)
+        case .reviewed: .view
         }
     }
 
