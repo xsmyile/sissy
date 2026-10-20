@@ -493,7 +493,7 @@ struct PanelOverview: View {
                     PlanBadge(plan: plan, tier: row.planTier)
                 }
                 if let notice = row.notice {
-                    Image(systemName: "exclamationmark.triangle.fill")
+                    Image(Glyph.alert02)
                         .font(.system(size: 10))
                         .foregroundStyle(.orange)
                         .help(notice.message)

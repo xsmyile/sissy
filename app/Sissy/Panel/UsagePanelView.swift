@@ -157,6 +157,11 @@ struct UsagePanelView: View {
     /// 26 pt box around it would make the header's left edge read as heavier
     /// than its right.
     private static let backButtonSize: CGFloat = 20
+    /// Three points over the 12 the system chevron was drawn at, because the
+    /// glyph's chevron sits small in its square: measured 2026-10-20,
+    /// `Glyph.arrowLeft01` covers 6.00 × 10.50 at 15 against the 6.25 × 10.50
+    /// the system one covered at 12 semibold.
+    private static let backGlyphSize: CGFloat = 15
     /// Above and below every header's row, home's and each page's alike, so
     /// the tab bar and the page under a header start at one height.
     private static let headerVerticalPadding: CGFloat = 12
@@ -698,8 +703,8 @@ struct UsagePanelView: View {
     /// like the home header's switches.
     private func refreshButton(help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: "arrow.clockwise")
-                .font(.system(size: 11, weight: .semibold))
+            Image(Glyph.refresh01)
+                .font(.system(size: 11))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
                 .contentShape(.circle)
         }
@@ -797,8 +802,8 @@ struct UsagePanelView: View {
         return Button {
             page = .calendar
         } label: {
-            Image(systemName: "calendar")
-                .font(.system(size: 12, weight: .semibold))
+            Image(Glyph.calendar03)
+                .font(.system(size: 12))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
                 .foregroundStyle(picked ? Color.accentColor : Color.secondary)
                 .contentShape(.circle)
@@ -936,8 +941,8 @@ struct UsagePanelView: View {
         Button {
             page = destination
         } label: {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 12, weight: .semibold))
+            Image(Glyph.arrowLeft01)
+                .font(.system(size: Self.backGlyphSize))
                 .frame(width: Self.backButtonSize, height: Self.backButtonSize)
                 .contentShape(.rect)
         }
@@ -1037,25 +1042,21 @@ struct UsagePanelView: View {
     /// sitting beside the refresh button. Settings carries the same choice for
     /// anyone who never finds either gesture.
     ///
-    /// The cup steams while the hold is in force, which says the effect in the
-    /// glyph as well as in the glass: the tint is the mode, the steam and the
-    /// fill are what came of it. One glyph in both states, with the steam
-    /// faded rather than swapped out: the only cup without steam the symbol
-    /// set has is the one on a saucer, and the two together read as two
-    /// different controls (decided 2026-10-03). Hiding the steam layer instead
-    /// leaves the cup's rim cut where the steam meets it.
+    /// One cup in every state: the tint is the mode and the glass is the hold.
+    /// The glyph is a single outline, so there is no steam layer to fade while
+    /// the switch is armed and not yet holding, which is what the system cup
+    /// did until 2026-10-20.
     ///
     /// Two points larger than the gear beside it, because the steam is thin
     /// strokes and the cup itself fills only the lower half of the glyph:
-    /// measured 2026-10-03, at 13 it carries 92.4 pt² of ink against the
-    /// gear's 91.5 at 12, where at 11 it carried 66.1 and read visibly smaller.
+    /// measured 2026-10-20, at 14 it carries 61.6 pt² of ink against the
+    /// gear's 59.5 at 12, where at 13 it carried 53.0 and read smaller.
     private func keepAwakeButton(_ state: KeepAwakeState) -> some View {
         Menu {
             keepAwakeMenu
         } label: {
-            Image(systemName: "cup.and.heat.waves.fill")
-                .symbolRenderingMode(state.active ? .monochrome : .hierarchical)
-                .font(.system(size: 13, weight: .semibold))
+            Image(Glyph.coffee02)
+                .font(.system(size: 14))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
                 .foregroundStyle(state.mode == .off ? Color.secondary : Color.blue)
                 .contentShape(.circle)
@@ -1095,14 +1096,12 @@ struct UsagePanelView: View {
     /// it takes no action closure, so the simultaneous gesture is what aims
     /// the window at a tab.
     ///
-    /// Filled, which is what makes it weigh the same as the cup beside it:
-    /// rendered side by side, an outline gear reads lighter than a filled cup
-    /// at every size. The cup is the one sized to match, because its steam
-    /// leaves less ink per point.
+    /// An outline like the cup beside it, which is the one sized to match it,
+    /// because its steam leaves less ink per point.
     private var settingsButton: some View {
         SettingsLink {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 12, weight: .semibold))
+            Image(Glyph.settings01)
+                .font(.system(size: 12))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
                 .foregroundStyle(.secondary)
                 .contentShape(.circle)

@@ -622,7 +622,7 @@ struct ProvidersSettingsView: View {
     /// explanation.
     private var unsupportedHomes: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(Glyph.alert02)
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
                 Text(ClaudeUnsupportedHomesCopy.title)
@@ -642,7 +642,7 @@ struct ProvidersSettingsView: View {
     /// What the last attempt to link failed with, on a row of its own now that
     /// the caption it used to replace lives in the ⓘ.
     private func failure(_ message: String) -> some View {
-        Label(message, systemImage: "exclamationmark.triangle")
+        Label(message, image: Glyph.alert02.rawValue)
             .foregroundStyle(.red)
             .fixedSize(horizontal: false, vertical: true)
     }

@@ -510,7 +510,7 @@ struct ForgeSettingsView: View {
             Label {
                 Text(ForgeCounterCopy.title(counter))
             } icon: {
-                Image(systemName: ProviderPalette.forgeSymbol(counter))
+                Image(ProviderPalette.forgeGlyph(counter))
                     .foregroundStyle(ProviderPalette.forgeTint(counter))
             }
         }

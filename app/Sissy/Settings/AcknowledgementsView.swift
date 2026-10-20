@@ -47,6 +47,12 @@ struct AcknowledgementsView: View {
             url: URL(string: "https://github.com/sparkle-project/Sparkle")!
         ),
         Credit(
+            name: "Hugeicons",
+            detail:
+                "The glyphs on the panel and in Settings, from its free Stroke Rounded set. Ships inside Sissy under MIT.",
+            url: URL(string: "https://github.com/hugeicons/hugeicons")!
+        ),
+        Credit(
             name: "ccusage",
             detail:
                 "The cost oracle Sissy measures itself against, and where it learned to read the CLIs' logs.",

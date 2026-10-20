@@ -24,22 +24,20 @@ enum SettingsTab: Hashable {
 
     /// Each tab's own glyph, which the `Settings` scene draws above the title.
     ///
-    /// Providers is a spark rather than a stack of cards: what the tab holds
-    /// is the AI CLIs Sissy meters, and a stack said nothing about them. There
-    /// is no robot to reach for — measured 2026-09-18, the 8526 symbols this
-    /// SDK ships name exactly one, a robotic vacuum, and the Apple
-    /// Intelligence glyph is restricted by the catalogue to referring to it.
-    /// Mac's is the same `memorychip` `PanelTab.mac` draws, since both name
-    /// the machine, and Awake's is the steaming cup the panel's switch wears
-    /// while it holds.
-    var symbol: String {
+    /// Providers is a bot rather than a stack of cards: what the tab holds is
+    /// the AI CLIs Sissy meters, and a stack said nothing about them. It was a
+    /// spark while the glyphs were the system's, which named no robot but a
+    /// vacuum (measured 2026-09-18). Mac's and Forge's are the glyphs
+    /// `PanelTab.mac` and `PanelTab.forge` draw, since each pair names one
+    /// thing, and Awake's is the cup the panel's switch wears.
+    var glyph: Glyph {
         switch self {
-        case .general: return "gearshape"
-        case .providers: return "sparkles"
-        case .mac: return "memorychip"
-        case .awake: return "cup.and.heat.waves.fill"
-        case .forge: return "arrow.triangle.branch"
-        case .about: return "info.circle"
+        case .general: return .settings01
+        case .providers: return .bot
+        case .mac: return .computerActivity
+        case .awake: return .coffee02
+        case .forge: return .gitFork
+        case .about: return .informationCircle
         }
     }
 }
@@ -107,7 +105,7 @@ struct SettingsRootView: View {
         _ tab: SettingsTab,
         @ViewBuilder content: () -> Content
     ) -> some TabContent<SettingsTab> {
-        Tab(tab.title, systemImage: tab.symbol, value: tab) {
+        Tab(tab.title, image: tab.glyph.rawValue, value: tab) {
             content()
                 .frame(maxHeight: Self.maxContentHeight)
                 .navigationTitle(Self.windowTitle)
