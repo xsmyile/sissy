@@ -265,7 +265,7 @@ func runSelfTest() {
     print("=== ServerConfig ===")
     runServerConfigTests()
 
-    print("=== UsageReaderShared.parseISODate ===")
+    print("=== UsageReaderShared.parseTimestamp ===")
     runISODateTests()
 
     print("=== ClaudeCodeAdapter.bufferContainsAssistantMarker ===")
@@ -396,9 +396,14 @@ private func runServerConfigTests() {
     }
 }
 
+/// `2026-09-10T12:20:00.061389+00:00` is the exact shape Anthropic's usage
+/// endpoint sends. A fraction comes off a line another program wrote, and
+/// nineteen digits once overflowed a hand-rolled accumulator and trapped, so it
+/// must answer rather than trap. The format style alone stops reading after the
+/// zone and would answer for trailing bytes.
 private func runISODateTests() {
     // Fractional seconds round-trip
-    let withFrac = UsageReaderShared.parseISODate("2026-05-19T10:01:38.269Z")
+    let withFrac = UsageReaderShared.parseTimestamp("2026-05-19T10:01:38.269Z")
     expect("iso with frac non-nil", withFrac != nil, true)
     if let d = withFrac {
         // 1779184898.269 derived from epoch math; allow ms slack against fp.
@@ -406,23 +411,21 @@ private func runISODateTests() {
         expect("iso with frac value within 1ms", delta < 0.001, true)
     }
     // No fractional
-    let noFrac = UsageReaderShared.parseISODate("2026-05-19T10:01:38Z")
+    let noFrac = UsageReaderShared.parseTimestamp("2026-05-19T10:01:38Z")
     expect("iso no frac non-nil", noFrac != nil, true)
     if let d = noFrac {
         expect("iso no frac value", Int(d.timeIntervalSince1970), 1_779_184_898)
     }
-    // Wrong shape (offset timezone) falls back to nil so caller hits formatter
-    expect("iso offset tz returns nil", UsageReaderShared.parseISODate("2026-05-19T10:01:38+02:00"), nil)
-    expect("iso missing Z returns nil", UsageReaderShared.parseISODate("2026-05-19T10:01:38"), nil)
-    expect("iso too short returns nil", UsageReaderShared.parseISODate("2026-05-19"), nil)
-    expect("iso bad separator returns nil", UsageReaderShared.parseISODate("2026/05/19T10:01:38Z"), nil)
-    expect("iso non-digit returns nil", UsageReaderShared.parseISODate("20XX-05-19T10:01:38Z"), nil)
+    let plusTwo = UsageReaderShared.parseTimestamp("2026-05-19T10:01:38+02:00")
+    expect("iso offset tz value", plusTwo.map { Int($0.timeIntervalSince1970) }, 1_779_177_698)
+    expect("iso missing Z returns nil", UsageReaderShared.parseTimestamp("2026-05-19T10:01:38"), nil)
+    expect("iso too short returns nil", UsageReaderShared.parseTimestamp("2026-05-19"), nil)
+    expect("iso bad separator returns nil", UsageReaderShared.parseTimestamp("2026/05/19T10:01:38Z"), nil)
+    expect("iso non-digit returns nil", UsageReaderShared.parseTimestamp("20XX-05-19T10:01:38Z"), nil)
     // Leap day
-    let leap = UsageReaderShared.parseISODate("2024-02-29T12:00:00Z")
+    let leap = UsageReaderShared.parseTimestamp("2024-02-29T12:00:00Z")
     expect("iso leap day non-nil", leap != nil, true)
 
-    // What the fast path rejects, parseTimestamp must still accept: this is
-    // the exact shape Anthropic's usage endpoint sends.
     let offset = UsageReaderShared.parseTimestamp("2026-09-10T12:20:00.061389+00:00")
     expect("timestamp with offset and micros non-nil", offset != nil, true)
     if let d = offset {
@@ -435,27 +438,24 @@ private func runISODateTests() {
     )
     expect("timestamp rejects a non-date", UsageReaderShared.parseTimestamp("not a date"), nil)
 
-    // The fractional part comes off a line another program wrote, and it used
-    // to be accumulated into two `Int`s with no bound: nineteen digits after
-    // the point overflowed the divisor and trapped, killing the reader mid
-    // scan. The precision kept is capped and the rest of the digits are
-    // consumed, so the shape still parses to the same instant.
-    let overlongFraction = UsageReaderShared.parseISODate(
-        "2026-05-19T10:01:38.2690000000000000000Z")
-    expect("iso with an overlong fraction still parses", overlongFraction != nil, true)
-    if let d = overlongFraction {
-        expect(
-            "iso with an overlong fraction keeps its value",
-            abs(d.timeIntervalSince1970 - 1_779_184_898.269) < 0.001, true)
-    }
+    expect(
+        "iso with an overlong fraction returns nil",
+        UsageReaderShared.parseTimestamp("2026-05-19T10:01:38.2690000000000000000Z"), nil)
+    expect(
+        "iso with nine fraction digits parses",
+        UsageReaderShared.parseTimestamp("2026-05-19T10:01:38.269000000Z") != nil, true)
     expect(
         "iso with a bare point returns nil",
-        UsageReaderShared.parseISODate("2026-05-19T10:01:38.Z"), nil)
-    // Anything after the `Z` is not this shape, and the formatter path is
-    // where an unfamiliar one belongs.
+        UsageReaderShared.parseTimestamp("2026-05-19T10:01:38.Z"), nil)
     expect(
         "iso with trailing bytes returns nil",
-        UsageReaderShared.parseISODate("2026-05-19T10:01:38Z "), nil)
+        UsageReaderShared.parseTimestamp("2026-05-19T10:01:38Z "), nil)
+    expect(
+        "iso with trailing junk returns nil",
+        UsageReaderShared.parseTimestamp("2026-05-19T10:01:38Zjunk"), nil)
+    expect(
+        "iso with junk after an offset returns nil",
+        UsageReaderShared.parseTimestamp("2026-05-19T10:01:38+02:00junk"), nil)
 }
 
 private func runAssistantMarkerTests() {
