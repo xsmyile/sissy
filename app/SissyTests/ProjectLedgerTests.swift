@@ -127,6 +127,36 @@ final class ProjectLedgerTests: XCTestCase {
         XCTAssertEqual(quarantined.count, 1)
     }
 
+    /// A read that failed says nothing about what is in the file, and nothing
+    /// can rebuild it. The run learns as usual and writes nothing, so the memory
+    /// is still there once the file can be read again.
+    func testAFileThatWillNotReadIsLeftUnwrittenForTheRun() throws {
+        let remembered = ProjectCheckout(directory: "/kept/worktree", project: "/kept")
+        let earlier = ProjectLedger(url: url)
+        earlier.remember(remembered)
+        earlier.saveIfDirty()
+        let before = try Data(contentsOf: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: url.path)
+        }
+
+        let ledger = ProjectLedger(url: url)
+        let learned = ProjectCheckout(directory: "/a/b", project: "/a")
+        ledger.remember(learned)
+        ledger.saveIfDirty()
+
+        XCTAssertEqual(ledger.all(), [learned], "the run still learns, it just does not write")
+        let quarantined = try FileManager.default
+            .contentsOfDirectory(atPath: stateDir.path)
+            .filter { $0.contains(".corrupt-") }
+        XCTAssertEqual(quarantined, [])
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        XCTAssertEqual(try Data(contentsOf: url), before)
+        XCTAssertEqual(ProjectLedger(url: url).all(), [remembered])
+    }
+
     /// What is carried between runs is bounded, so years of worktrees cannot
     /// grow the file without end.
     func testWhatIsCarriedBetweenRunsIsBounded() {

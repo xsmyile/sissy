@@ -208,27 +208,15 @@ actor ClaudeAccountRegistry {
         setActive(identity.uuid, cause: .seenInSlot)
     }
 
-    /// The index, with one that will not read set aside so the captures after
-    /// it can start a new one. Nil when it would not read and could not be
-    /// moved either, which leaves the file where it is and every write here
-    /// refused.
+    /// The index, with one that does not decode set aside so the captures after
+    /// it can start a new one. Nil when it would not read or could not be moved,
+    /// which leaves the file where it is and every write here refused.
     private static func loadIndex(_ store: ClaudeAccountStore) -> ClaudeAccountStore.Index? {
         do {
-            return try store.loadIndex()
-        } catch let unreadable {
-            do {
-                let aside = try store.setAsideIndex()
-                sissyLog(
-                    "sissy: the Claude account index would not read (\(unreadable)); kept it as "
-                        + aside.lastPathComponent)
-                return ClaudeAccountStore.Index()
-            } catch {
-                let moved = error as NSError
-                sissyLog(
-                    "sissy: the Claude account index would not read (\(unreadable)) and could "
-                        + "not be moved (\(moved.domain) \(moved.code))")
-                return nil
-            }
+            return try store.loadIndexSettingAside()
+        } catch {
+            sissyLog("sissy: the Claude account index was not loaded (\(error))")
+            return nil
         }
     }
 

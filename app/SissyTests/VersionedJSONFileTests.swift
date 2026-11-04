@@ -109,7 +109,7 @@ final class VersionedJSONFileTests: XCTestCase {
         _ = try forge.loadSettingAside(now: now)
         let accounts = ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: directory))
         try Data("{".utf8).write(to: accounts.indexURL)
-        _ = try accounts.setAsideIndex(now: now)
+        _ = try accounts.loadIndexSettingAside(now: now)
         XCTAssertEqual(
             try names(),
             [
