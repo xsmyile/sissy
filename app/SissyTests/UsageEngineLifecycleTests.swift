@@ -47,6 +47,19 @@ final class UsageEngineLifecycleTests: XCTestCase {
         )
     }
 
+    /// `sissy-cli --config` used to write its refusals into the real install,
+    /// because the store was pinned to the default support directory.
+    func testForgeRefusalsFollowTheEnginesStateDirectory() {
+        _ = makeEngine()
+        let forge = URL(string: "https://github.com")
+        ForgeRefusalStore.shared.record(.unauthorized, url: forge, token: "lifecycle-token")
+        defer { ForgeRefusalStore.shared.record(nil, url: forge, token: "lifecycle-token") }
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: tempDir.appendingPathComponent("forge-refusals.json").path))
+    }
+
     func testForgeActivityIsEmptyBeforeStartAndAfterStop() async throws {
         let engine = makeEngine()
         let idle = try await engine.forgeActivity(from: Date(), to: Date())

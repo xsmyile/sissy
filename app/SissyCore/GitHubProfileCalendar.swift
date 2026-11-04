@@ -203,49 +203,42 @@ enum GitHubProfileCalendar {
         return try parse(html)
     }
 
-    private static let cellPattern = try? NSRegularExpression(pattern: #"<td\b[^>]*>"#)
-    private static let datePattern = try? NSRegularExpression(
-        pattern: #"\bdata-date="(\d{4}-\d{2}-\d{2})""#)
-    private static let idPattern = try? NSRegularExpression(pattern: #"\sid="([^"]+)""#)
-    private static let tipPattern = try? NSRegularExpression(
-        pattern: #"<tool-tip\b[^>]*\sfor="([^"]+)"[^>]*>([^<]*)</tool-tip>"#)
-    private static let countPattern = try? NSRegularExpression(
-        pattern: #"^\s*(No|[0-9][0-9,]*) contributions? on "#)
-    private static let headerPattern = try? NSRegularExpression(
-        pattern: #"id="js-contribution-activity-description"[^>]*>\s*([0-9][0-9,]*)\s+contributions?\b"#)
+    /// A pattern matched the way `NSRegularExpression` matched it, by scalar
+    /// and with ICU's plain word boundary, against the grapheme and Unicode
+    /// defaults `Regex` otherwise takes. Slower for it and worth it on a poll:
+    /// measured 2026-11-04 over a synthetic 189 KB fragment of 371 squares,
+    /// 16-42 ms a parse and 470 ms for the first in a process, against 3 ms.
+    private static func literal<Output>(_ pattern: Regex<Output>) -> Regex<Output> {
+        pattern.matchingSemantics(.unicodeScalar).wordBoundaryKind(.simple)
+    }
 
     /// Every square's count, keyed by its date, or `malformed` for a fragment
     /// that does not prove itself: a square with no count, a count that will
     /// not read, or counts that do not add up to the total printed over them.
     static func parse(_ html: String) throws -> [String: Int] {
-        guard let cellPattern, let datePattern, let idPattern, let tipPattern, let countPattern,
-            let headerPattern
-        else { throw ForgeReadFailure.malformed }
+        let cellPattern = literal(#/<td\b[^>]*>/#)
+        let datePattern = literal(#/\bdata-date="(\d{4}-\d{2}-\d{2})"/#)
+        let idPattern = literal(#/\sid="([^"]+)"/#)
+        let tipPattern = literal(#/<tool-tip\b[^>]*\sfor="([^"]+)"[^>]*>([^<]*)<\/tool-tip>/#)
+        let countPattern = literal(#/^\s*(No|[0-9][0-9,]*) contributions? on /#)
+        let headerPattern = literal(
+            #/id="js-contribution-activity-description"[^>]*>\s*([0-9][0-9,]*)\s+contributions?\b/#)
         var counts: [String: Int] = [:]
-        for match in matches(tipPattern, in: html) {
-            guard let target = group(1, of: match, in: html), let text = group(2, of: match, in: html),
-                let count = countPattern.firstMatch(
-                    in: text, range: NSRange(text.startIndex..., in: text)
-                ).flatMap({ group(1, of: $0, in: text) })
-            else { continue }
-            counts[target] = count == "No" ? 0 : number(count)
+        for match in html.matches(of: tipPattern) {
+            guard let count = match.2.firstMatch(of: countPattern)?.1 else { continue }
+            counts[String(match.1)] = count == "No" ? 0 : number(String(count))
         }
         var days: [String: Int] = [:]
-        for match in matches(cellPattern, in: html) {
-            guard let cell = Range(match.range, in: html).map({ String(html[$0]) }),
-                let date = datePattern.firstMatch(in: cell, range: NSRange(cell.startIndex..., in: cell))
-                    .flatMap({ group(1, of: $0, in: cell) })
-            else { continue }
-            guard
-                let id = idPattern.firstMatch(in: cell, range: NSRange(cell.startIndex..., in: cell))
-                    .flatMap({ group(1, of: $0, in: cell) }),
-                let count = counts[id], days[date] == nil
+        for match in html.matches(of: cellPattern) {
+            let cell = match.0
+            guard let date = cell.firstMatch(of: datePattern)?.1 else { continue }
+            guard let id = cell.firstMatch(of: idPattern)?.1, let count = counts[String(id)],
+                days[String(date)] == nil
             else { throw ForgeReadFailure.malformed }
-            days[date] = count
+            days[String(date)] = count
         }
         guard !days.isEmpty,
-            let header = headerPattern.firstMatch(in: html, range: NSRange(html.startIndex..., in: html))
-                .flatMap({ group(1, of: $0, in: html) }).flatMap(number),
+            let header = html.firstMatch(of: headerPattern).flatMap({ number(String($0.1)) }),
             days.values.reduce(0, +) == header
         else { throw ForgeReadFailure.malformed }
         return days
@@ -266,14 +259,6 @@ enum GitHubProfileCalendar {
             cursor = next
         }
         return names
-    }
-
-    private static func matches(_ pattern: NSRegularExpression, in text: String) -> [NSTextCheckingResult] {
-        pattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
-    }
-
-    private static func group(_ index: Int, of match: NSTextCheckingResult, in text: String) -> String? {
-        Range(match.range(at: index), in: text).map { String(text[$0]) }
     }
 
     private static func number(_ text: String) -> Int? {

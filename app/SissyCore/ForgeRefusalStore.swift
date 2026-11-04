@@ -4,9 +4,25 @@ import Foundation
 /// HTTP refusals belong to a credential and survive a monitor rebuild or quit.
 /// Only a hash of the origin and credential is stored; no token reaches disk.
 final class ForgeRefusalStore: @unchecked Sendable {
-    static let shared = ForgeRefusalStore(
-        url: ServerConfig.defaultURL.deletingLastPathComponent().appendingPathComponent("forge-refusals.json")
-    )
+    private static let fileName = "forge-refusals.json"
+    private static let current = LockedValue(
+        ForgeRefusalStore(
+            url: ServerConfig.defaultURL.deletingLastPathComponent().appendingPathComponent(fileName)))
+
+    /// The store every forge request reads and files through. A static rather
+    /// than a parameter because those requests are a dozen static functions
+    /// deep, none of which holds an engine.
+    static var shared: ForgeRefusalStore { current.load() }
+
+    /// Moves the store to `directory`, for an engine whose config lives there:
+    /// `sissy-cli --config` used to write its refusals into the real install.
+    /// A store already on that file is kept, so an engine rebuilt on a provider
+    /// toggle does not drop what requests in flight are about to file.
+    static func use(directory: URL) {
+        let url = directory.appendingPathComponent(fileName)
+        current.update { if $0.url != url { $0 = ForgeRefusalStore(url: url) } }
+    }
+
     private struct Entry: Codable {
         let unauthorized: Bool
         let until: Date

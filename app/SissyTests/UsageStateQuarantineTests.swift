@@ -44,6 +44,26 @@ final class UsageStateQuarantineTests: XCTestCase {
             .filter { $0.hasPrefix(prefix) }
     }
 
+    /// A snapshot that could not be set aside is read again and refused again
+    /// on every launch, and it used to go under `try?` with no word of why.
+    func testAQuarantineThatCannotMoveTheFileSaysSo() throws {
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        let url = stateDir.appendingPathComponent("stuck-\(UUID().uuidString).json")
+        try Data("not json".utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: stateDir.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: stateDir.path)
+        }
+
+        guard case .invalid = UsageStatePersistence.load(from: url) else {
+            return XCTFail("a snapshot that does not decode should not load")
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertTrue(LoggedLines.contain(url.lastPathComponent))
+    }
+
     func testTheFirstUnreadableSnapshotIsKeptAside() throws {
         try loadAnUnreadableSnapshot(1)
         XCTAssertEqual(try quarantinedCopies().count, 1)

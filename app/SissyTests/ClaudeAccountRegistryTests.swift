@@ -567,6 +567,29 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertEqual(vault.active, credential("rotated-by-the-cli"))
     }
 
+    /// An expired token in the slot answers 401 from the profile endpoint, and
+    /// the watch asked again every two minutes for as long as it stayed there:
+    /// about 30 refused requests an hour. The token that renews it is asked.
+    func testAnExpiredTokenIsNotIdentifiedUntilItRenews() async {
+        let vault = Vault()
+        vault.active = credential("tok-a", expiresAt: 1_000_000_000_000)
+        let asked = LockedValue(0)
+        let registry = makeRegistry(
+            vault,
+            identify: { token in
+                asked.update { $0 += 1 }
+                return Self.byToken(token)
+            })
+
+        await registry.captureActive()
+        await registry.captureActive()
+        XCTAssertEqual(asked.load(), 0, "the endpoint was asked about a token known to be spent")
+
+        vault.active = credential("tok-a-renewed")
+        await registry.captureActive()
+        XCTAssertEqual(asked.load(), 1)
+    }
+
     /// A 429 from the profile endpoint is waited out, not asked again on the
     /// next tick: the watch polls every two minutes and the endpoint is one
     /// that earns a persistent refusal from exactly that.

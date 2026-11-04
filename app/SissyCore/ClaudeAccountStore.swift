@@ -80,9 +80,13 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
 
     var id: String { uuid }
 
-    /// The account as a row carries it.
+    /// The account as a row carries it. Sanitized here rather than in the
+    /// parses: this type is also written back to the CLI's config, which has to
+    /// get what the vendor sent.
     var providerAccount: ProviderAccount? {
-        ProviderAccount(email: email, name: name, organization: organization, seat: seat)
+        ProviderAccount(
+            email: UsageReaderShared.sanitizedDisplayText(email), name: name,
+            organization: UsageReaderShared.sanitizedDisplayText(organization), seat: seat)
     }
 
     /// The plan and its tier in the vocabulary the frame carries: `team`

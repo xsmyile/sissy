@@ -41,6 +41,8 @@ actor ProviderStatusMonitor {
     /// Bumped by every stop, so a request in flight when the monitor was torn
     /// down cannot publish over the run that replaced it.
     private var generation = 0
+    /// The cause last logged per provider, nil once it has answered.
+    private(set) var lastReported: [String: String] = [:]
 
     init(
         providers: [String],
@@ -119,14 +121,14 @@ actor ProviderStatusMonitor {
     func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
         let stamp = generation
         let before = published.load()
-        await withTaskGroup(of: (String, ProviderStatusReading?).self) { group in
+        await withTaskGroup(of: (String, Result<ProviderStatusReading, Error>).self) { group in
             for (id, root) in feeds {
                 let fetch = fetchSource
-                group.addTask { (id, try? await fetch(root)) }
+                group.addTask { (id, await Self.outcome(of: fetch, root)) }
             }
-            for await (id, reading) in group {
+            for await (id, outcome) in group {
                 guard stamp == generation, !Task.isCancelled else { continue }
-                publish(reading, for: id)
+                publish(reported(outcome, for: id), for: id)
             }
         }
         guard stamp == generation, !Task.isCancelled else { return nextDelay() }
@@ -141,10 +143,42 @@ actor ProviderStatusMonitor {
         guard let root = feeds[id] else { return }
         let stamp = generation
         let before = published.load()
-        let reading = try? await fetchSource(root)
+        let outcome = await Self.outcome(of: fetchSource, root)
         guard stamp == generation, !Task.isCancelled else { return }
-        publish(reading, for: id)
+        publish(reported(outcome, for: id), for: id)
         if published.load() != before { await onRefresh() }
+    }
+
+    private static func outcome(
+        of fetch: @Sendable (ProviderStatusFeed) async throws -> ProviderStatusReading,
+        _ root: ProviderStatusFeed
+    ) async -> Result<ProviderStatusReading, Error> {
+        do {
+            return .success(try await fetch(root))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// The reading a fetch came to, with the cause of one that failed logged
+    /// when it differs from the last. A vendor's page that stays down costs one
+    /// line rather than one a round, and an answer clears it so the next
+    /// failure is news.
+    private func reported(
+        _ outcome: Result<ProviderStatusReading, Error>, for id: String
+    ) -> ProviderStatusReading? {
+        switch outcome {
+        case .success(let reading):
+            lastReported[id] = nil
+            return reading
+        case .failure(let error):
+            let cause = String(describing: error)
+            if lastReported[id] != cause {
+                lastReported[id] = cause
+                sissyLog("sissy: the \(id) status page could not be read: \(cause)")
+            }
+            return nil
+        }
     }
 
     /// A reading replaces whatever was there, except for a tree it could not
