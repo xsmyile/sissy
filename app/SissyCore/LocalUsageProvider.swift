@@ -1542,7 +1542,10 @@ actor LocalUsageProvider: UsageProvider {
         {
             return 0
         }
-        let writer = DayArchiveWriter(provider: id, root: historyRoot, projects: adapter.projects)
+        let writer = DayArchiveWriter(
+            provider: id, root: historyRoot, projects: adapter.projects,
+            deletion: ArchiveBackfillLedger.deletion(
+                at: ArchiveBackfillLedger.defaultURL(in: historyRoot)))
         var unwritten: Set<Date> = []
         var written = 0
         for day in historyDirtyDays {
@@ -1697,6 +1700,9 @@ actor LocalUsageProvider: UsageProvider {
                     provider: id, day: day, in: historyRoot),
                 let priced = stored.pricingUnpricedRows(by: { adapter.cost(of: $0, model: $1) })
             else { continue }
+            let deletion = ArchiveBackfillLedger.deletion(
+                at: ArchiveBackfillLedger.defaultURL(in: historyRoot))
+            if deletion.refuses(day, today: dayFmt.string(from: Date())) { continue }
             do {
                 try UsageHistoryStore.save(priced, in: historyRoot)
                 repriced.append(day)

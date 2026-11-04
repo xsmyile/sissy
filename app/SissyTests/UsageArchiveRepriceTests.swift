@@ -117,6 +117,19 @@ final class UsageArchiveRepriceTests: XCTestCase {
         XCTAssertEqual(try archived().totals(forModel: Self.newModel).cost, 3)
     }
 
+    /// The repricing walk writes without `DayArchiveWriter`, so it answers to the
+    /// deletion itself. A delete landing after it listed a day leaves it a file to
+    /// write back.
+    func testAFileNamingADeletedDayIsNotRepriced() async throws {
+        try archive(freeRow())
+        ArchiveBackfillLedger.noteDeletion(
+            covering: [], window: nil, at: ArchiveBackfillLedger.defaultURL(in: stateDir))
+
+        await tail().applyPriceCatalog(Self.catalog)
+
+        XCTAssertEqual(try archived().totals(forModel: Self.newModel).cost, 0)
+    }
+
     func testTheArchivedEffortSplitIsPricedWithTheRows() async throws {
         try archive(freeRow(), effort: true)
 

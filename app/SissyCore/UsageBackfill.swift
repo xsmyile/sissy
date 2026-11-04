@@ -150,6 +150,29 @@ enum ArchiveBackfill {
     }
 }
 
+/// What a write to the archive has to respect from the user's last deletion.
+enum ArchiveDeletion: Equatable, Sendable {
+    /// The archive has not been deleted, or the record does not decode: writes
+    /// are atomic, so that is not a state Sissy leaves behind, and refusing on it
+    /// would freeze the archive for good.
+    case none
+    /// The record names the last day the user deleted.
+    case through(String)
+    /// The read itself failed, which says nothing about what the file holds.
+    case unreadable
+
+    /// Whether `day` may not be written now. A failed read refuses every day
+    /// but today, because any of them may be one the user deleted, and the next
+    /// read can still answer. `YYYY-MM-DD` orders as the days do.
+    func refuses(_ day: String, today: String) -> Bool {
+        switch self {
+        case .none: false
+        case .through(let last): day <= last
+        case .unreadable: day < today
+        }
+    }
+}
+
 /// What the archive is already answered for, per provider.
 ///
 /// Its own file, deliberately neither inside `history/` nor in `server.json`.
@@ -241,6 +264,18 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// The span each provider's pass is reading, written before it reads a byte
     /// so that a quit or a crash in it is asked for again.
     var pending: [String: Coverage] = [:]
+    /// The last day the user deleted, nil until they have.
+    ///
+    /// Here rather than in anything a provider holds, because neither a snapshot
+    /// nor what a reader has in memory can say a day was deleted: a snapshot can
+    /// be quarantined, a straggler gives a deleted day rows again, a day that was
+    /// only counted has no totals, and a backfill pass starts from nothing.
+    /// `DayArchiveWriter` refuses a day at or before this one, whoever asks.
+    ///
+    /// It survives a `currentSchemaVersion` bump, which answers everything else
+    /// in the file as nothing covered: that costs a pass, and the pass would
+    /// otherwise read the deleted days back. See `deletion(at:)`.
+    var deletedThrough: String?
 
     static func defaultURL(in directory: URL) -> URL {
         directory.appendingPathComponent(fileName)
@@ -308,17 +343,31 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
         passes: [(provider: String, span: Range<Date>)], within window: Range<Date>,
         startingAt url: URL
     ) {
-        saving(
-            passes.reduce(load(from: url)) {
+        update(at: url) {
+            passes.reduce($0) {
                 $0.starting(provider: $1.provider, span: $1.span, window: window)
-            }, to: url)
+            }
+        }
     }
 
     /// Writes down that the archive was deleted: `providers` are covered across
     /// `window`, and nothing anyone owed is owed any more, or the next pass
-    /// would read back the days the user just asked Sissy to forget.
-    static func noteDeletion(covering providers: [String], window: Range<Date>?, at url: URL) {
+    /// would read back the days the user just asked Sissy to forget, and every
+    /// day before today is gone for good.
+    ///
+    /// Written over a file that would not read, unlike `update(at:_:)`. What that
+    /// loses costs a pass, and the pass is refused by what this writes.
+    static func noteDeletion(
+        covering providers: [String], window: Range<Date>?, at url: URL, now: Date = Date()
+    ) {
         var updated = load(from: url)
+        let calendar = Calendar.current
+        if let yesterday = calendar.date(
+            byAdding: .day, value: -1, to: calendar.startOfDay(for: now))
+        {
+            updated.deletedThrough = max(
+                updated.deletedThrough ?? "", UsageReaderShared.dayFormatter.string(from: yesterday))
+        }
         if let window {
             updated = providers.reduce(updated) { $0.recording(provider: $1, covered: window) }
         }
@@ -337,12 +386,42 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
         }
     }
 
-    /// The record on disk, or an empty one. A file that will not decode is
-    /// answered as empty rather than quarantined: it holds no reading, and the
-    /// worst an unreadable one costs is a pass that runs again and rewrites
-    /// the same days.
+    /// Changes the record on disk, unless it would not read: answered as empty
+    /// and saved, that would lose `deletedThrough`, and the days it names would
+    /// come back.
+    static func update(at url: URL, _ change: (Self) -> Self) {
+        guard deletion(at: url) != .unreadable else {
+            sissyLog("sissy: left the archive backfill record unwritten, it would not read")
+            return
+        }
+        saving(change(load(from: url)), to: url)
+    }
+
+    /// The record on disk, or an empty one that keeps `deletedThrough`. A file
+    /// that will not decode is answered as empty rather than quarantined: it
+    /// holds no reading, and the worst an unreadable one costs is a pass that
+    /// runs again and rewrites the days the deletion does not cover.
     static func load(from url: URL) -> Self {
-        (try? file(url).load()) ?? Self()
+        var ledger = (try? file(url).load()) ?? Self()
+        if case .through(let day) = deletion(at: url) { ledger.deletedThrough = day }
+        return ledger
+    }
+
+    /// What the record says about the last deletion, read past any schema so a
+    /// bump cannot take it away.
+    static func deletion(at url: URL) -> ArchiveDeletion {
+        do {
+            let record = try VersionedJSONFile<DeletionRecord>(url: url, policy: .refuse).load()
+            return record?.deletedThrough.map(ArchiveDeletion.through) ?? .none
+        } catch JSONFileFailure.unreadable {
+            return .unreadable
+        } catch {
+            return .none
+        }
+    }
+
+    private struct DeletionRecord: Codable {
+        var deletedThrough: String?
     }
 
     static func save(_ ledger: Self, to url: URL) throws {
@@ -356,7 +435,7 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
 }
 
 extension ArchiveBackfillLedger {
-    /// By hand for two keys: a record written before them still decodes, because
+    /// By hand for three keys: a record written before them still decodes, because
     /// they add nothing the days already covered lack, so they earn no
     /// `currentSchemaVersion` bump and no pass over the whole window on every
     /// install.
@@ -366,5 +445,6 @@ extension ArchiveBackfillLedger {
         coverage = try container.decode([String: Coverage].self, forKey: .coverage)
         owed = try container.decodeIfPresent([String: OwedSpan].self, forKey: .owed) ?? [:]
         pending = try container.decodeIfPresent([String: Coverage].self, forKey: .pending) ?? [:]
+        deletedThrough = try container.decodeIfPresent(String.self, forKey: .deletedThrough)
     }
 }

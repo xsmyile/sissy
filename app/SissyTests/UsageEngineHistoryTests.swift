@@ -273,6 +273,32 @@ final class UsageEngineHistoryTests: XCTestCase {
         )
     }
 
+    /// Written whether or not a pass was running, and before anything is removed,
+    /// so nothing can write a past day back from here on. Today is not named: the
+    /// dialog promises it keeps counting, and it is back on disk at the next flush.
+    func testADeletionNamesYesterdayAndLeavesTodayCounting() async throws {
+        try writeClaudeTurn()
+        let engine = makeEngine()
+        addTeardownBlock { await engine.stop() }
+        let frames = FrameRecorder()
+        let landed = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [landed], timeout: 5)
+
+        await engine.deleteHistory()
+        await engine.flush()
+
+        XCTAssertEqual(
+            ArchiveBackfillLedger.load(from: ArchiveBackfillLedger.defaultURL(in: tempDir))
+                .deletedThrough,
+            UsageReaderShared.dayFormatter.string(from: try yesterday()))
+        XCTAssertNotNil(
+            UsageHistoryStore.load(
+                provider: ProviderID.claudeCode,
+                day: UsageReaderShared.dayFormatter.string(from: Date()),
+                in: tempDir))
+    }
+
     /// Zero days is the off switch, and it has to reach both halves: nothing
     /// written, and nothing read back out of what an earlier run wrote. What
     /// it deliberately does not do is delete — that is the button's job, and

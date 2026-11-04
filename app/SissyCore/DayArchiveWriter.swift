@@ -15,6 +15,7 @@ struct DayArchiveWriter {
     let provider: String
     let root: URL
     let projects: ProjectResolver
+    let deletion: ArchiveDeletion
 
     /// Writes `day`, merged with what its file holds beside the rows.
     ///
@@ -29,7 +30,15 @@ struct DayArchiveWriter {
     /// added beside the rows reaches none of the days stuck there. A failed save
     /// is logged because an archive that silently stops growing is
     /// indistinguishable from a quiet week.
+    ///
+    /// A day the user deleted is refused before anything else, whoever is asking
+    /// and whatever they hold for it. One that may be deleted, because the record
+    /// would not read, stays dirty for the read that can answer.
     func write(_ day: Date, from book: DayBook, now: Date) -> Outcome {
+        let dayFmt = UsageReaderShared.dayFormatter
+        if deletion.refuses(dayFmt.string(from: day), today: dayFmt.string(from: now)) {
+            return deletion == .unreadable ? .failed : .left
+        }
         let totals = book.rows[day] ?? [:]
         let counts = book.counts[day] ?? .none
         let activity = book.activity[day] ?? .none
@@ -37,7 +46,7 @@ struct DayArchiveWriter {
         guard !totals.isEmpty || !counts.isEmpty || !activity.isEmpty || !effort.isEmpty
         else { return .left }
         var record = UsageHistoryDay(
-            day: UsageReaderShared.dayFormatter.string(from: day),
+            day: dayFmt.string(from: day),
             provider: provider,
             updatedAt: now,
             totals: totals,

@@ -681,19 +681,10 @@ actor UsageEngine {
     private func recordArchiveBackfill(
         provider: String, covered span: Range<Date>, unread: [String] = [], at url: URL
     ) {
-        let ledger = ArchiveBackfillLedger.load(from: url)
-        let updated =
+        ArchiveBackfillLedger.update(at: url) {
             unread.isEmpty
-            ? ledger.recording(provider: provider, covered: span)
-            : ledger.owing(provider: provider, span: span, unread: unread)
-        do {
-            try ArchiveBackfillLedger.save(updated, to: url)
-        } catch {
-            // The pass itself succeeded and its days are on disk. Losing the
-            // record costs one repeat of a pass that rewrites the same
-            // numbers, which is why this is logged rather than propagated.
-            sissyLog(
-                "sissy: could not record the \(provider) archive backfill at \(url.path): \(error)")
+                ? $0.recording(provider: provider, covered: span)
+                : $0.owing(provider: provider, span: span, unread: unread)
         }
     }
 
@@ -2463,10 +2454,16 @@ actor UsageEngine {
     /// on the next flush, which is why the rollup is invalidated rather than
     /// zeroed — the next frame reads whatever is actually there.
     ///
-    /// The providers are told first. Each flushes on its own task, so a flush
-    /// landing in the suspension between the two would write a past day back
-    /// out after the files were gone, and nothing would remove it again — the
-    /// user's deletion would fail with nothing to show for it.
+    /// **The order is the deletion.** `stopArchiveBackfill` writes down what was
+    /// deleted before anything else, so every write from there on is refused, and
+    /// nothing can put a past day back. The providers are then told, because a
+    /// provider's answer also says that a write already past that check has
+    /// landed, so the removal cannot go ahead of it.
+    ///
+    /// They are told again afterwards for today. Each flushes on its own task, so
+    /// one landing between the first telling and the removal cleared today's dirty
+    /// mark on a file the removal then took, and today would have no file until
+    /// its next event.
     func deleteHistory() async {
         await stopArchiveBackfill()
         await aggregator.forgetArchivedDays()
@@ -2476,6 +2473,7 @@ actor UsageEngine {
         } catch {
             sissyLog("sissy: failed to delete usage history at \(stateDir.path): \(error)")
         }
+        await aggregator.forgetArchivedDays()
         historyRollups = [:]
         historyRollupAt = .distantPast
         historyGeneration += 1

@@ -130,8 +130,8 @@ struct GeneralSettingsView: View {
             Button(DialogCopy.cancel, role: .cancel) {}
         } message: {
             Text(
-                "Today keeps counting. The days before it are gone, and the session logs "
-                    + "they were read from may have been rotated since."
+                "Today keeps counting. The days before it are gone for good: Sissy will not "
+                    + "read them back from the session logs, even if you keep history for longer."
             )
         }
         .formStyle(.grouped)

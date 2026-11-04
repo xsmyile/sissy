@@ -200,38 +200,150 @@ final class UsageHistoryTailTests: XCTestCase {
             "a deleted day came back")
     }
 
-    /// The suppression lives in memory and does not survive a relaunch. What
-    /// carries it across is the forgotten day's token totals, which stay in the
-    /// snapshot with no rows beside them: `restoreModelTotals` reads a day like
-    /// that as one this process cannot vouch for, and suppresses it again.
-    func testADeletedDayStaysDeletedAcrossARelaunch() async throws {
-        let yesterday = try XCTUnwrap(
-            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
-        let yesterdayKey = UsageReaderShared.dayFormatter.string(from: yesterday)
-        try writeTurn("a.jsonl", requestId: "r1", at: yesterday)
-        let provider = LocalUsageProvider.claudeCode(
+    /// The order `UsageEngine.deleteHistory` asks in.
+    private func deleteArchive(under provider: LocalUsageProvider) async throws {
+        ArchiveBackfillLedger.noteDeletion(
+            covering: [], window: nil, at: ArchiveBackfillLedger.defaultURL(in: stateDir))
+        await provider.forgetArchivedDays()
+        try UsageHistoryStore.removeAll(in: stateDir)
+        await provider.forgetArchivedDays()
+    }
+
+    private func claudeTail() -> LocalUsageProvider {
+        LocalUsageProvider.claudeCode(
             claudeDir: logDir,
             retainDays: 2,
             pollInterval: .seconds(60),
             persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
             historyRoot: stateDir
         )
-        await provider.start { _ in }
-        XCTAssertNotNil(
-            UsageHistoryStore.load(
-                provider: ProviderID.claudeCode, day: yesterdayKey, in: stateDir),
-            "the day this test deletes was never archived")
+    }
 
-        try UsageHistoryStore.removeAll(in: stateDir)
-        await provider.forgetArchivedDays()
+    private func archivedYesterday(_ provider: String = ProviderID.claudeCode) throws -> UsageHistoryDay? {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        return UsageHistoryStore.load(
+            provider: provider, day: UsageReaderShared.dayFormatter.string(from: yesterday),
+            in: stateDir)
+    }
+
+    /// The relaunch after a deletion ingests a straggler on the deleted day, so
+    /// the snapshot holds rows for the day again, and those are what the relaunch
+    /// after that would write back.
+    func testADeletedDayStaysDeletedAcrossRelaunches() async throws {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        try writeTurn("a.jsonl", requestId: "r1", at: yesterday)
+        let provider = claudeTail()
+        await provider.start { _ in }
+        XCTAssertNotNil(try archivedYesterday(), "the day this test deletes was never archived")
+
+        try await deleteArchive(under: provider)
         await provider.stop()
         try writeTurn("b.jsonl", requestId: "r2", at: yesterday)
         try await runTail(archiving: true)
+        XCTAssertNil(try archivedYesterday(), "a deleted day came back on the first relaunch")
+
+        try await runTail(archiving: true)
+
+        XCTAssertNil(try archivedYesterday(), "a deleted day came back on the second relaunch")
+    }
+
+    /// A session somebody opened and never asked anything is counted and never
+    /// billed, so its day has no totals to tell a relaunch it was deleted.
+    func testADeletedDayThatWasOnlyCountedStaysDeleted() async throws {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        try writeOpenedRollout("rollout-a.jsonl", id: "a-1", at: yesterday)
+        let first = codexTail()
+        await first.start { _ in }
+        XCTAssertNotNil(
+            try archivedYesterday(ProviderID.codex), "the day this test deletes was never archived")
+
+        try await deleteArchive(under: first)
+        await first.stop()
+        try writeOpenedRollout("rollout-b.jsonl", id: "b-1", at: yesterday)
+        let second = codexTail()
+        await second.start { _ in }
+        await second.stop()
 
         XCTAssertNil(
-            UsageHistoryStore.load(
-                provider: ProviderID.claudeCode, day: yesterdayKey, in: stateDir),
-            "a deleted day came back after a relaunch")
+            try archivedYesterday(ProviderID.codex), "a deleted day came back carrying only a count")
+    }
+
+    /// A snapshot that will not load is followed by a cold scan of logs that
+    /// still name the deleted day, and it carries nothing a reader could hold.
+    func testADeletedDayStaysDeletedThroughAColdScan() async throws {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        try writeTurn("a.jsonl", requestId: "r1", at: yesterday)
+        let provider = claudeTail()
+        await provider.start { _ in }
+        try await deleteArchive(under: provider)
+        await provider.stop()
+        try Data("not a snapshot".utf8).write(to: UsageStatePersistence.defaultURL(in: stateDir))
+
+        try await runTail(archiving: true)
+
+        XCTAssertNil(try archivedYesterday(), "a cold scan wrote a deleted day back")
+    }
+
+    /// A delete takes today's file with the rest, and the same run still writes it
+    /// back, because today is the one day the dialog promises keeps counting.
+    func testTodayComesBackAfterADeletion() async throws {
+        try writeTurn("a.jsonl", requestId: "r1")
+        let provider = claudeTail()
+        await provider.start { _ in }
+        XCTAssertNotNil(archivedToday())
+
+        try await deleteArchive(under: provider)
+        XCTAssertNil(archivedToday())
+        await provider.stop()
+
+        XCTAssertNotNil(archivedToday(), "today has no file after a deletion")
+    }
+
+    /// A record that would not read may be one naming the day. It is held back,
+    /// not dropped, and written once the file answers that it was not deleted.
+    func testADayIsHeldBackWhileTheDeletionRecordWillNotRead() async throws {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        try writeTurn("a.jsonl", requestId: "r1", at: yesterday)
+        let url = ArchiveBackfillLedger.defaultURL(in: stateDir)
+        try ArchiveBackfillLedger.save(ArchiveBackfillLedger(), to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: url.path)
+        }
+        let provider = claudeTail()
+        await provider.start { _ in }
+        XCTAssertNil(try archivedYesterday(), "a day was written past an unread deletion record")
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        await provider.stop()
+
+        XCTAssertNotNil(try archivedYesterday(), "the day was dropped rather than held back")
+    }
+
+    private func codexTail() -> LocalUsageProvider {
+        LocalUsageProvider.codex(
+            codexDir: logDir,
+            retainDays: 2,
+            persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
+            historyRoot: stateDir)
+    }
+
+    /// A rollout that was opened and asked nothing: one session, no tokens.
+    private func writeOpenedRollout(_ name: String, id: String, at when: Date) throws {
+        let stamp = ISO8601DateFormatter()
+        stamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let meta = """
+            {"timestamp":"\(stamp.string(from: when))","type":"session_meta","payload":\
+            {"session_id":"\(id)","id":"\(id)","cwd":"/tmp","thread_source":"user"}}
+            """
+        try (meta + "\n").write(
+            to: logDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
     }
 
     /// The retain window is a rolling 48 hours, so the oldest day a cold scan
