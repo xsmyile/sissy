@@ -205,7 +205,7 @@ struct ClaudeAccountStore: Sendable {
     }
 
     static let indexFileName = "claude-accounts.json"
-    /// What an index that would not read is renamed to, with a timestamp
+    /// What an index that would not decode is renamed to, with a timestamp
     /// after it so a second one never replaces the first.
     static let setAsidePrefix = "claude-accounts.unreadable-"
 
@@ -225,10 +225,14 @@ struct ClaudeAccountStore: Sendable {
         try file.load() ?? Index()
     }
 
-    /// Moves an index that will not read out of the way, and answers where it
-    /// went. Renamed rather than deleted: a person can still read it.
-    func setAsideIndex(now: Date = Date()) throws -> URL {
-        try file.setAside(now: now)
+    /// The index, with one that does not decode moved out of the way first.
+    ///
+    /// Renamed rather than deleted: a person can still read it. **Only a file
+    /// that read and did not decode is moved**, because one whose read failed
+    /// may be a sound index behind a lock or a permission. That, and a file
+    /// that could not be moved, throw.
+    func loadIndexSettingAside(now: Date = Date()) throws -> Index {
+        try file.loadSettingAside(named: "the Claude account index", now: now) ?? Index()
     }
 
     /// Whether an index has ever been set aside beside this one.

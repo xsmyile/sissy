@@ -121,9 +121,10 @@ final class ProjectLedger: Sendable {
     /// every launch.
     ///
     /// `writable` is false once the file on disk is found to be a schema this
-    /// build does not know. The run keeps its own memory and refuses to write
-    /// over one a newer build left, which is the archive's rule and for the
-    /// same reason: what is on disk knows more than this build can express.
+    /// build does not know, or would not read at all. The run keeps its own
+    /// memory and refuses to write over either, which is the archive's rule and
+    /// for the same reason: what is on disk may know more than this run can say,
+    /// and nothing can rebuild it.
     private struct State {
         var checkouts: [ProjectCheckout] = []
         var scannedAt: [String: Date] = [:]
@@ -398,11 +399,13 @@ final class ProjectLedger: Sendable {
     /// A file that will not decode holds nothing this build can use, and the
     /// write that produced it was atomic, so it is a forensic artifact rather
     /// than a record: it is set aside and the run starts empty instead of
-    /// refusing to write. The schema is checked here rather than by the file
-    /// because a mismatch is the opposite case, a record from a newer build.
+    /// refusing to write. A read that failed says nothing about what is in the
+    /// file, so that one is left unwritten, as is one that could not be moved.
+    /// The schema is checked here rather than by the file because a mismatch is
+    /// the opposite case, a record from a newer build.
     private static func file(_ url: URL) -> VersionedJSONFile<Document> {
         VersionedJSONFile(
-            url: url, policy: .setAside, setAsidePrefix: "\(url.lastPathComponent).corrupt-",
+            url: url, policy: .refuse, setAsidePrefix: "\(url.lastPathComponent).corrupt-",
             iso8601Dates: true)
     }
 
@@ -410,10 +413,15 @@ final class ProjectLedger: Sendable {
         guard let url else { return }
         let document: Document
         do {
-            guard let loaded = try Self.file(url).load() else { return }
+            guard let loaded = try Self.file(url).loadSettingAside(named: "the project ledger") else {
+                return
+            }
             document = loaded
         } catch {
-            sissyLog("sissy: project ledger at \(url.path) was not loaded: \(error)")
+            state.withLock { $0.writable = false }
+            sissyLog(
+                "sissy: project ledger at \(url.path) was not loaded (\(error)), "
+                    + "left alone and not written this run")
             return
         }
         guard document.schemaVersion == Self.currentSchemaVersion else {

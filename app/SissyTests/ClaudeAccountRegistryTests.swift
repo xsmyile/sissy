@@ -518,6 +518,32 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertEqual(registry.currentSnapshot().accounts.map(\.uuid), ["u-tok-a"])
     }
 
+    /// A read that failed says nothing about what is in the file: it may be a
+    /// sound index behind a lock or a permission, so it stays where it is and
+    /// nothing is written over it.
+    func testAnIndexThatWillNotReadIsLeftWhereItIs() async throws {
+        let vault = Vault()
+        let indexURL = ClaudeAccountStore.defaultURL(in: tempDir)
+        let sound = Data("{\"accounts\":[]}".utf8)
+        try sound.write(to: indexURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: indexURL.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: indexURL.path)
+        }
+        vault.active = credential("tok-a")
+        let registry = makeRegistry(vault, identify: Self.byToken)
+
+        await registry.captureActive()
+
+        let aside = try FileManager.default.contentsOfDirectory(atPath: tempDir.path)
+            .filter { $0.hasPrefix(ClaudeAccountStore.setAsidePrefix) }
+        XCTAssertEqual(aside, [])
+        XCTAssertFalse(registry.currentSnapshot().indexSetAside)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: indexURL.path)
+        XCTAssertEqual(try Data(contentsOf: indexURL), sound)
+    }
+
     /// Absent is not unreadable: a first launch starts an index and says
     /// nothing about one being set aside.
     func testAMissingIndexIsAnEmptyOneAndNothingIsSetAside() async {
