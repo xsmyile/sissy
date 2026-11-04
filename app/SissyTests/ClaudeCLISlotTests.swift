@@ -16,9 +16,7 @@ final class ClaudeCLISlotTests: XCTestCase {
             read: { name in
                 if let failure = failing[name] { throw failure }
                 return held[name]
-            },
-            write: { _, _ in XCTFail("a lookup must not write") },
-            remove: { _ in XCTFail("a lookup must not remove") })
+            })
     }
 
     private func credential(_ token: String) -> Data {
@@ -118,35 +116,5 @@ final class ClaudeCLISlotTests: XCTestCase {
             return XCTFail("expected unreadable")
         }
         XCTAssertEqual(status, 36)
-    }
-}
-
-/// The account half of the CLI's credential blob, and everything beside it.
-final class ClaudeCredentialBlobTests: XCTestCase {
-    func testMergingKeepsEveryOtherKey() throws {
-        let merged = ClaudeCredentialBlob.merging(
-            account: Data(#"{"claudeAiOauth":{"accessToken":"tok-b"}}"#.utf8),
-            into: Data(#"{"claudeAiOauth":{"accessToken":"tok-a"},"mcpOAuth":{"s":"m"}}"#.utf8))
-
-        let root = try XCTUnwrap(merged.flatMap(ClaudeCredentialBlob.object))
-        XCTAssertEqual((root["mcpOAuth"] as? [String: String])?["s"], "m")
-        XCTAssertEqual(merged.flatMap(ClaudeCredentialBlob.credentials)?.accessToken, "tok-b")
-    }
-
-    func testTheRefreshExpiryIsReadInMilliseconds() {
-        let blob = Data(
-            #"{"claudeAiOauth":{"accessToken":"t","refreshTokenExpiresAt":1789487107266}}"#.utf8)
-
-        XCTAssertEqual(
-            ClaudeCredentialBlob.refreshExpiresAt(in: blob)?.timeIntervalSince1970 ?? 0,
-            1_789_487_107.266, accuracy: 0.01)
-    }
-
-    /// A blob that says nothing about its refresh token is not treated as an
-    /// expired one: the CLI may simply not record it.
-    func testNoRefreshExpiryIsNotExpired() {
-        let blob = Data(#"{"claudeAiOauth":{"accessToken":"t"}}"#.utf8)
-
-        XCTAssertFalse(ClaudeCredentialBlob.refreshHasExpired(blob, now: .distantFuture))
     }
 }

@@ -7,9 +7,8 @@ import Foundation
 /// answer. Everything here is a display string read back from Anthropic for a
 /// token the user already holds.
 struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
-    /// Anthropic's own account id, which is what one stored credential is
-    /// filed under: it survives an email change and a re-login where nothing
-    /// else does.
+    /// Anthropic's own account id, which is what an account is filed under:
+    /// it survives an email change and a re-login where nothing else does.
     let uuid: String
     let email: String?
     /// What the person calls themselves, where the vendor answers with one.
@@ -42,13 +41,8 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     /// decodes with a nil rather than being quarantined.
     let seat: String?
     /// The id of the organisation the seat belongs to, as `api/oauth/profile`
-    /// answers it.
-    ///
-    /// Recorded for one reader: a switch writes it into the CLI's config file
-    /// (`ClaudeCLIProfile`), where Claude Code takes it as the organisation
-    /// every organisation-scoped request is made for. Optional for the reason
-    /// `seat` is, and nil on an account archived before it was recorded, which
-    /// that writer leaves out rather than guesses.
+    /// answers it, which is what a reset is spent for. Optional for the reason
+    /// `seat` is.
     let organizationUUID: String?
     /// The plan as Anthropic words it, off `organization.plan_display_name`
     /// on `api/oauth/profile`. Optional for the reason `seat` is, and nil on
@@ -81,8 +75,7 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     var id: String { uuid }
 
     /// The account as a row carries it. Sanitized here rather than in the
-    /// parses: this type is also written back to the CLI's config, which has to
-    /// get what the vendor sent.
+    /// parses, so the index keeps what the vendor sent.
     var providerAccount: ProviderAccount? {
         ProviderAccount(
             email: UsageReaderShared.sanitizedDisplayText(email), name: name,
@@ -97,7 +90,7 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     /// different plan. `words("claude_team")` is "Claude Team", and
     /// `tierParts("default_claude_max_5x")` splits a base that matches no
     /// plan, which put "Claude Team" and "Default Claude Max 5x" on the rows
-    /// of every archived account.
+    /// of every known account.
     var plan: String? {
         UsageReaderShared.sanitizedPlanToken(Self.stripping(Self.planPrefix, from: organizationType))
     }
@@ -190,122 +183,25 @@ enum ClaudeAccountProfile {
     }
 }
 
-/// Every Claude Code account Sissy has seen signed in, and the credential each
-/// one was last seen with.
+/// Every Claude Code account Sissy has seen signed in, by name.
 ///
-/// This is the one place a Claude credential lives durably, and it exists
-/// because the CLI's own keychain slots are **scratch**: the unscoped item and
-/// each `Claude Code-credentials-<hash>` hold whichever account is active, and
-/// the CLI rewrites them with a rotated token every time it refreshes.
-/// Measured 2026-09-15: switching the active account and letting the CLI
-/// refresh once destroyed the previous account's only copy, and Anthropic's
-/// refresh tokens rotate on use, so it could not be recovered from anywhere on
-/// the machine. An account switch is therefore only safe when Sissy holds the
-/// archive and treats the CLI's slots as somewhere to write.
+/// The CLI's own keychain slots hold whichever account is active, so they
+/// cannot say which others exist. This index can, and it holds identities only:
+/// no token and no copy of a credential, here or in the keychain.
 ///
-/// The secrets sit in the login keychain under Sissy's own service, addressed
-/// through `ClaudeKeychainCLI` for the same reason as everything else here: no
-/// dialog and no grant that a re-signed build invalidates. The index beside
-/// them is identities only — never a token — so the list of accounts survives
-/// without a secret ever touching Sissy's own directory.
+/// An index written while Sissy still kept credentials also holds refresh
+/// expiries and token hashes. They decode as nothing and the next save drops
+/// them.
 struct ClaudeAccountStore: Sendable {
-    /// The secret half, behind three closures.
-    ///
-    /// Injected rather than called directly so the archive can be exercised
-    /// without a login keychain: writing a real credential is the one piece of
-    /// external I/O here, and a test of what the store *decides* must not
-    /// depend on it.
-    ///
-    /// `read` answers nil only for an account with nothing archived, and
-    /// throws where the keychain could not be asked. It used to fold both into
-    /// nil, which is how a locked keychain came to be worded as an account
-    /// that had never signed in.
-    struct Secrets: Sendable {
-        var read: @Sendable (String) throws -> Data?
-        var write: @Sendable (String, Data) throws -> Void
-        /// Whether an item is archived for the account, asked without reading
-        /// its secret. What decides whether an account is offered for a switch.
-        var contains: @Sendable (String) throws -> Bool
-
-        static let keychain = Self(
-            read: { uuid in
-                do {
-                    return try ClaudeKeychainCLI.read(
-                        service: ClaudeKeychainCLI.sissyAccountService, account: uuid)
-                } catch ClaudeKeychainCLI.Failure.noItem {
-                    return nil
-                }
-            },
-            write: { uuid, data in
-                try ClaudeKeychainCLI.write(
-                    data, service: ClaudeKeychainCLI.sissyAccountService, account: uuid)
-            },
-            contains: { uuid in
-                try ClaudeKeychainCLI.contains(
-                    service: ClaudeKeychainCLI.sissyAccountService, account: uuid)
-            })
-
-        /// Holds nothing and keeps nothing.
-        static let none = Self(read: { _ in nil }, write: { _, _ in }, contains: { _ in false })
-    }
-
-    /// Where the identities are listed. Secrets are never in here.
+    /// Where the identities are listed.
     let indexURL: URL
-    var secrets: Secrets = .keychain
 
     /// What the index holds: who Sissy knows about, and who it last saw
-    /// active. The active id is a note, not a claim — the keychain is what
-    /// decides, and `ClaudeAccountRegistry` reconciles the two.
+    /// active. The active id is a note, not a claim: the CLI's credential is
+    /// what decides, and `ClaudeAccountRegistry` reads it.
     struct Index: Sendable, Codable, Equatable {
         var accounts: [ClaudeAccountIdentity] = []
         var activeUUID: String?
-        /// When each archived credential's refresh token dies, by account.
-        ///
-        /// A date and never a token, so the index still holds no secret. It is
-        /// here so the switcher can tell an account that needs `/login` from
-        /// one it can switch to without reading every archived secret on each
-        /// publish. Optional so an index written before it decodes as it was.
-        var refreshExpiries: [String: Date]?
-        /// `ClaudeCredentialBlob.fingerprint(of:)` of every access token
-        /// archived under each account, oldest first, at most `lineageLimit`
-        /// of them. An index written before it decodes with none recorded.
-        ///
-        /// What lets a switch recognise an older rotation of an account it
-        /// holds. A renewal that reaches only the name the CLI reads leaves
-        /// the others on the token the switch wrote while the archive moves
-        /// on with the renewed one. Measured 2026-10-10: five presses
-        /// refused in a row, each on a sibling whose access token had expired
-        /// and that Anthropic therefore answered 401 for, while the account
-        /// it belonged to was archived and current. A hash is not a token:
-        /// it cannot be spent, so the index still holds no secret.
-        var lineage: [String: [String]] = [:]
-
-        /// How many of an account's rotations the lineage keeps. The CLI
-        /// renews every 26-73 minutes as `docs/DECISIONS.md` measures it, so
-        /// this reaches back 14 to 39 hours: a sibling older than that is
-        /// refused as it always was.
-        static let lineageLimit = 32
-
-        /// The index with this access token recorded under the account, the
-        /// oldest dropped past `lineageLimit`.
-        func recording(_ accessToken: String, for uuid: String) -> Self {
-            let fingerprint = ClaudeCredentialBlob.fingerprint(of: accessToken)
-            var known = lineage[uuid] ?? []
-            guard !known.contains(fingerprint) else { return self }
-            known.append(fingerprint)
-            var updated = self
-            updated.lineage[uuid] = Array(known.suffix(Self.lineageLimit))
-            return updated
-        }
-
-        /// The account this access token was archived under, and nil when
-        /// none was or more than one claims it: an owner picked out of two
-        /// would be whichever the dictionary listed first.
-        func account(archiving accessToken: String) -> String? {
-            let fingerprint = ClaudeCredentialBlob.fingerprint(of: accessToken)
-            let owners = lineage.filter { $0.value.contains(fingerprint) }.keys
-            return owners.count == 1 ? owners.first : nil
-        }
     }
 
     /// Why the store would not do what it was asked.
@@ -314,8 +210,6 @@ struct ClaudeAccountStore: Sendable {
         /// `reason` is the error's domain and code and never the file's
         /// bytes, so a log line built from it carries no account.
         case indexUnreadable(reason: String)
-        /// The credential offered carries no account to archive.
-        case noAccount
     }
 
     static let indexFileName = "claude-accounts.json"
@@ -330,13 +224,11 @@ struct ClaudeAccountStore: Sendable {
     /// The index, empty when there is none yet.
     ///
     /// Throws for a file that is there and will not read. That used to come
-    /// back as an empty index, and the next `remember` wrote over it: every
-    /// account left the switcher while its secret stayed in the keychain with
-    /// nothing to name it. Every write here follows a load that succeeded, so
-    /// a file this refuses is never overwritten. An empty file is refused
-    /// too: `saveIndex` writes atomically and never leaves one, so a file with
-    /// no bytes is one something truncated, and the accounts it listed are
-    /// still archived behind it.
+    /// back as an empty index, and the next `remember` wrote over it. Every
+    /// write here follows a load that succeeded, so a file this refuses is
+    /// never overwritten. An empty file is refused too: `saveIndex` writes
+    /// atomically and never leaves one, so a file with no bytes is one
+    /// something truncated.
     func loadIndex() throws -> Index {
         let data: Data
         do {
@@ -359,8 +251,7 @@ struct ClaudeAccountStore: Sendable {
     }
 
     /// Moves an index that will not read out of the way, and answers where it
-    /// went. Renamed rather than deleted: it is the only list of which
-    /// archived secrets belong to whom, and a person can still read it.
+    /// went. Renamed rather than deleted: a person can still read it.
     func setAsideIndex(now: Date = Date()) throws -> URL {
         let stamp = Int(now.timeIntervalSince1970)
         let aside = indexURL.deletingLastPathComponent()
@@ -370,8 +261,8 @@ struct ClaudeAccountStore: Sendable {
     }
 
     /// Whether an index has ever been set aside beside this one. Read off the
-    /// directory rather than remembered, so the switcher keeps saying so
-    /// across a relaunch until the file is dealt with.
+    /// directory rather than remembered, so the page keeps saying so across a
+    /// relaunch until the file is dealt with.
     func hasSetAsideIndex() -> Bool {
         let parent = indexURL.deletingLastPathComponent()
         let names = (try? FileManager.default.contentsOfDirectory(atPath: parent.path)) ?? []
@@ -384,57 +275,12 @@ struct ClaudeAccountStore: Sendable {
         try encoder.encode(index).write(to: indexURL, options: .atomic)
     }
 
-    /// The credential archived for one account, or nil when none is.
-    func credential(uuid: String) throws -> Data? { try secrets.read(uuid) }
-
-    /// Whether a credential is archived for one account.
-    func holdsCredential(uuid: String) throws -> Bool { try secrets.contains(uuid) }
-
-    /// Whether the archive already holds a later-expiring credential for that
-    /// account than the one offered.
+    /// Records an identity, replacing what was known about that account.
     ///
-    /// The archive never goes backwards. A CLI keeps more than one name for
-    /// one config home and they can disagree — an earlier build of Sissy wrote
-    /// one of a pair, a mixed pair of CLI builds rotates them apart — so the
-    /// same account legitimately reaches this from two places at two ages, and
-    /// the older copy must not become the one a switch writes back: its
-    /// refresh token may already have been spent, which signs that account out
-    /// of the machine it was archived from. Rotation only ever extends the
-    /// expiry, so it is what tells the two apart.
-    private func holdsFresherCredential(than credential: Data, for uuid: String) throws -> Bool {
-        guard let offered = ClaudeCredentialBlob.credentials(in: credential)?.expiresAt,
-            let held = try secrets.read(uuid).flatMap({
-                ClaudeCredentialBlob.credentials(in: $0)?.expiresAt
-            })
-        else { return false }
-        return held > offered
-    }
-
-    /// Archives a credential under its account and records the identity.
-    ///
-    /// Called whenever the active credential turns out to be new — a switch,
-    /// a `/login`, or the CLI rotating a token — so the archive tracks the
-    /// live one instead of going stale behind it. Only the account half is
-    /// kept: whatever else the CLI's blob carries is the CLI's as it is now,
-    /// and a copy of it frozen here is what a switch used to roll back.
-    ///
-    /// The token joins the account's lineage whether or not it is the copy
-    /// kept, because an older one offered here has still been identified as
-    /// this account.
-    func remember(_ identity: ClaudeAccountIdentity, credential: Data) throws {
+    /// Called whenever the active credential turns out to be new: a `/login`
+    /// or the CLI rotating a token.
+    func remember(_ identity: ClaudeAccountIdentity) throws {
         var index = try loadIndex()
-        guard let account = ClaudeCredentialBlob.accountOnly(credential),
-            let token = ClaudeCredentialBlob.credentials(in: account)?.accessToken
-        else {
-            throw StoreError.noAccount
-        }
-        index = index.recording(token, for: identity.uuid)
-        if try !holdsFresherCredential(than: account, for: identity.uuid) {
-            try secrets.write(identity.uuid, account)
-            var expiries = index.refreshExpiries ?? [:]
-            expiries[identity.uuid] = ClaudeCredentialBlob.refreshExpiresAt(in: account)
-            index.refreshExpiries = expiries.isEmpty ? nil : expiries
-        }
         if let existing = index.accounts.firstIndex(where: { $0.uuid == identity.uuid }) {
             index.accounts[existing] = identity
         } else {
@@ -546,17 +392,5 @@ enum ClaudeWebAccountProfile {
         return memberships.first {
             ($0[organizationKey] as? [String: Any])?[idKey] as? String == uuid
         }
-    }
-}
-
-extension ClaudeAccountStore.Index {
-    /// The synthesized decoder's reading, except that a missing `lineage` is
-    /// an empty one rather than a file that will not read.
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        accounts = try container.decode([ClaudeAccountIdentity].self, forKey: .accounts)
-        activeUUID = try container.decodeIfPresent(String.self, forKey: .activeUUID)
-        refreshExpiries = try container.decodeIfPresent([String: Date].self, forKey: .refreshExpiries)
-        lineage = try container.decodeIfPresent([String: [String]].self, forKey: .lineage) ?? [:]
     }
 }

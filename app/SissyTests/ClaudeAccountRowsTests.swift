@@ -69,17 +69,12 @@ final class ClaudeAccountRowsTests: XCTestCase {
 
     // MARK: The rows
 
-    /// Every known account is held in the keychain unless a test says
-    /// otherwise, which is what an install that archived them all looks like.
     private func entries(
-        readings: [AccountSignals], known: [ClaudeAccountIdentity], now: Date,
-        switchable: Set<String>? = nil, needsLogin: Set<String> = []
+        readings: [AccountSignals], known: [ClaudeAccountIdentity], now: Date
     ) -> [UsagePanelSnapshot.AccountEntry] {
         UsagePanelSnapshot.accountEntries(
             readings: readings,
-            known: ClaudeAccountRegistry.Snapshot(
-                accounts: known, activeUUID: signedInUUID,
-                switchable: switchable ?? Set(known.map(\.uuid)), needsLogin: needsLogin),
+            known: ClaudeAccountRegistry.Snapshot(accounts: known, activeUUID: signedInUUID),
             provider: ProviderID.claudeCode,
             reading: .used,
             now: now)
@@ -105,36 +100,6 @@ final class ClaudeAccountRowsTests: XCTestCase {
         XCTAssertEqual(rows.first { $0.id == signedInUUID }?.isReadable, true)
         XCTAssertEqual(rows.first { $0.id == signedInUUID }?.windows.map(\.percent), [18])
         XCTAssertEqual(rows.first { $0.id == archivedUUID }?.isReadable, false)
-        XCTAssertEqual(rows.first { $0.id == archivedUUID }?.isSwitchable, true)
-    }
-
-    /// An account the index names and the keychain holds nothing for is
-    /// listed, and not offered for a switch that could only fail.
-    func testAnIndexedAccountWithNoArchivedSecretIsNotSwitchable() {
-        let rows = entries(
-            readings: [],
-            known: [
-                identity(signedInUUID, organization: "Acme Srl"),
-                identity(archivedUUID, organization: "Radon Forge"),
-            ],
-            now: Date(), switchable: [signedInUUID])
-
-        XCTAssertNotNil(rows.first { $0.id == archivedUUID })
-        XCTAssertEqual(rows.first { $0.id == archivedUUID }?.isSwitchable, false)
-    }
-
-    /// An account whose saved sign-in has expired says so on its row.
-    func testAnExpiredArchiveNeedsLogin() {
-        let rows = entries(
-            readings: [],
-            known: [
-                identity(signedInUUID, organization: "Acme Srl"),
-                identity(archivedUUID, organization: "Radon Forge"),
-            ],
-            now: Date(), switchable: [signedInUUID], needsLogin: [archivedUUID])
-
-        XCTAssertEqual(rows.first { $0.id == archivedUUID }?.needsLogin, true)
-        XCTAssertEqual(rows.first { $0.id == signedInUUID }?.needsLogin, false)
     }
 
     /// An unreadable account answers for nothing of its own, which is what

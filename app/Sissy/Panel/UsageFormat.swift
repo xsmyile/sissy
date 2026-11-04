@@ -1125,7 +1125,7 @@ enum UsageFormat {
         }
     }
 
-    /// What one account is called in the switcher.
+    /// What one account is called in the picker.
     ///
     /// The address is what a user recognises an account by — it is what they
     /// typed to sign in — with the organisation behind it for an account whose
@@ -1482,7 +1482,7 @@ extension UsageFormat {
     }
 
     /// Said on the page of an account Sissy knows but holds no reading for:
-    /// it has an archived credential and no live source, which is every
+    /// it has been seen signed in and has no live source, which is every
     /// account signed into this CLI that has not had a session linked to it.
     ///
     /// Worded as a state rather than an instruction while the control that
@@ -1904,95 +1904,8 @@ enum DialogCopy {
     static let cancel = "Cancel"
 }
 
-/// What a failed account switch says.
-///
-/// Each case is a different thing for the user to do, which is why they are
-/// not one sentence: an account that has never signed in needs a login, and a
-/// keychain that said no needs the user to allow it.
-enum ClaudeAccountSwitchCopy {
-    /// Asked before the credential is written, because the write reaches a
-    /// program that is not Sissy and a menu item that does it silently is a
-    /// footgun whatever its tooltip says.
-    static func confirmTitle(_ label: String) -> String {
-        "Switch Claude Code to \(label)?"
-    }
-
-    /// The sentence a user cannot work out for themselves, measured
-    /// 2026-09-16: Claude Code holds its account for the life of a session and
-    /// rewrites the credential on every token refresh, so a `claude` that is
-    /// already running puts its own account back within minutes. Sissy cannot
-    /// prevent that — the slot is the CLI's — so the only honest thing is to
-    /// say it before the switch rather than let the row quietly revert.
-    static let confirmBody =
-        "Your next `claude` starts as it. A session that is already open will switch it back "
-        + "when it next refreshes its token, so quit it first."
-
-    /// Said on the same row as the two buttons: the account being left is not
-    /// lost, which is the whole reason this is safe to offer at all.
-    static let confirmReassurance = "Sissy keeps the account you are leaving."
-
-    /// The account menu's item for the account being read, with an ellipsis
-    /// because it asks before it writes anything.
-    static func useInCLI(_ label: String) -> String {
-        "Use \(label) in CLI…"
-    }
-
-    /// Set after the account the CLI is on in the account menu, the one place
-    /// that answers which it is. Only once there is more than one.
-    static let signedInSuffix = " · in CLI"
-    static let confirmAction = "Switch"
-
-    /// Shown while the credential is written and the reading behind it
-    /// re-read. It is a keychain write plus a network round trip, so without
-    /// it the panel sits unchanged for seconds and the click reads as nothing.
-    static func switching(_ label: String) -> String {
-        "Switching to \(label)…"
-    }
-
-    static func failure(_ why: ClaudeAccountRegistry.Failure) -> String {
-        switch why {
-        case .notArchived:
-            return "Sissy has no saved sign-in for that account yet. Sign into it once with claude /login"
-        case .activeAccountUnknown:
-            return
-                "One of Claude Code's saved sign-ins belongs to an account Sissy has not seen, "
-                + "so it left them alone. Run claude once, or sign in again with claude /login"
-        case .slotUnreadable:
-            return
-                "Sissy could not read one of Claude Code's saved sign-ins, so it changed nothing. "
-                + "If it keeps happening, sign in again with claude /login"
-        case .slotChanged:
-            return
-                "Claude Code renewed its sign-in while Sissy was switching, so it changed "
-                + "nothing. Try the switch again"
-        case .keychain:
-            return "The keychain would not accept the change, so the signed-in account is unchanged"
-        case .keychainUnavailable:
-            return
-                "The keychain could not be reached, so the signed-in account is unchanged. "
-                + "Unlock your Mac's login keychain and try again"
-        case .mirrorWrite:
-            return
-                "Claude Code's .credentials.json would not take the change, so Sissy put the "
-                + "signed-in account back. Check that file's permissions and try again"
-        case .partialSwitch:
-            return
-                "The switch stopped part way and could not be undone, so Claude Code's saved "
-                + "sign-ins disagree. Try the switch again, or sign in with claude /login"
-        case .needsLogin:
-            return needsLogin
-        case .indexUnreadable:
-            return
-                "Sissy could not read its list of saved accounts, so it changed nothing. "
-                + "Check claude-accounts.json in Sissy's folder"
-        }
-    }
-
-    /// Said under an account whose saved sign-in can no longer be used, in
-    /// place of the control that would try to.
-    static let needsLogin =
-        "That account's saved sign-in has expired. Sign into it again with claude /login"
-
+/// What the Claude Code page says about its account list.
+enum ClaudeAccountCopy {
     /// Said on the Claude Code page when the account index would not read and
     /// was set aside, which is why accounts it listed may be missing.
     static let indexSetAside =

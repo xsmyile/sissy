@@ -10,23 +10,11 @@ import SwiftUI
 /// at costs nothing.
 struct PanelProviderPage: View {
     let row: UsagePanelSnapshot.ProviderRow
-    /// Switches the vendor to another of its accounts, after the user has
-    /// confirmed it. Never called for a vendor with one account, whose row
-    /// carries no choices, and never straight from the menu: picking proposes
-    /// and the confirmation commits.
     /// Which account the page was opened on, which is the Overview row that
     /// was clicked. The picker overrides it and nothing else does.
     let openOnAccount: String?
-    let onSelectAccount: (String) -> Void
     /// Opens the login window that links another account.
     let onAddAccount: () -> Void
-    /// Why the last switch did not happen, when one did not. Shown under the
-    /// identity, because a switch that quietly failed leaves the user typing
-    /// `claude` and meeting the account they thought they had left.
-    let switchFailure: String?
-    /// The account a switch is running for, or nil when none is. Named rather
-    /// than a flag so the page can say which account it is moving to.
-    let switchingAccount: String?
     /// The account a reset is being spent for, nil while none is.
     let resetSpending: LimitResetTarget?
     /// How the last reset press ended, which the page words for the account
@@ -69,11 +57,6 @@ struct PanelProviderPage: View {
     /// the frame and a stored strip would freeze it at the moment the page was
     /// opened while the `Today` row below it kept moving.
     @State private var series: [UsageHistoryDaySummary] = []
-    /// The account picked but not yet confirmed. Picking is not switching:
-    /// the write reaches Claude Code's own credential, and the one thing a
-    /// user cannot work out for themselves — that an open session undoes it —
-    /// has to be said before it happens rather than discovered afterwards.
-    @State private var pendingAccount: UsagePanelSnapshot.AccountEntry?
     /// Which account's reading the page is showing. Nil is the signed-in one,
     /// which is what the row's own fields already carry.
     ///
@@ -301,19 +284,6 @@ struct PanelProviderPage: View {
                         accountPicker
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    if let pendingAccount, switchingAccount == nil {
-                        switchConfirmation(pendingAccount)
-                    }
-                    if let switchingAccount,
-                        let choice = row.accounts.first(where: { $0.id == switchingAccount })
-                    {
-                        switchProgress(choice)
-                    }
-                    if let switchFailure, pendingAccount == nil, switchingAccount == nil {
-                        identityCaption(switchFailure)
-                    } else if let viewed, !viewed.isSignedIn, viewed.needsLogin {
-                        identityCaption(ClaudeAccountSwitchCopy.needsLogin)
-                    }
                     if let notice = row.accountsNotice {
                         identityCaption(notice)
                     }
@@ -322,7 +292,7 @@ struct PanelProviderPage: View {
         }
     }
 
-    /// A sentence under a block's own line, for what the switcher or a reset
+    /// A sentence under a block's own line, for what the picker or a reset
     /// has to say about an account rather than about its limits.
     private func identityCaption(_ text: String) -> some View {
         Text(text)
@@ -331,55 +301,9 @@ struct PanelProviderPage: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// The question, the warning and the two answers, inside the panel.
+    /// Changes which of this vendor's accounts the page shows.
     ///
-    /// Not an `NSAlert`: Sissy has no windows, and a switch offered from a
-    /// popover should not summon one to ask about itself.
-    ///
-    /// Escape cancels and nothing is the default action: the commit writes
-    /// another program's credential, so it is reached by aiming at it and
-    /// never by a return key pressed at a panel.
-    @ViewBuilder
-    private func switchConfirmation(_ choice: UsagePanelSnapshot.AccountEntry)
-        -> some View
-    {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(ClaudeAccountSwitchCopy.confirmTitle(choice.label))
-                .font(.system(size: 12, weight: .medium))
-            Text(ClaudeAccountSwitchCopy.confirmBody)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                Text(ClaudeAccountSwitchCopy.confirmReassurance)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button(DialogCopy.cancel) { pendingAccount = nil }
-                    .keyboardShortcut(.cancelAction)
-                Button(ClaudeAccountSwitchCopy.confirmAction) {
-                    pendingAccount = nil
-                    onSelectAccount(choice.id)
-                }
-            }
-            .controlSize(.small)
-        }
-    }
-
-    @ViewBuilder
-    private func switchProgress(_ choice: UsagePanelSnapshot.AccountEntry) -> some View {
-        HStack(spacing: 6) {
-            ProgressView()
-                .controlSize(.small)
-            Text(ClaudeAccountSwitchCopy.switching(choice.label))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    /// Switches which of this vendor's accounts is signed in.
-    ///
-    /// It sits on the identity line because that line *is* the account — the
+    /// It sits on the identity line because that line *is* the account: the
     /// address, the organisation and the plan all belong to it, and a control
     /// that changes them belongs where they are rather than in Settings.
     ///
@@ -391,12 +315,11 @@ struct PanelProviderPage: View {
             Menu {
                 Picker("Account", selection: accountBinding) {
                     ForEach(row.accounts) { choice in
-                        Text(menuLabel(choice)).tag(choice.id)
+                        Text(choice.label).tag(choice.id)
                     }
                 }
                 .pickerStyle(.inline)
                 Divider()
-                useInCLI
                 addAccount
             } label: {
                 Image(Glyph.userSwitch)
@@ -414,14 +337,12 @@ struct PanelProviderPage: View {
     /// a menu renders to — the same shape the keep-awake modes already take,
     /// and the only one that marks which entry is current.
     ///
-    /// Picking is a change of view and nothing else. It used to be the switch
-    /// itself, which made a one-click menu item rewrite Claude Code's
-    /// credential; that is now `useInCLI`, which asks first.
+    /// Picking is a change of view and nothing else.
     ///
     /// A `Button` per account with a `Label(_:systemImage: "checkmark")` on the
     /// active one does not: a macOS menu item built from a SwiftUI `Button`
     /// drops the label's image, so every account rendered as plain text and
-    /// the menu said nothing about which one the CLI was signed into.
+    /// the menu said nothing about which one was being read.
     ///
     /// An id nothing matches leaves every entry unmarked, which is the honest
     /// rendering of an index that names an active account it no longer holds.
@@ -430,11 +351,6 @@ struct PanelProviderPage: View {
             get: { viewed?.id ?? "" },
             set: { picked in viewedAccount = picked }
         )
-    }
-
-    private func menuLabel(_ choice: UsagePanelSnapshot.AccountEntry) -> String {
-        choice.isSignedIn && row.accounts.count > 1
-            ? choice.label + ClaudeAccountSwitchCopy.signedInSuffix : choice.label
     }
 
     /// Links another account, from where someone looking at their accounts
@@ -456,46 +372,25 @@ struct PanelProviderPage: View {
 
     /// What the picker does, which is a different sentence for each vendor.
     ///
-    /// On Claude Code an account in this menu is one Sissy can sign the CLI in
-    /// as, so the tooltip says so rather than selling a credential change as a
-    /// filter. On Codex there is no such control — a linked account is read
-    /// and never signed in with — so the same words would promise something
-    /// the page cannot do. A provider Sissy knows no account mechanics of
-    /// gets the sentence that promises nothing and names no vendor, because
-    /// switching is the one claim a new id must not inherit.
+    /// The menu changes what Sissy reads and never what the CLI is signed in
+    /// as, and each known vendor's tooltip says which CLI stays put. A provider
+    /// Sissy knows no account mechanics of gets the sentence that names no
+    /// vendor.
     static func accountPickerHelp(for provider: String) -> String {
         switch provider {
-        case ProviderID.claudeCode: switchablePickerHelp
+        case ProviderID.claudeCode: claudeReadOnlyPickerHelp
         case ProviderID.codex: readOnlyPickerHelp
         default: neutralPickerHelp
         }
     }
 
-    static let switchablePickerHelp =
-        "Choose which account Claude Code signs in as. Sissy asks before it changes anything."
+    static let claudeReadOnlyPickerHelp =
+        "Choose which account to read. Claude Code stays on the account it is signed into."
 
     static let readOnlyPickerHelp =
         "Choose which account to read. Codex stays on the account it is signed into."
 
     static let neutralPickerHelp = "Choose which account to read."
-
-    /// Signs Claude Code in as the account being read, from the account menu
-    /// rather than the card: on the card it shared the name's line, and a long
-    /// name lost to it what a control used once in a while had no claim to.
-    ///
-    /// Present only while that is not the account it is already on, so it
-    /// cannot fire for the one in use and the accident it used to be is gone
-    /// by construction rather than by dialog. Absent for an account Sissy
-    /// holds no credential for — there is nothing to sign in with, and that
-    /// first `/login` is the user's.
-    @ViewBuilder
-    private var useInCLI: some View {
-        if let viewed, !viewed.isSignedIn, viewed.isSwitchable,
-            pendingAccount == nil, switchingAccount == nil
-        {
-            Button(ClaudeAccountSwitchCopy.useInCLI(viewed.label)) { pendingAccount = viewed }
-        }
-    }
 
     /// The account's name with its plan beside it, the shape the Overview's
     /// rows take. The badge never gives way, so a long name truncates instead:
@@ -659,9 +554,9 @@ struct PanelProviderPage: View {
         }
     }
 
-    /// The question and the two answers, inside the panel, on the rules the
-    /// account switch already keeps: Escape cancels and nothing is the default
-    /// action, so the spend is reached by aiming at it and never by a return
+    /// The question and the two answers, inside the panel: Escape cancels and
+    /// nothing is the default action, so the spend is reached by aiming at it
+    /// and never by a return
     /// key pressed at a panel.
     private func resetConfirmation(
         _ resets: UsagePanelSnapshot.ResetsRow, target: LimitResetTarget

@@ -514,29 +514,9 @@ final class ClaudeLimitsProbeTests: XCTestCase {
         await probe.stop()
     }
 
-    /// The account switch is the one event that makes a refusal stop being
-    /// this reader's: the endpoint authenticates a credential, and the next
-    /// request spends a different one. Without this the account switched *to*
-    /// had no limits until a deadline its own token never met.
-    func testAnAccountSwitchDropsTheRecordedBlock() async {
-        let held = LockedValue<Date?>(Date().addingTimeInterval(900))
-        let fetches = LockedValue(0)
-        let probe = succeedingProbe(backoff: slot(held), counting: fetches)
-        _ = await probe.refreshOnce {}
-        XCTAssertEqual(fetches.load(), 0)
-
-        await probe.clearBackoff()
-        _ = await probe.refreshOnce {}
-
-        XCTAssertEqual(fetches.load(), 1, "the new account was held to the old one's block")
-        XCTAssertNil(held.load())
-        XCTAssertEqual(probe.currentSignals().limitsState, .quiet)
-        await probe.stop()
-    }
-
     /// Reading the record is a suspension like any other, and a `stop()` can
-    /// land in it: the switch has just cleared the row, and a block restored
-    /// over that is a notice under a module the user turned off.
+    /// land in it, and a block restored over that is a notice under a module
+    /// the user turned off.
     ///
     /// Observed from inside the read, because that is the only place the gap
     /// exists.

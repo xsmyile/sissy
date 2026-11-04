@@ -168,13 +168,10 @@ private let linkIndexLock = NSLock()
 /// The claude.ai session links.
 ///
 /// Deliberately not `ClaudeAccountStore`'s index, though both list accounts.
-/// That one answers "whose CLI credential has Sissy archived", which is what
-/// decides whether an account can be switched to; an account with a session
-/// and no archived credential belongs in exactly one of the two lists, and
-/// putting it in that one would offer `Use in CLI` for an account Sissy holds
-/// nothing to sign in with. The lifecycles differ for the same reason:
-/// forgetting the sessions must not drop the archived credentials, and
-/// forgetting an account must not unlink its session.
+/// That one answers "who has Sissy seen signed in to the CLI"; an account with
+/// a session that never signed in there belongs in exactly one of the two
+/// lists. The lifecycles differ for the same reason: forgetting a session must
+/// not drop the name, and forgetting an account must not unlink its session.
 typealias ClaudeWebSessionIndex = LinkIndex<ClaudeWebLink>
 
 /// The linked Codex accounts.

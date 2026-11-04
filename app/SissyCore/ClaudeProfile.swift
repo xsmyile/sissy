@@ -88,7 +88,7 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     /// different moments and can name different accounts: a running `claude`
     /// holds its own identity in memory, so the usage cache is refreshed
     /// under the account the CLI started as long after the credential has
-    /// moved on. Measured 2026-09-16, a cache fetched 39 s after a switch was
+    /// moved on. Measured 2026-09-16, a cache fetched 39 s after it moved was
     /// still stamped with the previous account — folding the two into one
     /// owner would attribute the money by the profile's uuid.
     ///

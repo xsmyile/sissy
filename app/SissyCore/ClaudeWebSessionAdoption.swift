@@ -6,7 +6,7 @@ import Foundation
 /// `ClaudeWebSessionStore` held one item under a fixed name, because there was
 /// one session and nothing to tell it apart from. Sessions are now filed under
 /// the Anthropic account uuid they belong to — the same key
-/// `ClaudeAccountStore` files a CLI credential under, measured 2026-09-16 to
+/// `ClaudeAccountStore` files an identity under, measured 2026-09-16 to
 /// be one id across both vendors' endpoints — so the row a session draws and
 /// the account it belongs to are the same row.
 ///
@@ -41,8 +41,8 @@ enum ClaudeWebSessionAdoption {
 
     /// The keychain half, behind closures.
     ///
-    /// Injected for the same reason `ClaudeAccountStore.Secrets` is: writing a
-    /// real session is the one piece of external I/O here, and what the pass
+    /// Injected because writing a real session is the one piece of external
+    /// I/O here, and what the pass
     /// *decides* — especially that it never ends holding none — has to be
     /// provable without the developer's own login keychain taking part.
     struct Store: Sendable {
@@ -83,7 +83,7 @@ enum ClaudeWebSessionAdoption {
     /// `remember` files what the session turned out to belong to. It costs
     /// this pass nothing — the identity is already in hand — and it is the
     /// only thing that names an adopted account on the panel: an account
-    /// reached through a session alone has no archived CLI credential, so the
+    /// reached through a session alone never signed in to the CLI, so the
     /// account index holds nothing for it and its row would carry the raw
     /// Anthropic uuid. The organisation stays unrecorded, because nobody was
     /// asked and a capability-picked one is a guess rather than an answer.

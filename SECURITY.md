@@ -70,24 +70,28 @@ behind.
 login keychain through `/usr/bin/security`, or from
 `<config home>/.credentials.json` when the keychain holds none; Codex's from
 `~/.codex/auth.json`. Sissy never refreshes
-either, and never writes one back except on a Claude account switch you asked
-for: both vendors rotate refresh tokens, and spending one would sign you out
-of your own terminal. Codex's file is never written. A forge token is
+either and never writes one back: both vendors rotate refresh tokens, and
+spending one would sign you out of your own terminal. Neither Claude Code's
+items and config nor Codex's file is ever written. A forge token is
 offered, never taken: Sissy shows what `gh` or `glab` holds, warns that such a
 token usually carries write access to every repository, and copies it only on
 the press.
 
-**Credentials it holds.** Four keychain items are Sissy's own:
+**Credentials it holds.** Three keychain items are Sissy's own:
 
 | Item | Holds |
 |---|---|
-| `com.radonforge.sissy.claude-account` | a copy of each Claude credential seen active, so `Use in CLI` can switch back |
 | `com.radonforge.sissy.claude-web` | the claude.ai session from the in-app login window |
 | `com.radonforge.sissy.codex-oauth` | each linked Codex account's OpenAI credential, Sissy's own copy and the only one it renews |
 | `com.radonforge.sissy.forge-token` | each forge connection's token, used to read activity counts and nothing else |
 
-A Debug build files the same four under `com.radonforge.sissy.dev.*`, so a
+A Debug build files the same three under `com.radonforge.sissy.dev.*`, so a
 development copy never reads or overwrites what the released app holds.
+
+Earlier builds also kept a copy of each Claude credential they saw active, under
+`com.radonforge.sissy.claude-account`. The first launch of a build without the
+account switch deletes those items through `/usr/bin/security`, logs how many, and
+tries again at the next launch if the keychain refused.
 
 **Nothing on the wire is kept.** Every request goes through one ephemeral
 session with no HTTP cache, cookie jar or credential store. A redirect to
@@ -120,7 +124,6 @@ unless you ask for it:
 | Written | When |
 |---|---|
 | a line in `~/.claude/settings.json` and one in `~/.codex/hooks.json` | only under `Name projects even when Sissy is off`; both point at a script in Sissy's own folder and both come out when you switch it off |
-| the account part of Claude Code's keychain slot and its `.credentials.json` mirror | only when you pick an account with *Use in CLI*. Everything else in them, such as MCP server logins, is left as it was. Uninstalling does not switch it back |
 | `~/Library/Logs/Sissy/`, rotated | always, and it outlives an uninstall |
 | CSV files | only into the folder you choose when you press Export |
 

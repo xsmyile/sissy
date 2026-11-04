@@ -281,7 +281,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
                     identity: identity(linked, email: "davide@example.com"),
                     organization: "org-1")
             ],
-            archived: [])
+            known: [])
 
         XCTAssertEqual(accounts.map(\.id), [linked])
         XCTAssertEqual(accounts.first?.identity?.email, "davide@example.com")
@@ -293,7 +293,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
         let accounts = ClaudeWebAccount.list(
             stored: [unnamed],
             links: [:],
-            archived: [identity(unnamed, email: "smyile@example.com")])
+            known: [identity(unnamed, email: "smyile@example.com")])
 
         XCTAssertEqual(accounts.map(\.id), [unnamed])
         XCTAssertEqual(accounts.first?.identity?.email, "smyile@example.com")
@@ -312,7 +312,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
                     identity: identity(linked, email: "davide@example.com"),
                     organization: "org-1")
             ],
-            archived: [identity(linked, email: "stale@example.com", name: "Davide")])
+            known: [identity(linked, email: "stale@example.com", name: "Davide")])
 
         XCTAssertEqual(accounts.first?.identity?.name, "Davide")
         XCTAssertEqual(accounts.first?.identity?.email, "davide@example.com")
@@ -335,7 +335,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
                         organizationType: "claude_team", rateLimitTier: nil, seat: "team_tier_1"),
                     organization: "org-1")
             ],
-            archived: [archived])
+            known: [archived])
 
         let identity = accounts.first?.identity
         XCTAssertEqual(identity?.name, "Davide")
@@ -355,7 +355,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
                     identity: identity(linked, email: "davide@example.com", name: "Davide"),
                     organization: "org-1")
             ],
-            archived: [identity(linked, email: "stale@example.com", name: "Old Name")])
+            known: [identity(linked, email: "stale@example.com", name: "Old Name")])
 
         XCTAssertEqual(accounts.first?.identity?.name, "Davide")
     }
@@ -363,7 +363,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
     /// Named by neither, it keeps its uuid rather than being dropped: a row
     /// under a poor label is what makes that session removable at all.
     func testASessionNothingCanNameKeepsItsRow() {
-        let accounts = ClaudeWebAccount.list(stored: [unnamed], links: [:], archived: [])
+        let accounts = ClaudeWebAccount.list(stored: [unnamed], links: [:], known: [])
 
         XCTAssertEqual(accounts.map(\.id), [unnamed])
         XCTAssertNil(accounts.first?.identity)
@@ -373,7 +373,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
     /// session that is mid-adoption, under a label no user has seen.
     func testTheHoldingKeyIsNoAccount() {
         let accounts = ClaudeWebAccount.list(
-            stored: [ClaudeWebSessionStore.unkeyedAccount, linked], links: [:], archived: [])
+            stored: [ClaudeWebSessionStore.unkeyedAccount, linked], links: [:], known: [])
 
         XCTAssertEqual(accounts.map(\.id), [linked])
     }
@@ -388,7 +388,7 @@ final class ClaudeWebAccountListTests: XCTestCase {
                     identity: identity(linked, email: "davide@example.com"),
                     organization: "org-1")
             ],
-            archived: [])
+            known: [])
 
         XCTAssertTrue(accounts.isEmpty)
     }

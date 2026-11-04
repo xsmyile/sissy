@@ -4,8 +4,8 @@ import Foundation
 ///
 /// The session itself is a secret and lives in the keychain; this is the part
 /// that is not, and it exists because neither answer is derivable when it is
-/// needed. The identity, because an account reached only through a session has
-/// no archived CLI credential and therefore no entry in the account index —
+/// needed. The identity, because an account reached only through a session
+/// never signed in to the CLI and therefore has no entry in the account index:
 /// without this its row is labelled with the raw Anthropic uuid, which is the
 /// ordinary case the moment sessions can be linked rather than imported. The
 /// organisation, because an account can hold more than one that answers the
@@ -38,7 +38,7 @@ struct ClaudeWebLink: Sendable, Codable, Equatable {
 /// no row and no way to stop it.
 ///
 /// The identity is therefore optional and filled by whatever can fill it: the
-/// link, then the account archive, then nothing. The same fallback the panel's
+/// link, then the account index, then nothing. The same fallback the panel's
 /// own rows take, so one account cannot be named two ways.
 struct ClaudeWebAccount: Sendable, Equatable, Identifiable {
     let id: String
@@ -53,16 +53,16 @@ struct ClaudeWebAccount: Sendable, Equatable, Identifiable {
     static func list(
         stored: [String],
         links: [String: ClaudeWebLink],
-        archived: [ClaudeAccountIdentity]
+        known: [ClaudeAccountIdentity]
     ) -> [ClaudeWebAccount] {
         stored
             .filter { $0 != ClaudeWebSessionStore.unkeyedAccount }
             .map { uuid in
-                let archived = archived.first { $0.uuid == uuid }
+                let indexed = known.first { $0.uuid == uuid }
                 guard let linked = links[uuid]?.identity else {
-                    return ClaudeWebAccount(id: uuid, identity: archived)
+                    return Self(id: uuid, identity: indexed)
                 }
-                return ClaudeWebAccount(id: uuid, identity: linked.named(after: archived))
+                return Self(id: uuid, identity: linked.named(after: indexed))
             }
     }
 }
@@ -80,7 +80,7 @@ extension ClaudeAccountIdentity {
     /// one person, so whichever copy knows their name knows the same name.
     ///
     /// Deliberately the name and nothing else. Filling every nil from the
-    /// archive would restore `rateLimitTier`, which `ClaudeWebAccountProfile`
+    /// index would restore `rateLimitTier`, which `ClaudeWebAccountProfile`
     /// drops on purpose — claude.ai reports the organisation's `default_raven`
     /// where the OAuth profile reports the seat's `default_claude_max_5x` — so
     /// a generic merge would put back the one field a parser refuses.

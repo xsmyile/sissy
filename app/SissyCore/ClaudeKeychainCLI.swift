@@ -19,7 +19,7 @@ import Foundation
 ///
 /// Measured 2026-09-15 against Claude Code 2.1.272 on macOS 27, from a process
 /// that had never touched the item: a read of a scoped credential item returned
-/// its 2 377 bytes and a write back to it exited 0, both with no panel.
+/// its 2 377 bytes with no panel.
 enum ClaudeKeychainCLI {
     /// Why a call came back with nothing. Absence is not a failure — it is an
     /// account nobody has signed into — so it is its own case rather than a
@@ -34,22 +34,9 @@ enum ClaudeKeychainCLI {
         case unavailable
     }
 
-    /// `security`'s exit codes for a keychain that cannot be used right now
-    /// rather than an item that refused: 36 is `errSecInteractionNotAllowed`
-    /// (the keychain is locked and no dialog may be shown) and 51 is
-    /// `errSecAuthFailed`, each truncated to the eight bits an exit status
-    /// carries. Neither is fixed by signing in again, so neither may be worded
-    /// as if it were.
-    static let unavailableStatuses: Set<Int32> = [36, 51]
-
     /// Service name Claude Code files the credential of a CLI started with no
     /// `CLAUDE_CONFIG_DIR` under.
     static let claudeService = "Claude Code-credentials"
-    /// Service name Sissy files its own copy of an account's credential under.
-    /// Its keychain account is the Claude account's uuid, so one item is one
-    /// account for as long as that account exists.
-    static let sissyAccountService = SissyPaths.keychainService("claude-account")
-
     private static let toolPath = "/usr/bin/security"
     /// `security` answers in milliseconds and has no dialog to wait behind
     /// here, so this bounds a wedged process rather than a user's decision.
@@ -76,38 +63,11 @@ enum ClaudeKeychainCLI {
         return Data(blob.utf8)
     }
 
-    /// Replaces the secret under one service and account, creating the item if
-    /// it is not there. `-U` rather than a delete and an add: a delete that
-    /// succeeded followed by an add that failed would sign the user out of a
-    /// CLI they only asked to switch.
-    ///
-    /// The secret travels in `argv`, where a process running as this user can
-    /// see it for the few milliseconds the tool lives. That is the exposure
-    /// these items already have — any such process can read them back the same
-    /// way — and `security` offers no form that takes the value on stdin.
-    static func write(_ data: Data, service: String, account: String) throws {
-        guard let secret = String(bytes: data, encoding: .utf8) else {
-            throw Failure.noItem
-        }
-        let result = try run(
-            ["add-generic-password", "-U", "-s", service, "-a", account, "-w", secret])
-        guard result.status == 0 else { throw Failure.tool(result.status) }
-    }
-
-    /// Removes an item. A delete of something that is not there is a success:
-    /// the caller asked for it to be gone.
-    static func delete(service: String, account: String) throws {
-        let result = try run(["delete-generic-password", "-s", service, "-a", account])
-        if result.status == 0 || result.status == itemNotFound { return }
-        throw Failure.tool(result.status)
-    }
-
-    /// Whether an item exists, asked without reading its secret.
-    ///
-    /// Throws where the lookup itself failed, because a keychain that could
-    /// not be asked is not one without the item.
-    static func contains(service: String, account: String) throws -> Bool {
-        let result = try run(["find-generic-password", "-s", service, "-a", account])
+    /// Removes one item of a service, whichever the keychain finds first, and
+    /// answers false when none is left. Only `ClaudeArchiveRemoval` calls it,
+    /// and only for a service Sissy filed.
+    static func deleteOne(service: String) throws -> Bool {
+        let result = try run(["delete-generic-password", "-s", service])
         if result.status == itemNotFound { return false }
         guard result.status == 0 else { throw Failure.tool(result.status) }
         return true
@@ -143,17 +103,14 @@ enum ClaudeKeychainCLI {
     /// date to the second, the CLI having rewritten the pair together. The
     /// scoped one was created 2026-09-16, after the measurement
     /// `claudeService(for:)` is written from, so a build reading that rule
-    /// alone addresses half of what the CLI now keeps. Which of the two a
-    /// `claude` reads first is its business, so a switch reaching only one
-    /// leaves the other naming the account the user just left.
+    /// alone addresses half of what the CLI now keeps.
     ///
     /// The pair does not stay in step. Measured 2026-09-23 against Claude
     /// Code 2.1.280: a `claude /login` wrote the unscoped item alone at
     /// 09:20:38Z and left this one on the previous account, and the CLI went
     /// on running as the account the unscoped item named. So this name is a
     /// sibling rather than a peer: `ClaudeCLISlot` reads it only when the
-    /// unscoped item holds nothing, and a switch writes it only where it
-    /// already holds a credential.
+    /// unscoped item holds nothing.
     static func siblingClaudeServices(for home: URL) -> [String] {
         guard AccountDefaults.isDefaultClaudeHome(home) else { return [] }
         return [scopedClaudeService(for: home.path)]

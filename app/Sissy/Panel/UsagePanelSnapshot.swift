@@ -610,16 +610,14 @@ struct UsagePanelSnapshot: Equatable {
     /// One account of a vendor, as the panel knows it.
     ///
     /// Two things make an account appear here and they are not the same thing.
-    /// Sissy can **read** an account it holds a live source for — the CLI's
-    /// own credential for whoever is signed in, a linked claude.ai session for
-    /// anyone else — and it can **switch to** an account whose credential it
-    /// has archived. An account can be either, both, or the first without the
-    /// second.
+    /// Sissy can **read** an account it holds a live source for: the CLI's own
+    /// credential for whoever is signed in, a linked claude.ai session for
+    /// anyone else. And it **knows of** an account it has seen signed in.
     ///
-    /// So an archived account with no session linked gets a row with no
-    /// gauges: Sissy knows who it is and can sign the CLI in as it, and cannot
-    /// say a thing about its limits until a session is linked. Leaving it out
-    /// would hide the account the user most wants to link.
+    /// So a known account with no session linked gets a row with no gauges:
+    /// Sissy knows who it is and cannot say a thing about its limits until a
+    /// session is linked. Leaving it out would hide the account the user most
+    /// wants to link.
     struct AccountEntry: Equatable, Identifiable {
         let id: String
         /// What the picker calls it, and what qualifies the Overview's row
@@ -646,11 +644,6 @@ struct UsagePanelSnapshot: Equatable {
         /// Whether the CLI itself is signed in as this account — the one whose
         /// future spend lands in the day beside it.
         let isSignedIn: Bool
-        /// Whether Sissy holds a credential it could sign the CLI in with.
-        let isSwitchable: Bool
-        /// Whether the credential Sissy holds has a refresh token that has
-        /// expired, so only a `claude /login` as this account brings it back.
-        let needsLogin: Bool
     }
 
     struct ProviderRow: Equatable, Identifiable {
@@ -661,7 +654,7 @@ struct UsagePanelSnapshot: Equatable {
         /// control that does nothing, and the fields below are that one
         /// account's reading anyway.
         let accounts: [AccountEntry]
-        /// Why accounts the switcher used to list may be missing, worded. Nil
+        /// Why accounts the picker used to list may be missing, worded. Nil
         /// the rest of the time, which is every install whose account index
         /// has always read.
         let accountsNotice: String?
@@ -2069,9 +2062,9 @@ struct UsagePanelSnapshot: Equatable {
     /// CLI writes to, and a log line carries no account id, so the spend is the
     /// CLI's rather than an account's. What the account decides is the identity
     /// on the row and the limits under it, both of which come from the
-    /// credential that is signed in — and `accounts` is the list of the others
-    /// Sissy could switch to, which is a property of the keychain rather than
-    /// of the frame.
+    /// credential that is signed in, and `accounts` is the list of the others
+    /// Sissy has seen, which is a property of its index rather than of the
+    /// frame.
     private static func makeRows(
         _ slices: [ProviderSlice],
         claudeAccounts: ClaudeAccountRegistry.Snapshot,
@@ -2089,16 +2082,15 @@ struct UsagePanelSnapshot: Equatable {
                 name: UsageFormat.providerName(slice.id),
                 accounts: accountEntries(
                     readings: slice.signals.accounts,
-                    // The archive of credentials Sissy could switch the CLI to
-                    // is Claude Code's alone: a linked Codex account is read
-                    // and never signed in with, so an account it holds no
-                    // reading for is an account it holds nothing for.
+                    // The index of accounts seen signed in is Claude Code's
+                    // alone: an account Codex holds no reading for is an
+                    // account it holds nothing for.
                     known: slice.id == ProviderID.claudeCode
                         ? claudeAccounts : ClaudeAccountRegistry.Snapshot(),
                     provider: slice.id,
                     reading: limitsReading, naming: naming, now: now),
                 accountsNotice: slice.id == ProviderID.claudeCode && claudeAccounts.indexSetAside
-                    ? ClaudeAccountSwitchCopy.indexSetAside : nil,
+                    ? ClaudeAccountCopy.indexSetAside : nil,
                 plan: plan?.label,
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
@@ -2208,8 +2200,8 @@ struct UsagePanelSnapshot: Equatable {
     /// attributes the config file to the account it names and resolves a
     /// non-active account from its link ahead of the archive, so whatever
     /// reaches a row is already that row's account and already the freshest
-    /// of the answers. The archive is the fallback because it is the only one
-    /// that can name an account Sissy holds a credential for and no session.
+    /// of the answers. The index is the fallback because it is the only one
+    /// that can name an account Sissy has seen and holds no session for.
     static func accountEntries(
         readings: [AccountSignals],
         known: ClaudeAccountRegistry.Snapshot,
@@ -2252,9 +2244,7 @@ struct UsagePanelSnapshot: Equatable {
                 resetTarget: accountResetTarget(provider: provider, id: id, reading: reading),
                 notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet, provider: provider),
                 isReadable: reading != nil,
-                isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID),
-                isSwitchable: known.switchable.contains(id),
-                needsLogin: known.needsLogin.contains(id))
+                isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID))
         }
         return entries.sorted { lhs, rhs in
             (lhs.isSignedIn ? 0 : 1, lhs.label, lhs.id) < (rhs.isSignedIn ? 0 : 1, rhs.label, rhs.id)

@@ -28,14 +28,15 @@ struct ClaudeCodeSignals: SourceSignals {
     /// aggregator asks while the emitting provider still holds its actor.
     let webSources: LockedValue<[ClaudeWebSource]>
     /// What each linked session turned out to be, which is the only place an
-    /// account reached through a session alone is named: it has no archived
-    /// CLI credential, so the account index holds nothing for it.
+    /// account reached through a session alone is named: it never signed in to
+    /// the CLI, so the account index holds nothing for it.
     let webLinks: LockedValue<[String: ClaudeWebLink]>
     let profile: ClaudeProfileSource
     /// Who the CLI is signed in as, which is the account the probe's reading
     /// and the config file's identity both belong to. Read from the registry
     /// rather than from `.claude.json`, because only the CLI writes that file
-    /// and a switch Sissy made is not in it until some `claude` runs.
+    /// and a credential another program wrote is not in it until some `claude`
+    /// runs.
     let accounts: ClaudeAccountRegistry
 
     func currentSignals() -> ProviderSignals {
@@ -109,9 +110,9 @@ struct ClaudeCodeSignals: SourceSignals {
     /// The config file's reading, kept only for the account it belongs to.
     ///
     /// `.claude.json` is Claude Code's and only Claude Code writes it, so a
-    /// switch Sissy made reaches the keychain at once and that file not at
-    /// all — until some `claude` re-fetches its profile. Measured 2026-09-16:
-    /// a switch at 16:26:53 left a file rewritten at 16:29:31 whose
+    /// credential another program wrote reaches the keychain at once and that
+    /// file not at all, until some `claude` re-fetches its profile. Measured
+    /// 2026-09-16: a change at 16:26:53 left a file rewritten at 16:29:31 whose
     /// `oauthAccount` had been fetched at 12:28:10 and had not moved, so the
     /// row carried one account's id under another account's name, which is
     /// the pairing `ProviderSignals` exists to prevent.
@@ -201,13 +202,12 @@ struct ClaudeCodeSignals: SourceSignals {
     /// the registry's field keeps a caller that has no file reading — every
     /// test of this rule — saying what it always said.
     ///
-    /// The link names an account before the archive does, and this is the one
+    /// The link names an account before the index does, and this is the one
     /// branch where that is not arbitrary: it draws the accounts the CLI is
-    /// *not* on, and an archived identity is frozen at the build that filed
-    /// it. Sissy cannot re-ask — `captureActive` only ever reads the active
-    /// slot, and an archived access token expires with no refresh Sissy is
-    /// allowed to spend — so the link is the only identity a non-active
-    /// account can still update. Measured 2026-09-16: an account archived
+    /// *not* on, and an indexed identity is frozen at the build that filed
+    /// it. Sissy cannot re-ask, because `captureActive` only ever reads the
+    /// active slot, so the link is the only identity a non-active account can
+    /// still update. Measured 2026-09-16: an account filed
     /// before `seat` existed kept badging "Team" against a live "Team
     /// Premium", and would have kept it through a fresh link.
     static func perAccount(

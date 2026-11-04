@@ -622,10 +622,7 @@ struct UsagePanelView: View {
         return PanelProviderPage(
             row: row,
             openOnAccount: openAccount,
-            onSelectAccount: { model.engine.activateClaudeAccount(uuid: $0) },
             onAddAccount: { model.engine.addAccount(for: row.id) },
-            switchFailure: model.engine.accountSwitchFailure,
-            switchingAccount: model.engine.switchingClaudeAccount,
             resetSpending: model.engine.spendingReset,
             resetReport: model.engine.resetReport,
             useReset: { model.engine.useReset($0) },
