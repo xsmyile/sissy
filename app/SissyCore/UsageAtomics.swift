@@ -1,15 +1,15 @@
 import Foundation
+import Synchronization
 
 /// A value is copied under one lock, so readers cannot combine fields from
 /// different updates. Mutation stays synchronous and never holds a lock over await.
-final class LockedValue<Value: Sendable>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: Value
+final class LockedValue<Value: Sendable>: Sendable {
+    private let value: Mutex<Value>
 
-    init(_ value: Value) { self.value = value }
-    func load() -> Value { lock.withLock { value } }
-    func store(_ value: Value) { lock.withLock { self.value = value } }
-    func update(_ change: (inout Value) -> Void) { lock.withLock { change(&value) } }
+    init(_ value: Value) { self.value = Mutex(value) }
+    func load() -> Value { value.withLock { $0 } }
+    func store(_ new: Value) { value.withLock { $0 = new } }
+    func update(_ change: (inout Value) -> Void) { value.withLock { change(&$0) } }
 }
 
 /// When the engine last saw an agent do something, which is the one input to

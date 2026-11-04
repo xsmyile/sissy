@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Reads what Claude Code records about the account in its own config file:
 /// the subscription plan, and the usage credits the vendor has billed against
@@ -13,7 +14,7 @@ import Foundation
 /// A class rather than an actor because `UsageProvider.currentSignals()` is
 /// nonisolated: the aggregator reads it while the emitting provider still
 /// holds its own actor, so an actor hop here would deadlock the pair.
-final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
+final class ClaudeProfileSource: SourceSignals, Sendable {
     /// Claude Code rewrites this file on nearly every interaction — project
     /// history, feature counters — so a changed mtime is no evidence anything
     /// this type reads has moved. The floor is what keeps the safety-net poll
@@ -26,10 +27,13 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     private static let minimumReparseInterval: TimeInterval = 60
 
     private let url: URL
-    private let lock = NSLock()
-    private var attributed = Attributed()
-    private var lastParsedAt: Date = .distantPast
-    private var lastMTime: TimeInterval = 0
+    private struct State {
+        var attributed = Attributed()
+        var lastParsedAt: Date = .distantPast
+        var lastMTime: TimeInterval = 0
+    }
+
+    private let state = Mutex(State())
 
     /// `oauthAccount.seatTier` names which seat of a Team plan the account
     /// holds. Unprefixed, unlike the two above.
@@ -162,7 +166,7 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
 
     /// The reading and the account each half of it belongs to, which is what
     /// `ClaudeCodeSignals` needs to tell a stale profile from this one's.
-    func currentAttributed() -> Attributed { lock.withLock { attributed } }
+    func currentAttributed() -> Attributed { state.withLock { $0.attributed } }
 
     /// Re-reads the file when it has changed on disk and the floor has
     /// passed. A file that has stopped naming a plan clears the held one — a
@@ -179,8 +183,11 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     /// only job. The mtime gate still applies either way — an unchanged file
     /// has nothing new to say to anyone.
     func refresh(now: Date = Date(), userInitiated: Bool = false) {
-        let (parsedBefore, knownMTime, dueAt) = lock.withLock {
-            (lastParsedAt != .distantPast, lastMTime, lastParsedAt + Self.minimumReparseInterval)
+        let (parsedBefore, knownMTime, dueAt) = state.withLock {
+            (
+                $0.lastParsedAt != .distantPast, $0.lastMTime,
+                $0.lastParsedAt + Self.minimumReparseInterval
+            )
         }
         if parsedBefore && !userInitiated && now < dueAt { return }
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
@@ -194,22 +201,23 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
         let billed = Self.readCredits(root)
         let billedOwner = Self.creditsOwner(root)
         let cache = Self.readCachedWindows(root)
-        lock.withLock {
-            let profile = if case .found(let found) = reading { found } else { nil as Profile? }
-            attributed = Attributed(
-                signals: ProviderSignals(
-                    plan: profile?.plan, planTier: profile?.tier, planName: profile?.name,
-                    account: profile?.account, credits: billed),
-                profileOwner: profile?.owner,
-                creditsOwner: billedOwner,
-                cliVersion: (root[Self.cliVersionKey] as? String).flatMap {
-                    ClaudeResetGrants.isVersion($0) ? $0 : nil
-                },
-                fileOwner: Self.owner((root["oauthAccount"] as? [String: Any])?[Self.accountKey]),
-                cachedWindows: cache.windows,
-                cachedAt: cache.at)
-            lastParsedAt = now
-            lastMTime = mtime
+        let profile = if case .found(let found) = reading { found } else { nil as Profile? }
+        let parsed = Attributed(
+            signals: ProviderSignals(
+                plan: profile?.plan, planTier: profile?.tier, planName: profile?.name,
+                account: profile?.account, credits: billed),
+            profileOwner: profile?.owner,
+            creditsOwner: billedOwner,
+            cliVersion: (root[Self.cliVersionKey] as? String).flatMap {
+                ClaudeResetGrants.isVersion($0) ? $0 : nil
+            },
+            fileOwner: Self.owner((root["oauthAccount"] as? [String: Any])?[Self.accountKey]),
+            cachedWindows: cache.windows,
+            cachedAt: cache.at)
+        state.withLock {
+            $0.attributed = parsed
+            $0.lastParsedAt = now
+            $0.lastMTime = mtime
         }
     }
 
