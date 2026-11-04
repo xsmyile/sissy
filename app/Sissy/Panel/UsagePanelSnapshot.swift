@@ -644,6 +644,8 @@ struct UsagePanelSnapshot: Equatable {
         /// Whether the CLI itself is signed in as this account — the one whose
         /// future spend lands in the day beside it.
         let isSignedIn: Bool
+        /// How many running sessions are on this account.
+        let runningSessions: Int
     }
 
     struct ProviderRow: Equatable, Identifiable {
@@ -658,6 +660,9 @@ struct UsagePanelSnapshot: Equatable {
         /// the rest of the time, which is every install whose account index
         /// has always read.
         let accountsNotice: String?
+        /// Running sessions on the account the row's own fields describe, for
+        /// an install with one account, whose `accounts` is empty.
+        var runningSessions: Int = 0
         /// Subscription plan, already worded. Nil leaves the row's header at
         /// the name alone — an API-key user has no plan to name, and a Codex
         /// that has not taken a turn yet has not said which it is on.
@@ -2091,6 +2096,8 @@ struct UsagePanelSnapshot: Equatable {
                     reading: limitsReading, naming: naming, now: now),
                 accountsNotice: slice.id == ProviderID.claudeCode && claudeAccounts.indexSetAside
                     ? ClaudeAccountCopy.indexSetAside : nil,
+                runningSessions: slice.signals.accounts.first { $0.isSignedIn }?.runningSessions
+                    ?? slice.signals.accounts.first?.runningSessions ?? 0,
                 plan: plan?.label,
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
@@ -2243,8 +2250,9 @@ struct UsagePanelSnapshot: Equatable {
                 resets: makeResets(reading?.resets),
                 resetTarget: accountResetTarget(provider: provider, id: id, reading: reading),
                 notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet, provider: provider),
-                isReadable: reading != nil,
-                isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID))
+                isReadable: reading.map { !$0.isOnlyRunning || !$0.windows.isEmpty } ?? false,
+                isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID),
+                runningSessions: reading?.runningSessions ?? 0)
         }
         return entries.sorted { lhs, rhs in
             (lhs.isSignedIn ? 0 : 1, lhs.label, lhs.id) < (rhs.isSignedIn ? 0 : 1, rhs.label, rhs.id)

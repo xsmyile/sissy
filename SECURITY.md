@@ -36,9 +36,13 @@ repository. `KERN_PROC_ALL` enumerates the whole process table, not only
 yours; another user's entry is dropped there, on the credential in its table
 entry, before any of the three per-process calls run, and those run only for
 processes **running as you**. `KERN_PROCARGS2`, the one call that can return a
-command line, is asked only of a process whose executable is a JavaScript
-interpreter, which is the install shape where `argv[0]` names the CLI. No
-entitlement, no TCC prompt, and any process running as you can ask the same.
+command line, is asked of a process whose executable is a JavaScript
+interpreter, which is the install shape where `argv[0]` names the CLI, and of
+a Claude Code process. From the second, Sissy keeps `CLAUDE_CONFIG_DIR` and
+nothing else from that environment, logs none of it, and reads that folder's
+config file for the account it names and the usage reply the CLI cached there,
+never its credential. No entitlement, no TCC prompt, and any process running as
+you can ask the same.
 
 **Programs it runs.** Each at an absolute path, never resolved through `PATH`:
 

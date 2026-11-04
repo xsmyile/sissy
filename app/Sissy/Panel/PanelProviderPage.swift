@@ -284,6 +284,11 @@ struct PanelProviderPage: View {
                         accountPicker
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    if let inUse = ClaudeAccountCopy.inUseCaption(
+                        sessions: viewed.map(\.runningSessions) ?? row.runningSessions)
+                    {
+                        identityCaption(inUse)
+                    }
                     if let notice = row.accountsNotice {
                         identityCaption(notice)
                     }
@@ -315,7 +320,8 @@ struct PanelProviderPage: View {
             Menu {
                 Picker("Account", selection: accountBinding) {
                     ForEach(row.accounts) { choice in
-                        Text(choice.label).tag(choice.id)
+                        Text(ClaudeAccountCopy.menuLabel(choice.label, sessions: choice.runningSessions))
+                            .tag(choice.id)
                     }
                 }
                 .pickerStyle(.inline)

@@ -38,6 +38,8 @@ struct ClaudeCodeSignals: SourceSignals {
     /// and a credential another program wrote is not in it until some `claude`
     /// runs.
     let accounts: ClaudeAccountRegistry
+    /// Which accounts the running sessions are on, off the process sweep.
+    var running: ClaudeRunningSessions = .inert
 
     func currentSignals() -> ProviderSignals {
         let sources = webSources.load()
@@ -50,8 +52,10 @@ struct ClaudeCodeSignals: SourceSignals {
             probe: limitsProbe.flatMap {
                 Self.probeReading($0.currentReading(), for: signedIn, naming: active)
             })
-        reading.accounts = Self.perAccount(
-            reading, sources: sources, known: signedIn, active: active, links: webLinks.load())
+        reading.accounts = Self.withRunning(
+            Self.perAccount(
+                reading, sources: sources, known: signedIn, active: active, links: webLinks.load()),
+            running.current().accounts)
         return reading
     }
 
@@ -240,6 +244,34 @@ struct ClaudeCodeSignals: SourceSignals {
         return AccountSignals.signedInFirst(byAccount.values)
     }
 
+    /// The rows with each running account's session count, and a row of its own
+    /// for an account a running home names and nothing else answers for.
+    ///
+    /// Named from that home's `oauthAccount`, its gauges only what that file's
+    /// cached reply says. No limits reader is added and no other home's keychain
+    /// item is read, because a claude.ai link stays the live source for an account
+    /// the home Sissy meters is not on.
+    static func withRunning(
+        _ rows: [AccountSignals], _ running: [String: ClaudeRunningSessions.Account]
+    ) -> [AccountSignals] {
+        guard !running.isEmpty else { return rows }
+        var merged = rows.map { row -> AccountSignals in
+            var counted = row
+            counted.runningSessions = running[row.id]?.sessions ?? 0
+            return counted
+        }
+        let shown = Set(rows.map(\.id))
+        for found in running.values where !shown.contains(found.id) {
+            merged.append(
+                AccountSignals(
+                    id: found.id, account: found.account, plan: found.plan,
+                    planTier: found.planTier, planName: found.planName, windows: found.windows,
+                    credits: found.credits, limitsObservedAt: found.observedAt,
+                    runningSessions: found.sessions, isOnlyRunning: true))
+        }
+        return AccountSignals.signedInFirst(merged)
+    }
+
     /// The config file's reading, with whichever limits reader is actually
     /// answering laid over it.
     ///
@@ -339,6 +371,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
         webLinks: LockedValue<[String: ClaudeWebLink]>,
         profile: ClaudeProfileSource,
         accounts: ClaudeAccountRegistry,
+        running: ClaudeRunningSessions = .inert,
         ledger: ProjectLedger
     ) {
         self.pricingOverride = pricingOverride.map(PricingTable.init)
@@ -350,7 +383,7 @@ final class ClaudeCodeAdapter: SourceAdapter {
             watcherLabel: "sissy.usage.fswatch",
             signals: ClaudeCodeSignals(
                 limitsProbe: limitsProbe, webSources: webSources, webLinks: webLinks,
-                profile: profile, accounts: accounts)
+                profile: profile, accounts: accounts, running: running)
         )
     }
 
@@ -759,6 +792,7 @@ extension LocalUsageProvider {
         webLinks: LockedValue<[String: ClaudeWebLink]> = LockedValue([:]),
         profile: ClaudeProfileSource = .inert(),
         accounts: ClaudeAccountRegistry = .inert(),
+        running: ClaudeRunningSessions = .inert,
         ledger: ProjectLedger = ProjectLedger(),
         backfill: Range<Date>? = nil
     ) -> LocalUsageProvider {
@@ -772,6 +806,7 @@ extension LocalUsageProvider {
                 webLinks: webLinks,
                 profile: profile,
                 accounts: accounts,
+                running: running,
                 ledger: ledger
             ),
             retainDays: retainDays,
