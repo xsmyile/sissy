@@ -10,6 +10,19 @@ import Observation
 final class SissyModel {
     var currentFrame: FrameData? = nil
     var lastFrameAt: Date? = nil
+    /// The fields of the frame a surface reads while the panel is closed, each
+    /// stored apart from it so that reading one observes that one.
+    ///
+    /// The frame moves on every emission and these rarely do: `@Observable`
+    /// drops an assignment that leaves an `Equatable` value as it was, so the
+    /// menu bar and Settings wake when what they draw changes rather than each
+    /// time a token is counted. `currentFrame` stays for the panel, which is
+    /// on screen and draws most of it.
+    private(set) var hasFrame = false
+    private(set) var macLevel: MacHealthLevel?
+    private(set) var reportedKeepAwake: KeepAwakeState?
+    private(set) var accountSignals: [String: [AccountSignals]] = [:]
+    private(set) var forgeReadings: [ForgeActivityReading] = []
     var preferences: Preferences
     var settingsTab: SettingsTab = .general
     /// Whether the Awake tab should be showing the lid's confirmation. Held
@@ -203,7 +216,7 @@ final class SissyModel {
     var menuSnapshot: MenuSnapshot {
         let hold = keepAwake
         let header = HeaderSnapshot.make(
-            hasFrame: currentFrame != nil,
+            hasFrame: hasFrame,
             isWarm: engine.isWarm,
             filesWatched: engine.filesWatched,
             isMetering: engine.isMetering,
@@ -213,7 +226,7 @@ final class SissyModel {
             header: header,
             statusIcon: StatusIconSnapshot(
                 isAsleep: header.isAsleep, isHolding: hold.active,
-                macLevel: currentFrame?.macLevel)
+                macLevel: macLevel)
         )
     }
 
@@ -257,7 +270,7 @@ final class SissyModel {
     /// than a cold tint: see `UsageEngineHost.keepAwakeMode`.
     var keepAwake: KeepAwakeState {
         let reported =
-            currentFrame?.keepAwake ?? KeepAwakeState(mode: engine.keepAwakeMode, active: false)
+            reportedKeepAwake ?? KeepAwakeState(mode: engine.keepAwakeMode, active: false)
         guard let pending = pendingKeepAwake,
             reported.mode != pending.mode,
             Date().timeIntervalSince(pending.askedAt) < Self.keepAwakeAckWindow
@@ -312,6 +325,12 @@ final class SissyModel {
         if frame.keepAwake.mode != .off { preferredKeepAwakeMode = frame.keepAwake.mode }
         currentFrame = frame
         lastFrameAt = Date()
+        hasFrame = true
+        macLevel = frame.macLevel
+        reportedKeepAwake = frame.keepAwake
+        accountSignals = Dictionary(
+            frame.providers.map { ($0.id, $0.signals.accounts) }, uniquingKeysWith: { first, _ in first })
+        forgeReadings = frame.forge
     }
 
     /// Drops the reading on screen, for a change that invalidates it rather
@@ -321,6 +340,11 @@ final class SissyModel {
     func clearFrame() {
         currentFrame = nil
         lastFrameAt = nil
+        hasFrame = false
+        macLevel = nil
+        reportedKeepAwake = nil
+        accountSignals = [:]
+        forgeReadings = []
     }
 
     /// Switches the lid half of the hold, and answers whether the switch is

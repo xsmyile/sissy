@@ -25,8 +25,8 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
     private static let requestTimeout: TimeInterval = 15
     static let refreshInterval: Duration = .seconds(300)
     static let vendor = "OpenAI"
-    static var limitsState: WritableKeyPath<ProviderSignals, ProviderLimitsState> {
-        \.limitsState
+    static var limitsState: WritableKeyPath<AttributedReading, ProviderLimitsState> {
+        \.signals.limitsState
     }
     /// Header OpenAI selects a workspace with. A login can hold several and
     /// they are metered separately, so a reading without it is the vendor's
@@ -38,11 +38,21 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
     /// in as, which is not this reader's to fix or to remember.
     let account: String?
 
-    nonisolated let published = LockedValue(ProviderSignals())
-    /// The account the last reading actually came back for, published outside
-    /// the actor because the row it belongs to is decided while this reader is
-    /// still holding itself. Nil until one lands.
-    nonisolated private let observed = LockedValue<String?>(nil)
+    nonisolated let published = LockedValue(AttributedReading())
+
+    /// What the reader published, and whose credential it answers for.
+    ///
+    /// One value, published outside the actor because the row it belongs to is
+    /// decided while this reader is still holding itself. The two were written
+    /// apart once: the owner moved when `codex login` replaced the credential
+    /// and the windows when a request landed, which left one account's windows
+    /// under another account's id for as long as the request took or failed.
+    struct AttributedReading: Sendable, Equatable {
+        var signals = ProviderSignals()
+        /// `CodexCredential.userId` of the credential last read. A credential
+        /// naming anyone else takes `signals` down before it takes this over.
+        var owner: String?
+    }
 
     /// Where the credential comes from. Injectable for the reason the Claude
     /// readers' is: the keychain is what can raise a dialog, and a test of the
@@ -113,11 +123,21 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
         self.consumeSource = consumeSource
     }
 
-    nonisolated func currentSignals() -> ProviderSignals { published.load().live() }
+    nonisolated func currentSignals() -> ProviderSignals { published.load().signals.live() }
+
+    /// The live signals with the account they answer for, read in one load so
+    /// a credential replaced in between cannot pair one account's windows with
+    /// another's id.
+    nonisolated func currentReading() -> AttributedReading {
+        var reading = published.load()
+        reading.signals = reading.signals.live()
+        reading.owner = account ?? reading.owner
+        return reading
+    }
 
     /// Whose reading this is: the account the reader was built for, or the one
     /// the CLI's file turned out to name.
-    nonisolated var observedAccount: String? { account ?? observed.load() }
+    nonisolated var observedAccount: String? { account ?? published.load().owner }
 
     func start(userInitiated: Bool, onRefresh: @Sendable @escaping () async -> Void) {
         guard !retired, loop.pollTask == nil else { return }
@@ -132,16 +152,16 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
     /// this reader stopping is what puts the row back on them.
     func stop(clearingState: Bool = true) {
         cancelRequests()
-        observed.store(nil)
         nextCredit = nil
         published.update {
-            $0.windows = []
-            $0.credits = nil
-            $0.resets = nil
-            $0.account = nil
-            $0.plan = nil
-            $0.limitsObservedAt = nil
-            if clearingState { $0.limitsState = .quiet }
+            $0.owner = nil
+            $0.signals.windows = []
+            $0.signals.credits = nil
+            $0.signals.resets = nil
+            $0.signals.account = nil
+            $0.signals.plan = nil
+            $0.signals.limitsObservedAt = nil
+            if clearingState { $0.signals.limitsState = .quiet }
         }
         loop.lastReported = nil
     }
@@ -191,7 +211,7 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
         switch outcome {
         case .found(let found):
             published.update {
-                if $0.limitsState.isAnsweredByACredentialRead { $0.limitsState = .quiet }
+                if $0.signals.limitsState.isAnsweredByACredentialRead { $0.signals.limitsState = .quiet }
             }
             // An expired token keeps the previous reading rather than blanking
             // it: the credential is there and something else renews it — the
@@ -201,7 +221,7 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
                 report("the Codex access token has expired; waiting for it to be renewed")
                 return .wait(Self.refreshInterval)
             }
-            observed.store(found.userId)
+            takeOwnership(for: found)
             return .ready(found)
         case .missing:
             publishFailure(.signedOut)
@@ -250,13 +270,15 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
         var reading = try await fetchSource(credential)
         guard isCurrent(stamp) else { return Self.refreshInterval }
         if let named = reading.accountId, let asked = credential.accountId, named != asked {
-            report("OpenAI answered for a different account than the one asked for")
+            publishFailure(refusedState)
+            report("OpenAI answered for a different account than the one asked for; reading dropped")
+            return Self.refreshInterval
         }
         let dated = await dated(reading.resets, with: credential)
         guard isCurrent(stamp) else { return Self.refreshInterval }
         reading.resets = dated.resets
         nextCredit = dated.nextCredit
-        publish(reading)
+        publish(reading, for: credential)
         await backoff?.record(nil)
         return Self.refreshInterval
     }
@@ -317,7 +339,9 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
             }
             report("spending a Codex reset did not get an answer: \(error)")
         }
-        if outcome == .reset { published.update { $0.resets = $0.resets?.spendingOne() } }
+        if outcome == .reset {
+            published.update { $0.signals.resets = $0.signals.resets?.spendingOne() }
+        }
         await refresh(userInitiated: false, onRefresh: onRefresh)
         return outcome
     }
@@ -348,7 +372,7 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
                 return await handle(error)
             }
         case .expired:
-            published.update { $0.limitsState = .sessionExpired }
+            published.update { $0.signals.limitsState = .sessionExpired }
             report("the Codex credential was refused and its renewal was rejected; link it again")
         case .unreadable, .missing, .signedOut, .needsAuthorization, .refused:
             report("the Codex credential was refused and could not be renewed yet")
@@ -369,17 +393,37 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
     /// which names the account by id only — and it decorates the address the
     /// reply does carry, because an account line with an organisation and no
     /// address is the half nobody recognises.
-    private func publish(_ reading: CodexUsagePayload.Reading) {
+    private func publish(_ reading: CodexUsagePayload.Reading, for credential: CodexCredential) {
         published.update {
-            $0.windows = reading.windows
-            $0.credits = reading.credits
-            $0.resets = reading.resets
-            $0.plan = reading.plan ?? $0.plan
-            $0.account = ProviderAccount(
+            $0.owner = credential.userId
+            $0.signals.windows = reading.windows
+            $0.signals.credits = reading.credits
+            $0.signals.resets = reading.resets
+            $0.signals.plan = reading.plan ?? $0.signals.plan
+            $0.signals.account = ProviderAccount(
                 email: reading.account?.email, organization: workspace)
-            $0.limitsState = .quiet
-            $0.limitsObservedAt = Date()
+            $0.signals.limitsState = .quiet
+            $0.signals.limitsObservedAt = Date()
         }
+    }
+
+    /// Moves the published reading to the credential just read, taking down
+    /// whatever another account's credential left there.
+    ///
+    /// Everything goes with it, the state included: a refusal or a plan earned
+    /// by the account the user left says nothing about the one they joined.
+    private func takeOwnership(for credential: CodexCredential) {
+        guard published.load().owner != credential.userId else { return }
+        nextCredit = nil
+        published.store(AttributedReading(owner: credential.userId))
+    }
+
+    /// What a credential OpenAI will not answer for says on the row. A linked
+    /// account's is Sissy's, and linking again replaces it; the CLI's is
+    /// `codex login`'s, and linking would add a second account and leave this
+    /// row as it is.
+    private var refusedState: ProviderLimitsState {
+        account == nil ? .credentialRefused : .sessionExpired
     }
 
     /// What a failed request costs, and what it says.
@@ -399,8 +443,8 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
     private func handle(_ error: Error) async -> Duration {
         if let wait = await backOff(after: error) { return wait }
         if case UsageRequestError.badStatus(let code) = error, Self.refusalStatuses.contains(code) {
-            let refused: ProviderLimitsState = account == nil ? .credentialRefused : .sessionExpired
-            published.update { $0.limitsState = refused }
+            let refused = refusedState
+            published.update { $0.signals.limitsState = refused }
             report("the Codex credential was refused (status \(code)); sign in again")
             return Self.refreshInterval
         }
@@ -415,11 +459,11 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
     private func publishFailure(_ state: ProviderLimitsState) {
         nextCredit = nil
         published.update {
-            $0.limitsState = state
-            $0.windows = []
-            $0.credits = nil
-            $0.resets = nil
-            $0.limitsObservedAt = nil
+            $0.signals.limitsState = state
+            $0.signals.windows = []
+            $0.signals.credits = nil
+            $0.signals.resets = nil
+            $0.signals.limitsObservedAt = nil
         }
     }
 

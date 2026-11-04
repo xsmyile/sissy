@@ -198,10 +198,9 @@ final class StatusItemController: NSObject {
 
     /// A blink when a frame lands is Sissy noticing new numbers.
     ///
-    /// `lastFrameAt` carries the frame's own `ts`, which has second
-    /// resolution, and `@Observable` suppresses an assignment that doesn't
-    /// change the value — so a replayed frame is already silent.
-    /// `SissyMenuBarMotion.dataBlinkCooldown` covers what that leaves. The
+    /// `lastFrameAt` is the moment a frame landed rather than anything the
+    /// frame says, so every frame moves it, a replayed one included.
+    /// `SissyMenuBarMotion.dataBlinkCooldown` is what paces the blinks. The
     /// panel's Sissy paces herself on the same constant, off her own clock:
     /// the two surfaces match in rhythm, not frame for frame.
     private func observeFrameArrivals() {

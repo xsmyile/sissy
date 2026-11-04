@@ -184,9 +184,6 @@ struct PanelCalendar: View {
         }
         .padding(PanelMetrics.platterInset)
         .task(id: [shown, Calendar.current.startOfDay(for: now)]) {
-            if self.grid?.month != shown {
-                self.grid = CalendarMonth.make(month: shown, reading: nil, now: Date())
-            }
             guard let span = UsageDaySpan.month(containing: shown, now: Date()) else { return }
             let reading = await load(span)
             guard !Task.isCancelled else { return }
@@ -298,10 +295,10 @@ struct PanelCalendar: View {
         let calendar = Calendar.current
         let symbols = calendar.veryShortStandaloneWeekdaySymbols
         let first = calendar.firstWeekday - 1
-        let ordered = Array(symbols[first...] + symbols[..<first])
+        let ordered = symbols.indices.map { ($0 + first) % symbols.count }
         return HStack(spacing: 0) {
-            ForEach(Array(ordered.enumerated()), id: \.offset) { _, symbol in
-                Text(symbol)
+            ForEach(ordered, id: \.self) { weekday in
+                Text(symbols[weekday])
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity)
@@ -318,7 +315,7 @@ struct PanelCalendar: View {
         return GeometryReader { geo in
             let column = geo.size.width / 7
             ZStack(alignment: .topLeading) {
-                ForEach(Array(grid.cells.enumerated()), id: \.element.id) { index, cell in
+                ForEach(grid.cells.enumerated(), id: \.element.id) { index, cell in
                     let slot = grid.leading + index
                     self.cell(cell, width: column)
                         .frame(width: column, height: Self.rowHeight)

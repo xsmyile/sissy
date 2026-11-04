@@ -77,6 +77,76 @@ final class ClaudeUsagePayloadTests: XCTestCase {
         XCTAssertNil(windows.first?.scope)
     }
 
+    /// A kind renamed under `limits` used to answer with no windows at all,
+    /// published as a fresh quiet reading with both flat buckets beside it.
+    func testALimitsListThatMapsToNothingFallsBackToTheFlatKeys() {
+        let windows = ClaudeUsagePayload.windows([
+            "limits": [["kind": "amber_ladder", "percent": 5, "resets_at": reset]],
+            "five_hour": ["utilization": 12.0, "resets_at": reset],
+            "seven_day": ["utilization": 40.0, "resets_at": reset],
+        ])
+        XCTAssertEqual(windows.map(\.minutes), [300, 10_080])
+        XCTAssertEqual(windows.map(\.usedPercent), [12, 40])
+    }
+
+    func testALimitsListThatMapsKeepsTheFlatKeysOut() {
+        let windows = ClaudeUsagePayload.windows([
+            "limits": [["kind": "session", "percent": 5, "resets_at": reset]],
+            "seven_day": ["utilization": 40.0, "resets_at": reset],
+        ])
+        XCTAssertEqual(windows.map(\.minutes), [300])
+    }
+
+    /// The flat path used to drop a period nobody has started, where its own
+    /// docstring and `UsageWindow.resetsAt` both call that a window at zero.
+    func testAFlatBucketWithNoResetIsStillAWindow() {
+        let windows = ClaudeUsagePayload.windows([
+            "five_hour": ["utilization": 0.0, "resets_at": NSNull()]
+        ])
+        XCTAssertEqual(windows.map(\.minutes), [300])
+        XCTAssertNil(windows.first?.resetsAt)
+    }
+
+    /// A model-scoped bucket naming no model would draw as a second plan-wide
+    /// weekly gauge. The live scope is `{model, surface}`, so either half can
+    /// be null.
+    func testAScopedBucketNamingNoModelIsSkipped() {
+        for scope: Any in [
+            NSNull(),
+            ["model": NSNull(), "surface": "cowork"],
+            ["model": ["display_name": ""], "surface": NSNull()],
+            ["model": ["display_name": NSNull()]],
+        ] {
+            let windows = ClaudeUsagePayload.windows([
+                "limits": [
+                    ["kind": "weekly_all", "percent": 100, "resets_at": reset],
+                    ["kind": "weekly_scoped", "percent": 12, "resets_at": reset, "scope": scope],
+                ]
+            ])
+            XCTAssertEqual(windows.count, 1)
+            XCTAssertNil(windows.first?.scope)
+        }
+    }
+
+    /// What the once-only log line names: the kinds that mapped to nothing,
+    /// and the bucket-shaped keys only when the flat ones drew nothing.
+    func testUnmappedNamesAreTheKindsAndTheBucketShapedKeys() {
+        let listed: [[String: Any]] = [["kind": "amber_ladder"], ["kind": "NOT A TOKEN"]]
+        let body: [String: Any] = [
+            "ember_scale": ["utilization": 1.0],
+            "spend": ["enabled": true],
+        ]
+        XCTAssertEqual(
+            ClaudeUsagePayload.unmappedNames(listed: listed, flat: [], body: body),
+            ["amber_ladder", "ember_scale"])
+        let drawn = [UsageWindow(minutes: 300, usedPercent: 1, resetsAt: nil)!]
+        XCTAssertEqual(
+            ClaudeUsagePayload.unmappedNames(listed: listed, flat: drawn, body: body),
+            ["amber_ladder"])
+        XCTAssertEqual(
+            ClaudeUsagePayload.unmappedNames(listed: [], flat: [], body: ["spend": [:]]), [])
+    }
+
     // MARK: - The money
 
     private var spendBody: [String: Any] {

@@ -45,6 +45,26 @@ import SwiftUI
 struct PanelIdentities: View {
     let rows: [UsagePanelSnapshot.IdentityRow]
     let focus: String?
+    /// What the page shows without being asked: the findings.
+    private let standing: [UsagePanelSnapshot.IdentityRow]
+    /// What the disclosure folds, drawn under it so opening and closing it
+    /// leaves the control where the pointer is.
+    private let rest: [UsagePanelSnapshot.IdentityRow]
+    /// How many rows carry each mark, in the order the rows sort, leaving out
+    /// the marks no row carries.
+    private let counts: [(mark: UsagePanelSnapshot.IdentityMark, count: Int)]
+
+    init(rows: [UsagePanelSnapshot.IdentityRow], focus: String?) {
+        self.rows = rows
+        self.focus = focus
+        standing = rows.filter { $0.mark == .unexpected }
+        rest = rows.filter { $0.mark != .unexpected }
+        let marks: [UsagePanelSnapshot.IdentityMark] = [.unexpected, .agrees, .unjudged]
+        counts = marks.compactMap { mark in
+            let count = rows.count { $0.mark == mark }
+            return count == 0 ? nil : (mark, count)
+        }
+    }
 
     /// Local to the page, so leaving it and coming back asks the question
     /// again rather than answering the one before last — the same arrangement
@@ -55,27 +75,6 @@ struct PanelIdentities: View {
     private static let rowSpacing: CGFloat = 12
     private static let recapSpacing: CGFloat = 6
     private static let countSpacing: CGFloat = 10
-
-    /// What the page shows without being asked: the findings.
-    private var standing: [UsagePanelSnapshot.IdentityRow] {
-        rows.filter { $0.mark == .unexpected }
-    }
-
-    /// What the disclosure folds, drawn under it so opening and closing it
-    /// leaves the control where the pointer is.
-    private var rest: [UsagePanelSnapshot.IdentityRow] {
-        rows.filter { $0.mark != .unexpected }
-    }
-
-    /// How many rows carry each mark, in the order the rows sort, leaving out
-    /// the marks no row carries.
-    private var counts: [(mark: UsagePanelSnapshot.IdentityMark, count: Int)] {
-        let marks: [UsagePanelSnapshot.IdentityMark] = [.unexpected, .agrees, .unjudged]
-        return marks.compactMap { mark in
-            let count = rows.count { $0.mark == mark }
-            return count == 0 ? nil : (mark, count)
-        }
-    }
 
     /// The row the page was opened about, when it sits under the fold — a
     /// finding already answers for itself above it.
@@ -137,7 +136,7 @@ struct PanelIdentities: View {
             Text(
                 UsageFormat.identityVerdict(
                     unexpected: standing.count,
-                    unjudged: rows.count { $0.mark == .unjudged })
+                    unjudged: counts.first { $0.mark == .unjudged }?.count ?? 0)
             )
             .font(.system(size: 12))
             .fixedSize(horizontal: false, vertical: true)

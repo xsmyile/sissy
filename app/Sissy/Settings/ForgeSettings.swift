@@ -423,7 +423,7 @@ struct ForgeSettingsView: View {
     /// row re-reads the counters — so the same sign would mean two things one
     /// tooltip apart. macOS draws no icon inside a SwiftUI menu item anyway.
     private func row(_ connection: ForgeConnection) -> some View {
-        let reading = model.liveFrame?.frame.forge.first { $0.id == connection.id }
+        let reading = model.forgeReadings.first { $0.id == connection.id }
         return CredentialRow(
             title: connection.address,
             subtitle: subtitle(connection, reading: reading),

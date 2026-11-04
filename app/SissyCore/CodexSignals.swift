@@ -49,16 +49,16 @@ struct CodexSignals: SourceSignals {
 
     func currentSignals() -> ProviderSignals {
         let readers = sources.load()
-        let signedIn = readers.first { $0.account == nil }
+        let signedIn = readers.first { $0.account == nil }?.currentReading()
         // The signed-in account's own reading: the turns, with its own poll
         // laid over them. Resolved once and used twice — for the row and for
         // that account's entry — because the two must not be able to disagree
         // about what the account the CLI is on is doing.
-        let own = Self.merge(rollout: rollout.load(), live: signedIn?.currentSignals())
+        let own = Self.merge(rollout: rollout.load(), live: signedIn?.signals)
         var reading = Self.row(
             own: own, linked: readers.filter { $0.account != nil }.map { $0.currentSignals() })
         reading.accounts = Self.perAccount(
-            own: own, signedIn: signedIn, readers: readers, links: links.load())
+            own: own, signedInID: signedIn?.owner, readers: readers, links: links.load())
         return reading
     }
 
@@ -126,12 +126,11 @@ struct CodexSignals: SourceSignals {
     /// readings and belonging to different accounts is the whole point.
     static func perAccount(
         own: ProviderSignals,
-        signedIn: CodexUsageSource?,
+        signedInID: String?,
         readers: [CodexUsageSource],
         links: [String: CodexAccountLink]
     ) -> [AccountSignals] {
         var entries: [AccountSignals] = []
-        let signedInID = signedIn?.observedAccount
         if let signedInID {
             entries.append(
                 AccountSignals(

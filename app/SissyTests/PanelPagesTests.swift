@@ -249,6 +249,32 @@ final class PanelPagesTests: XCTestCase {
             UsagePanelView.openRow(.services("codex", account: nil), in: [row("claude-code")]))
     }
 
+    /// "Check Identity…" on a provider page's project row lands on a page
+    /// backed by no row. Treating that as the provider having left the frame
+    /// sent the page straight back to the Overview.
+    func testOnlyAPageAboutAProviderLosesItsRow() {
+        XCTAssertFalse(UsagePanelView.needsRow(.overview))
+        XCTAssertFalse(UsagePanelView.needsRow(.calendar))
+        XCTAssertFalse(UsagePanelView.needsRow(.projects(nil, account: nil)))
+        XCTAssertFalse(
+            UsagePanelView.needsRow(
+                .identities(focus: "/repos/a", from: .provider("codex", account: nil))))
+
+        XCTAssertTrue(UsagePanelView.needsRow(.provider("codex", account: nil)))
+        XCTAssertTrue(UsagePanelView.needsRow(.services("codex", account: nil)))
+        XCTAssertTrue(UsagePanelView.needsRow(.effort("codex", account: nil)))
+        XCTAssertTrue(UsagePanelView.needsRow(.projects("codex", account: nil)))
+    }
+
+    /// The focus reads the same whichever page the identities were opened from.
+    func testTheIdentitiesFocusSurvivesItsOrigin() {
+        XCTAssertEqual(
+            UsagePanelView.identityFocus(
+                .identities(focus: "/repos/a", from: .projects("codex", account: "acct"))),
+            "/repos/a")
+        XCTAssertNil(UsagePanelView.identityFocus(.identities(focus: nil, from: .overview)))
+    }
+
     // MARK: Attention on the Overview
 
     /// The split must not hide what the notice exists to show. The grant
