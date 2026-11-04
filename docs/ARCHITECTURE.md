@@ -651,6 +651,17 @@ keep-awake switch, which is where the app's own controls live.
 `Panel/PanelComponents.swift` holds what the pages draw in common, so a bar or a
 badge cannot drift a point between them.
 
+What the panel words is spread by what it words, and all of it is one `UsageFormat`:
+
+| File | Words |
+|---|---|
+| `Panel/UsageFormat.swift` | windows, periods, money, plans, models, effort and projects, and `UnitStep`, the one unit cascade |
+| `Panel/UsageFormatIdentity.swift` | an account of a vendor that has more than one, and git identities |
+| `Panel/UsageFormatAgents.swift` | running sessions, their footprint and their chart, and a worked duration |
+| `Panel/UsageFormatForge.swift` | a connected forge's counters, its day and its Actions minutes |
+| `Panel/UsageFormatMac.swift` | the Mac, Disk and Network tabs |
+| `Panel/SharedCopy.swift` | the sentences that are not figures: dialogs, account links, resets and the status switch, for Settings and the panel alike |
+
 The Overview carries a gauge per readable account rather than one across every
 provider. A single one reports the tightest and silently implies the rest are
 fine — measured on a day with Claude and Codex both at 100%, it named Codex and
