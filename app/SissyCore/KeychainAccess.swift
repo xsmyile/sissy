@@ -116,7 +116,7 @@ enum KeychainAccess {
     /// this lock's wait is the only bound they have. That is a worse failure
     /// than the overlap this exists to prevent. The claude.ai session poll
     /// (`ClaudeWebSource`) and the forge token reads (`ForgeActivityMonitor`)
-    /// go through `offPool` and the linked Codex accounts' reads through
+    /// go through `BlockingWork.run` and the linked Codex accounts' reads through
     /// `CodexRenewal`'s own queue, so the wait parks a dispatch thread. Two
     /// reads still run on the cooperative pool. `ForgeConnector`'s look for a
     /// token already filed, once per press of Connect. And
@@ -153,19 +153,6 @@ enum KeychainAccess {
     }
 
     private static let interactionLock = NSLock()
-
-    /// Runs a blocking keychain read on a dispatch thread and resumes with its
-    /// answer, so it parks that thread rather than one of the cooperative
-    /// pool's, which the whole runtime shares. For a read that needs no gate
-    /// and no budget of its own beyond the one `suppressingInteraction` puts
-    /// on the wait behind another reader. An interactive read still waits on
-    /// its dialog for as long as it is up, which is why only a user's own
-    /// gesture makes one.
-    static func offPool<Value: Sendable>(_ read: @escaping @Sendable () -> Value) async -> Value {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async { continuation.resume(returning: read()) }
-        }
-    }
 
     /// What one `SecItemCopyMatching` outcome means. Pure, because this is the
     /// mapping that decides whether the probe keeps polling or stops for good,

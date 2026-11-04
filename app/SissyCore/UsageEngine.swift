@@ -2403,8 +2403,8 @@ actor UsageEngine {
     ///
     /// The decision is the actor's and the file walk is not: the retention a
     /// switched-off archive is gated on lives in `config`, while decoding a
-    /// file per day belongs anywhere but here. Awaiting a detached task is
-    /// what separates them — the actor suspends rather than blocks, so frames
+    /// file per day belongs anywhere but here. `BlockingWork` is what separates
+    /// them — the actor suspends rather than blocks, so frames
     /// keep being emitted while a slow volume answers.
     ///
     /// This runs when a page opens, never on the frame path. `currentHistory`
@@ -2418,9 +2418,9 @@ actor UsageEngine {
     func historySeries(provider: String, days: Int) async -> [UsageHistoryDaySummary] {
         guard config.resolvedHistoryRetentionDays > 0 else { return [] }
         let directory = stateDir
-        return await Task.detached {
+        return await BlockingWork.run(qos: .userInitiated) {
             UsageHistoryStore.series(provider: provider, days: days, in: directory)
-        }.value
+        }
     }
 
     /// What the archive holds for days picked on a calendar, and what each

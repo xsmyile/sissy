@@ -1354,9 +1354,9 @@ func runServerConfigSaveTests() {
 /// dialog being answered afterwards changed nothing, because nobody was left
 /// waiting on it.
 func runKeychainGateTests() {
-    print("=== KeychainLookupGate ===")
+    print("=== SingleFlight ===")
 
-    let gate = KeychainLookupGate()
+    let gate = SingleFlight<ClaudeCredentialsLookup>(abandoned: .timedOut)
     let first = UUID()
     let second = UUID()
     let firstJoined = DispatchSemaphore(value: 0)
@@ -1426,7 +1426,7 @@ func runKeychainGateTests() {
     }
     fourthJoined.wait()
 
-    gate.giveUp(third)
+    gate.leave(third)
     thirdDone.wait()
     expect("a caller out of budget is answered timedOut", thirdGaveUp.value, true)
 

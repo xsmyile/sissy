@@ -337,7 +337,7 @@ final class DiskConfigTests: XCTestCase {
 
 /// The single-read gate, driven by hand: one waiter at a time, answered by
 /// `finish` or by its own cancel.
-final class DiskReadGateTests: XCTestCase {
+final class SingleFlightTests: XCTestCase {
     private static let sample = DiskReading(
         observedAt: Date(), home: nil, purgeable: nil, physicalMemory: 1, volumes: [])
 
@@ -346,7 +346,7 @@ final class DiskReadGateTests: XCTestCase {
     /// is what clears it: a later waiter under the same id is a waiter again
     /// rather than answered nil on arrival, which is the id kept for good.
     func testAnIDCancelledAfterItsReadFinishedIsForgotten() async {
-        let gate = DiskReadGate()
+        let gate = SingleFlight<DiskReading?>(abandoned: nil)
         let id = UUID()
         let first = await withCheckedContinuation { continuation in
             XCTAssertTrue(gate.join(id, continuation))
@@ -367,7 +367,7 @@ final class DiskReadGateTests: XCTestCase {
     /// And the case the record exists for: a waiter cancelled before it
     /// joined is answered nil the moment it does.
     func testAWaiterThatLeftBeforeJoiningIsAnsweredNil() async {
-        let gate = DiskReadGate()
+        let gate = SingleFlight<DiskReading?>(abandoned: nil)
         let id = UUID()
         gate.leave(id)
 
@@ -411,4 +411,32 @@ private final class FrameCounter: @unchecked Sendable {
     var count: Int { lock.withLock { value } }
 
     func bump() { lock.withLock { value += 1 } }
+}
+
+final class BlockingWorkTests: XCTestCase {
+    private struct Refused: Error {}
+
+    func testAnAnswerComesBack() async {
+        let answer = await BlockingWork.run { 42 }
+        XCTAssertEqual(answer, 42)
+    }
+
+    func testAThrowComesBack() async {
+        do {
+            _ = try await BlockingWork.run { () throws -> Int in throw Refused() }
+            XCTFail("the throw should have reached the caller")
+        } catch {
+            XCTAssertTrue(error is Refused)
+        }
+    }
+
+    /// The point of it: `Task.detached` leaves an actor and not the pool, so
+    /// this holds which queue the work is on rather than which actor it is off.
+    func testTheWorkRunsOffTheCooperativePool() async {
+        let name = await BlockingWork.run { () -> String in
+            let label = __dispatch_queue_get_label(nil)
+            return String(cString: label)
+        }
+        XCTAssertFalse(name.contains("cooperative"), name)
+    }
 }

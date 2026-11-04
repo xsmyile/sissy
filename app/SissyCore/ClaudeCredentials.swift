@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 
 /// Read-only view of the OAuth credentials Claude Code keeps in the login
 /// keychain.
@@ -77,64 +76,17 @@ enum ClaudeCredentialsStore {
                 } catch {
                     return
                 }
-                gate.giveUp(id)
+                gate.leave(id)
             }
             if mine {
-                DispatchQueue.global(qos: .utility).async {
-                    gate.finish(lookup())
-                }
+                BlockingWork.start { gate.finish(lookup()) }
             }
         }
         deadline?.cancel()
+        await deadline?.value
+        gate.forget(id)
         return outcome
     }
 
-    private static let gate = KeychainLookupGate()
-}
-
-/// The single in-flight keychain lookup and everyone waiting on its answer.
-///
-/// One at a time is the whole point: `SecItemCopyMatching` behind a
-/// user-presence prompt blocks until the dialog is answered, and a second call
-/// would park a second dispatch thread behind that same dialog. The waiters
-/// are independent of it — each leaves on its own budget, and whoever is still
-/// there when the lookup returns is served.
-final class KeychainLookupGate: Sendable {
-    private struct State {
-        var inFlight = false
-        var waiters: [UUID: CheckedContinuation<ClaudeCredentialsLookup, Never>] = [:]
-    }
-
-    private let state = Mutex(State())
-
-    /// Registers `id` as a waiter and reports whether this caller is the one
-    /// that has to run the lookup.
-    func join(
-        _ id: UUID,
-        _ continuation: CheckedContinuation<ClaudeCredentialsLookup, Never>
-    ) -> Bool {
-        state.withLock {
-            $0.waiters[id] = continuation
-            if $0.inFlight { return false }
-            $0.inFlight = true
-            return true
-        }
-    }
-
-    /// The lookup returned. Hands its answer to everyone still waiting and
-    /// reopens the slot.
-    func finish(_ value: ClaudeCredentialsLookup) {
-        let pending = state.withLock { state in
-            state.inFlight = false
-            defer { state.waiters.removeAll() }
-            return state.waiters
-        }
-        for continuation in pending.values { continuation.resume(returning: value) }
-    }
-
-    /// One caller's budget ran out. It leaves alone: the lookup stays in
-    /// flight, and the waiters still under their own budget are served by it.
-    func giveUp(_ id: UUID) {
-        state.withLock { $0.waiters.removeValue(forKey: id) }?.resume(returning: .timedOut)
-    }
+    private static let gate = SingleFlight<ClaudeCredentialsLookup>(abandoned: .timedOut)
 }

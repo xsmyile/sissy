@@ -51,9 +51,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The test host must not start the user's engine or retire login items.
         guard NSClassFromString("XCTestCase") == nil else { return }
-        storagePurge = Task.detached(priority: .utility) {
-            HTTPStoragePurge.run(in: .user())
-            ClaudeArchiveRemoval.live().run()
+        storagePurge = Task {
+            await BlockingWork.run {
+                HTTPStoragePurge.run(in: .user())
+                ClaudeArchiveRemoval.live().run()
+            }
         }
         model.start()
 

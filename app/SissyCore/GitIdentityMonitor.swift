@@ -214,37 +214,35 @@ actor GitIdentityMonitor {
         _ targets: [(String, ProjectRemote?)], git: URL, home: URL,
         reusing scans: [String: GitIdentityScan], stamps: [String: [String: Date]]
     ) async -> Round {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                let deadline = Date().addingTimeInterval(Self.sweepBudget)
-                let live = self.liveGeneration.load()
-                var round = Round()
-                for (repository, remote) in targets {
-                    if let known = scans[repository], let seen = stamps[repository],
-                        GitIdentityReader.stamps(of: known.sources) == seen
-                    {
-                        round.scans[repository] = known
-                        round.stamps[repository] = seen
-                        continue
-                    }
-                    guard Date() < deadline, self.liveGeneration.load() == live else {
-                        round.scans[repository] = scans[repository]
-                        round.stamps[repository] = stamps[repository]
-                        continue
-                    }
-                    let startedAt = Date()
-                    guard
-                        let scan = GitIdentityReader.read(
-                            repository: repository, remote: remote, git: git, home: home)
-                    else { continue }
-                    round.scans[repository] = scan
-                    let taken = GitIdentityReader.stamps(of: scan.sources)
-                    if taken.values.allSatisfy({ $0 < startedAt }) {
-                        round.stamps[repository] = taken
-                    }
+        await BlockingWork.run {
+            let deadline = Date().addingTimeInterval(Self.sweepBudget)
+            let live = self.liveGeneration.load()
+            var round = Round()
+            for (repository, remote) in targets {
+                if let known = scans[repository], let seen = stamps[repository],
+                    GitIdentityReader.stamps(of: known.sources) == seen
+                {
+                    round.scans[repository] = known
+                    round.stamps[repository] = seen
+                    continue
                 }
-                continuation.resume(returning: round)
+                guard Date() < deadline, self.liveGeneration.load() == live else {
+                    round.scans[repository] = scans[repository]
+                    round.stamps[repository] = stamps[repository]
+                    continue
+                }
+                let startedAt = Date()
+                guard
+                    let scan = GitIdentityReader.read(
+                        repository: repository, remote: remote, git: git, home: home)
+                else { continue }
+                round.scans[repository] = scan
+                let taken = GitIdentityReader.stamps(of: scan.sources)
+                if taken.values.allSatisfy({ $0 < startedAt }) {
+                    round.stamps[repository] = taken
+                }
             }
+            return round
         }
     }
 
