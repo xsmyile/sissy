@@ -249,7 +249,7 @@ final class ClaudeWebSessionSecrecyTests: XCTestCase {
         let written = try String(
             contentsOf: ClaudeWebSessionIndex.defaultURL(in: directory), encoding: .utf8)
         XCTAssertFalse(written.contains(sessionPrefix))
-        assertNoSession(in: index.load(), "the loaded links")
+        assertNoSession(in: try index.load(), "the loaded links")
     }
 
     /// What the login window hands the app when one question is left. The

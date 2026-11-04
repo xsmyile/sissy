@@ -464,6 +464,6 @@ final class CodexAccountLinkTests: XCTestCase {
             contentsOf: CodexAccountIndex.defaultURL(in: directory), encoding: .utf8)
         XCTAssertFalse(written.contains("access-token"))
         XCTAssertTrue(written.contains("someone@example.com"))
-        assertNoToken(in: index.load(), "the loaded links")
+        assertNoToken(in: try index.load(), "the loaded links")
     }
 }

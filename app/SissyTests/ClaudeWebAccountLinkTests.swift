@@ -151,15 +151,15 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
     }
 
     /// An index nobody has written is no links, not a failure.
-    func testAnAbsentFileIsNoLinks() {
-        XCTAssertTrue(index.load().isEmpty)
+    func testAnAbsentFileIsNoLinks() throws {
+        XCTAssertTrue(try index.load().isEmpty)
     }
 
     func testALinkSurvivesARoundTrip() throws {
         try index.remember(link("a1b2c3d4", organization: "org-1"))
 
-        XCTAssertEqual(index.load()["a1b2c3d4"]?.organization, "org-1")
-        XCTAssertEqual(index.load()["a1b2c3d4"]?.identity.email, "a1b2c3d4@example.com")
+        XCTAssertEqual(try index.load()["a1b2c3d4"]?.organization, "org-1")
+        XCTAssertEqual(try index.load()["a1b2c3d4"]?.identity.email, "a1b2c3d4@example.com")
     }
 
     /// Linking the same account again replaces its entry: the session it
@@ -168,8 +168,8 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
         try index.remember(link("a1b2c3d4", organization: "org-1"))
         try index.remember(link("a1b2c3d4", organization: "org-2"))
 
-        XCTAssertEqual(index.load().count, 1)
-        XCTAssertEqual(index.load()["a1b2c3d4"]?.organization, "org-2")
+        XCTAssertEqual(try index.load().count, 1)
+        XCTAssertEqual(try index.load()["a1b2c3d4"]?.organization, "org-2")
     }
 
     /// A session adopted from Claude.app was never asked about, so it records
@@ -177,8 +177,8 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
     func testAnAdoptedSessionRecordsNoOrganization() throws {
         try index.remember(link("a1b2c3d4", organization: nil))
 
-        XCTAssertNil(index.load()["a1b2c3d4"]?.organization)
-        XCTAssertNotNil(index.load()["a1b2c3d4"])
+        XCTAssertNil(try index.load()["a1b2c3d4"]?.organization)
+        XCTAssertNotNil(try index.load()["a1b2c3d4"])
     }
 
     func testForgettingOneLeavesTheOthers() throws {
@@ -187,7 +187,7 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
 
         try index.forget(uuid: "a1b2c3d4")
 
-        XCTAssertEqual(Array(index.load().keys), ["e5f6a7b8"])
+        XCTAssertEqual(Array(try index.load().keys), ["e5f6a7b8"])
     }
 
     /// Links made at once from different threads all land: each change reads,
@@ -201,7 +201,57 @@ final class ClaudeWebSessionIndexTests: XCTestCase {
             do { try index.remember(links[position]) } catch { failures.update { $0 += 1 } }
         }
         XCTAssertEqual(failures.load(), 0)
-        XCTAssertEqual(index.load().count, links.count)
+        XCTAssertEqual(try index.load().count, links.count)
+    }
+
+    /// The defect: a file that would not decode read as no links, and the
+    /// next change wrote that over it, losing every account's name and chosen
+    /// organisation.
+    func testAnUndecodableFileIsNeverOverwritten() throws {
+        let garbled = Data("{\"links\":[".utf8)
+        try garbled.write(to: index.url)
+        XCTAssertThrowsError(try index.load())
+        XCTAssertThrowsError(try index.remember(link("a1b2c3d4", organization: nil)))
+        XCTAssertThrowsError(try index.forget(uuid: "a1b2c3d4"))
+        XCTAssertEqual(try Data(contentsOf: index.url), garbled)
+    }
+
+    func testAnUndecodableFileIsMovedAsideWithItsBytes() throws {
+        let garbled = Data("{\"links\":[".utf8)
+        try garbled.write(to: index.url)
+        XCTAssertEqual(try index.loadSettingAside().count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: index.url.path))
+        let aside = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        XCTAssertEqual(aside.count, 1)
+        XCTAssertTrue(aside.first?.contains("unreadable") ?? false)
+        XCTAssertEqual(
+            try Data(contentsOf: directory.appendingPathComponent(try XCTUnwrap(aside.first))),
+            garbled)
+    }
+
+    func testALinkAfterTheSetAsideStartsAFreshIndex() throws {
+        try Data("{\"links\":[".utf8).write(to: index.url)
+        _ = try index.loadSettingAside()
+        try index.remember(link("a1b2c3d4", organization: "org-1"))
+        XCTAssertEqual(try index.load().count, 1)
+    }
+
+    /// A file that would not be read at all may be a sound index behind a
+    /// lock or a permission, so nothing moves it and nothing writes over it.
+    func testAFileThatCannotBeReadIsLeftInPlace() throws {
+        try FileManager.default.createDirectory(at: index.url, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try index.loadSettingAside())
+        XCTAssertThrowsError(try index.remember(link("a1b2c3d4", organization: nil)))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: index.url.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 1)
+    }
+
+    func testAFailedReloadKeepsWhatIsHeld() throws {
+        try index.remember(link("a1b2c3d4", organization: "org-1"))
+        let held = LockedValue(try index.load())
+        try Data("{\"links\":[".utf8).write(to: index.url)
+        index.reload(into: held)
+        XCTAssertEqual(held.load().count, 1)
     }
 }
 
