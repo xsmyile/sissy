@@ -28,8 +28,9 @@ final class CodexAdapter: SourceAdapter {
     private static let rateLimitBuckets = ["primary", "secondary"]
 
     /// Locale the vendor's own numbers are read against. A balance arrives as
-    /// text and `Decimal(string:)` takes the machine's separator, which on this
-    /// one is a comma — left to it, `"12.5"` parses as `12`.
+    /// text, and pinned it reads the same whatever the machine's locale says:
+    /// measured 2026-11-04 on macOS 27.2 under a comma-separator locale,
+    /// `Decimal(string: "12.5")` is `12.5` and only `locale: .current` gives `12`.
     private static let vendorLocale = Locale(identifier: "en_US_POSIX")
 
     /// Everything this adapter answers for besides tokens: the windows, the
