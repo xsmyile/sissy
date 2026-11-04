@@ -398,10 +398,10 @@ actor UsageEngine {
         let webIndex = ClaudeWebSessionIndex(
             url: ClaudeWebSessionIndex.defaultURL(in: stateDir))
         self.claudeWebIndex = webIndex
-        self.claudeWebLinks.store(webIndex.load())
+        self.claudeWebLinks.store(webIndex.loadAtLaunch())
         let codexIndex = CodexAccountIndex(url: CodexAccountIndex.defaultURL(in: stateDir))
         self.codexIndex = codexIndex
-        self.codexLinks.store(codexIndex.load())
+        self.codexLinks.store(codexIndex.loadAtLaunch())
         var ownLimits: ClaudeLimitsProbe?
         var providers: [any UsageProvider] = []
         for resolved in self.resolvedProviders where resolved.activation.isMetering {
@@ -722,7 +722,7 @@ actor UsageEngine {
                 remember: { link in
                     do {
                         try index.remember(link)
-                        links.store(index.load())
+                        index.reload(into: links)
                     } catch {
                         sissyLog("sissy: adopted the session but could not name it: \(error)")
                     }
@@ -910,7 +910,7 @@ actor UsageEngine {
         }
         do {
             try claudeWebIndex.remember(link)
-            claudeWebLinks.store(claudeWebIndex.load())
+            claudeWebIndex.reload(into: claudeWebLinks)
         } catch {
             sissyLog("sissy: filed the claude.ai session but not what it is for: \(error)")
         }
@@ -954,7 +954,7 @@ actor UsageEngine {
             "claude.ai session",
             removeCredential: { try ClaudeWebSessionStore.delete(account: account) },
             forgetName: { try index.forget(uuid: account) })
-        claudeWebLinks.store(claudeWebIndex.load())
+        claudeWebIndex.reload(into: claudeWebLinks)
         await followStoredClaudeWebSessions()
         return outcome
     }
@@ -1656,7 +1656,7 @@ actor UsageEngine {
         }
         do {
             try codexIndex.remember(link)
-            codexLinks.store(codexIndex.load())
+            codexIndex.reload(into: codexLinks)
         } catch {
             sissyLog("sissy: the Codex account was signed in but could not be named")
         }
@@ -1682,7 +1682,7 @@ actor UsageEngine {
             "Codex credential",
             removeCredential: { try await CodexRenewal.shared.remove(account: id) },
             forgetName: { try index.forget(id: id) })
-        codexLinks.store(codexIndex.load())
+        codexIndex.reload(into: codexLinks)
         await rebuildCodexSources()
         await reemit()
         return outcome
