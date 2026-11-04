@@ -88,12 +88,21 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
     /// The reset a press spends, the soonest to lapse, as the last list named
     /// it. Nil sends none and lets OpenAI pick, which its own CLI also does.
     private var nextCredit: String?
-    /// The spend whose answer never arrived. Every press sends it again until
-    /// OpenAI answers it, because the vendor redeems one request id once: a
-    /// second press that minted its own could spend a second reset beside an
-    /// attempt that may already have landed. Held here rather than by the
-    /// page, which navigating away from is enough to lose.
-    private var unanswered: (requestID: String, creditID: String?)?
+    /// The spends whose answer never arrived, by whose they are. Every press
+    /// sends its account's again until OpenAI answers it, because the vendor
+    /// redeems one request id once: a second press that minted its own could
+    /// spend a second reset beside an attempt that may already have landed.
+    /// Held here rather than by the page, which navigating away from is enough
+    /// to lose, and by account because the CLI's credential can change between
+    /// two presses, and an attempt made for one account must never go out under
+    /// another's token.
+    private var unanswered: [SpendAccount: (requestID: String, creditID: String?)] = [:]
+
+    /// Who a spend is made for: the login and the workspace it is asked under.
+    private struct SpendAccount: Hashable {
+        let user: String?
+        let workspace: String?
+    }
 
     init(
         account: String? = nil,
@@ -318,21 +327,30 @@ actor CodexUsageSource: SourceSignals, LimitsPolling {
     /// than as a notice about the limits. A spend that landed takes one off
     /// the count at once, as OpenAI's desktop client does, so the button does
     /// not outlive the reset it spent when the read after it cannot run.
+    ///
+    /// A credential that has moved since the reading on screen spends nothing:
+    /// the press was made on another account's row, and `nextCredit` names one
+    /// of that account's resets. The read after it brings the row level.
     func useReset(onRefresh: @Sendable @escaping () async -> Void) async -> LimitResetOutcome {
         guard !retired else { return .unavailable }
         guard case .found(let credential) = await credentialSource(false),
             !credential.isExpired()
         else { return .unavailable }
-        let attempt = unanswered ?? (requestID: UUID().uuidString, creditID: nextCredit)
-        unanswered = attempt
+        if let owner = published.load().owner, owner != credential.userId {
+            await refresh(userInitiated: false, onRefresh: onRefresh)
+            return .offerChanged
+        }
+        let spender = SpendAccount(user: credential.userId, workspace: credential.accountId)
+        let attempt = unanswered[spender] ?? (requestID: UUID().uuidString, creditID: nextCredit)
+        unanswered[spender] = attempt
         let outcome: LimitResetOutcome
         do {
             outcome = LimitResetOutcome(
                 try await consumeSource(credential, attempt.requestID, attempt.creditID))
-            unanswered = nil
+            unanswered[spender] = nil
         } catch {
             if Self.isRefusal(error) {
-                unanswered = nil
+                unanswered[spender] = nil
                 outcome = .refused
             } else {
                 outcome = .unconfirmed

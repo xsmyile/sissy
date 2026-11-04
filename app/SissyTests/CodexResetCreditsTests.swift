@@ -240,6 +240,80 @@ final class CodexResetCreditsTests: XCTestCase {
         XCTAssertEqual(spends.requestIDs.first, spends.requestIDs.last)
     }
 
+    /// A reader over the CLI's own credential, whichever account `who` names.
+    private static func signedInSource(
+        _ who: LockedValue<String>, spends: Spends,
+        answer: @escaping @Sendable (Int) throws -> CodexResetCredits.Answer
+    ) -> CodexUsageSource {
+        CodexUsageSource(
+            credentialSource: { _ in
+                .found(
+                    CodexCredential(
+                        accessToken: "token-\(who.load())", refreshToken: nil, idToken: nil,
+                        accountId: credential().accountId, userId: who.load(), email: nil,
+                        plan: nil, expiresAt: nil))
+            },
+            fetchSource: { _ in
+                CodexUsagePayload.reading(
+                    usageReply(resets: #"{"available_count": 1, "applicable_available_count": 1}"#),
+                    observedAt: Date())
+            },
+            creditsSource: { _ in [] },
+            consumeSource: { _, requestID, creditID in
+                spends.record(requestID, creditID)
+                return try answer(spends.requestIDs.count)
+            })
+    }
+
+    /// `codex login` between two presses: the request id the first press minted
+    /// used to go out again under the new account's token. Each account resends
+    /// only its own, which is still there when the CLI comes back to it.
+    func testAnUnansweredSpendIsResentOnlyForItsOwnAccount() async {
+        let who = LockedValue("user-one")
+        let spends = Spends()
+        let source = Self.signedInSource(
+            who, spends: spends,
+            answer: { _ in throw URLError(.timedOut) })
+        _ = await source.refreshOnce {}
+        let first = await source.useReset {}
+
+        who.store("user-two")
+        _ = await source.refreshOnce {}
+        let other = await source.useReset {}
+
+        who.store("user-one")
+        _ = await source.refreshOnce {}
+        let back = await source.useReset {}
+        await source.stop()
+
+        XCTAssertEqual([first, other, back], [.unconfirmed, .unconfirmed, .unconfirmed])
+        let ids = spends.requestIDs
+        XCTAssertEqual(ids.count, 3)
+        XCTAssertNotEqual(ids[1], ids[0], "another account's request went out under this one")
+        XCTAssertEqual(ids[2], ids[0], "the account's own attempt was lost")
+    }
+
+    /// A press lands on the reading on screen. A credential that has moved since
+    /// that reading answers for an account the press never saw, so nothing is
+    /// spent, and the read after it brings the row level for the next press.
+    func testAPressAfterTheCredentialMovedSpendsNothing() async {
+        let who = LockedValue("user-one")
+        let spends = Spends()
+        let source = Self.signedInSource(who, spends: spends, answer: { _ in .reset })
+        _ = await source.refreshOnce {}
+
+        who.store("user-two")
+        let moved = await source.useReset {}
+        XCTAssertEqual(moved, .offerChanged)
+        XCTAssertEqual(spends.requestIDs.count, 0)
+        XCTAssertEqual(source.observedAccount, "user-two")
+
+        let next = await source.useReset {}
+        await source.stop()
+        XCTAssertEqual(next, .reset)
+        XCTAssertEqual(spends.requestIDs.count, 1)
+    }
+
     /// The attempt is held by the reader, not by whichever button made it: it
     /// is sent until OpenAI answers it, and an answered one is never sent
     /// again.
