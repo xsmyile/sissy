@@ -1163,7 +1163,13 @@ enum UsageHistoryStore {
         else { return }
         for provider in providers(in: parent) {
             for (dayKey, url) in dayFiles(provider: provider, in: parent) where dayKey < cutoff {
-                try? FileManager.default.removeItem(at: url)
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    sissyLog(
+                        "sissy: could not prune the \(provider) archive of \(url.lastPathComponent), "
+                            + "which the retention setting promised to delete: \(error)")
+                }
             }
         }
     }

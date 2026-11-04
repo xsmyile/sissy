@@ -46,6 +46,20 @@ final class ClaudeWebAccountProfileTests: XCTestCase {
         XCTAssertEqual(identity.email, "someone@example.com")
     }
 
+    /// A control character in a vendor's name reached the row, which is one
+    /// line. The identity keeps what was sent, because it is written back to
+    /// the CLI's config; only what a row carries is cleaned.
+    func testARowCarriesAnIdentitysNamesSanitized() {
+        let identity = ClaudeAccountIdentity(
+            uuid: "u", email: "some\u{7}one@example.com", organization: "Acme\nCorp",
+            organizationType: nil, rateLimitTier: nil)
+
+        XCTAssertEqual(identity.providerAccount?.email, "someone@example.com")
+        XCTAssertEqual(identity.providerAccount?.organization, "AcmeCorp")
+        XCTAssertEqual(identity.email, "some\u{7}one@example.com")
+        XCTAssertEqual(identity.organization, "Acme\nCorp")
+    }
+
     /// An account can hold several organisations answering different
     /// questions. Reading the plan off the first listed would badge the
     /// subscription with the API org's, which nobody is on.

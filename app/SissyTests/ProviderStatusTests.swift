@@ -26,6 +26,29 @@ final class ProviderStatusTests: XCTestCase {
         try StatuspageFeed.parse(Data(payload.utf8), checkedAt: when)
     }
 
+    // MARK: Why a round failed
+
+    /// A failed fetch used to go under `try?`, so a page that stayed down said
+    /// nothing anywhere but the row. The cause is kept per provider, which is
+    /// what a line is deduped against, and an answer clears it.
+    func testAFailedFetchKeepsItsCauseUntilAnAnswer() async throws {
+        let failing = LockedValue(true)
+        let reading = try parse(Self.claudePayload)
+        let monitor = ProviderStatusMonitor(providers: [ProviderID.claudeCode]) { _ in
+            guard !failing.load() else { throw ProviderStatusError.malformedPayload }
+            return reading
+        }
+
+        _ = await monitor.refreshOnce {}
+        var reported = await monitor.lastReported
+        XCTAssertEqual(reported[ProviderID.claudeCode], "malformedPayload")
+
+        failing.store(false)
+        await monitor.refresh(provider: ProviderID.claudeCode) {}
+        reported = await monitor.lastReported
+        XCTAssertNil(reported[ProviderID.claudeCode])
+    }
+
     // MARK: The feed
 
     func testBothVendorsAnswerTheSameShape() throws {

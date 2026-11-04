@@ -291,9 +291,12 @@ enum PriceCatalogSource {
 
     static func saveCache(_ catalog: PriceCatalog, to url: URL = Self.cacheURL) {
         let dir = url.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        guard let data = try? encoder().encode(catalog) else { return }
-        try? data.write(to: url, options: [.atomic])
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try encoder().encode(catalog).write(to: url, options: [.atomic])
+        } catch {
+            sissyLog("sissy: could not save the pricing cache \(url.lastPathComponent): \(error)")
+        }
     }
 
     static func encoder() -> JSONEncoder {

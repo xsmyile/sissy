@@ -404,7 +404,11 @@ enum UsageStatePersistence {
         let ts = Int(Date().timeIntervalSince1970)
         let quarantined = url.deletingLastPathComponent()
             .appendingPathComponent("\(quarantinePrefix(for: url))\(reason)-\(ts).json")
-        try? FileManager.default.moveItem(at: url, to: quarantined)
+        do {
+            try FileManager.default.moveItem(at: url, to: quarantined)
+        } catch {
+            sissyLog("sissy: could not set \(url.lastPathComponent) aside (\(reason)): \(error)")
+        }
         pruneQuarantined(of: url)
     }
 

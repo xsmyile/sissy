@@ -389,6 +389,27 @@ final class UsageHistoryStoreTests: XCTestCase {
         XCTAssertNil(UsageHistoryStore.load(provider: "claude-code", day: day(-9), in: root))
     }
 
+    /// A removal that fails breaks the promise the retention setting makes, so
+    /// it has to say so rather than go under `try?`.
+    func testAPruneThatCannotRemoveADaySaysSo() throws {
+        let provider = "prune-\(UUID().uuidString)"
+        try write(provider: provider, day: day(-9), models: ["a": totals(input: 10, cost: "1")])
+        let directory = try XCTUnwrap(
+            FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
+                .compactMap { $0 as? URL }
+                .first { $0.lastPathComponent == provider })
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        }
+
+        UsageHistoryStore.prune(keeping: 3, in: root)
+
+        XCTAssertNotNil(UsageHistoryStore.load(provider: provider, day: day(-9), in: root))
+        XCTAssertTrue(LoggedLines.contain(provider))
+    }
+
     /// The archive is a directory in the user's Application Support, and the
     /// pruner walks it with a wildcard. Anything it cannot read as a day is
     /// something it did not write.

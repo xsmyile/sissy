@@ -105,6 +105,17 @@ actor ClaudeAccountRegistry {
     /// it unchanged costs nothing. Only a token Sissy has not already filed
     /// buys a request.
     private var lastSeenToken: String?
+    /// The expired token already logged. The profile endpoint answers one with
+    /// a 401, and asking it on every watch cost about 30 refused requests an
+    /// hour for as long as the slot held one, each logged. So it is not asked
+    /// (`ClaudeLimitsProbe` gates on the same field) and it is named once.
+    private var lastExpiredToken: String?
+    /// The token the profile endpoint last refused with a 401 or a 403. An
+    /// expiry says nothing about a revoked token, which cost the same request
+    /// on every watch, so the refusal itself is remembered, until the slot holds
+    /// a different token. In memory only: a relaunch asks once more.
+    private var refusedToken: String?
+    private static let refusalStatuses: Set<Int> = [401, 403]
     /// The account `lastSeenToken` was identified as or written for, set and
     /// cleared with it. What the config file is reconciled with, rather than
     /// the index's active id: that is a note on disk, and one that failed to
@@ -225,6 +236,16 @@ actor ClaudeAccountRegistry {
         guard let parsed = ClaudeCredentialBlob.credentials(in: current.data),
             parsed.accessToken != lastSeenToken
         else { return published.load() != before }
+        if let expiresAt = parsed.expiresAt, expiresAt <= now() {
+            if parsed.accessToken != lastExpiredToken {
+                lastExpiredToken = parsed.accessToken
+                sissyLog(
+                    "sissy: the Claude credential in \(current.name.label) has expired; "
+                        + "waiting for it to renew")
+            }
+            return published.load() != before
+        }
+        guard parsed.accessToken != refusedToken else { return published.load() != before }
         await file(credential: current.data, from: current.name, markActive: true)
         return published.load() != before
     }
@@ -491,6 +512,11 @@ actor ClaudeAccountRegistry {
             if case UsageRequestError.rateLimited(let retryAfter) = error {
                 identifyRefusedUntil = now().addingTimeInterval(
                     UsageRequestError.backoffSeconds(retryAfter: retryAfter))
+            }
+            if case UsageRequestError.badStatus(let code) = error,
+                Self.refusalStatuses.contains(code)
+            {
+                refusedToken = parsed.accessToken
             }
             sissyLog("sissy: could not identify the Claude credential in \(name.label): \(error)")
             return false

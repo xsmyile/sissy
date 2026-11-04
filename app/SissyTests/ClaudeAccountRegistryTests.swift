@@ -567,6 +567,73 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertEqual(vault.active, credential("rotated-by-the-cli"))
     }
 
+    /// An expired token in the slot answers 401 from the profile endpoint, and
+    /// the watch asked again every two minutes for as long as it stayed there:
+    /// about 30 refused requests an hour. The token that renews it is asked.
+    func testAnExpiredTokenIsNotIdentifiedUntilItRenews() async {
+        let vault = Vault()
+        vault.active = credential("tok-a", expiresAt: 1_000_000_000_000)
+        let asked = LockedValue(0)
+        let registry = makeRegistry(
+            vault,
+            identify: { token in
+                asked.update { $0 += 1 }
+                return Self.byToken(token)
+            })
+
+        await registry.captureActive()
+        await registry.captureActive()
+        XCTAssertEqual(asked.load(), 0, "the endpoint was asked about a token known to be spent")
+
+        vault.active = credential("tok-a-renewed")
+        await registry.captureActive()
+        XCTAssertEqual(asked.load(), 1)
+    }
+
+    /// A revoked token has an expiry still ahead of it, so that gate never
+    /// catches one, and the watch asked about it every two minutes. Its refusal
+    /// is remembered until the slot holds a different token.
+    func testARefusedTokenIsNotAskedAboutAgainUntilItChanges() async {
+        for status in [401, 403] {
+            let vault = Vault()
+            vault.active = credential("tok-a")
+            let asked = LockedValue(0)
+            let registry = makeRegistry(
+                vault,
+                identify: { token in
+                    asked.update { $0 += 1 }
+                    guard token != "tok-a" else { throw UsageRequestError.badStatus(status) }
+                    return Self.byToken(token)
+                })
+
+            await registry.captureActive()
+            await registry.captureActive()
+            XCTAssertEqual(asked.load(), 1, "status \(status) was asked about again")
+
+            vault.active = credential("tok-a-renewed")
+            await registry.captureActive()
+            XCTAssertEqual(asked.load(), 2, "the new token after \(status) was not asked about")
+            XCTAssertEqual(registry.currentSnapshot().activeUUID, Self.byToken("tok-a-renewed").uuid)
+        }
+    }
+
+    /// An outage says nothing about the token, so it is asked about again.
+    func testAFailedIdentificationThatIsNotARefusalIsAskedAgain() async {
+        let vault = Vault()
+        vault.active = credential("tok-a")
+        let asked = LockedValue(0)
+        let registry = makeRegistry(
+            vault,
+            identify: { _ in
+                asked.update { $0 += 1 }
+                throw UsageRequestError.badStatus(500)
+            })
+
+        await registry.captureActive()
+        await registry.captureActive()
+        XCTAssertEqual(asked.load(), 2)
+    }
+
     /// A 429 from the profile endpoint is waited out, not asked again on the
     /// next tick: the watch polls every two minutes and the endpoint is one
     /// that earns a persistent refusal from exactly that.

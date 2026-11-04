@@ -344,6 +344,7 @@ actor UsageEngine {
         self.live = LiveSampling(
             network: networkMonitor ?? NetworkMonitor(),
             disk: diskActivityMonitor ?? DiskActivityMonitor(), enabled: liveEnabled)
+        ForgeRefusalStore.use(directory: stateDir)
         let limitsBackoff = LimitsBackoffStore(
             url: LimitsBackoffLedger.defaultURL(in: stateDir))
         self.limitsBackoff = limitsBackoff
