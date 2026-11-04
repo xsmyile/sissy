@@ -905,9 +905,6 @@ actor LocalUsageProvider: UsageProvider {
         // complete (~12 s on a 300 MB tree).
         let files = enumerateJSONLSortedByMTime()
         watchedCounter.store(files.count)
-        // Compute the calendar day key once per poll. `Calendar.current` walks
-        // locale + timezone on each call (tens of µs); the old code paid this
-        // 3-4 times per poll across the emit branches.
         let todayKey = Calendar.current.startOfDay(for: Date())
         var dirtySinceEmit = false
         var lastEmitAt = Date.distantPast

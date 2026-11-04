@@ -2,16 +2,26 @@ import XCTest
 
 @testable import Sissy
 
-/// What `ClaudeProfileSource.read` takes off the CLI's `oauthAccount` block.
+/// What `ClaudeProfileSource.refresh` takes off the CLI's `oauthAccount` block.
 final class ClaudeProfileReadTests: XCTestCase {
+    /// What a source holds after reading `data` the way it ships: off a file.
+    private func read(_ data: Data) throws -> ClaudeProfileSource.Attributed {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sissy-profile-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try data.write(to: url)
+        let source = ClaudeProfileSource(url: url)
+        source.refresh(userInitiated: true)
+        return source.currentAttributed()
+    }
+
     private func account(_ fields: [String: String]) throws -> ProviderAccount? {
         var block: [String: String] = [
             "emailAddress": "davide@example.com", "organizationType": "claude_max",
         ]
         block.merge(fields) { _, new in new }
         let data = try JSONSerialization.data(withJSONObject: ["oauthAccount": block])
-        guard case .found(let profile) = ClaudeProfileSource.read(data) else { return nil }
-        return profile.account
+        return try read(data).signals.account
     }
 
     /// The full name leads, for the reason the OAuth profile's does.
@@ -29,8 +39,7 @@ final class ClaudeProfileReadTests: XCTestCase {
         var block: [String: String] = ["organizationType": "claude_max"]
         block.merge(fields) { _, new in new }
         let data = try JSONSerialization.data(withJSONObject: ["oauthAccount": block])
-        guard case .found(let profile) = ClaudeProfileSource.read(data) else { return nil }
-        return profile.tier
+        return try read(data).signals.planTier
     }
 
     /// The tier Claude Code files under the organisation's key, with the
@@ -46,20 +55,17 @@ final class ClaudeProfileReadTests: XCTestCase {
         var block = ["organizationType": "claude_max"]
         block["planDisplayName"] = "Ultra"
         let data = try JSONSerialization.data(withJSONObject: ["oauthAccount": block])
-        guard case .found(let profile) = ClaudeProfileSource.read(data) else {
-            return XCTFail("the block names a plan")
-        }
-        XCTAssertEqual(profile.plan, "max")
-        XCTAssertEqual(profile.name, "Ultra")
+        let signals = try read(data).signals
+        XCTAssertEqual(signals.plan, "max")
+        XCTAssertEqual(signals.planName, "Ultra")
     }
 
     func testAnAccountThatNamesNoWordHasNone() throws {
         let data = try JSONSerialization.data(
             withJSONObject: ["oauthAccount": ["organizationType": "claude_team"]])
-        guard case .found(let profile) = ClaudeProfileSource.read(data) else {
-            return XCTFail("the block names a plan")
-        }
-        XCTAssertNil(profile.name)
+        let signals = try read(data).signals
+        XCTAssertEqual(signals.plan, "team")
+        XCTAssertNil(signals.planName)
     }
 
     func testTheUsersOwnTierLeadsOverTheOrganisations() throws {
