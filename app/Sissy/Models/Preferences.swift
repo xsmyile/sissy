@@ -1,5 +1,22 @@
 import Foundation
 
+/// Which end of a rate-limit window its gauge prints: what has been spent, or
+/// what is still there.
+///
+/// A wording rather than a measurement. The vendor publishes one number and
+/// both readings are that number, so this never reaches `WindowRow.percent` —
+/// which is what orders the windows and what decides when the Overview's
+/// figure goes orange, and both have to land in the same place whichever way
+/// the user reads the bar. For the same reason the bar itself always fills
+/// with what has been spent: the pace mark sits at `elapsed / duration`, and a
+/// fill measured from the other end would put the mark on the wrong side of it.
+enum LimitsReading: String, Codable, CaseIterable, Sendable {
+    /// What the window has taken, which is what the vendor reports.
+    case used
+    /// What is left of it — the same reading, subtracted.
+    case left
+}
+
 /// What the app itself remembers, in
 /// ~/Library/Application Support/Sissy/preferences.json. JSON rather than
 /// UserDefaults keeps the file diffable for debugging.
