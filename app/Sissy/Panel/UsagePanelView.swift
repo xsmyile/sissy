@@ -499,7 +499,9 @@ struct UsagePanelView: View {
                 overview(snapshot)
             }
         case .identities:
-            PanelIdentities(rows: snapshot.identities, focus: Self.identityFocus(target))
+            PanelIdentities(
+                rows: UsagePanelSnapshot.identityRows(live?.frame.identities ?? []),
+                focus: Self.identityFocus(target))
         case .calendar:
             PanelCalendar(
                 period: snapshot.period,

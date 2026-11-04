@@ -96,7 +96,7 @@ struct PanelEffortPage: View {
             let gaps = Self.segmentGap * CGFloat(max(segments.count - 1, 0))
             let width = max(geometry.size.width - gaps, 0)
             HStack(spacing: Self.segmentGap) {
-                ForEach(Array(segments.enumerated()), id: \.element.id) { rank, segment in
+                ForEach(segments.enumerated(), id: \.element.id) { rank, segment in
                     Rectangle()
                         .fill(color(segment, rank: rank))
                         .frame(width: width * segment.share)

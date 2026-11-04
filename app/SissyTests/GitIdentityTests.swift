@@ -429,27 +429,27 @@ final class GitIdentityPanelTests: XCTestCase {
     /// the repository set one. Offering the command against a global rule
     /// would be offering a no-op dressed as a fix.
     func testTheCorrectionIsOfferedOnlyAgainstALocalOverride() {
-        let local = snapshot([
+        let local = identityRows([
             identity("/repos/local", author: personal, scope: "local"),
             identity("/repos/a", author: work), identity("/repos/b", author: work),
         ])
-        XCTAssertNotNil(local.identities.first { $0.id == "/repos/local" }?.fix)
+        XCTAssertNotNil(local.first { $0.id == "/repos/local" }?.fix)
 
-        let global = snapshot([
+        let global = identityRows([
             identity("/repos/global", author: personal, scope: "global"),
             identity("/repos/a", author: work), identity("/repos/b", author: work),
         ])
-        XCTAssertNil(global.identities.first { $0.id == "/repos/global" }?.fix)
+        XCTAssertNil(global.first { $0.id == "/repos/global" }?.fix)
     }
 
     /// The origin is shown on a row that needs correcting and nowhere else: on
     /// a row that agrees it answers a question nobody asked.
     func testTheOriginRidesOnlyOnAFinding() {
-        let rows = snapshot([
+        let rows = identityRows([
             identity("/repos/stray", author: personal, scope: "local"),
             identity("/repos/a", author: work, scope: "global"),
             identity("/repos/b", author: work, scope: "global"),
-        ]).identities
+        ])
         XCTAssertNotNil(rows.first { $0.id == "/repos/stray" }?.origin)
         XCTAssertNil(rows.first { $0.id == "/repos/a" }?.origin)
     }
@@ -495,13 +495,13 @@ final class GitIdentityPanelTests: XCTestCase {
     /// A page whose one wrong repository sorts to the middle has to be read
     /// rather than glanced at.
     func testFindingsSortAboveEverythingElse() {
-        let rows = snapshot([
+        let rows = identityRows([
             identity("/repos/aaa", author: work), identity("/repos/bbb", author: work),
             identity("/repos/zzz", author: personal),
             RepositoryIdentity(
                 repository: "/repos/loose", reading: .author(personal), origin: nil,
                 remote: nil, verdict: .unjudged),
-        ]).identities
+        ])
         XCTAssertEqual(rows.map(\.mark), [.unexpected, .unjudged, .agrees, .agrees])
     }
 
@@ -563,6 +563,10 @@ final class GitIdentityPanelTests: XCTestCase {
                 checkedAt: now.addingTimeInterval(-180), refreshing: false, now: now),
             "checked 3m ago")
         XCTAssertNil(UsageFormat.identitiesReading(checkedAt: nil, refreshing: false, now: now))
+    }
+
+    private func identityRows(_ identities: [RepositoryIdentity]) -> [UsagePanelSnapshot.IdentityRow] {
+        UsagePanelSnapshot.identityRows(GitIdentityConsensus.judged(identities))
     }
 
     private func snapshot(_ identities: [RepositoryIdentity]) -> UsagePanelSnapshot {

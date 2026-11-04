@@ -506,14 +506,14 @@ struct AgentMemoryChart: View {
     @Binding var hovered: Int?
 
     static let plotHeight: CGFloat = 44
-    private static let tickHeight: CGFloat = 4
+    fileprivate static let tickHeight: CGFloat = 4
     private static let axisSize: CGFloat = 9.5
     /// Opacity of the accent for each standing band, dearest first: one step
     /// per session the chart colours as its own band, which is
     /// `processRowLimit` sessions before the rest pool into one grey band.
     nonisolated static let bandOpacities: [Double] = [1, 0.78, 0.6, 0.45, 0.33, 0.24]
     private static let restOpacity: Double = 0.2
-    private static let cursorOpacity: Double = 0.5
+    fileprivate static let cursorOpacity: Double = 0.5
     private static let secondsPerMinute: Double = 60
 
     static func bandTint(_ band: Int?) -> Color {
@@ -525,8 +525,14 @@ struct AgentMemoryChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Canvas { context, size in draw(in: &context, size: size) }
+            AgentMemoryBands(chart: chart)
+                .equatable()
                 .frame(height: Self.plotHeight + Self.tickHeight + 2)
+                .overlay {
+                    if let hovered {
+                        AgentMemoryCursor(sample: hovered, samples: chart.totals.count)
+                    }
+                }
                 .contentShape(.rect)
                 .onGeometryChange(for: CGFloat.self) {
                     $0.size.width
@@ -567,13 +573,24 @@ struct AgentMemoryChart: View {
         let step = width / CGFloat(chart.totals.count - 1)
         return min(max(Int((x / step).rounded()), 0), chart.totals.count - 1)
     }
+}
+
+/// The chart's bands and start ticks, on their own so a hover moves the cursor
+/// over them rather than stroking every band's points again.
+private struct AgentMemoryBands: View, Equatable {
+    let chart: UsagePanelSnapshot.AgentsBlock.MemoryChart
+
+    var body: some View {
+        Canvas { context, size in draw(in: &context, size: size) }
+    }
 
     private func draw(in context: inout GraphicsContext, size: CGSize) {
         let count = chart.totals.count
         guard count > 1 else { return }
         let peak = Double(max(chart.peak, 1))
         let step = size.width / CGFloat(count - 1)
-        let y = { (bytes: UInt64) in Self.plotHeight * (1 - CGFloat(Double(bytes) / peak)) }
+        let plotHeight = AgentMemoryChart.plotHeight
+        let y = { (bytes: UInt64) in plotHeight * (1 - CGFloat(Double(bytes) / peak)) }
         var base = [UInt64](repeating: 0, count: count)
         for (position, band) in chart.bands.enumerated() {
             let top = zip(base, band.values).map { $0 + $1 }
@@ -585,22 +602,33 @@ struct AgentMemoryChart: View {
             }
             path.closeSubpath()
             let isRest = band.process == nil
-            context.fill(path, with: .color(Self.bandTint(isRest ? nil : position)))
+            context.fill(path, with: .color(AgentMemoryChart.bandTint(isRest ? nil : position)))
             base = top
         }
         for start in chart.starts {
             var tick = Path()
             let x = CGFloat(start) * step
-            tick.move(to: CGPoint(x: x, y: Self.plotHeight + 2))
-            tick.addLine(to: CGPoint(x: x, y: Self.plotHeight + 2 + Self.tickHeight))
+            tick.move(to: CGPoint(x: x, y: plotHeight + 2))
+            tick.addLine(to: CGPoint(x: x, y: plotHeight + 2 + AgentMemoryChart.tickHeight))
             context.stroke(tick, with: .color(.secondary), lineWidth: 1)
         }
-        if let hovered, hovered < count {
+    }
+}
+
+/// The hovered sample's vertical line, over the bands.
+private struct AgentMemoryCursor: View {
+    let sample: Int
+    let samples: Int
+
+    var body: some View {
+        Canvas { context, size in
+            guard samples > 1, sample < samples else { return }
+            let x = CGFloat(sample) * (size.width / CGFloat(samples - 1))
             var cursor = Path()
-            let x = CGFloat(hovered) * step
             cursor.move(to: CGPoint(x: x, y: 0))
-            cursor.addLine(to: CGPoint(x: x, y: Self.plotHeight))
-            context.stroke(cursor, with: .color(.primary.opacity(Self.cursorOpacity)), lineWidth: 1)
+            cursor.addLine(to: CGPoint(x: x, y: AgentMemoryChart.plotHeight))
+            context.stroke(
+                cursor, with: .color(.primary.opacity(AgentMemoryChart.cursorOpacity)), lineWidth: 1)
         }
     }
 }
