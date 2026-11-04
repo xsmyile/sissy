@@ -28,12 +28,6 @@ actor ForgeActivityMonitor {
     /// Spread across the interval, so every Sissy started at login does not ask
     /// the same two APIs in the same second.
     static let jitterSeconds: ClosedRange<Int> = 0...30
-    /// How often a wait looks up from its sleep to see whether work has begun.
-    ///
-    /// The cadence is chosen from activity that can start *during* a wait, so
-    /// the wait is taken in slices rather than in one sleep. A slice costs a
-    /// timer and no request.
-    static let activityCheck: Duration = .seconds(60)
     /// The least a wait can be, so a delay capped at a boundary it is already
     /// on cannot come out as no wait at all and ask again in the same second.
     static let shortestWait: Duration = .seconds(1)
@@ -47,6 +41,11 @@ actor ForgeActivityMonitor {
     /// to how often this polls. A wait consults it between slices without
     /// awaiting this actor.
     nonisolated let activity: ActivityClock
+    /// The poll's wait. Nonisolated, so a wait that is mostly sleeping never
+    /// holds the actor against a refresh arriving from the row.
+    nonisolated var pacedWait: ActivityPacedWait {
+        ActivityPacedWait(activity: activity, shortest: Self.refreshInterval)
+    }
     private let connections: [ForgeConnection]
     /// Which counters to ask for. Held here rather than read per round because
     /// a change to it rebuilds the monitor, exactly as a change to the
@@ -71,7 +70,7 @@ actor ForgeActivityMonitor {
     /// on a dialog, and either wait held every other caller of this actor
     /// while the read ran on it.
     private let tokenSource: @Sendable (String, Bool) async -> CredentialLookup<String>
-    private var pollTask: Task<Void, Never>?
+    private var poll = PollLoop()
     /// Connections whose last failure needs the user. They keep their row and
     /// their last figures; what they stop costing is a request per round.
     private var parked: Set<String> = []
@@ -113,7 +112,6 @@ actor ForgeActivityMonitor {
     private var reads = 0
     /// Bumped by every stop, so a request in flight when the monitor was torn
     /// down cannot publish over the run that replaced it.
-    private var generation = 0
     /// The selected local days and their zone, never the bounds themselves: a span ending
     /// today caps its end at each call's own `now`, so keying on it shared
     /// nothing between two reads of the same dates.
@@ -185,10 +183,10 @@ actor ForgeActivityMonitor {
             return absent(.invalidDates)
         }
         if let failure = spanBlock(connection.id, now: now) { return absent(.failure(failure)) }
-        let started = generation
+        let started = poll.generation
         let lookup = await tokenSource(connection.id, false)
         try Task.checkCancellation()
-        guard started == generation else { return absent(.monitorChanged) }
+        guard started == poll.generation else { return absent(.monitorChanged) }
         if let failure = spanBlock(connection.id, now: now) { return absent(.failure(failure)) }
         guard case .found(let token) = lookup else { return absent(.failure(Self.credentialFailure(lookup))) }
         if let failure = ForgeRefusalStore.shared.failure(url: connection.root, token: token, now: now) {
@@ -207,7 +205,7 @@ actor ForgeActivityMonitor {
             spanTasks[key] = existing
             running = existing
         } else {
-            let stamp = generation
+            let stamp = poll.generation
             let id = UUID()
             let enabled = counters
             let task = Task {
@@ -277,7 +275,7 @@ actor ForgeActivityMonitor {
     private func finishSpan(
         _ reading: ForgeSpanReading, key: SpanKey, id: UUID, stamp: Int, token: String
     ) -> ForgeSpanReading {
-        guard stamp == generation else {
+        guard stamp == poll.generation else {
             guard let connection = connections.first(where: { $0.id == key.connection }) else {
                 return reading
             }
@@ -340,16 +338,10 @@ actor ForgeActivityMonitor {
     /// parked, or a failure that kept the figures and the reason it already
     /// had. Idempotent, and a no-op for a build with nothing connected.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
-        guard pollTask == nil, !connections.isEmpty else { return }
-        pollTask = Task { [weak self] in
-            var delay: Duration = .zero
-            while !Task.isCancelled {
-                guard let self else { return }
-                if delay > .zero {
-                    do { try await self.wait(delay) } catch { return }
-                }
-                delay = await self.refreshOnce(onRefresh: onRefresh)
-            }
+        guard !connections.isEmpty else { return }
+        let paced = pacedWait
+        poll.start(wait: paced.wait) { [weak self] in
+            await self?.refreshOnce(onRefresh: onRefresh)
         }
     }
 
@@ -365,12 +357,10 @@ actor ForgeActivityMonitor {
     /// started them reaches none of them, and one started by a refresh has no
     /// loop above it at all. The generation still decides what may publish.
     func stop() {
-        generation &+= 1
+        poll.stop()
         spanCache.removeAll()
         spanTasks.values.forEach { $0.task.cancel() }
         spanTasks.removeAll()
-        pollTask?.cancel()
-        pollTask = nil
         inFlight.values.forEach { $0.task.cancel() }
         inFlight.removeAll()
         parked.removeAll()
@@ -383,13 +373,13 @@ actor ForgeActivityMonitor {
     /// Internal rather than private so a test can run exactly one round and
     /// assert on what it published, instead of waiting on the scheduler.
     func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
-        let stamp = generation
+        let stamp = poll.generation
         let before = published.load()
         let due = connections.filter {
             !parked.contains($0.id) && (retryUntil[$0.id] ?? .distantPast) <= Date()
         }
         for task in due.map({ read($0, allowingInteraction: false) }) { await task.value }
-        guard stamp == generation, !Task.isCancelled else { return nextDelay() }
+        guard poll.isCurrent(stamp) else { return nextDelay() }
         if published.load() != before { await onRefresh() }
         return nextDelay()
     }
@@ -420,10 +410,10 @@ actor ForgeActivityMonitor {
         guard let connection = connections.first(where: { $0.id == id }) else { return }
         spanRefusals[connection.id] = nil
         spanCache = spanCache.filter { $0.key.connection != connection.id }
-        let stamp = generation
+        let stamp = poll.generation
         let before = published.load()
         await read(connection, allowingInteraction: true).value
-        guard stamp == generation else { return }
+        guard stamp == poll.generation else { return }
         if published.load() != before { await onRefresh() }
     }
 
@@ -449,7 +439,7 @@ actor ForgeActivityMonitor {
         }
         reads &+= 1
         let seq = reads
-        let stamp = generation
+        let stamp = poll.generation
         let fetch = fetchSource
         let token = tokenSource
         let counters = counters
@@ -502,7 +492,7 @@ actor ForgeActivityMonitor {
         _ outcome: Result<ForgeActivityReading, Error>, for connection: ForgeConnection,
         token: String?, stamp: Int, seq: Int
     ) {
-        guard stamp == generation, inFlight[connection.id]?.seq == seq else { return }
+        guard stamp == poll.generation, inFlight[connection.id]?.seq == seq else { return }
         inFlight[connection.id] = nil
         apply(outcome, for: connection, token: token)
     }
@@ -614,49 +604,5 @@ actor ForgeActivityMonitor {
                 byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
         else { return delay }
         return max(min(delay, .seconds(midnight.timeIntervalSince(now))), Self.shortestWait)
-    }
-
-    /// Whether a wait that has run for `waited` is over.
-    ///
-    /// The delay is the ceiling. The other way out is what the slices exist
-    /// for: an idle wait was sized for a Mac nobody was working at, and once
-    /// agents are working the short interval is the one in force — so a wait
-    /// that has already covered it ends rather than serving out the rest of a
-    /// half hour chosen before the work started. Without it the short cadence
-    /// arrives a round late, which is up to half an hour of the idle interval
-    /// running over exactly the stretch the short one exists for.
-    ///
-    /// `shortest` is that interval, taken as an argument so a test can hold the
-    /// boundary without naming the number the predicate reads.
-    static func waitIsOver(
-        waited: Duration, of delay: Duration, working: Bool,
-        shortest: Duration = refreshInterval
-    ) -> Bool {
-        if waited >= delay { return true }
-        return working && waited >= shortest
-    }
-
-    /// Sleeps out `delay`, reconsidering it as it goes.
-    ///
-    /// Nonisolated, so a wait that is mostly sleeping never holds the actor
-    /// against a refresh arriving from the row. `ContinuousClock` rather than
-    /// `SuspendingClock` on purpose: it keeps counting while the Mac is
-    /// asleep, so one waking after a nine-hour lid-close polls at once instead
-    /// of serving out the rest of an interval nobody was there for.
-    ///
-    /// `slice` and `shortest` are arguments for the reason `fetch` and `token`
-    /// are: this loop is the thing worth asserting, and a test of it cannot
-    /// wait out a real minute to watch one turn.
-    nonisolated func wait(
-        _ delay: Duration, slice: Duration = activityCheck, shortest: Duration = refreshInterval
-    ) async throws {
-        let started = ContinuousClock.now
-        while true {
-            let waited = ContinuousClock.now - started
-            let over = Self.waitIsOver(
-                waited: waited, of: delay, working: activity.isWorking(), shortest: shortest)
-            if over { return }
-            try await Task.sleep(for: min(delay - waited, slice))
-        }
     }
 }

@@ -95,7 +95,7 @@ actor AgentProcessMonitor {
     private var lastSweepAt: Date?
     private var cpuTotal: TimeInterval = 0
     private var energyTotal: UInt64 = 0
-    private var pollTask: Task<Void, Never>?
+    private var poll = PollLoop()
     /// Injected by a test, so a round can be asserted without the kernel's own
     /// process table under it. Told whether to measure the apps as well.
     private let sweep: @Sendable (Date, Bool) -> AgentProcessSweep
@@ -151,19 +151,15 @@ actor AgentProcessMonitor {
     /// `quietFrameInterval` has passed, which is what keeps the age the
     /// Sessions tab prints true.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
-        guard pollTask == nil else { return }
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await self.sampleOnce(onRefresh: onRefresh)
-                do { try await Task.sleep(for: Self.sampleInterval) } catch { return }
-            }
+        poll.start { [weak self] in
+            guard let self else { return nil }
+            await self.sampleOnce(onRefresh: onRefresh)
+            return Self.sampleInterval
         }
     }
 
     func stop() {
-        pollTask?.cancel()
-        pollTask = nil
+        poll.stop()
         samples = []
         perAgent = []
         firstSampleAt = nil

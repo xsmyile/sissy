@@ -45,6 +45,12 @@ actor GitIdentityMonitor {
     /// When the engine last saw an agent do something, which is the only input
     /// to how often this sweeps.
     nonisolated let activity: ActivityClock
+    /// The sweep loop's wait: an idle one ends once agents are working and it
+    /// has covered `refreshInterval`, so a sweep stays no further behind than
+    /// that when work resumes.
+    nonisolated var pacedWait: ActivityPacedWait {
+        ActivityPacedWait(activity: activity, shortest: Self.refreshInterval)
+    }
     /// The generation the blocking read loop checks between repositories.
     ///
     /// `stop()` cancels `pollTask`, which a loop parked in `waitUntilExit`
@@ -64,8 +70,7 @@ actor GitIdentityMonitor {
     private var git: URL?
     private var didLocate: Bool
     private let home: URL?
-    private var pollTask: Task<Void, Never>?
-    private var generation = 0
+    private var poll = PollLoop()
     /// The round in flight. The actor is reentrant across the hop the reads
     /// take, so the poll loop and the panel's own refresh can otherwise run
     /// one each — and the slower of the two writes its own `scans` back last,
@@ -98,25 +103,18 @@ actor GitIdentityMonitor {
     /// is one frame every ten minutes at the most. Idempotent, and a no-op
     /// where there is no git to run.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
-        guard pollTask == nil, home != nil else { return }
-        pollTask = Task { [weak self] in
-            var delay: Duration = .zero
-            while !Task.isCancelled {
-                if delay > .zero {
-                    do { try await Task.sleep(for: delay) } catch { return }
-                }
-                guard let self else { return }
-                await self.sweepOnce(onRefresh: onRefresh)
-                delay = await self.nextDelay()
-            }
+        guard home != nil else { return }
+        let paced = pacedWait
+        poll.start(wait: paced.wait) { [weak self] in
+            guard let self else { return nil }
+            await self.sweepOnce(onRefresh: onRefresh)
+            return await self.nextDelay()
         }
     }
 
     func stop() {
-        generation &+= 1
+        poll.stop()
         liveGeneration.update { $0 &+= 1 }
-        pollTask?.cancel()
-        pollTask = nil
         inFlight?.cancel()
         inFlight = nil
         scans = [:]
@@ -134,11 +132,11 @@ actor GitIdentityMonitor {
             await inFlight.value
             return
         }
-        let owner = generation
+        let owner = poll.generation
         let round = Task { await sweep(onRefresh: onRefresh) }
         inFlight = round
         await round.value
-        if owner == generation { inFlight = nil }
+        if owner == poll.generation { inFlight = nil }
     }
 
     private func sweep(onRefresh: @Sendable @escaping () async -> Void) async {
@@ -147,11 +145,11 @@ actor GitIdentityMonitor {
             git = GitIdentityReader.locate()
         }
         guard let git, let home else { return }
-        let stamp = generation
+        let stamp = poll.generation
         let targets = repositories()
         guard !targets.isEmpty else { return }
         let round = await read(targets, git: git, home: home, reusing: scans, stamps: stamps)
-        guard stamp == generation, !Task.isCancelled else { return }
+        guard poll.isCurrent(stamp) else { return }
         scans = round.scans
         stamps = round.stamps
         let judged = GitIdentityConsensus.judged(round.scans.values.map(\.identity)).sorted {

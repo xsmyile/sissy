@@ -397,12 +397,8 @@ enum PriceCatalogSource {
         initialPrevious: PriceCatalog? = nil,
         publish: @Sendable @escaping (PriceCatalog) async -> Void
     ) async {
-        var delay = initialDelay
         var previous: PriceCatalog? = initialPrevious
-        while !Task.isCancelled {
-            if delay > .zero {
-                do { try await Task.sleep(for: delay) } catch { return }
-            }
+        await PollLoop.run(first: initialDelay) {
             do {
                 let catalog = retaining(try await fetch(), over: previous)
                 saveCache(catalog)
@@ -419,14 +415,14 @@ enum PriceCatalogSource {
                         "sissy: pricing catalog refreshed — "
                             + "anthropic=\(catalog.anthropic.count), openai=\(catalog.openai.count)")
                 }
-                delay = refreshInterval
+                return refreshInterval
             } catch is CancellationError {
-                return
+                return nil
             } catch {
                 sissyLog(
                     "sissy: pricing catalog refresh failed (\(error)) — "
                         + "keeping previous rates, retrying later")
-                delay = retryInterval
+                return retryInterval
             }
         }
     }

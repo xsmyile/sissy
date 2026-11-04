@@ -326,7 +326,7 @@ actor LocalUsageProvider: UsageProvider {
     /// only reports what is written once it is armed, so a line appended to a
     /// file the cold scan had already read otherwise waited out a whole
     /// interval, however long the scan took.
-    private var pollTask: Task<Void, Never>?
+    private var pollLoop = PollLoop()
     private var onChange: (@Sendable (DayTotals) async -> Void)?
     nonisolated private let watchedCounter = LockedValue(0)
     /// FSEvents-backed primary wake source. When non-nil, kernel-level
@@ -570,17 +570,16 @@ actor LocalUsageProvider: UsageProvider {
         // left to cancel.
         guard lifecycle == .running, !Task.isCancelled else { return }
         coldScanComplete = true
-        // Read back once more before arming anything: `pollTask` is
+        // Read back once more before arming anything: `pollLoop` is
         // unstructured and inherits nothing, so a boot cancelled during the
         // emit above would otherwise leave a 60 s loop behind it.
         guard lifecycle == .running, !Task.isCancelled else { return }
         startFSWatcher()
         let interval = pollInterval
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.poll()
-                try? await Task.sleep(for: interval)
-            }
+        pollLoop.start { [weak self] in
+            guard let self else { return nil }
+            await self.poll()
+            return interval
         }
     }
 
@@ -680,8 +679,7 @@ actor LocalUsageProvider: UsageProvider {
         saveHistoryIfDirty(force: true)
         fsWatcher?.stop()
         fsWatcher = nil
-        pollTask?.cancel()
-        pollTask = nil
+        pollLoop.stop()
         // Release the emit callback so the aggregator that captured
         // `self` via the closure can be reclaimed. Without this clear the
         // strong-self capture in `UsageAggregator.start` would keep the
@@ -709,7 +707,7 @@ actor LocalUsageProvider: UsageProvider {
     }
 
     /// Boots an FSEvents watcher rooted at the source tree. FSEvents wakes are
-    /// the primary trigger for JSONL ingest; the surviving `pollTask` runs
+    /// the primary trigger for JSONL ingest; the surviving `pollLoop` runs
     /// at the configured cadence (default 60s) as a safety net for missed
     /// events and midnight rollover with no JSONL activity. The stream is
     /// rooted at the tree, so subdirectories a CLI creates on demand — a new
@@ -725,7 +723,7 @@ actor LocalUsageProvider: UsageProvider {
             fsWatcher = watcher
         }
         // On failure (e.g. unsupported filesystem) we fall back to pure
-        // polling — the `pollTask` still runs. No fatal here.
+        // polling — the `pollLoop` still runs. No fatal here.
     }
 
     /// FSEvents callback target. Ingests new bytes from each `.jsonl` URL and

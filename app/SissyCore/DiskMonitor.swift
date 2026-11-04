@@ -28,10 +28,7 @@ actor DiskMonitor {
     static let readInterval: Duration = .seconds(60)
 
     nonisolated private let published = LockedValue<DiskReading?>(nil)
-    private var pollTask: Task<Void, Never>?
-    /// Which `start()` a read belongs to, so one that returns after a `stop()`
-    /// cannot publish into the `start()` after it.
-    private var generation = 0
+    private var poll = PollLoop()
     private let gate = DiskReadGate()
     private let read: @Sendable (Date) -> DiskReading
 
@@ -44,23 +41,17 @@ actor DiskMonitor {
     nonisolated func currentReading() -> DiskReading? { published.load() }
 
     func start(onRefresh: @Sendable @escaping () async -> Void) {
-        guard pollTask == nil else { return }
-        generation += 1
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await self.sampleOnce(onRefresh: onRefresh)
-                do { try await Task.sleep(for: Self.readInterval) } catch { return }
-            }
+        poll.start { [weak self] in
+            guard let self else { return nil }
+            await self.sampleOnce(onRefresh: onRefresh)
+            return Self.readInterval
         }
     }
 
     /// Stops reading and drops what was published, so a module switched off
     /// leaves nothing on the next frame. Never waits for a read in flight.
     func stop() {
-        generation += 1
-        pollTask?.cancel()
-        pollTask = nil
+        poll.stop()
         published.store(nil)
     }
 
@@ -69,9 +60,8 @@ actor DiskMonitor {
     /// publishes nothing.
     func sampleOnce(onRefresh: @Sendable @escaping () async -> Void) async {
         guard !Task.isCancelled else { return }
-        let started = generation
-        guard let reading = await readOffActor(), !Task.isCancelled, started == generation
-        else { return }
+        let started = poll.generation
+        guard let reading = await readOffActor(), poll.isCurrent(started) else { return }
         published.store(reading)
         await onRefresh()
     }

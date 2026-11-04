@@ -247,7 +247,7 @@ actor KeepAwake {
     /// the backstop for a powerd write no notification announced.
     private let lidReassertInterval: TimeInterval
     /// Sets the switch again on the backstop interval while the lid is held.
-    private var lidKeeper: Task<Void, Never>?
+    private var lidKeeper = PollLoop()
     /// The power-source registration that sets the switch again when the
     /// source changes, held only while the lid is.
     private var powerSourceWatch: PowerSourceWatch?
@@ -270,7 +270,7 @@ actor KeepAwake {
     /// cancel; the notification registration goes with `powerSourceWatch`.
     /// The switch itself is the engine's record to answer for, not this.
     deinit {
-        lidKeeper?.cancel()
+        lidKeeper.stop()
         powerSourceRepair?.cancel()
     }
 
@@ -369,7 +369,7 @@ actor KeepAwake {
     private func takeLid() {
         guard clamshell.set(true) else { return }
         lid = true
-        if lidKeeper == nil { keepLid() }
+        if !lidKeeper.isRunning { keepLid() }
     }
 
     /// The repairs stop first whatever the kernel answers, because they set
@@ -398,13 +398,11 @@ actor KeepAwake {
     }
 
     private func keepLid() {
-        let interval = lidReassertInterval
-        lidKeeper = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(interval))
-                guard !Task.isCancelled else { return }
-                await self?.reassertLid()
-            }
+        let interval = Duration.seconds(lidReassertInterval)
+        lidKeeper.start(first: interval) { [weak self] in
+            guard let self else { return nil }
+            await self.reassertLid()
+            return interval
         }
         powerSourceWatch = PowerSourceWatch(
             key: kIOPSNotifyPowerSource, fallback: "the lid relies on the backstop"
@@ -414,8 +412,7 @@ actor KeepAwake {
     }
 
     private func stopKeepingLid() {
-        lidKeeper?.cancel()
-        lidKeeper = nil
+        lidKeeper.stop()
         powerSourceRepair?.cancel()
         powerSourceRepair = nil
         powerSourceWatch = nil
