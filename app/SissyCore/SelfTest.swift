@@ -980,14 +980,14 @@ func runClaudeLimitsParseTests() {
     )
     expect(
         "profile plan and tier both strip their vendor prefix",
-        ClaudeProfileSource.read(profileBlob),
+        profileReading(profileBlob),
         .found(ClaudeProfileSource.Profile(plan: "max", tier: "max_5x", account: nil))
     )
 
     let apiKeyProfile = Data(#"{"hasCompletedOnboarding":true}"#.utf8)
     expect(
         "a profile with no oauthAccount names no plan",
-        ClaudeProfileSource.read(apiKeyProfile) == .absent,
+        profileReading(apiKeyProfile) == .absent,
         true
     )
 
@@ -996,7 +996,7 @@ func runClaudeLimitsParseTests() {
     // beside it must not synthesise one.
     expect(
         "an unprefixed organizationType passes through without a tier",
-        ClaudeProfileSource.read(unprefixedProfile),
+        profileReading(unprefixedProfile),
         .found(ClaudeProfileSource.Profile(plan: "team", tier: nil, account: nil))
     )
 
@@ -1005,7 +1005,7 @@ func runClaudeLimitsParseTests() {
     let shoutingProfile = Data(#"{"oauthAccount":{"organizationType":"claude_MAX"}}"#.utf8)
     expect(
         "a plan outside the token shape is refused",
-        ClaudeProfileSource.read(shoutingProfile) == .absent,
+        profileReading(shoutingProfile) == .absent,
         true
     )
 
@@ -1017,7 +1017,7 @@ func runClaudeLimitsParseTests() {
     )
     expect(
         "a refused tier keeps the plan and reports no tier",
-        ClaudeProfileSource.read(oddTierProfile),
+        profileReading(oddTierProfile),
         .found(ClaudeProfileSource.Profile(plan: "pro", tier: nil, account: nil))
     )
 
@@ -1046,9 +1046,9 @@ func runClaudeLimitsParseTests() {
     // plan: treating it as one blanked the badge on any bad read, and the
     // reading the source already holds is the better answer.
     expect(
-        "unparseable bytes are unreadable, not absent",
-        ClaudeProfileSource.read(Data("{ truncated".utf8)),
-        .unreadable
+        "unparseable bytes leave the reading the source holds",
+        profilePlanAfterUnparseableBytes(following: profileBlob),
+        "max"
     )
 
     // Measured shape of `cachedUsageUtilization` in `~/.claude.json`, which is
@@ -1063,7 +1063,7 @@ func runClaudeLimitsParseTests() {
         "enabled":true}}}}
         """#.replacingOccurrences(of: "\n", with: "").utf8
     )
-    let billed = ClaudeProfileSource.readCredits(creditsBlob)
+    let billed = profileAttributed(creditsBlob).signals.credits
     expect("credits used", billed?.usedMinor, 5895)
     expect("credits cap", billed?.capMinor, 10000)
     expect("credits currency is the account's", billed?.unit, .money(currency: "EUR", exponent: 2))
@@ -1084,7 +1084,7 @@ func runClaudeLimitsParseTests() {
     )
     expect(
         "credits with two currencies are refused",
-        ClaudeProfileSource.readCredits(mixedCurrency) == nil,
+        profileAttributed(mixedCurrency).signals.credits == nil,
         true
     )
 
@@ -1096,13 +1096,13 @@ func runClaudeLimitsParseTests() {
     )
     expect(
         "credits with a non-ISO currency are refused",
-        ClaudeProfileSource.readCredits(badCurrency) == nil,
+        profileAttributed(badCurrency).signals.credits == nil,
         true
     )
 
     expect(
         "a config naming no credits answers none",
-        ClaudeProfileSource.readCredits(Data(#"{"oauthAccount":{}}"#.utf8)) == nil,
+        profileAttributed(Data(#"{"oauthAccount":{}}"#.utf8)).signals.credits == nil,
         true
     )
 
@@ -2152,6 +2152,45 @@ private func runPriceCatalogTests() {
 /// The account each provider is signed in as, and the seat that words a Team
 /// plan. Both come out of files the adapters already read for the plan, so the
 /// fixtures here are the measured shapes of those files and nothing more.
+/// What a source takes off `data`, read the way it ships: off a file, by
+/// `ClaudeProfileSource.refresh`.
+private func profileAttributed(_ data: Data) -> ClaudeProfileSource.Attributed {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sissy-selftest-profile-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try? data.write(to: url)
+    let source = ClaudeProfileSource(url: url)
+    source.refresh(userInitiated: true)
+    return source.currentAttributed()
+}
+
+/// `profileAttributed` in the shape the assertions below name: found where the
+/// source holds a plan, and absent where it does not.
+private func profileReading(_ data: Data) -> ClaudeProfileSource.Reading {
+    let attributed = profileAttributed(data)
+    guard let plan = attributed.signals.plan else { return .absent }
+    return .found(
+        ClaudeProfileSource.Profile(
+            plan: plan, tier: attributed.signals.planTier, account: attributed.signals.account,
+            owner: attributed.profileOwner, name: attributed.signals.planName))
+}
+
+/// The plan a source holds once a file it has read turns to bytes that do not
+/// parse. Dated apart so the mtime gate lets the second read through.
+private func profilePlanAfterUnparseableBytes(following good: Data) -> String? {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sissy-selftest-profile-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try? good.write(to: url)
+    let source = ClaudeProfileSource(url: url)
+    source.refresh(userInitiated: true)
+    try? Data("{ truncated".utf8).write(to: url)
+    try? FileManager.default.setAttributes(
+        [.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: url.path)
+    source.refresh(userInitiated: true)
+    return source.currentSignals().plan
+}
+
 func runProviderAccountTests() {
     let claudeBlob = Data(
         #"""
@@ -2160,7 +2199,7 @@ func runProviderAccountTests() {
     )
     expect(
         "the claude profile carries the account beside the plan",
-        ClaudeProfileSource.read(claudeBlob),
+        profileReading(claudeBlob),
         .found(
             ClaudeProfileSource.Profile(
                 plan: "team",
@@ -2179,7 +2218,7 @@ func runProviderAccountTests() {
     let bareProfile = Data(#"{"oauthAccount":{"organizationType":"claude_pro"}}"#.utf8)
     expect(
         "a profile naming nobody carries no account",
-        ClaudeProfileSource.read(bareProfile),
+        profileReading(bareProfile),
         .found(ClaudeProfileSource.Profile(plan: "pro", tier: nil, account: nil))
     )
 

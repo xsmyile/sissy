@@ -277,9 +277,9 @@ struct ClaudeAccountStore: Sendable {
         var lineage: [String: [String]] = [:]
 
         /// How many of an account's rotations the lineage keeps. The CLI
-        /// renews about every eight hours, so this reaches back days rather
-        /// than weeks: a sibling older than that has a refresh token long
-        /// since spent, and is refused as it always was.
+        /// renews every 26-73 minutes as `docs/DECISIONS.md` measures it, so
+        /// this reaches back 14 to 39 hours: a sibling older than that is
+        /// refused as it always was.
         static let lineageLimit = 32
 
         /// The index with this access token recorded under the account, the

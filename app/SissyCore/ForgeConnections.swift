@@ -62,10 +62,6 @@ struct ForgeConnection: Sendable, Codable, Equatable, Identifiable {
         return components.url
     }
 
-    static func gitHub(host: String = GitHubActivityFeed.dotComHost) -> Self {
-        Self(kind: .gitHub, host: host)
-    }
-
     static let scheme = "https"
     private static let insecureScheme = "http"
     private static let knownSchemes = [scheme, insecureScheme]

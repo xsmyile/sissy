@@ -117,16 +117,13 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     private static let usageFetchedAtKey = "fetchedAtMs"
     private static let usageBodyKey = "utilization"
 
-    /// Outcome of reading the config file, on the same reasoning as
-    /// `ClaudeCredentialsLookup`: naming no plan and answering nothing are
-    /// different states. The first is an account without one — an API-key
-    /// user, or a CLI signed out — and clears the plan on the row. The second
-    /// is a payload this type could not parse, which is no information at
-    /// all, and must leave the last good reading where it is.
+    /// Outcome of reading the config file. Naming no plan is an account without
+    /// one, an API-key user or a CLI signed out, and clears the plan on the
+    /// row. Bytes that do not parse never get this far: `refresh` leaves the
+    /// last good reading where it is.
     enum Reading: Sendable, Equatable {
         case found(Profile)
         case absent
-        case unreadable
     }
 
     /// `url` is the config file of the home being read, which is
@@ -202,26 +199,9 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
         }
     }
 
-    /// Reads a `.claude.json` payload. A shape that parses but names no plan
-    /// is `.absent`, so a config file the CLI reorganises costs the panel a
-    /// badge rather than showing a wrong one; bytes that are not a JSON object
-    /// at all are `.unreadable`, which is not the same claim.
-    static func read(_ data: Data) -> Reading {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return .unreadable
-        }
-        return readProfile(root)
-    }
-
-    /// The credits block of a `.claude.json` payload, for a caller holding the
-    /// bytes rather than the parsed object.
-    static func readCredits(_ data: Data) -> ProviderCredits? {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        return readCredits(root)
-    }
-
+    /// A `.claude.json` payload's plan and account. A shape that parses but
+    /// names no plan is `.absent`, so a config file the CLI reorganises costs
+    /// the panel a badge rather than showing a wrong one.
     private static func readProfile(_ root: [String: Any]) -> Reading {
         guard let account = root["oauthAccount"] as? [String: Any],
             let plan = UsageReaderShared.sanitizedPlanToken(
