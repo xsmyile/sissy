@@ -303,6 +303,19 @@ final class UsageHistoryTailTests: XCTestCase {
         XCTAssertNotNil(archivedToday(), "today has no file after a deletion")
     }
 
+    /// A deletion made further east names a date that is still today here, and the
+    /// live events of a day nobody deleted have to reach the archive.
+    func testTodayIsWrittenEvenWhenTheDeletionRecordNamesIt() async throws {
+        try writeTurn("a.jsonl", requestId: "r1")
+        var ledger = ArchiveBackfillLedger()
+        ledger.deletedThrough = today
+        try ArchiveBackfillLedger.save(ledger, to: ArchiveBackfillLedger.defaultURL(in: stateDir))
+
+        try await runTail(archiving: true)
+
+        XCTAssertNotNil(archivedToday(), "today was refused as a deleted day")
+    }
+
     /// A record that would not read may be one naming the day. It is held back,
     /// not dropped, and written once the file answers that it was not deleted.
     func testADayIsHeldBackWhileTheDeletionRecordWillNotRead() async throws {

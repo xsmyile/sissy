@@ -161,14 +161,19 @@ enum ArchiveDeletion: Equatable, Sendable {
     /// The read itself failed, which says nothing about what the file holds.
     case unreadable
 
-    /// Whether `day` may not be written now. A failed read refuses every day
-    /// but today, because any of them may be one the user deleted, and the next
-    /// read can still answer. `YYYY-MM-DD` orders as the days do.
+    /// Whether `day` may not be written now. A failed read refuses every past
+    /// day, because any of them may be one the user deleted, and the next read
+    /// can still answer. `YYYY-MM-DD` orders as the days do.
+    ///
+    /// Today is never refused, whatever the record names: a deletion made in Tokyo
+    /// records a date that is still today in Honolulu, and refusing it would lose
+    /// the live events of a day nobody deleted.
     func refuses(_ day: String, today: String) -> Bool {
+        guard day < today else { return false }
         switch self {
-        case .none: false
-        case .through(let last): day <= last
-        case .unreadable: day < today
+        case .none: return false
+        case .through(let last): return day <= last
+        case .unreadable: return true
         }
     }
 }
@@ -356,10 +361,13 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// day before today is gone for good.
     ///
     /// Written over a file that would not read, unlike `update(at:_:)`. What that
-    /// loses costs a pass, and the pass is refused by what this writes.
+    /// loses costs a pass, and the pass is refused by what this writes. Answers
+    /// whether it reached the disk, because a deletion without its date can come
+    /// back, and the disk may only have room once the archive is gone.
+    @discardableResult
     static func noteDeletion(
         covering providers: [String], window: Range<Date>?, at url: URL, now: Date = Date()
-    ) {
+    ) -> Bool {
         var updated = load(from: url)
         let calendar = Calendar.current
         if let yesterday = calendar.date(
@@ -373,28 +381,35 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
         }
         updated.owed = [:]
         updated.pending = [:]
-        saving(updated, to: url)
+        return saving(updated, to: url)
     }
 
     /// Losing either write costs one repeat of a pass, which is why it is logged
     /// rather than propagated.
-    private static func saving(_ ledger: Self, to url: URL) {
+    @discardableResult
+    private static func saving(_ ledger: Self, to url: URL) -> Bool {
         do {
             try save(ledger, to: url)
+            return true
         } catch {
             sissyLog("sissy: could not write the archive backfill record: \(error)")
+            return false
         }
     }
 
     /// Changes the record on disk, unless it would not read: answered as empty
     /// and saved, that would lose `deletedThrough`, and the days it names would
     /// come back.
+    ///
+    /// One read for both answers: a failure on a second read would come back as an
+    /// empty record with no date, past a check the first read had already passed.
     static func update(at url: URL, _ change: (Self) -> Self) {
-        guard deletion(at: url) != .unreadable else {
+        let reading = read(url)
+        guard reading.deletion != .unreadable else {
             sissyLog("sissy: left the archive backfill record unwritten, it would not read")
             return
         }
-        saving(change(load(from: url)), to: url)
+        saving(change(reading.ledger), to: url)
     }
 
     /// The record on disk, or an empty one that keeps `deletedThrough`. A file
@@ -402,26 +417,39 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// holds no reading, and the worst an unreadable one costs is a pass that
     /// runs again and rewrites the days the deletion does not cover.
     static func load(from url: URL) -> Self {
-        var ledger = (try? file(url).load()) ?? Self()
-        if case .through(let day) = deletion(at: url) { ledger.deletedThrough = day }
-        return ledger
+        read(url).ledger
     }
 
     /// What the record says about the last deletion, read past any schema so a
     /// bump cannot take it away.
     static func deletion(at url: URL) -> ArchiveDeletion {
-        do {
-            let record = try VersionedJSONFile<DeletionRecord>(url: url, policy: .refuse).load()
-            return record?.deletedThrough.map(ArchiveDeletion.through) ?? .none
-        } catch JSONFileFailure.unreadable {
-            return .unreadable
-        } catch {
-            return .none
-        }
+        read(url).deletion
     }
 
     private struct DeletionRecord: Codable {
         var deletedThrough: String?
+    }
+
+    /// The file read once, and everything it answers.
+    private static func read(_ url: URL) -> (ledger: Self, deletion: ArchiveDeletion) {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch CocoaError.fileReadNoSuchFile {
+            return (Self(), .none)
+        } catch {
+            return (Self(), .unreadable)
+        }
+        let decoder = JSONDecoder()
+        let deleted = (try? decoder.decode(DeletionRecord.self, from: data))?.deletedThrough
+        var ledger = Self()
+        if let decoded = try? decoder.decode(Self.self, from: data),
+            decoded.schemaVersion == currentSchemaVersion
+        {
+            ledger = decoded
+        }
+        ledger.deletedThrough = deleted
+        return (ledger, deleted.map(ArchiveDeletion.through) ?? .none)
     }
 
     static func save(_ ledger: Self, to url: URL) throws {
@@ -429,8 +457,7 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     }
 
     private static func file(_ url: URL) -> VersionedJSONFile<Self> {
-        VersionedJSONFile(
-            url: url, policy: .replace, schema: (currentSchemaVersion, \.schemaVersion))
+        VersionedJSONFile(url: url, policy: .replace)
     }
 }
 

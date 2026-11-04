@@ -2464,14 +2464,25 @@ actor UsageEngine {
     /// one landing between the first telling and the removal cleared today's dirty
     /// mark on a file the removal then took, and today would have no file until
     /// its next event.
-    func deleteHistory() async {
-        await stopArchiveBackfill()
+    ///
+    /// **The date is tried again once the files are gone.** Someone deleting
+    /// history to free a full disk has no room for it the first time, and the
+    /// dialog has already said these days are gone for good.
+    func deleteHistory(
+        removingWith remove: (URL) throws -> Void = UsageHistoryStore.removeAll(in:)
+    ) async {
+        let recorded = await stopArchiveBackfill()
         await aggregator.forgetArchivedDays()
         do {
-            try UsageHistoryStore.removeAll(in: stateDir)
+            try remove(stateDir)
             sissyLog("sissy: usage history deleted")
         } catch {
             sissyLog("sissy: failed to delete usage history at \(stateDir.path): \(error)")
+        }
+        if !recorded, !noteArchiveDeletion() {
+            sissyLog(
+                "sissy: the archive was deleted but the date it was deleted through could not "
+                    + "be saved, so a later pass may read those days back")
         }
         await aggregator.forgetArchivedDays()
         historyRollups = [:]
@@ -2496,12 +2507,16 @@ actor UsageEngine {
     /// waits with no task at all, so either way the next launch would go back
     /// for the days that were just deleted — which is the same promise the
     /// record's own location outside `history/` exists to keep.
-    private func stopArchiveBackfill() async {
+    private func stopArchiveBackfill() async -> Bool {
         if let task = backfillTask {
             backfillTask = nil
             task.cancel()
             await task.value
         }
+        return noteArchiveDeletion()
+    }
+
+    private func noteArchiveDeletion() -> Bool {
         ArchiveBackfillLedger.noteDeletion(
             covering: resolvedProviders.filter(\.activation.isMetering).map(\.id),
             window: ArchiveBackfill.window(retentionDays: config.resolvedHistoryRetentionDays),

@@ -149,6 +149,16 @@ final class UsageBackfillTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: ledgerURL), before)
     }
 
+    /// A deletion cannot reach today, whichever zone the record was written in.
+    func testNoRecordRefusesToday() {
+        let today = "2026-11-03"
+        XCTAssertFalse(ArchiveDeletion.through(today).refuses(today, today: today))
+        XCTAssertFalse(ArchiveDeletion.through("2026-11-04").refuses(today, today: today))
+        XCTAssertFalse(ArchiveDeletion.unreadable.refuses(today, today: today))
+        XCTAssertTrue(ArchiveDeletion.through(today).refuses("2026-11-02", today: today))
+        XCTAssertTrue(ArchiveDeletion.unreadable.refuses("2026-11-02", today: today))
+    }
+
     /// A later deletion moves the date on, and nothing moves it back.
     func testTheDeletedDateOnlyMovesForward() {
         let today = Date()
