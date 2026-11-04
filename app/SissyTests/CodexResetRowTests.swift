@@ -148,6 +148,9 @@ final class CodexResetRowTests: XCTestCase {
         XCTAssertEqual(
             LimitResetCopy.outcome(.nothingToReset, provider: ProviderID.codex),
             "Nothing was spent: OpenAI says this account does not need a reset right now.")
+        XCTAssertTrue(
+            LimitResetCopy.outcome(.offerChanged, provider: ProviderID.codex)
+                .contains("Codex is signed in to another account"))
         XCTAssertEqual(
             LimitResetCopy.outcome(.unconfirmed, provider: ProviderID.codex),
             "No answer from OpenAI. Trying again cannot spend a second reset.")

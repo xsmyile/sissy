@@ -2080,7 +2080,8 @@ enum LimitResetCopy {
             return "Nothing was spent: another reset was just started on this account. Try again "
                 + "in a minute."
         case .offerChanged:
-            return "Nothing was spent: Claude Code is signed in to another account now. Its "
+            let cli = provider == ProviderID.codex ? "Codex" : "Claude Code"
+            return "Nothing was spent: \(cli) is signed in to another account now. Its "
                 + "resets are on this page once it reads them."
         case .mayHaveLanded:
             return "The earlier try may have gone through. The windows above say whether it did."
