@@ -110,6 +110,12 @@ actor ClaudeAccountRegistry {
     /// hour for as long as the slot held one, each logged. So it is not asked
     /// (`ClaudeLimitsProbe` gates on the same field) and it is named once.
     private var lastExpiredToken: String?
+    /// The token the profile endpoint last refused with a 401 or a 403. An
+    /// expiry says nothing about a revoked token, which cost the same request
+    /// on every watch, so the refusal itself is remembered, until the slot holds
+    /// a different token. In memory only: a relaunch asks once more.
+    private var refusedToken: String?
+    private static let refusalStatuses: Set<Int> = [401, 403]
     /// The account `lastSeenToken` was identified as or written for, set and
     /// cleared with it. What the config file is reconciled with, rather than
     /// the index's active id: that is a note on disk, and one that failed to
@@ -239,6 +245,7 @@ actor ClaudeAccountRegistry {
             }
             return published.load() != before
         }
+        guard parsed.accessToken != refusedToken else { return published.load() != before }
         await file(credential: current.data, from: current.name, markActive: true)
         return published.load() != before
     }
@@ -505,6 +512,11 @@ actor ClaudeAccountRegistry {
             if case UsageRequestError.rateLimited(let retryAfter) = error {
                 identifyRefusedUntil = now().addingTimeInterval(
                     UsageRequestError.backoffSeconds(retryAfter: retryAfter))
+            }
+            if case UsageRequestError.badStatus(let code) = error,
+                Self.refusalStatuses.contains(code)
+            {
+                refusedToken = parsed.accessToken
             }
             sissyLog("sissy: could not identify the Claude credential in \(name.label): \(error)")
             return false

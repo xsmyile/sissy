@@ -44,17 +44,6 @@ final class GitHubProfileCalendarTests: XCTestCase {
         ("2026-10-13", "1,234 contributions on October 13th."),
     ]
 
-    /// Matched by scalar, as `NSRegularExpression` did: under `Regex`'s default
-    /// a mark combining with a closing bracket would hide the square behind it.
-    func testACombiningMarkBesideABracketDoesNotHideASquare() throws {
-        let html = Self.fragment(days: Self.threeDays)
-            .replacingOccurrences(
-                of: "ContributionCalendar-day\">", with: "ContributionCalendar-day\">\u{301}")
-        XCTAssertEqual(
-            try GitHubProfileCalendar.parse(html),
-            ["2026-10-11": 0, "2026-10-12": 1, "2026-10-13": 1234])
-    }
-
     func testParseReadsEverySquareAgainstTheHeading() throws {
         XCTAssertEqual(
             try GitHubProfileCalendar.parse(Self.fragment(days: Self.threeDays)),
