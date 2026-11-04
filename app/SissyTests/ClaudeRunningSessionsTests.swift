@@ -126,8 +126,27 @@ final class ProcessEnvironmentTests: XCTestCase {
         XCTAssertEqual(lookup(raw), .unreadable)
     }
 
+    /// An empty environment, with the kernel's own strings after it as a real
+    /// process always has.
     func testAnEmptyEnvironmentIsAbsent() {
-        XCTAssertEqual(lookup(bytes(environment: [])), .absent)
+        XCTAssertEqual(lookup(bytes(environment: [], trailer: ["stack_guard=0x1"])), .absent)
+    }
+
+    /// A rewritten title over a withheld environment: the walk ends in zeros and
+    /// they run to the end of the bytes, which says nothing about the variable.
+    func testZerosRunningToTheEndAreUnreadable() {
+        var raw = withUnsafeBytes(of: Int32(2)) { Array($0) }
+        raw += Array("/usr/local/bin/node".utf8) + [0]
+        raw += Array("claude".utf8) + [UInt8](repeating: 0, count: 40)
+        XCTAssertEqual(lookup(raw), .unreadable)
+    }
+
+    func testARealChildWithAnEmptyEnvironmentAnswersAbsent() throws {
+        let child = try spawn(environment: [:])
+        defer { child.terminate() }
+        var buffer: [UInt8] = []
+        XCTAssertEqual(
+            AgentProcessReader.claudeConfigDir(of: child.processIdentifier, buffer: &buffer), .absent)
     }
 
     func testTooFewBytesAreUnreadable() {
@@ -986,6 +1005,18 @@ final class ClaudeRunningRowsTests: XCTestCase {
 
         XCTAssertEqual(row.account?.name, "Renamed sole")
         XCTAssertEqual(row.reading.runningSessions, 2)
+    }
+
+    /// A probe with resets and no windows: the row draws them and a press spends
+    /// the metered credential, so the row must not take the running account's name.
+    func testResetsOnTheMeteredRowKeepTheRunningAccountOffIt() throws {
+        var reading = signals([runningOnly()])
+        reading.resets = LimitResets(available: 1, applicable: 1)
+        let row = snapshot(signals: reading).providers[0]
+
+        XCTAssertNil(row.account)
+        XCTAssertEqual(row.reading.runningSessions, 0)
+        XCTAssertNotNil(row.reading.resets)
     }
 
     /// With a picker the entries speak, so the row's own fields take no account.

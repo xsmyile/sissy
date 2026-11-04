@@ -1018,12 +1018,14 @@ struct UsagePanelSnapshot: Equatable {
 
         /// Only over a slice with nothing of its own. One that names an account
         /// or holds a reading has no id to say so with where the file predates
-        /// `accountUuid`, and the running account is not that one.
+        /// `accountUuid`, and the running account is not that one. Resets count:
+        /// the row draws them, and a press spends the metered home's credential,
+        /// which must not go out under the running account's name.
         init?(soleRunning slice: ProviderSlice, known: ClaudeAccountRegistry.Snapshot) {
             let accounts = slice.signals.accounts
             guard accounts.count == 1, let only = accounts.first, only.isOnlyRunning,
                 known.accounts.allSatisfy({ $0.uuid == only.id }),
-                slice.account == nil, slice.plan == nil, slice.windows.isEmpty
+                slice.account == nil, slice.plan == nil, slice.windows.isEmpty, slice.resets == nil
             else { return nil }
             plan = only.plan
             planTier = only.planTier

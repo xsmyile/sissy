@@ -38,11 +38,14 @@ enum ProcessEnvironment {
     /// is either a prompt that happens to, or an environment entry the walk took
     /// for an argument after a long title, and nothing tells those apart, so with
     /// no other answer it is `unreadable`: `absent` would count the session on the
-    /// default home.
+    /// default home. So are bytes that are zeros all the way to their end: a real
+    /// process has the kernel's own strings after its environment, so that is a
+    /// rewritten title over a withheld environment rather than an empty one.
     static func lookup(_ name: String, in bytes: [UInt8]) -> Lookup {
         guard let walked = arguments(in: bytes), walked.end < bytes.count else { return .unreadable }
         var cursor = walked.end
         while cursor < bytes.count, bytes[cursor] == 0 { cursor += 1 }
+        guard cursor < bytes.count else { return .unreadable }
         let prefix = Array(name.utf8) + [UInt8(ascii: "=")]
         while cursor < bytes.count, bytes[cursor] != 0 {
             guard let end = bytes[cursor...].firstIndex(of: 0) else { return .unreadable }
