@@ -54,6 +54,17 @@ final class MacHealthPanelTests: XCTestCase {
         XCTAssertEqual(UsageFormat.storage(0), "0 B")
     }
 
+    /// Under a megabyte used to round to `0 MB`, which is the small amount
+    /// reading as none this format exists to refuse.
+    func testASmallAmountNeverReadsAsNone() {
+        XCTAssertEqual(UsageFormat.storage(1), "1 B")
+        XCTAssertEqual(UsageFormat.storage(999), "999 B")
+        XCTAssertEqual(UsageFormat.storage(1_000), "1 KB")
+        XCTAssertEqual(UsageFormat.storage(499_000), "499 KB")
+        XCTAssertEqual(UsageFormat.storage(999_400), "999 KB")
+        XCTAssertEqual(UsageFormat.storage(999_600), "1 MB")
+    }
+
     func testStorageReadsTerabytesToOneDecimal() {
         XCTAssertEqual(UsageFormat.storage(2_000_398_934_016), "2.0 TB")
         XCTAssertEqual(UsageFormat.storage(999_000_000_000), "999 GB")

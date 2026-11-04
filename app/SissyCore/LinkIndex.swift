@@ -33,8 +33,80 @@ struct LinkIndex<Link: IndexedLink>: Sendable {
         var links: [String: Link] = [:]
     }
 
-    func load() -> [String: Link] {
-        linkIndexLock.withLock { read() }
+    /// Why the index would not answer. `reason` is the error's domain and
+    /// code and never the file's bytes.
+    enum LoadError: Error, Equatable {
+        /// The file is there and the read itself failed, which says nothing
+        /// about what is in it.
+        case unreadable(reason: String)
+        /// The file read and does not decode, which is the one case its
+        /// contents are known to be bad.
+        case undecodable(reason: String)
+    }
+
+    /// Every link, and none when there is no file yet.
+    ///
+    /// Throws for a file that is there and will not read, which used to come
+    /// back as no links: the next `remember` or `forget` then wrote that over
+    /// the file, losing every other account's name and chosen organisation.
+    /// The rule `ForgeConnectionIndex.load` is on, for the same reason.
+    func load() throws -> [String: Link] {
+        try linkIndexLock.withLock { try read() }
+    }
+
+    /// Every link, with an index that does not decode moved out of the way
+    /// first.
+    ///
+    /// Moved rather than deleted: a person can still read it, and a new link
+    /// starts a fresh file instead of being refused for ever. **Only a file
+    /// that read and did not decode is moved**, because one whose read failed
+    /// may be a sound index behind a lock or a permission. That, and a file
+    /// that could not be moved, throw.
+    func loadSettingAside(now: Date = Date()) throws -> [String: Link] {
+        try linkIndexLock.withLock {
+            do {
+                return try read()
+            } catch let failure as LoadError {
+                guard case .undecodable = failure else { throw failure }
+                let aside = url.deletingPathExtension().appendingPathExtension(
+                    "unreadable-\(Int(now.timeIntervalSince1970)).json")
+                do {
+                    try FileManager.default.moveItem(at: url, to: aside)
+                } catch {
+                    sissyLog(
+                        "sissy: \(Link.fileName) would not decode (\(failure)) and could not be "
+                            + "moved (\(Self.reason(error)))")
+                    throw failure
+                }
+                sissyLog(
+                    "sissy: \(Link.fileName) would not decode (\(failure)); kept it as "
+                        + aside.lastPathComponent)
+                return [:]
+            }
+        }
+    }
+
+    /// The links an engine starts with: none, and said so, when the file will
+    /// not answer. The file stays where it is and `change` keeps refusing to
+    /// write over it.
+    func loadAtLaunch() -> [String: Link] {
+        do {
+            return try loadSettingAside()
+        } catch {
+            sissyLog("sissy: \(Link.fileName) could not be loaded (\(error))")
+            return [:]
+        }
+    }
+
+    /// Copies the file's links into what the engine holds. A file that will
+    /// not read leaves the held copy as it stands, because blanking it would
+    /// take every account's name with it.
+    func reload(into held: LockedValue<[String: Link]>) {
+        do {
+            held.store(try load())
+        } catch {
+            sissyLog("sissy: \(Link.fileName) could not be reloaded (\(error))")
+        }
     }
 
     /// Records what a link turned out to be, replacing whatever was there.
@@ -54,10 +126,11 @@ struct LinkIndex<Link: IndexedLink>: Sendable {
     }
 
     /// Applies `mutation` to the file's links under the lock, and writes them
-    /// back only when it answers that it changed something.
+    /// back only when it answers that it changed something. A file that will
+    /// not read throws before anything is written, so it is never overwritten.
     private func change(_ mutation: (inout [String: Link]) -> Bool) throws {
         try linkIndexLock.withLock {
-            var links = read()
+            var links = try read()
             guard mutation(&links) else { return }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -65,11 +138,25 @@ struct LinkIndex<Link: IndexedLink>: Sendable {
         }
     }
 
-    private func read() -> [String: Link] {
-        guard let data = try? Data(contentsOf: url),
-            let decoded = try? JSONDecoder().decode(Contents.self, from: data)
-        else { return [:] }
-        return decoded.links
+    private func read() throws -> [String: Link] {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch CocoaError.fileReadNoSuchFile {
+            return [:]
+        } catch {
+            throw LoadError.unreadable(reason: Self.reason(error))
+        }
+        do {
+            return try JSONDecoder().decode(Contents.self, from: data).links
+        } catch {
+            throw LoadError.undecodable(reason: "\(data.count) bytes, \(Self.reason(error))")
+        }
+    }
+
+    private static func reason(_ error: Error) -> String {
+        let bridged = error as NSError
+        return "\(bridged.domain) \(bridged.code)"
     }
 }
 

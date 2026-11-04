@@ -182,6 +182,28 @@ final class ClaudeAccountRowsTests: XCTestCase {
         XCTAssertEqual(linked?.plan, "team")
     }
 
+    /// The plan's word belongs to the source that named the plan: an archive
+    /// that said Ultra cannot rename a newer reading of a Team seat, and it
+    /// still answers for an account nothing has read.
+    func testAnArchivedPlanWordAnswersOnlyForAnArchivedPlan() {
+        let archived = ClaudeAccountIdentity(
+            uuid: archivedUUID, email: nil, organization: "Radon Forge",
+            organizationType: "claude_max", rateLimitTier: "default_claude_max_20x",
+            planName: "Ultra Plus")
+        let other = AccountSignals(id: signedInUUID, account: nil, plan: "pro", planTier: nil)
+        let team = AccountSignals(
+            id: archivedUUID,
+            account: ProviderAccount(email: nil, organization: "Acme Srl", seat: "team_tier_1"),
+            plan: "team", planTier: nil)
+        let unread = AccountSignals(id: archivedUUID, account: nil, plan: nil, planTier: nil)
+
+        let read = entries(readings: [team, other], known: [archived], now: Date())
+        XCTAssertEqual(read.first { $0.id == archivedUUID }?.plan, "Team Premium")
+
+        let fallback = entries(readings: [unread, other], known: [archived], now: Date())
+        XCTAssertEqual(fallback.first { $0.id == archivedUUID }?.plan, "Ultra Plus")
+    }
+
     /// An archived account's plan reaches the row in the vocabulary the
     /// formatter words.
     ///
@@ -328,6 +350,43 @@ final class ClaudeAccountRowsTests: XCTestCase {
         XCTAssertEqual(rows.map(\.qualifier), ["Acme Srl", "Radon Forge"])
         XCTAssertEqual(rows.map(\.title), ["Claude · Acme Srl", "Claude · Radon Forge"])
         XCTAssertEqual(rows.map(\.plan), ["Team", "Team"])
+    }
+
+    /// The count over a vendor's rows names the accounts its picker lists, so
+    /// a third one Sissy holds no reading for is still counted. Counting rows
+    /// read `2 accounts` over a page whose picker offered three.
+    func testTheAccountCountIncludesAnAccountWithNoReading() throws {
+        let now = Date()
+        func account(_ uuid: String, organization: String) -> AccountSignals {
+            AccountSignals(
+                id: uuid,
+                account: ProviderAccount(
+                    email: "\(uuid)@example.com", organization: organization, seat: nil),
+                plan: "team", planTier: nil, windows: [window(18)], limitsObservedAt: now,
+                isSignedIn: uuid == signedInUUID)
+        }
+        var signals = reading(observedAt: now)
+        signals.accounts = [
+            account(signedInUUID, organization: "Acme Srl"),
+            account(archivedUUID, organization: "Radon Forge"),
+        ]
+        let frame = FrameData(
+            tokens: 1, cost: 1, burn: nil,
+            providers: [
+                ProviderSlice(id: ProviderID.claudeCode, tokens: 1, cost: 1, signals: signals)
+            ],
+            keepAwake: .off)
+
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame,
+            claudeAccounts: ClaudeAccountRegistry.Snapshot(
+                accounts: [identity("c9d0e1f2", organization: "Unlinked Srl")]),
+            now: now)
+
+        XCTAssertEqual(snapshot.gaugeRows.count, 2)
+        XCTAssertEqual(snapshot.gaugeRows.map(\.accountCount), [3, 3])
+        let picker = try XCTUnwrap(snapshot.providers.first?.accounts)
+        XCTAssertEqual(picker.count, 3)
     }
 
     /// The Overview names a vendor once over all its accounts, and keeps the

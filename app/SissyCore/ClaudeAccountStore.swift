@@ -50,6 +50,11 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     /// `seat` is, and nil on an account archived before it was recorded, which
     /// that writer leaves out rather than guesses.
     let organizationUUID: String?
+    /// The plan as Anthropic words it, off `organization.plan_display_name`
+    /// on `api/oauth/profile`. Optional for the reason `seat` is, and nil on
+    /// an account filed before it was read, which `UsageFormat` words from the
+    /// tier instead.
+    let planName: String?
 
     init(
         uuid: String,
@@ -59,7 +64,8 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
         organizationType: String?,
         rateLimitTier: String?,
         seat: String? = nil,
-        organizationUUID: String? = nil
+        organizationUUID: String? = nil,
+        planName: String? = nil
     ) {
         self.uuid = uuid
         self.email = email
@@ -69,6 +75,7 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
         self.rateLimitTier = rateLimitTier
         self.seat = seat
         self.organizationUUID = organizationUUID
+        self.planName = planName
     }
 
     var id: String { uuid }
@@ -101,9 +108,9 @@ struct ClaudeAccountIdentity: Sendable, Codable, Equatable, Identifiable {
     static let planPrefix = "claude_"
 
     /// `rateLimitTier` prefixes the tier the same way: `default_claude_max_5x`
-    /// for the account metered at Max 5x. Only the two `max` multipliers
-    /// appear in 2.1.267, which is why the tier is treated as a decoration on
-    /// the plan and never as the plan itself.
+    /// for the account on the plan Anthropic now sells as Max. Only the two
+    /// `max` multipliers appear in 2.1.267, which is why the tier is treated as
+    /// a decoration on the plan and never as the plan itself.
     static let tierPrefix = "default_claude_"
 
     /// The owner's name off whichever block a source carries it on.
@@ -172,7 +179,9 @@ enum ClaudeAccountProfile {
             organizationType: organization?["organization_type"] as? String,
             rateLimitTier: organization?["rate_limit_tier"] as? String,
             seat: UsageReaderShared.sanitizedPlanToken(organization?[seatKey] as? String),
-            organizationUUID: organization?["uuid"] as? String
+            organizationUUID: organization?["uuid"] as? String,
+            planName: UsageReaderShared.sanitizedDisplayText(
+                organization?["plan_display_name"] as? String)
         )
     }
 }
@@ -444,10 +453,14 @@ struct ClaudeAccountStore: Sendable {
 /// organisation's name and its plan, whose token is character-for-character
 /// the one `.claude.json` puts in `organizationType`, so one formatter words
 /// both. The fifth does not and is left nil rather than guessed: claude.ai
-/// reports `rate_limit_tier` in a taxonomy of its own (`default_raven`) where
-/// the OAuth profile reports `default_claude_max_5x`. Two vocabularies, so a
-/// Max account reads "Max" here and "Max 5x" there — a missing decoration
-/// rather than a wrong reading.
+/// reports the organisation's `rate_limit_tier` (`default_raven`) where the
+/// OAuth profile reports the seat's (`default_claude_max_5x`): measured
+/// 2026-11-04, one `.claude.json` block holds both, under
+/// `organizationRateLimitTier` and `userRateLimitTier`. It is also not trusted
+/// for the plan's size: the same day a link's token read `claude_max 5x` for
+/// an account the OAuth profile puts at `default_claude_max_20x`. That token
+/// fails `sanitizedPlanToken`, so such an account has no badge from this
+/// source, a missing decoration rather than a wrong plan.
 ///
 /// The seat is the sixth and it maps too, from a different place: claude.ai
 /// puts `seat_tier` on the *membership* where the OAuth profile puts it on the
@@ -476,7 +489,8 @@ enum ClaudeWebAccountProfile {
     private static let organizationKey = "organization"
     private static let organizationNameKey = "name"
     /// The plan, under the name claude.ai gives it. Measured to carry the
-    /// identical token `.claude.json` puts in `organizationType`.
+    /// identical token `.claude.json` puts in `organizationType` for a Team
+    /// account, and not for a Max one (see above).
     private static let planKey = "analytics_subscription_plan"
     /// On the membership here, on the organisation in the OAuth profile.
     private static let seatKey = "seat_tier"

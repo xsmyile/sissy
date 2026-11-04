@@ -784,19 +784,24 @@ enum UsageFormat {
     /// The plan as the badge says it, plus the limit tier when the tier
     /// belongs to a different plan than the account's own.
     ///
-    /// A Max account metered at `max_5x` reads as one thing, "Max 5x". A Team
-    /// seat metered at the same tier does not: "Team 5x" is a plan nobody
-    /// sells, so the badge stays "Team" and the tier goes to the row's
-    /// tooltip. Folding is therefore conditional on the tier naming the plan
-    /// it decorates.
-    static func plan(_ plan: String?, tier: String?, seat: String? = nil) -> (
-        label: String, tier: String?
-    )? {
+    /// The vendor's own word leads wherever it sends one (`name`). Failing
+    /// that, a tier on the plan it decorates folds into one thing, and a tier
+    /// on another plan goes to the row's tooltip, because "Team 5x" is a plan
+    /// nobody sells. The two tiers of `soldTierNames` go nowhere on another
+    /// plan: the seat already names what it pays for, and Anthropic no longer
+    /// sells a plan with a multiplier in its name to compare it to.
+    static func plan(
+        _ plan: String?, tier: String?, seat: String? = nil, name: String? = nil
+    ) -> (label: String, tier: String?)? {
         guard let plan, let label = words(plan) else { return nil }
-        let named = seatLabel(plan: plan, seat: seat) ?? label
+        let named = name ?? seatLabel(plan: plan, seat: seat) ?? label
         let parts = tierParts(tier)
         guard let base = parts.base else { return (named, nil) }
+        if let tier, let sold = soldTierNames[tier] {
+            return (base == plan && name == nil ? sold : named, nil)
+        }
         if base == plan {
+            if name != nil { return (named, nil) }
             return (parts.multiplier.map { "\(named) \($0)" } ?? named, nil)
         }
         guard let baseLabel = words(base) else { return (named, nil) }
@@ -813,6 +818,16 @@ enum UsageFormat {
     ]
 
     private static let teamPlanToken = "team"
+
+    /// What Anthropic sells each Max tier as since the rename of 2026-10-30,
+    /// which left the tokens as they were. A map for the reason `teamSeatLabels`
+    /// may be one: it only answers for a reading that carries no word of the
+    /// vendor's, an older CLI's or an identity filed before `planName` was
+    /// read, and any other tier falls through to the derived wording.
+    private static let soldTierNames = [
+        "max_20x": "Ultra",
+        "max_5x": "Max",
+    ]
 
     /// The seat the account holds, where the vendor's token names one this
     /// build knows.
@@ -1110,27 +1125,6 @@ enum UsageFormat {
         }
     }
 
-    /// What a row is called when the same vendor answers for more than one
-    /// account.
-    ///
-    /// The vendor's name alone stops identifying a row the moment a second
-    /// account of it appears, and two rows both reading "Claude" is the
-    /// failure this whole feature exists to remove — one of them is a work
-    /// seat and the user cannot tell which. The qualifier is the account's own
-    /// organisation, which is the name the vendor itself puts on it and the
-    /// one the user recognises; an account that names none falls back to the
-    /// local part of its address, and one that names neither to the key it was
-    /// added under, because a row has to be callable something.
-    ///
-    /// Deliberately not applied when a vendor has one account: the overwhelming
-    /// majority of installs have exactly that, and "Claude · Personal" on a Mac
-    /// with one Claude account is noise dressed as information.
-    static func providerName(_ id: String, distinguishedBy account: ProviderAccount?) -> String {
-        let name = providerName(id)
-        guard let qualifier = accountQualifier(id, account: account) else { return name }
-        return "\(name) · \(qualifier)"
-    }
-
     /// What one account is called in the switcher.
     ///
     /// The address is what a user recognises an account by — it is what they
@@ -1149,14 +1143,6 @@ enum UsageFormat {
     static func accountLabel(_ account: ProviderAccount?) -> String? {
         if let email = account?.email, !email.isEmpty { return email }
         if let organization = account?.organization, !organization.isEmpty { return organization }
-        return nil
-    }
-
-    private static func accountQualifier(_ id: String, account: ProviderAccount?) -> String? {
-        if let organization = account?.organization, !organization.isEmpty { return organization }
-        if let email = account?.email, let local = email.split(separator: "@").first {
-            return String(local)
-        }
         return nil
     }
 
@@ -2417,7 +2403,8 @@ extension UsageFormat {
 
     /// Bytes at the grain a disk and a swap file are read at: terabytes to
     /// one decimal from one up, whole gigabytes from ten, one decimal under
-    /// that, whole megabytes under one, and `0 B` for none at all.
+    /// that, whole megabytes under one, whole kilobytes under that, and bytes
+    /// under one kilobyte, so `0 B` is none at all and only that.
     ///
     /// Not `bytes`, whose two decimals are for a footprint sitting beside
     /// Activity Monitor's: `77.00 GB free` claims a precision a volume that
@@ -2428,7 +2415,6 @@ extension UsageFormat {
     /// `1000 GB` and a free space just short of ten never reads `10.0 GB`.
     static func storage(_ bytes: UInt64) -> String {
         let value = Double(bytes)
-        if bytes == 0 { return "0 B" }
         let gigabytes = value / bytesPerGigabyte
         if gigabytes.rounded() >= unitStepLimit {
             return String(format: "%.1f TB", value / bytesPerTerabyte)
@@ -2439,7 +2425,13 @@ extension UsageFormat {
         if (value / bytesPerMegabyte).rounded() >= unitStepLimit {
             return String(format: "%.1f GB", gigabytes)
         }
-        return String(format: "%.0f MB", value / bytesPerMegabyte)
+        if (value / bytesPerKilobyte).rounded() >= unitStepLimit {
+            return String(format: "%.0f MB", value / bytesPerMegabyte)
+        }
+        if value >= bytesPerKilobyte {
+            return String(format: "%.0f KB", value / bytesPerKilobyte)
+        }
+        return "\(bytes) B"
     }
 
     /// `1.2 GB`, the swap in use, and a dash where the kernel would not say.

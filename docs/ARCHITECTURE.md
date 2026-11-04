@@ -317,9 +317,11 @@ panel. `nil` for a provider that names none, which is what leaves the row's badg
 off. `planTier` is the limit tier that plan is metered at (`max_5x`), for the one
 vendor that publishes one, and rides inside `plan`'s presence: alone it names
 nothing the app could attribute. The app folds it into the badge only when the
-tier names the plan it decorates — a Max account reads "Max 5x", while a Team
-seat metered at the same tier keeps "Team" and puts the tier in the row's
-tooltip, because "Team 5x" is a plan nobody sells.
+tier names the plan it decorates, while a seat metered at another plan's tier
+keeps its own word, because "Team 5x" is a plan nobody sells. Anthropic's own word
+leads where it sends one (`planName`, read as `Ultra` on 2026-11-04 over the
+unchanged token `max` and tier `max_20x`), and `soldTierNames` words the two Max
+tiers where it does not.
 
 Claude Code's windows come from the credential the CLI is signed in with,
 read in the CLI's own macOS order: the login keychain first, and
@@ -561,8 +563,7 @@ selected surface exists — a `TabView` would hold every tab's view graph live,
 which is precisely the cost `UsagePanelController` drops its host on close to
 avoid. A module earns a tab when it has more than a line to say: Sessions
 always, Mac while the frame carries a `MacHealthReading`, Forge while a forge
-is connected. A tab is named for what it reads, and a switcher with one
-destination is not drawn at all. `PanelTabBar` sits on a row of its own
+is connected. A tab is named for what it reads. `PanelTabBar` sits on a row of its own
 under the header, on the level-0 pages only, and a tab carries the one thing
 worth leaving the current page for: the Mac's level past normal, and a
 repository committing under an unexpected name.

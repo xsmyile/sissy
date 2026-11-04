@@ -72,9 +72,6 @@ struct PanelOverview: View {
     /// Puts the panel's period on a bar's days, from a bar of the strip.
     let selectDays: (UsageDaySpan) -> Void
 
-    /// The strip's bar under the pointer, which swaps its caption.
-    @State private var pointedDay: String?
-
     var body: some View {
         VStack(alignment: .leading, spacing: PanelMetrics.platterGap) {
             headline
@@ -151,8 +148,7 @@ struct PanelOverview: View {
                     }
                 }
                 if let strip = snapshot.strip {
-                    PanelDayBars(
-                        strip: strip, tint: .accentColor, hovered: $pointedDay, select: selectDays)
+                    OverviewDayBars(strip: strip, select: selectDays)
                 }
             }
         }
@@ -382,7 +378,7 @@ struct PanelOverview: View {
                 .foregroundStyle(Self.nameTint(status))
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Text(UsageFormat.accountsCaption(group.rows.count))
+            Text(UsageFormat.accountsCaption(group.rows.first?.accountCount ?? group.rows.count))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -617,4 +613,20 @@ struct PanelOverview: View {
         }
     }
 
+}
+
+/// The Usage tab's strip, holding the bar under the pointer for it.
+///
+/// A view of its own for the reason `PanelDayBlock` is: nothing beside the
+/// strip reads the pointed day here, so a hover has no business re-evaluating
+/// the rest of the tab.
+private struct OverviewDayBars: View {
+    let strip: UsagePanelSnapshot.DayStrip
+    let select: (UsageDaySpan) -> Void
+
+    @State private var pointedDay: String?
+
+    var body: some View {
+        PanelDayBars(strip: strip, tint: .accentColor, hovered: $pointedDay, select: select)
+    }
 }

@@ -536,10 +536,7 @@ struct ProvidersSettingsView: View {
     /// Nil is an account the engine has not answered for yet, which is the
     /// ordinary state in the moment after a link and never a fault.
     private func signals(of account: String, provider: String) -> AccountSignals? {
-        model.liveFrame?.frame.providers
-            .first { $0.id == provider }?
-            .signals.accounts
-            .first { $0.id == account }
+        model.accountSignals[provider]?.first { $0.id == account }
     }
 
     /// What the row has to report, in the reader's own words.
@@ -654,10 +651,9 @@ struct ProvidersSettingsView: View {
     /// The caption breaks a tie, because one person holding two seats is the
     /// case this list exists for and their rows can lead on the same word.
     private var sortedAccounts: [ClaudeWebAccount] {
-        model.engine.linkedClaudeAccounts.sorted { lhs, rhs in
-            let left = snapshot(of: lhs)
-            let right = snapshot(of: rhs)
-            return (left.title, left.subtitle ?? "") < (right.title, right.subtitle ?? "")
+        Self.sorted(model.engine.linkedClaudeAccounts) {
+            let row = snapshot(of: $0)
+            return (row.title, row.subtitle ?? "")
         }
     }
 
@@ -722,7 +718,8 @@ struct ProvidersSettingsView: View {
             subtitle: row.subtitle,
             monogram: row.title,
             plan: UsageFormat.plan(
-                signals?.plan, tier: signals?.planTier, seat: signals?.account?.seat),
+                signals?.plan, tier: signals?.planTier, seat: signals?.account?.seat,
+                name: signals?.planName),
             address: Self.label(of: account),
             unlinkHelp: ClaudeAccountLinkCopy.unlinkHelp)
         return linkedRow(content, signals: signals) { unlinking = account }
@@ -748,9 +745,17 @@ struct ProvidersSettingsView: View {
     /// Ordered by what the row is drawn under rather than by the id it is
     /// keyed by, which is the order the engine deliberately does not have.
     private var sortedCodexAccounts: [CodexLinkedAccount] {
-        model.engine.linkedCodexAccounts.sorted {
-            (snapshot(of: $0).title, $0.id) < (snapshot(of: $1).title, $1.id)
-        }
+        Self.sorted(model.engine.linkedCodexAccounts) { (snapshot(of: $0).title, $0.id) }
+    }
+
+    /// Accounts in the order of what their rows lead on, each row worded once
+    /// rather than once per comparison.
+    private static func sorted<Account>(
+        _ accounts: [Account], by key: (Account) -> (String, String)
+    ) -> [Account] {
+        accounts.map { (account: $0, key: key($0)) }
+            .sorted { $0.key < $1.key }
+            .map(\.account)
     }
 
     /// What the confirmation and the screen reader call a Codex account: the
