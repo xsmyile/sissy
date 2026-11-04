@@ -88,12 +88,11 @@ struct DayBook {
     /// Forgets what the archive writes for every day before `today`, and answers
     /// which days that touched.
     ///
-    /// **`totals` stays, and that is what keeps a deletion across a relaunch.**
-    /// The caller's suppression lives in memory, and a day in the snapshot with
-    /// totals and no rows is what `restoreModelTotals` suppresses again. Taken
-    /// out with the rest, the next event stamped on the day after a relaunch
-    /// would put its file back. Nothing reads a past day's totals but that, and
-    /// `trim(before:)` still bounds them.
+    /// **`totals` stays.** It is what the archive writes none of: no file comes
+    /// back from it, nothing reads a past day's totals, and `trim(before:)` still
+    /// bounds them. What keeps the deletion is the answer, which the caller
+    /// suppresses and carries in the snapshot, because what this book holds for a
+    /// day cannot say it was deleted.
     mutating func forget(before today: Date) -> Set<Date> {
         let held = Set(rows.keys).union(activity.keys).union(counts.keys).union(effort.keys)
         rows = rows.filter { $0.key >= today }

@@ -200,11 +200,10 @@ final class UsageHistoryTailTests: XCTestCase {
             "a deleted day came back")
     }
 
-    /// The suppression lives in memory and does not survive a relaunch. What
-    /// carries it across is the forgotten day's token totals, which stay in the
-    /// snapshot with no rows beside them: `restoreModelTotals` reads a day like
-    /// that as one this process cannot vouch for, and suppresses it again.
-    func testADeletedDayStaysDeletedAcrossARelaunch() async throws {
+    /// A deletion has to outlive more than the next launch: the run after it
+    /// ingests a straggler on the deleted day, so the snapshot holds rows for the
+    /// day again, and those are what the run after that would write back.
+    func testADeletedDayStaysDeletedAcrossRelaunches() async throws {
         let yesterday = try XCTUnwrap(
             Calendar.current.date(byAdding: .day, value: -1, to: Date()))
         let yesterdayKey = UsageReaderShared.dayFormatter.string(from: yesterday)
@@ -227,11 +226,94 @@ final class UsageHistoryTailTests: XCTestCase {
         await provider.stop()
         try writeTurn("b.jsonl", requestId: "r2", at: yesterday)
         try await runTail(archiving: true)
+        XCTAssertNil(
+            UsageHistoryStore.load(
+                provider: ProviderID.claudeCode, day: yesterdayKey, in: stateDir),
+            "a deleted day came back on the relaunch after the deletion")
+
+        try await runTail(archiving: true)
 
         XCTAssertNil(
             UsageHistoryStore.load(
                 provider: ProviderID.claudeCode, day: yesterdayKey, in: stateDir),
-            "a deleted day came back after a relaunch")
+            "a deleted day came back on the relaunch after that")
+    }
+
+    /// A session somebody opened and never asked anything is counted and never
+    /// billed, so its day has no totals to tell a relaunch it was deleted.
+    func testADeletedDayThatWasOnlyCountedStaysDeleted() async throws {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        let yesterdayKey = UsageReaderShared.dayFormatter.string(from: yesterday)
+        try writeOpenedRollout("rollout-a.jsonl", id: "a-1", at: yesterday)
+        let first = codexTail()
+        await first.start { _ in }
+        XCTAssertNotNil(
+            UsageHistoryStore.load(provider: ProviderID.codex, day: yesterdayKey, in: stateDir),
+            "the day this test deletes was never archived")
+
+        try UsageHistoryStore.removeAll(in: stateDir)
+        await first.forgetArchivedDays()
+        await first.stop()
+        try writeOpenedRollout("rollout-b.jsonl", id: "b-1", at: yesterday)
+        let second = codexTail()
+        await second.start { _ in }
+        await second.stop()
+
+        XCTAssertNil(
+            UsageHistoryStore.load(provider: ProviderID.codex, day: yesterdayKey, in: stateDir),
+            "a deleted day came back carrying only a count")
+    }
+
+    /// The deletion has to be on disk when it returns: nothing else marks the
+    /// snapshot as behind, so a process killed afterwards would resume from the
+    /// rows of the days it was asked to forget.
+    func testADeletionReachesTheSnapshotWithoutWaitingForAFlush() async throws {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        try writeTurn("a.jsonl", requestId: "r1", at: yesterday)
+        let url = UsageStatePersistence.defaultURL(in: stateDir)
+        let provider = LocalUsageProvider.claudeCode(
+            claudeDir: logDir,
+            retainDays: 2,
+            pollInterval: .seconds(60),
+            persistenceURL: url,
+            historyRoot: stateDir
+        )
+        await provider.start { _ in }
+
+        await provider.forgetArchivedDays()
+
+        guard case .ok(let snapshot) = UsageStatePersistence.load(from: url) else {
+            await provider.stop()
+            return XCTFail("the snapshot did not load")
+        }
+        XCTAssertEqual(
+            snapshot.archiveSuppression?.days.contains(
+                UsageReaderShared.dayFormatter.string(from: yesterday)),
+            true)
+        XCTAssertEqual(snapshot.historyResume?.dailyModelTotals.isEmpty ?? true, true)
+        await provider.stop()
+    }
+
+    private func codexTail() -> LocalUsageProvider {
+        LocalUsageProvider.codex(
+            codexDir: logDir,
+            retainDays: 2,
+            persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
+            historyRoot: stateDir)
+    }
+
+    /// A rollout that was opened and asked nothing: one session, no tokens.
+    private func writeOpenedRollout(_ name: String, id: String, at when: Date) throws {
+        let stamp = ISO8601DateFormatter()
+        stamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let meta = """
+            {"timestamp":"\(stamp.string(from: when))","type":"session_meta","payload":\
+            {"session_id":"\(id)","id":"\(id)","cwd":"/tmp","thread_source":"user"}}
+            """
+        try (meta + "\n").write(
+            to: logDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
     }
 
     /// The retain window is a rolling 48 hours, so the oldest day a cold scan

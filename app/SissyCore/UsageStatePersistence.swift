@@ -79,6 +79,17 @@ struct UsageStateSnapshot: Codable, Equatable {
     /// paths, which are personal data like every other project path Sissy
     /// keeps.
     var projectCheckouts: [ProjectCheckout]?
+    /// The days this provider must not write to the archive, absent when there
+    /// are none and in a snapshot written before it existed.
+    var archiveSuppression: ArchiveSuppression?
+
+    /// Carried rather than worked out again from what the rest of the snapshot
+    /// holds, because a day's shape cannot say it: a deleted day ingests a
+    /// straggler and has rows again, and one that was only counted never had
+    /// totals to go by.
+    struct ArchiveSuppression: Codable, Equatable {
+        var days: [String]
+    }
 
     /// Grouped the way `CodexResume` is, and for the same reason: absence is
     /// one question, and within the block empty and missing mean the same

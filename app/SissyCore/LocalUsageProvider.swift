@@ -265,6 +265,9 @@ actor LocalUsageProvider: UsageProvider {
     /// Writing one then would freeze a day that counts only from the upgrade
     /// onwards. A missing day is recoverable — a wrong one, once it ages out
     /// of the retain window, is permanent.
+    ///
+    /// Carried in the snapshot, so a day stays this way across a relaunch
+    /// whatever the snapshot holds for it by then.
     private var historySuppressedDays: Set<Date> = []
     private var lastHistorySaveAt: Date = .distantPast
     /// Dedup keys tagged with the event day. The day tag lets `trim()` evict
@@ -1383,6 +1386,7 @@ actor LocalUsageProvider: UsageProvider {
     /// the panel splits today by, and a disk-retention setting must not
     /// quietly take a live answer away with it.
     private func restoreModelTotals(from snapshot: UsageStateSnapshot) {
+        restoreSuppressedDays(from: snapshot)
         book.restoreCounted(from: snapshot.historyResume)
         let restored = book.restoredRows(from: snapshot.historyResume) {
             adapter.projects.project(for: $0)
@@ -1395,7 +1399,22 @@ actor LocalUsageProvider: UsageProvider {
                 continue
             }
             book.rows[day] = totals
-            if historyRoot != nil { historyDirtyDays.insert(day) }
+            if historyRoot != nil, !historySuppressedDays.contains(day) {
+                historyDirtyDays.insert(day)
+            }
+        }
+    }
+
+    /// Takes back the days the last run must not have written, without the ones
+    /// that have left the retain window since.
+    private func restoreSuppressedDays(from snapshot: UsageStateSnapshot) {
+        let cal = Calendar.current
+        let dayFmt = UsageReaderShared.dayFormatter
+        let cutoff = cal.startOfDay(for: retainWindowStart)
+        for day in snapshot.archiveSuppression?.days ?? [] {
+            guard let dayDate = dayFmt.date(from: day) else { continue }
+            let dayKey = cal.startOfDay(for: dayDate)
+            if dayKey >= cutoff { historySuppressedDays.insert(dayKey) }
         }
     }
 
@@ -1456,11 +1475,17 @@ actor LocalUsageProvider: UsageProvider {
     /// asked anything is one session, no tokens and no minutes. Such a day
     /// survived the delete unsuppressed, and the next event stamped on it put
     /// its file back carrying a count the user had asked Sissy to forget.
+    ///
+    /// **Saved here, whatever the throttle says.** The suppression is what keeps
+    /// the deletion, and nothing else marks the snapshot as behind: a process
+    /// killed before the next flush would resume from the rows of the very days
+    /// it was asked to forget.
     func forgetArchivedDays() async {
         settleKeyZone()
         let today = Calendar.current.startOfDay(for: Date())
         historySuppressedDays.formUnion(book.forget(before: today))
         historyDirtyDays = Set(book.rows.keys)
+        saveSnapshotIfDirty(force: true)
     }
 
     /// Throttled whole-day writes, for the same reasons as the snapshot's and
@@ -1712,7 +1737,11 @@ actor LocalUsageProvider: UsageProvider {
             dedupKeysToday: retainedKeys,
             historyResume: book.snapshotResume(),
             codexResume: adapter.resumeState(),
-            projectCheckouts: nil
+            projectCheckouts: nil,
+            archiveSuppression: historySuppressedDays.isEmpty
+                ? nil
+                : UsageStateSnapshot.ArchiveSuppression(
+                    days: historySuppressedDays.map { dayFmt.string(from: $0) }.sorted())
         )
         do {
             try UsageStatePersistence.save(snapshot, to: url)
