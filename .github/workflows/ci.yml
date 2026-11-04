@@ -52,11 +52,12 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           PROSE: '^(docs/.*|AGENTS\.md|CODE_OF_CONDUCT\.md|CONTRIBUTING\.md|README\.md|SECURITY\.md|\.github/PULL_REQUEST_TEMPLATE\.md)$'
         run: |
-          set -uo pipefail
+          set -u
           code=true
           if [ -n "$PR" ] && files="$(gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only)" \
-            && [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE "$PROSE"; then
-            code=false
+            && [ -n "$files" ]; then
+            outside="$(printf '%s\n' "$files" | grep -vE "$PROSE" || true)"
+            [ -n "$outside" ] || code=false
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "builds on a Mac: $code"
