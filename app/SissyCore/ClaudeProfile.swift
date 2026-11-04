@@ -181,7 +181,8 @@ final class ClaudeProfileSource: SourceSignals, Sendable {
     /// order of never; a person pressing refresh is not that, and making them
     /// wait a quarter of an hour for the answer is the button failing at its
     /// only job. The mtime gate still applies either way — an unchanged file
-    /// has nothing new to say to anyone.
+    /// has nothing new to say to anyone. It reads the file a link lands on: a
+    /// dotfile manager keeps this file as a link, whose own date never moves.
     func refresh(now: Date = Date(), userInitiated: Bool = false) {
         let (parsedBefore, knownMTime, dueAt) = state.withLock {
             (
@@ -190,7 +191,8 @@ final class ClaudeProfileSource: SourceSignals, Sendable {
             )
         }
         if parsedBefore && !userInitiated && now < dueAt { return }
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+        guard
+            let attrs = try? FileManager.default.attributesOfItem(atPath: url.resolvingSymlinksInPath().path),
             let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970
         else { return }
         if parsedBefore && abs(mtime - knownMTime) < UsageReaderShared.mtimeTolerance { return }

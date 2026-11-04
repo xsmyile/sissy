@@ -36,12 +36,67 @@ final class ProcessEnvironmentTests: XCTestCase {
         XCTAssertEqual(lookup(bytes(environment: ["\(Self.name)="])), .absent)
     }
 
-    /// A prompt on the command line can spell anything, and is not the
-    /// environment.
-    func testAnArgumentSpellingTheVariableIsNotIt() {
+    /// An entry in the argument positions can be a prompt or, after a long
+    /// title, an environment entry the walk took for an argument. Nothing tells
+    /// them apart, and answering absent would count the session on the default home.
+    func testAnArgumentSpellingTheVariableIsUnreadable() {
         let found = lookup(
             bytes(arguments: ["claude", "\(Self.name)=/tmp/argument"], environment: ["PATH=/bin"]))
-        XCTAssertEqual(found, .absent)
+        XCTAssertEqual(found, .unreadable)
+    }
+
+    func testTheEnvironmentsOwnValueOutranksAnArgumentSpellingIt() {
+        let found = lookup(
+            bytes(
+                arguments: ["claude", "\(Self.name)=/tmp/argument"],
+                environment: ["\(Self.name)=/tmp/real"]))
+        XCTAssertEqual(found, .value("/tmp/real"))
+    }
+
+    /// The bytes of argc 5 and a short `process.title`, as measured with node:
+    /// the title, then zeros up to the environment.
+    private func titled(_ title: String, zeros: Int, environment: [String]) -> [UInt8] {
+        var out = withUnsafeBytes(of: Int32(5)) { Array($0) }
+        out += Array("/usr/local/bin/node".utf8) + [0]
+        out += Array(title.utf8) + [UInt8](repeating: 0, count: zeros)
+        for entry in environment { out += Array(entry.utf8) + [0] }
+        out += [0, 0, 0] + Array("stack_guard=0x1".utf8) + [0]
+        return out
+    }
+
+    func testAShortTitleLeavesTheVariableReadable() {
+        let found = lookup(
+            titled("claude", zeros: 90, environment: ["PATH=/bin", "\(Self.name)=/tmp/work"]))
+        XCTAssertEqual(found, .value("/tmp/work"))
+    }
+
+    func testAShortTitleOverNoVariableIsAbsent() {
+        XCTAssertEqual(lookup(titled("claude", zeros: 90, environment: ["PATH=/bin"])), .absent)
+    }
+
+    /// Fewer zeros than `argc` asks for: the walk runs into the environment.
+    func testATitleWhoseZerosRunShortNeverReadsAsAbsent() {
+        let eaten = lookup(
+            titled("claude", zeros: 2, environment: ["\(Self.name)=/tmp/work", "PATH=/bin"]))
+        XCTAssertEqual(eaten, .unreadable)
+        let later = lookup(
+            titled(
+                "claude", zeros: 2,
+                environment: ["A=1", "B=2", "C=3", "D=4", "\(Self.name)=/tmp/work"]))
+        XCTAssertEqual(later, .value("/tmp/work"))
+    }
+
+    /// A title too long for the area: one entry, then the environment at once,
+    /// so the walk takes environment entries for arguments.
+    func testALongTitleNeverReadsAsAbsent() {
+        let title = String(repeating: "x", count: 120)
+        XCTAssertEqual(
+            lookup(titled(title, zeros: 1, environment: ["\(Self.name)=/tmp/work", "PATH=/bin"])),
+            .unreadable)
+        XCTAssertEqual(
+            lookup(
+                titled(title, zeros: 1, environment: ["A=1", "B=2", "C=3", "D=4", "\(Self.name)=/tmp/work"])),
+            .value("/tmp/work"))
     }
 
     func testALongerNameSharingThePrefixIsNotIt() {
@@ -71,8 +126,27 @@ final class ProcessEnvironmentTests: XCTestCase {
         XCTAssertEqual(lookup(raw), .unreadable)
     }
 
+    /// An empty environment, with the kernel's own strings after it as a real
+    /// process always has.
     func testAnEmptyEnvironmentIsAbsent() {
-        XCTAssertEqual(lookup(bytes(environment: [])), .absent)
+        XCTAssertEqual(lookup(bytes(environment: [], trailer: ["stack_guard=0x1"])), .absent)
+    }
+
+    /// A rewritten title over a withheld environment: the walk ends in zeros and
+    /// they run to the end of the bytes, which says nothing about the variable.
+    func testZerosRunningToTheEndAreUnreadable() {
+        var raw = withUnsafeBytes(of: Int32(2)) { Array($0) }
+        raw += Array("/usr/local/bin/node".utf8) + [0]
+        raw += Array("claude".utf8) + [UInt8](repeating: 0, count: 40)
+        XCTAssertEqual(lookup(raw), .unreadable)
+    }
+
+    func testARealChildWithAnEmptyEnvironmentAnswersAbsent() throws {
+        let child = try spawn(environment: [:])
+        defer { child.terminate() }
+        var buffer: [UInt8] = []
+        XCTAssertEqual(
+            AgentProcessReader.claudeConfigDir(of: child.processIdentifier, buffer: &buffer), .absent)
     }
 
     func testTooFewBytesAreUnreadable() {
@@ -142,7 +216,7 @@ final class ProcessEnvironmentTests: XCTestCase {
             .appendingPathComponent("procargs-child-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let source = directory.appendingPathComponent("child.c")
-        try Data("#include <unistd.h>\nint main(void) { pause(); return 0; }\n".utf8).write(to: source)
+        try Data(childSource.utf8).write(to: source)
         let binary = directory.appendingPathComponent("child")
         let compile = Process()
         compile.executableURL = URL(fileURLWithPath: "/usr/bin/cc")
@@ -153,11 +227,46 @@ final class ProcessEnvironmentTests: XCTestCase {
         return binary
     }
 
-    private func spawn(environment: [String: String]) throws -> Process {
+    /// With arguments it does to its own argument area what a title does:
+    /// zeros over all of it, then a short name at the front.
+    private static let childSource = """
+        #include <string.h>
+        #include <unistd.h>
+        int main(int argc, char **argv) {
+            if (argc > 1) {
+                size_t area = (size_t)(argv[argc - 1] + strlen(argv[argc - 1]) - argv[0]);
+                memset(argv[0], 0, area);
+                strcpy(argv[0], "claude");
+            }
+            write(1, "up", 2);
+            pause();
+            return 0;
+        }
+
+        """
+
+    func testARealProcessThatRewroteItsTitleIsStillRead() throws {
+        let child = try spawn(
+            environment: [Self.name: "/tmp/sissy-titled-child"],
+            arguments: ["--one", "--two", "--three", "--four"])
+        defer { child.terminate() }
+        var buffer: [UInt8] = []
+        XCTAssertEqual(
+            AgentProcessReader.claudeConfigDir(of: child.processIdentifier, buffer: &buffer),
+            .value("/tmp/sissy-titled-child"))
+    }
+
+    /// Waits for the child to say it is running, because a read in front of its
+    /// rewrite would see arguments that are still whole.
+    private func spawn(environment: [String: String], arguments: [String] = []) throws -> Process {
         let process = Process()
         process.executableURL = try Self.childExecutable.get()
         process.environment = environment
+        process.arguments = arguments
+        let started = Pipe()
+        process.standardOutput = started
         try process.run()
+        _ = try started.fileHandleForReading.read(upToCount: 2)
         return process
     }
 
@@ -184,7 +293,7 @@ final class ClaudeProcessHomeTests: XCTestCase {
     private let userHome = URL(fileURLWithPath: "/Users/someone")
 
     private func home(_ lookup: ProcessEnvironment.Lookup) -> ClaudeProcessHome? {
-        ClaudeProcessHome(variable: lookup, userHome: userHome)
+        ClaudeProcessHome(variable: lookup)
     }
 
     func testNoVariableIsTheDefaultHome() {
@@ -199,12 +308,36 @@ final class ClaudeProcessHomeTests: XCTestCase {
         XCTAssertNil(home(.value("relative/dir")))
     }
 
-    func testAPathIsThatHomeWhateverItsTrailingSlash() {
-        XCTAssertEqual(home(.value("/tmp/work/")), .named("/tmp/work"))
+    func testAPathIsKeptAsItsExactText() {
+        XCTAssertEqual(home(.value("/tmp/work/")), .named("/tmp/work/"))
     }
 
-    func testNamingTheDefaultDirectoryIsTheDefaultHome() {
-        XCTAssertEqual(home(.value("/Users/someone/.claude")), .standard)
+    /// Read in the 2.1.318 bundle: any value takes the scoped item and its own
+    /// `.claude.json`, so naming the default directory outright is another home.
+    func testNamingTheDefaultDirectoryIsNotTheDefaultHome() {
+        let named = home(.value("/Users/someone/.claude"))
+        XCTAssertEqual(named, .named("/Users/someone/.claude"))
+        XCTAssertEqual(
+            named?.configFile(userHome: userHome).path, "/Users/someone/.claude/.claude.json")
+        let real = ClaudeProcessHome.userHome.appendingPathComponent(".claude").path
+        XCTAssertEqual(home(.value(real)), .named(real))
+    }
+
+    /// The CLI hashes the variable's exact text, so a trailing slash is another
+    /// keychain item.
+    func testTheServiceHashesTheExactText() {
+        XCTAssertEqual(
+            ClaudeProcessHome.named("/tmp/work/").credentialServices(userHome: userHome),
+            [ClaudeKeychainCLI.scopedClaudeService(for: "/tmp/work/")])
+        XCTAssertNotEqual(
+            ClaudeKeychainCLI.scopedClaudeService(for: "/tmp/work/"),
+            ClaudeKeychainCLI.scopedClaudeService(for: "/tmp/work"))
+    }
+
+    func testTwoSpellingsOfOneHomeReadOneFile() {
+        XCTAssertEqual(
+            ClaudeProcessHome.named("/tmp/sissy-no-such/").configFile(userHome: userHome).path,
+            ClaudeProcessHome.named("/tmp/sissy-no-such").configFile(userHome: userHome).path)
     }
 
     func testTheDefaultHomesFileSitsBesideItsDirectory() {
@@ -296,8 +429,8 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([first, first, first, second, second]))
 
-        XCTAssertEqual(running.current().accounts[Self.accountA]?.sessions, 5)
-        XCTAssertEqual(running.current().accounts.count, 1)
+        XCTAssertEqual(running.current().accounts()[Self.accountA]?.sessions, 5)
+        XCTAssertEqual(running.current().accounts().count, 1)
     }
 
     func testTwoHomesOnTwoAccountsCountApart() throws {
@@ -306,8 +439,8 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([first, second, second]))
 
-        XCTAssertEqual(running.current().accounts[Self.accountA]?.sessions, 1)
-        XCTAssertEqual(running.current().accounts[Self.accountB]?.sessions, 2)
+        XCTAssertEqual(running.current().accounts()[Self.accountA]?.sessions, 1)
+        XCTAssertEqual(running.current().accounts()[Self.accountB]?.sessions, 2)
     }
 
     func testADefaultHomeProcessReadsTheFileBesideItsDirectory() throws {
@@ -316,7 +449,7 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([.standard, .standard]))
 
-        XCTAssertEqual(running.current().accounts[Self.accountA]?.sessions, 2)
+        XCTAssertEqual(running.current().accounts()[Self.accountA]?.sessions, 2)
         XCTAssertEqual(running.current().homes, [.standard])
     }
 
@@ -325,13 +458,13 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([nobody]))
 
-        XCTAssertTrue(running.current().accounts.isEmpty)
+        XCTAssertTrue(running.current().accounts().isEmpty)
         XCTAssertEqual(running.current().homes, [nobody])
     }
 
     func testAHomeWithNoFileAddsNoOne() {
         running.update(agents([.named(root.appendingPathComponent("missing").path)]))
-        XCTAssertTrue(running.current().accounts.isEmpty)
+        XCTAssertTrue(running.current().accounts().isEmpty)
     }
 
     /// A plan Sissy cannot word does not take the session off its account.
@@ -340,8 +473,8 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([home]))
 
-        XCTAssertEqual(running.current().accounts[Self.accountA]?.sessions, 1)
-        XCTAssertNil(running.current().accounts[Self.accountA]?.plan)
+        XCTAssertEqual(running.current().accounts()[Self.accountA]?.sessions, 1)
+        XCTAssertNil(running.current().accounts()[Self.accountA]?.plan)
     }
 
     func testAProcessWithNoReadableHomeIsNotCounted() throws {
@@ -349,7 +482,7 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([home, nil]))
 
-        XCTAssertEqual(running.current().accounts[Self.accountA]?.sessions, 1)
+        XCTAssertEqual(running.current().accounts()[Self.accountA]?.sessions, 1)
     }
 
     func testTheRowIsNamedFromTheFile() throws {
@@ -357,7 +490,7 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([home]))
 
-        let found = try XCTUnwrap(running.current().accounts[Self.accountA])
+        let found = try XCTUnwrap(running.current().accounts()[Self.accountA])
         XCTAssertEqual(found.account?.name, "Some One")
         XCTAssertEqual(found.plan, "team")
     }
@@ -367,7 +500,7 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([home]))
 
-        let found = try XCTUnwrap(running.current().accounts[Self.accountA])
+        let found = try XCTUnwrap(running.current().accounts()[Self.accountA])
         XCTAssertEqual(found.windows.map(\.usedPercent), [42])
         XCTAssertEqual(found.observedAt?.timeIntervalSince1970, Self.fetchedAtMs / 1000)
     }
@@ -377,7 +510,7 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([home]))
 
-        let found = try XCTUnwrap(running.current().accounts[Self.accountA])
+        let found = try XCTUnwrap(running.current().accounts()[Self.accountA])
         XCTAssertTrue(found.windows.isEmpty)
         XCTAssertNil(found.observedAt)
     }
@@ -391,7 +524,7 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([home]))
 
-        XCTAssertEqual(running.current().accounts[Self.accountA]?.windows, [])
+        XCTAssertEqual(running.current().accounts()[Self.accountA]?.windows, [])
     }
 
     func testTheFreshestOfTwoHomesReadingsStands() throws {
@@ -406,7 +539,7 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([older, newer, stale]))
 
-        let found = try XCTUnwrap(running.current().accounts[Self.accountA])
+        let found = try XCTUnwrap(running.current().accounts()[Self.accountA])
         XCTAssertEqual(found.windows.map(\.usedPercent), [90])
         XCTAssertEqual(found.sessions, 3)
     }
@@ -419,7 +552,7 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([.named(directory.path)]))
 
-        XCTAssertTrue(running.current().accounts.isEmpty)
+        XCTAssertTrue(running.current().accounts().isEmpty)
     }
 
     func testALinkedConfigIsFollowed() throws {
@@ -432,7 +565,7 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([.named(directory.path)]))
 
-        XCTAssertEqual(running.current().accounts[Self.accountA]?.sessions, 1)
+        XCTAssertEqual(running.current().accounts()[Self.accountA]?.sessions, 1)
     }
 
     func testASessionThatExitedLeavesTheCount() throws {
@@ -441,8 +574,114 @@ final class ClaudeRunningSessionsTests: XCTestCase {
 
         running.update(agents([]))
 
-        XCTAssertTrue(running.current().accounts.isEmpty)
+        XCTAssertTrue(running.current().accounts().isEmpty)
         XCTAssertTrue(running.current().homes.isEmpty)
+    }
+
+    // MARK: The metered home
+
+    private func metered(writing body: [String: Any]) throws -> ClaudeRunningSessions {
+        let file = root.appendingPathComponent(".claude.json")
+        try JSONSerialization.data(withJSONObject: body).write(to: file)
+        return ClaudeRunningSessions(userHome: root, meteredConfig: { file })
+    }
+
+    /// The registry names B and the file still names A: the sessions are B's
+    /// and A gets no phantom row.
+    func testTheMeteredHomesSessionsGoToWhoTheRegistryNames() throws {
+        let sessions = try metered(writing: config(owner: Self.accountA, stamp: Self.accountA))
+
+        sessions.update(agents([.standard, .standard]))
+
+        let found = sessions.current().accounts(signedIn: Self.accountB)
+        XCTAssertEqual(found[Self.accountB]?.sessions, 2)
+        XCTAssertNil(found[Self.accountA])
+        XCTAssertNil(found[Self.accountB]?.account)
+        XCTAssertEqual(found[Self.accountB]?.windows, [])
+
+        let row = AccountSignals(
+            id: Self.accountB, reading: ProviderSignals(), account: nil, plan: nil, planTier: nil,
+            isSignedIn: true)
+        let rows = ClaudeCodeSignals.withRunning([row], found)
+        XCTAssertEqual(rows.map(\.id), [Self.accountB])
+        XCTAssertEqual(rows[0].runningSessions, 2)
+    }
+
+    func testTheMeteredHomesFileStandsWhenTheRegistryNamesNobody() throws {
+        let sessions = try metered(writing: config(owner: Self.accountA))
+
+        sessions.update(agents([.standard]))
+
+        XCTAssertEqual(sessions.current().accounts()[Self.accountA]?.sessions, 1)
+    }
+
+    func testTheMeteredHomesFileStandsWhenItAgrees() throws {
+        let sessions = try metered(writing: config(owner: Self.accountA, stamp: Self.accountA))
+
+        sessions.update(agents([.standard]))
+
+        let found = sessions.current().accounts(signedIn: Self.accountA)
+        XCTAssertEqual(found[Self.accountA]?.account?.name, "Some One")
+        XCTAssertEqual(found[Self.accountA]?.windows.count, 1)
+    }
+
+    /// The registry reads one home's credential and says nothing about another's.
+    func testAnotherHomeIsNotJudgedByTheRegistry() throws {
+        let other = try named("other", config(owner: Self.accountA))
+        let sessions = try metered(writing: config(owner: Self.accountB))
+
+        sessions.update(agents([other, .standard]))
+
+        let found = sessions.current().accounts(signedIn: Self.accountB)
+        XCTAssertEqual(found[Self.accountA]?.sessions, 1)
+        XCTAssertEqual(found[Self.accountB]?.sessions, 1)
+    }
+
+    func testTheMeteredHomesFileNamingNobodyStillCountsOnTheRegistrysAccount() throws {
+        let sessions = try metered(writing: config(owner: nil))
+
+        sessions.update(agents([.standard]))
+
+        XCTAssertEqual(sessions.current().accounts(signedIn: Self.accountB)[Self.accountB]?.sessions, 1)
+    }
+
+    // MARK: A linked config
+
+    /// The link's own date never moves, so a gate on it read the file once.
+    func testALinkedConfigIsReadAgainWhenItsTargetMoves() throws {
+        let target = root.appendingPathComponent("real.json")
+        try JSONSerialization.data(withJSONObject: config(owner: Self.accountA)).write(to: target)
+        let link = root.appendingPathComponent("link.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        let source = ClaudeProfileSource(url: link)
+        let start = Date()
+        source.refresh(now: start)
+        XCTAssertEqual(source.currentAttributed().fileOwner, Self.accountA)
+
+        try JSONSerialization.data(withJSONObject: config(owner: Self.accountB)).write(to: target)
+        try FileManager.default.setAttributes(
+            [.modificationDate: start.addingTimeInterval(120)], ofItemAtPath: target.path)
+        source.refresh(now: start.addingTimeInterval(120))
+
+        XCTAssertEqual(source.currentAttributed().fileOwner, Self.accountB)
+    }
+
+    // MARK: The unread-sign-in notice
+
+    func testOnlyAHomeNamingItsAccountCountsAsNamed() throws {
+        let first = try named("first", config(owner: Self.accountA))
+        let nobody = try named("nobody", config(owner: nil))
+        let missing = ClaudeProcessHome.named(root.appendingPathComponent("missing").path)
+
+        running.update(agents([first, nobody, missing]))
+
+        XCTAssertEqual(running.current().homes.count, 3)
+        XCTAssertEqual(running.current().namedHomes, [first])
+        let foreign = [first, nobody, missing].flatMap { $0.credentialServices(userHome: root) }
+        let left = ClaudeUnsupportedHomes.services(
+            in: foreign, reading: AccountDefaults.claudeHome, running: running.current().namedHomes)
+        XCTAssertEqual(
+            left, Set([nobody, missing].flatMap { $0.credentialServices(userHome: root) }).sorted())
     }
 
     func testTheInertOneCountsNothing() throws {
@@ -461,10 +700,10 @@ final class ClaudeRunningSessionsTests: XCTestCase {
             runningSessions: running)
 
         await monitor.sampleOnce {}
-        XCTAssertEqual(running.current().accounts[Self.accountA]?.sessions, 1)
+        XCTAssertEqual(running.current().accounts()[Self.accountA]?.sessions, 1)
 
         await monitor.stop()
-        XCTAssertTrue(running.current().accounts.isEmpty)
+        XCTAssertTrue(running.current().accounts().isEmpty)
     }
 }
 
@@ -720,5 +959,115 @@ final class ClaudeRunningRowsTests: XCTestCase {
         XCTAssertNil(cached.reading.windows.first?.pace)
         XCTAssertEqual(cached.reading.windows.first?.percent, 61)
         XCTAssertNotNil(cached.reading.windowsCaption)
+    }
+
+    // MARK: A slice with something of its own
+
+    /// A file from before `accountUuid` names an account with no id. The running
+    /// account is not that one, so its name, count and rename stay off that row.
+    func testARunningAccountStaysOffAMeteredRowThatNamesItsOwn() throws {
+        var reading = signals([runningOnly(sessions: 4, windows: [try window(percent: 80)])])
+        reading.account = ProviderAccount(email: "own@example.com", name: "Own")
+        reading.plan = "max"
+        reading.windows = [try window(percent: 20)]
+        reading.limitsObservedAt = Date()
+        let slice = ProviderSlice(id: ProviderID.claudeCode, tokens: 0, cost: 0, signals: reading)
+        var naming = AccountNaming()
+        naming.rename("sole", to: "Renamed sole")
+
+        let row = UsagePanelSnapshot.make(
+            frame: FrameData(
+                tokens: 0, cost: 0, burn: nil, providers: [slice], keepAwake: .off, history: [:],
+                projects: []),
+            accountNaming: naming
+        ).providers[0]
+
+        XCTAssertEqual(row.account?.name, "Own")
+        XCTAssertEqual(row.reading.runningSessions, 0)
+        XCTAssertEqual(row.reading.windows.map(\.percent), [20])
+        XCTAssertNotNil(row.reading.windows.first?.pace)
+    }
+
+    /// With nothing of its own the row is the running account's, rename included,
+    /// which is what the sole-account reading intends.
+    func testASoleRunningAccountsRenameLandsOnItsRow() {
+        var naming = AccountNaming()
+        naming.rename("sole", to: "Renamed sole")
+        let slice = ProviderSlice(
+            id: ProviderID.claudeCode, tokens: 0, cost: 0, signals: signals([runningOnly()]))
+
+        let row = UsagePanelSnapshot.make(
+            frame: FrameData(
+                tokens: 0, cost: 0, burn: nil, providers: [slice], keepAwake: .off, history: [:],
+                projects: []),
+            accountNaming: naming
+        ).providers[0]
+
+        XCTAssertEqual(row.account?.name, "Renamed sole")
+        XCTAssertEqual(row.reading.runningSessions, 2)
+    }
+
+    /// A probe with resets and no windows: the row draws them and a press spends
+    /// the metered credential, so the row must not take the running account's name.
+    func testResetsOnTheMeteredRowKeepTheRunningAccountOffIt() throws {
+        var reading = signals([runningOnly()])
+        reading.resets = LimitResets(available: 1, applicable: 1)
+        let row = snapshot(signals: reading).providers[0]
+
+        XCTAssertNil(row.account)
+        XCTAssertEqual(row.reading.runningSessions, 0)
+        XCTAssertNotNil(row.reading.resets)
+    }
+
+    /// With a picker the entries speak, so the row's own fields take no account.
+    func testAPickerLeavesTheRowsOwnFieldsToNobody() {
+        let known = ClaudeAccountRegistry.Snapshot(
+            accounts: [
+                ClaudeAccountIdentity(
+                    uuid: "other", email: nil, organization: nil, organizationType: nil,
+                    rateLimitTier: nil)
+            ],
+            activeUUID: nil)
+        var naming = AccountNaming()
+        naming.rename("sole", to: "Renamed sole")
+        let slice = ProviderSlice(
+            id: ProviderID.claudeCode, tokens: 0, cost: 0, signals: signals([runningOnly()]))
+
+        let row = UsagePanelSnapshot.make(
+            frame: FrameData(
+                tokens: 0, cost: 0, burn: nil, providers: [slice], keepAwake: .off, history: [:],
+                projects: []),
+            claudeAccounts: known, accountNaming: naming
+        ).providers[0]
+
+        XCTAssertNil(row.account)
+        XCTAssertEqual(row.reading.runningSessions, 0)
+        XCTAssertEqual(row.accounts.first { $0.id == "sole" }?.reading.runningSessions, 2)
+    }
+
+    // MARK: Past its reset
+
+    private func pastReset() throws -> UsageWindow {
+        try XCTUnwrap(
+            UsageWindow(minutes: 300, usedPercent: 61, resetsAt: Date().addingTimeInterval(-600)))
+    }
+
+    /// An old percentage past its reset is drawn as the rolled-over dash, the
+    /// same as a live reading's, rather than as current.
+    func testACachedWindowPastItsResetRollsOverLikeALiveOne() throws {
+        var live = signals([])
+        live.windows = [try pastReset()]
+        live.limitsObservedAt = Date()
+        let liveWindow = try XCTUnwrap(snapshot(signals: live).providers[0].reading.windows.first)
+
+        let sole = snapshot(signals: signals([runningOnly(windows: [try pastReset()])]))
+        let cached = try XCTUnwrap(sole.providers[0].reading.windows.first)
+        let entry = try XCTUnwrap(
+            entries([row("signed", signedIn: true), runningOnly(windows: [try pastReset()])])
+                .first { $0.id == "sole" }?.reading.windows.first)
+
+        XCTAssertTrue(liveWindow.hasRolledOver)
+        XCTAssertTrue(cached.hasRolledOver)
+        XCTAssertTrue(entry.hasRolledOver)
     }
 }

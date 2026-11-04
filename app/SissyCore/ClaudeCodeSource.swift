@@ -55,7 +55,7 @@ struct ClaudeCodeSignals: SourceSignals {
         reading.accounts = Self.withRunning(
             Self.perAccount(
                 reading, sources: sources, known: signedIn, active: active, links: webLinks.load()),
-            running.current().accounts)
+            running.current().accounts(signedIn: signedIn.activeUUID))
         return reading
     }
 

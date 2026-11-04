@@ -13,6 +13,11 @@ import Foundation
 /// `/bin/sleep` started with the variable set answered with its arguments alone,
 /// where a compiled child answered with its environment and the kernel's own
 /// strings. The `macos-26` CI runner answered with the environment for both.
+///
+/// `argc` cannot be trusted either. A process that sets its title overwrites the
+/// argument area. Measured 2026-11-04 with node 24 and `process.title`, argc 5: a
+/// short title left `claude`, then zeros up to the environment, and a title too
+/// long for the area left one entry with the environment straight after it.
 enum ProcessEnvironment {
     /// What the bytes say about a variable. `absent` is a reading, that the
     /// process was started without it, where `unreadable` says nothing.
@@ -27,8 +32,20 @@ enum ProcessEnvironment {
 
     /// The first entry named `name`, as the C library reads it. An empty value
     /// is no value, which is how the CLI itself reads the variable it is used for.
+    ///
+    /// Zeros in front of the environment are skipped, because they are what a
+    /// rewritten title leaves. An entry spelling the variable among the arguments
+    /// is either a prompt that happens to, or an environment entry the walk took
+    /// for an argument after a long title, and nothing tells those apart, so with
+    /// no other answer it is `unreadable`: `absent` would count the session on the
+    /// default home. So are bytes that are zeros all the way to their end: a real
+    /// process has the kernel's own strings after its environment, so that is a
+    /// rewritten title over a withheld environment rather than an empty one.
     static func lookup(_ name: String, in bytes: [UInt8]) -> Lookup {
-        guard var cursor = environmentStart(in: bytes) else { return .unreadable }
+        guard let walked = arguments(in: bytes), walked.end < bytes.count else { return .unreadable }
+        var cursor = walked.end
+        while cursor < bytes.count, bytes[cursor] == 0 { cursor += 1 }
+        guard cursor < bytes.count else { return .unreadable }
         let prefix = Array(name.utf8) + [UInt8(ascii: "=")]
         while cursor < bytes.count, bytes[cursor] != 0 {
             guard let end = bytes[cursor...].firstIndex(of: 0) else { return .unreadable }
@@ -41,23 +58,25 @@ enum ProcessEnvironment {
             else { return .unreadable }
             return .value(text)
         }
-        return .absent
+        return walked.entries.contains { $0.starts(with: prefix) } ? .unreadable : .absent
     }
 
-    /// Where the environment begins, past the count, the executable path, its
-    /// padding and every argument. Nil where the bytes end first.
-    private static func environmentStart(in bytes: [UInt8]) -> Int? {
+    /// The `argc` entries past the count, the executable path and its padding,
+    /// and where they end. Nil where the bytes end first.
+    private static func arguments(in bytes: [UInt8]) -> (entries: [ArraySlice<UInt8>], end: Int)? {
         let header = MemoryLayout<Int32>.size
         guard bytes.count > header else { return nil }
         let argc = bytes[0..<header].reversed().reduce(Int32(0)) { ($0 << 8) | Int32($1) }
         guard argc >= 0, var cursor = bytes[header...].firstIndex(of: 0) else { return nil }
         cursor += 1
         while cursor < bytes.count, bytes[cursor] == 0 { cursor += 1 }
+        var entries: [ArraySlice<UInt8>] = []
         for _ in 0..<argc {
             guard let end = bytes[cursor...].firstIndex(of: 0) else { return nil }
+            entries.append(bytes[cursor..<end])
             cursor = end + 1
         }
-        return cursor < bytes.count ? cursor : nil
+        return (entries, cursor)
     }
 }
 
@@ -69,9 +88,14 @@ enum ClaudeProcessHome: Hashable, Sendable {
 
     /// Reads the variable's value off a process. Nil for a value that names no
     /// directory Sissy can resolve: a relative path means something only to
-    /// the process that holds it. Naming the default directory outright is the
-    /// default home, whose config file sits beside it.
-    init?(variable lookup: ProcessEnvironment.Lookup, userHome: URL = Self.userHome) {
+    /// the process that holds it.
+    ///
+    /// Kept as the exact text, because the CLI hashes that for its keychain item.
+    /// Read in the 2.1.318 bundle on 2026-11-04: any value at all takes a scoped
+    /// item and `<value>/.claude.json`, so naming `~/.claude` outright is not the
+    /// default home, whose unscoped item and `$HOME/.claude.json` belong only to a
+    /// process with no variable.
+    init?(variable lookup: ProcessEnvironment.Lookup) {
         switch lookup {
         case .unreadable:
             return nil
@@ -79,10 +103,7 @@ enum ClaudeProcessHome: Hashable, Sendable {
             self = .standard
         case .value(let path):
             guard path.hasPrefix("/") else { return nil }
-            let directory = URL(fileURLWithPath: path).standardizedFileURL
-            self =
-                directory.path == Self.standardDirectory(userHome: userHome).standardizedFileURL.path
-                ? .standard : .named(directory.path)
+            self = .named(path)
         }
     }
 
@@ -103,8 +124,15 @@ enum ClaudeProcessHome: Hashable, Sendable {
 
     /// The names Claude Code files this home's credential under.
     func credentialServices(userHome: URL = Self.userHome) -> [String] {
-        let scoped = ClaudeKeychainCLI.scopedClaudeService(for: directory(userHome: userHome).path)
-        return self == .standard ? [ClaudeKeychainCLI.claudeService, scoped] : [scoped]
+        switch self {
+        case .standard:
+            return [
+                ClaudeKeychainCLI.claudeService,
+                ClaudeKeychainCLI.scopedClaudeService(for: directory(userHome: userHome).path),
+            ]
+        case .named(let text):
+            return [ClaudeKeychainCLI.scopedClaudeService(for: text)]
+        }
     }
 
     /// The config file, by the rule `ProviderHome` applies to the home it reads.
@@ -143,10 +171,33 @@ final class ClaudeRunningSessions: @unchecked Sendable {
         var observedAt: Date?
     }
 
+    /// One running home, its sessions, and what its config file says.
+    struct HomeRead: Sendable, Equatable {
+        let home: ClaudeProcessHome
+        let sessions: Int
+        let file: ClaudeProfileSource.Attributed
+        /// Whether this is the home whose credential the account registry
+        /// identifies, so that the registry outranks this file.
+        let isMetered: Bool
+    }
+
     /// What the last sweep found.
     struct Reading: Sendable, Equatable {
-        var accounts: [String: Account] = [:]
-        var homes: [ClaudeProcessHome] = []
+        var reads: [HomeRead] = []
+
+        var homes: [ClaudeProcessHome] { reads.map(\.home) }
+
+        /// The homes Sissy names and counts. A home whose file names nobody, or
+        /// would not be opened, is running and still unread.
+        var namedHomes: [ClaudeProcessHome] {
+            reads.filter { $0.file.fileOwner != nil }.map(\.home)
+        }
+
+        /// The accounts these homes are on, sessions summed. `signedIn` is who
+        /// the registry says the metered home is on.
+        func accounts(signedIn: String? = nil) -> [String: Account] {
+            ClaudeRunningSessions.accounts(reads, signedIn: signedIn)
+        }
     }
 
     /// Far beyond any config file measured: 320 KB is the ordinary size.
@@ -159,13 +210,19 @@ final class ClaudeRunningSessions: @unchecked Sendable {
 
     private let isEnabled: Bool
     private let userHome: URL
+    /// The config file of the home the account registry reads, nil for none.
+    private let meteredConfig: @Sendable () -> URL?
     private let lock = NSLock()
     private var sources: [URL: ClaudeProfileSource] = [:]
     private let published = LockedValue(Reading())
 
-    init(isEnabled: Bool = true, userHome: URL = ClaudeProcessHome.userHome) {
+    init(
+        isEnabled: Bool = true, userHome: URL = ClaudeProcessHome.userHome,
+        meteredConfig: @escaping @Sendable () -> URL? = { nil }
+    ) {
         self.isEnabled = isEnabled
         self.userHome = userHome
+        self.meteredConfig = meteredConfig
     }
 
     func current() -> Reading { published.load() }
@@ -180,14 +237,17 @@ final class ClaudeRunningSessions: @unchecked Sendable {
         let homes = counts.keys.sorted {
             $0.directory(userHome: userHome).path < $1.directory(userHome: userHome).path
         }
-        let reads = homes.map { home -> (sessions: Int, file: ClaudeProfileSource.Attributed) in
-            (counts[home] ?? 0, read(home))
+        let metered = meteredConfig()?.standardizedFileURL.path
+        let reads = homes.map { home in
+            HomeRead(
+                home: home, sessions: counts[home] ?? 0, file: read(home),
+                isMetered: home.configFile(userHome: userHome).standardizedFileURL.path == metered)
         }
         lock.withLock {
             let wanted = Set(homes.map { $0.configFile(userHome: userHome) })
             sources = sources.filter { wanted.contains($0.key) }
         }
-        published.store(Reading(accounts: Self.accounts(reads), homes: homes))
+        published.store(Reading(reads: reads))
     }
 
     /// Forgets everything, for a monitor that stopped.
@@ -225,17 +285,24 @@ final class ClaudeRunningSessions: @unchecked Sendable {
     /// The accounts these files name, sessions summed. A file that names
     /// nobody adds no one. Where two homes are on one account, the freshest
     /// reading stands for it.
-    static func accounts(
-        _ reads: [(sessions: Int, file: ClaudeProfileSource.Attributed)]
-    ) -> [String: Account] {
+    ///
+    /// The metered home takes the judgement `ClaudeCodeSignals.attributed` gives
+    /// its file: the file can name an account the credential has moved off, so
+    /// where the registry names someone the sessions are theirs, and nothing else
+    /// that file says is laid under that name.
+    static func accounts(_ reads: [HomeRead], signedIn: String? = nil) -> [String: Account] {
         var byAccount: [String: Account] = [:]
         for read in reads {
-            guard let owner = read.file.fileOwner else { continue }
+            let registered = read.isMetered ? signedIn : nil
+            guard let owner = registered ?? read.file.fileOwner else { continue }
+            let trusted = read.file.fileOwner == owner
             var candidate = Account(
-                id: owner, sessions: read.sessions, account: read.file.signals.account,
-                plan: read.file.signals.plan, planTier: read.file.signals.planTier,
-                planName: read.file.signals.planName)
-            if read.file.creditsOwner == owner {
+                id: owner, sessions: read.sessions,
+                account: trusted ? read.file.signals.account : nil,
+                plan: trusted ? read.file.signals.plan : nil,
+                planTier: trusted ? read.file.signals.planTier : nil,
+                planName: trusted ? read.file.signals.planName : nil)
+            if trusted, read.file.creditsOwner == owner {
                 candidate.windows = read.file.cachedWindows
                 candidate.credits = read.file.signals.credits
                 candidate.observedAt = read.file.cachedAt
