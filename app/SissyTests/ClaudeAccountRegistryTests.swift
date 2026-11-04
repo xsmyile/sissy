@@ -80,6 +80,15 @@ final class ClaudeAccountProfileTests: XCTestCase {
         XCTAssertEqual(identity.rateLimitTier, "default_claude_max_5x")
     }
 
+    /// The word the CLI copies into `planDisplayName`, read at its source.
+    func testParseTakesThePlansOwnWord() throws {
+        let identity = try ClaudeAccountProfile.parse([
+            "account": ["uuid": "u-1"],
+            "organization": ["organization_type": "claude_max", "plan_display_name": "Ultra"],
+        ])
+        XCTAssertEqual(identity.planName, "Ultra")
+    }
+
     /// The seat sits on the organisation here, where claude.ai puts it on the
     /// membership. Measured 2026-09-16: both answer `team_tier_1` for one
     /// account, which is what lets a row badge "Team Premium" whichever source

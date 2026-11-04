@@ -140,6 +140,7 @@ struct ClaudeCodeSignals: SourceSignals {
             signals.account = identity?.providerAccount
             signals.plan = identity?.plan
             signals.planTier = identity?.planTier
+            signals.planName = identity?.planName
         }
         if contradicts(reading.creditsOwner, active) {
             signals.credits = nil
@@ -221,7 +222,7 @@ struct ClaudeCodeSignals: SourceSignals {
         if let active = signedInUUID {
             byAccount[active] = AccountSignals(
                 id: active, reading: reading, account: reading.account, plan: reading.plan,
-                planTier: reading.planTier, isSignedIn: true)
+                planTier: reading.planTier, planName: reading.planName, isSignedIn: true)
         }
         for source in sources where source.account != signedInUUID {
             let identity =
@@ -232,7 +233,8 @@ struct ClaudeCodeSignals: SourceSignals {
                 id: source.account, reading: signals,
                 account: identity.map(\.providerAccount) ?? signals.account,
                 plan: identity?.plan ?? signals.plan,
-                planTier: identity?.planTier ?? signals.planTier, isSignedIn: false)
+                planTier: identity?.planTier ?? signals.planTier,
+                planName: identity?.planName ?? signals.planName, isSignedIn: false)
         }
         return AccountSignals.signedInFirst(byAccount.values)
     }

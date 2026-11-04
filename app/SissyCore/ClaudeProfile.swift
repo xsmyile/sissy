@@ -48,6 +48,11 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     /// The user's own tier leads where both answer, since it is the account's
     /// rather than its organisation's.
     private static let tierKeys = ["userRateLimitTier", "organizationRateLimitTier"]
+    /// The plan as Anthropic words it. Measured 2026-11-04 on 2.1.318, an
+    /// account carried `planDisplayName: Ultra` beside the unchanged
+    /// `organizationType: claude_max` and `default_claude_max_20x`, while a
+    /// Team account's block had no such key.
+    private static let planNameKey = "planDisplayName"
 
     /// Whose account the block is about. Both blocks this type reads name it
     /// under the same key, and they are not the same answer.
@@ -62,12 +67,18 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
         /// The account `oauthAccount` says it describes, nil where the block
         /// names none — which is every CLI old enough not to write it.
         let owner: String?
+        /// The plan as the vendor words it, nil where the block names none.
+        let name: String?
 
-        init(plan: String, tier: String?, account: ProviderAccount?, owner: String? = nil) {
+        init(
+            plan: String, tier: String?, account: ProviderAccount?, owner: String? = nil,
+            name: String? = nil
+        ) {
             self.plan = plan
             self.tier = tier
             self.account = account
             self.owner = owner
+            self.name = name
         }
     }
 
@@ -179,7 +190,7 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
             let profile = if case .found(let found) = reading { found } else { nil as Profile? }
             attributed = Attributed(
                 signals: ProviderSignals(
-                    plan: profile?.plan, planTier: profile?.tier,
+                    plan: profile?.plan, planTier: profile?.tier, planName: profile?.name,
                     account: profile?.account, credits: billed),
                 profileOwner: profile?.owner,
                 creditsOwner: billedOwner,
@@ -237,7 +248,8 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
                         account[organizationKey] as? String),
                     seat: UsageReaderShared.sanitizedPlanToken(account[seatKey] as? String)
                 ),
-                owner: owner(account[accountKey])
+                owner: owner(account[accountKey]),
+                name: UsageReaderShared.sanitizedDisplayText(account[planNameKey] as? String)
             )
         )
     }

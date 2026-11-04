@@ -133,10 +133,11 @@ extension AccountSignals {
     /// reader.
     init(
         id: String, reading: ProviderSignals, account: ProviderAccount?, plan: String?,
-        planTier: String?, isSignedIn: Bool
+        planTier: String?, planName: String? = nil, isSignedIn: Bool
     ) {
         self.init(
-            id: id, account: account, plan: plan, planTier: planTier, windows: reading.windows,
+            id: id, account: account, plan: plan, planTier: planTier, planName: planName,
+            windows: reading.windows,
             credits: reading.credits, resets: reading.resets, limitsState: reading.limitsState,
             limitsObservedAt: reading.limitsObservedAt, isSignedIn: isSignedIn)
     }

@@ -280,11 +280,19 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.plan("pro", tier: nil, seat: "team_tier_1")?.label, "Pro")
     }
 
-    /// The seat replaces the label and nothing else: a Team seat metered at
-    /// Max 5x still says so where it said so before.
+    /// The seat replaces the label and nothing else: a tier of another plan
+    /// still goes to the tooltip.
     func testTheTierSurvivesAWordedSeat() {
         XCTAssertEqual(
-            UsageFormat.plan("team", tier: "max_5x", seat: "team_tier_1")?.tier, "Max 5x")
+            UsageFormat.plan("team", tier: "scale_3x", seat: "team_tier_1")?.tier, "Scale 3x")
+    }
+
+    /// A Team seat metered at a Max tier names what it pays for already, and
+    /// "Max 5x" is no longer a plan anyone sells.
+    func testASoldMaxTierIsNotATooltipOnASeat() {
+        let plan = UsageFormat.plan("team", tier: "max_5x", seat: "team_tier_1")
+        XCTAssertEqual(plan?.label, "Team Premium")
+        XCTAssertNil(plan?.tier)
     }
 
     /// Every notice names what to do. The one state Sissy cannot fix offers
@@ -453,17 +461,38 @@ final class UsageFormatTests: XCTestCase {
     }
 
     func testPlanFoldsTheMultiplierWhenTheTierNamesItsOwnPlan() {
-        let plan = UsageFormat.plan("max", tier: "max_20x")
-        XCTAssertEqual(plan?.label, "Max 20x")
+        let plan = UsageFormat.plan("pro", tier: "pro_2x")
+        XCTAssertEqual(plan?.label, "Pro 2x")
         XCTAssertNil(plan?.tier)
+    }
+
+    /// The tokens outlived the rename of 2026-10-30, so a reading with no word
+    /// of the vendor's still says what is sold today.
+    func testTheMaxTiersReadAsThePlansSoldToday() {
+        XCTAssertEqual(UsageFormat.plan("max", tier: "max_20x")?.label, "Ultra")
+        XCTAssertEqual(UsageFormat.plan("max", tier: "max_5x")?.label, "Max")
+        XCTAssertEqual(UsageFormat.plan("max", tier: nil)?.label, "Max")
+    }
+
+    /// A tier this build has never heard of keeps the derived wording.
+    func testAnUnknownMaxTierKeepsItsMultiplier() {
+        XCTAssertEqual(UsageFormat.plan("max", tier: "max_40x")?.label, "Max 40x")
+    }
+
+    /// The vendor's word beats both the map and the derivation, including a
+    /// tier that would otherwise have folded a multiplier into it.
+    func testTheVendorsWordLeads() {
+        XCTAssertEqual(UsageFormat.plan("max", tier: "max_5x", name: "Ultra")?.label, "Ultra")
+        XCTAssertEqual(UsageFormat.plan("pro", tier: "pro_2x", name: "Pro Plus")?.label, "Pro Plus")
+        XCTAssertEqual(UsageFormat.plan("pro", tier: nil, name: "Pro Plus")?.label, "Pro Plus")
     }
 
     /// "Team 5x" is a plan nobody sells, so the seat keeps its own badge and
     /// the tier it is metered at becomes the tooltip.
     func testPlanKeepsTheTierApartWhenItNamesAnotherPlan() {
-        let plan = UsageFormat.plan("team", tier: "max_5x")
+        let plan = UsageFormat.plan("team", tier: "scale_3x")
         XCTAssertEqual(plan?.label, "Team")
-        XCTAssertEqual(plan?.tier, "Max 5x")
+        XCTAssertEqual(plan?.tier, "Scale 3x")
     }
 
     func testPlanIgnoresATierThatOnlyRepeatsThePlan() {

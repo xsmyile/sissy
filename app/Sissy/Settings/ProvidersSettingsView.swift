@@ -722,7 +722,8 @@ struct ProvidersSettingsView: View {
             subtitle: row.subtitle,
             monogram: row.title,
             plan: UsageFormat.plan(
-                signals?.plan, tier: signals?.planTier, seat: signals?.account?.seat),
+                signals?.plan, tier: signals?.planTier, seat: signals?.account?.seat,
+                name: signals?.planName),
             address: Self.label(of: account),
             unlinkHelp: ClaudeAccountLinkCopy.unlinkHelp)
         return linkedRow(content, signals: signals) { unlinking = account }

@@ -501,6 +501,7 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
     var windows: [UsageWindow] { signals.windows }
     var plan: String? { signals.plan }
     var planTier: String? { signals.planTier }
+    var planName: String? { signals.planName }
     var credits: ProviderCredits? { signals.credits }
     var resets: LimitResets? { signals.resets }
     var account: ProviderAccount? { signals.account }
@@ -521,7 +522,10 @@ struct ProviderSlice: Sendable, Equatable, Identifiable {
         self.effort = effort
         var ordered = signals
         ordered.windows = UsageWindow.ordered(ordered.windows)
-        if ordered.plan == nil { ordered.planTier = nil }
+        if ordered.plan == nil {
+            ordered.planTier = nil
+            ordered.planName = nil
+        }
         self.signals = ordered
         self.projects = projects
         self.models = models
