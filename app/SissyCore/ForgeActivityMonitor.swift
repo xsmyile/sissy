@@ -65,7 +65,7 @@ actor ForgeActivityMonitor {
     /// the same parameter `ClaudeWebSource` passes its session store: a
     /// scheduled round reads silently, and only the gesture on the row asks.
     ///
-    /// Async because the production read runs through `KeychainAccess.offPool`:
+    /// Async because the production read runs through `BlockingWork.run`:
     /// it waits on the keychain's interaction lock and, for the row's gesture,
     /// on a dialog, and either wait held every other caller of this actor
     /// while the read ran on it.
@@ -310,7 +310,7 @@ actor ForgeActivityMonitor {
                 try await ForgeActivityFeed.read($0, token: $1, counters: $2, now: $3)
             },
         token: @escaping @Sendable (String, Bool) async -> CredentialLookup<String> = { id, ask in
-            await KeychainAccess.offPool { ForgeTokenStore.load(connection: id, allowingInteraction: ask) }
+            await BlockingWork.run { ForgeTokenStore.load(connection: id, allowingInteraction: ask) }
         }
     ) {
         self.connections = connections

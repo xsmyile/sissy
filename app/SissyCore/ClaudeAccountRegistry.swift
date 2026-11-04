@@ -11,11 +11,11 @@ import Foundation
 /// answer's name, never the credential. Sissy only observes: nothing here
 /// writes to the CLI's slots or its config.
 ///
-/// Every keychain read is a `/usr/bin/security` process run on this actor and
-/// waited for synchronously, each bounded by `ClaudeKeychainCLI`'s watchdog at
-/// 5 s. So a keychain that stalls holds the actor for up to 5 s a call, and
-/// what queues behind it is the account watch's `captureActive()`. The app
-/// never does: it reads `currentSnapshot()`, which is nonisolated.
+/// Every keychain read is a `/usr/bin/security` process, bounded by
+/// `ClaudeKeychainCLI`'s watchdog at 5 s and run through `BlockingWork`, so a
+/// keychain that stalls parks a dispatch thread rather than the cooperative
+/// pool. The actor is released across it, and `capturing` is what keeps a second
+/// capture from starting in that gap.
 actor ClaudeAccountRegistry {
     /// What the app reads: who is known and who is active.
     struct Snapshot: Sendable, Equatable {
@@ -129,7 +129,7 @@ actor ClaudeAccountRegistry {
         publishIndex()
         let current: (name: ClaudeCLISlot.Name, data: Data)?
         do {
-            current = try slot.current()
+            current = try await BlockingWork.run { [slot] in try slot.current() }
         } catch {
             sissyLog("sissy: could not read Claude Code's credential: \(error)")
             return published.load() != before
@@ -197,7 +197,8 @@ actor ClaudeAccountRegistry {
             sissyLog("sissy: could not record the Claude account found in \(name.label): \(error)")
             return
         }
-        guard let still = try? slot.current()?.data,
+        let held = try? await BlockingWork.run { [slot] in try slot.current() }
+        guard let still = held?.data,
             ClaudeCredentialBlob.credentials(in: still)?.accessToken == accessToken
         else {
             publishIndex()

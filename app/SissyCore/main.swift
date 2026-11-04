@@ -47,20 +47,14 @@ if args.contains("--dump-seed") {
     // seed this binary was built with, using the same parser that validates the
     // runtime refresh. Release-time tool; see AGENTS.md. Writes the Swift source
     // to stdout.
-    let sem = DispatchSemaphore(value: 0)
-    var status: Int32 = 0
-    Task.detached {
-        do {
-            let catalog = PriceCatalogSource.retaining(try await PriceCatalogSource.fetch())
-            print(try PriceCatalogSource.swiftSeedSource(for: catalog))
-        } catch {
-            sissyLog("sissy: --dump-seed failed: \(error)")
-            status = 1
-        }
-        sem.signal()
+    do {
+        let catalog = PriceCatalogSource.retaining(try await PriceCatalogSource.fetch())
+        print(try PriceCatalogSource.swiftSeedSource(for: catalog))
+    } catch {
+        sissyLog("sissy: --dump-seed failed: \(error)")
+        exit(1)
     }
-    sem.wait()
-    exit(status)
+    exit(0)
 }
 if args.contains("--refresh-catalog") {
     // Puts a live LiteLLM catalog in the cache and exits. The pricing-oracle
@@ -69,34 +63,27 @@ if args.contains("--refresh-catalog") {
     // embedded seed simply being older. The oracle used to boot the daemon in
     // server mode and grep its log for the refresh line; this replaced that
     // when the server went.
-    let sem = DispatchSemaphore(value: 0)
-    var status: Int32 = 0
-    Task.detached {
-        defer { sem.signal() }
-        do {
-            let catalog = try await PriceCatalogSource.fetch()
-            guard PriceCatalogSource.isUsable(catalog) else {
-                sissyLog(
-                    "sissy: --refresh-catalog rejected the fetched catalog "
-                        + "(\(catalog.anthropic.count) anthropic, \(catalog.openai.count) openai rates) "
-                        + "— upstream changed shape; the cache is left as it was")
-                status = 1
-                return
-            }
-            let retained = PriceCatalogSource.retaining(
-                catalog, over: PriceCatalogSource.loadCache())
-            PriceCatalogSource.saveCache(retained)
+    do {
+        let catalog = try await PriceCatalogSource.fetch()
+        guard PriceCatalogSource.isUsable(catalog) else {
             sissyLog(
-                "sissy: pricing catalog refreshed — "
-                    + "\(retained.anthropic.count + retained.openai.count) rates cached at "
-                    + PriceCatalogSource.cacheURL.path)
-        } catch {
-            sissyLog("sissy: --refresh-catalog failed: \(error)")
-            status = 1
+                "sissy: --refresh-catalog rejected the fetched catalog "
+                    + "(\(catalog.anthropic.count) anthropic, \(catalog.openai.count) openai rates) "
+                    + "— upstream changed shape; the cache is left as it was")
+            exit(1)
         }
+        let retained = PriceCatalogSource.retaining(
+            catalog, over: PriceCatalogSource.loadCache())
+        PriceCatalogSource.saveCache(retained)
+        sissyLog(
+            "sissy: pricing catalog refreshed — "
+                + "\(retained.anthropic.count + retained.openai.count) rates cached at "
+                + PriceCatalogSource.cacheURL.path)
+    } catch {
+        sissyLog("sissy: --refresh-catalog failed: \(error)")
+        exit(1)
     }
-    sem.wait()
-    exit(status)
+    exit(0)
 }
 // Optional `--config <path>` override. Lets smoke tests / integration runs
 // point the tool at an isolated config + JSONL tree without touching the
@@ -127,87 +114,78 @@ if args.contains("--scan") {
         else { return "all" }
         return args[idx + 1]
     }()
-    let sem = DispatchSemaphore(value: 0)
-    // `Task.detached` keeps the body off the main actor so `sem.wait()` below
-    // does not block the actor that the body needs to make progress on. Under
-    // Swift 6 strict concurrency, top-level `Task { … }` inherits the main
-    // actor and deadlocks against the semaphore.
-    Task.detached {
-        // Same directories, overrides and pricing policy as the app, so
-        // comparing this output against `ccusage` measures Sissy's real
-        // behaviour rather than a set of defaults nobody runs.
-        var providers: [any UsageProvider] = []
-        // The install's own ledger, so a scan attributes what the app would
-        // rather than only what is still on disk at the moment it runs.
-        let projectLedger = ProjectLedger(
-            url: ProjectLedger.defaultURL(in: configURL.deletingLastPathComponent()))
-        if scanFilter == "all" || scanFilter == ProviderID.claudeCode {
-            let home = config.providerHome(vendor: ProviderID.claudeCode)
-            providers.append(
-                LocalUsageProvider.claudeCode(
-                    claudeDir: home.dataDir,
-                    id: home.id,
-                    pricingOverride: config.pricingOverride,
-                    profile: ClaudeProfileSource(url: home.claudeProfileURL),
-                    ledger: projectLedger))
-        }
-        if scanFilter == "all" || scanFilter == ProviderID.codex {
-            let home = config.providerHome(vendor: ProviderID.codex)
-            providers.append(
-                LocalUsageProvider.codex(
-                    codexDir: home.dataDir,
-                    id: home.id,
-                    pricingOverride: config.pricingOverride,
-                    ledger: projectLedger))
-        }
-        // No fetch here — `--scan` stays offline and fast. The cached catalog
-        // only exists once something has refreshed it; otherwise the embedded
-        // seed prices, which is also what the app would do.
-        if config.remotePricingEnabled, let cached = PriceCatalogSource.loadCache() {
-            for p in providers { await p.applyPriceCatalog(cached) }
-            sissyLog(
-                "sissy: --scan pricing from cached catalog "
-                    + "(fetched \(ISO8601DateFormatter().string(from: cached.fetchedAt)))")
-        } else {
-            sissyLog("sissy: --scan pricing from the embedded rate seed")
-        }
-        var out: [String: ScanEntry] = [:]
-        for p in providers {
-            await p.start { _ in }
-            let today = await p.current()
-            let signals = p.currentSignals()
-            out[p.id] = ScanEntry(
-                tokens: today.totalTokens,
-                cost: NSDecimalNumber(decimal: today.totalCost).stringValue,
-                filesWatched: p.filesWatched(),
-                plan: signals.plan,
-                planTier: signals.planTier,
-                credits: signals.credits.map { (credits: ProviderCredits) in
-                    let figure = { (value: Decimal?) in
-                        value.map { NSDecimalNumber(decimal: $0).stringValue }
-                    }
-                    var currency: String?
-                    if case .money(let code, _) = credits.unit { currency = code }
-                    return ScanCredits(
-                        used: figure(credits.used),
-                        cap: figure(credits.cap),
-                        balance: figure(credits.balance),
-                        currency: currency,
-                        observedAt: credits.observedAt)
-                },
-                sessions: p.currentAgents().sessions,
-                agents: p.currentAgents().agents
-            )
-            await p.stop()
-        }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(out), let s = String(data: data, encoding: .utf8) {
-            print(s)
-        }
-        sem.signal()
+    // Same directories, overrides and pricing policy as the app, so
+    // comparing this output against `ccusage` measures Sissy's real
+    // behaviour rather than a set of defaults nobody runs.
+    var providers: [any UsageProvider] = []
+    // The install's own ledger, so a scan attributes what the app would
+    // rather than only what is still on disk at the moment it runs.
+    let projectLedger = ProjectLedger(
+        url: ProjectLedger.defaultURL(in: configURL.deletingLastPathComponent()))
+    if scanFilter == "all" || scanFilter == ProviderID.claudeCode {
+        let home = config.providerHome(vendor: ProviderID.claudeCode)
+        providers.append(
+            LocalUsageProvider.claudeCode(
+                claudeDir: home.dataDir,
+                id: home.id,
+                pricingOverride: config.pricingOverride,
+                profile: ClaudeProfileSource(url: home.claudeProfileURL),
+                ledger: projectLedger))
     }
-    sem.wait()
+    if scanFilter == "all" || scanFilter == ProviderID.codex {
+        let home = config.providerHome(vendor: ProviderID.codex)
+        providers.append(
+            LocalUsageProvider.codex(
+                codexDir: home.dataDir,
+                id: home.id,
+                pricingOverride: config.pricingOverride,
+                ledger: projectLedger))
+    }
+    // No fetch here — `--scan` stays offline and fast. The cached catalog
+    // only exists once something has refreshed it; otherwise the embedded
+    // seed prices, which is also what the app would do.
+    if config.remotePricingEnabled, let cached = PriceCatalogSource.loadCache() {
+        for p in providers { await p.applyPriceCatalog(cached) }
+        sissyLog(
+            "sissy: --scan pricing from cached catalog "
+                + "(fetched \(ISO8601DateFormatter().string(from: cached.fetchedAt)))")
+    } else {
+        sissyLog("sissy: --scan pricing from the embedded rate seed")
+    }
+    var out: [String: ScanEntry] = [:]
+    for p in providers {
+        await p.start { _ in }
+        let today = await p.current()
+        let signals = p.currentSignals()
+        out[p.id] = ScanEntry(
+            tokens: today.totalTokens,
+            cost: NSDecimalNumber(decimal: today.totalCost).stringValue,
+            filesWatched: p.filesWatched(),
+            plan: signals.plan,
+            planTier: signals.planTier,
+            credits: signals.credits.map { (credits: ProviderCredits) in
+                let figure = { (value: Decimal?) in
+                    value.map { NSDecimalNumber(decimal: $0).stringValue }
+                }
+                var currency: String?
+                if case .money(let code, _) = credits.unit { currency = code }
+                return ScanCredits(
+                    used: figure(credits.used),
+                    cap: figure(credits.cap),
+                    balance: figure(credits.balance),
+                    currency: currency,
+                    observedAt: credits.observedAt)
+            },
+            sessions: p.currentAgents().sessions,
+            agents: p.currentAgents().agents
+        )
+        await p.stop()
+    }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    if let data = try? encoder.encode(out), let s = String(data: data, encoding: .utf8) {
+        print(s)
+    }
     exit(0)
 }
 
@@ -222,42 +200,37 @@ if args.contains("--backfill") {
     // agreement the issue asks for — a backfilled day landing on the oracle to
     // the token and the microdollar — is assertable in CI. `--scan` cannot:
     // it runs the tail's own 48 h window and reports today alone.
-    let sem = DispatchSemaphore(value: 0)
-    Task.detached {
-        defer { sem.signal() }
-        let stateDir = configURL.deletingLastPathComponent()
-        guard
-            let window = ArchiveBackfill.window(
-                retentionDays: config.resolvedHistoryRetentionDays)
-        else {
-            sissyLog("sissy: --backfill has no window to cover — check historyRetentionDays")
-            return
-        }
-        let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
-        let catalog = config.remotePricingEnabled ? PriceCatalogSource.loadCache() : nil
-        if let catalog {
-            sissyLog(
-                "sissy: --backfill pricing from cached catalog "
-                    + "(fetched \(ISO8601DateFormatter().string(from: catalog.fetchedAt)))")
-        }
-        for vendor in [ProviderID.claudeCode, ProviderID.codex] {
-            let provider = UsageEngine.backfillProvider(
-                home: config.providerHome(vendor: vendor), window: window,
-                historyRoot: stateDir, pricingOverride: config.pricingOverride,
-                ledger: projectLedger)
-            if let catalog { await provider.applyPriceCatalog(catalog) }
-            _ = await provider.backfillArchive()
-        }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(UsageHistoryStore.allDays(in: stateDir)),
-            let text = String(data: data, encoding: .utf8)
-        {
-            print(text)
-        }
+    let stateDir = configURL.deletingLastPathComponent()
+    guard
+        let window = ArchiveBackfill.window(
+            retentionDays: config.resolvedHistoryRetentionDays)
+    else {
+        sissyLog("sissy: --backfill has no window to cover — check historyRetentionDays")
+        exit(0)
     }
-    sem.wait()
+    let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
+    let catalog = config.remotePricingEnabled ? PriceCatalogSource.loadCache() : nil
+    if let catalog {
+        sissyLog(
+            "sissy: --backfill pricing from cached catalog "
+                + "(fetched \(ISO8601DateFormatter().string(from: catalog.fetchedAt)))")
+    }
+    for vendor in [ProviderID.claudeCode, ProviderID.codex] {
+        let provider = UsageEngine.backfillProvider(
+            home: config.providerHome(vendor: vendor), window: window,
+            historyRoot: stateDir, pricingOverride: config.pricingOverride,
+            ledger: projectLedger)
+        if let catalog { await provider.applyPriceCatalog(catalog) }
+        _ = await provider.backfillArchive()
+    }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+    if let data = try? encoder.encode(UsageHistoryStore.allDays(in: stateDir)),
+        let text = String(data: data, encoding: .utf8)
+    {
+        print(text)
+    }
     exit(0)
 }
 

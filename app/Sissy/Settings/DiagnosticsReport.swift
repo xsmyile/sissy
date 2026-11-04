@@ -53,7 +53,7 @@ struct DiagnosticsReport {
         bundle: Bundle = .main,
         processInfo: ProcessInfo = .processInfo
     ) async -> String {
-        let ccusage = await Task.detached { CcusageProbe.installs() }.value
+        let ccusage = await BlockingWork.run(qos: .userInitiated) { CcusageProbe.installs() }
         return text(
             Snapshot(
                 version: bundle.shortVersion,

@@ -94,7 +94,7 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
         self.sessionSource =
             sessionSource
             ?? { allowingInteraction in
-                await KeychainAccess.offPool {
+                await BlockingWork.run {
                     ClaudeWebSessionStore.load(
                         account: account, allowingInteraction: allowingInteraction)
                 }

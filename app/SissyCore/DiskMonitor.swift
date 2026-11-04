@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 
 /// Reads the disks once a minute and publishes what it read, behind
 /// `ServerConfig.disk`.
@@ -13,7 +12,7 @@ import Synchronization
 /// filesystem call with no bound, and `stop()` is what the engine awaits on
 /// its way down: a read holding the actor would hold the switch, the engine's
 /// `stop()` and the quit behind it. So the read goes to a dispatch thread
-/// through `DiskReadGate`, one at a time, and a poll that is cancelled leaves
+/// through a `SingleFlight`, one at a time, and a poll that is cancelled leaves
 /// it there rather than waiting for it.
 ///
 /// In memory and nowhere else, and needing no permission, no entitlement and
@@ -30,7 +29,7 @@ actor DiskMonitor {
 
     nonisolated private let published = LockedValue<DiskReading?>(nil)
     private var poll = PollLoop()
-    private let gate = DiskReadGate()
+    private let gate = SingleFlight<DiskReading?>(abandoned: nil)
     private let read: @Sendable (Date) -> DiskReading
 
     init(read: @escaping @Sendable (Date) -> DiskReading = { DiskReader.read(now: $0) }) {
@@ -74,9 +73,7 @@ actor DiskMonitor {
         let reading = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 if gate.join(id, continuation) {
-                    DispatchQueue.global(qos: .utility).async {
-                        gate.finish(read(Date()))
-                    }
+                    BlockingWork.start { gate.finish(read(Date())) }
                 }
             }
         } onCancel: {
@@ -84,68 +81,5 @@ actor DiskMonitor {
         }
         gate.forget(id)
         return reading
-    }
-}
-
-/// The single disk read in flight and everyone waiting on it, on
-/// `KeychainLookupGate`'s terms.
-///
-/// One at a time, because a read stuck in the filesystem parks its dispatch
-/// thread, and a second read behind the same stuck volume would park a
-/// second. A waiter that leaves is answered nil at once, and one that leaves
-/// before it joined is answered nil when it does.
-final class DiskReadGate: Sendable {
-    private struct State {
-        var inFlight = false
-        var waiters: [UUID: CheckedContinuation<DiskReading?, Never>] = [:]
-        var left: Set<UUID> = []
-    }
-
-    private let state = Mutex(State())
-
-    /// Registers `id` as a waiter and reports whether this caller is the one
-    /// that has to run the read.
-    func join(_ id: UUID, _ continuation: CheckedContinuation<DiskReading?, Never>) -> Bool {
-        let (alreadyLeft, runs) = state.withLock { state in
-            if state.left.remove(id) != nil { return (true, false) }
-            state.waiters[id] = continuation
-            defer { state.inFlight = true }
-            return (false, !state.inFlight)
-        }
-        if alreadyLeft { continuation.resume(returning: nil) }
-        return runs
-    }
-
-    /// The read returned. Hands it to everyone still waiting and reopens the
-    /// slot.
-    func finish(_ reading: DiskReading) {
-        let pending = state.withLock { state in
-            state.inFlight = false
-            defer { state.waiters.removeAll() }
-            return state.waiters
-        }
-        for continuation in pending.values { continuation.resume(returning: reading) }
-    }
-
-    /// A waiter was cancelled. It leaves alone, and the read stays in flight
-    /// for anyone else.
-    func leave(_ id: UUID) {
-        let abandoned = state.withLock {
-            let abandoned = $0.waiters.removeValue(forKey: id)
-            if abandoned == nil { $0.left.insert(id) }
-            return abandoned
-        }
-        abandoned?.resume(returning: nil)
-    }
-
-    /// The waiter is done and its cancellation handler can no longer run.
-    ///
-    /// A cancel landing after `finish` had already answered it finds no
-    /// waiter and records the id as one that left before joining, which no
-    /// `join` will ever come to collect. Clearing it here, once the handler's
-    /// scope has closed, is what keeps that race from leaving one id behind
-    /// for the life of the process.
-    func forget(_ id: UUID) {
-        state.withLock { _ = $0.left.remove(id) }
     }
 }

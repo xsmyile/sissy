@@ -316,7 +316,7 @@ final class UsageEngineHost {
         guard let engine else { return }
         let host = self
         Task {
-            let found = await Task.detached { engine.unsupportedClaudeHomes() }.value
+            let found = await BlockingWork.run { engine.unsupportedClaudeHomes() }
             guard host.engine === engine else { return }
             host.claudeConfigHome = engine.claudeConfigHome
             host.unsupportedClaudeHomes = found
@@ -633,7 +633,7 @@ final class UsageEngineHost {
     /// the keychain took to answer.
     func forgeTokenCandidates() async -> [ForgeTokenCandidate] {
         guard let engine else { return [] }
-        return await Task.detached { engine.forgeTokenCandidates() }.value
+        return await BlockingWork.run(qos: .userInitiated) { engine.forgeTokenCandidates() }
     }
 
     /// Connects a forge with a token the user supplied or accepted.
@@ -920,18 +920,18 @@ final class UsageEngineHost {
     ///
     /// The read is the engine's because the project paths are re-resolved
     /// against the ledger it owns, though it runs off the engine's actor. Both
-    /// it and the write run detached, so a large archive or a user's slow
+    /// it and the write run through `BlockingWork`, so a large archive or a user's slow
     /// volume stalls the export rather than the metering or the main thread:
     /// measured 2026-09-29, the read alone held the main thread 7 ms for this
     /// Mac's 62 day files and 0.87 s for a 7,300-file archive.
     func exportUsageHistory(to directory: URL) async throws -> Int {
         guard let engine else { throw ExportFailure.engineNotRunning }
-        return try await Task.detached {
+        return try await BlockingWork.run(qos: .userInitiated) {
             let days = engine.exportableHistory()
             guard !days.isEmpty else { return 0 }
             try UsageHistoryExport.write(days, to: directory)
             return days.count
-        }.value
+        }
     }
 
     /// What the archive holds for one provider over the panel's own window,
@@ -1074,26 +1074,28 @@ final class UsageEngineHost {
             // refusal is free.
             let stopping = await MainActor.run { host.isStopped }
             guard !stopping else { return }
-            let installer = AgentHookInstaller(stateDirectory: stateDirectory, targets: targets)
+            let installer: @Sendable () -> AgentHookInstaller = {
+                AgentHookInstaller(stateDirectory: stateDirectory, targets: targets)
+            }
             let pass: AgentHookLaunchPass = onlyIfRegistered ? .lookFirst : .apply
-            guard pass.proceeds(holdsOwnEntry: onlyIfRegistered && installer.holdsOwnEntry())
-            else { return }
+            let holdsOwnEntry =
+                onlyIfRegistered ? await BlockingWork.run { installer().holdsOwnEntry() } : false
+            guard pass.proceeds(holdsOwnEntry: holdsOwnEntry) else { return }
             // Persist the retry before touching either foreign configuration.
             await engine.setAgentHooks(enabled: enabled, removalPending: !enabled)
-            let report: [AgentHookTarget: AgentHookOutcome]
-            if enabled, let script {
-                report = installer.install(bundledScript: script)
-            } else {
-                report = installer.remove()
+            let report = await BlockingWork.run {
+                if enabled, let script { return installer().install(bundledScript: script) }
+                return installer().remove()
             }
             let refused =
                 report
                 .filter { _, outcome in outcome == .failed || outcome == .unreadable }
                 .keys.map(\.name)
                 .sorted()
+            let entrySurvives =
+                enabled ? false : await BlockingWork.run { installer().holdsOwnEntry() }
             let owed = AgentHookInstaller.removalOwed(
-                enabled: enabled, refused: refused,
-                entrySurvives: !enabled && installer.holdsOwnEntry())
+                enabled: enabled, refused: refused, entrySurvives: entrySurvives)
             await engine.setAgentHooks(enabled: enabled, removalPending: owed)
             await MainActor.run {
                 guard host.agentHooksGeneration == generation else { return }
