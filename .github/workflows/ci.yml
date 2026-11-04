@@ -34,9 +34,46 @@ jobs:
           tar xzf "$tarball" actionlint
           ./actionlint -color
 
+  # A PR that touches only prose needs no Mac. The list is explicit, so a file
+  # nobody thought of still builds: THIRD-PARTY-NOTICES.md and CREDITS.md are
+  # absent because the app ships them and AboutTests reads them.
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          PROSE: '^(docs/.*|AGENTS\.md|CODE_OF_CONDUCT\.md|CONTRIBUTING\.md|README\.md|SECURITY\.md|\.github/PULL_REQUEST_TEMPLATE\.md)$'
+        run: |
+          set -u
+          code=true
+          if [ -n "$PR" ] && files="$(gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only)" \
+            && [ -n "$files" ]; then
+            outside="$(printf '%s\n' "$files" | grep -vE "$PROSE" || true)"
+            [ -n "$outside" ] || code=false
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "builds on a Mac: $code"
+
   app:
-    name: app + cli (Xcode build + self-test)
+    name: app + cli (${{ matrix.configuration }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
+    strategy:
+      fail-fast: false
+      # Release is the configuration that ships: its own bundle id, and with it
+      # the release paths and keychain namespace, and whole-module optimisation.
+      # Debug alone never compiles the binary a user runs.
+      matrix:
+        configuration: [Debug, Release]
     defaults:
       run:
         working-directory: app
@@ -53,10 +90,12 @@ jobs:
         run: xcodegen generate
 
       - name: SwiftLint
+        if: matrix.configuration == 'Debug'
         working-directory: ${{ github.workspace }}
         run: scripts/swiftlint.sh lint --quiet --strict --baseline .swiftlint-baseline
 
       - name: Swift format lint
+        if: matrix.configuration == 'Debug'
         working-directory: ${{ github.workspace }}
         run: |
           xcrun swift-format lint --recursive --strict \
@@ -66,30 +105,16 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
-            -configuration Debug build CODE_SIGNING_ALLOWED=NO \
+            -configuration "${{ matrix.configuration }}" build CODE_SIGNING_ALLOWED=NO \
             | xcbeautify --renderer github-actions
 
       - name: CLI self-test
         run: |
-          CLI="$(../scripts/cli-path.sh Debug)"
-          "$CLI" --self-test
-
-      # The configuration that ships: its own bundle id, and with it the
-      # release paths and keychain namespace, and whole-module optimisation.
-      # Debug alone never compiles the binary a user runs.
-      - name: Build the CLI (Release)
-        run: |
-          set -o pipefail
-          xcodebuild -project Sissy.xcodeproj -scheme sissy-cli \
-            -configuration Release build CODE_SIGNING_ALLOWED=NO \
-            | xcbeautify --renderer github-actions
-
-      - name: CLI self-test (Release)
-        run: |
-          CLI="$(../scripts/cli-path.sh Release)"
+          CLI="$(../scripts/cli-path.sh "${{ matrix.configuration }}")"
           "$CLI" --self-test
 
       - name: Codex parser smoke (--scan against fixture)
+        if: matrix.configuration == 'Debug'
         timeout-minutes: 3
         run: |
           CLI="$(../scripts/cli-path.sh Debug)"
@@ -99,17 +124,11 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project Sissy.xcodeproj -scheme Sissy \
-            -configuration Debug build CODE_SIGNING_ALLOWED=NO \
-            | xcbeautify --renderer github-actions
-
-      - name: Build app (Release)
-        run: |
-          set -o pipefail
-          xcodebuild -project Sissy.xcodeproj -scheme Sissy \
-            -configuration Release build CODE_SIGNING_ALLOWED=NO \
+            -configuration "${{ matrix.configuration }}" build CODE_SIGNING_ALLOWED=NO \
             | xcbeautify --renderer github-actions
 
       - name: Unit tests
+        if: matrix.configuration == 'Debug'
         run: |
           set -o pipefail
           xcodebuild -project Sissy.xcodeproj -scheme Sissy \
