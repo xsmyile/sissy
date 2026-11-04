@@ -98,7 +98,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
 
         XCTAssertEqual(rows.count, 2)
         XCTAssertEqual(rows.first { $0.id == signedInUUID }?.isReadable, true)
-        XCTAssertEqual(rows.first { $0.id == signedInUUID }?.windows.map(\.percent), [18])
+        XCTAssertEqual(rows.first { $0.id == signedInUUID }?.reading.windows.map(\.percent), [18])
         XCTAssertEqual(rows.first { $0.id == archivedUUID }?.isReadable, false)
     }
 
@@ -115,9 +115,9 @@ final class ClaudeAccountRowsTests: XCTestCase {
             now: now)
 
         let archived = rows.first { $0.id == archivedUUID }
-        XCTAssertEqual(archived?.windows, [])
-        XCTAssertNil(archived?.windowsCaption)
-        XCTAssertNil(archived?.credits)
+        XCTAssertEqual(archived?.reading.windows, [])
+        XCTAssertNil(archived?.reading.windowsCaption)
+        XCTAssertNil(archived?.reading.credits)
     }
 
     /// An account reached through a session alone is named by its link.
@@ -163,10 +163,10 @@ final class ClaudeAccountRowsTests: XCTestCase {
         let unread = AccountSignals(id: archivedUUID, account: nil, plan: nil, planTier: nil)
 
         let read = entries(readings: [team, other], known: [archived], now: Date())
-        XCTAssertEqual(read.first { $0.id == archivedUUID }?.plan, "Team Premium")
+        XCTAssertEqual(read.first { $0.id == archivedUUID }?.reading.plan, "Team Premium")
 
         let fallback = entries(readings: [unread, other], known: [archived], now: Date())
-        XCTAssertEqual(fallback.first { $0.id == archivedUUID }?.plan, "Ultra Plus")
+        XCTAssertEqual(fallback.first { $0.id == archivedUUID }?.reading.plan, "Ultra Plus")
     }
 
     /// An archived account's plan reaches the row in the vocabulary the
@@ -314,7 +314,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         XCTAssertEqual(rows.map(\.name), ["Claude", "Claude"])
         XCTAssertEqual(rows.map(\.qualifier), ["Acme Srl", "Radon Forge"])
         XCTAssertEqual(rows.map(\.title), ["Claude · Acme Srl", "Claude · Radon Forge"])
-        XCTAssertEqual(rows.map(\.plan), ["Team", "Team"])
+        XCTAssertEqual(rows.map(\.reading.plan), ["Team", "Team"])
     }
 
     /// The count over a vendor's rows names the accounts its picker lists, so
@@ -360,7 +360,7 @@ final class ClaudeAccountRowsTests: XCTestCase {
         func row(_ provider: String, _ account: String?) -> UsagePanelSnapshot.GaugeRow {
             UsagePanelSnapshot.GaugeRow(
                 id: "\(provider)#\(account ?? "-")", provider: provider, account: account,
-                name: provider, qualifier: account, windows: [], notice: nil, status: nil)
+                name: provider, qualifier: account, reading: UsagePanelSnapshot.AccountReading(), status: nil)
         }
         let rows = [row("claude", "a"), row("claude", "b"), row("codex", nil), row("claude", "c")]
 

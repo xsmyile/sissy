@@ -33,27 +33,27 @@ final class CodexResetRowTests: XCTestCase {
     /// No count is a reading nobody took, and a count of zero is a block that
     /// never changes: neither gets a row.
     func testNoRowWithoutAResetToSpend() {
-        XCTAssertNil(codex(resets: nil).resets)
-        XCTAssertNil(codex(resets: LimitResets(available: 0, applicable: 0)).resets)
+        XCTAssertNil(codex(resets: nil).reading.resets)
+        XCTAssertNil(codex(resets: LimitResets(available: 0, applicable: 0)).reading.resets)
     }
 
     func testTheHeadlineIsTheVendorsCount() {
         XCTAssertEqual(
-            codex(resets: LimitResets(available: 2, applicable: nil)).resets?.headline,
+            codex(resets: LimitResets(available: 2, applicable: nil)).reading.resets?.headline,
             "2 available")
     }
 
     /// Measured 2026-09-24: one reset held, none applicable with the windows
     /// at 29% and 83%. The row stays, and says the vendor counts none needed.
     func testAResetTheVendorWouldNotApplyKeepsItsRow() {
-        let row = codex(resets: LimitResets(available: 1, applicable: 0)).resets
+        let row = codex(resets: LimitResets(available: 1, applicable: 0)).reading.resets
         XCTAssertEqual(row?.headline, "1 available")
         XCTAssertEqual(row?.appliesNow, false)
     }
 
     func testWithoutAnApplicableCountTheResetIsNeeded() {
         XCTAssertEqual(
-            codex(resets: LimitResets(available: 1, applicable: nil)).resets?.appliesNow, true)
+            codex(resets: LimitResets(available: 1, applicable: nil)).reading.resets?.appliesNow, true)
     }
 
     func testTheCaptionCarriesTheVendorsTitleAndTheExpiry() {
@@ -61,14 +61,14 @@ final class CodexResetRowTests: XCTestCase {
             resets: LimitResets(
                 available: 1, applicable: 1, nextExpiry: Self.expiry,
                 title: "Full reset (Weekly + 5 hr)")
-        ).resets
+        ).reading.resets
         let day = Self.expiry.formatted(.dateTime.day().month(.abbreviated))
         XCTAssertEqual(row?.caption, "Full reset (Weekly + 5 hr) · expires \(day)")
     }
 
     func testAResetWithNoTitleOrDateIsAFullReset() {
         XCTAssertEqual(
-            codex(resets: LimitResets(available: 1, applicable: 1)).resets?.caption, "Full reset")
+            codex(resets: LimitResets(available: 1, applicable: 1)).reading.resets?.caption, "Full reset")
     }
 
     // MARK: - Whose credential a press spends
@@ -77,7 +77,7 @@ final class CodexResetRowTests: XCTestCase {
         let row = codex(
             resets: LimitResets(available: 1, applicable: 1),
             accounts: [account("user-1", signedIn: true, resets: nil)])
-        XCTAssertEqual(row.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: nil))
+        XCTAssertEqual(row.reading.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: nil))
     }
 
     /// On a Mac whose `codex` is signed out the row is the lone linked
@@ -86,7 +86,8 @@ final class CodexResetRowTests: XCTestCase {
         let row = codex(
             resets: LimitResets(available: 1, applicable: 1),
             accounts: [account("user-2", signedIn: false, resets: nil)])
-        XCTAssertEqual(row.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: "user-2"))
+        XCTAssertEqual(
+            row.reading.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: "user-2"))
     }
 
     func testEachAccountEntrySpendsItsOwnCredential() {
@@ -101,15 +102,16 @@ final class CodexResetRowTests: XCTestCase {
             now: Date())
         let byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
         XCTAssertEqual(
-            byID["user-1"]?.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: nil))
+            byID["user-1"]?.reading.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: nil))
         XCTAssertEqual(
-            byID["user-2"]?.resetTarget, LimitResetTarget(provider: ProviderID.codex, account: "user-2"))
-        XCTAssertEqual(byID["user-2"]?.resets?.headline, "3 available")
+            byID["user-2"]?.reading.resetTarget,
+            LimitResetTarget(provider: ProviderID.codex, account: "user-2"))
+        XCTAssertEqual(byID["user-2"]?.reading.resets?.headline, "3 available")
     }
 
     func testAProviderWithoutResetsHasNoTarget() {
         let slice = ProviderSlice(id: "opencode", tokens: 0, cost: 0)
-        XCTAssertNil(UsagePanelSnapshot.make(frame: frame(slice)).providers[0].resetTarget)
+        XCTAssertNil(UsagePanelSnapshot.make(frame: frame(slice)).providers[0].reading.resetTarget)
     }
 
     // MARK: - The words
