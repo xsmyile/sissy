@@ -20,6 +20,15 @@ final class LimitsBackoffTests: XCTestCase {
 
     /// The whole point of the file: a refusal one run met is a wait the next
     /// one serves, rather than a request spent on a vendor still saying no.
+    func testTheLogNamesAReaderAndNeverItsAccount() {
+        let account = "a1b2c3d4-0000-0000-0000-000000000000"
+        XCTAssertEqual(LimitsBackoffLedger.reader(of: LimitsBackoffLedger.claudeCLIKey), "claude-cli")
+        XCTAssertEqual(
+            LimitsBackoffLedger.reader(of: LimitsBackoffLedger.claudeWebKey(account: account)), "claude-web")
+        XCTAssertFalse(
+            LimitsBackoffLedger.reader(of: LimitsBackoffLedger.codexKey(account: account)).contains(account))
+    }
+
     func testARefusalIsAnsweredByTheNextRun() async {
         let until = Date().addingTimeInterval(900)
         await LimitsBackoffStore(url: url).record(until, for: LimitsBackoffLedger.claudeCLIKey)

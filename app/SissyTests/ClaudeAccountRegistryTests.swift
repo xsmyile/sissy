@@ -425,6 +425,30 @@ final class ClaudeAccountRegistryTests: XCTestCase {
         XCTAssertEqual(found.accessToken, "tok-b")
     }
 
+    /// The log leaves the Mac in a bug report, so a move names positions in
+    /// the index and never an account's id.
+    func testTheMoveLineNamesPositionsAndNeverAnId() {
+        let first = Self.byToken("first")
+        let second = Self.byToken("second")
+
+        let line = ClaudeAccountRegistry.moveLine(
+            from: first.uuid, to: second.uuid, in: [first, second], cause: "because")
+
+        XCTAssertEqual(
+            line,
+            "sissy: Claude Code is signed in as account 2 of 2 in claude-accounts.json, "
+                + "was account 1 of 2 in claude-accounts.json (because)")
+        XCTAssertFalse(line.contains(first.uuid))
+        XCTAssertFalse(line.contains(second.uuid))
+    }
+
+    func testTheMoveLineSaysNobodyAndUnlistedWithoutAnId() {
+        let line = ClaudeAccountRegistry.moveLine(
+            from: "u-gone", to: nil, in: [], cause: "because")
+
+        XCTAssertEqual(line, "sissy: Claude Code is signed in as nobody, was an unlisted account (because)")
+    }
+
     /// A signed-out CLI is on no account, whatever the index noted last.
     func testASlotThatEmptiedClearsTheActiveAccount() async {
         let vault = Vault()

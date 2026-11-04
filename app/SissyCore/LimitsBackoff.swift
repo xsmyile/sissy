@@ -40,6 +40,12 @@ struct LimitsBackoffLedger: Codable, Equatable, Sendable {
         account.map { "codex:\($0)" } ?? "codex-cli"
     }
 
+    /// Which kind of reader a key belongs to, for the log: the part in front
+    /// of the account id, which stays out of it.
+    static func reader(of key: String) -> String {
+        String(key.prefix { $0 != ":" })
+    }
+
     static func defaultURL(in directory: URL) -> URL {
         directory.appendingPathComponent(fileName)
     }
@@ -125,7 +131,9 @@ actor LimitsBackoffStore {
         do {
             try LimitsBackoffLedger.save(updated, to: url)
         } catch {
-            sissyLog("sissy: could not record the limits backoff for \(key): \(error)")
+            sissyLog(
+                "sissy: could not record the limits backoff for \(LimitsBackoffLedger.reader(of: key)): \(error)"
+            )
         }
     }
 
