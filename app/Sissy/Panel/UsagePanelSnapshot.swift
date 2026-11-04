@@ -42,6 +42,14 @@ struct UsagePanelSnapshot: Equatable {
     /// its name claims.
     let coverage: String?
     let providers: [ProviderRow]
+    /// The Overview's gauges: one per vendor, or one per readable account of a
+    /// vendor that has more than one.
+    ///
+    /// An account Sissy cannot read is left out here while it still appears in
+    /// the picker. The picker is a list of accounts and this is a list of
+    /// readings, and a row with an empty track would report headroom nobody
+    /// measured.
+    let gaugeRows: [GaugeRow]
     /// One row per provider the window's days name, in place of the gauges
     /// while the window does not reach today. Empty while it does.
     let spendRows: [SpendRow]
@@ -178,11 +186,6 @@ struct UsagePanelSnapshot: Equatable {
         let isBinding: Bool
     }
 
-    /// Every repository Sissy could read a commit identity for, the ones that
-    /// disagree with their forge first. Empty where there is no git to read
-    /// with and until the first sweep has run, and the page then says nothing
-    /// has been read rather than that everything agrees.
-    let identities: [IdentityRow]
     /// The Overview's one line about identities, drawn on every frame: it is
     /// the door to the page, and a door that comes and goes with the findings
     /// is one nobody learns is there.
@@ -1133,6 +1136,7 @@ struct UsagePanelSnapshot: Equatable {
                     calendar: calendar)
             },
             providers: rows,
+            gaugeRows: makeGaugeRows(rows),
             spendRows: includesToday ? [] : window.map(makeSpendRows) ?? [],
             strip: answer?.strip,
             usedToday: frame.providers.count { $0.tokens > 0 },
@@ -1147,7 +1151,6 @@ struct UsagePanelSnapshot: Equatable {
                     makeForgeSpan(frame.forge, span: picked, answer: forgeSpan, now: now)
                 }
             }(),
-            identities: makeIdentities(frame.identities),
             identityLine: makeIdentityLine(frame.identities),
             mac: frame.mac.map(makeMac),
             disk: frame.disk.map(makeDisk)
@@ -1963,13 +1966,19 @@ struct UsagePanelSnapshot: Equatable {
         }
     }
 
-    /// The identities page's rows, the findings first.
+    /// The identities page's rows: every repository Sissy could read a commit
+    /// identity for, the findings first. Empty where there is no git to read
+    /// with and until the first sweep has run, and the page then says nothing
+    /// has been read rather than that everything agrees.
     ///
     /// Ordered by what the row says rather than by name: a page whose one
     /// wrong repository sorts to position nineteen is a page that has to be
     /// read rather than glanced at, and the rows that agree are the ones the
     /// user is not looking for.
-    private static func makeIdentities(_ identities: [RepositoryIdentity]) -> [IdentityRow] {
+    ///
+    /// Not on the snapshot, which is built on every body pass of every page:
+    /// the one page that draws these builds them.
+    static func identityRows(_ identities: [RepositoryIdentity]) -> [IdentityRow] {
         identities.map(identityRow).sorted { left, right in
             guard left.mark == right.mark else { return rank(left.mark) < rank(right.mark) }
             return left.name.localizedStandardCompare(right.name) == .orderedAscending
@@ -2142,14 +2151,8 @@ struct UsagePanelSnapshot: Equatable {
             children: component.children.map(makeComponent))
     }
 
-    /// The Overview's gauges: one per vendor, or one per readable account of a
-    /// vendor that has more than one.
-    ///
-    /// An account Sissy cannot read is left out here while it still appears in
-    /// the picker. The picker is a list of accounts and this is a list of
-    /// readings, and a row with an empty track would report headroom nobody
-    /// measured.
-    var gaugeRows: [GaugeRow] {
+    /// The rows behind `gaugeRows`, built once with the snapshot.
+    private static func makeGaugeRows(_ providers: [ProviderRow]) -> [GaugeRow] {
         providers.flatMap { row -> [GaugeRow] in
             let readable = row.accounts.filter(\.isReadable)
             guard readable.count > 1 else {
