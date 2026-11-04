@@ -506,6 +506,30 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertEqual(heldSystemAssertions(), baseline, "the ceiling left the Mac held awake")
     }
 
+    /// The loop reads a passed deadline and then hops to the engine, so a ceiling
+    /// picked in that hop has already moved the deadline by the time it lands. A
+    /// stale wake-up must leave the new run alone rather than switch it off.
+    func testAStaleWakeUpDoesNotEndAHoldWhoseDeadlineMoved() async throws {
+        try writeClaudeTurn()
+        let frames = FrameRecorder()
+        let engine = makeEngine(
+            codex: false,
+            keepAwake: .on,
+            keepAwakeCeiling: .oneHour,
+            keepAwakePolicy: KeepAwakePolicy(idleWindow: 600, ceilingHour: 3600))
+        let held = frames.expectation("the hold is taken") { $0.keepAwake.active }
+        await engine.start { frames.record($0) }
+        addTeardownBlock { await engine.stop() }
+        await fulfillment(of: [held], timeout: 5)
+
+        await engine.keepAwakeDeadlinePassed()
+        let told = frames.expectation("a frame after the wake-up") { $0.keepAwake.coversScreen }
+        await engine.setKeepScreenAwake(enabled: true)
+        await fulfillment(of: [told], timeout: 5)
+
+        XCTAssertEqual(frames.all.last?.keepAwake.mode, .on, "a stale wake-up ended the hold")
+    }
+
     /// `never` sets no deadline at all, so the hold is still in force at a
     /// point where any of the other ceilings, at this policy's hour, would
     /// have switched it off several times over.
