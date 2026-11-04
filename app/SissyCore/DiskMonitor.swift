@@ -116,11 +116,11 @@ final class DiskReadGate: Sendable {
     /// Registers `id` as a waiter and reports whether this caller is the one
     /// that has to run the read.
     func join(_ id: UUID, _ continuation: CheckedContinuation<DiskReading?, Never>) -> Bool {
-        let (alreadyLeft, runs) = state.withLock {
-            if $0.left.remove(id) != nil { return (true, false) }
-            $0.waiters[id] = continuation
-            defer { $0.inFlight = true }
-            return (false, !$0.inFlight)
+        let (alreadyLeft, runs) = state.withLock { state in
+            if state.left.remove(id) != nil { return (true, false) }
+            state.waiters[id] = continuation
+            defer { state.inFlight = true }
+            return (false, !state.inFlight)
         }
         if alreadyLeft { continuation.resume(returning: nil) }
         return runs
@@ -129,10 +129,10 @@ final class DiskReadGate: Sendable {
     /// The read returned. Hands it to everyone still waiting and reopens the
     /// slot.
     func finish(_ reading: DiskReading) {
-        let pending = state.withLock {
-            $0.inFlight = false
-            defer { $0.waiters.removeAll() }
-            return $0.waiters
+        let pending = state.withLock { state in
+            state.inFlight = false
+            defer { state.waiters.removeAll() }
+            return state.waiters
         }
         for continuation in pending.values { continuation.resume(returning: reading) }
     }

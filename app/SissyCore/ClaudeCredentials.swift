@@ -124,10 +124,10 @@ final class KeychainLookupGate: Sendable {
     /// The lookup returned. Hands its answer to everyone still waiting and
     /// reopens the slot.
     func finish(_ value: ClaudeCredentialsLookup) {
-        let pending = state.withLock {
-            $0.inFlight = false
-            defer { $0.waiters.removeAll() }
-            return $0.waiters
+        let pending = state.withLock { state in
+            state.inFlight = false
+            defer { state.waiters.removeAll() }
+            return state.waiters
         }
         for continuation in pending.values { continuation.resume(returning: value) }
     }

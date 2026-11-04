@@ -365,9 +365,9 @@ private final class FirstAnswer: Sendable {
     }
 
     func resume(_ answer: Bool) {
-        let waiting = state.withLock {
-            defer { $0.continuation = nil }
-            return $0.continuation
+        let waiting = state.withLock { state in
+            defer { state.continuation = nil }
+            return state.continuation
         }
         waiting?.resume(returning: answer)
     }
