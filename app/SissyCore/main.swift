@@ -216,7 +216,7 @@ if args.contains("--backfill") {
                 + "(fetched \(ISO8601DateFormatter().string(from: catalog.fetchedAt)))")
     }
     for vendor in [ProviderID.claudeCode, ProviderID.codex] {
-        let provider = UsageEngine.backfillProvider(
+        let provider = ArchiveCoordinator.backfillProvider(
             home: config.providerHome(vendor: vendor), window: window,
             historyRoot: stateDir, pricingOverride: config.pricingOverride,
             ledger: projectLedger)
