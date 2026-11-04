@@ -58,6 +58,8 @@ struct AccountSignals: Sendable, Equatable, Identifiable {
     let account: ProviderAccount?
     let plan: String?
     let planTier: String?
+    /// The plan as the vendor words it, where it does.
+    var planName: String?
     var windows: [UsageWindow] = []
     var credits: ProviderCredits?
     var resets: LimitResets?
@@ -100,6 +102,11 @@ struct ProviderSignals: Sendable, Equatable {
     /// Limit tier the plan is metered at (`max_5x`), for the one vendor that
     /// publishes one. Only ever shown alongside `plan`.
     var planTier: String?
+    /// The plan as the vendor itself words it (`Ultra`), for the one vendor
+    /// that publishes a word beside its token. The token stayed `max` through
+    /// the rename of 2026-10-30, so this is what carries a rename without a
+    /// release. Printed unguarded, so every reader sanitizes it.
+    var planName: String?
     /// Who this provider is signed in as, when its own files say.
     var account: ProviderAccount?
     /// What the vendor has billed against a spend cap, for the providers that

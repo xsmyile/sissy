@@ -373,18 +373,32 @@ final class UsagePanelSnapshotTests: XCTestCase {
                 slice("claude-code", 1000, "1.00", plan: "max", planTier: "max_5x")
             ])
         )
-        XCTAssertEqual(snapshot.providers.first?.plan, "Max 5x")
+        XCTAssertEqual(snapshot.providers.first?.plan, "Max")
         XCTAssertNil(snapshot.providers.first?.planTier)
     }
 
     func testProviderRowCarriesAForeignTierSeparately() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [
-                slice("claude-code", 1000, "1.00", plan: "team", planTier: "max_5x")
+                slice("claude-code", 1000, "1.00", plan: "team", planTier: "scale_3x")
             ])
         )
         XCTAssertEqual(snapshot.providers.first?.plan, "Team")
-        XCTAssertEqual(snapshot.providers.first?.planTier, "Max 5x")
+        XCTAssertEqual(snapshot.providers.first?.planTier, "Scale 3x")
+    }
+
+    /// The vendor's word reaches the badge over whatever the token derives to.
+    func testProviderRowLeadsOnTheVendorsWordForThePlan() {
+        let snapshot = UsagePanelSnapshot.make(
+            frame: frame(providers: [
+                ProviderSlice(
+                    id: "claude-code", tokens: 1000, cost: 1,
+                    signals: ProviderSignals(
+                        plan: "max", planTier: "max_20x", planName: "Ultra Plus"))
+            ])
+        )
+        XCTAssertEqual(snapshot.providers.first?.plan, "Ultra Plus")
+        XCTAssertNil(snapshot.providers.first?.planTier)
     }
 
     /// A tier cannot arrive on its own: the engine drops it when there is no

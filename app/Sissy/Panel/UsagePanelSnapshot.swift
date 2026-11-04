@@ -663,7 +663,7 @@ struct UsagePanelSnapshot: Equatable {
         /// that has not taken a turn yet has not said which it is on.
         let plan: String?
         /// Limit tier, worded, and only when it is not already part of
-        /// `plan` — a Team seat metered at Max 5x. It goes to the tooltip:
+        /// `plan` — a seat metered at a tier of another plan. It goes to the tooltip:
         /// the badge is for the plan the user pays for.
         let planTier: String?
         let tokens: String
@@ -2069,7 +2069,8 @@ struct UsagePanelSnapshot: Equatable {
     ) -> [ProviderRow] {
         slices.map { slice in
             let plan = UsageFormat.plan(
-                slice.plan, tier: slice.planTier, seat: slice.account?.seat)
+                slice.plan, tier: slice.planTier, seat: slice.account?.seat,
+                name: slice.planName)
             return ProviderRow(
                 id: slice.id,
                 name: UsageFormat.providerName(slice.id),
@@ -2221,7 +2222,8 @@ struct UsagePanelSnapshot: Equatable {
             let plan = UsageFormat.plan(
                 planToken,
                 tier: reading?.planTier ?? identity?.planTier,
-                seat: account?.seat)
+                seat: account?.seat,
+                name: reading?.plan != nil ? reading?.planName : identity?.planName)
             let observedAt = reading?.limitsObservedAt
             let label = naming.name(id: id, account: account, plan: planToken) ?? id
             return AccountEntry(

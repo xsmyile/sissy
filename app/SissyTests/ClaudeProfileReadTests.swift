@@ -40,6 +40,28 @@ final class ClaudeProfileReadTests: XCTestCase {
             try tier(["organizationRateLimitTier": "default_claude_max_20x"]), "max_20x")
     }
 
+    /// Measured 2026-11-04 on 2.1.318: the rename reached this one key and left
+    /// the plan and the tier as they were.
+    func testThePlansOwnWordIsRead() throws {
+        var block = ["organizationType": "claude_max"]
+        block["planDisplayName"] = "Ultra"
+        let data = try JSONSerialization.data(withJSONObject: ["oauthAccount": block])
+        guard case .found(let profile) = ClaudeProfileSource.read(data) else {
+            return XCTFail("the block names a plan")
+        }
+        XCTAssertEqual(profile.plan, "max")
+        XCTAssertEqual(profile.name, "Ultra")
+    }
+
+    func testAnAccountThatNamesNoWordHasNone() throws {
+        let data = try JSONSerialization.data(
+            withJSONObject: ["oauthAccount": ["organizationType": "claude_team"]])
+        guard case .found(let profile) = ClaudeProfileSource.read(data) else {
+            return XCTFail("the block names a plan")
+        }
+        XCTAssertNil(profile.name)
+    }
+
     func testTheUsersOwnTierLeadsOverTheOrganisations() throws {
         XCTAssertEqual(
             try tier([

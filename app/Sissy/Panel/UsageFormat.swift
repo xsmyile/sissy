@@ -784,19 +784,24 @@ enum UsageFormat {
     /// The plan as the badge says it, plus the limit tier when the tier
     /// belongs to a different plan than the account's own.
     ///
-    /// A Max account metered at `max_5x` reads as one thing, "Max 5x". A Team
-    /// seat metered at the same tier does not: "Team 5x" is a plan nobody
-    /// sells, so the badge stays "Team" and the tier goes to the row's
-    /// tooltip. Folding is therefore conditional on the tier naming the plan
-    /// it decorates.
-    static func plan(_ plan: String?, tier: String?, seat: String? = nil) -> (
-        label: String, tier: String?
-    )? {
+    /// The vendor's own word leads wherever it sends one (`name`). Failing
+    /// that, a tier on the plan it decorates folds into one thing, and a tier
+    /// on another plan goes to the row's tooltip, because "Team 5x" is a plan
+    /// nobody sells. The two tiers of `soldTierNames` go nowhere on another
+    /// plan: the seat already names what it pays for, and Anthropic no longer
+    /// sells a plan with a multiplier in its name to compare it to.
+    static func plan(
+        _ plan: String?, tier: String?, seat: String? = nil, name: String? = nil
+    ) -> (label: String, tier: String?)? {
         guard let plan, let label = words(plan) else { return nil }
-        let named = seatLabel(plan: plan, seat: seat) ?? label
+        let named = name ?? seatLabel(plan: plan, seat: seat) ?? label
         let parts = tierParts(tier)
         guard let base = parts.base else { return (named, nil) }
+        if let tier, let sold = soldTierNames[tier] {
+            return (base == plan && name == nil ? sold : named, nil)
+        }
         if base == plan {
+            if name != nil { return (named, nil) }
             return (parts.multiplier.map { "\(named) \($0)" } ?? named, nil)
         }
         guard let baseLabel = words(base) else { return (named, nil) }
@@ -813,6 +818,16 @@ enum UsageFormat {
     ]
 
     private static let teamPlanToken = "team"
+
+    /// What Anthropic sells each Max tier as since the rename of 2026-10-30,
+    /// which left the tokens as they were. A map for the reason `teamSeatLabels`
+    /// may be one: it only answers for a reading that carries no word of the
+    /// vendor's, an older CLI's or an identity filed before `planName` was
+    /// read, and any other tier falls through to the derived wording.
+    private static let soldTierNames = [
+        "max_20x": "Ultra",
+        "max_5x": "Max",
+    ]
 
     /// The seat the account holds, where the vendor's token names one this
     /// build knows.

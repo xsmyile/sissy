@@ -81,9 +81,9 @@ extension ClaudeAccountIdentity {
     ///
     /// Deliberately the name and nothing else. Filling every nil from the
     /// archive would restore `rateLimitTier`, which `ClaudeWebAccountProfile`
-    /// drops on purpose — claude.ai reports `default_raven` where the OAuth
-    /// profile reports `default_claude_max_5x`, two taxonomies — so a generic
-    /// merge would put back the one field a parser refuses.
+    /// drops on purpose — claude.ai reports the organisation's `default_raven`
+    /// where the OAuth profile reports the seat's `default_claude_max_5x` — so
+    /// a generic merge would put back the one field a parser refuses.
     func named(after other: ClaudeAccountIdentity?) -> ClaudeAccountIdentity {
         guard name == nil, let borrowed = other?.name else { return self }
         return ClaudeAccountIdentity(
