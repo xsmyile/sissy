@@ -49,8 +49,9 @@ struct PanelProviderPage: View {
     let openProjects: (String?) -> Void
     let openEffort: (String?) -> Void
     /// Opens a repository's commit identity from its own row, so the same row
-    /// offers the same actions wherever the panel draws it.
-    let openIdentities: (String) -> Void
+    /// offers the same actions wherever the panel draws it. Carries the account
+    /// the page is showing, for the way back, as the three above do.
+    let openIdentities: (String, String?) -> Void
     /// This provider's archived days, read once when the page opens. A closure
     /// rather than a value because the read walks the archive and the page is
     /// rebuilt on every frame the engine emits — a value would have to be
@@ -233,7 +234,7 @@ struct PanelProviderPage: View {
                     ProjectRowView(
                         row: project, bar: .behind,
                         checkIdentity: project.repository == nil
-                            ? nil : { openIdentities(project.id) })
+                            ? nil : { openIdentities(project.id, viewed?.id) })
                 }
             }
         }
