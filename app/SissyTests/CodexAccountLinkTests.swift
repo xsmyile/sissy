@@ -311,7 +311,7 @@ final class CodexAccountLinkTests: XCTestCase {
         var own = ProviderSignals()
         own.windows = [UsageWindow(minutes: 300, usedPercent: 32, resetsAt: nil)!]
         let accounts = CodexSignals.perAccount(
-            own: own, signedIn: cli, readers: [cli, linked], links: [:])
+            own: own, signedInID: cli.observedAccount, readers: [cli, linked], links: [:])
 
         XCTAssertEqual(accounts.map(\.id), ["user-cli", "user-2"])
         XCTAssertEqual(accounts.first?.isSignedIn, true)
@@ -328,7 +328,7 @@ final class CodexAccountLinkTests: XCTestCase {
         _ = await linked.refreshOnce {}
 
         let accounts = CodexSignals.perAccount(
-            own: ProviderSignals(), signedIn: cli, readers: [cli, linked], links: [:])
+            own: ProviderSignals(), signedInID: cli.observedAccount, readers: [cli, linked], links: [:])
         XCTAssertEqual(accounts.map(\.id), ["user-cli"])
     }
 
@@ -366,7 +366,7 @@ final class CodexAccountLinkTests: XCTestCase {
         XCTAssertEqual(row.windows.first?.usedPercent, 8)
 
         let accounts = CodexSignals.perAccount(
-            own: own, signedIn: cli, readers: [cli, linked], links: [:])
+            own: own, signedInID: cli.observedAccount, readers: [cli, linked], links: [:])
         XCTAssertEqual(accounts.filter(\.isSignedIn).flatMap(\.windows).count, 0)
     }
 
@@ -419,7 +419,7 @@ final class CodexAccountLinkTests: XCTestCase {
         _ = await linked.refreshOnce {}
 
         let accounts = CodexSignals.perAccount(
-            own: ProviderSignals(), signedIn: cli, readers: [cli, linked], links: [:])
+            own: ProviderSignals(), signedInID: cli.observedAccount, readers: [cli, linked], links: [:])
         // The sweep has to be able to fail: a walk that reached nothing would
         // report no leak for ever.
         XCTAssertTrue(strings(in: accounts).contains("someone@example.com"))
