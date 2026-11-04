@@ -662,6 +662,17 @@ What the panel words is spread by what it words, and all of it is one `UsageForm
 | `Panel/UsageFormatMac.swift` | the Mac, Disk and Network tabs |
 | `Panel/SharedCopy.swift` | the sentences that are not figures: dialogs, account links, resets and the status switch, for Settings and the panel alike |
 
+`UsagePanelSnapshot` is one value spread the same way, with its stored properties all in the struct:
+
+| File | Holds |
+|---|---|
+| `Panel/UsagePanelSnapshot.swift` | the stored properties, `make`, accounts, windows and the pace, which share private helpers and are one concern |
+| `Panel/UsagePanelSnapshotSessions.swift` | `AgentsBlock`, `makeAgents` and `Live.charted` |
+| `Panel/UsagePanelSnapshotForge.swift` | the forge's rows and span answers, and `ActionsBlock` |
+| `Panel/UsagePanelSnapshotMac.swift` | `MacBlock`, `DiskBlock` and their builders |
+| `Panel/UsagePanelSnapshotIdentity.swift` | `IdentityRow`, `IdentityLine` and their builders |
+| `Panel/UsagePanelSnapshotProjects.swift` | projects, models and effort, with `projectsPage` |
+
 The Overview carries a gauge per readable account rather than one across every
 provider. A single one reports the tightest and silently implies the rest are
 fine — measured on a day with Claude and Codex both at 100%, it named Codex and
