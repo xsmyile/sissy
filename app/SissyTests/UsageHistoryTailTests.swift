@@ -200,6 +200,40 @@ final class UsageHistoryTailTests: XCTestCase {
             "a deleted day came back")
     }
 
+    /// The suppression lives in memory and does not survive a relaunch. What
+    /// carries it across is the forgotten day's token totals, which stay in the
+    /// snapshot with no rows beside them: `restoreModelTotals` reads a day like
+    /// that as one this process cannot vouch for, and suppresses it again.
+    func testADeletedDayStaysDeletedAcrossARelaunch() async throws {
+        let yesterday = try XCTUnwrap(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        let yesterdayKey = UsageReaderShared.dayFormatter.string(from: yesterday)
+        try writeTurn("a.jsonl", requestId: "r1", at: yesterday)
+        let provider = LocalUsageProvider.claudeCode(
+            claudeDir: logDir,
+            retainDays: 2,
+            pollInterval: .seconds(60),
+            persistenceURL: UsageStatePersistence.defaultURL(in: stateDir),
+            historyRoot: stateDir
+        )
+        await provider.start { _ in }
+        XCTAssertNotNil(
+            UsageHistoryStore.load(
+                provider: ProviderID.claudeCode, day: yesterdayKey, in: stateDir),
+            "the day this test deletes was never archived")
+
+        try UsageHistoryStore.removeAll(in: stateDir)
+        await provider.forgetArchivedDays()
+        await provider.stop()
+        try writeTurn("b.jsonl", requestId: "r2", at: yesterday)
+        try await runTail(archiving: true)
+
+        XCTAssertNil(
+            UsageHistoryStore.load(
+                provider: ProviderID.claudeCode, day: yesterdayKey, in: stateDir),
+            "a deleted day came back after a relaunch")
+    }
+
     /// The retain window is a rolling 48 hours, so the oldest day a cold scan
     /// reaches begins at whatever time of day the scan runs. Freezing that
     /// fraction as the day is the one way this archive can be permanently
