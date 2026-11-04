@@ -255,37 +255,8 @@ actor LocalUsageProvider: UsageProvider {
 
     private var fileOffsets: [URL: UInt64] = [:]
     private var fileMTimes: [URL: TimeInterval] = [:]
-    private var dailyTotals: [Date: DayTotals] = [:]
-    /// The same days as `dailyTotals`, split by model, which is the grain the
-    /// archive keeps. Fed by the same `ingest` and trimmed by the same
-    /// `trim()`, so the two cannot describe different days.
-    private var dailyModelTotals: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
-    /// The same days again, counted rather than measured: how many sessions
-    /// were started and how many agents they spawned.
-    ///
-    /// A third map rather than a field on the two above, because it is a third
-    /// grain: `dailyTotals` is one pair of scalars for the provider's day and
-    /// `dailyModelTotals` a row per model per project, while a count belongs to
-    /// the provider's day and to no model at all. Fed by the same `ingest` and
-    /// trimmed by the same `trim()`, so no day can exist in one and not the
-    /// others.
-    private var dailyAgentCounts: [Date: AgentCounts] = [:]
-    /// The same days again, as the shape of the working day rather than its
-    /// size: which minutes of each carried a turn, and which of those a
-    /// sub-agent's.
-    ///
-    /// A fourth map for the reason there is a third — it is a fourth grain,
-    /// belonging to the provider's day and to no model, project or count — and
-    /// fed by the same `ingest` so no day can exist in one and not the others.
-    private var dailyActivity: [Date: AgentActivityDay] = [:]
-    /// The same days again at a fifth grain: what each model spent at each
-    /// effort.
-    ///
-    /// A fifth map because `(model, effort)` is neither of the two grains
-    /// above it — `EffortKey` carries why it is not a third key on the rows —
-    /// and fed by the same `ingest` so no day can exist in one and not the
-    /// others.
-    private var dailyEffort: [Date: [EffortKey: EffortTotals]] = [:]
+    /// What this provider has counted, day by day.
+    private var book = DayBook()
     /// Days whose archive file is behind what is in memory.
     private var historyDirtyDays: Set<Date> = []
     /// Days this process must not write, because it cannot vouch for them: a
@@ -831,10 +802,10 @@ actor LocalUsageProvider: UsageProvider {
         let todayKey = Calendar.current.startOfDay(for: Date())
         publishedProjects.store(projectTotals(on: todayKey))
         publishedModels.store(modelTotals(on: todayKey))
-        publishedAgents.store(dailyAgentCounts[todayKey] ?? .none)
-        publishedActivity.store(dailyActivity[todayKey] ?? .none)
+        publishedAgents.store(book.counts[todayKey] ?? .none)
+        publishedActivity.store(book.activity[todayKey] ?? .none)
         publishedEffort.store(effortSplits(on: todayKey))
-        return dailyTotals[todayKey] ?? DayTotals(totalTokens: 0, totalCost: 0)
+        return book.totals[todayKey] ?? DayTotals(totalTokens: 0, totalCost: 0)
     }
 
     nonisolated func filesWatched() -> Int { watchedCounter.load() }
@@ -851,7 +822,7 @@ actor LocalUsageProvider: UsageProvider {
 
     /// One day's `(model, effort)` pairs as the frame carries them.
     private func effortSplits(on day: Date) -> [EffortSplit] {
-        (dailyEffort[day] ?? [:]).map { EffortSplit(key: $0.key, totals: $0.value) }
+        (book.effort[day] ?? [:]).map { EffortSplit(key: $0.key, totals: $0.value) }
     }
 
     /// One day's rows folded down to a total per project. A row naming no
@@ -861,7 +832,7 @@ actor LocalUsageProvider: UsageProvider {
     private func projectTotals(on day: Date) -> [ProjectTotals] {
         var tokens: [String: Int] = [:]
         var cost: [String: Decimal] = [:]
-        for (row, totals) in dailyModelTotals[day] ?? [:] {
+        for (row, totals) in book.rows[day] ?? [:] {
             guard let project = row.project else { continue }
             tokens[project, default: 0] += totals.totalTokens
             cost[project, default: 0] += totals.cost
@@ -891,7 +862,7 @@ actor LocalUsageProvider: UsageProvider {
     /// `~/.claude/projects` — and a row of zeroes is a model that never ran.
     private func modelTotals(on day: Date) -> [ModelTotals] {
         var byModel: [String: UsageHistoryTotals] = [:]
-        for (row, totals) in dailyModelTotals[day] ?? [:] {
+        for (row, totals) in book.rows[day] ?? [:] {
             byModel[row.model, default: .init()].add(totals)
         }
         return byModel.compactMap { model, totals in
@@ -1032,25 +1003,7 @@ actor LocalUsageProvider: UsageProvider {
             }
         }
         let key = Calendar.current.startOfDay(for: event.timestamp)
-        let totalTokens =
-            event.inputTokens
-            + event.outputTokens
-            + event.cacheReadTokens
-            + event.cacheCreationTokens
-        let existing = dailyTotals[key] ?? DayTotals(totalTokens: 0, totalCost: 0)
-        dailyTotals[key] = DayTotals(
-            totalTokens: existing.totalTokens + totalTokens,
-            totalCost: existing.totalCost + event.cost
-        )
-        var byRow = dailyModelTotals[key] ?? [:]
-        byRow[UsageHistoryRow(model: event.model, project: event.project), default: .init()]
-            .add(event)
-        dailyModelTotals[key] = byRow
-        dailyActivity[key, default: .none].record(
-            minute: AgentActivityDay.minute(of: event.timestamp), delegated: event.delegated)
-        dailyEffort[key, default: [:]][
-            EffortKey(model: event.model, effort: event.effort), default: .init()
-        ].record(event)
+        book.record(event, on: key)
         guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
         historyDirtyDays.insert(key)
     }
@@ -1069,11 +1022,7 @@ actor LocalUsageProvider: UsageProvider {
     /// of today is not an archive write.
     private func ingest(_ activity: AgentActivityEvent) {
         let key = Calendar.current.startOfDay(for: activity.timestamp)
-        if case .turnCompleted(let milliseconds) = activity.kind {
-            dailyActivity[key, default: .none].recordTurn(milliseconds: milliseconds)
-        } else {
-            dailyAgentCounts[key, default: .none].record(activity.kind)
-        }
+        book.record(activity, on: key)
         guard historyRoot != nil, !historySuppressedDays.contains(key) else { return }
         historyDirtyDays.insert(key)
     }
@@ -1096,11 +1045,7 @@ actor LocalUsageProvider: UsageProvider {
             calendar.date(from: previous.dateComponents([.era, .year, .month, .day], from: day))
                 ?? day
         }
-        dailyTotals = Self.rekeyed(dailyTotals, by: move)
-        dailyModelTotals = Self.rekeyed(dailyModelTotals, by: move)
-        dailyAgentCounts = Self.rekeyed(dailyAgentCounts, by: move)
-        dailyActivity = Self.rekeyed(dailyActivity, by: move)
-        dailyEffort = Self.rekeyed(dailyEffort, by: move)
+        book.rekey(by: move)
         historyDirtyDays = Set(historyDirtyDays.map(move))
         historySuppressedDays = Set(historySuppressedDays.map(move))
         seenEventKeys = seenEventKeys.mapValues { seen in
@@ -1113,12 +1058,6 @@ actor LocalUsageProvider: UsageProvider {
         trimmedDaysTo = nil
     }
 
-    private static func rekeyed<Value>(
-        _ days: [Date: Value], by move: (Date) -> Date
-    ) -> [Date: Value] {
-        Dictionary(days.map { (move($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
-    }
-
     private func trim() {
         let cal = Calendar.current
         let cutoff = cal.startOfDay(for: retainWindowStart)
@@ -1129,11 +1068,7 @@ actor LocalUsageProvider: UsageProvider {
             saveHistoryIfDirty(force: true)
         }
         if trimmedDaysTo != cutoff {
-            dailyTotals = dailyTotals.filter { $0.key >= cutoff }
-            dailyModelTotals = dailyModelTotals.filter { $0.key >= cutoff }
-            dailyAgentCounts = dailyAgentCounts.filter { $0.key >= cutoff }
-            dailyActivity = dailyActivity.filter { $0.key >= cutoff }
-            dailyEffort = dailyEffort.filter { $0.key >= cutoff }
+            book.trim(before: cutoff)
             historySuppressedDays = historySuppressedDays.filter { $0 >= cutoff }
             // Evict dedup keys for days that have aged out so the set's memory
             // footprint stays bounded across long-running sessions.
@@ -1405,14 +1340,7 @@ actor LocalUsageProvider: UsageProvider {
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
         let cutoffDay = cal.startOfDay(for: cutoffDate)
-        var newDaily: [Date: DayTotals] = [:]
-        for t in snapshot.dailyTotals {
-            guard let dayDate = dayFmt.date(from: t.day) else { continue }
-            let dayKey = cal.startOfDay(for: dayDate)
-            if dayKey < cutoffDay { continue }
-            let cost = Decimal(string: t.cost) ?? 0
-            newDaily[dayKey] = DayTotals(totalTokens: t.tokens, totalCost: cost)
-        }
+        let newDaily = DayBook.totals(from: snapshot, notBefore: cutoffDay)
         var newKeys: [String: SeenEvent] = [:]
         for k in snapshot.dedupKeysToday {
             guard let dayDate = dayFmt.date(from: k.day) else { continue }
@@ -1426,7 +1354,7 @@ actor LocalUsageProvider: UsageProvider {
         guard adapter.resume(from: snapshot, offsets: newOffsets) else { return false }
         fileOffsets = newOffsets
         fileMTimes = newMTimes
-        dailyTotals = newDaily
+        book.totals = newDaily
         seenEventKeys = newKeys
         restoreModelTotals(from: snapshot)
         return true
@@ -1455,63 +1383,18 @@ actor LocalUsageProvider: UsageProvider {
     /// the panel splits today by, and a disk-retention setting must not
     /// quietly take a live answer away with it.
     private func restoreModelTotals(from snapshot: UsageStateSnapshot) {
-        let cal = Calendar.current
-        let dayFmt = UsageReaderShared.dayFormatter
-        // Deliberately not gated on the day having token totals, which the
-        // rows below are: a day can be counted without being billed, and such
-        // a day has no entry there at all. `trim()` is what bounds these, the
-        // same as it bounds the totals themselves.
-        for row in snapshot.historyResume?.dailyAgentCounts ?? [] {
-            guard let dayDate = dayFmt.date(from: row.day) else { continue }
-            dailyAgentCounts[cal.startOfDay(for: dayDate)] = AgentCounts(
-                sessions: row.sessions, agents: row.agents)
+        book.restoreCounted(from: snapshot.historyResume)
+        let restored = book.restoredRows(from: snapshot.historyResume) {
+            adapter.projects.project(for: $0)
         }
-        for row in snapshot.historyResume?.dailyActivity ?? [] {
-            guard let dayDate = dayFmt.date(from: row.day) else { continue }
-            dailyActivity[cal.startOfDay(for: dayDate)] = row.activity
-        }
-        for row in snapshot.historyResume?.dailyEffort ?? [] {
-            guard let dayDate = dayFmt.date(from: row.day) else { continue }
-            dailyEffort[cal.startOfDay(for: dayDate), default: [:]][
-                EffortKey(model: row.model, effort: row.effort), default: .init()
-            ].add(
-                EffortTotals(
-                    turns: row.turns,
-                    totals: UsageHistoryTotals(
-                        inputTokens: row.inputTokens,
-                        outputTokens: row.outputTokens,
-                        cacheReadTokens: row.cacheReadTokens,
-                        cacheCreationTokens: row.cacheCreationTokens,
-                        cacheCreation1hTokens: row.cacheCreation1hTokens ?? 0,
-                        cost: Decimal(string: row.cost) ?? 0)))
-        }
-        var restored: [Date: [UsageHistoryRow: UsageHistoryTotals]] = [:]
-        for row in snapshot.historyResume?.dailyModelTotals ?? [] {
-            guard let dayDate = dayFmt.date(from: row.day) else { continue }
-            let dayKey = cal.startOfDay(for: dayDate)
-            guard dailyTotals[dayKey] != nil else { continue }
-            let key = UsageHistoryRow(
-                model: row.model,
-                project: row.project.flatMap { adapter.projects.project(for: $0) }
-            )
-            restored[dayKey, default: [:]][key, default: .init()].add(
-                UsageHistoryTotals(
-                    inputTokens: row.inputTokens,
-                    outputTokens: row.outputTokens,
-                    cacheReadTokens: row.cacheReadTokens,
-                    cacheCreationTokens: row.cacheCreationTokens,
-                    cacheCreation1hTokens: row.cacheCreation1hTokens ?? 0,
-                    cost: Decimal(string: row.cost) ?? 0
-                ))
-        }
-        for day in dailyTotals.keys {
+        for day in book.totals.keys {
             guard let totals = restored[day] else {
                 guard historyRoot != nil else { continue }
                 historySuppressedDays.insert(day)
                 dropArchivedDayIfShort(day)
                 continue
             }
-            dailyModelTotals[day] = totals
+            book.rows[day] = totals
             if historyRoot != nil { historyDirtyDays.insert(day) }
         }
     }
@@ -1525,7 +1408,7 @@ actor LocalUsageProvider: UsageProvider {
     /// need are exactly what this day has none of. A week that says the day is
     /// missing is readable; one that quietly counts a fraction of it is not.
     private func dropArchivedDayIfShort(_ day: Date) {
-        guard let historyRoot, let metered = dailyTotals[day] else { return }
+        guard let historyRoot, let metered = book.totals[day] else { return }
         let dayKey = UsageReaderShared.dayFormatter.string(from: day)
         guard let stored = UsageHistoryStore.load(provider: id, day: dayKey, in: historyRoot),
             stored.totalTokens < metered.totalTokens
@@ -1566,9 +1449,9 @@ actor LocalUsageProvider: UsageProvider {
     /// has to be back on disk at the next flush rather than at the next
     /// relaunch.
     ///
-    /// **Every day map, not the ones that carry tokens.** The suppression used
-    /// to be taken from the token rows and the worked minutes alone, and a day
-    /// that has only been *counted* is in neither: Codex writes a rollout's
+    /// **Every map the archive writes, not the ones that carry tokens.** The
+    /// suppression used to be taken from the token rows and the worked minutes
+    /// alone, and a day that has only been *counted* is in neither: Codex writes a rollout's
     /// `session_meta` when it opens, so a session somebody started and never
     /// asked anything is one session, no tokens and no minutes. Such a day
     /// survived the delete unsuppressed, and the next event stamped on it put
@@ -1576,16 +1459,8 @@ actor LocalUsageProvider: UsageProvider {
     func forgetArchivedDays() async {
         settleKeyZone()
         let today = Calendar.current.startOfDay(for: Date())
-        let held = Set(dailyModelTotals.keys).union(dailyActivity.keys)
-            .union(dailyAgentCounts.keys).union(dailyEffort.keys)
-        for day in held where day < today {
-            historySuppressedDays.insert(day)
-        }
-        dailyModelTotals = dailyModelTotals.filter { $0.key >= today }
-        dailyActivity = dailyActivity.filter { $0.key >= today }
-        dailyAgentCounts = dailyAgentCounts.filter { $0.key >= today }
-        dailyEffort = dailyEffort.filter { $0.key >= today }
-        historyDirtyDays = Set(dailyModelTotals.keys)
+        historySuppressedDays.formUnion(book.forget(before: today))
+        historyDirtyDays = Set(book.rows.keys)
     }
 
     /// Throttled whole-day writes, for the same reasons as the snapshot's and
@@ -1623,7 +1498,7 @@ actor LocalUsageProvider: UsageProvider {
         {
             return 0
         }
-        let dayFmt = UsageReaderShared.dayFormatter
+        let writer = DayArchiveWriter(provider: id, root: historyRoot, projects: adapter.projects)
         var unwritten: Set<Date> = []
         var written = 0
         for day in historyDirtyDays {
@@ -1631,66 +1506,18 @@ actor LocalUsageProvider: UsageProvider {
                 unwritten.insert(day)
                 continue
             }
-            let totals = dailyModelTotals[day] ?? [:]
-            let counts = dailyAgentCounts[day] ?? .none
-            let activity = dailyActivity[day] ?? .none
-            let effort = dailyEffort[day] ?? [:]
-            // A day can be counted without being billed: Codex writes a
-            // rollout's `session_meta` when it opens, so a session somebody
-            // started and never asked anything is one session and no tokens.
-            // Skipped on the token rows alone, such a day left the dirty set
-            // here and was never retried, so its count aged out unwritten.
-            guard !totals.isEmpty || !counts.isEmpty || !activity.isEmpty || !effort.isEmpty
-            else { continue }
-            if refusesUnpricedDays, Self.holdsAnUnpricedModel(totals) {
+            if refusesUnpricedDays, Self.holdsAnUnpricedModel(book.rows[day] ?? [:]) {
+                let dayName = UsageReaderShared.dayFormatter.string(from: day)
                 sissyLog(
-                    "sissy: \(id) left \(dayFmt.string(from: day)) out of the archive — it holds "
+                    "sissy: \(id) left \(dayName) out of the archive — it holds "
                         + "a model no pricing source carries, and a day written short is frozen "
                         + "short")
                 continue
             }
-            var record = UsageHistoryDay(
-                day: dayFmt.string(from: day),
-                provider: id,
-                updatedAt: now,
-                totals: totals,
-                agents: counts,
-                activity: activity,
-                effort: effort
-            )
-            switch UsageHistoryStore.stored(provider: id, day: record.day, in: historyRoot) {
-            case .unreadable:
-                continue
-            case .day(let onDisk)
-            where !onDisk.reattributed(by: { adapter.projects.project(for: $0) })
-                .isCoveredBy(record):
-                // Logged for the reason the save failure below is: a day the
-                // archive refuses to rewrite is indistinguishable from one it
-                // had nothing new to say about, and a field added beside the
-                // rows reaches none of the days stuck here.
-                sissyLog(
-                    "sissy: \(id) left \(record.day) as it stands — this reading knows less "
-                        + "about it than the file does (\(record.totalTokens) tokens against "
-                        + "\(onDisk.totalTokens))")
-                continue
-            case .day(let onDisk):
-                record = record.merging(
-                    counts: onDisk.agents, activity: onDisk.activity, effort: onDisk.effort)
-            case .absent:
-                break
-            }
-            do {
-                try UsageHistoryStore.save(record, in: historyRoot)
-                written += 1
-            } catch {
-                // Same call as the snapshot's: the day stays dirty and the
-                // next flush retries it. Logged because an archive that
-                // silently stops growing is indistinguishable from a quiet
-                // week.
-                sissyLog(
-                    "sissy: \(id) history save failed for \(record.day) at "
-                        + "\(historyRoot.path): \(error)")
-                unwritten.insert(day)
+            switch writer.write(day, from: book, now: now) {
+            case .written: written += 1
+            case .left: break
+            case .failed: unwritten.insert(day)
             }
         }
         historyDirtyDays = unwritten
@@ -1746,29 +1573,29 @@ actor LocalUsageProvider: UsageProvider {
     private func repriceUnpricedRows() -> Bool {
         var priced: Set<String> = []
         var movedDays: Set<Date> = []
-        for (day, rows) in dailyModelTotals {
+        for (day, rows) in book.rows {
             var added: Decimal = 0
             for (row, totals) in rows where Self.isUnpriced(totals) {
                 guard let cost = adapter.cost(of: totals, model: row.model), cost > 0 else {
                     continue
                 }
-                dailyModelTotals[day]?[row]?.cost = cost
+                book.rows[day]?[row]?.cost = cost
                 added += cost
                 priced.insert(row.model)
             }
             guard added > 0 else { continue }
-            if let total = dailyTotals[day] {
-                dailyTotals[day] = DayTotals(
+            if let total = book.totals[day] {
+                book.totals[day] = DayTotals(
                     totalTokens: total.totalTokens, totalCost: total.totalCost + added)
             }
             movedDays.insert(day)
         }
-        for (day, splits) in dailyEffort {
+        for (day, splits) in book.effort {
             for (key, split) in splits where Self.isUnpriced(split.totals) {
                 guard let cost = adapter.cost(of: split.totals, model: key.model), cost > 0 else {
                     continue
                 }
-                dailyEffort[day]?[key]?.totals.cost = cost
+                book.effort[day]?[key]?.totals.cost = cost
                 priced.insert(key.model)
                 movedDays.insert(day)
             }
@@ -1812,7 +1639,7 @@ actor LocalUsageProvider: UsageProvider {
         guard backfill == nil, let historyRoot else { return }
         let dayFmt = UsageReaderShared.dayFormatter
         let held = Set(
-            dailyModelTotals.keys.filter { !historySuppressedDays.contains($0) }
+            book.rows.keys.filter { !historySuppressedDays.contains($0) }
                 .map { dayFmt.string(from: $0) })
         var repriced: [String] = []
         let days = UsageHistoryStore.storedDays(provider: id, in: historyRoot)
@@ -1852,7 +1679,7 @@ actor LocalUsageProvider: UsageProvider {
         // briefly show the "sleep" pose with 0 tokens before the cold
         // rescan rebuilds totals. Leaving the file absent forces a clean
         // cold path instead.
-        if fileOffsets.isEmpty && dailyTotals.isEmpty { return }
+        if fileOffsets.isEmpty && book.totals.isEmpty { return }
 
         let cal = Calendar.current
         let dayFmt = UsageReaderShared.dayFormatter
@@ -1863,64 +1690,6 @@ actor LocalUsageProvider: UsageProvider {
                 offset: v,
                 mtimeUnix: fileMTimes[k] ?? 0
             )
-        }
-        let daily: [UsageStateSnapshot.DailyTotal] = dailyTotals.map { (k, v) in
-            UsageStateSnapshot.DailyTotal(
-                day: dayFmt.string(from: k),
-                tokens: v.totalTokens,
-                cost: NSDecimalNumber(decimal: v.totalCost).stringValue
-            )
-        }
-        var modelTotals: [UsageStateSnapshot.DailyModelTotal] = []
-        for (day, byRow) in dailyModelTotals {
-            let dayString = dayFmt.string(from: day)
-            for (row, totals) in byRow {
-                modelTotals.append(
-                    UsageStateSnapshot.DailyModelTotal(
-                        day: dayString,
-                        model: row.model,
-                        project: row.project,
-                        inputTokens: totals.inputTokens,
-                        outputTokens: totals.outputTokens,
-                        cacheReadTokens: totals.cacheReadTokens,
-                        cacheCreationTokens: totals.cacheCreationTokens,
-                        cacheCreation1hTokens: UsageHistoryDay.present(
-                            totals.cacheCreation1hTokens),
-                        cost: NSDecimalNumber(decimal: totals.cost).stringValue
-                    ))
-            }
-        }
-        let agentCounts: [UsageStateSnapshot.DailyAgentCount] = dailyAgentCounts.compactMap {
-            day, counts in
-            guard !counts.isEmpty else { return nil }
-            return UsageStateSnapshot.DailyAgentCount(
-                day: dayFmt.string(from: day),
-                sessions: counts.sessions,
-                agents: counts.agents)
-        }
-        let activity: [UsageStateSnapshot.DailyActivity] = dailyActivity.compactMap { day, shape in
-            guard !shape.isEmpty else { return nil }
-            return UsageStateSnapshot.DailyActivity(
-                day: dayFmt.string(from: day), activity: shape)
-        }
-        var effort: [UsageStateSnapshot.DailyEffort] = []
-        for (day, byKey) in dailyEffort {
-            let dayString = dayFmt.string(from: day)
-            for (key, totals) in byKey where totals.turns > 0 {
-                effort.append(
-                    UsageStateSnapshot.DailyEffort(
-                        day: dayString,
-                        model: key.model,
-                        effort: key.effort,
-                        turns: totals.turns,
-                        inputTokens: totals.totals.inputTokens,
-                        outputTokens: totals.totals.outputTokens,
-                        cacheReadTokens: totals.totals.cacheReadTokens,
-                        cacheCreationTokens: totals.totals.cacheCreationTokens,
-                        cacheCreation1hTokens: UsageHistoryDay.present(
-                            totals.totals.cacheCreation1hTokens),
-                        cost: NSDecimalNumber(decimal: totals.totals.cost).stringValue))
-            }
         }
         let retainedCutoff = cal.startOfDay(for: retainWindowStart)
         var keyDays: [Date: String] = [:]
@@ -1939,16 +1708,9 @@ actor LocalUsageProvider: UsageProvider {
             claudeDataDirHash: UsageStatePersistence.hashDataDir(root),
             retainDays: retainDays,
             files: files,
-            dailyTotals: daily,
+            dailyTotals: book.snapshotTotals(),
             dedupKeysToday: retainedKeys,
-            historyResume: modelTotals.isEmpty && agentCounts.isEmpty && activity.isEmpty
-                && effort.isEmpty
-                ? nil
-                : UsageStateSnapshot.HistoryResume(
-                    dailyModelTotals: modelTotals,
-                    dailyAgentCounts: agentCounts.isEmpty ? nil : agentCounts,
-                    dailyActivity: activity.isEmpty ? nil : activity,
-                    dailyEffort: effort.isEmpty ? nil : effort),
+            historyResume: book.snapshotResume(),
             codexResume: adapter.resumeState(),
             projectCheckouts: nil
         )

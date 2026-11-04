@@ -412,6 +412,8 @@ compiled into the app too.
 | `UsageProvider.swift`           | Protocol shared by each provider (id, start/stop, `flush`, current, isWarm, `currentSignals`). `flush` writes what the throttles hold back without the teardown, for a Mac about to sleep |
 | `ProviderReadiness.swift`       | `ProviderID`, and how a toggle resolves (`on` / `off` / `auto — detected` / `auto — not found`) alongside each running provider's scan progress |
 | `UsageAggregator.swift`         | Sums per-day totals across active providers and rebuilds the per-provider slices |
+| `DayBook.swift`                 | One provider's days at each grain they are read at, in one value: how a day is rekeyed, trimmed, forgotten and restored, and how those maps go in and out of the snapshot. A forgotten day keeps its totals, which is what suppresses it again after a relaunch. |
+| `DayArchiveWriter.swift`        | Writes one day of a `DayBook` to the archive, whole, and only over a file it knows at least as much as. |
 | `LocalUsageProvider.swift`      | The one tail behind both trees: enumeration, offsets, mtimes, FSEvents, the poll, the dedup ledger, day buckets, snapshot load/save, archive flush, emit throttle. Four grains are republished on every emit for the aggregator to read without an actor hop: the project split, the model split, the agent counts and the working shape. Also `UsageEvent`, `SourceAdapter` and `SourceDescriptor`. Built with a `backfill` range instead, the same type is the archive backfill: it counts that fixed range rather than the rolling window, is driven by `backfillArchive()` rather than `start()`, writes day files and nothing else, and refuses a day holding a model no rate covers |
 | `ClaudeCodeSource.swift`        | `ClaudeCodeAdapter`: `assistant` lines out of `~/.claude/projects/**/*.jsonl`, keyed by `requestId` — a repeat is the same answer still streaming, so it bills the growth in output and nothing else — priced against the Anthropic slice, with `cwd` resolved to a project; the plan and the probe's windows reach the provider as its `SourceSignals` |
 | `CodexSource.swift`             | `CodexAdapter`: `token_count` events out of `~/.codex/sessions/**/rollout-*.jsonl` (or `$CODEX_HOME`), `last_token_usage` as per-turn delta, model from `turn_context.payload.model` (fallback `gpt-5-codex`); owns the resume block. Two of those events are not turns: one whose `total_token_usage` has not moved is the previous turn re-emitted, and a session whose `session_meta` names a parent opens with that parent's whole history stamped at its own start — both are dropped, and both keep their bookkeeping in the snapshot because a relaunch can land between a turn and its repeat |
@@ -526,7 +528,7 @@ are full of lines stamped for the day before, and a bucket that had already been
 dropped would bill them to today and hand the archive a day it never metered. Cold scans skip every file with
 `mtime < now-48h`, which on real-world trees (~500 MB across hundreds of
 projects) parses ~10-20% of the bytes and finishes in low seconds. Bumping this
-requires every consumer of `dailyTotals` to actually use the extra history; today
+requires every consumer of `DayBook.totals` to actually use the extra history; today
 nothing does.
 
 ## The app (`app/Sissy/`)
