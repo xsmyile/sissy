@@ -21,32 +21,13 @@ actor UsageEngine {
     /// Where the archive lives, which is beside the config that named the
     /// trees it was read from — the rule the snapshots already follow.
     private let stateDir: URL
-    /// Last archive rollups and when they landed. The day files are written
-    /// by the providers on their own throttle, so the frame re-reads them rather
-    /// than being told; the cache is what keeps a burst of frames from turning
-    /// into a burst of directory walks.
-    private var historyRollups: [UsagePeriod: UsageHistoryRollup] = [:]
-    private var historyRollupAt: Date = .distantPast
-    /// Where the rollups and a picked span are read, off this actor, through
-    /// the one resolver and day cache the reader keeps for the engine's life.
-    private let historyReader: UsageHistoryReader
-    /// The rollup the reader is taking now, so a burst of frames past the TTL
-    /// starts one rather than one each.
-    private var historyRefresh: Task<Void, Never>?
-    /// Moves whenever the rollups held, or the reader's day cache, can no
-    /// longer answer: the pricing changed, the archive was deleted or switched
-    /// off. A rollup started before the move is dropped when it lands rather
-    /// than served.
-    private var historyGeneration = 0
+    /// The archive as the engine drives it: its rollups, the pass that fills it
+    /// in and the day it was last pruned for.
+    private var archive: ArchiveCoordinator
     /// The one checkout memory every provider shares, kept because the export
     /// re-reads the archive's project paths through a resolver built on it.
     /// A second ledger over the same file would be a second writer to it.
     private let projectLedger: ProjectLedger
-    /// Day the archive was last pruned for. Retention is measured in days, so
-    /// the answer changes only when the day does — and a Mac that stays up for
-    /// a month has to keep the promise the setting makes without waiting for a
-    /// relaunch to enforce it.
-    private var lastHistoryPruneDay: Date?
     /// Handle on the aggregator boot Task so `stop()` can cancel an
     /// in-flight cold scan. Without this the engine kept walking
     /// `~/.claude/projects` after everything else had shut down and only
@@ -61,10 +42,6 @@ actor UsageEngine {
     /// in-flight fetch instead of leaving it to finish against a torn-down
     /// engine.
     private var priceCatalogTask: Task<Void, Never>?
-    /// Handle on the one-time archive backfill, for the same reason: it is a
-    /// read of the whole log tree and a quit has to interrupt it rather than
-    /// wait for it.
-    private var backfillTask: Task<Void, Never>?
     /// The catalog the cold scan settled on, kept so the archive backfill
     /// prices historical events against exactly the rates the tail used. Nil
     /// is the embedded seed, which is a rate source rather than a failure.
@@ -74,7 +51,7 @@ actor UsageEngine {
     /// the readers are handed. The archive's day cache is started again with
     /// it, because it holds each day already priced.
     private var pricing: ProviderPricing {
-        didSet { historyGeneration += 1 }
+        didSet { archive.pricingChanged() }
     }
     /// Whether a provider has produced a reading yet. It is what a config
     /// change re-emits against: before the first one there is nothing to
@@ -168,76 +145,8 @@ actor UsageEngine {
     /// The rates logged in the background and published only while a page of
     /// the panel asks for them.
     private let live: LiveSampling
-    /// Holds the power assertion. Constructed unconditionally and inert until
-    /// asked, like the probe above: an actor nobody has told to hold anything
-    /// touches nothing.
-    private let keepAwake: KeepAwake
-    /// How long a hold in each mode survives without help.
-    private let keepAwakePolicy: KeepAwakePolicy
-    /// Whether the Mac is being held awake right now, as opposed to what the
-    /// user asked for — which is `config.keepAwake`. They differ when power
-    /// management refuses the assertion, and the panel shows both.
-    private var keepAwakeActive = false
-    /// When the hold in force was taken, and `nil` while nothing is held.
-    ///
-    /// It belongs to the hold rather than to the call that applied it: a hold
-    /// already in force keeps the instant it started from, so what the panel
-    /// counts up from is the Mac's, never the last time this ran.
-    private var keepAwakeSince: Date?
-    /// What the ceiling on `on` counts from, which is not always `since`.
-    ///
-    /// It starts with the hold and starts again whenever the user asks for a
-    /// run from now under one: a ceiling picked, the lid switched on, or the
-    /// mode switched to `on` under an automatic hold. Counted from the hold
-    /// instead, a ceiling picked under it ended it in seconds on two nights,
-    /// see `setKeepAwakeCeiling`. `since` keeps the older instant, because
-    /// what the panel counts up from is how long the Mac has been held, and
-    /// that did not change.
-    private var keepAwakeCeilingFrom: Date?
-    /// Whether the lid half is being let go because the battery fell below
-    /// `config.lidBatteryFloor`, held so the release and the return are each
-    /// logged once rather than on every apply.
-    private var lidReleasedForBattery = false
-    /// Reads where the power comes from, for the battery floor.
-    private let powerSource: PowerSourceGauge
-    /// Asks for the floor to be read again on every change of power source,
-    /// held only while a lid hold with a floor is wanted.
-    private var powerSourceWatch: PowerSourceWatch?
-    /// Whether the screen is being held lit too, as opposed to whether the
-    /// user asked for it — which is `config.keepScreenAwake`. Same split as
-    /// `keepAwakeActive` draws against the mode, for the same reason.
-    private var keepAwakeCoversScreen = false
-    /// Whether closing the lid leaves the Mac working, as opposed to whether
-    /// the user asked for it, which is `config.keepAwakeWithLidClosed`.
-    private var keepAwakeCoversLid = false
-    /// Which `applyKeepAwake` call currently speaks for the engine. Bumped on
-    /// entry so a call that returns to find a newer stamp knows it was
-    /// overtaken while suspended.
-    private var keepAwakeGeneration = 0
-    /// When a turn last landed, which is what `auto` holds the Mac against.
-    /// `nil` until one does: an automatic hold begins when the agents do, not
-    /// when Sissy launches.
-    private var lastAgentActivityAt: Date?
-    /// Newest live event any provider has reported, as that provider stamped
-    /// it. Held only to tell one turn from the next — the hold itself counts
-    /// from when the reading arrived, never from a CLI's own clock.
-    private var lastObservedActivityAt: Date?
-    /// Wakes when the hold in force is due to end. Owned here so `stop()` has
-    /// something to cancel rather than leaving a sleeper against a torn-down
-    /// engine.
-    private var keepAwakeDeadlineTask: Task<Void, Never>?
-    /// How long the rollups are reused before the day files are read again.
-    /// Long enough that frames do not walk the archive, short enough that a
-    /// window is never visibly behind the day it includes.
-    ///
-    /// It survives the archive growing from days to years because
-    /// `historyReader`'s day cache reads a day file again only once it changes:
-    /// measured 2026-09-29, a rebuild over this Mac's 62 files went from
-    /// 7.6 ms to 0.6 ms, and over a 7,300-file archive from 1,100 ms to 70 ms.
-    /// What a backfill needs is not a longer interval but a frame —
-    /// `invalidateHistoryRollups` — since an idle Mac emits nothing and the
-    /// panel would otherwise hold yesterday's windows until the next turn.
-    private static let historyRollupTTL: TimeInterval = 2
+    /// The keep-awake hold: what it has taken, what it is owed and when it ends.
+    private var keepAwake: KeepAwakeController
 
     /// An engine runs once. `stopped` is terminal on purpose: the app builds a
     /// fresh engine when it needs one, so reviving this instance would leave
@@ -317,9 +226,9 @@ actor UsageEngine {
         self.pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: nil)
         self.configURL = configURL
         self.configIsWritable = configIsWritable
-        self.keepAwakePolicy = keepAwakePolicy
-        self.keepAwake = KeepAwake(clamshell: clamshell)
-        self.powerSource = powerSource
+        self.keepAwake = KeepAwakeController(
+            assertions: KeepAwake(clamshell: clamshell), policy: keepAwakePolicy,
+            powerSource: powerSource)
         let activity = statusMonitor?.activity ?? ActivityClock()
         self.activity = activity
 
@@ -335,7 +244,10 @@ actor UsageEngine {
         // invalidates a tail's snapshot may take it with it.
         let projectLedger = ProjectLedger(url: ProjectLedger.defaultURL(in: stateDir))
         self.projectLedger = projectLedger
-        self.historyReader = UsageHistoryReader(directory: stateDir, ledger: projectLedger)
+        self.archive = ArchiveCoordinator(
+            stateDir: stateDir,
+            reader: UsageHistoryReader(directory: stateDir, ledger: projectLedger),
+            projectLedger: projectLedger)
         self.identityMonitor = GitIdentityMonitor(ledger: projectLedger, activity: activity)
         let meteredHome = config.providerHome(vendor: ProviderID.claudeCode)
         let runningSessions: ClaudeRunningSessions =
@@ -520,7 +432,7 @@ actor UsageEngine {
         frameDelivery = FrameDelivery(send: onFrame)
         if config.lidHoldPending {
             sissyLog("sissy: the clamshell switch was left set by a previous run; taking it over")
-            await keepAwake.adoptStrandedLid()
+            await keepAwake.assertions.adoptStrandedLid()
         }
         await live.start()
         // Settle on one catalog before the cold scan starts, so the backfill
@@ -534,7 +446,7 @@ actor UsageEngine {
             sissyLog("sissy: remote pricing disabled — using the embedded rate seed")
         }
         guard lifecycle == .running else { return }
-        pruneHistoryIfDue(now: Date())
+        archive.pruneIfDue(retentionDays: config.resolvedHistoryRetentionDays, now: Date())
         // Not for a Claude Code that is switched off: there is no slice for
         // its windows to ride on, so the poll would spend a read on a reading
         // nothing could show.
@@ -578,98 +490,21 @@ actor UsageEngine {
         startArchiveBackfill()
     }
 
-    /// Fills the archive in from the CLIs' own logs, once per provider, for
-    /// every day older than the window the live tail owns.
-    ///
-    /// Detached and at `utility`, because it reads the whole log tree — about
-    /// 870 MB and 35 s on one real machine — and the app is usable throughout.
-    /// Each provider gets its own pass and its own record, so a CLI switched
-    /// on months from now fills its own history in without touching the one
-    /// beside it.
-    ///
-    /// The record is written only where a pass ran to completion and read
-    /// every log it listed. Until then the span is owed in the same file, so the
-    /// next launch asks again whatever the tail has done since, and a provider
-    /// whose pass met a log it could not read holds up its own record only: the
-    /// providers after it still get their pass.
+    /// Starts the pass that fills the archive in, for the providers that owe one.
     private func startArchiveBackfill() {
-        guard lifecycle == .running,
-            config.resolvedHistoryRetentionDays > 0,
-            let window = ArchiveBackfill.window(
-                retentionDays: config.resolvedHistoryRetentionDays)
-        else { return }
-        let ledgerURL = ArchiveBackfillLedger.defaultURL(in: stateDir)
-        let ledger = ArchiveBackfillLedger.load(from: ledgerURL)
-        var due: [(home: ProviderHome, span: Range<Date>)] = []
-        for provider in resolvedProviders where provider.activation.isMetering {
-            let snapshot: URL = Self.persistenceURL(for: provider.home, in: stateDir)
-            guard
-                let span = ArchiveBackfill.uncovered(
-                    window,
-                    coverage: ledger.coverage[provider.id],
-                    owed: ledger.owed[provider.id],
-                    pending: ledger.pending[provider.id],
-                    meteredThrough: ArchiveBackfill.lastMetered(snapshotAt: snapshot))
-            else { continue }
-            due.append((home: provider.home, span: span))
-        }
-        guard !due.isEmpty else { return }
-        ArchiveBackfillLedger.note(
-            passes: due.map { (provider: $0.home.id, span: $0.span) }, within: window,
-            startingAt: ledgerURL)
+        guard lifecycle == .running else { return }
         let me = self
-        let stateDir = self.stateDir
-        let pricingOverride = config.pricingOverride
-        let projectLedger = self.projectLedger
-        let catalog = initialPriceCatalog
-        backfillTask = Task.detached(priority: .utility) {
-            for (home, span) in due {
-                if Task.isCancelled { return }
-                let provider = Self.backfillProvider(
-                    home: home,
-                    window: span,
-                    historyRoot: stateDir,
-                    pricingOverride: pricingOverride,
-                    ledger: projectLedger)
-                if let catalog { await provider.applyPriceCatalog(catalog) }
-                let outcome = await provider.backfillArchive { await me.invalidateHistoryRollups() }
-                if Task.isCancelled { return }
+        archive.startBackfill(
+            config: config,
+            homes: resolvedProviders.filter(\.activation.isMetering).map {
+                (home: $0.home, snapshot: Self.persistenceURL(for: $0.home, in: stateDir))
+            },
+            catalog: initialPriceCatalog,
+            invalidated: { await me.invalidateHistoryRollups() },
+            record: { provider, span, unread, url in
                 await me.recordArchiveBackfill(
-                    provider: home.id, covered: span, unread: outcome.unread, at: ledgerURL)
-            }
-        }
-    }
-
-    /// One provider's backfill reader: the same adapter the tail uses, over
-    /// the same tree, with a window of its own and nothing persisted but day
-    /// files. `sissy-cli --backfill` builds its passes through here too, so the
-    /// pass CI asserts against the oracle is the one the app runs.
-    static func backfillProvider(
-        home: ProviderHome,
-        window: Range<Date>,
-        historyRoot: URL,
-        pricingOverride: [String: ModelPricing]?,
-        ledger: ProjectLedger
-    ) -> LocalUsageProvider {
-        switch home.id {
-        case ProviderID.codex:
-            return LocalUsageProvider.codex(
-                codexDir: home.dataDir,
-                id: home.id,
-                historyRoot: historyRoot,
-                pricingOverride: pricingOverride,
-                ledger: ledger,
-                backfill: window)
-        default:
-            return LocalUsageProvider.claudeCode(
-                claudeDir: home.dataDir,
-                id: home.id,
-                historyRoot: historyRoot,
-                pricingOverride: pricingOverride,
-                profile: ClaudeProfileSource(url: home.claudeProfileURL),
-                ledger: ledger,
-                backfill: window)
-        }
+                    provider: provider, covered: span, unread: unread, at: url)
+            })
     }
 
     /// Records that one provider's history has been indexed as far back as
@@ -691,7 +526,7 @@ actor UsageEngine {
     /// Drops the cached archive rollups so the next frame reads the day files
     /// again. What makes the panel's windows fill in while a backfill runs.
     private func invalidateHistoryRollups() async {
-        historyRollupAt = .distantPast
+        archive.expireRollups()
         await reemit()
     }
 
@@ -786,14 +621,12 @@ actor UsageEngine {
         // cancellation and bails out of its file enumeration loops before
         // anything else is torn down.
         bootTask?.cancel()
-        backfillTask?.cancel()
+        archive.cancelBackfill()
         let claudeAccountsTask = claudeAccountsPoll.stop()
         claudeWebAdoptionTask?.cancel()
         priceCatalogTask?.cancel()
-        historyRefresh?.cancel()
-        historyRefresh = nil
-        keepAwakeDeadlineTask?.cancel()
-        keepAwakeDeadlineTask = nil
+        archive.cancelRefresh()
+        keepAwake.cancelDeadline()
         // Released first, before the awaits below: the kernel drops a dead
         // process's assertions on its own, but `stop()` is also reachable
         // without an exit, and a Mac held awake by something that has shut
@@ -804,7 +637,7 @@ actor UsageEngine {
         await applyKeepAwake()
         await claudeAccountsTask?.value
         await claudeWebAdoptionTask?.value
-        await backfillTask?.value
+        await archive.backfillTask?.value
         await stopClaudeLimits()
         await stopCodexLimits()
         await statusMonitor.stop()
@@ -816,7 +649,7 @@ actor UsageEngine {
         await agentMonitor.stop()
         await aggregator.stop()
         bootTask = nil
-        backfillTask = nil
+        archive.clearBackfill()
         claudeWebAdoptionTask = nil
         priceCatalogTask = nil
     }
@@ -1099,7 +932,7 @@ actor UsageEngine {
         guard let mode = KeepAwakeMode(rawValue: raw), mode != config.keepAwake else { return }
         config.keepAwake = mode
         persistConfig("keepAwake")
-        if mode == .on, keepAwakeActive { keepAwakeCeilingFrom = Date() }
+        if mode == .on { keepAwake.restartCeiling() }
         await applyKeepAwake()
         await reemit()
     }
@@ -1142,7 +975,7 @@ actor UsageEngine {
         guard ceiling != config.keepAwakeCeiling else { return }
         config.keepAwakeCeiling = ceiling
         persistConfig("keepAwakeCeiling")
-        if keepAwakeActive { keepAwakeCeilingFrom = Date() }
+        keepAwake.restartCeiling()
         rearmKeepAwakeDeadline()
     }
 
@@ -1161,12 +994,12 @@ actor UsageEngine {
     /// persist it. Applied through the same path as the screen, so the lid is
     /// added or dropped under a running hold without touching the assertions.
     ///
-    /// Switching it on starts the ceiling again, see `keepAwakeCeilingFrom`.
+    /// Switching it on starts the ceiling again, see `KeepAwakeController.ceilingFrom`.
     func setKeepAwakeWithLidClosed(enabled: Bool) async {
         guard enabled != config.keepAwakeWithLidClosed else { return }
         config.keepAwakeWithLidClosed = enabled
         persistConfig("keepAwakeWithLidClosed")
-        if enabled, keepAwakeActive { keepAwakeCeilingFrom = Date() }
+        if enabled { keepAwake.restartCeiling() }
         await applyKeepAwake()
         await reemit()
     }
@@ -1186,30 +1019,11 @@ actor UsageEngine {
     /// the hold only when the answer moved, because the notification behind it
     /// fires on every battery attribute and nearly all of them change nothing.
     func powerSourceChanged() async {
-        guard lifecycle == .running, keepAwakeWanted, config.keepAwakeWithLidClosed else { return }
-        guard config.lidBatteryFloor.isReached(by: powerSource.read()) != lidReleasedForBattery
+        guard lifecycle == .running, keepAwake.wanted(config: config, running: true),
+            config.keepAwakeWithLidClosed, keepAwake.batteryFloorMoved(config: config)
         else { return }
         await applyKeepAwake()
         await reemit()
-    }
-
-    /// Whether the Mac should be held right now.
-    ///
-    /// `on` is the switch and `auto` is the evidence: a hold the agents earn
-    /// by working, and lose by going quiet for `idleWindow`. Both die with the
-    /// lifecycle, because quitting Sissy has to let the Mac sleep again.
-    private var keepAwakeWanted: Bool {
-        guard lifecycle == .running else { return false }
-        switch config.keepAwake {
-        case .off: return false
-        case .on: return true
-        case .auto: return automaticHoldEarned
-        }
-    }
-
-    private var automaticHoldEarned: Bool {
-        guard let last = lastAgentActivityAt else { return false }
-        return Date().timeIntervalSince(last) < keepAwakePolicy.idleWindow
     }
 
     /// Drives the assertion to whatever the mode, and in `auto` the agents,
@@ -1226,72 +1040,25 @@ actor UsageEngine {
     /// time for a newer call, and return leaving an assertion held that no
     /// flag admits to.
     private func applyKeepAwake() async {
-        keepAwakeGeneration &+= 1
-        let generation = keepAwakeGeneration
-        let wanted = keepAwakeWanted
-        let lidAsked = wanted && config.keepAwakeWithLidClosed
-        let floorWatched = lidAsked && config.lidBatteryFloor != .never
-        watchPowerSource(floorWatched)
-        let reading = floorWatched ? powerSource.read() : nil
-        let floorReached = config.lidBatteryFloor.isReached(by: reading)
-        noteBatteryFloor(floorReached, reading: reading, logged: lidAsked)
-        let lidWanted = lidAsked && !floorReached && recordLidHold()
-        let hold = await keepAwake.apply(
-            holding: wanted, includingScreen: config.keepScreenAwake, includingLid: lidWanted)
-        guard generation == keepAwakeGeneration else { return }
-        keepAwakeActive = hold.system && wanted
-        keepAwakeCoversScreen = hold.screen && wanted
-        keepAwakeCoversLid = hold.lid && wanted
-        keepAwakeSince = keepAwakeActive ? (keepAwakeSince ?? Date()) : nil
-        keepAwakeCeilingFrom = keepAwakeActive ? (keepAwakeCeilingFrom ?? Date()) : nil
+        let onPowerChange: @Sendable () -> Void = { [weak self] in
+            Task { await self?.powerSourceChanged() }
+        }
+        let apply = keepAwake.begin(
+            config: config, running: lifecycle == .running, onPowerChange: onPowerChange)
+        let lidWanted = apply.lidAsked && !apply.floorReached && recordLidHold()
+        let hold = await keepAwake.assertions.apply(
+            holding: apply.wanted, includingScreen: config.keepScreenAwake, includingLid: lidWanted)
+        guard keepAwake.settle(hold, for: apply) else { return }
         if !hold.lid, config.lidHoldPending {
             config.lidHoldPending = false
             if !persistConfig("lidHoldPending") { config.lidHoldPending = true }
         }
         sissyLog(
             "sissy: keep-awake \(config.keepAwake.rawValue) — "
-                + (keepAwakeActive ? "holding" : "not holding")
-                + (keepAwakeCoversScreen ? ", screen on" : "")
-                + (keepAwakeCoversLid ? ", lid closed too" : ""))
+                + (keepAwake.active ? "holding" : "not holding")
+                + (keepAwake.coversScreen ? ", screen on" : "")
+                + (keepAwake.coversLid ? ", lid closed too" : ""))
         rearmKeepAwakeDeadline()
-    }
-
-    /// Records whether the floor is holding the lid back, and logs its release
-    /// and its return once each. Not logged when the lid is no longer asked
-    /// for at all: a hold that ended is not a lid taken back.
-    ///
-    /// The reading is taken fresh on every apply rather than cached, because
-    /// it is one IPC and a cached one is how a lid would be held on a charge
-    /// that had already fallen.
-    private func noteBatteryFloor(_ reached: Bool, reading: PowerSourceReading?, logged: Bool) {
-        guard reached != lidReleasedForBattery else { return }
-        lidReleasedForBattery = reached
-        guard logged else { return }
-        let charge = reading?.batteryPercent.map { "\($0)%" } ?? "unknown"
-        if reached {
-            sissyLog(
-                "sissy: keep-awake let the lid go: on battery at \(charge), "
-                    + "below the \(config.lidBatteryFloor.rawValue)% floor")
-        } else {
-            sissyLog(
-                "sissy: keep-awake takes the lid back: battery at \(charge), "
-                    + (reading?.onBattery == true ? "on battery" : "on power"))
-        }
-    }
-
-    /// Starts or stops listening for power-source changes, which only a lid
-    /// hold with a floor needs.
-    private func watchPowerSource(_ wanted: Bool) {
-        guard wanted != (powerSourceWatch != nil) else { return }
-        guard wanted else {
-            powerSourceWatch = nil
-            return
-        }
-        powerSourceWatch = PowerSourceWatch(
-            fallback: "the battery floor is read only when the hold changes"
-        ) { [weak self] in
-            Task { await self?.powerSourceChanged() }
-        }
     }
 
     /// Writes down that the clamshell switch is about to be set, and answers
@@ -1312,55 +1079,16 @@ actor UsageEngine {
         return true
     }
 
-    /// When the hold in force runs out on its own, and `nil` when nothing is
-    /// holding or nothing would end it.
-    ///
-    /// The clock is the wall's, sleep included: the deadline is a `Date`,
-    /// and the task waiting on it sleeps on the continuous clock, which keeps
-    /// counting while the Mac is asleep, so a ceiling that passed during a
-    /// sleep ends the hold at the next wake. That is deliberate. A ceiling is
-    /// a bound on how long the user agreed to have the Mac held, and one that
-    /// paused while the Mac slept would stretch an hour's hold across a night
-    /// of naps; the restarts in `keepAwakeCeilingFrom` are what keep a run the
-    /// user asked for from inheriting an older one's clock.
-    private var keepAwakeDeadline: Date? {
-        guard keepAwakeActive, let since = keepAwakeSince else { return nil }
-        switch config.keepAwake {
-        case .off: return nil
-        case .auto: return (lastAgentActivityAt ?? since) + keepAwakePolicy.idleWindow
-        case .on:
-            let from = keepAwakeCeilingFrom ?? since
-            return config.keepAwakeCeiling.hours.map {
-                from + TimeInterval($0) * keepAwakePolicy.ceilingHour
-            }
-        }
-    }
-
     /// Wakes the engine when the hold is due to end.
-    ///
-    /// A loop rather than a task per emit: `auto` pushes its deadline forward
-    /// on every turn that lands, and re-creating this each time would build a
-    /// task several times a second while agents work. Waking at the old
-    /// deadline and finding it has moved costs one comparison instead.
     private func rearmKeepAwakeDeadline() {
-        keepAwakeDeadlineTask?.cancel()
-        keepAwakeDeadlineTask = nil
-        guard keepAwakeDeadline != nil else { return }
         let me = self
-        keepAwakeDeadlineTask = Task {
-            while !Task.isCancelled {
-                guard let deadline = await me.currentKeepAwakeDeadline() else { return }
-                let remaining = deadline.timeIntervalSinceNow
-                guard remaining > 0 else {
-                    await me.keepAwakeDeadlinePassed()
-                    return
-                }
-                try? await Task.sleep(for: .seconds(remaining))
-            }
-        }
+        keepAwake.rearmDeadline(
+            config: config,
+            current: { await me.currentKeepAwakeDeadline() },
+            passed: { await me.keepAwakeDeadlinePassed() })
     }
 
-    private func currentKeepAwakeDeadline() -> Date? { keepAwakeDeadline }
+    private func currentKeepAwakeDeadline() -> Date? { keepAwake.deadline(config: config) }
 
     /// What a hold that ran out does about it.
     ///
@@ -1381,38 +1109,14 @@ actor UsageEngine {
         }
     }
 
-    /// Records that agents are working, which in `auto` is what earns the
-    /// hold.
-    ///
-    /// A provider stamps an event as live only once its own cold scan has
-    /// finished, so what reaches here is a turn that landed while Sissy was
-    /// watching rather than a backfill reporting what happened before it was
-    /// launched. That distinction cannot be drawn from the day total: the
-    /// scan emits its intermediate results, and each of those grew the total
-    /// too — which is how a launch on a busy day took a hold with nothing
-    /// running. `reemit` and the midnight roll-over reach this path as well,
-    /// and neither advances a provider's marker.
-    ///
-    /// The hold then counts from *now*, not from the stamp: the stamp comes
-    /// off a CLI's own log line, whose clock Sissy does not own and whose
-    /// precision it does not choose, and an idle window measured against it
-    /// would start part-spent on arrival.
-    private func noteAgentActivity(_ slices: [ProviderSlice]) {
-        guard let latest = slices.compactMap({ $0.signals.lastActivityAt }).max(),
-            latest > lastObservedActivityAt ?? .distantPast
-        else { return }
-        lastObservedActivityAt = latest
-        lastAgentActivityAt = Date()
-        activity.note()
-    }
-
     /// Takes or releases the automatic hold when the agents change the answer.
     ///
     /// Only when the decision actually moves, so the common case — a turn
     /// landing while the hold is already in force — never reaches the
     /// assertion and never suspends the emit that called it.
     private func refreshAutomaticHold() async {
-        guard config.keepAwake == .auto, automaticHoldEarned != keepAwakeActive else { return }
+        guard config.keepAwake == .auto, keepAwake.automaticHoldEarned != keepAwake.active
+        else { return }
         await applyKeepAwake()
     }
 
@@ -2247,7 +1951,7 @@ actor UsageEngine {
         let slices = reading.slices
         guard lifecycle == .running else { return }
         hasReading = true
-        noteAgentActivity(slices)
+        if keepAwake.noteAgentActivity(slices) { activity.note() }
         await refreshAutomaticHold()
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
@@ -2257,17 +1961,12 @@ actor UsageEngine {
         // or from `currentReading()`. Rebuilding them here would race
         // actor reentrancy and could ship a frame whose scalars and breakdown
         // disagree.
-        pruneHistoryIfDue(now: now)
+        archive.pruneIfDue(retentionDays: config.resolvedHistoryRetentionDays, now: now)
         let frame = FrameBuilder.build(
             today: today,
             hoursElapsed: hoursElapsed,
             providers: slices,
-            keepAwake: KeepAwakeState(
-                mode: config.keepAwake,
-                active: keepAwakeActive,
-                since: keepAwakeSince,
-                coversScreen: keepAwakeCoversScreen,
-                coversLid: keepAwakeCoversLid),
+            keepAwake: keepAwake.state(mode: config.keepAwake),
             history: currentHistory(now: now),
             providerStatus: statusMonitor.currentStatus(),
             forge: forgeMonitor.currentReadings(),
@@ -2285,95 +1984,30 @@ actor UsageEngine {
         await rebuildAndEmit(await aggregator.currentReading(), retrying: false)
     }
 
-    /// What the archive holds for every period the panel offers, cached for a
-    /// beat and read off this actor.
-    ///
-    /// Empty when the archive is switched off, and when it is on but empty — a
-    /// control offering four windows that all come to nothing offers a feature
-    /// rather than a reading, so the panel keeps the headline on today until
-    /// there is something behind it. The widest window decides that for all of
-    /// them: it contains the others, so nothing in it is nothing anywhere.
-    ///
-    /// The cache is kept even when the answer is withheld, so an empty archive
-    /// costs one directory walk every `historyRollupTTL` rather than one per
-    /// frame. Switching the archive off drops it instead: the setting can come
-    /// back inside the TTL, and serving what was read before it went off would
-    /// answer for days the user asked to stop recording.
-    ///
-    /// Past the TTL the frame is built from the rollups already held while
-    /// `historyReader` takes new ones, and `landHistory` emits again once they
-    /// differ: a cold rollup walks every project path the archive names, which
-    /// `UsageHistoryReader` measures, and every emit would otherwise wait on
-    /// it. The first frame after launch therefore carries no windows, and the
-    /// one after the reader lands does.
     private func currentHistory(now: Date) -> [UsagePeriod: UsageHistoryRollup] {
-        guard config.resolvedHistoryRetentionDays > 0 else {
-            if !historyRollups.isEmpty || historyRefresh != nil {
-                historyRollups = [:]
-                historyGeneration += 1
-            }
-            historyRollupAt = .distantPast
-            return [:]
-        }
-        if now.timeIntervalSince(historyRollupAt) >= Self.historyRollupTTL {
-            refreshHistory(now: now)
-        }
-        return (historyRollups[.all]?.tokens ?? 0) > 0 ? historyRollups : [:]
-    }
-
-    /// Has the reader take every window's rollup, unless it is taking them
-    /// already.
-    private func refreshHistory(now: Date) {
-        guard historyRefresh == nil else { return }
-        let reader = historyReader
-        let pricing = pricing
-        let generation = historyGeneration
-        historyRefresh = Task {
-            let rollups = await reader.rollups(
-                for: Set(UsagePeriod.archived), now: now, pricing: pricing, generation: generation)
-            await self.landHistory(rollups, generation: generation)
-        }
+        let me = self
+        return archive.current(
+            retentionDays: config.resolvedHistoryRetentionDays, now: now, pricing: pricing,
+            land: { await me.landHistory($0, generation: $1) })
     }
 
     /// Takes a rollup the reader finished, and emits a frame when it says
     /// something the last one did not.
-    ///
-    /// The TTL runs from here rather than from the start, so a rollup slower
-    /// than the TTL is not started again the moment it lands. One started
-    /// before the generation moved is dropped and read again at once, since
-    /// what it holds is the archive as it stood before a deletion or priced
-    /// at a catalog since replaced; the archive switched off meanwhile is
-    /// not read again at all.
     private func landHistory(_ rollups: [UsagePeriod: UsageHistoryRollup], generation: Int) async {
-        historyRefresh = nil
+        archive.refreshEnded()
         guard lifecycle == .running else { return }
-        guard generation == historyGeneration else {
-            historyRollupAt = .distantPast
-            if config.resolvedHistoryRetentionDays > 0 { refreshHistory(now: Date()) }
-            return
+        switch archive.land(rollups, generation: generation) {
+        case .stale:
+            guard config.resolvedHistoryRetentionDays > 0 else { return }
+            let me = self
+            archive.refreshRollups(
+                now: Date(), pricing: pricing,
+                land: { await me.landHistory($0, generation: $1) })
+        case .unchanged:
+            break
+        case .changed:
+            await reemit()
         }
-        historyRollupAt = Date()
-        guard rollups != historyRollups else { return }
-        historyRollups = rollups
-        await reemit()
-    }
-
-    /// Prunes the archive to what `historyRetentionDays` allows, once for each
-    /// day the engine is alive across.
-    ///
-    /// The engine owns this rather than the tails: a provider the user has
-    /// switched off is never built, and the days it recorded would otherwise
-    /// sit in the archive past a retention that was supposed to bound them.
-    /// It runs at boot and on the frame path: boot is what bounds an archive
-    /// whose providers are all switched off and emitting nothing, and the
-    /// frame path is what enforces retention on a Mac that stays up across a
-    /// day boundary. The guard makes every call after the day's first free.
-    private func pruneHistoryIfDue(now: Date) {
-        let today = Calendar.current.startOfDay(for: now)
-        guard lastHistoryPruneDay != today else { return }
-        lastHistoryPruneDay = today
-        UsageHistoryStore.prune(
-            keeping: config.resolvedHistoryRetentionDays, in: stateDir, now: now)
     }
 
     /// The whole archive, every path re-read through the resolver, for the one
@@ -2393,7 +2027,7 @@ actor UsageEngine {
     ///
     /// Nonisolated, and that is the point rather than an optimisation. This
     /// walks every day file in the archive and stats git for every distinct
-    /// path in it, unwindowed and uncached — the opposite of `currentHistory`,
+    /// path in it, unwindowed and uncached — the opposite of `ArchiveCoordinator.current`,
     /// which is windowed and TTL-cached because it runs on the frame path. On
     /// the actor, one click would queue every frame behind it and stop the
     /// metering for as long as the walk took. It touches only `let`s: the
@@ -2413,7 +2047,7 @@ actor UsageEngine {
     /// them — the actor suspends rather than blocks, so frames
     /// keep being emitted while a slow volume answers.
     ///
-    /// This runs when a page opens, never on the frame path. `currentHistory`
+    /// This runs when a page opens, never on the frame path. `ArchiveCoordinator.current`
     /// is windowed and TTL-cached precisely because it is on that path, and
     /// widening it to feed a chart would put a decode per archived day behind
     /// every emit.
@@ -2435,7 +2069,7 @@ actor UsageEngine {
     /// Off the actor for `historySeries`' reasons, and never on the frame
     /// path: it decodes every file the span names, which is a window the
     /// user asked for once rather than one every frame re-reads. Read by
-    /// `historyReader`, through the resolver the frame's rollups go through,
+    /// `ArchiveCoordinator.reader`, through the resolver the frame's rollups go through,
     /// so a span and the preset of the same days split a repository alike.
     ///
     /// Nil rather than an empty reading when retention is `0`: the archive
@@ -2444,7 +2078,7 @@ actor UsageEngine {
     /// through `UsageSpanReading.hasReading`.
     func historyReading(over span: UsageDaySpan) async -> UsageSpanReading? {
         guard config.resolvedHistoryRetentionDays > 0 else { return nil }
-        return await historyReader.reading(over: span, pricing: pricing)
+        return await archive.reader.reading(over: span, pricing: pricing)
     }
 
     /// Deletes the archive, on the one explicit ask there is for it.
@@ -2485,9 +2119,7 @@ actor UsageEngine {
                     + "be saved, so a later pass may read those days back")
         }
         await aggregator.forgetArchivedDays()
-        historyRollups = [:]
-        historyRollupAt = .distantPast
-        historyGeneration += 1
+        archive.dropRollups()
         await reemit()
     }
 
@@ -2508,8 +2140,7 @@ actor UsageEngine {
     /// for the days that were just deleted — which is the same promise the
     /// record's own location outside `history/` exists to keep.
     private func stopArchiveBackfill() async -> Bool {
-        if let task = backfillTask {
-            backfillTask = nil
+        if let task = archive.takeBackfill() {
             task.cancel()
             await task.value
         }
@@ -2582,7 +2213,7 @@ actor UsageEngine {
     /// which would take the period control's windows off an open panel.
     private func applyPricing(_ catalog: PriceCatalog) async {
         pricing = ProviderPricing(override: config.pricingOverride ?? [:], catalog: catalog)
-        historyRollupAt = .distantPast
+        archive.expireRollups()
         await reemit()
     }
 }
