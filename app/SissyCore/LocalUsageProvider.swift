@@ -322,6 +322,10 @@ actor LocalUsageProvider: UsageProvider {
     private let publishedEffort = LockedValue<[EffortSplit]>([])
     private let publishedUsage = LockedValue(ProviderSignals())
     private var lastPublishedSignals: ProviderSignals?
+    /// The safety net under the stream. It polls before it sleeps: the stream
+    /// only reports what is written once it is armed, so a line appended to a
+    /// file the cold scan had already read otherwise waited out a whole
+    /// interval, however long the scan took.
     private var pollTask: Task<Void, Never>?
     private var onChange: (@Sendable (DayTotals) async -> Void)?
     nonisolated private let watchedCounter = LockedValue(0)
@@ -333,6 +337,12 @@ actor LocalUsageProvider: UsageProvider {
 
     private var persistDirty = false
     private var lastSaveAt: Date = .distantPast
+    /// The logs the last read of each could not open or finish, which is what
+    /// makes a backfill pass over one incomplete.
+    private var unreadFiles: Set<URL> = []
+    /// The logs already named in the log. The tail meets an unreadable one on
+    /// every poll, so each is named once for the life of this provider.
+    private var reportedUnread: Set<URL> = []
     /// startOfDay of the most recent `onChange` emit. When `poll()` observes a
     /// different `startOfDay(now)` it forces an emit even without new JSONL
     /// activity so the UI rolls over to a fresh "today" frame at midnight
@@ -568,11 +578,20 @@ actor LocalUsageProvider: UsageProvider {
         let interval = pollInterval
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: interval)
-                if Task.isCancelled { return }
                 await self?.poll()
+                try? await Task.sleep(for: interval)
             }
         }
+    }
+
+    /// What one backfill pass came to.
+    struct BackfillOutcome: Sendable, Equatable {
+        /// The day files it wrote.
+        let written: Int
+        /// Whether it read every log it listed to the end. Only a pass that
+        /// did may be recorded as having covered its span: the record is never
+        /// revisited, so a log skipped under it would be lost for good.
+        let complete: Bool
     }
 
     /// Writes the archive for every day older than the window the live tail
@@ -604,8 +623,10 @@ actor LocalUsageProvider: UsageProvider {
     /// them. What is *not* done here is the inbox: it is consumed on read, and
     /// a pass that drained it would take entries out from under the tail's own
     /// resolver, which caches what it is told for the life of the process.
-    func backfillArchive(onDaysWritten: @Sendable () async -> Void = {}) async -> Int {
-        guard backfill != nil, historyRoot != nil, lifecycle == .idle else { return 0 }
+    func backfillArchive(onDaysWritten: @Sendable () async -> Void = {}) async -> BackfillOutcome {
+        guard backfill != nil, historyRoot != nil, lifecycle == .idle else {
+            return BackfillOutcome(written: 0, complete: false)
+        }
         lifecycle = .running
         defer { lifecycle = .stopped }
         settleKeyZone()
@@ -640,8 +661,9 @@ actor LocalUsageProvider: UsageProvider {
         }
         sissyLog(
             "sissy: \(id) backfill read \(files.count) log file(s) and wrote \(written) "
-                + "archived day(s)\(interrupted ? " before it was cancelled" : "")")
-        return written
+                + "archived day(s)\(interrupted ? " before it was cancelled" : "")"
+                + "\(unreadFiles.isEmpty ? "" : ", \(unreadFiles.count) unread")")
+        return BackfillOutcome(written: written, complete: !interrupted && unreadFiles.isEmpty)
     }
 
     func stop() async {
@@ -1189,9 +1211,15 @@ actor LocalUsageProvider: UsageProvider {
         }
 
         let readFrom = fileOffsets[url] ?? 0
-        guard let fh = try? FileHandle(forReadingFrom: url) else { return false }
+        guard let fh = openForReading(url) else { return false }
         defer { try? fh.close() }
-        do { try fh.seek(toOffset: readFrom) } catch { return false }
+        do {
+            try fh.seek(toOffset: readFrom)
+        } catch {
+            noteUnread(url, error)
+            return false
+        }
+        unreadFiles.remove(url)
         fileMTimes[url] = mtime
 
         var anyIngested = false
@@ -1217,6 +1245,7 @@ actor LocalUsageProvider: UsageProvider {
             do {
                 chunk = try fh.read(upToCount: UsageReaderShared.ingestChunkSize) ?? Data()
             } catch {
+                noteUnread(url, error)
                 break
             }
             if chunk.isEmpty { break }
@@ -1275,6 +1304,32 @@ actor LocalUsageProvider: UsageProvider {
         fileOffsets[url] = lastNewlineAbs
         persistDirty = true
         return anyIngested
+    }
+
+    /// The log open, or nil with the failure written down.
+    private func openForReading(_ url: URL) -> FileHandle? {
+        do {
+            return try FileHandle(forReadingFrom: url)
+        } catch {
+            noteUnread(url, error)
+            return nil
+        }
+    }
+
+    /// Writes down a log that would not read, and logs it the first time.
+    ///
+    /// A file gone since the listing is not one: it has no lines left to lose.
+    private func noteUnread(_ url: URL, _ error: Error) {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            unreadFiles.remove(url)
+            return
+        }
+        unreadFiles.insert(url)
+        guard reportedUnread.insert(url).inserted else { return }
+        let bridged = error as NSError
+        sissyLog(
+            "sissy: \(id) could not read \(url.lastPathComponent) (\(bridged.domain) "
+                + "\(bridged.code)); its lines stay uncounted until it can be read")
     }
 
     private enum SnapshotFileFate {
