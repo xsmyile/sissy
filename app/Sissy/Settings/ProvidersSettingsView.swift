@@ -536,10 +536,7 @@ struct ProvidersSettingsView: View {
     /// Nil is an account the engine has not answered for yet, which is the
     /// ordinary state in the moment after a link and never a fault.
     private func signals(of account: String, provider: String) -> AccountSignals? {
-        model.liveFrame?.frame.providers
-            .first { $0.id == provider }?
-            .signals.accounts
-            .first { $0.id == account }
+        model.accountSignals[provider]?.first { $0.id == account }
     }
 
     /// What the row has to report, in the reader's own words.
