@@ -24,11 +24,8 @@ actor SystemHealthMonitor {
 
     nonisolated private let published = LockedValue<MacHealthReading?>(nil)
     private var lastFrameAt: Date?
-    private var pollTask: Task<Void, Never>?
+    private var poll = PollLoop()
     private var pressureSource: DispatchSourceMemoryPressure?
-    /// Which `start()` a pressure event was delivered under, so an event
-    /// queued behind a `stop()` cannot publish into the `start()` after it.
-    private var generation = 0
     private let read: @Sendable (Date) -> MacHealthReading
     /// The heaviest apps, which the agent sweep measures out of the same pass
     /// over the process table rather than this monitor walking it again.
@@ -49,9 +46,8 @@ actor SystemHealthMonitor {
     /// Starts sampling, and listens for the kernel's pressure transitions so a
     /// change publishes when it happens rather than on the next sample.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
-        guard pollTask == nil else { return }
-        generation += 1
-        let started = generation
+        guard !poll.isRunning else { return }
+        let started = poll.generation
         let source = DispatchSource.makeMemoryPressureSource(
             eventMask: [.normal, .warning, .critical], queue: .global(qos: .utility))
         source.setEventHandler { @Sendable [weak self] in
@@ -59,20 +55,17 @@ actor SystemHealthMonitor {
         }
         source.activate()
         pressureSource = source
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await self.sampleOnce(onRefresh: onRefresh)
-                do { try await Task.sleep(for: Self.sampleInterval) } catch { return }
-            }
+        poll.start { [weak self] in
+            guard let self else { return nil }
+            await self.sampleOnce(onRefresh: onRefresh)
+            return Self.sampleInterval
         }
     }
 
     /// Stops sampling and drops what was published, so a module switched off
     /// leaves nothing on the next frame.
     func stop() {
-        pollTask?.cancel()
-        pollTask = nil
+        poll.stop()
         pressureSource?.cancel()
         pressureSource = nil
         lastFrameAt = nil
@@ -85,7 +78,7 @@ actor SystemHealthMonitor {
     private func pressureChanged(
         under started: Int, onRefresh: @Sendable @escaping () async -> Void
     ) async {
-        guard pollTask != nil, started == generation else { return }
+        guard poll.isCurrent(started) else { return }
         await sampleOnce(forcingFrame: true, onRefresh: onRefresh)
     }
 

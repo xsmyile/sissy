@@ -55,7 +55,7 @@ actor UsageEngine {
     /// Watches which Claude Code account is signed in and names every one
     /// it sees, which is what makes switching back to one possible at all.
     private let claudeAccounts: ClaudeAccountRegistry
-    private var claudeAccountsTask: Task<Void, Never>?
+    private var claudeAccountsPoll = PollLoop()
     private var claudeWebAdoptionTask: Task<Void, Never>?
     /// Handle on the pricing-catalog refresh loop so `stop()` can cancel an
     /// in-flight fetch instead of leaving it to finish against a torn-down
@@ -703,15 +703,9 @@ actor UsageEngine {
     private func startClaudeAccountWatch() {
         let registry = claudeAccounts
         let me = self
-        claudeAccountsTask = Task.detached {
-            while !Task.isCancelled {
-                if await registry.captureActive() { await me.reemit() }
-                do {
-                    try await Task.sleep(for: Self.claudeAccountPollInterval)
-                } catch {
-                    return
-                }
-            }
+        claudeAccountsPoll.start {
+            if await registry.captureActive() { await me.reemit() }
+            return Self.claudeAccountPollInterval
         }
     }
 
@@ -787,7 +781,7 @@ actor UsageEngine {
         // anything else is torn down.
         bootTask?.cancel()
         backfillTask?.cancel()
-        claudeAccountsTask?.cancel()
+        let claudeAccountsTask = claudeAccountsPoll.stop()
         claudeWebAdoptionTask?.cancel()
         priceCatalogTask?.cancel()
         historyRefresh?.cancel()
@@ -817,7 +811,6 @@ actor UsageEngine {
         await aggregator.stop()
         bootTask = nil
         backfillTask = nil
-        claudeAccountsTask = nil
         claudeWebAdoptionTask = nil
         priceCatalogTask = nil
     }

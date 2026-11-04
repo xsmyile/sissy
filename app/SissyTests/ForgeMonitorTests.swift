@@ -393,18 +393,20 @@ final class ForgeMonitorTests: XCTestCase {
         let short = ForgeActivityMonitor.refreshInterval
         let idle = ForgeActivityMonitor.idleRefreshInterval
         XCTAssertFalse(
-            ForgeActivityMonitor.waitIsOver(
-                waited: short - .seconds(1), of: idle, working: true))
-        XCTAssertTrue(ForgeActivityMonitor.waitIsOver(waited: short, of: idle, working: true))
+            ActivityPacedWait.isOver(
+                waited: short - .seconds(1), of: idle, working: true, shortest: short))
+        XCTAssertTrue(ActivityPacedWait.isOver(waited: short, of: idle, working: true, shortest: short))
     }
 
     /// With nobody working the wait runs its full length, so an idle Mac keeps
     /// costing one request every half hour and not one every five minutes.
     func testAWaitWithNobodyWorkingRunsItsFullLength() {
         let idle = ForgeActivityMonitor.idleRefreshInterval
+        let short = ForgeActivityMonitor.refreshInterval
         XCTAssertFalse(
-            ForgeActivityMonitor.waitIsOver(waited: idle - .seconds(1), of: idle, working: false))
-        XCTAssertTrue(ForgeActivityMonitor.waitIsOver(waited: idle, of: idle, working: false))
+            ActivityPacedWait.isOver(
+                waited: idle - .seconds(1), of: idle, working: false, shortest: short))
+        XCTAssertTrue(ActivityPacedWait.isOver(waited: idle, of: idle, working: false, shortest: short))
     }
 
     /// The frame path reports the work without awaiting this actor, and the
@@ -431,7 +433,9 @@ final class ForgeMonitorTests: XCTestCase {
         monitor.activity.note()
         let ceiling = Duration.seconds(10)
         let started = ContinuousClock.now
-        try await monitor.wait(ceiling, slice: .milliseconds(5), shortest: .milliseconds(20))
+        try await ActivityPacedWait(
+            activity: monitor.activity, shortest: .milliseconds(20), slice: .milliseconds(5)
+        ).wait(ceiling)
         XCTAssertLessThan(ContinuousClock.now - started, ceiling / 2)
     }
 
@@ -442,7 +446,9 @@ final class ForgeMonitorTests: XCTestCase {
         XCTAssertFalse(monitor.activity.isWorking())
         let ceiling = Duration.milliseconds(120)
         let started = ContinuousClock.now
-        try await monitor.wait(ceiling, slice: .milliseconds(5), shortest: .milliseconds(20))
+        try await ActivityPacedWait(
+            activity: monitor.activity, shortest: .milliseconds(20), slice: .milliseconds(5)
+        ).wait(ceiling)
         XCTAssertGreaterThanOrEqual(ContinuousClock.now - started, ceiling)
     }
 

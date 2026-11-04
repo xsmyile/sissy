@@ -305,10 +305,11 @@ interval for the rest of that wait — up to half an hour of the idle cadence
 running over exactly the stretch the 5-minute one exists for, which is also the
 stretch where these counters actually move. `ActivityClock.note` cannot wake a
 sleeping loop: it is nonisolated and written from the frame path, which cannot afford to
-await the actor. So the wait sleeps in `activityCheck` slices and `waitIsOver`
-decides at each one — the delay is the ceiling, and a wait that has already
+await the actor. So `ActivityPacedWait` sleeps in `activityCheck` slices and decides at each one — the delay is the ceiling, and a wait that has already
 covered `refreshInterval` ends as soon as agents are working. A slice costs a
-timer and no request.
+timer and no request. `ProviderStatusMonitor` and `GitIdentityMonitor` wait the same
+way since 2026-11-04: they slept the whole idle delay, so readings stayed stale up to
+30 and 60 minutes after work resumed.
 
 `providers[].plan` is the account's subscription plan as the vendor's own
 lowercase token — `max`, `team`, `plus` — never a display label: the app words it

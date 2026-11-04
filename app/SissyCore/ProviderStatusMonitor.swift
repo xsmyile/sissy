@@ -33,14 +33,17 @@ actor ProviderStatusMonitor {
     /// When the engine last saw an agent do something, which is the only input
     /// to how often this polls.
     nonisolated let activity: ActivityClock
+    /// The poll's wait: an idle one ends once agents are working and it has
+    /// covered `refreshInterval`, so a reading stays no further behind than that
+    /// when work resumes.
+    nonisolated var pacedWait: ActivityPacedWait {
+        ActivityPacedWait(activity: activity, shortest: Self.refreshInterval)
+    }
     private let feeds: [String: ProviderStatusFeed]
     /// The network half, injectable for the reason `ClaudeLimitsProbe`'s is: a
     /// test of the poll contract must not reach a vendor to observe it.
     private let fetchSource: @Sendable (ProviderStatusFeed) async throws -> ProviderStatusReading
-    private var pollTask: Task<Void, Never>?
-    /// Bumped by every stop, so a request in flight when the monitor was torn
-    /// down cannot publish over the run that replaced it.
-    private var generation = 0
+    private var poll = PollLoop()
     /// The cause last logged per provider, nil once it has answered.
     private(set) var lastReported: [String: String] = [:]
 
@@ -86,16 +89,10 @@ actor ProviderStatusMonitor {
     /// changes, so a vendor that keeps answering the same thing costs no
     /// frames. Idempotent, and a no-op for a build with no feed to read.
     func start(onRefresh: @Sendable @escaping () async -> Void) {
-        guard pollTask == nil, !feeds.isEmpty else { return }
-        pollTask = Task { [weak self] in
-            var delay: Duration = .zero
-            while !Task.isCancelled {
-                if delay > .zero {
-                    do { try await Task.sleep(for: delay) } catch { return }
-                }
-                guard let self else { return }
-                delay = await self.refreshOnce(onRefresh: onRefresh)
-            }
+        guard !feeds.isEmpty else { return }
+        let paced = pacedWait
+        poll.start(wait: paced.wait) { [weak self] in
+            await self?.refreshOnce(onRefresh: onRefresh)
         }
     }
 
@@ -107,9 +104,7 @@ actor ProviderStatusMonitor {
     /// switch the user has just turned off, dated to whenever it last managed
     /// to read.
     func stop() {
-        generation &+= 1
-        pollTask?.cancel()
-        pollTask = nil
+        poll.stop()
         published.store([:])
     }
 
@@ -119,7 +114,7 @@ actor ProviderStatusMonitor {
     /// Internal rather than private so a test can run exactly one round and
     /// assert on what it published, instead of waiting on the scheduler.
     func refreshOnce(onRefresh: @Sendable @escaping () async -> Void) async -> Duration {
-        let stamp = generation
+        let stamp = poll.generation
         let before = published.load()
         await withTaskGroup(of: (String, Result<ProviderStatusReading, Error>).self) { group in
             for (id, root) in feeds {
@@ -127,11 +122,11 @@ actor ProviderStatusMonitor {
                 group.addTask { (id, await Self.outcome(of: fetch, root)) }
             }
             for await (id, outcome) in group {
-                guard stamp == generation, !Task.isCancelled else { continue }
+                guard poll.isCurrent(stamp) else { continue }
                 publish(reported(outcome, for: id), for: id)
             }
         }
-        guard stamp == generation, !Task.isCancelled else { return nextDelay() }
+        guard poll.isCurrent(stamp) else { return nextDelay() }
         if published.load() != before { await onRefresh() }
         return nextDelay()
     }
@@ -141,10 +136,10 @@ actor ProviderStatusMonitor {
     /// and the status page is now part of that.
     func refresh(provider id: String, onRefresh: @Sendable @escaping () async -> Void) async {
         guard let root = feeds[id] else { return }
-        let stamp = generation
+        let stamp = poll.generation
         let before = published.load()
         let outcome = await Self.outcome(of: fetchSource, root)
-        guard stamp == generation, !Task.isCancelled else { return }
+        guard poll.isCurrent(stamp) else { return }
         publish(reported(outcome, for: id), for: id)
         if published.load() != before { await onRefresh() }
     }
