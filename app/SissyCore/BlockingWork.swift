@@ -78,6 +78,9 @@ final class SingleFlight<Value: Sendable>: Sendable {
         for continuation in pending.values { continuation.resume(returning: value) }
     }
 
+    /// How many callers are waiting right now, so a test can tell one has joined.
+    var waiterCount: Int { state.withLock { $0.waiters.count } }
+
     /// A waiter's budget ran out or it was cancelled. It leaves alone, and the
     /// call stays in flight for anyone else.
     func leave(_ id: UUID) {
