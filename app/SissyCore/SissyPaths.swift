@@ -50,8 +50,17 @@ enum SissyPaths {
     /// build's item also answers a scheduled read with
     /// `errSecInteractionNotAllowed`, being another signature's, so the row
     /// carried no reading either.
+    ///
+    /// A test harness gets one of its own for the reason it gets its own
+    /// support directory. It is hosted under the dev app's id, so a hermetic
+    /// engine listed the developer's real items, built readers for the claude.ai
+    /// sessions and Codex accounts linked there and could poll the vendors with
+    /// them; keyed by pid so two suites run from two worktrees share nothing.
     private static var keychainNamespace: String {
-        isDev ? devBundleIdentifier : releaseBundleIdentifier
+        if isTestHarness {
+            return "\(devBundleIdentifier).tests-\(ProcessInfo.processInfo.processIdentifier)"
+        }
+        return isDev ? devBundleIdentifier : releaseBundleIdentifier
     }
 
     /// The keychain service for one kind of item Sissy owns, in this build's
