@@ -854,12 +854,17 @@ final class UsageEngineControlTests: XCTestCase {
         XCTAssertEqual(try? ServerConfig.load(from: configURL).keepAwake, .on)
     }
 
+    /// This process's own assertions under Sissy's name. The list is the whole
+    /// Mac's, and a suite in another worktree or the running dev app holds the
+    /// same name, so counting all of them moved the baseline under a test.
     private func heldSystemAssertions() -> Int {
         var assertions: Unmanaged<CFDictionary>?
         guard IOPMCopyAssertionsByProcess(&assertions) == kIOReturnSuccess,
             let byProcess = assertions?.takeRetainedValue() as? [AnyHashable: [[String: Any]]]
         else { return 0 }
-        return byProcess.values.flatMap { $0 }
+        let own = byProcess.first { ($0.key.base as? NSNumber)?.int32Value == getpid() }?.value ?? []
+        return
+            own
             .filter { $0["AssertName"] as? String == Self.systemAssertionName }
             .count
     }
