@@ -139,6 +139,10 @@ sessions and agents behind them, every rate-limit window, the plan and the
 credits. Claude Code is on unless you switch it off; Codex is picked up whenever
 its session directory exists.
 
+A running Claude Code's account comes from its own config file: Sissy reads
+`CLAUDE_CONFIG_DIR` off the process, and counts the sessions on each account.
+Spend is still metered from one tree per vendor.
+
 Rate-limit windows come from each vendor's own usage endpoint, read with
 the credential its CLI already stored, and cost no dialog either way.
 Codex's is a file in its config directory. Claude's is that same file, or

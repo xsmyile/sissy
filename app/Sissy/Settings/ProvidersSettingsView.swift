@@ -287,7 +287,7 @@ enum ClaudeUnsupportedHomesCopy {
 
     static func message(reading home: URL) -> String {
         let path = (home.path as NSString).abbreviatingWithTildeInPath
-        return "Sissy reads only \(path) and ignores CLAUDE_CONFIG_DIR. "
+        return "Sissy meters only \(path), and reads CLAUDE_CONFIG_DIR only off a session it sees running. "
             + "If that folder is gone, remove its sign-in in Keychain Access."
     }
 }

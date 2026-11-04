@@ -102,6 +102,16 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
         /// The CLI version the file last recorded, which is the one the usage
         /// request has to name for Anthropic to offer the account's resets.
         var cliVersion: String?
+        /// The account `oauthAccount` names, whatever else the block says or
+        /// fails to. `profileOwner` waits on a plan it can word, and a running
+        /// session is on its account either way.
+        var fileOwner: String?
+        /// The windows of the usage reply the CLI cached, with the vendor's
+        /// own fetch time. Apart from `signals` because the row Sissy meters
+        /// has live readers and never reads these; `creditsOwner` says whose
+        /// they are.
+        var cachedWindows: [UsageWindow] = []
+        var cachedAt: Date?
     }
 
     /// Where the CLI records the last version whose release notes it showed,
@@ -183,6 +193,7 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
         let reading = Self.readProfile(root)
         let billed = Self.readCredits(root)
         let billedOwner = Self.creditsOwner(root)
+        let cache = Self.readCachedWindows(root)
         lock.withLock {
             let profile = if case .found(let found) = reading { found } else { nil as Profile? }
             attributed = Attributed(
@@ -193,7 +204,10 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
                 creditsOwner: billedOwner,
                 cliVersion: (root[Self.cliVersionKey] as? String).flatMap {
                     ClaudeResetGrants.isVersion($0) ? $0 : nil
-                })
+                },
+                fileOwner: Self.owner((root["oauthAccount"] as? [String: Any])?[Self.accountKey]),
+                cachedWindows: cache.windows,
+                cachedAt: cache.at)
             lastParsedAt = now
             lastMTime = mtime
         }
@@ -245,6 +259,15 @@ final class ClaudeProfileSource: SourceSignals, @unchecked Sendable {
     private static func owner(_ raw: Any?) -> String? {
         guard let uuid = raw as? String, !uuid.isEmpty else { return nil }
         return uuid
+    }
+
+    /// The windows of the cached usage reply and when the vendor answered it.
+    private static func readCachedWindows(_ root: [String: Any]) -> (windows: [UsageWindow], at: Date?) {
+        guard let cache = root[usageCacheKey] as? [String: Any],
+            let fetchedAtMs = cache[usageFetchedAtKey] as? Double,
+            let body = cache[usageBodyKey] as? [String: Any]
+        else { return ([], nil) }
+        return (ClaudeUsagePayload.windows(body), Date(timeIntervalSince1970: fetchedAtMs / 1000))
     }
 
     /// The vendor's own answer for what it has billed against the spend cap,

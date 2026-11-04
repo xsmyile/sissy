@@ -115,14 +115,18 @@ actor AgentProcessMonitor {
     /// cache and is not `Sendable`, and the only caller is the sweep, which
     /// already runs on this actor.
     private let projects: ProjectResolver
+    /// Which accounts the sweep's Claude Code processes are on.
+    private let runningSessions: ClaudeRunningSessions
 
     init(
         sweep: @escaping @Sendable (Date, Bool) -> AgentProcessSweep = {
             AgentProcessReader.sweep(now: $0, measuringApps: $1)
         },
-        ledger: ProjectLedger = ProjectLedger()
+        ledger: ProjectLedger = ProjectLedger(),
+        runningSessions: ClaudeRunningSessions = .inert
     ) {
         self.sweep = sweep
+        self.runningSessions = runningSessions
         self.projects = ProjectResolver(ledger: ledger)
     }
 
@@ -175,6 +179,7 @@ actor AgentProcessMonitor {
         measuresApps = false
         published.store(nil)
         publishedApps.store(nil)
+        runningSessions.clear()
     }
 
     /// One sweep. Internal rather than private so a test can run exactly one
@@ -185,6 +190,7 @@ actor AgentProcessMonitor {
         publishedApps.store(measuresApps ? result.apps : nil)
         var reading = result.agents
         reading.attributeProjects(by: projects.project(for:))
+        runningSessions.update(reading.agents)
         accrue(&reading, at: now)
         let previous = published.load()
         samples.append(reading.footprint)

@@ -96,9 +96,20 @@ final class ClaudeUnsupportedHomesTests: XCTestCase {
         XCTAssertEqual(found, [foreign])
     }
 
+    /// A home seen running is one whose account Sissy names and counts.
+    func testAHomeSeenRunningIsNotFound() {
+        let seen = ClaudeKeychainCLI.scopedClaudeService(for: Self.otherHome.path)
+        let idle = ClaudeKeychainCLI.scopedClaudeService(for: "/tmp/sissy-tests/.claude-idle")
+
+        let found = ClaudeUnsupportedHomes.services(
+            in: [seen, idle], reading: Self.defaultHome, running: [.named(Self.otherHome.path)])
+
+        XCTAssertEqual(found, [idle])
+    }
+
     /// The notice names the variable and the folder, which is what a user who
     /// set one needs to recognise the other.
-    func testTheNoticeNamesTheVariableItDoesNotFollow() {
+    func testTheNoticeNamesTheVariableAndTheFolder() {
         let message = ClaudeUnsupportedHomesCopy.message(reading: Self.defaultHome)
         XCTAssertTrue(message.contains("CLAUDE_CONFIG_DIR"), message)
         XCTAssertTrue(message.contains(".claude"), message)

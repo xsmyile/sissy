@@ -1911,6 +1911,22 @@ enum ClaudeAccountCopy {
     static let indexSetAside =
         "Sissy could not read its list of saved accounts and kept it aside, so some may be "
         + "missing here · they come back as each one signs in"
+
+    /// How many running sessions are on an account.
+    static func sessions(_ count: Int) -> String {
+        UsageFormat.agentCount(count, singular: "session", plural: "sessions")
+    }
+
+    /// An account in the account menu, which says which ones are in use.
+    static func menuLabel(_ label: String, sessions count: Int) -> String {
+        count > 0 ? "\(label) · in use · \(sessions(count))" : label
+    }
+
+    /// Said under the identity of the account being viewed, nil while no
+    /// session is on it.
+    static func inUseCaption(sessions count: Int) -> String? {
+        count > 0 ? "In use · \(sessions(count))" : nil
+    }
 }
 
 /// What spending a reset says, from the count on the page to the answer the

@@ -41,6 +41,10 @@ struct AgentProcess: Sendable, Equatable, Identifiable {
     /// which the monitor sets. Nil on the sweep that first sees it: one
     /// reading of a counter is a total, not a rate.
     var cpuLoad: Double?
+    /// The config home a Claude Code process was started with, the one value
+    /// kept from its environment. Nil for any other CLI, and for a process
+    /// whose environment could not be read.
+    var claudeHome: ClaudeProcessHome?
 
     /// Who a process is across sweeps: its pid, and the start time that tells
     /// it apart from a later process the kernel hands the same pid to.
@@ -151,6 +155,7 @@ enum AgentProcessReader {
         for process in processes { childrenOf[process.parent, default: []].append(process.pid) }
         var footprints: [pid_t: UInt64] = [:]
         var agents: [AgentProcess] = []
+        var arguments: [UInt8] = []
         for process in processes {
             guard let provider = classify(process) else { continue }
             let counters = usage(process.pid)
@@ -168,7 +173,10 @@ enum AgentProcessReader {
                     version: version(of: process),
                     directory: workingDirectory(of: process.pid),
                     cpuTime: counters.map { seconds(machTicks: $0.ri_user_time + $0.ri_system_time) } ?? 0,
-                    energy: counters?.ri_energy_nj ?? 0))
+                    energy: counters?.ri_energy_nj ?? 0,
+                    claudeHome: provider == ProviderID.claudeCode
+                        ? ClaudeProcessHome(variable: claudeConfigDir(of: process.pid, buffer: &arguments))
+                        : nil))
         }
         let reading = AgentProcessReading(
             observedAt: now, agents: agents.sorted { $0.footprint > $1.footprint })
@@ -398,6 +406,33 @@ enum AgentProcessReader {
         guard !argument.isEmpty else { return nil }
         return utf8(argument)
     }
+
+    /// `CLAUDE_CONFIG_DIR` out of a process's environment.
+    ///
+    /// `KERN_PROCARGS2` answers for a process of this user with no permission.
+    /// Measured 2026-11-04: 8 of 8 running sessions readable as an ordinary
+    /// user, 0.08 ms a process. Only this one value leaves here. The bytes hold
+    /// the whole environment, so they stay in `buffer`, which the caller reuses
+    /// for the length of one sweep and which never outlives it. A process that
+    /// exits mid-read answers `unreadable`.
+    static func claudeConfigDir(of pid: pid_t, buffer: inout [UInt8]) -> ProcessEnvironment.Lookup {
+        if buffer.isEmpty { buffer = [UInt8](repeating: 0, count: argumentsCapacity) }
+        var name: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = buffer.count
+        guard sysctl(&name, 3, &buffer, &size, nil, 0) == 0 else { return .unreadable }
+        return ProcessEnvironment.lookup(
+            AccountDefaults.claudeConfigDirEnvVar, in: Array(buffer[0..<size]))
+    }
+
+    /// The most `KERN_PROCARGS2` can answer with, which is the kernel's own
+    /// limit on arguments and environment together.
+    private static let argumentsCapacity: Int = {
+        var name: [Int32] = [CTL_KERN, KERN_ARGMAX]
+        var limit: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctl(&name, 2, &limit, &size, nil, 0) == 0, limit > 0 else { return Int(ARG_MAX) }
+        return Int(limit)
+    }()
 
     /// A C string's bytes, without its terminator, as UTF-8, or nil for
     /// bytes that are not.

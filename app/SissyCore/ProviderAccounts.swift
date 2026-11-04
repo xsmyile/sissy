@@ -9,7 +9,8 @@ import Foundation
 /// not of the directory: a log line carries no account id, so two accounts used
 /// under one home are one reading, and Sissy reports what was spent rather than
 /// who paid for it. `ClaudeAccountRegistry` is what answers the account
-/// question, on the credential where it belongs.
+/// question for this home, on the credential where it belongs, and
+/// `ClaudeRunningSessions` for the other homes a running session names.
 struct ProviderHome: Sendable, Equatable {
     /// The CLI: `claude-code`, `codex`. What the app words, colours and draws
     /// a mark for, and what names this provider's snapshot and archive.
@@ -28,13 +29,17 @@ struct ProviderHome: Sendable, Equatable {
     /// rather than inside it. Measured against 2.1.272, which creates
     /// `<home>/.claude.json` on first run under a home it was given.
     var claudeProfileURL: URL {
+        Self.claudeProfileURL(
+            home: home, isDefault: AccountDefaults.isDefaultClaudeHome(home),
+            userHome: URL(fileURLWithPath: NSHomeDirectory()))
+    }
+
+    /// That rule for any home, which is what a home seen running is read by.
+    static func claudeProfileURL(home: URL, isDefault: Bool, userHome: URL) -> URL {
         let profile = home.appendingPathComponent(AccountDefaults.claudeProfileName)
         if FileManager.default.fileExists(atPath: profile.path) { return profile }
-        guard AccountDefaults.isDefaultClaudeHome(home) else {
-            return home.appendingPathComponent(AccountDefaults.claudeLegacyProfileName)
-        }
-        return URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(AccountDefaults.claudeLegacyProfileName)
+        let parent = isDefault ? userHome : home
+        return parent.appendingPathComponent(AccountDefaults.claudeLegacyProfileName)
     }
 
     /// Claude Code's own OAuth credential, which reads the usage endpoint with

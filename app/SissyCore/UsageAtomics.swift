@@ -68,6 +68,12 @@ struct AccountSignals: Sendable, Equatable, Identifiable {
     /// Whether this is the account the CLI itself is signed in as, which is
     /// the one whose future spend lands in the day beside it.
     var isSignedIn: Bool = false
+    /// How many running Claude Code sessions are on this account.
+    var runningSessions: Int = 0
+    /// Whether the row exists only because a running home names the account,
+    /// with no live source behind it. Its gauges, if any, are that home's
+    /// cached reply.
+    var isOnlyRunning: Bool = false
 
     /// The same reading ordered by period, on the rule
     /// `ProviderSignals.live()` applies to its own — a bucket past its reset

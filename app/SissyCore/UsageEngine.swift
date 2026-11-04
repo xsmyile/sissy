@@ -155,6 +155,10 @@ actor UsageEngine {
     /// above rather than on a provider: a running process belongs to the Mac,
     /// and it is there on a day neither CLI has spent anything.
     private let agentMonitor: AgentProcessMonitor
+    /// Which accounts the sweep's Claude Code sessions are on. Off the real
+    /// machine in a test host, which would otherwise name the developer's own
+    /// accounts on a hermetic engine's rows.
+    private let runningSessions: ClaudeRunningSessions
     /// What the Mac itself is answering, behind `ServerConfig.macHealth`. It
     /// takes its heaviest apps from `agentMonitor`'s sweep, which measures them
     /// only while this is running.
@@ -333,7 +337,10 @@ actor UsageEngine {
         self.projectLedger = projectLedger
         self.historyReader = UsageHistoryReader(directory: stateDir, ledger: projectLedger)
         self.identityMonitor = GitIdentityMonitor(ledger: projectLedger, activity: activity)
-        let agentMonitor = AgentProcessMonitor(ledger: projectLedger)
+        let runningSessions: ClaudeRunningSessions =
+            SissyPaths.isTestHarness ? .inert : ClaudeRunningSessions()
+        self.runningSessions = runningSessions
+        let agentMonitor = AgentProcessMonitor(ledger: projectLedger, runningSessions: runningSessions)
         self.agentMonitor = agentMonitor
         self.healthMonitor =
             healthMonitor ?? SystemHealthMonitor(heaviest: { agentMonitor.currentApps() })
@@ -480,6 +487,7 @@ actor UsageEngine {
                         webLinks: self.claudeWebLinks,
                         profile: profile,
                         accounts: accountRegistry,
+                        running: runningSessions,
                         ledger: projectLedger
                     ))
             }
@@ -1003,7 +1011,8 @@ actor UsageEngine {
     /// read, by keychain service name. Nonisolated and blocking, because it
     /// is one keychain query and the caller runs it off the main actor.
     nonisolated func unsupportedClaudeHomes() -> [String] {
-        ClaudeUnsupportedHomes.scan(reading: claudeHome.home)
+        ClaudeUnsupportedHomes.scan(
+            reading: claudeHome.home, running: runningSessions.current().homes)
     }
 
     /// The Claude Code config home this engine reads, for the notice that
