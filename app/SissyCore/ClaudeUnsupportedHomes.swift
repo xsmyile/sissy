@@ -6,9 +6,9 @@ import Security
 /// Sissy meters one home per vendor. An app started from the Dock or at login
 /// does not inherit a shell's environment, so a `CLAUDE_CONFIG_DIR` exported in
 /// `.zshrc` never reaches Sissy. A running session's own environment can be read
-/// (`AgentProcessReader.claudeConfigDir`), so a home seen running is one whose
-/// account Sissy names and counts, and it is not listed here. A home with nothing
-/// running shows only as a consequence. Claude Code files every home other than
+/// (`AgentProcessReader.claudeConfigDir`), so a running home whose file names its
+/// account is one Sissy names and counts, and it is not listed here. Any other
+/// home shows only as a consequence. Claude Code files every home other than
 /// the default under `Claude Code-credentials-` and the first eight hex characters
 /// of the SHA-256 of that home's path, so an item under that shape whose hash is
 /// none of those names is a `claude` signed in somewhere Sissy is not looking, and
@@ -41,8 +41,8 @@ enum ClaudeUnsupportedHomes {
     private static let listingLimit = 256
     private static let hexDigits = Set("0123456789abcdef")
 
-    /// The scoped names in `listed` that belong to no home Sissy reads or has
-    /// seen running, sorted and each once.
+    /// The scoped names in `listed` that belong to no home Sissy reads or
+    /// counts, sorted and each once.
     static func services(
         in listed: [String], reading home: URL, running: [ClaudeProcessHome] = []
     ) -> [String] {

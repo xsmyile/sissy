@@ -337,8 +337,10 @@ actor UsageEngine {
         self.projectLedger = projectLedger
         self.historyReader = UsageHistoryReader(directory: stateDir, ledger: projectLedger)
         self.identityMonitor = GitIdentityMonitor(ledger: projectLedger, activity: activity)
+        let meteredHome = config.providerHome(vendor: ProviderID.claudeCode)
         let runningSessions: ClaudeRunningSessions =
-            SissyPaths.isTestHarness ? .inert : ClaudeRunningSessions()
+            SissyPaths.isTestHarness
+            ? .inert : ClaudeRunningSessions(meteredConfig: { meteredHome.claudeProfileURL })
         self.runningSessions = runningSessions
         let agentMonitor = AgentProcessMonitor(ledger: projectLedger, runningSessions: runningSessions)
         self.agentMonitor = agentMonitor
@@ -1005,7 +1007,7 @@ actor UsageEngine {
     /// is one keychain query and the caller runs it off the main actor.
     nonisolated func unsupportedClaudeHomes() -> [String] {
         ClaudeUnsupportedHomes.scan(
-            reading: claudeHome.home, running: runningSessions.current().homes)
+            reading: claudeHome.home, running: runningSessions.current().namedHomes)
     }
 
     /// The Claude Code config home this engine reads, for the notice that

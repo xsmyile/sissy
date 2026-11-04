@@ -932,8 +932,7 @@ struct UsagePanelSnapshot: Equatable {
         slices.map { slice in
             let known =
                 slice.id == ProviderID.claudeCode ? claudeAccounts : ClaudeAccountRegistry.Snapshot()
-            let source =
-                RowSource(soleRunning: slice.signals.accounts, known: known) ?? RowSource(slice)
+            let source = RowSource(soleRunning: slice, known: known) ?? RowSource(slice)
             let plan = UsageFormat.plan(
                 source.plan, tier: source.planTier, seat: source.account?.seat,
                 name: source.planName)
@@ -961,14 +960,13 @@ struct UsagePanelSnapshot: Equatable {
                     credits: source.credits,
                     resets: slice.resets,
                     resetTarget: rowResetTarget(provider: slice.id, slice.signals.accounts),
-                    runningSessions: slice.signals.accounts.first { $0.isSignedIn }?.runningSessions
-                        ?? slice.signals.accounts.first?.runningSessions ?? 0,
+                    runningSessions: source.runningSessions,
                     limitsReading: limitsReading,
                     now: now),
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
                 account: makeAccount(
-                    source.account, id: soleAccountID(slice.signals.accounts),
+                    source.account, id: source.id,
                     plan: source.plan, naming: naming),
                 projects: makeProjects(slice.projects, totalCost: slice.cost),
                 projectCount: slice.projects.count,
@@ -999,6 +997,9 @@ struct UsagePanelSnapshot: Equatable {
         let credits: ProviderCredits?
         /// Whether the windows are a running home's cached reply.
         let isCached: Bool
+        /// The account a rename of this row is kept by.
+        let id: String?
+        let runningSessions: Int
 
         init(_ slice: ProviderSlice) {
             plan = slice.plan
@@ -1009,11 +1010,20 @@ struct UsagePanelSnapshot: Equatable {
             observedAt = slice.limitsObservedAt
             credits = slice.credits
             isCached = false
+            let own = slice.signals.accounts.filter { !$0.isOnlyRunning }
+            let ownID = soleAccountID(own)
+            id = ownID
+            runningSessions = own.first { $0.id == ownID }?.runningSessions ?? 0
         }
 
-        init?(soleRunning accounts: [AccountSignals], known: ClaudeAccountRegistry.Snapshot) {
+        /// Only over a slice with nothing of its own. One that names an account
+        /// or holds a reading has no id to say so with where the file predates
+        /// `accountUuid`, and the running account is not that one.
+        init?(soleRunning slice: ProviderSlice, known: ClaudeAccountRegistry.Snapshot) {
+            let accounts = slice.signals.accounts
             guard accounts.count == 1, let only = accounts.first, only.isOnlyRunning,
-                known.accounts.allSatisfy({ $0.uuid == only.id })
+                known.accounts.allSatisfy({ $0.uuid == only.id }),
+                slice.account == nil, slice.plan == nil, slice.windows.isEmpty
             else { return nil }
             plan = only.plan
             planTier = only.planTier
@@ -1023,6 +1033,8 @@ struct UsagePanelSnapshot: Equatable {
             observedAt = only.limitsObservedAt
             credits = only.credits
             isCached = true
+            id = only.id
+            runningSessions = only.runningSessions
         }
     }
 
