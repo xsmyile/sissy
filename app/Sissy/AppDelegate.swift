@@ -19,9 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// click, and left nil in the test host, which builds neither.
     var onReopen: (() -> Void)?
 
-    /// The launch run of `HTTPStoragePurge`, held here so the delete has an
-    /// owner and stays off the main thread, at utility priority because
-    /// nothing waits on it.
+    /// The launch run of `HTTPStoragePurge` and `ClaudeArchiveRemoval`, held
+    /// here so the deletes have an owner and stay off the main thread, at
+    /// utility priority because nothing waits on them.
     ///
     /// Its order against the engine's `start()` does not matter: `SissyHTTP`
     /// keeps no disk cache and no cookie jar, so nothing the engine sends can
@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard NSClassFromString("XCTestCase") == nil else { return }
         storagePurge = Task.detached(priority: .utility) {
             HTTPStoragePurge.run(in: .user())
+            ClaudeArchiveRemoval.live().run()
         }
         model.start()
 

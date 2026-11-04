@@ -131,8 +131,7 @@ enum VendorLinkCopy {
 /// Its own vocabulary rather than the Claude one's: what is linked is a
 /// sign-in to OpenAI rather than a session on a website, what it is read for is
 /// a workspace rather than an organisation, and what unlinking costs is
-/// different — there is no archived credential left behind, because Sissy
-/// never took one.
+/// different: no CLI sign-in is involved, because Sissy never took one.
 enum CodexAccountLinkCopy {
     /// What the sign-in page is called when it fails.
     static let vendor = "OpenAI"
@@ -229,17 +228,15 @@ enum ClaudeAccountLinkCopy {
     static let chooseLabel = "Which organisation?"
 
     static let unlinkHelp =
-        "Forget this account's claude.ai session. The Claude Code sign-in Sissy archived "
-        + "for it stays, so you can still switch to it."
+        "Forget this account's claude.ai session. Claude Code's own sign-in is not touched."
 
     static func unlinkTitle(_ account: String) -> String {
         "Forget the claude.ai session for \(account)?"
     }
 
     static let unlinkMessage =
-        "Sissy stops reading this account's limits and credits from claude.ai. The Claude "
-        + "Code sign-in it archived stays, so the account is still one you can switch to. "
-        + "You can link the session again from this window."
+        "Sissy stops reading this account's limits and credits from claude.ai. Claude Code's "
+        + "own sign-in is not touched. You can link the session again from this window."
 
     /// One word, because a longer one does not survive the alert's layout:
     /// every button is given the widest one's fitting width, and a row that

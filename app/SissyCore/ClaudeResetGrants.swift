@@ -177,7 +177,7 @@ enum ClaudeResetGrants {
 
     /// Asked of the vendor with the token that will spend, rather than read
     /// off `.claude.json`: that file is the CLI's and can name the account
-    /// the CLI was on before a switch, and a reset addressed to another
+    /// the CLI was on before its credential moved, and a reset addressed to another
     /// account is a spend on one the user is not looking at.
     static func owner(token: String, userAgent: String?) async throws -> Owner {
         let profile = try await UsageRequestError.object(

@@ -32,7 +32,7 @@ final class SissyPathsTests: XCTestCase {
         let namespace = ".tests-\(ProcessInfo.processInfo.processIdentifier)."
         for service in [
             ClaudeWebSessionStore.keychainService, CodexAccountStore.keychainService,
-            ForgeTokenStore.keychainService, ClaudeKeychainCLI.sissyAccountService,
+            ForgeTokenStore.keychainService, ClaudeArchiveRemoval.service,
         ] {
             XCTAssertTrue(service.contains(namespace), "\(service) is an install's")
         }

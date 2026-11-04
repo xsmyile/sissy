@@ -109,7 +109,7 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     var loop = LimitsLoop()
     /// The grant the last reading names next, which is the one a press spends,
     /// with the fingerprint of the token that read it: a grant read for one
-    /// account is not one to spend with another's token after a switch.
+    /// account is not one to spend with another's token after a `/login`.
     private var nextGrant: (id: String, credential: String)?
     /// The attempts nobody heard an answer to, by whose they are.
     ///
@@ -126,7 +126,7 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     private var spending = false
     /// The last resets note logged and the credential that read it, so a
     /// reading that says the same thing as the one before it adds no line,
-    /// while the first reading after a switch always does: two accounts can
+    /// while the first reading after a `/login` always does: two accounts can
     /// answer the same words, and the log must still show the second was read.
     private var lastResetsNote: (credential: String, note: String)?
 
@@ -302,21 +302,6 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
                     + "\(Self.keychainTimeout); its limits keep their last reading")
         }
         return .wait(Self.refreshInterval)
-    }
-
-    /// Drops the block, on the row and in the record.
-    ///
-    /// For the account switch, which is the one event that makes a refusal
-    /// stop being this reader's: the endpoint authenticates a credential, the
-    /// block was earned by the one that has just been replaced, and the next
-    /// request spends a different token. Without it a switch made inside a
-    /// block met no limits at all until the deadline passed — and with the
-    /// record on disk, past the relaunch too.
-    func clearBackoff() async {
-        published.update {
-            if case .rateLimited = $0.signals.limitsState { $0.signals.limitsState = .quiet }
-        }
-        await backoff?.record(nil)
     }
 
     /// One request against the usage endpoint, and the backoff its answer

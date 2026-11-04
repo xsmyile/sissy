@@ -1,21 +1,17 @@
 import CryptoKit
 import Foundation
 
-/// The parts of a Claude Code credential blob Sissy reads, merges and keeps.
+/// The parts of a Claude Code credential blob Sissy reads.
 ///
 /// The blob is not only the account. Measured 2026-09-23 on a Mac with plugin
 /// MCP servers signed in, `~/.claude/.credentials.json` carried two top-level
 /// keys, `claudeAiOauth` and `mcpOAuth`, and the keychain items carry the same
-/// shape. Only `claudeAiOauth` is the account: it is what gets archived, what
-/// a switch puts back, and what decides whether a slot holds a credential at
-/// all. Every other key belongs to the CLI as it is now and is carried over
-/// untouched, because a switch that wrote a whole archived blob rolled every
-/// MCP login back to the day that blob was filed.
+/// shape. Only `claudeAiOauth` is the account, and it is what decides whether a
+/// slot holds a credential at all.
 enum ClaudeCredentialBlob {
     static let oauthKey = "claudeAiOauth"
     private static let tokenKey = "accessToken"
     private static let expiryKey = "expiresAt"
-    private static let refreshExpiryKey = "refreshTokenExpiresAt"
 
     /// The top-level JSON object, or nil for bytes that are not one.
     static func object(_ data: Data) -> [String: Any]? {
@@ -56,56 +52,6 @@ enum ClaudeCredentialBlob {
     /// other's secret.
     static func fingerprint(of accessToken: String) -> String {
         SHA256.hash(data: Data(accessToken.utf8)).map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// When the refresh token dies, where the CLI records it.
-    ///
-    /// An access token that has expired is the ordinary state of an archive:
-    /// the CLI renews it with the refresh token the moment it runs. A refresh
-    /// token that has expired is not, because nothing can renew it and the
-    /// CLI answers a switch to it with a request for `/login`.
-    static func refreshExpiresAt(in data: Data) -> Date? {
-        guard let oauth = oauth(in: data) else { return nil }
-        if let text = oauth[refreshExpiryKey] as? String {
-            return UsageReaderShared.parseTimestamp(text)
-        }
-        return date(oauth[refreshExpiryKey])
-    }
-
-    /// Whether an archived credential can still sign the CLI in.
-    static func refreshHasExpired(_ data: Data, now: Date) -> Bool {
-        guard let expiry = refreshExpiresAt(in: data) else { return false }
-        return expiry <= now
-    }
-
-    /// The account half alone, as a blob of its own: what the archive keeps.
-    static func accountOnly(_ data: Data) -> Data? {
-        guard let oauth = oauth(in: data) else { return nil }
-        return serialize([oauthKey: oauth])
-    }
-
-    /// Whether two blobs name the same credential, whatever else they carry.
-    static func sameAccountCredential(_ lhs: Data, _ rhs: Data) -> Bool {
-        guard let left = oauth(in: lhs), let right = oauth(in: rhs) else { return false }
-        return NSDictionary(dictionary: left).isEqual(to: right)
-    }
-
-    /// The account half of `account` written into `current`, every other key
-    /// of `current` kept as it is. Nil `current` is a slot with nothing in it,
-    /// which takes the account half alone.
-    static func merging(account: Data, into current: Data?) -> Data? {
-        guard let oauth = oauth(in: account) else { return nil }
-        var root: [String: Any] = [:]
-        if let current {
-            guard let existing = object(current) else { return nil }
-            root = existing
-        }
-        root[oauthKey] = oauth
-        return serialize(root)
-    }
-
-    private static func serialize(_ root: [String: Any]) -> Data? {
-        try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .withoutEscapingSlashes])
     }
 
     /// Epoch values above this many seconds cannot be a plausible date, so
@@ -150,9 +96,8 @@ enum ClaudeCredentialBlob {
 ///
 /// A place that cannot be read is not a place that is empty, so a failed
 /// lookup throws rather than falling through: reading past it would answer
-/// for a credential the CLI may not be using, and a switch would overwrite a
-/// name it never saw. Bytes that do not decode are the same claim, and throw
-/// `Failure.malformed` where they sit: a place holding nothing, a blob with
+/// for a credential the CLI may not be using. Bytes that do not decode are the
+/// same claim, and throw `Failure.malformed` where they sit: a place holding nothing, a blob with
 /// no account half and a blob that is not one are three different answers.
 struct ClaudeCLISlot: Sendable {
     enum Failure: Error, Equatable {
@@ -182,14 +127,10 @@ struct ClaudeCLISlot: Sendable {
     var names: @Sendable () -> [Name]
     /// The bytes at one name, nil where there are none.
     var read: @Sendable (Name) throws -> Data?
-    var write: @Sendable (Name, Data) throws -> Void
-    /// Takes away what a failed switch created where there had been nothing.
-    var remove: @Sendable (Name) throws -> Void
 
-    /// Reads and writes nothing. What a test gets unless it asks for the real
-    /// keychain, so a suite can never read the machine's own credential.
-    static let inert = Self(
-        names: { [] }, read: { _ in nil }, write: { _, _ in }, remove: { _ in })
+    /// Reads nothing. What a test gets unless it asks for the real keychain,
+    /// so a suite can never read the machine's own credential.
+    static let inert = Self(names: { [] }, read: { _ in nil })
 
     /// The name the CLI is reading its credential from, and those bytes, or
     /// nil when no name holds one.
@@ -239,24 +180,6 @@ struct ClaudeCLISlot: Sendable {
                 case .file:
                     guard FileManager.default.fileExists(atPath: mirror.path) else { return nil }
                     return try Data(contentsOf: mirror)
-                }
-            },
-            write: { name, data in
-                switch name {
-                case .keychain(let service):
-                    try ClaudeKeychainCLI.write(
-                        data, service: service, account: ClaudeKeychainCLI.claudeLoginName())
-                case .file:
-                    try data.write(to: mirror, options: .atomic)
-                }
-            },
-            remove: { name in
-                switch name {
-                case .keychain(let service):
-                    try ClaudeKeychainCLI.delete(
-                        service: service, account: ClaudeKeychainCLI.claudeLoginName())
-                case .file:
-                    try FileManager.default.removeItem(at: mirror)
                 }
             })
     }

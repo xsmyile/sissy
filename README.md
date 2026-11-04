@@ -144,9 +144,9 @@ the credential its CLI already stored, and cost no dialog either way.
 Codex's is a file in its config directory. Claude's is that same file, or
 an item read through `/usr/bin/security` where macOS keeps it in the
 login keychain instead, and that tool is already on the item's access
-list. Sissy never refreshes either of those. The one credential it renews
-is its own copy, minted when you link an account in the app, and it
-replaces one only when you pick an account with *Use in CLI*.
+list. Sissy never refreshes either of those, and never writes them. The one
+credential it renews is its own copy, minted when you link an account in the
+app.
 
 A forge connection reuses the token `gh` or `glab` already holds, or one you
 paste. Sissy warns first that a CLI's token usually carries write access to
@@ -183,8 +183,7 @@ empty for a month. Credentials sit in keychain items of Sissy's own, listed unde
 
 **What it writes elsewhere** is off by default. *Name projects even when Sissy is
 off* adds one line to `~/.claude/settings.json` and one to `~/.codex/hooks.json`,
-and takes both out when you switch it off. *Use in CLI* writes the Claude account
-you picked into the slot the CLI reads its credential from.
+and takes both out when you switch it off.
 
 [SECURITY.md](SECURITY.md) has the full surface: what Sissy reads, what it runs
 and what it holds.
@@ -205,12 +204,10 @@ What survives, and the way out of each:
 | The usage archive | Settings ▸ General ▸ Delete |
 | Everything else under `~/Library/Application Support/Sissy/` | delete the folder |
 | Logs under `~/Library/Logs/Sissy/` | delete the folder |
-| Archived Claude credentials (`com.radonforge.sissy.claude-account`) | Keychain Access, no control of its own yet |
 | A linked claude.ai session (`…claude-web`) | Settings ▸ Providers, on its row |
 | Linked Codex accounts (`…codex-oauth`) | Settings ▸ Providers, on its row |
 | Connected forge tokens (`…forge-token`) | Settings ▸ Forge, on its row |
 | Any CSV you exported | wherever you saved it |
-| The Claude account *Use in CLI* last wrote to the CLI | uninstalling does not put the previous one back; `/login` or another switch does |
 | The session hooks, if you switched them on | switch them off **before** uninstalling |
 
 The hooks are the one thing that keeps running once Sissy is gone: the script

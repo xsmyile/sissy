@@ -52,7 +52,7 @@ actor UsageEngine {
     /// `~/.claude/projects` after everything else had shut down and only
     /// drained when every provider finished its scan organically.
     private var bootTask: Task<Void, Never>?
-    /// Watches which Claude Code account is signed in and archives every one
+    /// Watches which Claude Code account is signed in and names every one
     /// it sees, which is what makes switching back to one possible at all.
     private let claudeAccounts: ClaudeAccountRegistry
     private var claudeAccountsTask: Task<Void, Never>?
@@ -394,7 +394,7 @@ actor UsageEngine {
             claudeAccounts
             ?? ClaudeAccountRegistry(
                 store: ClaudeAccountStore(indexURL: ClaudeAccountStore.defaultURL(in: stateDir)),
-                slot: claudeSlot, profile: .live(home: claudeHome))
+                slot: claudeSlot)
         self.claudeAccounts = accountRegistry
         let webIndex = ClaudeWebSessionIndex(
             url: ClaudeWebSessionIndex.defaultURL(in: stateDir))
@@ -681,11 +681,11 @@ actor UsageEngine {
         await reemit()
     }
 
-    /// Keeps the account archive level with whichever account is signed in.
+    /// Keeps the account index level with whichever account is signed in.
     ///
-    /// The poll is what catches a `/login` or a switch made outside Sissy, and
-    /// it is cheap: an unchanged credential costs a `security` call for each
-    /// slot name read, one more per archived account, and no request. Only a
+    /// The poll is what catches a `/login`, and it is cheap: an unchanged
+    /// credential costs a `security` call for each slot name read and no
+    /// request. Only a
     /// token Sissy has not filed buys a round trip to identify it, which is
     /// roughly once per token rotation.
     ///
@@ -751,7 +751,7 @@ actor UsageEngine {
 
     /// How often the active credential is re-read. Long on purpose: a token
     /// rotation is tens of minutes apart, and the only thing a shorter poll
-    /// would buy is noticing a switch sooner than the next frame.
+    /// would buy is noticing a `/login` sooner than the next frame.
     private static let claudeAccountPollInterval: Duration = .seconds(120)
 
     /// Writes what every tail is holding back on its throttles, for a Mac
@@ -933,11 +933,8 @@ actor UsageEngine {
     /// it is.
     ///
     /// The session is the only half of an account the user added, and the only
-    /// half Sissy can put back: another sign-in is a window away. The archived
-    /// CLI credential is untouched here on purpose — Sissy took that one
-    /// itself the first time the account was active, cannot mint a second, and
-    /// deleting it while the CLI is on that account leaves one copy in a slot
-    /// the next switch overwrites. Two lifetimes, which is what
+    /// half Sissy can put back: another sign-in is a window away. The name the
+    /// account index holds stays. Two lifetimes, which is what
     /// `ClaudeWebSessionIndex` is a separate list for.
     ///
     /// The keying pass is cancelled *and joined* first. Cancellation alone is
@@ -964,58 +961,9 @@ actor UsageEngine {
         return outcome
     }
 
-    /// Makes an account the one Claude Code starts as.
+    /// Every Claude Code account Sissy has seen signed in, and which one is.
     ///
-    /// Safe to write the CLI's slots here precisely because they are not where
-    /// the account lives: `ClaudeAccountRegistry` holds Sissy's own copy of
-    /// every account it has seen, so whatever this overwrites is still
-    /// recoverable in a click. It runs from the panel's own control and from
-    /// nothing else.
-    /// Guarded on the lifecycle for the reason every other control here is:
-    /// the host captures the engine strongly in an unstructured `Task`, so a
-    /// switch that lands after `stop()` would build the probe a fresh poll
-    /// loop and hold the dead engine alive through its callback.
-    ///
-    /// The row is emitted between the switch and the re-read rather than after
-    /// both, because the re-read is a credential and an HTTP round trip and a
-    /// control that sits in its old position for the length of one reads as a
-    /// click that did nothing. Same rule the provider toggle already follows.
-    ///
-    /// The identity on the row and the windows under it come from two places
-    /// that both answer for the account this just changed — the CLI's config
-    /// file and the CLI's credential — and neither is watched, so left to
-    /// their own cadences the switch half-happens: the address moves on the
-    /// next tail read while the gauges keep the percentages of the account the
-    /// user left.
-    ///
-    /// The imported claude.ai session is deliberately not refreshed. It is
-    /// Claude.app's account rather than the CLI's, and this control did not
-    /// touch it.
-    func activateClaudeAccount(uuid: String) async -> Result<Void, ClaudeAccountRegistry.Failure> {
-        guard lifecycle == .running else { return .failure(.notArchived) }
-        let outcome = await claudeAccounts.activate(uuid: uuid)
-        if case .failure(let why) = outcome {
-            sissyLog("sissy: could not switch Claude Code to \(uuid): \(why)")
-            await reemit()
-            return outcome
-        }
-        await reemit()
-        let me = self
-        // The block a refusal left belongs to the credential that earned it,
-        // and that credential has just been replaced. Keeping it would leave
-        // the account the user switched *to* with no limits until a deadline
-        // its own token never met — and, now the record outlives the process,
-        // past a relaunch as well.
-        await claudeOwnLimits?.clearBackoff()
-        await claudeOwnLimits?.refresh { await me.reemit() }
-        await aggregator.refreshSignals(for: ProviderID.claudeCode)
-        await reemit()
-        return outcome
-    }
-
-    /// Every Claude Code account Sissy has archived, and which is signed in.
-    ///
-    /// Nonisolated because the panel draws the switcher from it while the
+    /// Nonisolated because the panel draws the picker from it while the
     /// registry is busy identifying a credential, and a control that only
     /// appears once a network call has returned is a control nobody finds.
     nonisolated var claudeAccountSnapshot: ClaudeAccountRegistry.Snapshot {
@@ -1048,7 +996,7 @@ actor UsageEngine {
         ClaudeWebAccount.list(
             stored: ClaudeWebSessionStore.storedAccounts(),
             links: claudeWebLinks.load(),
-            archived: claudeAccounts.currentSnapshot().accounts)
+            known: claudeAccounts.currentSnapshot().accounts)
     }
 
     /// Claude Code credentials filed for config homes this engine does not

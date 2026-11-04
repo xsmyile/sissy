@@ -276,9 +276,6 @@ final class UsageEngineHost {
         refreshingAgents = false
         allRefresh?.cancel()
         allRefresh = nil
-        accountSwitch?.cancel()
-        accountSwitch = nil
-        switchingClaudeAccount = nil
         networkReading = nil
         diskActivityReading = nil
         guard let engine else { return }
@@ -326,64 +323,10 @@ final class UsageEngineHost {
         }
     }
 
-    /// Why the last account switch did not happen, or nil when none has
-    /// failed. Published because a switch that silently does nothing leaves
-    /// the user typing `claude` and meeting the account they just left.
-    ///
-    /// Cleared when the signed-in account moves, whoever moved it: a
-    /// `/login` or another tool's switch answers the question the warning
-    /// asked. Measured 2026-10-11, one survived 27 h and a switch made
-    /// elsewhere in between, because only the next press cleared it.
-    private(set) var accountSwitchFailure: String?
-    /// Every Claude Code account Sissy has archived, and which one is signed
-    /// in. Refreshed from the engine rather than held here, so the app keeps
-    /// no second copy of something the keychain decides.
+    /// Every Claude Code account Sissy has seen signed in, and which one is.
+    /// Refreshed from the engine rather than held here, so the app keeps no
+    /// second copy of something the CLI's credential decides.
     private(set) var claudeAccounts = ClaudeAccountRegistry.Snapshot()
-
-    /// Which account a switch is running for, or nil when none is.
-    ///
-    /// Published because the work is a keychain write and a network round trip
-    /// behind it: without a word on screen the panel sits unchanged for
-    /// seconds and the click reads as a control that did nothing. It carries
-    /// the uuid rather than a flag so the page can name the account it is
-    /// moving to rather than saying "working".
-    private(set) var switchingClaudeAccount: String?
-
-    /// Makes an archived account the one Claude Code starts as.
-    ///
-    /// Sissy holds its own copy of every account it has seen signed in, so
-    /// this overwrites the CLI's slots without putting any credential beyond
-    /// recovery — which is the whole difference from the version that lost
-    /// one.
-    ///
-    /// Non-re-entrant, on the same grounds as the refresh button: a second
-    /// click while the first write is in flight would race two credentials
-    /// into one slot.
-    func activateClaudeAccount(uuid: String) {
-        guard let engine, switchingClaudeAccount == nil else { return }
-        accountSwitchFailure = nil
-        switchingClaudeAccount = uuid
-        accountSwitch = Task { [weak self] in
-            await Self.holdingFloor {
-                let outcome = await engine.activateClaudeAccount(uuid: uuid)
-                guard !Task.isCancelled else { return }
-                if case .failure(let why) = outcome {
-                    self?.accountSwitchFailure = ClaudeAccountSwitchCopy.failure(why)
-                }
-                self?.claudeAccounts = engine.claudeAccountSnapshot
-            }
-            guard let self, !Task.isCancelled else { return }
-            switchingClaudeAccount = nil
-            accountSwitch = nil
-        }
-    }
-
-    /// The switch in flight, held so a teardown can cancel it. Its answer is
-    /// the old engine's once `releaseEngine()` has run: writing that engine's
-    /// snapshot and clearing the flag would land over a switch the next
-    /// engine has started, and let a third press race two credentials into
-    /// one slot.
-    @ObservationIgnored private var accountSwitch: Task<Void, Never>?
 
     /// Whether a claude.ai session is filed, so Settings can offer the right
     /// button. Asked without decrypting one, so it is answerable on a build
@@ -1391,20 +1334,15 @@ final class UsageEngineHost {
     /// compare is what keeps a steady state from invalidating the panel's view
     /// graph on every emit.
     ///
-    /// Without it the switcher could not appear at all: the property was
-    /// written only by `activateClaudeAccount`, which is reachable only from
-    /// the control that the list it populates is what draws.
-    ///
     /// The linked accounts are re-read with it because their names fall back
-    /// to this archive. Read once at `start`, they were named from whatever it
-    /// held then, which on a first launch is nothing: the archive fills on the
+    /// to this index. Read once at `start`, they were named from whatever it
+    /// held then, which on a first launch is nothing: the index fills on the
     /// registry's first capture, after the engine is built, and a session with
     /// no link of its own stayed a bare uuid in Settings until a relaunch.
     private func syncClaudeAccounts() {
         guard let engine else { return }
         let snapshot = engine.claudeAccountSnapshot
         guard snapshot != claudeAccounts else { return }
-        if snapshot.activeUUID != claudeAccounts.activeUUID { accountSwitchFailure = nil }
         claudeAccounts = snapshot
         linkedClaudeAccounts = engine.linkedClaudeAccounts
         settleUnlinkFailures()

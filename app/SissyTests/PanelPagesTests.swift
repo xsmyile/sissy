@@ -631,13 +631,12 @@ final class PanelPagesTests: XCTestCase {
         XCTAssertGreaterThan(PanelMetrics.maxHeight(on: nil), 0)
     }
 
-    /// Each vendor's picker says what it does, and only Claude Code's
-    /// promises a switch: a provider Sissy knows no account mechanics of
-    /// inherits neither that promise nor Codex's sentence naming Codex.
+    /// Each vendor's picker says what it does: a provider Sissy knows no
+    /// account mechanics of inherits no sentence naming another vendor.
     func testEachProviderGetsItsOwnPickerHelpAndAnUnknownOneTheNeutral() {
         XCTAssertEqual(
             PanelProviderPage.accountPickerHelp(for: ProviderID.claudeCode),
-            PanelProviderPage.switchablePickerHelp)
+            PanelProviderPage.claudeReadOnlyPickerHelp)
         XCTAssertEqual(
             PanelProviderPage.accountPickerHelp(for: ProviderID.codex),
             PanelProviderPage.readOnlyPickerHelp)

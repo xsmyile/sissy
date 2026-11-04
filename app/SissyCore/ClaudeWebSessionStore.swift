@@ -30,8 +30,8 @@ enum ClaudeWebSessionStore {
     /// Where a session waits until Sissy knows whose it is.
     ///
     /// Sessions are filed under the Anthropic account uuid they belong to,
-    /// which is the same key `ClaudeAccountStore` files a CLI credential
-    /// under — measured, both vendors' endpoints name an account with one id.
+    /// which is the same key `ClaudeAccountStore` files an identity under:
+    /// measured, both vendors' endpoints name an account with one id.
     /// A cookie is opaque, though, so only claude.ai can say which account a
     /// freshly imported one is for, and that answer can be unavailable exactly
     /// when the import happens.
