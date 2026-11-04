@@ -586,10 +586,10 @@ actor UsageEngine {
     /// beside it.
     ///
     /// The record is written only where a pass ran to completion and read
-    /// every log it listed. A cancelled one leaves nothing behind but the days
-    /// it had already proved whole, and the next launch asks again, as it does
-    /// for a provider whose pass met a log it could not read. That one withholds
-    /// its own record only: the providers after it still get their pass.
+    /// every log it listed. Until then the span is owed in the same file, so the
+    /// next launch asks again whatever the tail has done since, and a provider
+    /// whose pass met a log it could not read holds up its own record only: the
+    /// providers after it still get their pass.
     private func startArchiveBackfill() {
         guard lifecycle == .running,
             config.resolvedHistoryRetentionDays > 0,
@@ -605,11 +605,14 @@ actor UsageEngine {
                 let span = ArchiveBackfill.uncovered(
                     window,
                     coverage: ledger.coverage[provider.id],
+                    owed: ledger.owed[provider.id],
                     meteredThrough: ArchiveBackfill.lastMetered(snapshotAt: snapshot))
             else { continue }
             due.append((home: provider.home, span: span))
         }
         guard !due.isEmpty else { return }
+        ArchiveBackfillLedger.note(
+            passes: due.map { (provider: $0.home.id, span: $0.span) }, startingAt: ledgerURL)
         let me = self
         let stateDir = self.stateDir
         let pricingOverride = config.pricingOverride
@@ -627,8 +630,8 @@ actor UsageEngine {
                 if let catalog { await provider.applyPriceCatalog(catalog) }
                 let outcome = await provider.backfillArchive { await me.invalidateHistoryRollups() }
                 if Task.isCancelled { return }
-                guard outcome.complete else { continue }
-                await me.recordArchiveBackfill(provider: home.id, covered: span, at: ledgerURL)
+                await me.recordArchiveBackfill(
+                    provider: home.id, covered: span, unread: outcome.unread, at: ledgerURL)
             }
         }
     }
@@ -668,9 +671,17 @@ actor UsageEngine {
     /// Records that one provider's history has been indexed as far back as
     /// the window asked for. Read-modify-write on the actor, so two providers
     /// finishing close together cannot drop each other's entry.
-    private func recordArchiveBackfill(provider: String, covered span: Range<Date>, at url: URL) {
-        let updated = ArchiveBackfillLedger.load(from: url)
-            .recording(provider: provider, covered: span)
+    ///
+    /// A pass that met logs it could not read covered nothing, so it records what
+    /// it still owes and what stands in the way.
+    private func recordArchiveBackfill(
+        provider: String, covered span: Range<Date>, unread: [String] = [], at url: URL
+    ) {
+        let ledger = ArchiveBackfillLedger.load(from: url)
+        let updated =
+            unread.isEmpty
+            ? ledger.recording(provider: provider, covered: span)
+            : ledger.owing(provider: provider, span: span, unread: unread)
         do {
             try ArchiveBackfillLedger.save(updated, to: url)
         } catch {

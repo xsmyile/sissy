@@ -381,6 +381,69 @@ final class UsageEngineHistoryTests: XCTestCase {
             "the second provider's day was not archived")
     }
 
+    /// A Mac off for a fortnight comes back with a record, a gap, and a log in
+    /// that gap it cannot read. The pass writes no record, the tail then rewrites
+    /// its snapshot, and on the next launch the tail's reach was past the window's
+    /// end, so nothing ever went back for the log.
+    func testAGapThatMetAnUnreadableLogIsReadOnceTheLogCanBe() async throws {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let old = try XCTUnwrap(cal.date(byAdding: .day, value: -10, to: today))
+            .addingTimeInterval(12 * 60 * 60)
+        let covered = try XCTUnwrap(cal.date(byAdding: .day, value: -20, to: today))
+        let window = try XCTUnwrap(
+            ArchiveBackfill.window(retentionDays: ServerConfig.defaults.resolvedHistoryRetentionDays))
+        let ledgerURL = ArchiveBackfillLedger.defaultURL(in: tempDir)
+        try ArchiveBackfillLedger.save(
+            ArchiveBackfillLedger().recording(
+                provider: ProviderID.claudeCode, covered: window.lowerBound..<covered),
+            to: ledgerURL)
+        try writeClaudeTurn()
+        let name = "locked-\(UUID().uuidString).jsonl"
+        let locked = claudeDir.appendingPathComponent(name)
+        try ClaudeLogFixture.writeTurn(
+            to: locked, requestId: "r-locked", model: "claude-sonnet-4-6", input: 100, at: old)
+        try FileManager.default.setAttributes(
+            [.modificationDate: old, .posixPermissions: 0], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        }
+
+        let first = makeEngine()
+        await first.start { _ in }
+        try await waitFor { LoggedLines.contain(name) }
+        await first.stop()
+        XCTAssertNotNil(
+            ArchiveBackfill.lastMetered(snapshotAt: UsageStatePersistence.defaultURL(in: tempDir)),
+            "the tail left no snapshot, so this is not the case being held")
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        let second = makeEngine()
+        await second.start { _ in }
+        addTeardownBlock { await second.stop() }
+        let day = UsageReaderShared.dayFormatter.string(from: old)
+        try await waitFor {
+            UsageHistoryStore.load(provider: ProviderID.claudeCode, day: day, in: self.tempDir) != nil
+        }
+        XCTAssertNotNil(
+            UsageHistoryStore.load(provider: ProviderID.claudeCode, day: day, in: tempDir),
+            "the log was never read")
+        try await waitFor {
+            ArchiveBackfillLedger.load(from: ledgerURL).owed.isEmpty
+        }
+        XCTAssertEqual(ArchiveBackfillLedger.load(from: ledgerURL).owed, [:], "the span stayed owed")
+    }
+
+    /// Waits out a detached pass, for as long as a small tree could take.
+    private func waitFor(_ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(Self.backfillLandingWindow)
+        while !condition(), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     /// A `token_count` line as Codex writes one.
     private static func codexTurn(at when: Date) throws -> String {
         let stamp = ISO8601DateFormatter().string(from: when)
