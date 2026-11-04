@@ -91,7 +91,7 @@ actor UsageEngine {
     /// that arrives later must not need a new provider to be seen.
     /// One reader per linked claude.ai session, shared with the adapter's
     /// signals so both see the same set the moment it changes.
-    private let claudeWebSources = LockedValue<[ClaudeWebSource]>([])
+    nonisolated let claudeWebSources = LockedValue<[ClaudeWebSource]>([])
     /// What each linked session is, read once at launch and republished
     /// whenever a link changes. A `LockedValue` for the reason the sources
     /// are: the adapter's signals read it while the emitting provider still
@@ -105,7 +105,7 @@ actor UsageEngine {
     /// metered: that file is there on every Mac that has signed into `codex`,
     /// it needs no permission Sissy has to ask for, and without it the row's
     /// gauges are only ever as fresh as the last turn.
-    private let codexSources = LockedValue<[CodexUsageSource]>([])
+    nonisolated let codexSources = LockedValue<[CodexUsageSource]>([])
     /// What each linked Codex credential turned out to be, read once at launch
     /// and republished whenever a link changes.
     private let codexLinks = LockedValue<[String: CodexAccountLink]>([:])
@@ -741,10 +741,7 @@ actor UsageEngine {
     private func followStoredClaudeWebSessions() async {
         guard lifecycle == .running else { return }
         await rebuildClaudeWebSources()
-        let me = self
-        for source in claudeWebSources.load() {
-            await source.start(userInitiated: false) { await me.reemit() }
-        }
+        await startClaudeWebSources(userInitiated: false)
         await reemit()
     }
 
@@ -767,7 +764,9 @@ actor UsageEngine {
     /// The account watcher is waited for, not only cancelled. An engine is
     /// rebuilt on every provider toggle, and a watcher still identifying a
     /// token when its engine stopped went on to write the archive and the
-    /// index after the replacement's own watcher had started.
+    /// index after the replacement's own watcher had started. The session
+    /// adoption and the archive backfill are waited for on the same grounds:
+    /// both write files the replacement's own passes write too.
     func stop() async {
         lifecycle = .stopped
         await frameDelivery?.stop()
@@ -792,6 +791,8 @@ actor UsageEngine {
         // the wanted state false.
         await applyKeepAwake()
         await claudeAccountsTask?.value
+        await claudeWebAdoptionTask?.value
+        await backfillTask?.value
         await stopClaudeLimits()
         await stopCodexLimits()
         await statusMonitor.stop()
@@ -1494,14 +1495,26 @@ actor UsageEngine {
                 await me.noteOwnCredential(own.currentSignals().limitsState)
                 await me.reemit()
             }
+            guard lifecycle == .running else { return await own.stop() }
         }
         // The linked claude.ai sessions run beside it rather than instead of
         // it: `ClaudeCodeSignals.merge` prefers the CLI's own reading and falls
         // back to these, which are the only answer left on a Mac nobody has
         // signed the CLI into.
         await rebuildClaudeWebSources()
+        await startClaudeWebSources(userInitiated: userInitiated)
+    }
+
+    /// Starts every claude.ai reader. The lifecycle is checked on both sides
+    /// of each hop for the reason `startMonitor` checks it: a `stop()` landing
+    /// in one has already been through this set, so a reader started after it
+    /// would poll with nothing left to stop it.
+    private func startClaudeWebSources(userInitiated: Bool) async {
+        let me = self
         for source in claudeWebSources.load() {
+            guard lifecycle == .running else { return }
             await source.start(userInitiated: userInitiated) { await me.reemit() }
+            guard lifecycle == .running else { return await source.retire() }
         }
     }
 
@@ -1524,14 +1537,20 @@ actor UsageEngine {
     /// a `start` loop that read the set before this call can reach a reader
     /// this call has just discarded, and a poll loop on an object nothing
     /// holds outlives `stop()` and keeps the engine alive through its own
-    /// callback.
+    /// callback. The set is replaced before the first retire, in one step with
+    /// no suspension in it: an overlapping rebuild writing back what it read
+    /// before that suspension would drop a reader the other had just added,
+    /// with nothing left to stop it.
+    ///
+    /// A provider that is switched off has no reader, for the reason
+    /// `rebuildCodexSources` gives.
     private func rebuildClaudeWebSources() async {
-        let stored = Set(ClaudeWebSessionStore.storedAccounts())
-            .subtracting([ClaudeWebSessionStore.unkeyedAccount])
+        let stored =
+            meteringClaudeCode
+            ? Set(ClaudeWebSessionStore.storedAccounts())
+                .subtracting([ClaudeWebSessionStore.unkeyedAccount])
+            : []
         let existing = claudeWebSources.load()
-        for source in existing where !stored.contains(source.account) {
-            await source.retire()
-        }
         let kept = existing.filter { stored.contains($0.account) }
         let links = claudeWebLinks.load()
         let added = stored.subtracting(kept.map(\.account))
@@ -1544,6 +1563,9 @@ actor UsageEngine {
                         for: LimitsBackoffLedger.claudeWebKey(account: $0)))
             }
         claudeWebSources.store(kept + added)
+        for source in existing where !stored.contains(source.account) {
+            await source.retire()
+        }
     }
 
     /// Records whether the CLI turned out to keep a credential Sissy can read,
@@ -1554,10 +1576,12 @@ actor UsageEngine {
 
     /// Stops both readers. Which one was running is not worth remembering:
     /// stopping one that never started is a no-op, and asking would be a
-    /// second place for the answer to be wrong.
+    /// second place for the answer to be wrong. A claude.ai reader is retired
+    /// rather than stopped, because a `start` loop this landed behind can
+    /// still reach it and this is the last call that could stop it.
     private func stopClaudeLimits() async {
         for source in claudeWebSources.load() {
-            await source.stop()
+            await source.retire()
         }
         await claudeOwnLimits?.stop()
     }
@@ -1734,7 +1758,8 @@ actor UsageEngine {
     /// blank that account's gauges until its next request. A dropped one is
     /// retired rather than stopped, because this suspends — a `start` that
     /// read the set before this call can reach a reader this call discarded,
-    /// and a poll loop on an object nothing holds outlives `stop()`.
+    /// and a poll loop on an object nothing holds outlives `stop()`. The set
+    /// is replaced first, for the reason `rebuildClaudeWebSources` gives.
     private func rebuildCodexSources() async {
         // A provider that is switched off has no reader, whatever the keychain
         // holds: the rule is that a module which is off does not exist as far
@@ -1743,14 +1768,14 @@ actor UsageEngine {
         let stored = meteringCodex ? Set(CodexAccountStore.storedAccounts()) : []
         let links = codexLinks.load()
         let split = Self.partitionCodexSources(codexSources.load(), stored: stored, links: links)
-        for source in split.retired {
-            await source.retire()
-        }
         let kept = split.kept
         let added = stored.subtracting(kept.compactMap(\.account))
             .sorted()
             .map { Self.linkedCodexSource(id: $0, links: links, backoff: limitsBackoff) }
         codexSources.store(kept + added)
+        for source in split.retired {
+            await source.retire()
+        }
     }
 
     /// Which readers a rebuild keeps and which it retires.
@@ -1789,13 +1814,16 @@ actor UsageEngine {
     private func startCodexLimits(userInitiated: Bool) async {
         let me = self
         for source in codexSources.load() {
+            guard lifecycle == .running else { return }
             await source.start(userInitiated: userInitiated) { await me.reemit() }
+            guard lifecycle == .running else { return await source.retire() }
         }
     }
 
+    /// Retires every Codex reader, for the reason `stopClaudeLimits` does.
     private func stopCodexLimits() async {
         for source in codexSources.load() {
-            await source.stop()
+            await source.retire()
         }
     }
 
@@ -2551,6 +2579,7 @@ actor UsageEngine {
             await aggregator.applyPriceCatalog(resolved)
             await applyPricing(resolved)
         }
+        guard lifecycle == .running else { return }
         let aggregator = self.aggregator
         priceCatalogTask = Task.detached { [weak self] in
             await PriceCatalogSource.refreshLoop(
