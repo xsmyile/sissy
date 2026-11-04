@@ -145,18 +145,8 @@ struct PanelMac: View {
         } content: {
             VStack(alignment: .leading, spacing: Self.rowSpacing) {
                 ForEach(apps) { app in
-                    HStack(spacing: 6) {
-                        Text(app.name)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer(minLength: 8)
-                        Text(app.footprint)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    .font(.system(size: PanelMetrics.rowText))
-                    .help(app.id)
+                    PanelFigureRow(label: app.name, value: app.footprint, emphasizesLabel: true)
+                        .help(app.id)
                 }
             }
         }

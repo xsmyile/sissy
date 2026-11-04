@@ -322,8 +322,8 @@ struct PanelProviderPage: View {
         }
     }
 
-    /// A sentence under the identity line, for what the switcher has to say
-    /// about an account rather than about its limits.
+    /// A sentence under a block's own line, for what the switcher or a reset
+    /// has to say about an account rather than about its limits.
     private func identityCaption(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11))
@@ -553,9 +553,7 @@ struct PanelProviderPage: View {
     /// already is.
     private var limits: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                SectionLabel(text: "Limits")
-                Spacer(minLength: 0)
+            SectionHeader("Limits") {
                 if let caption = shownWindowsCaption {
                     Text(caption)
                         .font(.system(size: 10))
@@ -620,9 +618,7 @@ struct PanelProviderPage: View {
         -> some View
     {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                SectionLabel(text: LimitResetCopy.section)
-                Spacer(minLength: 0)
+            SectionHeader(LimitResetCopy.section) {
                 if let resets {
                     Text(resets.headline)
                         .font(.system(size: 12))
@@ -654,20 +650,13 @@ struct PanelProviderPage: View {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
-                    resetCaption(LimitResetCopy.spending)
+                    identityCaption(LimitResetCopy.spending)
                 }
                 .padding(.top, 4)
             } else if let report = resetReport, report.target == target {
                 resetOutcome(report)
             }
         }
-    }
-
-    private func resetCaption(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The question and the two answers, inside the panel, on the rules the
@@ -680,7 +669,7 @@ struct PanelProviderPage: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(LimitResetCopy.confirmTitle)
                 .font(.system(size: 12, weight: .medium))
-            resetCaption(
+            identityCaption(
                 LimitResetCopy.confirmBody(
                     available: resets.available, clears: resets.clears,
                     naturalReset: naturalReset, appliesNow: resets.appliesNow,
@@ -715,7 +704,7 @@ struct PanelProviderPage: View {
     @ViewBuilder
     private func resetOutcome(_ report: LimitResetReport) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            resetCaption(LimitResetCopy.outcome(report.outcome, provider: report.target.provider))
+            identityCaption(LimitResetCopy.outcome(report.outcome, provider: report.target.provider))
                 .frame(maxWidth: .infinity, alignment: .leading)
             if report.outcome == .unconfirmed {
                 Button(LimitResetCopy.retry) { useReset(report.target) }
@@ -750,9 +739,7 @@ struct PanelProviderPage: View {
     /// percentage *of*, on the heading line both already share.
     private func credits(_ credits: UsagePanelSnapshot.CreditsRow) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                SectionLabel(text: "Credits")
-                Spacer(minLength: 0)
+            SectionHeader("Credits") {
                 Text(UsageFormat.creditsReading(amount: credits.amount, percent: credits.percent))
                     .font(.system(size: 12))
                     .monospacedDigit()

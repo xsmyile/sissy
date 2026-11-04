@@ -660,16 +660,9 @@ struct UsagePanelView: View {
     /// rows stand still, so without it the button reads as broken.
     private func identitiesHeader(checkedAt: Date?, back: Page) -> some View {
         subpageHeader(back: back, mark: nil, title: "Identities") {
-            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
-                if let line = UsageFormat.identitiesReading(
-                    checkedAt: checkedAt, refreshing: model.engine.refreshingIdentities,
-                    now: context.date)
-                {
-                    Text(line)
-                        .font(.system(size: PanelMetrics.headlineMeta))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
+            PanelAgeText(size: PanelMetrics.headlineMeta) { now in
+                UsageFormat.identitiesReading(
+                    checkedAt: checkedAt, refreshing: model.engine.refreshingIdentities, now: now)
             }
         } trailing: {
             refreshButton(help: "Read every repository's commit identity again") {

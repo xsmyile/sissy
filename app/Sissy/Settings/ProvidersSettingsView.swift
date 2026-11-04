@@ -417,18 +417,10 @@ struct ProvidersSettingsView: View {
     /// above, which are its preview: they redraw under the format as it is
     /// picked.
     private var accountNames: some View {
-        LabeledContent {
-            Picker(AccountNamingCopy.label, selection: accountNameFormatBinding) {
-                ForEach(AccountNameFormat.allCases, id: \.self) { format in
-                    Text(AccountNamingCopy.title(format)).tag(format)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
-        } label: {
-            Text(AccountNamingCopy.label)
-            Text(AccountNamingCopy.caption)
-        }
+        SettingsPickerRow(
+            title: AccountNamingCopy.label, caption: AccountNamingCopy.caption,
+            selection: accountNameFormatBinding,
+            options: AccountNameFormat.allCases, optionTitle: AccountNamingCopy.title)
     }
 
     private var accountNameFormatBinding: Binding<AccountNameFormat> {

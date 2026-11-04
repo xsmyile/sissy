@@ -27,13 +27,14 @@ struct PanelDisk: View {
                 VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
                     headline
                     VStack(alignment: .leading, spacing: 4) {
-                        DiskBar(
-                            used: block.used,
-                            marks: [
-                                block.warnMark.map { ($0, MacHealthLevel.warn) },
-                                block.criticalMark.map { ($0, MacHealthLevel.critical) },
-                            ].compactMap { $0 },
-                            tint: MacLevelStyle.tint(block.free.level))
+                        BarCanvas(
+                            share: block.used,
+                            segments: [
+                                BarSegment(share: block.used, tint: MacLevelStyle.tint(block.free.level))
+                            ],
+                            marks: marks
+                        )
+                        .frame(height: PanelMetrics.barHeight)
                         Text(block.thresholds)
                             .font(.system(size: Self.legendSize))
                             .monospacedDigit()
@@ -56,6 +57,16 @@ struct PanelDisk: View {
     }
 
     // MARK: Home volume
+
+    /// A mark where each step begins, in the colour of the step it opens, so a
+    /// fill that has passed the orange one is a disk at warn without reading
+    /// the legend.
+    private var marks: [BarMark] {
+        [
+            block.warnMark.map { BarMark(share: $0, tint: MacLevelStyle.tint(.warn)) },
+            block.criticalMark.map { BarMark(share: $0, tint: MacLevelStyle.tint(.critical)) },
+        ].compactMap { $0 }
+    }
 
     /// The free space as the tab's one number, in the level's colour, with
     /// what it is out of and the read's age under it.
@@ -82,67 +93,12 @@ struct PanelDisk: View {
             VStack(alignment: .leading, spacing: Self.rowSpacing) {
                 ForEach(block.volumes) { volume in
                     VStack(alignment: .leading, spacing: Self.volumeSpacing) {
-                        HStack(spacing: 6) {
-                            Text(volume.name)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: 8)
-                            Text(volume.free)
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        .font(.system(size: PanelMetrics.rowText))
+                        PanelFigureRow(label: volume.name, value: volume.free, emphasizesLabel: true)
                         ShareBar(share: volume.used, tint: .secondary)
                     }
                     .accessibilityElement(children: .combine)
                 }
             }
         }
-    }
-}
-
-/// The home volume's used share, with a mark where each step begins.
-///
-/// The marks are cut out of the bar the way the usage gauges cut their pace
-/// mark, in the colour of the step they open, so a fill that has passed the
-/// orange one is a disk at warn without reading the legend.
-private struct DiskBar: View {
-    let used: Double
-    let marks: [(share: Double, level: MacHealthLevel)]
-    let tint: Color
-
-    var body: some View {
-        Canvas { context, size in
-            let bounds = CGRect(origin: .zero, size: size)
-            context.fill(Self.capsule(bounds), with: .style(.quaternary))
-            let fill = BarGeometry.fillWidth(used, in: size.width)
-            if fill > 0 {
-                context.fill(
-                    Self.capsule(CGRect(x: 0, y: 0, width: fill, height: size.height)),
-                    with: .style(tint.gradient))
-            }
-            for mark in marks {
-                let centre = BarGeometry.markCentre(mark.share, in: size.width)
-                context.blendMode = .destinationOut
-                context.fill(
-                    Self.capsule(Self.markRect(centre, BarGeometry.markGap, size.height)),
-                    with: .color(.white))
-                context.blendMode = .normal
-                context.fill(
-                    Self.capsule(Self.markRect(centre, BarGeometry.markWidth, size.height)),
-                    with: .color(MacLevelStyle.tint(mark.level)))
-            }
-        }
-        .frame(height: PanelMetrics.barHeight)
-    }
-
-    private static func markRect(_ centre: CGFloat, _ width: CGFloat, _ height: CGFloat) -> CGRect {
-        CGRect(x: centre - width / 2, y: 0, width: width, height: height)
-    }
-
-    private static func capsule(_ rect: CGRect) -> Path {
-        let radius = min(rect.width, rect.height) / 2
-        return Path { $0.addRoundedRect(in: rect, cornerSize: CGSize(width: radius, height: radius)) }
     }
 }

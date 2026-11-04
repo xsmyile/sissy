@@ -44,6 +44,31 @@ extension SettingsSwitchRow where Heading == Text {
     }
 }
 
+/// One choice among a type's cases, in the same shape: the heading and its
+/// caption beside a menu sized to what it says rather than to the row.
+struct SettingsPickerRow<Option: Hashable>: View {
+    let title: String
+    let caption: String
+    @Binding var selection: Option
+    let options: [Option]
+    let optionTitle: (Option) -> String
+
+    var body: some View {
+        LabeledContent {
+            Picker(title, selection: $selection) {
+                ForEach(options, id: \.self) { option in
+                    Text(optionTitle(option)).tag(option)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        } label: {
+            Text(title)
+            Text(caption)
+        }
+    }
+}
+
 extension View {
     /// A removal asked about before it runs: raised while `item` holds what
     /// the row's menu chose, and dropped by either button.
