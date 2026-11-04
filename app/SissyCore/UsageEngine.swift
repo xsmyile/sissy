@@ -1098,8 +1098,18 @@ actor UsageEngine {
     /// second cause wearing the same face would leave the panel saying
     /// something that is true of two different Macs. A switch back in the off
     /// position is unambiguous, and clicking it again is one gesture.
-    private func keepAwakeDeadlinePassed() async {
+    ///
+    /// Read again here, because the loop read it before hopping to the engine: a
+    /// ceiling picked in that hop moved it, and that run is not over. Rearmed
+    /// rather than left, since a turn pushing an automatic deadline along arms
+    /// nothing of its own.
+    func keepAwakeDeadlinePassed() async {
         guard lifecycle == .running else { return }
+        guard let deadline = keepAwake.deadline(config: config), deadline.timeIntervalSinceNow <= 0
+        else {
+            rearmKeepAwakeDeadline()
+            return
+        }
         if config.keepAwake == .on {
             sissyLog("sissy: keep-awake reached its ceiling and switched itself off")
             await setKeepAwake(mode: KeepAwakeMode.off.rawValue)
