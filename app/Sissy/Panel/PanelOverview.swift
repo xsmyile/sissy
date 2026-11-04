@@ -455,7 +455,7 @@ struct PanelOverview: View {
     /// ticks for the reason `WindowRowView` does: the line is a duration, and
     /// one built with the body goes stale while the engine coalesces emits.
     private func providerRow(_ row: UsagePanelSnapshot.GaugeRow, grouped: Bool) -> some View {
-        let binding = UsagePanelSnapshot.binding(row.windows)
+        let binding = UsagePanelSnapshot.binding(row.reading.windows)
         return TimelineView(.periodic(from: .now, by: Self.resetTick)) { context in
             providerRowBody(row, grouped: grouped, binding: binding, now: context.date)
         }
@@ -485,10 +485,10 @@ struct PanelOverview: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .accessibilityLabel(Self.legendHelp(row))
-                if grouped, let plan = row.plan {
-                    PlanBadge(plan: plan, tier: row.planTier)
+                if grouped, let plan = row.reading.plan {
+                    PlanBadge(plan: plan, tier: row.reading.planTier)
                 }
-                if let notice = row.notice {
+                if let notice = row.reading.notice {
                     Image(Glyph.alert02)
                         .font(.system(size: 10))
                         .foregroundStyle(.orange)

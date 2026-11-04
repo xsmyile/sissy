@@ -75,7 +75,7 @@ final class PanelPagesTests: XCTestCase {
             ]),
             limitsReading: reading,
             now: Self.now
-        ).providers[0].windows
+        ).providers[0].reading.windows
     }
 
     /// Reading a gauge from the other end is a wording. It must not reach
@@ -184,7 +184,7 @@ final class PanelPagesTests: XCTestCase {
     }
 
     func testAProviderReportingNoWindowHasNoneThatBinds() {
-        let rows = UsagePanelSnapshot.make(frame: frame([slice("codex")])).providers[0].windows
+        let rows = UsagePanelSnapshot.make(frame: frame([slice("codex")])).providers[0].reading.windows
 
         XCTAssertNil(UsagePanelSnapshot.binding(rows))
     }
@@ -285,7 +285,7 @@ final class PanelPagesTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame([slice("claude-code", limitsState: .needsAuthorization)]))
 
-        XCTAssertNotNil(try XCTUnwrap(snapshot.providers.first).notice)
+        XCTAssertNotNil(try XCTUnwrap(snapshot.providers.first).reading.notice)
     }
 
     /// A vendor refusing to answer is the one limits problem whose windows
@@ -297,7 +297,7 @@ final class PanelPagesTests: XCTestCase {
                 slice("claude-code", limitsState: .rateLimited(until: Date().addingTimeInterval(600)))
             ]))
 
-        let notice = try XCTUnwrap(try XCTUnwrap(snapshot.providers.first).notice)
+        let notice = try XCTUnwrap(try XCTUnwrap(snapshot.providers.first).reading.notice)
         XCTAssertTrue(notice.message.hasPrefix("Anthropic is not answering"), notice.message)
         XCTAssertNil(notice.action)
     }
@@ -305,7 +305,7 @@ final class PanelPagesTests: XCTestCase {
     func testAProviderWithNothingWrongCarriesNoMark() throws {
         let snapshot = UsagePanelSnapshot.make(frame: frame([slice("codex")]))
 
-        XCTAssertNil(try XCTUnwrap(snapshot.providers.first).notice)
+        XCTAssertNil(try XCTUnwrap(snapshot.providers.first).reading.notice)
     }
 
     // MARK: Account

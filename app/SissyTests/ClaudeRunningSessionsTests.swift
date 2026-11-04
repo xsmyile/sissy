@@ -531,8 +531,8 @@ final class ClaudeRunningRowsTests: XCTestCase {
             [row("signed", signedIn: true)],
             ["signed": found("signed", sessions: 8), "other": found("other", sessions: 1)])
 
-        XCTAssertEqual(entries(rows).first { $0.id == "signed" }?.runningSessions, 8)
-        XCTAssertEqual(entries(rows).first { $0.id == "other" }?.runningSessions, 1)
+        XCTAssertEqual(entries(rows).first { $0.id == "signed" }?.reading.runningSessions, 8)
+        XCTAssertEqual(entries(rows).first { $0.id == "other" }?.reading.runningSessions, 1)
     }
 
     /// A row with nothing behind it invites a link rather than claiming a
@@ -606,12 +606,13 @@ final class ClaudeRunningRowsTests: XCTestCase {
 
         XCTAssertTrue(row.accounts.isEmpty)
         XCTAssertEqual(row.account?.name, "Named sole")
-        XCTAssertNotNil(row.plan)
-        XCTAssertEqual(row.windows.map(\.percent), [61])
-        XCTAssertNotNil(row.windowsCaption)
-        XCTAssertEqual(row.runningSessions, 2)
-        XCTAssertEqual(ClaudeAccountCopy.inUseCaption(sessions: row.runningSessions), "In use · 2 sessions")
-        XCTAssertEqual(made.gaugeRows.first?.windows.map(\.percent), [61])
+        XCTAssertNotNil(row.reading.plan)
+        XCTAssertEqual(row.reading.windows.map(\.percent), [61])
+        XCTAssertNotNil(row.reading.windowsCaption)
+        XCTAssertEqual(row.reading.runningSessions, 2)
+        XCTAssertEqual(
+            ClaudeAccountCopy.inUseCaption(sessions: row.reading.runningSessions), "In use · 2 sessions")
+        XCTAssertEqual(made.gaugeRows.first?.reading.windows.map(\.percent), [61])
     }
 
     /// With nothing cached it still has its name and count, and whatever the
@@ -623,10 +624,10 @@ final class ClaudeRunningRowsTests: XCTestCase {
         let row = snapshot(signals: reading).providers[0]
 
         XCTAssertEqual(row.account?.name, "Named sole")
-        XCTAssertEqual(row.runningSessions, 2)
-        XCTAssertTrue(row.windows.isEmpty)
-        XCTAssertNil(row.windowsCaption)
-        XCTAssertNotNil(row.notice)
+        XCTAssertEqual(row.reading.runningSessions, 2)
+        XCTAssertTrue(row.reading.windows.isEmpty)
+        XCTAssertNil(row.reading.windowsCaption)
+        XCTAssertNotNil(row.reading.notice)
     }
 
     /// Gauges under `No stored Claude login` would contradict each other, and
@@ -635,7 +636,7 @@ final class ClaudeRunningRowsTests: XCTestCase {
         var reading = signals([runningOnly(windows: [try window()])])
         reading.limitsState = .signedOut
 
-        XCTAssertNil(snapshot(signals: reading).providers[0].notice)
+        XCTAssertNil(snapshot(signals: reading).providers[0].reading.notice)
     }
 
     func testAnIndexEntryForTheSameAccountStillReachesTheRow() throws {
@@ -681,8 +682,8 @@ final class ClaudeRunningRowsTests: XCTestCase {
 
         let row = snapshot(signals: reading).providers[0]
 
-        XCTAssertEqual(row.windows.map(\.percent), [20])
-        XCTAssertEqual(row.runningSessions, 3)
+        XCTAssertEqual(row.reading.windows.map(\.percent), [20])
+        XCTAssertEqual(row.reading.runningSessions, 3)
     }
 
     // MARK: The pace
@@ -694,17 +695,17 @@ final class ClaudeRunningRowsTests: XCTestCase {
         reading.windows = [try window()]
         reading.limitsObservedAt = Date()
 
-        XCTAssertNotNil(snapshot(signals: reading).providers[0].windows.first?.pace)
+        XCTAssertNotNil(snapshot(signals: reading).providers[0].reading.windows.first?.pace)
     }
 
     func testASoleRunningAccountsGaugesDrawNoPace() throws {
         let row = snapshot(signals: signals([runningOnly(windows: [try window()])])).providers[0]
-        let drawn = try XCTUnwrap(row.windows.first)
+        let drawn = try XCTUnwrap(row.reading.windows.first)
 
         XCTAssertNil(drawn.pace)
         XCTAssertEqual(drawn.percent, 61)
         XCTAssertNotNil(drawn.resetsAt)
-        XCTAssertNotNil(row.windowsCaption)
+        XCTAssertNotNil(row.reading.windowsCaption)
     }
 
     func testARunningOnlyEntrysGaugesDrawNoPaceBesideAPacedOne() throws {
@@ -714,10 +715,10 @@ final class ClaudeRunningRowsTests: XCTestCase {
 
         let found = entries([signed, runningOnly(windows: [try window()])])
 
-        XCTAssertNotNil(found.first { $0.id == "signed" }?.windows.first?.pace)
+        XCTAssertNotNil(found.first { $0.id == "signed" }?.reading.windows.first?.pace)
         let cached = try XCTUnwrap(found.first { $0.id == "sole" })
-        XCTAssertNil(cached.windows.first?.pace)
-        XCTAssertEqual(cached.windows.first?.percent, 61)
-        XCTAssertNotNil(cached.windowsCaption)
+        XCTAssertNil(cached.reading.windows.first?.pace)
+        XCTAssertEqual(cached.reading.windows.first?.percent, 61)
+        XCTAssertNotNil(cached.reading.windowsCaption)
     }
 }

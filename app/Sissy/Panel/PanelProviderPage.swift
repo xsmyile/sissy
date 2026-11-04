@@ -89,33 +89,15 @@ struct PanelProviderPage: View {
             ?? row.accounts.first
     }
 
-    private var shownCredits: UsagePanelSnapshot.CreditsRow? {
-        viewed.map(\.credits) ?? row.credits
-    }
-
-    private var shownResets: UsagePanelSnapshot.ResetsRow? {
-        viewed.map(\.resets) ?? row.resets
-    }
-
-    private var shownResetTarget: LimitResetTarget? {
-        viewed.map(\.resetTarget) ?? row.resetTarget
+    /// The reading of the account being read, which is the row's own while
+    /// there is one account.
+    private var shown: UsagePanelSnapshot.AccountReading {
+        viewed?.reading ?? row.reading
     }
 
     private var shownName: String? { viewed.map(\.label) ?? row.account?.name }
 
     private var shownDetail: String? { viewed.map(\.detail) ?? row.account?.detail }
-
-    private var shownPlan: String? { viewed.map(\.plan) ?? row.plan }
-
-    private var shownPlanTier: String? { viewed.map(\.planTier) ?? row.planTier }
-
-    private var shownWindowsCaption: String? {
-        viewed.map(\.windowsCaption) ?? row.windowsCaption
-    }
-
-    private var shownNotice: UsagePanelSnapshot.LimitsNotice? {
-        viewed.map(\.notice) ?? row.notice
-    }
 
     private var tint: Color { ProviderPalette.tint(for: row.id) }
 
@@ -170,12 +152,12 @@ struct PanelProviderPage: View {
             VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
                 limits
 
-                if let target = shownResetTarget, shownResets != nil || hasResetActivity(target) {
+                if let target = shown.resetTarget, shown.resets != nil || hasResetActivity(target) {
                     Divider()
-                    resets(shownResets, target: target)
+                    resets(shown.resets, target: target)
                 }
 
-                if let credits = shownCredits {
+                if let credits = shown.credits {
                     Divider()
                     self.credits(credits)
                 }
@@ -263,7 +245,7 @@ struct PanelProviderPage: View {
     /// a label on the app.
     @ViewBuilder
     private var identity: some View {
-        if row.account != nil || row.plan != nil || !row.accounts.isEmpty
+        if row.account != nil || row.reading.plan != nil || !row.accounts.isEmpty
             || row.accountsNotice != nil
         {
             PanelGroup {
@@ -285,7 +267,7 @@ struct PanelProviderPage: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     if let inUse = ClaudeAccountCopy.inUseCaption(
-                        sessions: viewed.map(\.runningSessions) ?? row.runningSessions)
+                        sessions: shown.runningSessions)
                     {
                         identityCaption(inUse)
                     }
@@ -320,8 +302,11 @@ struct PanelProviderPage: View {
             Menu {
                 Picker("Account", selection: accountBinding) {
                     ForEach(row.accounts) { choice in
-                        Text(ClaudeAccountCopy.menuLabel(choice.label, sessions: choice.runningSessions))
-                            .tag(choice.id)
+                        Text(
+                            ClaudeAccountCopy.menuLabel(
+                                choice.label, sessions: choice.reading.runningSessions)
+                        )
+                        .tag(choice.id)
                     }
                 }
                 .pickerStyle(.inline)
@@ -404,7 +389,7 @@ struct PanelProviderPage: View {
     /// where a long one squeezed it to an ellipsis.
     @ViewBuilder
     private var nameLine: some View {
-        if shownName != nil || shownPlan != nil {
+        if shownName != nil || shown.plan != nil {
             HStack(spacing: 6) {
                 if let name = shownName {
                     Text(name)
@@ -413,8 +398,8 @@ struct PanelProviderPage: View {
                         .truncationMode(.middle)
                         .textSelection(.enabled)
                 }
-                if let plan = shownPlan {
-                    PlanBadge(plan: plan, tier: shownPlanTier)
+                if let plan = shown.plan {
+                    PlanBadge(plan: plan, tier: shown.planTier)
                 }
             }
         }
@@ -427,13 +412,7 @@ struct PanelProviderPage: View {
     /// lives, so the page and the Overview's legend cannot lead on different
     /// windows of the same provider.
     private var binding: UsagePanelSnapshot.WindowRow? {
-        UsagePanelSnapshot.binding(shownWindows)
-    }
-
-    /// The windows of the account being read, which is the row's own while
-    /// there is one account.
-    private var shownWindows: [UsagePanelSnapshot.WindowRow] {
-        viewed.map(\.windows) ?? row.windows
+        UsagePanelSnapshot.binding(shown.windows)
     }
 
     /// Every window this provider reports, shortest first, with the reason
@@ -455,7 +434,7 @@ struct PanelProviderPage: View {
     private var limits: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionHeader("Limits") {
-                if let caption = shownWindowsCaption {
+                if let caption = shown.windowsCaption {
                     Text(caption)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -463,13 +442,13 @@ struct PanelProviderPage: View {
                 }
             }
 
-            if let notice = shownNotice {
+            if let notice = shown.notice {
                 LimitsNoticeView(
                     notice: notice, act: notice.kind == .link ? onAddAccount : refresh)
             }
 
-            if shownWindows.isEmpty {
-                if shownNotice == nil {
+            if shown.windows.isEmpty {
+                if shown.notice == nil {
                     Text(
                         viewed.map { $0.isReadable } == false
                             ? UsageFormat.unlinkedAccountCaption
@@ -480,7 +459,7 @@ struct PanelProviderPage: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                ForEach(shownWindows) { window in
+                ForEach(shown.windows) { window in
                     WindowRowView(
                         window: window, tint: tint, isBinding: window.id == binding?.id)
                 }
@@ -592,7 +571,7 @@ struct PanelProviderPage: View {
     /// The longest window the page shows with a reset still ahead, and how
     /// long until it comes on its own.
     private var naturalReset: (label: String, countdown: String)? {
-        for window in shownWindows.reversed() {
+        for window in shown.windows.reversed() {
             if let resetsAt = window.resetsAt,
                 let countdown = UsageFormat.resetLabel(resetsAt, now: Date())
             {

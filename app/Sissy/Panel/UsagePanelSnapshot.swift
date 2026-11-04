@@ -342,17 +342,14 @@ struct UsagePanelSnapshot: Equatable {
         /// which by default is a team seat's organisation and a personal
         /// plan's owner. Nil for a vendor drawing one row.
         let qualifier: String?
-        /// The account's plan, worded, for the badge a row under a vendor's
-        /// label carries. Nil for a vendor drawing one row, whose plan is on
-        /// its page.
-        var plan: String?
-        var planTier: String?
         /// How many accounts the vendor's picker lists, for the count over a
         /// vendor drawing more than one row. Not how many rows it draws: an
         /// account with no reading has no row and is still one of the vendor's.
         var accountCount: Int = 1
-        let windows: [WindowRow]
-        let notice: LimitsNotice?
+        /// The account's reading. Its plan is the badge a row under a vendor's
+        /// label carries, so it is nil for a vendor drawing one row, whose plan
+        /// is on its page.
+        let reading: AccountReading
         let status: StatusRow?
 
         /// The row as one string, `Claude · Acme Srl`, for the hover and the
@@ -360,6 +357,45 @@ struct UsagePanelSnapshot: Equatable {
         var title: String {
             qualifier.map { "\(name) · \($0)" } ?? name
         }
+    }
+
+    /// What the panel reads about one account, whichever row carries it: an
+    /// entry in a vendor's list, the vendor's own row while it has one account,
+    /// or a gauge on the Overview.
+    struct AccountReading: Equatable {
+        /// Subscription plan, already worded. Nil leaves the row's header at
+        /// the name alone: an API-key user has no plan to name, and a Codex
+        /// that has not taken a turn yet has not said which it is on.
+        var plan: String?
+        /// Limit tier, worded, and only when it is not already part of
+        /// `plan`: a seat metered at a tier of another plan. It goes to the
+        /// tooltip: the badge is for the plan the user pays for.
+        var planTier: String?
+        /// Shortest window first. Empty when the account reports none, which
+        /// its page answers with a sentence rather than a blank block.
+        var windows: [WindowRow] = []
+        /// When those windows were taken, worded. Nil when there are none, and
+        /// when the provider published them without saying: a gauge with an
+        /// invented age would be worse than one with none.
+        var windowsCaption: String?
+        /// What to say and offer when the limits are missing for a reason the
+        /// user can act on. Nil the rest of the time, which is most of it.
+        var notice: LimitsNotice?
+        /// What the vendor has billed against a spend cap, worded. Nil for a
+        /// provider that publishes none and for an account with nothing to
+        /// say: no cap set and nothing spent, which is every account that
+        /// has never turned credits on.
+        var credits: CreditsRow?
+        /// The resets the vendor lets this account spend on its windows. Nil
+        /// for a provider that offers none, and for an account that holds none.
+        var resets: ResetsRow?
+        /// Whose credential a reset press on this account spends, nil for a
+        /// provider that offers none. Beside the row rather than on it, because
+        /// the press that spends the last reset takes the row away, and its
+        /// answer still has to be said somewhere.
+        var resetTarget: LimitResetTarget?
+        /// How many running sessions are on this account.
+        var runningSessions: Int = 0
     }
 
     /// One account of a vendor, as the panel knows it.
@@ -382,25 +418,14 @@ struct UsagePanelSnapshot: Equatable {
         /// The address and organisation the label leaves out, for the line
         /// under it on the provider page.
         let detail: String?
-        let plan: String?
-        let planTier: String?
-        /// Shortest window first, and empty for an account Sissy cannot read.
-        let windows: [WindowRow]
-        let windowsCaption: String?
-        let credits: CreditsRow?
-        let resets: ResetsRow?
-        /// Which credential a reset press for this account spends, nil for a
-        /// vendor that offers none.
-        let resetTarget: LimitResetTarget?
-        let notice: LimitsNotice?
+        /// Its windows are empty for an account Sissy cannot read.
+        let reading: AccountReading
         /// Whether Sissy has a source for this account at all. False is an
         /// invitation to link one rather than a failure to report.
         let isReadable: Bool
         /// Whether the CLI itself is signed in as this account — the one whose
         /// future spend lands in the day beside it.
         let isSignedIn: Bool
-        /// How many running sessions are on this account.
-        let runningSessions: Int
     }
 
     struct ProviderRow: Equatable, Identifiable {
@@ -408,36 +433,18 @@ struct UsagePanelSnapshot: Equatable {
         let name: String
         /// Every account of this vendor the panel knows. Empty when there is
         /// one, which is most installs — a picker over a single choice is a
-        /// control that does nothing, and the fields below are that one
-        /// account's reading anyway.
+        /// control that does nothing, and `reading` is that one account's
+        /// anyway.
         let accounts: [AccountEntry]
         /// Why accounts the picker used to list may be missing, worded. Nil
         /// the rest of the time, which is every install whose account index
         /// has always read.
         let accountsNotice: String?
-        /// Running sessions on the account the row's own fields describe, for
-        /// an install with one account, whose `accounts` is empty.
-        var runningSessions: Int = 0
-        /// Subscription plan, already worded. Nil leaves the row's header at
-        /// the name alone — an API-key user has no plan to name, and a Codex
-        /// that has not taken a turn yet has not said which it is on.
-        let plan: String?
-        /// Limit tier, worded, and only when it is not already part of
-        /// `plan` — a seat metered at a tier of another plan. It goes to the tooltip:
-        /// the badge is for the plan the user pays for.
-        let planTier: String?
+        /// The reading of the account this row's identity names, for an install
+        /// with one account, whose `accounts` is empty.
+        let reading: AccountReading
         let tokens: String
         let cost: String
-        /// Shortest window first. Empty when the provider reports none, which
-        /// its page answers with a sentence rather than a blank block.
-        let windows: [WindowRow]
-        /// When those windows were taken, worded. Nil when there are none, and
-        /// when the provider published them without saying — a gauge with an
-        /// invented age would be worse than one with none.
-        let windowsCaption: String?
-        /// What to say and offer when the limits are missing for a reason the
-        /// user can act on. Nil the rest of the time, which is most of it.
-        let notice: LimitsNotice?
         /// Who this provider is signed in as, worded. Nil when its own files
         /// name nobody.
         let account: AccountRow?
@@ -456,19 +463,6 @@ struct UsagePanelSnapshot: Equatable {
         /// them together with the archived days the strip draws, and a slice
         /// carrying a pre-shared row could not be added to another day's.
         let effort: [EffortSplit]
-        /// What the vendor has billed against a spend cap, worded. Nil for a
-        /// provider that publishes none and for an account with nothing to
-        /// say — no cap set and nothing spent, which is every account that
-        /// has never turned credits on.
-        let credits: CreditsRow?
-        /// The resets the vendor lets this account spend on its windows. Nil
-        /// for a provider that offers none, and for an account that holds none.
-        let resets: ResetsRow?
-        /// Whose credential a reset press on this row spends, nil for a
-        /// provider that offers none. Beside the row rather than on it, because the
-        /// press that spends the last reset takes the row away, and its answer
-        /// still has to be said somewhere.
-        let resetTarget: LimitResetTarget?
         /// What the vendor's own status page last said. Nil while the readings
         /// are switched off and for a provider with no feed to poll, which is
         /// what leaves the row off the page rather than putting an empty one
@@ -956,24 +950,23 @@ struct UsagePanelSnapshot: Equatable {
                     reading: limitsReading, naming: naming, now: now),
                 accountsNotice: slice.id == ProviderID.claudeCode && claudeAccounts.indexSetAside
                     ? ClaudeAccountCopy.indexSetAside : nil,
-                runningSessions: slice.signals.accounts.first { $0.isSignedIn }?.runningSessions
-                    ?? slice.signals.accounts.first?.runningSessions ?? 0,
-                plan: plan?.label,
-                planTier: plan?.tier,
+                reading: AccountReading(
+                    plan: plan,
+                    windows: source.windows,
+                    observedAt: source.observedAt,
+                    captionedAt: source.windows.isEmpty ? nil : source.observedAt,
+                    projecting: !source.isCached,
+                    notice: source.windows.isEmpty || !source.isCached
+                        ? UsageFormat.limitsNotice(slice.limitsState, provider: slice.id) : nil,
+                    credits: source.credits,
+                    resets: slice.resets,
+                    resetTarget: rowResetTarget(provider: slice.id, slice.signals.accounts),
+                    runningSessions: slice.signals.accounts.first { $0.isSignedIn }?.runningSessions
+                        ?? slice.signals.accounts.first?.runningSessions ?? 0,
+                    limitsReading: limitsReading,
+                    now: now),
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
-                windows: source.windows.map {
-                    makeWindow(
-                        $0, observedAt: source.observedAt ?? now, reading: limitsReading,
-                        projecting: !source.isCached, now: now)
-                },
-                windowsCaption: source.windows.isEmpty
-                    ? nil
-                    : source.observedAt.map {
-                        UsageFormat.windowsCaption(observedAt: $0, now: now)
-                    },
-                notice: source.windows.isEmpty || !source.isCached
-                    ? UsageFormat.limitsNotice(slice.limitsState, provider: slice.id) : nil,
                 account: makeAccount(
                     source.account, id: soleAccountID(slice.signals.accounts),
                     plan: source.plan, naming: naming),
@@ -983,9 +976,6 @@ struct UsagePanelSnapshot: Equatable {
                     slice.models, provider: slice.id, totalCost: slice.cost,
                     totalTokens: slice.tokens),
                 effort: slice.effort,
-                credits: makeCredits(source.credits, now: now),
-                resets: makeResets(slice.resets),
-                resetTarget: rowResetTarget(provider: slice.id, slice.signals.accounts),
                 status: makeStatus(status[slice.id], provider: slice.id)
             )
         }
@@ -1066,10 +1056,13 @@ struct UsagePanelSnapshot: Equatable {
         providers.flatMap { row -> [GaugeRow] in
             let readable = row.accounts.filter(\.isReadable)
             guard readable.count > 1 else {
+                var reading = row.reading
+                reading.plan = nil
+                reading.planTier = nil
                 return [
                     GaugeRow(
                         id: row.id, provider: row.id, account: nil, name: row.name, qualifier: nil,
-                        windows: row.windows, notice: row.notice, status: row.status)
+                        reading: reading, status: row.status)
                 ]
             }
             return readable.map { account in
@@ -1079,11 +1072,8 @@ struct UsagePanelSnapshot: Equatable {
                     account: account.id,
                     name: row.name,
                     qualifier: account.label,
-                    plan: account.plan,
-                    planTier: account.planTier,
                     accountCount: row.accounts.count,
-                    windows: account.windows,
-                    notice: account.notice,
+                    reading: account.reading,
                     status: row.status)
             }
         }
@@ -1143,23 +1133,22 @@ struct UsagePanelSnapshot: Equatable {
                 id: id,
                 label: label,
                 detail: naming.detail(name: label, account: account, plan: planToken),
-                plan: plan?.label,
-                planTier: plan?.tier,
-                windows: (reading?.windows ?? []).map {
-                    makeWindow(
-                        $0, observedAt: observedAt ?? now, reading: limitsReading,
-                        projecting: reading?.isOnlyRunning != true, now: now)
-                },
-                windowsCaption: observedAt.map {
-                    UsageFormat.windowsCaption(observedAt: $0, now: now)
-                },
-                credits: makeCredits(reading?.credits, now: now),
-                resets: makeResets(reading?.resets),
-                resetTarget: accountResetTarget(provider: provider, id: id, reading: reading),
-                notice: UsageFormat.limitsNotice(reading?.limitsState ?? .quiet, provider: provider),
+                reading: AccountReading(
+                    plan: plan,
+                    windows: reading?.windows ?? [],
+                    observedAt: observedAt,
+                    captionedAt: observedAt,
+                    projecting: reading?.isOnlyRunning != true,
+                    notice: UsageFormat.limitsNotice(
+                        reading?.limitsState ?? .quiet, provider: provider),
+                    credits: reading?.credits,
+                    resets: reading?.resets,
+                    resetTarget: accountResetTarget(provider: provider, id: id, reading: reading),
+                    runningSessions: reading?.runningSessions ?? 0,
+                    limitsReading: limitsReading,
+                    now: now),
                 isReadable: reading.map { !$0.isOnlyRunning || !$0.windows.isEmpty } ?? false,
-                isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID),
-                runningSessions: reading?.runningSessions ?? 0)
+                isSignedIn: reading?.isSignedIn ?? (id == known.activeUUID))
         }
         return entries.sorted { lhs, rhs in
             (lhs.isSignedIn ? 0 : 1, lhs.label, lhs.id) < (rhs.isSignedIn ? 0 : 1, rhs.label, rhs.id)
@@ -1361,6 +1350,46 @@ struct UsagePanelSnapshot: Equatable {
         guard rate > 0 else { return nil }
         let untilEmpty = headroom / rate
         return untilEmpty >= remaining ? nil : observedAt.addingTimeInterval(untilEmpty)
+    }
+}
+
+extension UsagePanelSnapshot.AccountReading {
+    /// A reading worded from what a row's source says. The one place an account's
+    /// figures become its words, so a vendor's own row and an entry in its list
+    /// cannot word the same reading two ways.
+    ///
+    /// `captionedAt` is apart from `observedAt` because a vendor's own row drops
+    /// the age of a reading with no windows, where an entry keeps it.
+    init(
+        plan: (label: String, tier: String?)?,
+        windows: [UsageWindow],
+        observedAt: Date?,
+        captionedAt: Date?,
+        projecting: Bool,
+        notice: UsagePanelSnapshot.LimitsNotice?,
+        credits: ProviderCredits?,
+        resets: LimitResets?,
+        resetTarget: LimitResetTarget?,
+        runningSessions: Int,
+        limitsReading: LimitsReading,
+        now: Date
+    ) {
+        self.init(
+            plan: plan?.label,
+            planTier: plan?.tier,
+            windows: windows.map {
+                UsagePanelSnapshot.makeWindow(
+                    $0, observedAt: observedAt ?? now, reading: limitsReading,
+                    projecting: projecting, now: now)
+            },
+            windowsCaption: captionedAt.map {
+                UsageFormat.windowsCaption(observedAt: $0, now: now)
+            },
+            notice: notice,
+            credits: UsagePanelSnapshot.makeCredits(credits, now: now),
+            resets: UsagePanelSnapshot.makeResets(resets),
+            resetTarget: resetTarget,
+            runningSessions: runningSessions)
     }
 }
 

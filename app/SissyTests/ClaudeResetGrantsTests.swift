@@ -411,11 +411,11 @@ final class ClaudeResetGrantsTests: XCTestCase {
             projects: [])
         let row = UsagePanelSnapshot.make(frame: frame).providers[0]
         XCTAssertEqual(
-            row.resetTarget, LimitResetTarget(provider: ProviderID.claudeCode, account: nil))
-        XCTAssertEqual(row.resets?.clears, ["Session", "Weekly"])
+            row.reading.resetTarget, LimitResetTarget(provider: ProviderID.claudeCode, account: nil))
+        XCTAssertEqual(row.reading.resets?.clears, ["Session", "Weekly"])
         XCTAssertEqual(
             LimitResetCopy.confirmBody(
-                available: 1, clears: row.resets?.clears ?? [], naturalReset: nil, appliesNow: false,
+                available: 1, clears: row.reading.resets?.clears ?? [], naturalReset: nil, appliesNow: false,
                 provider: ProviderID.claudeCode),
             "Session and Weekly go back to zero. This spends 1 of 1. Anthropic does not count one "
                 + "as needed yet and may decline it, which spends nothing.")

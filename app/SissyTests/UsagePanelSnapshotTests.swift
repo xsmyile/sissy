@@ -76,14 +76,14 @@ final class UsagePanelSnapshotTests: XCTestCase {
                 slice("codex", 1000, "1.00", windows: [try window(300, 25), try window(10080, 8)])
             ])
         )
-        XCTAssertEqual(snapshot.providers.first?.windows.map(\.label), ["Session", "Weekly"])
+        XCTAssertEqual(snapshot.providers.first?.reading.windows.map(\.label), ["Session", "Weekly"])
     }
 
     func testWindowPercentRoundsWhileTheBarStaysClamped() throws {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("codex", 1000, "1.00", windows: [try window(300, 104.6)])])
         )
-        let row = snapshot.providers.first?.windows.first
+        let row = snapshot.providers.first?.reading.windows.first
         XCTAssertEqual(row?.percent, 105)
         XCTAssertEqual(row?.fraction, 1)
     }
@@ -92,7 +92,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("claude-code", 1000, "1.00")])
         )
-        XCTAssertEqual(snapshot.providers.first?.windows, [])
+        XCTAssertEqual(snapshot.providers.first?.reading.windows, [])
     }
 
     // MARK: Pace
@@ -165,7 +165,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window])]),
             now: now
         )
-        let row = try XCTUnwrap(snapshot.providers.first?.windows.first)
+        let row = try XCTUnwrap(snapshot.providers.first?.reading.windows.first)
 
         XCTAssertEqual(UsageFormat.windowCaption(row, now: now), "starts on first use")
     }
@@ -179,7 +179,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window])]),
             now: now
         )
-        let row = try XCTUnwrap(snapshot.providers.first?.windows.first)
+        let row = try XCTUnwrap(snapshot.providers.first?.reading.windows.first)
 
         XCTAssertNil(UsageFormat.windowCaption(row, now: now))
     }
@@ -238,7 +238,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("codex", 1000, "1.00", windows: [rolled, live])]),
             now: now
         )
-        let windows = try XCTUnwrap(snapshot.providers.first?.windows)
+        let windows = try XCTUnwrap(snapshot.providers.first?.reading.windows)
 
         XCTAssertEqual(UsagePanelSnapshot.binding(windows)?.minutes, 10_080)
     }
@@ -256,7 +256,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("codex", 1000, "1.00", windows: [session, weekly])]),
             now: now
         )
-        let windows = try XCTUnwrap(snapshot.providers.first?.windows)
+        let windows = try XCTUnwrap(snapshot.providers.first?.reading.windows)
 
         XCTAssertEqual(windows.count, 2)
         XCTAssertNil(UsagePanelSnapshot.binding(windows))
@@ -272,7 +272,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window])]),
             now: now
         )
-        return try XCTUnwrap(snapshot.providers.first?.windows.first)
+        return try XCTUnwrap(snapshot.providers.first?.reading.windows.first)
     }
 
     private func paceRow(
@@ -292,7 +292,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("codex", 1000, "1.00", windows: [window])]),
             now: now
         )
-        return try XCTUnwrap(snapshot.providers.first?.windows.first)
+        return try XCTUnwrap(snapshot.providers.first?.reading.windows.first)
     }
 
     // MARK: Account
@@ -357,14 +357,14 @@ final class UsagePanelSnapshotTests: XCTestCase {
                 slice("codex", 1000, "1.00", plan: "plus"),
             ])
         )
-        XCTAssertEqual(snapshot.providers.map(\.plan), ["Max", "Plus"])
+        XCTAssertEqual(snapshot.providers.map(\.reading.plan), ["Max", "Plus"])
     }
 
     func testProviderWithoutAPlanReportsNone() {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("claude-code", 1000, "1.00")])
         )
-        XCTAssertNil(snapshot.providers.first?.plan)
+        XCTAssertNil(snapshot.providers.first?.reading.plan)
     }
 
     func testProviderRowFoldsTheTierIntoTheBadgeWhenItNamesThePlan() {
@@ -373,8 +373,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
                 slice("claude-code", 1000, "1.00", plan: "max", planTier: "max_5x")
             ])
         )
-        XCTAssertEqual(snapshot.providers.first?.plan, "Max")
-        XCTAssertNil(snapshot.providers.first?.planTier)
+        XCTAssertEqual(snapshot.providers.first?.reading.plan, "Max")
+        XCTAssertNil(snapshot.providers.first?.reading.planTier)
     }
 
     func testProviderRowCarriesAForeignTierSeparately() {
@@ -383,8 +383,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
                 slice("claude-code", 1000, "1.00", plan: "team", planTier: "scale_3x")
             ])
         )
-        XCTAssertEqual(snapshot.providers.first?.plan, "Team")
-        XCTAssertEqual(snapshot.providers.first?.planTier, "Scale 3x")
+        XCTAssertEqual(snapshot.providers.first?.reading.plan, "Team")
+        XCTAssertEqual(snapshot.providers.first?.reading.planTier, "Scale 3x")
     }
 
     /// The vendor's word reaches the badge over whatever the token derives to.
@@ -397,8 +397,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
                         plan: "max", planTier: "max_20x", planName: "Ultra Plus"))
             ])
         )
-        XCTAssertEqual(snapshot.providers.first?.plan, "Ultra Plus")
-        XCTAssertNil(snapshot.providers.first?.planTier)
+        XCTAssertEqual(snapshot.providers.first?.reading.plan, "Ultra Plus")
+        XCTAssertNil(snapshot.providers.first?.reading.planTier)
     }
 
     /// A tier cannot arrive on its own: the engine drops it when there is no
@@ -408,8 +408,8 @@ final class UsagePanelSnapshotTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("claude-code", 1000, "1.00", planTier: "max_5x")])
         )
-        XCTAssertNil(snapshot.providers.first?.plan)
-        XCTAssertNil(snapshot.providers.first?.planTier)
+        XCTAssertNil(snapshot.providers.first?.reading.plan)
+        XCTAssertNil(snapshot.providers.first?.reading.planTier)
     }
 
     /// Documentation and the view both promise "shortest first", and the view
@@ -428,7 +428,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
                     ])
             ]))
 
-        XCTAssertEqual(snapshot.providers.first?.windows.map(\.id), ["300-", "10080-"])
+        XCTAssertEqual(snapshot.providers.first?.reading.windows.map(\.id), ["300-", "10080-"])
     }
 
     // MARK: Totals
@@ -464,7 +464,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             ])
         )
         XCTAssertEqual(snapshot.providers.map(\.id), ["claude-code", "codex"])
-        XCTAssertEqual(snapshot.providers.last?.plan, "Plus")
+        XCTAssertEqual(snapshot.providers.last?.reading.plan, "Plus")
         XCTAssertEqual(snapshot.usedToday, 1)
     }
 
@@ -479,7 +479,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
                 slice("claude-code", 100, "1.00", credits: credits(used: 5895, cap: 10_000))
             ])
         )
-        let row = try XCTUnwrap(snapshot.providers.first?.credits)
+        let row = try XCTUnwrap(snapshot.providers.first?.reading.credits)
         XCTAssertEqual(row.percent, 59)
         XCTAssertEqual(try XCTUnwrap(row.fraction), 0.5895, accuracy: 0.0001)
         XCTAssertFalse(row.capReached)
@@ -502,7 +502,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("claude-code", 100, "1.00", credits: credits(used: 5895, cap: 0))])
         )
-        let row = try XCTUnwrap(snapshot.providers.first?.credits)
+        let row = try XCTUnwrap(snapshot.providers.first?.reading.credits)
         XCTAssertNil(row.percent)
         XCTAssertNil(row.fraction)
         XCTAssertFalse(row.amount.contains(" of "))
@@ -554,7 +554,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             frame: frame(providers: [slice("codex", 100, "1.00", credits: empty)])
         )
 
-        XCTAssertNil(snapshot.providers.first?.credits)
+        XCTAssertNil(snapshot.providers.first?.reading.credits)
     }
 
     private func balanceRow(_ balanceMinor: Int) -> UsagePanelSnapshot.CreditsRow? {
@@ -563,7 +563,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
             observedAt: Date(timeIntervalSince1970: 1_789_303_000), balanceMinor: balanceMinor)
         return UsagePanelSnapshot.make(
             frame: frame(providers: [slice("codex", 100, "1.00", credits: credits)])
-        ).providers.first?.credits
+        ).providers.first?.reading.credits
     }
 
     func testCreditsAtTheCapSaySoInsteadOfNamingWhatIsLeft() throws {
@@ -572,7 +572,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
                 slice("claude-code", 100, "1.00", credits: credits(used: 10_000, cap: 10_000))
             ])
         )
-        let row = try XCTUnwrap(snapshot.providers.first?.credits)
+        let row = try XCTUnwrap(snapshot.providers.first?.reading.credits)
         XCTAssertTrue(row.capReached)
         XCTAssertTrue(row.caption.hasPrefix("Cap reached"))
     }
@@ -583,7 +583,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
         let snapshot = UsagePanelSnapshot.make(
             frame: frame(providers: [slice("claude-code", 100, "1.00", credits: credits(used: 0, cap: 0))])
         )
-        XCTAssertNil(snapshot.providers.first?.credits)
+        XCTAssertNil(snapshot.providers.first?.reading.credits)
     }
 
     func testNoCreditsRowWhenTheVendorReportsTheFacilityOff() {
@@ -592,7 +592,7 @@ final class UsagePanelSnapshotTests: XCTestCase {
                 slice("claude-code", 100, "1.00", credits: credits(used: 5895, cap: 10_000, isEnabled: false))
             ])
         )
-        XCTAssertNil(snapshot.providers.first?.credits)
+        XCTAssertNil(snapshot.providers.first?.reading.credits)
     }
 
     // MARK: Provider rows
