@@ -265,6 +265,10 @@ final class DiskMonitorTests: XCTestCase {
 
     /// A restart behind a stuck read waits on that read rather than parking a
     /// second thread behind the same volume, and is served when it returns.
+    ///
+    /// `start` returns once the restart's task exists, not once it has joined. A
+    /// release ahead of it reopens the slot, and the restart would rightly take a
+    /// second read, so the release waits until it is waiting.
     func testARestartBehindAStuckReadJoinsIt() async throws {
         let stuck = StuckRead()
         addTeardownBlock { stuck.release() }
@@ -274,6 +278,11 @@ final class DiskMonitorTests: XCTestCase {
         await monitor.stop()
         let published = expectation(description: "the restart published")
         await monitor.start { published.fulfill() }
+        let joined = ContinuousClock.now + .seconds(2)
+        while monitor.samplesWaiting == 0, ContinuousClock.now < joined {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertEqual(monitor.samplesWaiting, 1, "the restart never joined the stuck read")
 
         stuck.release()
         await fulfillment(of: [published], timeout: 2)

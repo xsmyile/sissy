@@ -273,6 +273,77 @@ final class UsageEngineHistoryTests: XCTestCase {
         )
     }
 
+    /// Written whether or not a pass was running, and before anything is removed,
+    /// so nothing can write a past day back from here on. Today is not named: the
+    /// dialog promises it keeps counting, and it is back on disk at the next flush.
+    func testADeletionNamesYesterdayAndLeavesTodayCounting() async throws {
+        try writeClaudeTurn()
+        let engine = makeEngine()
+        addTeardownBlock { await engine.stop() }
+        let frames = FrameRecorder()
+        let landed = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [landed], timeout: 5)
+
+        await engine.deleteHistory()
+        await engine.flush()
+
+        XCTAssertEqual(
+            ArchiveBackfillLedger.load(from: ArchiveBackfillLedger.defaultURL(in: tempDir))
+                .deletedThrough,
+            UsageReaderShared.dayFormatter.string(from: try yesterday()))
+        XCTAssertNotNil(
+            UsageHistoryStore.load(
+                provider: ProviderID.claudeCode,
+                day: UsageReaderShared.dayFormatter.string(from: Date()),
+                in: tempDir))
+    }
+
+    /// Someone deleting history to free a full disk has no room for the date until
+    /// the files are gone. The removal here is what clears the way for it.
+    func testADeletionTriesTheDateAgainOnceTheFilesAreGone() async throws {
+        try writeClaudeTurn()
+        let engine = makeEngine()
+        addTeardownBlock { await engine.stop() }
+        let frames = FrameRecorder()
+        let landed = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [landed], timeout: 5)
+        let url = ArchiveBackfillLedger.defaultURL(in: tempDir)
+        try? FileManager.default.removeItem(at: url)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+
+        await engine.deleteHistory { _ in try FileManager.default.removeItem(at: url) }
+
+        XCTAssertEqual(
+            ArchiveBackfillLedger.load(from: url).deletedThrough,
+            UsageReaderShared.dayFormatter.string(from: try yesterday()))
+    }
+
+    /// With no room for the date even then, the files still go: that is what the
+    /// user asked for, and only the promise about later passes is at risk.
+    func testADeletionStillRemovesTheFilesWhenTheDateCannotBeSaved() async throws {
+        try writeClaudeTurn()
+        try archiveYesterday()
+        let engine = makeEngine()
+        addTeardownBlock { await engine.stop() }
+        let frames = FrameRecorder()
+        let landed = frames.expectation(forFrameCount: 1)
+        await engine.start { frames.record($0) }
+        await fulfillment(of: [landed], timeout: 5)
+        let url = ArchiveBackfillLedger.defaultURL(in: tempDir)
+        try? FileManager.default.removeItem(at: url)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+
+        await engine.deleteHistory()
+
+        XCTAssertNil(
+            UsageHistoryStore.load(
+                provider: ProviderID.claudeCode,
+                day: UsageReaderShared.dayFormatter.string(from: try yesterday()),
+                in: tempDir))
+    }
+
     /// Zero days is the off switch, and it has to reach both halves: nothing
     /// written, and nothing read back out of what an earlier run wrote. What
     /// it deliberately does not do is delete — that is the button's job, and

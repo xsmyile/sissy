@@ -267,6 +267,9 @@ actor LocalUsageProvider: UsageProvider {
     /// of the retain window, is permanent.
     private var historySuppressedDays: Set<Date> = []
     private var lastHistorySaveAt: Date = .distantPast
+    /// Whether the log already says the deletion record would not read, so a
+    /// file that stays that way is one line rather than one per flush.
+    private var loggedUnreadableDeletion = false
     /// Dedup keys tagged with the event day. The day tag lets `trim()` evict
     /// keys older than the retain window (previously the set grew unbounded
     /// across long-running sessions) and lets the persistence layer
@@ -1542,7 +1545,16 @@ actor LocalUsageProvider: UsageProvider {
         {
             return 0
         }
-        let writer = DayArchiveWriter(provider: id, root: historyRoot, projects: adapter.projects)
+        let deletion = ArchiveBackfillLedger.deletion(
+            at: ArchiveBackfillLedger.defaultURL(in: historyRoot))
+        if deletion == .unreadable, !loggedUnreadableDeletion {
+            sissyLog(
+                "sissy: \(id) is holding past days out of the archive: the record of what was "
+                    + "deleted would not read")
+        }
+        loggedUnreadableDeletion = deletion == .unreadable
+        let writer = DayArchiveWriter(
+            provider: id, root: historyRoot, projects: adapter.projects, deletion: deletion)
         var unwritten: Set<Date> = []
         var written = 0
         for day in historyDirtyDays {
@@ -1697,6 +1709,9 @@ actor LocalUsageProvider: UsageProvider {
                     provider: id, day: day, in: historyRoot),
                 let priced = stored.pricingUnpricedRows(by: { adapter.cost(of: $0, model: $1) })
             else { continue }
+            let deletion = ArchiveBackfillLedger.deletion(
+                at: ArchiveBackfillLedger.defaultURL(in: historyRoot))
+            if deletion.refuses(day, today: dayFmt.string(from: Date())) { continue }
             do {
                 try UsageHistoryStore.save(priced, in: historyRoot)
                 repriced.append(day)

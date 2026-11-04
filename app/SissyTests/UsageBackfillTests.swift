@@ -85,6 +85,92 @@ final class UsageBackfillTests: XCTestCase {
         return await provider.backfillArchive()
     }
 
+    private var ledgerURL: URL { ArchiveBackfillLedger.defaultURL(in: stateDir) }
+
+    /// A pass starts from nothing and holds no snapshot, so the record is the only
+    /// thing that can tell it the logs it reads name days the user deleted.
+    func testAPassDoesNotBringBackADeletedDay() async throws {
+        try writeTurn("old.jsonl", requestId: "r-old", dayOffset: -10)
+        ArchiveBackfillLedger.noteDeletion(covering: [], window: nil, at: ledgerURL)
+
+        let outcome = try await runBackfillForOutcome()
+
+        XCTAssertEqual(outcome, .init(written: 0, unread: []))
+        XCTAssertNil(try archived(-10))
+    }
+
+    /// A record from before the key says nothing was deleted, and a pass over it
+    /// fills the days in as it always did.
+    func testAnOldRecordWithNoDeletionWritesAsBefore() async throws {
+        try writeTurn("old.jsonl", requestId: "r-old", dayOffset: -10)
+        try Data(
+            #"{"schemaVersion":\#(ArchiveBackfillLedger.currentSchemaVersion),"coverage":{}}"#.utf8
+        ).write(to: ledgerURL)
+        XCTAssertEqual(ArchiveBackfillLedger.deletion(at: ledgerURL), .none)
+
+        let outcome = try await runBackfillForOutcome()
+
+        XCTAssertEqual(outcome, .init(written: 1, unread: []))
+        XCTAssertNotNil(try archived(-10))
+    }
+
+    /// A bump answers the file as nothing covered, which asks for a pass over the
+    /// window, and that pass must not read the deleted days back.
+    func testADeletionSurvivesASchemaBump() async throws {
+        try writeTurn("old.jsonl", requestId: "r-old", dayOffset: -10)
+        ArchiveBackfillLedger.noteDeletion(covering: [], window: nil, at: ledgerURL)
+        let deleted = try XCTUnwrap(ArchiveBackfillLedger.load(from: ledgerURL).deletedThrough)
+        try Data(#"{"schemaVersion":1,"coverage":{},"deletedThrough":"\#(deleted)"}"#.utf8)
+            .write(to: ledgerURL)
+
+        ArchiveBackfillLedger.update(at: ledgerURL) { $0 }
+        let outcome = try await runBackfillForOutcome()
+
+        XCTAssertEqual(ArchiveBackfillLedger.load(from: ledgerURL).deletedThrough, deleted)
+        XCTAssertEqual(outcome, .init(written: 0, unread: []))
+        XCTAssertNil(try archived(-10))
+    }
+
+    /// Answered as empty and saved, a read failure would take the date with it.
+    func testAnUpdateLeavesARecordThatWillNotRead() throws {
+        ArchiveBackfillLedger.noteDeletion(covering: [], window: nil, at: ledgerURL)
+        let before = try Data(contentsOf: ledgerURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: ledgerURL.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: ledgerURL.path)
+        }
+        XCTAssertEqual(ArchiveBackfillLedger.deletion(at: ledgerURL), .unreadable)
+
+        ArchiveBackfillLedger.update(at: ledgerURL) { $0.recording(provider: "x", covered: Date()..<Date()) }
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: ledgerURL.path)
+        XCTAssertEqual(try Data(contentsOf: ledgerURL), before)
+    }
+
+    /// A deletion cannot reach today, whichever zone the record was written in.
+    func testNoRecordRefusesToday() {
+        let today = "2026-11-03"
+        XCTAssertFalse(ArchiveDeletion.through(today).refuses(today, today: today))
+        XCTAssertFalse(ArchiveDeletion.through("2026-11-04").refuses(today, today: today))
+        XCTAssertFalse(ArchiveDeletion.unreadable.refuses(today, today: today))
+        XCTAssertTrue(ArchiveDeletion.through(today).refuses("2026-11-02", today: today))
+        XCTAssertTrue(ArchiveDeletion.unreadable.refuses("2026-11-02", today: today))
+    }
+
+    /// A later deletion moves the date on, and nothing moves it back.
+    func testTheDeletedDateOnlyMovesForward() {
+        let today = Date()
+        let earlier = today.addingTimeInterval(-10 * 86400)
+        ArchiveBackfillLedger.noteDeletion(covering: [], window: nil, at: ledgerURL, now: today)
+        let last = ArchiveBackfillLedger.load(from: ledgerURL).deletedThrough
+
+        ArchiveBackfillLedger.noteDeletion(covering: [], window: nil, at: ledgerURL, now: earlier)
+
+        XCTAssertEqual(ArchiveBackfillLedger.load(from: ledgerURL).deletedThrough, last)
+    }
+
     func testAPassThatReadEveryLogIsComplete() async throws {
         try writeTurn("old.jsonl", requestId: "r-old", dayOffset: -10)
         let outcome = try await runBackfillForOutcome()

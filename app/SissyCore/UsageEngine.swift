@@ -681,19 +681,10 @@ actor UsageEngine {
     private func recordArchiveBackfill(
         provider: String, covered span: Range<Date>, unread: [String] = [], at url: URL
     ) {
-        let ledger = ArchiveBackfillLedger.load(from: url)
-        let updated =
+        ArchiveBackfillLedger.update(at: url) {
             unread.isEmpty
-            ? ledger.recording(provider: provider, covered: span)
-            : ledger.owing(provider: provider, span: span, unread: unread)
-        do {
-            try ArchiveBackfillLedger.save(updated, to: url)
-        } catch {
-            // The pass itself succeeded and its days are on disk. Losing the
-            // record costs one repeat of a pass that rewrites the same
-            // numbers, which is why this is logged rather than propagated.
-            sissyLog(
-                "sissy: could not record the \(provider) archive backfill at \(url.path): \(error)")
+                ? $0.recording(provider: provider, covered: span)
+                : $0.owing(provider: provider, span: span, unread: unread)
         }
     }
 
@@ -2463,19 +2454,37 @@ actor UsageEngine {
     /// on the next flush, which is why the rollup is invalidated rather than
     /// zeroed — the next frame reads whatever is actually there.
     ///
-    /// The providers are told first. Each flushes on its own task, so a flush
-    /// landing in the suspension between the two would write a past day back
-    /// out after the files were gone, and nothing would remove it again — the
-    /// user's deletion would fail with nothing to show for it.
-    func deleteHistory() async {
-        await stopArchiveBackfill()
+    /// **The order is the deletion.** `stopArchiveBackfill` writes down what was
+    /// deleted before anything else, so every write from there on is refused, and
+    /// nothing can put a past day back. The providers are then told, because a
+    /// provider's answer also says that a write already past that check has
+    /// landed, so the removal cannot go ahead of it.
+    ///
+    /// They are told again afterwards for today. Each flushes on its own task, so
+    /// one landing between the first telling and the removal cleared today's dirty
+    /// mark on a file the removal then took, and today would have no file until
+    /// its next event.
+    ///
+    /// **The date is tried again once the files are gone.** Someone deleting
+    /// history to free a full disk has no room for it the first time, and the
+    /// dialog has already said these days are gone for good.
+    func deleteHistory(
+        removingWith remove: (URL) throws -> Void = UsageHistoryStore.removeAll(in:)
+    ) async {
+        let recorded = await stopArchiveBackfill()
         await aggregator.forgetArchivedDays()
         do {
-            try UsageHistoryStore.removeAll(in: stateDir)
+            try remove(stateDir)
             sissyLog("sissy: usage history deleted")
         } catch {
             sissyLog("sissy: failed to delete usage history at \(stateDir.path): \(error)")
         }
+        if !recorded, !noteArchiveDeletion() {
+            sissyLog(
+                "sissy: the archive was deleted but the date it was deleted through could not "
+                    + "be saved, so a later pass may read those days back")
+        }
+        await aggregator.forgetArchivedDays()
         historyRollups = [:]
         historyRollupAt = .distantPast
         historyGeneration += 1
@@ -2498,12 +2507,16 @@ actor UsageEngine {
     /// waits with no task at all, so either way the next launch would go back
     /// for the days that were just deleted — which is the same promise the
     /// record's own location outside `history/` exists to keep.
-    private func stopArchiveBackfill() async {
+    private func stopArchiveBackfill() async -> Bool {
         if let task = backfillTask {
             backfillTask = nil
             task.cancel()
             await task.value
         }
+        return noteArchiveDeletion()
+    }
+
+    private func noteArchiveDeletion() -> Bool {
         ArchiveBackfillLedger.noteDeletion(
             covering: resolvedProviders.filter(\.activation.isMetering).map(\.id),
             window: ArchiveBackfill.window(retentionDays: config.resolvedHistoryRetentionDays),

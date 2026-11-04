@@ -48,6 +48,9 @@ actor DiskMonitor {
         }
     }
 
+    /// How many samples are waiting on the read in flight.
+    nonisolated var samplesWaiting: Int { gate.waiterCount }
+
     /// Stops reading and drops what was published, so a module switched off
     /// leaves nothing on the next frame. Never waits for a read in flight.
     func stop() {
