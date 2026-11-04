@@ -135,7 +135,7 @@ final class ProcessEnvironmentTests: XCTestCase {
         XCTAssertEqual(AgentProcessReader.claudeConfigDir(of: pid, buffer: &buffer), .unreadable)
     }
 
-    /// A child of its own compiling, because the kernel withholds the
+    /// A child of its own compiling, because the kernel can withhold the
     /// environment of a platform binary like `/bin/sleep`.
     private static let childExecutable = Result { () throws -> URL in
         let directory = FileManager.default.temporaryDirectory
@@ -161,9 +161,11 @@ final class ProcessEnvironmentTests: XCTestCase {
         return process
     }
 
-    /// `/bin/sleep` with the variable set: the kernel answers with no
-    /// environment, which says nothing about the process.
-    func testAPlatformBinarysWithheldEnvironmentIsUnreadable() throws {
+    /// `/bin/sleep` with the variable set. Whether the kernel hands over a
+    /// platform binary's environment depends on the Mac, so either answer can
+    /// come back, but a withheld one must never read as a process without the
+    /// variable: that would count it on the default home.
+    func testAPlatformBinarysEnvironmentIsNeverReadAsAbsent() throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sleep")
         process.arguments = ["30"]
@@ -171,9 +173,9 @@ final class ProcessEnvironmentTests: XCTestCase {
         try process.run()
         defer { process.terminate() }
         var buffer: [UInt8] = []
-        XCTAssertEqual(
+        XCTAssertNotEqual(
             AgentProcessReader.claudeConfigDir(of: process.processIdentifier, buffer: &buffer),
-            .unreadable)
+            .absent)
     }
 }
 

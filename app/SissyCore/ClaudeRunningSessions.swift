@@ -8,10 +8,11 @@ import Foundation
 /// parse trusts none of it: every walk stops at the end of the buffer, and a
 /// shape that does not hold answers `unreadable` rather than a guess.
 ///
-/// Bytes that end straight after the arguments are one of those: the kernel
-/// withholds the environment of a platform binary. Measured 2026-11-04, `/bin/sleep`
-/// started with the variable set answered with its arguments alone, where a
-/// compiled child answered with its environment and the kernel's own strings.
+/// Bytes that end straight after the arguments are one of those: the kernel can
+/// withhold the environment of a platform binary. Measured 2026-11-04 on macOS 27,
+/// `/bin/sleep` started with the variable set answered with its arguments alone,
+/// where a compiled child answered with its environment and the kernel's own
+/// strings. The `macos-26` CI runner answered with the environment for both.
 enum ProcessEnvironment {
     /// What the bytes say about a variable. `absent` is a reading, that the
     /// process was started without it, where `unreadable` says nothing.
