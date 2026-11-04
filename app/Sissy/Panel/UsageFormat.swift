@@ -17,6 +17,63 @@ enum LimitsReading: String, Codable, CaseIterable, Sendable {
     case left
 }
 
+/// One step of a unit cascade: print in a unit once a figure, read the way it
+/// would be printed, reaches a limit.
+///
+/// Deciding on the printed figure rather than the raw one is what keeps a reading
+/// from saying `1000 MB` or `10.0 MB/s`.
+struct UnitStep {
+    /// How the figure a step decides on would read.
+    enum Reading {
+        case exact
+        case whole
+        case oneDecimal
+
+        fileprivate func printed(_ figure: Double) -> Double {
+            switch self {
+            case .exact: figure
+            case .whole: figure.rounded()
+            case .oneDecimal: (figure * 10).rounded() / 10
+            }
+        }
+    }
+
+    static let kilo: Double = 1_000
+    static let mega: Double = 1_000_000
+    static let giga: Double = 1_000_000_000
+    static let tera: Double = 1_000_000_000_000
+    /// The figure a step usually waits for, which is the one the unit below it
+    /// must never print.
+    static let unitLimit: Double = 1_000
+
+    let format: String
+    let unit: Double
+    let reading: Reading
+    let scale: Double
+    let limit: Double
+
+    /// Prints in `unit` once `value / scale`, read as `reading`, reaches `limit`.
+    init(
+        _ format: String, per unit: Double, once reading: Reading, of scale: Double,
+        reaches limit: Double = unitLimit
+    ) {
+        self.format = format
+        self.unit = unit
+        self.reading = reading
+        self.scale = scale
+        self.limit = limit
+    }
+
+    /// `value` in the first of `steps` it reaches, largest unit first, and nil
+    /// when it reaches none of them.
+    static func format(_ value: Double, _ steps: [Self]) -> String? {
+        for step in steps where step.reading.printed(value / step.scale) >= step.limit {
+            return String(format: step.format, value / step.unit)
+        }
+        return nil
+    }
+}
+
 /// Display formatters shared by the menubar menu and the usage panel.
 ///
 /// The only place a number on screen is worded. The frame carries the day's
@@ -33,31 +90,14 @@ enum UsageFormat {
     /// over a month, and the `30 days` and `All` headlines would otherwise
     /// print thousands of millions.
     static func tokens(_ tokens: Int) -> String {
-        let value = Double(tokens)
-        if oneDecimal(value / tokensPerMillion) >= unitStepLimit {
-            return String(format: "%.1fB", value / tokensPerBillion)
-        }
-        if oneDecimal(value / tokensPerThousand) >= unitStepLimit {
-            return String(format: "%.1fM", value / tokensPerMillion)
-        }
-        if value >= tokensPerThousand {
-            return String(format: "%.1fK", value / tokensPerThousand)
-        }
-        return "\(tokens)"
+        UnitStep.format(Double(tokens), tokenSteps) ?? "\(tokens)"
     }
 
-    private static let tokensPerThousand: Double = 1_000
-    private static let tokensPerMillion: Double = 1_000_000
-    private static let tokensPerBillion: Double = 1_000_000_000
-
-    /// The figure a unit cascade compares against the next step: a step is
-    /// taken once the printed figure would reach it.
-    private static let unitStepLimit: Double = 1_000
-
-    /// A value as `%.1f` prints it, for deciding a unit on what will be read.
-    private static func oneDecimal(_ value: Double) -> Double {
-        (value * 10).rounded() / 10
-    }
+    private static let tokenSteps = [
+        UnitStep("%.1fB", per: UnitStep.giga, once: .oneDecimal, of: UnitStep.mega),
+        UnitStep("%.1fM", per: UnitStep.mega, once: .oneDecimal, of: UnitStep.kilo),
+        UnitStep("%.1fK", per: UnitStep.kilo, once: .exact, of: 1),
+    ]
 
     static func cost(_ cost: Decimal) -> String {
         String(format: "$%.2f", NSDecimalNumber(decimal: cost).doubleValue)
@@ -1695,14 +1735,13 @@ extension UsageFormat {
     /// never reads `1000 MB`.
     static func bytes(_ bytes: UInt64) -> String {
         let value = Double(bytes)
-        if (value / bytesPerMegabyte).rounded() >= unitStepLimit {
-            return String(format: "%.2f GB", value / bytesPerGigabyte)
-        }
-        if (value / bytesPerKilobyte).rounded() >= unitStepLimit {
-            return String(format: "%.0f MB", value / bytesPerMegabyte)
-        }
-        return String(format: "%.0f KB", value / bytesPerKilobyte)
+        return UnitStep.format(value, byteSteps) ?? String(format: "%.0f KB", value / UnitStep.kilo)
     }
+
+    private static let byteSteps = [
+        UnitStep("%.2f GB", per: UnitStep.giga, once: .whole, of: UnitStep.mega),
+        UnitStep("%.0f MB", per: UnitStep.mega, once: .whole, of: UnitStep.kilo),
+    ]
 
     /// The headline of the Sessions tab's live half.
     ///
@@ -2344,25 +2383,18 @@ extension UsageFormat {
     /// will be printed, `networkRate`'s rule, so a volume never reads
     /// `1000 GB` and a free space just short of ten never reads `10.0 GB`.
     static func storage(_ bytes: UInt64) -> String {
-        let value = Double(bytes)
-        let gigabytes = value / bytesPerGigabyte
-        if gigabytes.rounded() >= unitStepLimit {
-            return String(format: "%.1f TB", value / bytesPerTerabyte)
-        }
-        if oneDecimal(gigabytes) >= storageWholeGigabytes {
-            return String(format: "%.0f GB", gigabytes)
-        }
-        if (value / bytesPerMegabyte).rounded() >= unitStepLimit {
-            return String(format: "%.1f GB", gigabytes)
-        }
-        if (value / bytesPerKilobyte).rounded() >= unitStepLimit {
-            return String(format: "%.0f MB", value / bytesPerMegabyte)
-        }
-        if value >= bytesPerKilobyte {
-            return String(format: "%.0f KB", value / bytesPerKilobyte)
-        }
-        return "\(bytes) B"
+        UnitStep.format(Double(bytes), storageSteps) ?? "\(bytes) B"
     }
+
+    private static let storageSteps = [
+        UnitStep("%.1f TB", per: UnitStep.tera, once: .whole, of: UnitStep.giga),
+        UnitStep(
+            "%.0f GB", per: UnitStep.giga, once: .oneDecimal, of: UnitStep.giga,
+            reaches: storageWholeGigabytes),
+        UnitStep("%.1f GB", per: UnitStep.giga, once: .whole, of: UnitStep.mega),
+        UnitStep("%.0f MB", per: UnitStep.mega, once: .whole, of: UnitStep.kilo),
+        UnitStep("%.0f KB", per: UnitStep.kilo, once: .exact, of: 1),
+    ]
 
     /// `1.2 GB`, the swap in use, and a dash where the kernel would not say.
     static func macSwap(_ swap: MacSwapUsage?) -> String {
@@ -2384,9 +2416,6 @@ extension UsageFormat {
         "sampled " + age(now.timeIntervalSince(observedAt))
     }
 
-    private static let bytesPerTerabyte: Double = 1_000_000_000_000
-    private static let bytesPerGigabyte: Double = 1_000_000_000
-    private static let bytesPerMegabyte: Double = 1_000_000
     private static let storageWholeGigabytes: Double = 10
 }
 
@@ -2468,15 +2497,17 @@ extension UsageFormat {
     /// shrinking, see `PanelNetwork`.
     static func networkRate(_ bytesPerSecond: Double) -> String {
         let value = max(bytesPerSecond, 0)
-        let kilobytes = (value / bytesPerKilobyte).rounded()
-        if kilobytes < unitStepLimit { return String(format: "%.0f KB/s", kilobytes) }
-        let megabytes = value / bytesPerMegabyte
-        if oneDecimal(megabytes) < rateWholeMegabytes {
-            return String(format: "%.1f MB/s", megabytes)
-        }
-        if megabytes.rounded() < unitStepLimit { return String(format: "%.0f MB/s", megabytes) }
-        return String(format: "%.1f GB/s", value / bytesPerGigabyte)
+        return UnitStep.format(value, rateSteps)
+            ?? String(format: "%.0f KB/s", (value / UnitStep.kilo).rounded())
     }
+
+    private static let rateSteps = [
+        UnitStep("%.1f GB/s", per: UnitStep.giga, once: .whole, of: UnitStep.mega),
+        UnitStep(
+            "%.0f MB/s", per: UnitStep.mega, once: .oneDecimal, of: UnitStep.mega,
+            reaches: rateWholeMegabytes),
+        UnitStep("%.1f MB/s", per: UnitStep.mega, once: .whole, of: UnitStep.kilo),
+    ]
 
     /// `↓ 2.4 MB/s`, what came in.
     static func networkDown(_ bytesPerSecond: Double?) -> String {
@@ -2537,6 +2568,5 @@ extension UsageFormat {
         interface.displayName ?? interface.bsdName
     }
 
-    private static let bytesPerKilobyte: Double = 1_000
     private static let rateWholeMegabytes: Double = 10
 }
