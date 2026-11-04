@@ -558,10 +558,10 @@ actor LocalUsageProvider: UsageProvider {
     struct BackfillOutcome: Sendable, Equatable {
         /// The day files it wrote.
         let written: Int
-        /// Whether it read every log it listed to the end. Only a pass that
-        /// did may be recorded as having covered its span: the record is never
-        /// revisited, so a log skipped under it would be lost for good.
-        let complete: Bool
+        /// The paths it could not list or read to the end, sorted. Only a pass
+        /// with none may be recorded as having covered its span: the record is
+        /// never revisited, so a log skipped under it would be lost for good.
+        let unread: [String]
     }
 
     /// Writes the archive for every day older than the window the live tail
@@ -593,9 +593,13 @@ actor LocalUsageProvider: UsageProvider {
     /// them. What is *not* done here is the inbox: it is consumed on read, and
     /// a pass that drained it would take entries out from under the tail's own
     /// resolver, which caches what it is told for the life of the process.
+    ///
+    /// A log it could not read breaks that proof, so a day can go out short of
+    /// that log's lines. What repairs it is the span staying owed: the pass that
+    /// reads the log replaces the day, being the more complete reading.
     func backfillArchive(onDaysWritten: @Sendable () async -> Void = {}) async -> BackfillOutcome {
         guard backfill != nil, historyRoot != nil, lifecycle == .idle else {
-            return BackfillOutcome(written: 0, complete: false)
+            return BackfillOutcome(written: 0, unread: [])
         }
         lifecycle = .running
         defer { lifecycle = .stopped }
@@ -633,7 +637,7 @@ actor LocalUsageProvider: UsageProvider {
             "sissy: \(id) backfill read \(files.count) log file(s) and wrote \(written) "
                 + "archived day(s)\(interrupted ? " before it was cancelled" : "")"
                 + "\(unreadFiles.isEmpty ? "" : ", \(unreadFiles.count) unread")")
-        return BackfillOutcome(written: written, complete: !interrupted && unreadFiles.isEmpty)
+        return BackfillOutcome(written: written, unread: unreadFiles.map(\.path).sorted())
     }
 
     func stop() async {
@@ -961,28 +965,53 @@ actor LocalUsageProvider: UsageProvider {
         let size: UInt64
     }
 
+    private static let listingKeys: [URLResourceKey] = [
+        .contentModificationDateKey, .fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey,
+    ]
+
+    /// Whether an entry named like a log can be one. A directory passes `access`
+    /// and fails at the read, so it would stay unread for ever and never block,
+    /// and a pipe would hang the read. A link is judged by what it reaches:
+    /// these keys describe the link, and a log reads perfectly well through one.
+    private static func holdsLines(_ url: URL, _ values: URLResourceValues) -> Bool {
+        if values.isRegularFile == true { return true }
+        guard values.isSymbolicLink == true else { return false }
+        let target = try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey])
+        return target?.isRegularFile == true
+    }
+
     /// Every `.jsonl` under the tree, newest first. Any name is accepted —
     /// Codex writes `rollout-*.jsonl` and Claude Code a UUID, and a fork that
     /// renames either still gets read.
     private func enumerateJSONLSortedByMTime() -> [ScannedFile] {
+        let refused = LockedValue<[(URL, any Error)]>([])
         guard
             let it = FileManager.default.enumerator(
                 at: root,
-                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-                options: [.skipsHiddenFiles]
+                includingPropertiesForKeys: Self.listingKeys,
+                options: [.skipsHiddenFiles],
+                errorHandler: { url, error in
+                    refused.update { $0.append((url, error)) }
+                    return true
+                }
             )
         else { return [] }
         let cutoff = retainWindowStart
         var candidates: [ScannedFile] = []
         while let u = it.nextObject() as? URL {
             guard u.pathExtension == "jsonl" else { continue }
-            guard
-                let values = try? u.resourceValues(forKeys: [
-                    .contentModificationDateKey, .fileSizeKey,
-                ]),
-                let mtimeDate = values.contentModificationDate,
-                let size = values.fileSize
-            else { continue }
+            let values: URLResourceValues
+            do {
+                values = try u.resourceValues(forKeys: Set(Self.listingKeys))
+            } catch {
+                noteUnread(u, error)
+                continue
+            }
+            guard Self.holdsLines(u, values) else { continue }
+            guard let mtimeDate = values.contentModificationDate, let size = values.fileSize else {
+                noteUnread(u, CocoaError(.fileReadUnknown))
+                continue
+            }
             if mtimeDate < cutoff, fileOffsets[u] == nil {
                 // Stale file we've never read; its data is outside the
                 // retain window so skip permanently.
@@ -992,6 +1021,7 @@ actor LocalUsageProvider: UsageProvider {
                 ScannedFile(
                     url: u, mtime: mtimeDate.timeIntervalSince1970, size: UInt64(size)))
         }
+        for (url, error) in refused.load() { noteUnread(url, error) }
         candidates.sort { $0.mtime > $1.mtime }
         return candidates
     }
@@ -1249,8 +1279,10 @@ actor LocalUsageProvider: UsageProvider {
     /// Writes down a log that would not read, and logs it the first time.
     ///
     /// A file gone since the listing is not one: it has no lines left to lose.
+    /// Told from the error rather than by asking whether the path exists, which
+    /// also answers no for a file behind a directory that refuses to be searched.
     private func noteUnread(_ url: URL, _ error: Error) {
-        guard FileManager.default.fileExists(atPath: url.path) else {
+        guard !Self.saysGone(error) else {
             unreadFiles.remove(url)
             return
         }
@@ -1260,6 +1292,18 @@ actor LocalUsageProvider: UsageProvider {
         sissyLog(
             "sissy: \(id) could not read \(url.lastPathComponent) (\(bridged.domain) "
                 + "\(bridged.code)); its lines stay uncounted until it can be read")
+    }
+
+    /// Whether a failed read of a path means there is nothing at that path, which
+    /// `ArchiveBackfill.canReadNow` has to answer the same way.
+    static func saysGone(_ error: Error) -> Bool {
+        let bridged = error as NSError
+        let missing =
+            (bridged.domain == NSCocoaErrorDomain
+                && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(bridged.code))
+            || (bridged.domain == NSPOSIXErrorDomain && [ENOENT, ENOTDIR].contains(Int32(bridged.code)))
+        guard !missing else { return true }
+        return (bridged.userInfo[NSUnderlyingErrorKey] as? NSError).map(saysGone) ?? false
     }
 
     private enum SnapshotFileFate {

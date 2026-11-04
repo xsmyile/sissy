@@ -88,7 +88,7 @@ final class UsageBackfillTests: XCTestCase {
     func testAPassThatReadEveryLogIsComplete() async throws {
         try writeTurn("old.jsonl", requestId: "r-old", dayOffset: -10)
         let outcome = try await runBackfillForOutcome()
-        XCTAssertEqual(outcome, .init(written: 1, complete: true))
+        XCTAssertEqual(outcome, .init(written: 1, unread: []))
     }
 
     /// A log that would not open was skipped under `try?` and the pass still
@@ -105,15 +105,337 @@ final class UsageBackfillTests: XCTestCase {
 
         let outcome = try await runBackfillForOutcome()
 
-        XCTAssertEqual(outcome, .init(written: 1, complete: false))
+        XCTAssertEqual(outcome.written, 1)
+        XCTAssertEqual(outcome.unread.map { URL(fileURLWithPath: $0).lastPathComponent }, ["locked.jsonl"])
         XCTAssertNotNil(try archived(-10))
         XCTAssertNil(try archived(-20))
 
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o644], ofItemAtPath: locked.path)
         let retried = try await runBackfillForOutcome()
-        XCTAssertTrue(retried.complete)
+        XCTAssertEqual(retried.unread, [])
         XCTAssertNotNil(try archived(-20))
+    }
+
+    /// A skipped log breaks "newest first proves the day whole": the day goes
+    /// out short of its lines, and it is the pass that can read them that puts
+    /// them back.
+    func testADayWrittenShortOfAnUnreadableLogIsRepairedByTheRetry() async throws {
+        let cal = Calendar.current
+        let when = try XCTUnwrap(cal.date(byAdding: .hour, value: 12, to: try day(-10)))
+        try writeTurn("readable.jsonl", requestId: "r-readable", dayOffset: -10)
+        let locked = logDir.appendingPathComponent("locked.jsonl")
+        try ClaudeLogFixture.writeTurn(
+            to: locked, requestId: "r-locked", model: Self.model, input: Self.tokensPerTurn, at: when)
+        try FileManager.default.setAttributes(
+            [.modificationDate: try day(-5), .posixPermissions: 0], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        }
+
+        _ = try await runBackfillForOutcome()
+        XCTAssertEqual(try archived(-10)?.totalTokens, Self.tokensPerTurn)
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        _ = try await runBackfillForOutcome()
+        XCTAssertEqual(try archived(-10)?.totalTokens, 2 * Self.tokensPerTurn)
+    }
+
+    /// A directory the listing cannot enter used to read as one holding nothing,
+    /// so the pass reported whole over logs it never saw.
+    func testAnUnsearchableDirectoryLeavesThePassIncomplete() async throws {
+        let closed = logDir.appendingPathComponent("closed", isDirectory: true)
+        try FileManager.default.createDirectory(at: closed, withIntermediateDirectories: true)
+        try writeTurn("closed/inner.jsonl", requestId: "r-inner", dayOffset: -10)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: closed.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: closed.path)
+        }
+
+        let outcome = try await runBackfillForOutcome()
+
+        XCTAssertEqual(outcome.unread.map { URL(fileURLWithPath: $0).lastPathComponent }, ["closed"])
+    }
+
+    /// A directory that lists its names and will not state them: the file is
+    /// there, and its mtime is what the listing could not read.
+    func testAFileTheListingCannotStateLeavesThePassIncomplete() async throws {
+        let closed = logDir.appendingPathComponent("listable", isDirectory: true)
+        try FileManager.default.createDirectory(at: closed, withIntermediateDirectories: true)
+        try writeTurn("listable/inner.jsonl", requestId: "r-inner", dayOffset: -10)
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: closed.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: closed.path)
+        }
+
+        let outcome = try await runBackfillForOutcome()
+
+        XCTAssertFalse(outcome.unread.isEmpty, "the pass reported whole over a file it never read")
+    }
+
+    /// No tree at all is a CLI with nothing to read rather than one refused.
+    func testAMissingTreeIsNotUnread() async throws {
+        try FileManager.default.removeItem(at: logDir)
+        let outcome = try await runBackfillForOutcome()
+        XCTAssertEqual(outcome.unread, [])
+    }
+
+    func testAMissingPathIsToldFromARefusedOne() throws {
+        let missing = logDir.appendingPathComponent("missing.jsonl")
+        XCTAssertThrowsError(try FileHandle(forReadingFrom: missing)) {
+            XCTAssertTrue(LocalUsageProvider.saysGone($0))
+        }
+        XCTAssertThrowsError(try missing.resourceValues(forKeys: [.fileSizeKey])) {
+            XCTAssertTrue(LocalUsageProvider.saysGone($0))
+        }
+        let locked = try writeTurn("locked.jsonl", requestId: "r-locked", dayOffset: -10)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        }
+        XCTAssertThrowsError(try FileHandle(forReadingFrom: locked)) {
+            XCTAssertFalse(LocalUsageProvider.saysGone($0))
+        }
+    }
+
+    // MARK: What a pass owes
+
+    /// The tail's reach past the window's end answered "nothing to do", so a
+    /// span a pass finished short of was lost for good.
+    func testAnOwedSpanIsAnsweredPastTheTailsReachOnceItCanBeRead() throws {
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        let ledger = ArchiveBackfillLedger()
+            .recording(provider: ProviderID.claudeCode, covered: try span(-29, -20))
+            .owing(
+                provider: ProviderID.claudeCode, span: try span(-20, -6),
+                unread: ["/logs/locked.jsonl"])
+        let coverage = ledger.coverage[ProviderID.claudeCode]
+        let owed = try XCTUnwrap(ledger.owed[ProviderID.claudeCode])
+
+        let answered = ArchiveBackfill.uncovered(
+            window, coverage: coverage, owed: owed, meteredThrough: Date(), canRead: { _ in true })
+
+        XCTAssertEqual(answered, try day(-20)..<window.upperBound)
+        XCTAssertNil(
+            ArchiveBackfill.uncovered(window, coverage: coverage, meteredThrough: Date()),
+            "without the span the tail's reach answers nothing, which is the case being held")
+    }
+
+    /// One log that stays unreadable must not re-read the whole span on every
+    /// launch, a first pass included, where no coverage record exists at all.
+    func testALogThatStaysUnreadableAsksForNoPass() throws {
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        let owed = try XCTUnwrap(
+            ArchiveBackfillLedger()
+                .owing(provider: ProviderID.claudeCode, span: window, unread: ["/logs/locked.jsonl"])
+                .owed[ProviderID.claudeCode])
+
+        XCTAssertNil(
+            ArchiveBackfill.uncovered(
+                window, coverage: nil, owed: owed, meteredThrough: Date(), canRead: { _ in false }))
+        XCTAssertEqual(
+            ArchiveBackfill.uncovered(
+                window, coverage: nil, owed: owed, meteredThrough: Date(), canRead: { _ in true }),
+            window, "the log can be read now")
+    }
+
+    /// A span a log is blocking, on a CLI idle past the tail's 48 h: no snapshot,
+    /// and the window's end has moved past what the span reached. The first launch
+    /// of each day used to read the whole span again, to meet the same log.
+    func testWhileBlockedOnlyTheNewGapIsRead() throws {
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        let ledger = ArchiveBackfillLedger()
+            .recording(provider: ProviderID.claudeCode, covered: try span(-29, -20))
+            .owing(
+                provider: ProviderID.claudeCode, span: try span(-20, -6),
+                unread: ["/logs/locked.jsonl"])
+
+        let answered = ArchiveBackfill.uncovered(
+            window, coverage: ledger.coverage[ProviderID.claudeCode],
+            owed: ledger.owed[ProviderID.claudeCode], meteredThrough: nil,
+            canRead: { _ in false })
+
+        XCTAssertEqual(answered, try day(-6)..<window.upperBound)
+    }
+
+    /// A directory named like a log passes `access` and fails at the read, so it
+    /// stayed unread and never blocked, which was a full pass on every launch.
+    func testADirectoryNamedLikeALogIsNotALog() async throws {
+        try FileManager.default.createDirectory(
+            at: logDir.appendingPathComponent("named.jsonl", isDirectory: true),
+            withIntermediateDirectories: true)
+        try writeTurn("old.jsonl", requestId: "r-old", dayOffset: -10)
+
+        let outcome = try await runBackfillForOutcome()
+
+        XCTAssertEqual(outcome, .init(written: 1, unread: []))
+    }
+
+    /// `FileManager` does not follow a link for these keys, and a filter on the
+    /// link's own type would drop a log that reads perfectly well through it.
+    func testALogReachedThroughALinkIsStillRead() async throws {
+        let elsewhere = stateDir.appendingPathComponent("elsewhere.jsonl")
+        let when = try XCTUnwrap(Calendar.current.date(byAdding: .hour, value: 12, to: try day(-10)))
+        try ClaudeLogFixture.writeTurn(
+            to: elsewhere, requestId: "r-linked", model: Self.model, input: Self.tokensPerTurn, at: when)
+        try FileManager.default.createSymbolicLink(
+            at: logDir.appendingPathComponent("linked.jsonl"), withDestinationURL: elsewhere)
+
+        let outcome = try await runBackfillForOutcome()
+
+        XCTAssertEqual(outcome.unread, [])
+        XCTAssertEqual(try archived(-10)?.totalTokens, Self.tokensPerTurn)
+    }
+
+    /// What a read of a path answers and what a launch asks of it must agree, or
+    /// a path one calls unread and the other calls gone runs a pass on every launch.
+    func testAPathBelowAFileIsGoneToBothQuestions() throws {
+        let file = try writeTurn("old.jsonl", requestId: "r-old", dayOffset: -10)
+        let below = file.appendingPathComponent("below.jsonl")
+
+        XCTAssertTrue(ArchiveBackfill.canReadNow(below.path))
+        XCTAssertThrowsError(try FileHandle(forReadingFrom: below)) {
+            XCTAssertTrue(LocalUsageProvider.saysGone($0))
+        }
+    }
+
+    func testALogBehindADirectoryThatRefusesToBeSearchedStaysUnreadable() throws {
+        let closed = logDir.appendingPathComponent("listable", isDirectory: true)
+        try FileManager.default.createDirectory(at: closed, withIntermediateDirectories: true)
+        let inner = try writeTurn("listable/inner.jsonl", requestId: "r-inner", dayOffset: -10)
+        XCTAssertTrue(ArchiveBackfill.canReadNow(inner.path))
+        XCTAssertTrue(ArchiveBackfill.canReadNow(closed.appendingPathComponent("gone.jsonl").path))
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: closed.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: closed.path)
+        }
+
+        XCTAssertFalse(ArchiveBackfill.canReadNow(inner.path))
+    }
+
+    /// A pass that never finished has no log to wait for: a quit or a crash left
+    /// it, and it is asked for again past the tail's reach.
+    func testAPassCutShortIsAskedForAgain() throws {
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        let gap = try span(-20, -6)
+        let ledger = ArchiveBackfillLedger()
+            .recording(provider: ProviderID.claudeCode, covered: try span(-29, -20))
+            .starting(provider: ProviderID.claudeCode, span: gap, window: window)
+
+        XCTAssertEqual(
+            ArchiveBackfill.uncovered(
+                window, coverage: ledger.coverage[ProviderID.claudeCode],
+                pending: ledger.pending[ProviderID.claudeCode], meteredThrough: Date()),
+            gap.lowerBound..<window.upperBound)
+    }
+
+    /// Cut short beside a blocked span: the gap is asked for again, and only it.
+    func testAGapCutShortBesideABlockedSpanIsAskedForAlone() throws {
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        let ledger = ArchiveBackfillLedger()
+            .recording(provider: ProviderID.claudeCode, covered: try span(-29, -20))
+            .owing(
+                provider: ProviderID.claudeCode, span: try span(-20, -6),
+                unread: ["/logs/locked.jsonl"]
+            )
+            .starting(provider: ProviderID.claudeCode, span: try span(-6, -3), window: window)
+
+        XCTAssertEqual(
+            ArchiveBackfill.uncovered(
+                window, coverage: ledger.coverage[ProviderID.claudeCode],
+                owed: ledger.owed[ProviderID.claudeCode],
+                pending: ledger.pending[ProviderID.claudeCode], meteredThrough: Date(),
+                canRead: { _ in false }),
+            try day(-6)..<window.upperBound)
+    }
+
+    /// A pass over a new gap finishes without having read the blocked span, so
+    /// the span stays owed and its logs stay named.
+    func testAGapFinishedBesideABlockedSpanLeavesItOwed() throws {
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        let owedSpan = try span(-20, -6)
+        let unread = ["/logs/locked.jsonl"]
+        let ledger = ArchiveBackfillLedger()
+            .owing(provider: ProviderID.claudeCode, span: owedSpan, unread: unread)
+            .starting(provider: ProviderID.claudeCode, span: try span(-6, -3), window: window)
+            .recording(provider: ProviderID.claudeCode, covered: try span(-6, -3))
+
+        XCTAssertEqual(ledger.owed[ProviderID.claudeCode]?.unread, unread)
+        XCTAssertEqual(ledger.pending[ProviderID.claudeCode], nil)
+    }
+
+    /// A pass reading back across what was owed takes it over: finished, nothing
+    /// is owed; cut short, it is pending; short of logs, those are what is owed.
+    func testAPassAcrossAnOwedSpanTakesItOver() throws {
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        let owedSpan = try span(-20, -6)
+        let started = ArchiveBackfillLedger()
+            .owing(provider: ProviderID.claudeCode, span: owedSpan, unread: ["/logs/locked.jsonl"])
+            .starting(
+                provider: ProviderID.claudeCode, span: owedSpan.lowerBound..<window.upperBound,
+                window: window)
+        XCTAssertNil(started.owed[ProviderID.claudeCode])
+        XCTAssertNotNil(started.pending[ProviderID.claudeCode])
+
+        let finished = started.recording(
+            provider: ProviderID.claudeCode, covered: owedSpan.lowerBound..<window.upperBound)
+        XCTAssertEqual(finished.owed, [:])
+        XCTAssertEqual(finished.pending, [:])
+
+        let short = started.owing(
+            provider: ProviderID.claudeCode, span: owedSpan.lowerBound..<window.upperBound,
+            unread: ["/logs/other.jsonl"])
+        XCTAssertEqual(short.owed[ProviderID.claudeCode]?.unread, ["/logs/other.jsonl"])
+        XCTAssertEqual(short.pending, [:])
+    }
+
+    /// A span reaching further back than retention still ends: the pass starts at
+    /// the window's edge, and that has to count as reading back across it, or the
+    /// span stayed owed and every launch went back for it.
+    func testAnOwedSpanOlderThanTheWindowIsTakenOverAtItsEdge() throws {
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        let ledger = ArchiveBackfillLedger()
+            .owing(
+                provider: ProviderID.claudeCode, span: try span(-60, -6),
+                unread: ["/logs/locked.jsonl"]
+            )
+            .starting(provider: ProviderID.claudeCode, span: window, window: window)
+
+        XCTAssertNil(ledger.owed[ProviderID.claudeCode])
+    }
+
+    func testAProvidersUnfinishedPassesLeaveTheOthersAlone() throws {
+        let window = try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        let ledger = ArchiveBackfillLedger()
+            .starting(provider: ProviderID.claudeCode, span: try span(-20, -15), window: window)
+            .starting(provider: ProviderID.codex, span: try span(-20, -15), window: window)
+            .recording(provider: ProviderID.claudeCode, covered: try span(-20, -15))
+
+        XCTAssertNil(ledger.pending[ProviderID.claudeCode])
+        XCTAssertNotNil(ledger.pending[ProviderID.codex])
+    }
+
+    /// A record from before `owed` keeps its coverage, or every install would
+    /// pay for a pass over the whole window for a field with nothing in it.
+    func testARecordWrittenBeforeOwedStillDecodes() throws {
+        let url = stateDir.appendingPathComponent(ArchiveBackfillLedger.fileName)
+        let old = """
+            {"schemaVersion":\(ArchiveBackfillLedger.currentSchemaVersion),\
+            "coverage":{"claude-code":{"from":"2026-01-01","through":"2026-03-01"}}}
+            """
+        try Data(old.utf8).write(to: url)
+
+        let ledger = ArchiveBackfillLedger.load(from: url)
+
+        XCTAssertEqual(ledger.coverage[ProviderID.claudeCode]?.through, "2026-03-01")
+        XCTAssertEqual(ledger.owed, [:])
+        XCTAssertEqual(ledger.pending, [:])
     }
 
     /// The stream only reports what is written after it is armed, so a line

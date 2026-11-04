@@ -67,11 +67,58 @@ enum ArchiveBackfill {
     /// A `coverage` that begins later than the window does is answered with the
     /// whole window: retention has been widened, and the days it just admitted
     /// are older than anything the record speaks for.
+    ///
+    /// **What a pass left unfinished answers past the tail's reach.** It has no
+    /// record, and the tail's snapshot moves on regardless, so without this the
+    /// next launch read the tail's reach past the window's end and nothing went
+    /// back: a log it could not read was lost for good, and so was a pass cut
+    /// short by a quit. `pending` is a pass that never finished, read again from
+    /// where it started. `owed` is one that finished short of logs it could not
+    /// read, read again once `canRead` says one of them reads or has gone.
+    ///
+    /// **Until then the owed span counts as covered**, so a log that stays
+    /// unreadable costs one `access` per path at each launch rather than a pass,
+    /// and a day's new gap costs a pass over that gap and no further back.
     static func uncovered(
         _ window: Range<Date>,
         coverage: ArchiveBackfillLedger.Coverage?,
+        owed: ArchiveBackfillLedger.OwedSpan? = nil,
+        pending: ArchiveBackfillLedger.Coverage? = nil,
         meteredThrough: Date?,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        canRead: (String) -> Bool = canReadNow
+    ) -> Range<Date>? {
+        let blockedSpan = owed.flatMap { $0.isBlocked(canRead: canRead) ? $0.span : nil }
+        let gap = narrowed(
+            window, coverage: blockedSpan?.merging(coverage) ?? coverage,
+            meteredThrough: meteredThrough, calendar: calendar)
+        let unfinished = [pending, blockedSpan == nil ? owed?.span : nil]
+            .compactMap { $0?.fromDay }
+            .map { max(window.lowerBound, calendar.startOfDay(for: $0)) }
+        guard let start = (unfinished + [gap?.lowerBound].compactMap { $0 }).min(),
+            start < window.upperBound
+        else { return nil }
+        return start..<window.upperBound
+    }
+
+    /// Whether a log a pass could not read might answer now. One that has gone
+    /// has no lines left to wait for. Told from `errno` because `FileManager`
+    /// also calls a file gone when a directory above it refuses to be searched,
+    /// which would run the pass on every launch. The same two answers count as
+    /// gone in `LocalUsageProvider.saysGone`, so the read and this agree.
+    ///
+    /// A log that passes this and fails at the read, a disk error being the
+    /// case left, stays unread without ever blocking, and costs a pass each
+    /// launch.
+    static func canReadNow(_ path: String) -> Bool {
+        access(path, R_OK) == 0 || errno == ENOENT || errno == ENOTDIR
+    }
+
+    private static func narrowed(
+        _ window: Range<Date>,
+        coverage: ArchiveBackfillLedger.Coverage?,
+        meteredThrough: Date?,
+        calendar: Calendar
     ) -> Range<Date>? {
         guard let coverage,
             let from = coverage.fromDay,
@@ -166,10 +213,34 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
 
         var fromDay: Date? { UsageReaderShared.dayFormatter.date(from: from) }
         var throughDay: Date? { UsageReaderShared.dayFormatter.date(from: through) }
+
+        /// Both spans as one. `YYYY-MM-DD` orders as the days do.
+        func merging(_ other: Self?) -> Self {
+            guard let other else { return self }
+            return Self(from: min(from, other.from), through: max(through, other.through))
+        }
+    }
+
+    /// A span a pass finished short of logs it could not read.
+    struct OwedSpan: Codable, Equatable, Sendable {
+        var span: Coverage
+        /// The paths the passes over it could not read. Sissy's own file,
+        /// holding what the logs are called and nothing that is in them.
+        var unread: [String]
+
+        /// Whether another pass would only meet the same logs again.
+        func isBlocked(canRead: (String) -> Bool) -> Bool {
+            !unread.contains(where: canRead)
+        }
     }
 
     var schemaVersion: Int = Self.currentSchemaVersion
     var coverage: [String: Coverage] = [:]
+    /// What each provider's passes finished short of.
+    var owed: [String: OwedSpan] = [:]
+    /// The span each provider's pass is reading, written before it reads a byte
+    /// so that a quit or a crash in it is asked for again.
+    var pending: [String: Coverage] = [:]
 
     static func defaultURL(in directory: URL) -> URL {
         directory.appendingPathComponent(fileName)
@@ -178,7 +249,8 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// This record with one provider's span written down. A later pass that
     /// covered a narrower span still extends what is known: the two are
     /// merged, never replaced, or a relaunch's one-day top-up would throw away
-    /// the months the first pass indexed.
+    /// the months the first pass indexed. It settles the pass that was pending,
+    /// and an owed span stays: a pass over a new gap beside it did not read it.
     func recording(provider: String, covered span: Range<Date>) -> Self {
         let formatter = UsageReaderShared.dayFormatter
         var from: Date = span.lowerBound
@@ -192,7 +264,77 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
         var updated = self
         updated.coverage[provider] = Coverage(
             from: formatter.string(from: from), through: formatter.string(from: through))
+        updated.pending[provider] = nil
         return updated
+    }
+
+    private static func days(of span: Range<Date>) -> Coverage {
+        let formatter = UsageReaderShared.dayFormatter
+        return Coverage(
+            from: formatter.string(from: span.lowerBound),
+            through: formatter.string(from: span.upperBound))
+    }
+
+    /// This record with a pass over `span` finished short of `unread`, on top of
+    /// whatever the provider owed already.
+    func owing(provider: String, span: Range<Date>, unread: [String]) -> Self {
+        let existing = owed[provider]
+        var updated = self
+        updated.owed[provider] = OwedSpan(
+            span: Self.days(of: span).merging(existing?.span),
+            unread: Array(Set(unread + (existing?.unread ?? []))).sorted())
+        updated.pending[provider] = nil
+        return updated
+    }
+
+    /// This record with a pass over `span` under way. One reaching back across
+    /// what the provider owed takes that over, because it reads what that did;
+    /// one over a new gap beside a blocked span leaves it owed.
+    func starting(
+        provider: String, span: Range<Date>, window: Range<Date>, calendar: Calendar = .current
+    ) -> Self {
+        var updated = self
+        updated.pending[provider] = Self.days(of: span)
+        if let from = owed[provider]?.span.fromDay,
+            span.lowerBound <= max(window.lowerBound, calendar.startOfDay(for: from))
+        {
+            updated.owed[provider] = nil
+        }
+        return updated
+    }
+
+    /// Writes down the passes about to start, ahead of the first byte they read.
+    static func note(
+        passes: [(provider: String, span: Range<Date>)], within window: Range<Date>,
+        startingAt url: URL
+    ) {
+        saving(
+            passes.reduce(load(from: url)) {
+                $0.starting(provider: $1.provider, span: $1.span, window: window)
+            }, to: url)
+    }
+
+    /// Writes down that the archive was deleted: `providers` are covered across
+    /// `window`, and nothing anyone owed is owed any more, or the next pass
+    /// would read back the days the user just asked Sissy to forget.
+    static func noteDeletion(covering providers: [String], window: Range<Date>?, at url: URL) {
+        var updated = load(from: url)
+        if let window {
+            updated = providers.reduce(updated) { $0.recording(provider: $1, covered: window) }
+        }
+        updated.owed = [:]
+        updated.pending = [:]
+        saving(updated, to: url)
+    }
+
+    /// Losing either write costs one repeat of a pass, which is why it is logged
+    /// rather than propagated.
+    private static func saving(_ ledger: Self, to url: URL) {
+        do {
+            try save(ledger, to: url)
+        } catch {
+            sissyLog("sissy: could not write the archive backfill record: \(error)")
+        }
     }
 
     /// The record on disk, or an empty one. A file that will not decode is
@@ -210,5 +352,19 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     private static func file(_ url: URL) -> VersionedJSONFile<Self> {
         VersionedJSONFile(
             url: url, policy: .replace, schema: (currentSchemaVersion, \.schemaVersion))
+    }
+}
+
+extension ArchiveBackfillLedger {
+    /// By hand for two keys: a record written before them still decodes, because
+    /// they add nothing the days already covered lack, so they earn no
+    /// `currentSchemaVersion` bump and no pass over the whole window on every
+    /// install.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        coverage = try container.decode([String: Coverage].self, forKey: .coverage)
+        owed = try container.decodeIfPresent([String: OwedSpan].self, forKey: .owed) ?? [:]
+        pending = try container.decodeIfPresent([String: Coverage].self, forKey: .pending) ?? [:]
     }
 }
