@@ -68,12 +68,84 @@ final class UsageBackfillTests: XCTestCase {
             historyRoot: stateDir,
             backfill: window
         )
-        return await provider.backfillArchive()
+        return await provider.backfillArchive().written
     }
 
     private func archived(_ offset: Int) throws -> UsageHistoryDay? {
         UsageHistoryStore.load(
             provider: ProviderID.claudeCode, day: try dayKey(offset), in: stateDir)
+    }
+
+    private func runBackfillForOutcome() async throws -> LocalUsageProvider.BackfillOutcome {
+        let provider = LocalUsageProvider.claudeCode(
+            claudeDir: logDir,
+            historyRoot: stateDir,
+            backfill: try XCTUnwrap(ArchiveBackfill.window(retentionDays: Self.retentionDays))
+        )
+        return await provider.backfillArchive()
+    }
+
+    func testAPassThatReadEveryLogIsComplete() async throws {
+        try writeTurn("old.jsonl", requestId: "r-old", dayOffset: -10)
+        let outcome = try await runBackfillForOutcome()
+        XCTAssertEqual(outcome, .init(written: 1, complete: true))
+    }
+
+    /// A log that would not open was skipped under `try?` and the pass still
+    /// ended complete, so its span was recorded covered and never revisited.
+    /// The log beside it is still archived; what is withheld is the record.
+    func testAnUnreadableLogLeavesThePassIncomplete() async throws {
+        try writeTurn("old.jsonl", requestId: "r-old", dayOffset: -10)
+        let locked = try writeTurn("locked.jsonl", requestId: "r-locked", dayOffset: -20)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        }
+
+        let outcome = try await runBackfillForOutcome()
+
+        XCTAssertEqual(outcome, .init(written: 1, complete: false))
+        XCTAssertNotNil(try archived(-10))
+        XCTAssertNil(try archived(-20))
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        let retried = try await runBackfillForOutcome()
+        XCTAssertTrue(retried.complete)
+        XCTAssertNotNil(try archived(-20))
+    }
+
+    /// The stream only reports what is written after it is armed, so a line
+    /// appended to a file the cold scan has already read used to wait out a
+    /// whole poll interval.
+    func testALineAppendedDuringTheColdScanIsReadWithoutWaitingOutTheInterval() async throws {
+        let url = logDir.appendingPathComponent("live.jsonl")
+        try ClaudeLogFixture.writeTurn(to: url, requestId: "r-first", model: Self.model, input: 100)
+        let appended = LockedValue(false)
+        let seen = LockedValue(0)
+        let line = ClaudeLogFixture.turnLine(requestId: "r-second", model: Self.model, input: 100)
+        let provider = LocalUsageProvider.claudeCode(
+            claudeDir: logDir, retainDays: 2, pollInterval: .seconds(3600))
+        await provider.start { today in
+            seen.store(today.totalTokens)
+            var first = false
+            appended.update {
+                first = !$0
+                $0 = true
+            }
+            guard first, let handle = try? FileHandle(forWritingTo: url) else { return }
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: Data((line + "\n").utf8))
+        }
+        let deadline = Date().addingTimeInterval(5)
+        while seen.load() < 200, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        await provider.stop()
+        XCTAssertTrue(appended.load(), "the scan published nothing to append from")
+        XCTAssertEqual(seen.load(), 200)
     }
 
     func testTheWindowEndsWhereTheLiveTailsBegins() throws {

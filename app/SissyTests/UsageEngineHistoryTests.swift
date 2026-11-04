@@ -32,6 +32,8 @@ final class UsageEngineHistoryTests: XCTestCase {
     /// lands a fixture this size in milliseconds, which is what
     /// `firstFrameWithHistory` waits on, so a second is far past it.
     private static let readerLandingWindow: TimeInterval = 1
+    /// How long a test waits for a backfill over a small tree to record itself.
+    private static let backfillLandingWindow: TimeInterval = 10
 
     private func makeEngine(retentionDays: Int? = nil) -> UsageEngine {
         var config = ServerConfig.hermetic(claudeDir: claudeDir, codexDir: codexDir)
@@ -327,6 +329,72 @@ final class UsageEngineHistoryTests: XCTestCase {
             )?.models.first?.inputTokens,
             Self.tokensPerTurn
         )
+    }
+
+    /// One provider's unreadable log withholds that provider's record and
+    /// nothing else: a pass over it used to end the loop, so a CLI with a log it
+    /// could not read kept the one beside it from ever filling its history in.
+    func testAnUnreadableLogLeavesTheNextProvidersPassToRun() async throws {
+        let cal = Calendar.current
+        let old = try XCTUnwrap(
+            cal.date(byAdding: .day, value: -10, to: cal.startOfDay(for: Date()))
+        )
+        .addingTimeInterval(12 * 60 * 60)
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+        let locked = claudeDir.appendingPathComponent("locked.jsonl")
+        try ClaudeLogFixture.writeTurn(
+            to: locked, requestId: "r-locked", model: "claude-sonnet-4-6", input: 100, at: old)
+        try FileManager.default.setAttributes(
+            [.modificationDate: old, .posixPermissions: 0], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        }
+        let rollout = codexDir.appendingPathComponent("rollout-old.jsonl")
+        try Self.codexTurn(at: old).write(to: rollout, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: rollout.path)
+
+        var config = ServerConfig.hermetic(claudeDir: claudeDir, codexDir: codexDir)
+        config.providers = ProviderToggles(claudeCode: true, codex: true)
+        let engine = UsageEngine(
+            config: config, configURL: configURL,
+            limitsProbe: ClaudeLimitsProbe { _ in .absent }, claudeAccounts: .inert())
+        await engine.start { _ in }
+        addTeardownBlock { await engine.stop() }
+
+        let ledgerURL = ArchiveBackfillLedger.defaultURL(in: tempDir)
+        let deadline = Date().addingTimeInterval(Self.backfillLandingWindow)
+        while ArchiveBackfillLedger.load(from: ledgerURL).coverage[ProviderID.codex] == nil,
+            Date() < deadline
+        {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let coverage = ArchiveBackfillLedger.load(from: ledgerURL).coverage
+        XCTAssertNotNil(coverage[ProviderID.codex], "the second provider's pass never recorded")
+        XCTAssertNil(coverage[ProviderID.claudeCode], "a pass with an unread log was recorded")
+        XCTAssertNotNil(
+            UsageHistoryStore.load(
+                provider: ProviderID.codex, day: UsageReaderShared.dayFormatter.string(from: old),
+                in: tempDir),
+            "the second provider's day was not archived")
+    }
+
+    /// A `token_count` line as Codex writes one.
+    private static func codexTurn(at when: Date) throws -> String {
+        let stamp = ISO8601DateFormatter().string(from: when)
+        let usage: [String: Int] = [
+            "input_tokens": 100, "cached_input_tokens": 0, "output_tokens": 0, "total_tokens": 100,
+        ]
+        let line: [String: Any] = [
+            "type": "event_msg", "timestamp": stamp,
+            "payload": [
+                "type": "token_count",
+                "info": ["last_token_usage": usage, "total_token_usage": usage],
+            ],
+        ]
+        return String(decoding: try JSONSerialization.data(withJSONObject: line), as: UTF8.self) + "\n"
     }
 
     /// The backfill is a second writer to the archive and is not the
