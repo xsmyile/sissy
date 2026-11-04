@@ -965,6 +965,21 @@ actor LocalUsageProvider: UsageProvider {
         let size: UInt64
     }
 
+    private static let listingKeys: [URLResourceKey] = [
+        .contentModificationDateKey, .fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey,
+    ]
+
+    /// Whether an entry named like a log can be one. A directory passes `access`
+    /// and fails at the read, so it would stay unread for ever and never block,
+    /// and a pipe would hang the read. A link is judged by what it reaches:
+    /// these keys describe the link, and a log reads perfectly well through one.
+    private static func holdsLines(_ url: URL, _ values: URLResourceValues) -> Bool {
+        if values.isRegularFile == true { return true }
+        guard values.isSymbolicLink == true else { return false }
+        let target = try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey])
+        return target?.isRegularFile == true
+    }
+
     /// Every `.jsonl` under the tree, newest first. Any name is accepted —
     /// Codex writes `rollout-*.jsonl` and Claude Code a UUID, and a fork that
     /// renames either still gets read.
@@ -973,7 +988,7 @@ actor LocalUsageProvider: UsageProvider {
         guard
             let it = FileManager.default.enumerator(
                 at: root,
-                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+                includingPropertiesForKeys: Self.listingKeys,
                 options: [.skipsHiddenFiles],
                 errorHandler: { url, error in
                     refused.update { $0.append((url, error)) }
@@ -987,11 +1002,12 @@ actor LocalUsageProvider: UsageProvider {
             guard u.pathExtension == "jsonl" else { continue }
             let values: URLResourceValues
             do {
-                values = try u.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                values = try u.resourceValues(forKeys: Set(Self.listingKeys))
             } catch {
                 noteUnread(u, error)
                 continue
             }
+            guard Self.holdsLines(u, values) else { continue }
             guard let mtimeDate = values.contentModificationDate, let size = values.fileSize else {
                 noteUnread(u, CocoaError(.fileReadUnknown))
                 continue
@@ -1278,13 +1294,14 @@ actor LocalUsageProvider: UsageProvider {
                 + "\(bridged.code)); its lines stay uncounted until it can be read")
     }
 
-    /// Whether a failed read of a path means there is nothing at that path.
+    /// Whether a failed read of a path means there is nothing at that path, which
+    /// `ArchiveBackfill.canReadNow` has to answer the same way.
     static func saysGone(_ error: Error) -> Bool {
         let bridged = error as NSError
         let missing =
             (bridged.domain == NSCocoaErrorDomain
                 && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(bridged.code))
-            || (bridged.domain == NSPOSIXErrorDomain && bridged.code == Int(ENOENT))
+            || (bridged.domain == NSPOSIXErrorDomain && [ENOENT, ENOTDIR].contains(Int32(bridged.code)))
         guard !missing else { return true }
         return (bridged.userInfo[NSUnderlyingErrorKey] as? NSError).map(saysGone) ?? false
     }

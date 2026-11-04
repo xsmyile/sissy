@@ -606,13 +606,15 @@ actor UsageEngine {
                     window,
                     coverage: ledger.coverage[provider.id],
                     owed: ledger.owed[provider.id],
+                    pending: ledger.pending[provider.id],
                     meteredThrough: ArchiveBackfill.lastMetered(snapshotAt: snapshot))
             else { continue }
             due.append((home: provider.home, span: span))
         }
         guard !due.isEmpty else { return }
         ArchiveBackfillLedger.note(
-            passes: due.map { (provider: $0.home.id, span: $0.span) }, startingAt: ledgerURL)
+            passes: due.map { (provider: $0.home.id, span: $0.span) }, within: window,
+            startingAt: ledgerURL)
         let me = self
         let stateDir = self.stateDir
         let pricingOverride = config.pricingOverride
@@ -2489,23 +2491,21 @@ actor UsageEngine {
     /// cancellation is observed between files, so a write can still be in
     /// flight when `cancel()` returns.
     ///
-    /// Recording the window as covered is the other half. A pass cut short
-    /// writes no record, so the next launch would go back for the days that
-    /// were just deleted — which is the same promise the record's own location
-    /// outside `history/` exists to keep.
+    /// Recording the window as covered is the other half, with a task running or
+    /// not. A pass cut short writes no record, and a span a log was blocking
+    /// waits with no task at all, so either way the next launch would go back
+    /// for the days that were just deleted — which is the same promise the
+    /// record's own location outside `history/` exists to keep.
     private func stopArchiveBackfill() async {
-        guard let task = backfillTask else { return }
-        backfillTask = nil
-        task.cancel()
-        await task.value
-        guard let window = ArchiveBackfill.window(retentionDays: config.resolvedHistoryRetentionDays)
-        else { return }
-        for provider in resolvedProviders where provider.activation.isMetering {
-            recordArchiveBackfill(
-                provider: provider.id,
-                covered: window,
-                at: ArchiveBackfillLedger.defaultURL(in: stateDir))
+        if let task = backfillTask {
+            backfillTask = nil
+            task.cancel()
+            await task.value
         }
+        ArchiveBackfillLedger.noteDeletion(
+            covering: resolvedProviders.filter(\.activation.isMetering).map(\.id),
+            window: ArchiveBackfill.window(retentionDays: config.resolvedHistoryRetentionDays),
+            at: ArchiveBackfillLedger.defaultURL(in: stateDir))
     }
 
     /// Picks the rate catalog the cold backfill will run against, then starts

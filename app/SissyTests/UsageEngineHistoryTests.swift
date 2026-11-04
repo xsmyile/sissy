@@ -431,9 +431,58 @@ final class UsageEngineHistoryTests: XCTestCase {
             UsageHistoryStore.load(provider: ProviderID.claudeCode, day: day, in: tempDir),
             "the log was never read")
         try await waitFor {
-            ArchiveBackfillLedger.load(from: ledgerURL).owed.isEmpty
+            let ledger = ArchiveBackfillLedger.load(from: ledgerURL)
+            return ledger.owed.isEmpty && ledger.pending.isEmpty
         }
         XCTAssertEqual(ArchiveBackfillLedger.load(from: ledgerURL).owed, [:], "the span stayed owed")
+        XCTAssertEqual(ArchiveBackfillLedger.load(from: ledgerURL).pending, [:])
+    }
+
+    /// A delete with no pass running: the span was blocked and nothing was due.
+    /// It went back for the deleted days the moment the log could be read.
+    func testADeleteForgetsAnOwedSpanWithNoPassRunning() async throws {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let old = try XCTUnwrap(cal.date(byAdding: .day, value: -10, to: today))
+            .addingTimeInterval(12 * 60 * 60)
+        let window = try XCTUnwrap(
+            ArchiveBackfill.window(retentionDays: ServerConfig.defaults.resolvedHistoryRetentionDays))
+        try writeClaudeTurn()
+        let locked = claudeDir.appendingPathComponent("locked.jsonl")
+        try ClaudeLogFixture.writeTurn(
+            to: locked, requestId: "r-locked", model: "claude-sonnet-4-6", input: 100, at: old)
+        try FileManager.default.setAttributes(
+            [.modificationDate: old, .posixPermissions: 0], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        }
+        let ledgerURL = ArchiveBackfillLedger.defaultURL(in: tempDir)
+        try ArchiveBackfillLedger.save(
+            ArchiveBackfillLedger().owing(
+                provider: ProviderID.claudeCode, span: window, unread: [locked.path]),
+            to: ledgerURL)
+
+        let first = makeEngine()
+        await first.start { _ in }
+        await first.deleteHistory()
+        await first.stop()
+
+        let ledger = ArchiveBackfillLedger.load(from: ledgerURL)
+        XCTAssertEqual(ledger.owed, [:], "the span outlived the delete")
+        XCTAssertNotNil(ledger.coverage[ProviderID.claudeCode], "the delete did not record the window")
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        let second = makeEngine()
+        await second.start { _ in }
+        addTeardownBlock { await second.stop() }
+        try await Task.sleep(for: .seconds(Self.readerLandingWindow))
+        XCTAssertNil(
+            UsageHistoryStore.load(
+                provider: ProviderID.claudeCode, day: UsageReaderShared.dayFormatter.string(from: old),
+                in: tempDir),
+            "the deleted day came back")
     }
 
     /// Waits out a detached pass, for as long as a small tree could take.
