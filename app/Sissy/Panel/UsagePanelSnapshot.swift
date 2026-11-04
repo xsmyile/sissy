@@ -2223,7 +2223,7 @@ struct UsagePanelSnapshot: Equatable {
                 planToken,
                 tier: reading?.planTier ?? identity?.planTier,
                 seat: account?.seat,
-                name: reading?.planName ?? identity?.planName)
+                name: reading?.plan != nil ? reading?.planName : identity?.planName)
             let observedAt = reading?.limitsObservedAt
             let label = naming.name(id: id, account: account, plan: planToken) ?? id
             return AccountEntry(

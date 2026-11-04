@@ -234,7 +234,8 @@ struct ClaudeCodeSignals: SourceSignals {
                 account: identity.map(\.providerAccount) ?? signals.account,
                 plan: identity?.plan ?? signals.plan,
                 planTier: identity?.planTier ?? signals.planTier,
-                planName: identity?.planName ?? signals.planName, isSignedIn: false)
+                planName: identity?.plan != nil ? identity?.planName : signals.planName,
+                isSignedIn: false)
         }
         return AccountSignals.signedInFirst(byAccount.values)
     }

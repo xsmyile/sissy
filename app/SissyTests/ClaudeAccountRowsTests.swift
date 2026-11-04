@@ -182,6 +182,28 @@ final class ClaudeAccountRowsTests: XCTestCase {
         XCTAssertEqual(linked?.plan, "team")
     }
 
+    /// The plan's word belongs to the source that named the plan: an archive
+    /// that said Ultra cannot rename a newer reading of a Team seat, and it
+    /// still answers for an account nothing has read.
+    func testAnArchivedPlanWordAnswersOnlyForAnArchivedPlan() {
+        let archived = ClaudeAccountIdentity(
+            uuid: archivedUUID, email: nil, organization: "Radon Forge",
+            organizationType: "claude_max", rateLimitTier: "default_claude_max_20x",
+            planName: "Ultra Plus")
+        let other = AccountSignals(id: signedInUUID, account: nil, plan: "pro", planTier: nil)
+        let team = AccountSignals(
+            id: archivedUUID,
+            account: ProviderAccount(email: nil, organization: "Acme Srl", seat: "team_tier_1"),
+            plan: "team", planTier: nil)
+        let unread = AccountSignals(id: archivedUUID, account: nil, plan: nil, planTier: nil)
+
+        let read = entries(readings: [team, other], known: [archived], now: Date())
+        XCTAssertEqual(read.first { $0.id == archivedUUID }?.plan, "Team Premium")
+
+        let fallback = entries(readings: [unread, other], known: [archived], now: Date())
+        XCTAssertEqual(fallback.first { $0.id == archivedUUID }?.plan, "Ultra Plus")
+    }
+
     /// An archived account's plan reaches the row in the vocabulary the
     /// formatter words.
     ///
