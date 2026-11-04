@@ -110,8 +110,6 @@ actor ForgeActivityMonitor {
     /// connection's current fetch. Monotonic per monitor; it is only ever
     /// compared for equality.
     private var reads = 0
-    /// Bumped by every stop, so a request in flight when the monitor was torn
-    /// down cannot publish over the run that replaced it.
     /// The selected local days and their zone, never the bounds themselves: a span ending
     /// today caps its end at each call's own `now`, so keying on it shared
     /// nothing between two reads of the same dates.

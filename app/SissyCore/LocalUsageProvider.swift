@@ -330,7 +330,7 @@ actor LocalUsageProvider: UsageProvider {
     private var onChange: (@Sendable (DayTotals) async -> Void)?
     nonisolated private let watchedCounter = LockedValue(0)
     /// FSEvents-backed primary wake source. When non-nil, kernel-level
-    /// notifications drive `ingestEventPaths` directly and the `pollTask`
+    /// notifications drive `ingestEventPaths` directly and the `pollLoop`
     /// timer only runs as a low-frequency safety net (missed events,
     /// midnight rollover with no JSONL activity).
     private var fsWatcher: FSWatcher?

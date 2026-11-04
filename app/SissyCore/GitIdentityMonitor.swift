@@ -53,7 +53,7 @@ actor GitIdentityMonitor {
     }
     /// The generation the blocking read loop checks between repositories.
     ///
-    /// `stop()` cancels `pollTask`, which a loop parked in `waitUntilExit`
+    /// `stop()` cancels `poll`, which a loop parked in `waitUntilExit`
     /// cannot observe — so without this a stopped monitor goes on spawning a
     /// `git` per repository for a monitor nothing is listening to, and an
     /// engine torn down because a provider was switched off waits behind it.

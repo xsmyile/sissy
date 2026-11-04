@@ -44,8 +44,6 @@ actor ProviderStatusMonitor {
     /// test of the poll contract must not reach a vendor to observe it.
     private let fetchSource: @Sendable (ProviderStatusFeed) async throws -> ProviderStatusReading
     private var poll = PollLoop()
-    /// Bumped by every stop, so a request in flight when the monitor was torn
-    /// down cannot publish over the run that replaced it.
     /// The cause last logged per provider, nil once it has answered.
     private(set) var lastReported: [String: String] = [:]
 
