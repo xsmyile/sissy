@@ -40,10 +40,10 @@ final class CodexUsageSourceTests: XCTestCase {
         (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
     }
 
-    private static func credential(expiresAt: Date? = nil) -> CodexCredential {
+    private static func credential(expiresAt: Date? = nil, user: String = "user-1") -> CodexCredential {
         CodexCredential(
             accessToken: "token", refreshToken: nil, idToken: nil,
-            accountId: "7c31482a-768d-4750-8521-cd39b2669767", userId: "user-1",
+            accountId: "7c31482a-768d-4750-8521-cd39b2669767", userId: user,
             email: "someone@example.com", plan: "plus", expiresAt: expiresAt)
     }
 
@@ -410,6 +410,107 @@ final class CodexUsageSourceTests: XCTestCase {
         account.store("user-two")
         _ = await source.refreshOnce {}
         XCTAssertEqual(source.observedAccount, "user-two")
+    }
+
+    /// `codex login` as somebody else, and a request for them that fails with
+    /// neither a 401 nor a 403: the windows on the row were the account the
+    /// user left's, filed under the id of the one they joined.
+    func testAReadingNeverOutlivesTheAccountThatProducedIt() async {
+        let account = LockedValue("user-one")
+        let answering = LockedValue(true)
+        let source = Self.source(
+            credential: { _ in
+                .found(Self.credential(user: account.load()))
+            },
+            fetch: { _ in
+                guard answering.load() else { throw UsageRequestError.badStatus(500) }
+                return CodexUsagePayload.reading(Self.reply(), observedAt: Date())
+            })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentReading().owner, "user-one")
+        XCTAssertFalse(source.currentReading().signals.windows.isEmpty)
+
+        account.store("user-two")
+        answering.store(false)
+        _ = await source.refreshOnce {}
+
+        let reading = source.currentReading()
+        XCTAssertEqual(reading.owner, "user-two")
+        XCTAssertEqual(reading.signals.windows, [])
+        XCTAssertNil(reading.signals.limitsObservedAt)
+        XCTAssertNil(reading.signals.plan)
+        XCTAssertNil(reading.signals.account)
+    }
+
+    /// A renewed token is the same account, and a poll that fails keeps its
+    /// reading: only another account's credential takes it down.
+    func testACredentialForTheSameAccountKeepsTheReading() async {
+        let answering = LockedValue(true)
+        let source = Self.source(
+            credential: { _ in .found(Self.credential()) },
+            fetch: { _ in
+                guard answering.load() else { throw UsageRequestError.badStatus(500) }
+                return CodexUsagePayload.reading(Self.reply(), observedAt: Date())
+            })
+        _ = await source.refreshOnce {}
+        answering.store(false)
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().windows.map(\.minutes), [300, 10_080])
+    }
+
+    /// The row and the account entry are both built from one load of the
+    /// reader, so the entry can carry no window of the account it left.
+    func testTheSignedInEntryNamesTheAccountItsWindowsCameFrom() async {
+        let account = LockedValue("user-one")
+        let answering = LockedValue(true)
+        let source = Self.source(
+            credential: { _ in
+                .found(Self.credential(user: account.load()))
+            },
+            fetch: { _ in
+                guard answering.load() else { throw UsageRequestError.badStatus(500) }
+                return CodexUsagePayload.reading(Self.reply(), observedAt: Date())
+            })
+        _ = await source.refreshOnce {}
+        XCTAssertFalse(source.currentSignals().windows.isEmpty)
+        account.store("user-two")
+        answering.store(false)
+        _ = await source.refreshOnce {}
+
+        let signals = CodexSignals(
+            rollout: LockedValue(ProviderSignals()), sources: LockedValue([source])
+        ).currentSignals()
+        XCTAssertEqual(signals.accounts.map(\.id), ["user-two"])
+        XCTAssertEqual(signals.accounts.first?.windows, [])
+    }
+
+    /// A reply naming another workspace than the one asked for is that
+    /// workspace's reading: published, it put one account's windows on
+    /// another's row with only a log line to say so.
+    func testAReplyForAnotherAccountIsDropped() async {
+        let source = Self.source(
+            credential: { _ in .found(Self.credential()) },
+            fetch: { _ in
+                CodexUsagePayload.reading(
+                    Self.body(#"{"account_id": "someone-else", "plan_type": "plus"}"#),
+                    observedAt: Date())
+            })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().limitsState, .credentialRefused)
+        XCTAssertEqual(source.currentSignals().windows, [])
+        XCTAssertNil(source.currentSignals().limitsObservedAt)
+    }
+
+    func testALinkedAccountAnsweredForAnotherSaysToLinkAgain() async {
+        let source = Self.source(
+            account: "user-1",
+            credential: { _ in .found(Self.credential()) },
+            fetch: { _ in
+                CodexUsagePayload.reading(
+                    Self.body(#"{"account_id": "someone-else"}"#), observedAt: Date())
+            })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().limitsState, .sessionExpired)
     }
 
     /// Codex signed out, or driving the API with a key, is an account with no
