@@ -579,7 +579,8 @@ actor UsageEngine {
     /// The record is written only where a pass ran to completion and read
     /// every log it listed. A cancelled one leaves nothing behind but the days
     /// it had already proved whole, and the next launch asks again, as it does
-    /// after a pass that met a log it could not read.
+    /// for a provider whose pass met a log it could not read. That one withholds
+    /// its own record only: the providers after it still get their pass.
     private func startArchiveBackfill() {
         guard lifecycle == .running,
             config.resolvedHistoryRetentionDays > 0,
@@ -616,7 +617,8 @@ actor UsageEngine {
                     ledger: projectLedger)
                 if let catalog { await provider.applyPriceCatalog(catalog) }
                 let outcome = await provider.backfillArchive { await me.invalidateHistoryRollups() }
-                guard outcome.complete, !Task.isCancelled else { return }
+                if Task.isCancelled { return }
+                guard outcome.complete else { continue }
                 await me.recordArchiveBackfill(provider: home.id, covered: span, at: ledgerURL)
             }
         }
