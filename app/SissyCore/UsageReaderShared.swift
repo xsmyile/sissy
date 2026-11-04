@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Constants and helpers shared by the one tail (`LocalUsageProvider`) and
 /// the per-CLI adapters that feed it. Centralized so a tuning change can't
@@ -163,19 +164,17 @@ enum UsageReaderShared {
 /// `.current` once kept the launch zone after a flight while the tail's
 /// buckets, `startOfDay` and the rollups follow `Calendar.current`, so a key
 /// and the day it was computed for could name two different dates.
-final class DayKeyFormatter: @unchecked Sendable {
+final class DayKeyFormatter: Sendable {
     private static let format = "yyyy-MM-dd"
     private static let localeIdentifier = "en_US_POSIX"
     /// Held for the life of the process, which is the life of the shared
     /// formatter it serves.
-    nonisolated(unsafe) private static var zoneObserver: NSObjectProtocol?
-    private static let observerLock = NSLock()
+    private static let zoneObserver = Mutex<NSObjectProtocol?>(nil)
 
-    private let formatter: DateFormatter
-    private let zone: @Sendable () -> TimeZone
     /// `DateFormatter` is safe to read from several threads, not to have its
     /// zone set under a reader.
-    private let lock = NSLock()
+    private let formatter: Mutex<DateFormatter>
+    private let zone: @Sendable () -> TimeZone
 
     init(zone: @escaping @Sendable () -> TimeZone = { Calendar.current.timeZone }) {
         let formatter = DateFormatter()
@@ -183,25 +182,25 @@ final class DayKeyFormatter: @unchecked Sendable {
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: Self.localeIdentifier)
         formatter.timeZone = zone()
-        self.formatter = formatter
+        self.formatter = Mutex(formatter)
         self.zone = zone
     }
 
     func string(from date: Date) -> String {
-        lock.withLock {
-            settleZone()
-            return formatter.string(from: date)
+        formatter.withLock {
+            settleZone(of: $0)
+            return $0.string(from: date)
         }
     }
 
     func date(from string: String) -> Date? {
-        lock.withLock {
-            settleZone()
-            return formatter.date(from: string)
+        formatter.withLock {
+            settleZone(of: $0)
+            return $0.date(from: string)
         }
     }
 
-    private func settleZone() {
+    private func settleZone(of formatter: DateFormatter) {
         let current = zone()
         if formatter.timeZone != current { formatter.timeZone = current }
     }
@@ -210,9 +209,9 @@ final class DayKeyFormatter: @unchecked Sendable {
     /// new one, so `Calendar.current` and every key read after it agree on
     /// the zone the Mac is in now rather than on the one it launched in.
     static func followSystemZone() {
-        observerLock.withLock {
-            guard zoneObserver == nil else { return }
-            zoneObserver = observeSystemZone(on: .default) { NSTimeZone.resetSystemTimeZone() }
+        zoneObserver.withLock {
+            guard $0 == nil else { return }
+            $0 = observeSystemZone(on: .default) { NSTimeZone.resetSystemTimeZone() }
         }
     }
 

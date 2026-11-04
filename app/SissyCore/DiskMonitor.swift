@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Reads the disks once a minute and publishes what it read, behind
 /// `ServerConfig.disk`.
@@ -103,46 +104,47 @@ actor DiskMonitor {
 /// thread, and a second read behind the same stuck volume would park a
 /// second. A waiter that leaves is answered nil at once, and one that leaves
 /// before it joined is answered nil when it does.
-final class DiskReadGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var inFlight = false
-    private var waiters: [UUID: CheckedContinuation<DiskReading?, Never>] = [:]
-    private var left: Set<UUID> = []
+final class DiskReadGate: Sendable {
+    private struct State {
+        var inFlight = false
+        var waiters: [UUID: CheckedContinuation<DiskReading?, Never>] = [:]
+        var left: Set<UUID> = []
+    }
+
+    private let state = Mutex(State())
 
     /// Registers `id` as a waiter and reports whether this caller is the one
     /// that has to run the read.
     func join(_ id: UUID, _ continuation: CheckedContinuation<DiskReading?, Never>) -> Bool {
-        lock.lock()
-        if left.remove(id) != nil {
-            lock.unlock()
-            continuation.resume(returning: nil)
-            return false
+        let (alreadyLeft, runs) = state.withLock { state in
+            if state.left.remove(id) != nil { return (true, false) }
+            state.waiters[id] = continuation
+            defer { state.inFlight = true }
+            return (false, !state.inFlight)
         }
-        waiters[id] = continuation
-        let runs = !inFlight
-        inFlight = true
-        lock.unlock()
+        if alreadyLeft { continuation.resume(returning: nil) }
         return runs
     }
 
     /// The read returned. Hands it to everyone still waiting and reopens the
     /// slot.
     func finish(_ reading: DiskReading) {
-        lock.lock()
-        inFlight = false
-        let pending = waiters
-        waiters.removeAll()
-        lock.unlock()
+        let pending = state.withLock { state in
+            state.inFlight = false
+            defer { state.waiters.removeAll() }
+            return state.waiters
+        }
         for continuation in pending.values { continuation.resume(returning: reading) }
     }
 
     /// A waiter was cancelled. It leaves alone, and the read stays in flight
     /// for anyone else.
     func leave(_ id: UUID) {
-        lock.lock()
-        let abandoned = waiters.removeValue(forKey: id)
-        if abandoned == nil { left.insert(id) }
-        lock.unlock()
+        let abandoned = state.withLock {
+            let abandoned = $0.waiters.removeValue(forKey: id)
+            if abandoned == nil { $0.left.insert(id) }
+            return abandoned
+        }
         abandoned?.resume(returning: nil)
     }
 
@@ -154,8 +156,6 @@ final class DiskReadGate: @unchecked Sendable {
     /// scope has closed, is what keeps that race from leaving one id behind
     /// for the life of the process.
     func forget(_ id: UUID) {
-        lock.lock()
-        left.remove(id)
-        lock.unlock()
+        state.withLock { _ = $0.left.remove(id) }
     }
 }

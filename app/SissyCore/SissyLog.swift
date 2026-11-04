@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// What `SissyLogFile` writes through: a `FileHandle` in the app, and in the
 /// tests a handle that fails the way a real disk does.
@@ -23,16 +24,19 @@ extension FileHandle: SissyLogHandle {
 /// tracked as the lines go out instead, and one generation is kept
 /// (`sissy.err.1.log`) — enough to grep the last boot's stderr after a crash,
 /// small enough never to need manual cleanup.
-final class SissyLogFile: @unchecked Sendable {
+final class SissyLogFile: Sendable {
     private let url: URL
     private let rotatedURL: URL
     private let maxBytes: UInt64
     private let open: @Sendable (URL) throws -> any SissyLogHandle
-    private let lock = NSLock()
-    private var handle: (any SissyLogHandle)?
-    private var written: UInt64 = 0
-    private var failed = 0
-    private var lastCompleteLine: UInt64?
+    private struct State {
+        var handle: (any SissyLogHandle)?
+        var written: UInt64 = 0
+        var failed = 0
+        var lastCompleteLine: UInt64?
+    }
+
+    private let state = Mutex(State())
 
     /// `open` hands back a handle positioned at the end of the file it was
     /// given; tests pass one that refuses every write.
@@ -54,9 +58,7 @@ final class SissyLogFile: @unchecked Sendable {
     /// Lines this log could not write, because the file would not open or
     /// the write itself failed.
     var failures: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return failed
+        state.withLock { $0.failed }
     }
 
     /// Appends `data`, rotating first when it would not fit. A line is never
@@ -72,31 +74,33 @@ final class SissyLogFile: @unchecked Sendable {
     /// dropped. It is never logged: the log is the thing that just failed,
     /// and `sissyLog` from here would recurse.
     func write(_ data: Data) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard var handle = opened() else {
-            failed += 1
+        state.withLock { write(data, holding: &$0) }
+    }
+
+    private func write(_ data: Data, holding state: inout State) {
+        guard var handle = opened(&state) else {
+            state.failed += 1
             return
         }
-        if written + UInt64(data.count) > maxBytes {
-            rotate()
-            guard let fresh = opened() else {
-                failed += 1
+        if state.written + UInt64(data.count) > maxBytes {
+            rotate(&state)
+            guard let fresh = opened(&state) else {
+                state.failed += 1
                 return
             }
             handle = fresh
         }
-        let start = written
+        let start = state.written
         do {
             try handle.append(data)
-            written += UInt64(data.count)
+            state.written += UInt64(data.count)
         } catch {
-            failed += 1
+            state.failed += 1
             if (try? handle.truncate(atOffset: start)) == nil {
-                lastCompleteLine = start
+                state.lastCompleteLine = start
             }
             try? handle.close()
-            self.handle = nil
+            state.handle = nil
         }
     }
 
@@ -120,18 +124,18 @@ final class SissyLogFile: @unchecked Sendable {
     /// A fragment a failed write left behind is truncated away before the
     /// handle is used, and a handle that cannot remove it is closed and not
     /// used at all.
-    private func opened() -> (any SissyLogHandle)? {
-        if let handle { return handle }
+    private func opened(_ state: inout State) -> (any SissyLogHandle)? {
+        if let handle = state.handle { return handle }
         guard let opened = try? open(url) else { return nil }
-        if let lastCompleteLine {
+        if let lastCompleteLine = state.lastCompleteLine {
             guard (try? opened.truncate(atOffset: lastCompleteLine)) != nil else {
                 try? opened.close()
                 return nil
             }
-            self.lastCompleteLine = nil
+            state.lastCompleteLine = nil
         }
-        written = (try? opened.offset()) ?? 0
-        handle = opened
+        state.written = (try? opened.offset()) ?? 0
+        state.handle = opened
         return opened
     }
 
@@ -142,13 +146,13 @@ final class SissyLogFile: @unchecked Sendable {
     /// leaves the open handle alone rather than dropping it: the line still has
     /// somewhere to go, and the next one asks again instead of closing and
     /// reopening a file it could not rotate.
-    private func rotate() {
+    private func rotate(_ state: inout State) {
         let fm = FileManager.default
         try? fm.removeItem(at: rotatedURL)
         guard (try? fm.moveItem(at: url, to: rotatedURL)) != nil else { return }
-        try? handle?.close()
-        handle = nil
-        written = 0
+        try? state.handle?.close()
+        state.handle = nil
+        state.written = 0
     }
 }
 
@@ -156,10 +160,9 @@ final class SissyLogFile: @unchecked Sendable {
 ///
 /// Same rule as `SissyLogFile`: a write the handle refuses is counted and
 /// dropped, never raised and never logged.
-final class SissyLogStream: @unchecked Sendable {
+final class SissyLogStream: Sendable {
     private let handle: FileHandle
-    private let lock = NSLock()
-    private var failed = 0
+    private let failed = Mutex(0)
 
     init(handle: FileHandle) {
         self.handle = handle
@@ -167,18 +170,16 @@ final class SissyLogStream: @unchecked Sendable {
 
     /// Lines the handle refused.
     var failures: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return failed
+        failed.withLock { $0 }
     }
 
     func write(_ data: Data) {
-        lock.lock()
-        defer { lock.unlock() }
-        do {
-            try handle.write(contentsOf: data)
-        } catch {
-            failed += 1
+        failed.withLock {
+            do {
+                try handle.write(contentsOf: data)
+            } catch {
+                $0 += 1
+            }
         }
     }
 }

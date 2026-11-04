@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// A directory that was a checkout of a repository, and the repository it
 /// belonged to.
@@ -66,7 +67,7 @@ struct InboxIngest: Equatable, Sendable {
 ///
 /// Shared across the providers' actors, so the state sits behind a lock — and
 /// no file I/O happens while that lock is held.
-final class ProjectLedger: @unchecked Sendable {
+final class ProjectLedger: Sendable {
     /// How many gone checkouts are worth carrying. Generous on purpose: an
     /// evicted entry is a row that loses its project for good, and the
     /// archive it has to answer for retains 90 days by default and may be
@@ -115,29 +116,37 @@ final class ProjectLedger: @unchecked Sendable {
 
     private let url: URL?
     private let inbox: URL?
-    private let fileManager: FileManager
-    private let lock = NSLock()
+    /// Most recently confirmed first in `checkouts`, which is also the order
+    /// the cap drops from: a checkout still being worked in is re-confirmed on
+    /// every launch.
+    ///
+    /// `writable` is false once the file on disk is found to be a schema this
+    /// build does not know. The run keeps its own memory and refuses to write
+    /// over one a newer build left, which is the archive's rule and for the
+    /// same reason: what is on disk knows more than this build can express.
+    private struct State {
+        var checkouts: [ProjectCheckout] = []
+        var scannedAt: [String: Date] = [:]
+        var dirty = false
+        var writable = true
+
+        mutating func cap() {
+            guard checkouts.count > ProjectLedger.maxCheckouts else { return }
+            checkouts.removeLast(checkouts.count - ProjectLedger.maxCheckouts)
+        }
+    }
+
+    private let state = Mutex(State())
     /// Held for the whole of a save, so the two providers cannot both reach
     /// the file with a document each: the one that wrote second would decide
     /// what is on disk, and the one that wrote the newer document has already
-    /// cleared `dirty`, so nothing would rewrite it. Taken outside `lock` and
+    /// cleared `dirty`, so nothing would rewrite it. Taken outside `state` and
     /// never the other way round, which is the only order either is taken in.
-    private let writeLock = NSLock()
-    /// Most recently confirmed first, which is also the order the cap drops
-    /// from: a checkout still being worked in is re-confirmed on every launch.
-    private var checkouts: [ProjectCheckout] = []
-    private var scannedAt: [String: Date] = [:]
-    private var dirty = false
-    /// False once the file on disk is found to be a schema this build does not
-    /// know. The run keeps its own memory and refuses to write over one a
-    /// newer build left, which is the archive's rule and for the same reason:
-    /// what is on disk knows more than this build can express.
-    private var writable = true
+    private let writeLock = Mutex(())
 
-    init(url: URL? = nil, fileManager: FileManager = .default) {
+    init(url: URL? = nil) {
         self.url = url
         self.inbox = url.map { Self.inboxURL(in: $0.deletingLastPathComponent()) }
-        self.fileManager = fileManager
         load()
     }
 
@@ -152,23 +161,23 @@ final class ProjectLedger: @unchecked Sendable {
     /// Deepest match wins, so a worktree that sat inside another checkout is
     /// answered by itself rather than by what contained it.
     func project(under workingDirectory: String) -> String? {
-        let match = lock.withLock {
-            checkouts
+        let match = state.withLock {
+            $0.checkouts
                 .filter { workingDirectory.isInside($0.directory) }
                 .max { $0.directory.count < $1.directory.count }
         }
-        guard let match, !fileManager.fileExists(atPath: match.directory) else { return nil }
+        guard let match, !FileManager.default.fileExists(atPath: match.directory) else { return nil }
         remember(match)
         return match.project
     }
 
     func remember(_ checkout: ProjectCheckout) {
-        lock.withLock {
-            if checkouts.first == checkout { return }
-            if !checkouts.contains(checkout) { dirty = true }
-            checkouts.removeAll { $0.directory == checkout.directory }
-            checkouts.insert(checkout, at: 0)
-            cap()
+        state.withLock {
+            if $0.checkouts.first == checkout { return }
+            if !$0.checkouts.contains(checkout) { $0.dirty = true }
+            $0.checkouts.removeAll { $0.directory == checkout.directory }
+            $0.checkouts.insert(checkout, at: 0)
+            $0.cap()
         }
     }
 
@@ -177,18 +186,18 @@ final class ProjectLedger: @unchecked Sendable {
     /// fresher answer about the same directory than one read last week.
     @discardableResult
     func adopt(_ remembered: [ProjectCheckout]) -> Int {
-        lock.withLock {
-            let known = Set(checkouts.map(\.directory))
+        state.withLock {
+            let known = Set($0.checkouts.map(\.directory))
             let added = remembered.filter { !known.contains($0.directory) }
             guard !added.isEmpty else { return 0 }
-            checkouts.append(contentsOf: added)
-            dirty = true
-            cap()
+            $0.checkouts.append(contentsOf: added)
+            $0.dirty = true
+            $0.cap()
             return added.count
         }
     }
 
-    func all() -> [ProjectCheckout] { lock.withLock { checkouts } }
+    func all() -> [ProjectCheckout] { state.withLock { $0.checkouts } }
 
     /// Records every worktree git currently lists for a repository, so each one
     /// is already answered for by the time it is deleted.
@@ -204,7 +213,7 @@ final class ProjectLedger: @unchecked Sendable {
             .appendingPathComponent(Self.gitEntryName)
             .appendingPathComponent(Self.worktreesDirName)
         let entries =
-            (try? fileManager.contentsOfDirectory(
+            (try? FileManager.default.contentsOfDirectory(
                 at: admin, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
             )) ?? []
         for entry in entries {
@@ -226,7 +235,7 @@ final class ProjectLedger: @unchecked Sendable {
     /// harvesting from something that happens when a line is read into
     /// something that happens before one is.
     func refreshKnownRepositories(now: Date = Date()) {
-        let repositories = Set(lock.withLock { checkouts.map(\.project) })
+        let repositories = Set(state.withLock { $0.checkouts.map(\.project) })
         for repository in repositories {
             harvestWorktrees(of: repository, now: now)
         }
@@ -247,7 +256,7 @@ final class ProjectLedger: @unchecked Sendable {
     func ingestInbox() -> InboxIngest {
         guard let inbox else { return InboxIngest() }
         let entries =
-            (try? fileManager.contentsOfDirectory(
+            (try? FileManager.default.contentsOfDirectory(
                 at: inbox, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
             )) ?? []
         var report = InboxIngest()
@@ -255,12 +264,12 @@ final class ProjectLedger: @unchecked Sendable {
         for entry in entries.prefix(Self.maxInboxEntriesPerPass) {
             guard let text = readEntry(at: entry) else { continue }
             report.read += 1
-            try? fileManager.removeItem(at: entry)
+            try? FileManager.default.removeItem(at: entry)
             guard let checkout = Self.checkout(from: text) else {
                 report.rejected += 1
                 continue
             }
-            if !fileManager.fileExists(atPath: checkout.directory) {
+            if !FileManager.default.fileExists(atPath: checkout.directory) {
                 report.arrivedDeleted += 1
             }
             arrived.append(checkout)
@@ -356,31 +365,32 @@ final class ProjectLedger: @unchecked Sendable {
     /// other order loses it to any process that dies in between.
     func saveIfDirty(now: Date = Date()) {
         guard let url else { return }
-        writeLock.withLock {
-            let document: Document? = lock.withLock {
-                guard dirty, writable else { return nil }
-                dirty = false
+        writeLock.withLock { _ in
+            let document: Document? = state.withLock {
+                guard $0.dirty, $0.writable else { return nil }
+                $0.dirty = false
                 return Document(
-                    schemaVersion: Self.currentSchemaVersion, updatedAt: now, checkouts: checkouts)
+                    schemaVersion: Self.currentSchemaVersion, updatedAt: now,
+                    checkouts: $0.checkouts)
             }
             guard let document else { return }
             do {
                 try Self.file(url).save(document)
             } catch {
-                lock.withLock { dirty = true }
+                state.withLock { $0.dirty = true }
                 sissyLog("sissy: project ledger save failed at \(url.path): \(error)")
             }
         }
     }
 
     private func claimScan(of repository: String, now: Date) -> Bool {
-        lock.withLock {
-            if let last = scannedAt[repository],
+        state.withLock {
+            if let last = $0.scannedAt[repository],
                 now.timeIntervalSince(last) < Self.worktreeScanInterval
             {
                 return false
             }
-            scannedAt[repository] = now
+            $0.scannedAt[repository] = now
             return true
         }
     }
@@ -407,21 +417,16 @@ final class ProjectLedger: @unchecked Sendable {
             return
         }
         guard document.schemaVersion == Self.currentSchemaVersion else {
-            lock.withLock { writable = false }
+            state.withLock { $0.writable = false }
             sissyLog(
                 "sissy: project ledger at \(url.path) is schema \(document.schemaVersion), "
                     + "expected \(Self.currentSchemaVersion), left alone and not written this run")
             return
         }
-        lock.withLock {
-            checkouts = document.checkouts
-            cap()
+        state.withLock {
+            $0.checkouts = document.checkouts
+            $0.cap()
         }
-    }
-
-    private func cap() {
-        guard checkouts.count > Self.maxCheckouts else { return }
-        checkouts.removeLast(checkouts.count - Self.maxCheckouts)
     }
 }
 

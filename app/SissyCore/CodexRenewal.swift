@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Renews a linked Codex account's credential and files the renewal, as one
 /// operation nothing a caller does can interrupt.
@@ -347,28 +348,31 @@ actor CodexRenewal {
 /// Whichever of two racing tasks answers first resumes the waiter, and the
 /// loser is cancelled. A task group cannot do this: it awaits every child
 /// before returning, and the renewal it would wait on is uncancellable.
-private final class FirstAnswer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Bool, Never>?
-    private var tasks: [Task<Void, Never>] = []
+private final class FirstAnswer: Sendable {
+    private struct State {
+        var continuation: CheckedContinuation<Bool, Never>?
+        var tasks: [Task<Void, Never>] = []
+    }
+
+    private let state = Mutex(State())
 
     func arm(_ continuation: CheckedContinuation<Bool, Never>) {
-        lock.withLock { self.continuation = continuation }
+        state.withLock { $0.continuation = continuation }
     }
 
     func own(_ task: Task<Void, Never>) {
-        lock.withLock { tasks.append(task) }
+        state.withLock { $0.tasks.append(task) }
     }
 
     func resume(_ answer: Bool) {
-        let waiting: CheckedContinuation<Bool, Never>? = lock.withLock {
-            defer { continuation = nil }
-            return continuation
+        let waiting = state.withLock { state in
+            defer { state.continuation = nil }
+            return state.continuation
         }
         waiting?.resume(returning: answer)
     }
 
     func cancelAll() {
-        lock.withLock { tasks }.forEach { $0.cancel() }
+        state.withLock { $0.tasks }.forEach { $0.cancel() }
     }
 }

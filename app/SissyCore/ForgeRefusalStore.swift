@@ -1,9 +1,10 @@
 import CryptoKit
 import Foundation
+import Synchronization
 
 /// HTTP refusals belong to a credential and survive a monitor rebuild or quit.
 /// Only a hash of the origin and credential is stored; no token reaches disk.
-final class ForgeRefusalStore: @unchecked Sendable {
+final class ForgeRefusalStore: Sendable {
     private static let fileName = "forge-refusals.json"
     private static let current = LockedValue(
         ForgeRefusalStore(
@@ -31,16 +32,15 @@ final class ForgeRefusalStore: @unchecked Sendable {
     static let deadlineCeiling: TimeInterval = 86_400
     /// The wait a refusal that names no deadline is held for.
     static let defaultBackoff: TimeInterval = 300
-    private let lock = NSLock()
     private let url: URL?
-    private var entries: [String: Entry]
+    private let entries: Mutex<[String: Entry]>
 
     /// Loads the file without the rate limits that have run out by `now`,
     /// which would otherwise be rewritten on every record for as long as the
     /// file lived.
     init(url: URL? = nil, now: Date = Date()) {
         self.url = url
-        entries = Self.live(url.flatMap { try? Self.file($0).load() } ?? [:], now: now)
+        entries = Mutex(Self.live(url.flatMap { try? Self.file($0).load() } ?? [:], now: now))
     }
 
     private static func file(_ url: URL) -> VersionedJSONFile<[String: Entry]> {
@@ -64,40 +64,42 @@ final class ForgeRefusalStore: @unchecked Sendable {
     }
 
     func failure(url: URL?, token: String, now: Date = Date()) -> ForgeReadFailure? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let entry = entries[key(url: url, token: token)] else { return nil }
-        if entry.unauthorized { return .unauthorized }
-        return entry.until > now ? .rateLimited : nil
+        let key = key(url: url, token: token)
+        return entries.withLock {
+            guard let entry = $0[key] else { return nil }
+            if entry.unauthorized { return .unauthorized }
+            return entry.until > now ? .rateLimited : nil
+        }
     }
 
     func deadline(url: URL?, token: String) -> Date? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let entry = entries[key(url: url, token: token)], !entry.unauthorized else { return nil }
-        return entry.until
+        let key = key(url: url, token: token)
+        return entries.withLock {
+            guard let entry = $0[key], !entry.unauthorized else { return nil }
+            return entry.until
+        }
     }
 
     func record(
         _ failure: ForgeReadFailure?, url: URL?, token: String, until: Date? = nil, now: Date = Date()
     ) {
-        lock.lock()
-        defer { lock.unlock() }
         let key = key(url: url, token: token)
-        if failure == .unauthorized || failure == .rateLimited {
-            entries[key] = Entry(
-                unauthorized: failure == .unauthorized,
-                until: until ?? now.addingTimeInterval(Self.defaultBackoff))
-        } else if failure == nil {
-            guard entries.removeValue(forKey: key) != nil else { return }
-        } else {
-            return
+        entries.withLock {
+            if failure == .unauthorized || failure == .rateLimited {
+                $0[key] = Entry(
+                    unauthorized: failure == .unauthorized,
+                    until: until ?? now.addingTimeInterval(Self.defaultBackoff))
+            } else if failure == nil {
+                guard $0.removeValue(forKey: key) != nil else { return }
+            } else {
+                return
+            }
+            $0 = Self.live($0, now: now)
+            guard let url = self.url else { return }
+            do {
+                try Self.file(url).save($0)
+            } catch { sissyLog("sissy: could not save forge refusal state") }
         }
-        entries = Self.live(entries, now: now)
-        guard let url = self.url else { return }
-        do {
-            try Self.file(url).save(entries)
-        } catch { sissyLog("sissy: could not save forge refusal state") }
     }
 
     /// Retry-After seconds or an HTTP date, with a one-day ceiling. Constructed
