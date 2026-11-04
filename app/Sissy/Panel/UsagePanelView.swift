@@ -137,11 +137,13 @@ struct UsagePanelView: View {
         /// first account.
         case projects(String?, account: String?)
         /// Which repositories commit under a name their forge does not
-        /// expect, one level in from the Overview. `focus` is the repository
-        /// the page was opened about — a project row's own, or the single
-        /// repository the Overview's line names — and nil where it was opened
-        /// to read the whole list.
-        case identities(focus: String?)
+        /// expect, one level in from whichever page drew the row that opened
+        /// it. `focus` is the repository the page was opened about — a project
+        /// row's own, or the single repository the Overview's line names — and
+        /// nil where it was opened to read the whole list. `from` is the way
+        /// back, because a project row sits on the Overview, on a vendor's own
+        /// page and on the Projects page alike.
+        indirect case identities(focus: String?, from: Self)
         /// The presets and a month of the archive to pick the panel's period
         /// from, one level in from the header's calendar button. A pick
         /// returns to the tab it was opened from.
@@ -201,6 +203,17 @@ struct UsagePanelView: View {
         case .projects(let id, _):
             guard let id else { return nil }
             return providers.first { $0.id == id }
+        }
+    }
+
+    /// Whether `page` draws one provider's row, and so has nothing to draw
+    /// once that row leaves the frame. A page about no provider resolves to no
+    /// row as a matter of course, which is not the row being gone.
+    nonisolated static func needsRow(_ page: Page) -> Bool {
+        switch page {
+        case .overview, .identities, .calendar: false
+        case .provider, .services, .effort: true
+        case .projects(let id, _): id != nil
         }
     }
 
@@ -304,7 +317,7 @@ struct UsagePanelView: View {
         .focusEffectDisabled()
         .focused($panelFocused)
         .defaultFocus($panelFocused, true)
-        .onChange(of: open == nil) { _, gone in
+        .onChange(of: Self.needsRow(page) && open == nil) { _, gone in
             if gone { page = .overview }
         }
         .onChange(of: liveDemand, initial: true) { _, wanted in
@@ -429,8 +442,8 @@ struct UsagePanelView: View {
             } else {
                 header(live, period: readings.period)
             }
-        case .identities:
-            identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt)
+        case .identities(_, let origin):
+            identitiesHeader(checkedAt: live?.frame.identitiesCheckedAt, back: origin)
         case .calendar:
             subpageHeader(back: .overview, mark: nil, title: "Calendar") {
                 EmptyView()
@@ -481,7 +494,7 @@ struct UsagePanelView: View {
             if let projects = readings.projects {
                 PanelProjectsPage(
                     page: projects,
-                    openIdentities: { page = .identities(focus: $0) })
+                    openIdentities: { page = .identities(focus: $0, from: target) })
             } else {
                 overview(snapshot)
             }
@@ -575,7 +588,7 @@ struct UsagePanelView: View {
                     UsagePanelSnapshot.forgeAwaited(
                         snapshot.forge, period: snapshot.period, answer: forgeSpan)),
                 refreshForge: { model.engine.refreshForge($0) },
-                openIdentities: { page = .identities(focus: $0) })
+                openIdentities: { page = .identities(focus: $0, from: .overview) })
         }
     }
 
@@ -589,7 +602,7 @@ struct UsagePanelView: View {
             },
             openProvider: { page = .provider($0, account: $1) },
             openProjects: { page = .projects(nil, account: nil) },
-            openIdentities: { page = .identities(focus: $0) },
+            openIdentities: { page = .identities(focus: $0, from: .overview) },
             resetPeriod: { model.setUsagePeriod(.preset(.today)) },
             selectDays: { model.setUsagePeriod(.days($0)) }
         )
@@ -618,7 +631,7 @@ struct UsagePanelView: View {
             openServices: { page = .services(row.id, account: $0) },
             openProjects: { page = .projects(row.id, account: $0) },
             openEffort: { page = .effort(row.id, account: $0) },
-            openIdentities: { page = .identities(focus: $0) },
+            openIdentities: { page = .identities(focus: $0, from: .provider(row.id, account: $1)) },
             loadHistory: {
                 await model.engine.usageHistorySeries(provider: $0)
             },
@@ -631,7 +644,7 @@ struct UsagePanelView: View {
 
     /// Which repository the identities page was opened about, if any.
     static func identityFocus(_ page: Page) -> String? {
-        guard case .identities(let focus) = page else { return nil }
+        guard case .identities(let focus, _) = page else { return nil }
         return focus
     }
 
@@ -643,8 +656,8 @@ struct UsagePanelView: View {
     /// to watch the row clear reads as the correction not having worked. The
     /// age under the title is what answers a press that changed nothing: the
     /// rows stand still, so without it the button reads as broken.
-    private func identitiesHeader(checkedAt: Date?) -> some View {
-        subpageHeader(back: .overview, mark: nil, title: "Identities") {
+    private func identitiesHeader(checkedAt: Date?, back: Page) -> some View {
+        subpageHeader(back: back, mark: nil, title: "Identities") {
             TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
                 if let line = UsageFormat.identitiesReading(
                     checkedAt: checkedAt, refreshing: model.engine.refreshingIdentities,
@@ -953,10 +966,14 @@ struct UsagePanelView: View {
     }
 
     /// The way back's tooltip, named by where it lands: the vendor's page by
-    /// the vendor, and the Overview by the tab it was opened from.
+    /// the vendor, the Projects page by its title, and the Overview by the tab
+    /// it was opened from.
     private func backHelp(to destination: Page) -> String {
-        guard case .provider(let id, _) = destination else { return homeHelp }
-        return "Back to \(UsageFormat.providerName(id))"
+        switch destination {
+        case .provider(let id, _): "Back to \(UsageFormat.providerName(id))"
+        case .projects: "Back to Projects"
+        default: homeHelp
+        }
     }
 
     /// Where the way back from a page one level in goes: the tab it was
