@@ -561,4 +561,163 @@ final class ClaudeRunningRowsTests: XCTestCase {
         XCTAssertEqual(ClaudeAccountCopy.inUseCaption(sessions: 1), "In use · 1 session")
         XCTAssertEqual(ClaudeAccountCopy.inUseCaption(sessions: 3), "In use · 3 sessions")
     }
+
+    // MARK: The row itself
+
+    private func window(percent: Double = 61) throws -> UsageWindow {
+        try XCTUnwrap(
+            UsageWindow(
+                minutes: 300, usedPercent: percent, resetsAt: Date().addingTimeInterval(7200)))
+    }
+
+    private func runningOnly(
+        _ id: String = "sole", sessions: Int = 2, windows: [UsageWindow] = [], credits: ProviderCredits? = nil
+    ) -> AccountSignals {
+        AccountSignals(
+            id: id,
+            account: ProviderAccount(email: "\(id)@example.com", name: "Named \(id)"),
+            plan: "team", planTier: nil, windows: windows, credits: credits,
+            limitsObservedAt: windows.isEmpty ? nil : Date().addingTimeInterval(-3600),
+            runningSessions: sessions, isOnlyRunning: true)
+    }
+
+    private func snapshot(
+        signals: ProviderSignals, known: ClaudeAccountRegistry.Snapshot = .init()
+    ) -> UsagePanelSnapshot {
+        let slice = ProviderSlice(id: ProviderID.claudeCode, tokens: 0, cost: 0, signals: signals)
+        return UsagePanelSnapshot.make(
+            frame: FrameData(
+                tokens: 0, cost: 0, burn: nil, providers: [slice], keepAwake: .off, history: [:],
+                projects: []),
+            claudeAccounts: known)
+    }
+
+    private func signals(_ accounts: [AccountSignals]) -> ProviderSignals {
+        var signals = ProviderSignals()
+        signals.accounts = accounts
+        return signals
+    }
+
+    /// A user running Claude Code only under `CLAUDE_CONFIG_DIR`: the metered
+    /// home names nobody, so everything the row shows is that one account's.
+    func testASoleRunningAccountReachesTheRow() throws {
+        let made = snapshot(signals: signals([runningOnly(windows: [try window()])]))
+        let row = made.providers[0]
+
+        XCTAssertTrue(row.accounts.isEmpty)
+        XCTAssertEqual(row.account?.name, "Named sole")
+        XCTAssertNotNil(row.plan)
+        XCTAssertEqual(row.windows.map(\.percent), [61])
+        XCTAssertNotNil(row.windowsCaption)
+        XCTAssertEqual(row.runningSessions, 2)
+        XCTAssertEqual(ClaudeAccountCopy.inUseCaption(sessions: row.runningSessions), "In use · 2 sessions")
+        XCTAssertEqual(made.gaugeRows.first?.windows.map(\.percent), [61])
+    }
+
+    /// With nothing cached it still has its name and count, and whatever the
+    /// metered home has to say about limits still stands.
+    func testASoleRunningAccountWithNoGaugesKeepsItsNameAndTheNotice() {
+        var reading = signals([runningOnly()])
+        reading.limitsState = .signedOut
+
+        let row = snapshot(signals: reading).providers[0]
+
+        XCTAssertEqual(row.account?.name, "Named sole")
+        XCTAssertEqual(row.runningSessions, 2)
+        XCTAssertTrue(row.windows.isEmpty)
+        XCTAssertNil(row.windowsCaption)
+        XCTAssertNotNil(row.notice)
+    }
+
+    /// Gauges under `No stored Claude login` would contradict each other, and
+    /// that sentence is about the metered home.
+    func testASoleRunningAccountsGaugesReplaceTheMeteredHomesNotice() throws {
+        var reading = signals([runningOnly(windows: [try window()])])
+        reading.limitsState = .signedOut
+
+        XCTAssertNil(snapshot(signals: reading).providers[0].notice)
+    }
+
+    func testAnIndexEntryForTheSameAccountStillReachesTheRow() throws {
+        let known = ClaudeAccountRegistry.Snapshot(
+            accounts: [
+                ClaudeAccountIdentity(
+                    uuid: "sole", email: nil, organization: nil, organizationType: nil,
+                    rateLimitTier: nil)
+            ],
+            activeUUID: nil)
+
+        let row = snapshot(signals: signals([runningOnly()]), known: known).providers[0]
+
+        XCTAssertTrue(row.accounts.isEmpty)
+        XCTAssertEqual(row.account?.name, "Named sole")
+    }
+
+    /// A second known account draws the picker, which reads the entries.
+    func testAnotherKnownAccountLeavesTheRowToThePicker() {
+        let known = ClaudeAccountRegistry.Snapshot(
+            accounts: [
+                ClaudeAccountIdentity(
+                    uuid: "other", email: nil, organization: nil, organizationType: nil,
+                    rateLimitTier: nil)
+            ],
+            activeUUID: nil)
+
+        let row = snapshot(signals: signals([runningOnly()]), known: known).providers[0]
+
+        XCTAssertEqual(row.accounts.count, 2)
+        XCTAssertNil(row.account)
+    }
+
+    /// One account the metered home is signed in as reads its own live fields.
+    func testASignedInAccountStillReadsTheSlice() throws {
+        var reading = signals([
+            AccountSignals(
+                id: "signed", account: nil, plan: nil, planTier: nil, isSignedIn: true,
+                runningSessions: 3)
+        ])
+        reading.windows = [try window(percent: 20)]
+        reading.limitsObservedAt = Date()
+
+        let row = snapshot(signals: reading).providers[0]
+
+        XCTAssertEqual(row.windows.map(\.percent), [20])
+        XCTAssertEqual(row.runningSessions, 3)
+    }
+
+    // MARK: The pace
+
+    /// The control beside the two below: this window earns a pace off a live
+    /// reader, so its absence there is the cached reply's doing.
+    func testALiveReadingOfTheSameWindowDrawsAPace() throws {
+        var reading = signals([])
+        reading.windows = [try window()]
+        reading.limitsObservedAt = Date()
+
+        XCTAssertNotNil(snapshot(signals: reading).providers[0].windows.first?.pace)
+    }
+
+    func testASoleRunningAccountsGaugesDrawNoPace() throws {
+        let row = snapshot(signals: signals([runningOnly(windows: [try window()])])).providers[0]
+        let drawn = try XCTUnwrap(row.windows.first)
+
+        XCTAssertNil(drawn.pace)
+        XCTAssertEqual(drawn.percent, 61)
+        XCTAssertNotNil(drawn.resetsAt)
+        XCTAssertNotNil(row.windowsCaption)
+    }
+
+    func testARunningOnlyEntrysGaugesDrawNoPaceBesideAPacedOne() throws {
+        let signed = AccountSignals(
+            id: "signed", reading: ProviderSignals(windows: [try window()], limitsObservedAt: Date()),
+            account: nil, plan: nil, planTier: nil, isSignedIn: true)
+
+        let found = entries([signed, runningOnly(windows: [try window()])])
+
+        XCTAssertNotNil(found.first { $0.id == "signed" }?.windows.first?.pace)
+        let cached = try XCTUnwrap(found.first { $0.id == "sole" })
+        XCTAssertNil(cached.windows.first?.pace)
+        XCTAssertEqual(cached.windows.first?.percent, 61)
+        XCTAssertNotNil(cached.windowsCaption)
+    }
 }

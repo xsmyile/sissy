@@ -2079,9 +2079,13 @@ struct UsagePanelSnapshot: Equatable {
         now: Date
     ) -> [ProviderRow] {
         slices.map { slice in
+            let known =
+                slice.id == ProviderID.claudeCode ? claudeAccounts : ClaudeAccountRegistry.Snapshot()
+            let source =
+                RowSource(soleRunning: slice.signals.accounts, known: known) ?? RowSource(slice)
             let plan = UsageFormat.plan(
-                slice.plan, tier: slice.planTier, seat: slice.account?.seat,
-                name: slice.planName)
+                source.plan, tier: source.planTier, seat: source.account?.seat,
+                name: source.planName)
             return ProviderRow(
                 id: slice.id,
                 name: UsageFormat.providerName(slice.id),
@@ -2090,8 +2094,7 @@ struct UsagePanelSnapshot: Equatable {
                     // The index of accounts seen signed in is Claude Code's
                     // alone: an account Codex holds no reading for is an
                     // account it holds nothing for.
-                    known: slice.id == ProviderID.claudeCode
-                        ? claudeAccounts : ClaudeAccountRegistry.Snapshot(),
+                    known: known,
                     provider: slice.id,
                     reading: limitsReading, naming: naming, now: now),
                 accountsNotice: slice.id == ProviderID.claudeCode && claudeAccounts.indexSetAside
@@ -2102,31 +2105,77 @@ struct UsagePanelSnapshot: Equatable {
                 planTier: plan?.tier,
                 tokens: UsageFormat.tokens(slice.tokens),
                 cost: UsageFormat.cost(slice.cost),
-                windows: slice.windows.map {
+                windows: source.windows.map {
                     makeWindow(
-                        $0, observedAt: slice.limitsObservedAt ?? now, reading: limitsReading,
-                        now: now)
+                        $0, observedAt: source.observedAt ?? now, reading: limitsReading,
+                        projecting: !source.isCached, now: now)
                 },
-                windowsCaption: slice.windows.isEmpty
+                windowsCaption: source.windows.isEmpty
                     ? nil
-                    : slice.limitsObservedAt.map {
+                    : source.observedAt.map {
                         UsageFormat.windowsCaption(observedAt: $0, now: now)
                     },
-                notice: UsageFormat.limitsNotice(slice.limitsState, provider: slice.id),
+                notice: source.windows.isEmpty || !source.isCached
+                    ? UsageFormat.limitsNotice(slice.limitsState, provider: slice.id) : nil,
                 account: makeAccount(
-                    slice.account, id: soleAccountID(slice.signals.accounts),
-                    plan: slice.plan, naming: naming),
+                    source.account, id: soleAccountID(slice.signals.accounts),
+                    plan: source.plan, naming: naming),
                 projects: makeProjects(slice.projects, totalCost: slice.cost),
                 projectCount: slice.projects.count,
                 models: makeModels(
                     slice.models, provider: slice.id, totalCost: slice.cost,
                     totalTokens: slice.tokens),
                 effort: slice.effort,
-                credits: makeCredits(slice.credits, now: now),
+                credits: makeCredits(source.credits, now: now),
                 resets: makeResets(slice.resets),
                 resetTarget: rowResetTarget(provider: slice.id, slice.signals.accounts),
                 status: makeStatus(status[slice.id], provider: slice.id)
             )
+        }
+    }
+
+    /// What a row's own fields read: the slice, or the one account a running
+    /// home names when that account is all there is.
+    ///
+    /// A single account draws no picker, so `accountEntries` answers with none
+    /// and the page and the Overview read the row's fields alone. Those are the
+    /// metered home's, which names nobody for a user running Claude Code only
+    /// under `CLAUDE_CONFIG_DIR`, and the account would vanish with its count and
+    /// its gauges. It never counts as signed in to the metered home.
+    private struct RowSource {
+        let plan: String?
+        let planTier: String?
+        let planName: String?
+        let account: ProviderAccount?
+        let windows: [UsageWindow]
+        let observedAt: Date?
+        let credits: ProviderCredits?
+        /// Whether the windows are a running home's cached reply.
+        let isCached: Bool
+
+        init(_ slice: ProviderSlice) {
+            plan = slice.plan
+            planTier = slice.planTier
+            planName = slice.planName
+            account = slice.account
+            windows = slice.windows
+            observedAt = slice.limitsObservedAt
+            credits = slice.credits
+            isCached = false
+        }
+
+        init?(soleRunning accounts: [AccountSignals], known: ClaudeAccountRegistry.Snapshot) {
+            guard accounts.count == 1, let only = accounts.first, only.isOnlyRunning,
+                known.accounts.allSatisfy({ $0.uuid == only.id })
+            else { return nil }
+            plan = only.plan
+            planTier = only.planTier
+            planName = only.planName
+            account = only.account
+            windows = only.windows
+            observedAt = only.limitsObservedAt
+            credits = only.credits
+            isCached = true
         }
     }
 
@@ -2241,7 +2290,8 @@ struct UsagePanelSnapshot: Equatable {
                 planTier: plan?.tier,
                 windows: (reading?.windows ?? []).map {
                     makeWindow(
-                        $0, observedAt: observedAt ?? now, reading: limitsReading, now: now)
+                        $0, observedAt: observedAt ?? now, reading: limitsReading,
+                        projecting: reading?.isOnlyRunning != true, now: now)
                 },
                 windowsCaption: observedAt.map {
                     UsageFormat.windowsCaption(observedAt: $0, now: now)
@@ -2809,8 +2859,13 @@ struct UsagePanelSnapshot: Equatable {
 
     private static let foldedProjectRowID = "sissy.projects.rest"
 
+    /// One window as a row draws it. `projecting` is false for a running home's
+    /// cached reply, which keeps its percentage and its age and draws no pace: a
+    /// rate worked out from a reply of unknown age says `Runs out in 16m` about
+    /// spending nobody has measured.
     private static func makeWindow(
-        _ window: UsageWindow, observedAt: Date, reading: LimitsReading, now: Date
+        _ window: UsageWindow, observedAt: Date, reading: LimitsReading, projecting: Bool = true,
+        now: Date
     ) -> WindowRow {
         let percent = Int(window.usedPercent.rounded())
         return WindowRow(
@@ -2822,7 +2877,7 @@ struct UsagePanelSnapshot: Equatable {
             readingSentence: UsageFormat.windowReading(percent, as: reading),
             fraction: min(max(window.usedPercent / 100, 0), 1),
             resetsAt: window.resetsAt,
-            pace: makePace(window, observedAt: observedAt),
+            pace: projecting ? makePace(window, observedAt: observedAt) : nil,
             hasRolledOver: window.resetsAt.map { $0 < now } ?? false
         )
     }
