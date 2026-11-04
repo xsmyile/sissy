@@ -194,7 +194,7 @@ actor ClaudeAccountRegistry {
         do {
             try store.remember(identity)
         } catch {
-            sissyLog("sissy: could not record the Claude account \(identity.uuid): \(error)")
+            sissyLog("sissy: could not record the Claude account found in \(name.label): \(error)")
             return
         }
         guard let still = try? slot.current()?.data,
@@ -242,8 +242,7 @@ actor ClaudeAccountRegistry {
         guard var index = Self.loadIndex(store) else { return }
         if index.activeUUID != uuid {
             sissyLog(
-                "sissy: Claude Code is signed in as \(uuid ?? "nobody"), "
-                    + "was \(index.activeUUID ?? "nobody") (\(cause.rawValue))")
+                Self.moveLine(from: index.activeUUID, to: uuid, in: index.accounts, cause: cause.rawValue))
         }
         index.activeUUID = uuid
         do {
@@ -252,6 +251,24 @@ actor ClaudeAccountRegistry {
             sissyLog("sissy: could not record the active Claude account: \(error)")
         }
         publish(index)
+    }
+
+    /// What the log says when the active account moves.
+    ///
+    /// An account is named by where the index lists it, never by its id: the
+    /// log leaves the Mac in a bug report, and the list it counts in does not.
+    static func moveLine(
+        from previous: String?, to current: String?, in accounts: [ClaudeAccountIdentity],
+        cause: String
+    ) -> String {
+        func position(_ uuid: String?) -> String {
+            guard let uuid else { return "nobody" }
+            guard let found = accounts.firstIndex(where: { $0.uuid == uuid }) else {
+                return "an unlisted account"
+            }
+            return "account \(found + 1) of \(accounts.count) in \(ClaudeAccountStore.indexFileName)"
+        }
+        return "sissy: Claude Code is signed in as \(position(current)), was \(position(previous)) (\(cause))"
     }
 
     private func publishIndex() {
