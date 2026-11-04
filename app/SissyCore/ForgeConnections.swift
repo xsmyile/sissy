@@ -228,15 +228,10 @@ struct ForgeConnectionIndex: Sendable {
         var connections: [ForgeConnection] = []
     }
 
-    /// Why the index would not answer. `reason` is the error's domain and
-    /// code and never the file's bytes.
-    enum LoadError: Error, Equatable {
-        /// The file is there and the read itself failed, which says nothing
-        /// about what is in it.
-        case unreadable(reason: String)
-        /// The file read and does not decode, which is the one case its
-        /// contents are known to be bad.
-        case undecodable(reason: String)
+    private var file: VersionedJSONFile<Contents> {
+        VersionedJSONFile(
+            url: url, policy: .refuse, setAsidePrefix: Self.setAsidePrefix,
+            formatting: [.prettyPrinted, .sortedKeys])
     }
 
     /// Every connection, in a stable order so two reads agree and the panel's
@@ -251,20 +246,11 @@ struct ForgeConnectionIndex: Sendable {
     /// writes atomically and never leaves one. The rule
     /// `ClaudeAccountStore.loadIndex` is on, for the same reason.
     func load() throws -> [ForgeConnection] {
-        let data: Data
-        do {
-            data = try Data(contentsOf: url)
-        } catch CocoaError.fileReadNoSuchFile {
-            return []
-        } catch {
-            throw LoadError.unreadable(reason: Self.reason(error))
-        }
-        do {
-            return try JSONDecoder().decode(Contents.self, from: data).connections
-                .sorted { $0.id < $1.id }
-        } catch {
-            throw LoadError.undecodable(reason: "\(data.count) bytes, \(Self.reason(error))")
-        }
+        Self.ordered(try file.load())
+    }
+
+    private static func ordered(_ contents: Contents?) -> [ForgeConnection] {
+        (contents?.connections ?? []).sorted { $0.id < $1.id }
     }
 
     /// Every connection, with an index that does not decode moved out of the
@@ -280,34 +266,12 @@ struct ForgeConnectionIndex: Sendable {
     /// file that could not be moved, throw, which is the answer under which
     /// nothing may be written.
     func loadSettingAside(now: Date = Date()) throws -> [ForgeConnection] {
-        do {
-            return try load()
-        } catch let unreadable as LoadError {
-            guard case .undecodable = unreadable else { throw unreadable }
-            let aside = url.deletingLastPathComponent()
-                .appendingPathComponent("\(Self.setAsidePrefix)\(Int(now.timeIntervalSince1970)).json")
-            do {
-                try FileManager.default.moveItem(at: url, to: aside)
-            } catch {
-                sissyLog(
-                    "sissy: the forge connection index would not decode (\(unreadable)) and could "
-                        + "not be moved (\(Self.reason(error)))")
-                throw unreadable
-            }
-            sissyLog(
-                "sissy: the forge connection index would not decode (\(unreadable)); kept it as "
-                    + aside.lastPathComponent)
-            return []
-        }
+        Self.ordered(try file.loadSettingAside(named: "the forge connection index", now: now))
     }
 
-    /// Whether an index has ever been set aside beside this one. Read off the
-    /// directory rather than remembered, so Settings keeps saying so across a
-    /// relaunch until the file is dealt with.
+    /// Whether an index has ever been set aside beside this one.
     func hasSetAside() -> Bool {
-        let parent = url.deletingLastPathComponent()
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: parent.path)) ?? []
-        return names.contains { $0.hasPrefix(Self.setAsidePrefix) }
+        file.hasSetAside()
     }
 
     /// The connections a token is filed under that the index does not name,
@@ -337,15 +301,7 @@ struct ForgeConnectionIndex: Sendable {
     }
 
     private func save(_ connections: [ForgeConnection]) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let contents = Contents(connections: connections.sorted { $0.id < $1.id })
-        try encoder.encode(contents).write(to: url, options: .atomic)
-    }
-
-    private static func reason(_ error: Error) -> String {
-        let bridged = error as NSError
-        return "\(bridged.domain) \(bridged.code)"
+        try file.save(Contents(connections: connections.sorted { $0.id < $1.id }))
     }
 }
 

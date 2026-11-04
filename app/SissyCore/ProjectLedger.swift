@@ -365,12 +365,7 @@ final class ProjectLedger: @unchecked Sendable {
             }
             guard let document else { return }
             do {
-                try fileManager.createDirectory(
-                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.sortedKeys]
-                encoder.dateEncodingStrategy = .iso8601
-                try encoder.encode(document).write(to: url, options: [.atomic])
+                try Self.file(url).save(document)
             } catch {
                 lock.withLock { dirty = true }
                 sissyLog("sissy: project ledger save failed at \(url.path): \(error)")
@@ -390,41 +385,37 @@ final class ProjectLedger: @unchecked Sendable {
         }
     }
 
+    /// A file that will not decode holds nothing this build can use, and the
+    /// write that produced it was atomic, so it is a forensic artifact rather
+    /// than a record: it is set aside and the run starts empty instead of
+    /// refusing to write. The schema is checked here rather than by the file
+    /// because a mismatch is the opposite case, a record from a newer build.
+    private static func file(_ url: URL) -> VersionedJSONFile<Document> {
+        VersionedJSONFile(
+            url: url, policy: .setAside, setAsidePrefix: "\(url.lastPathComponent).corrupt-",
+            iso8601Dates: true)
+    }
+
     private func load() {
-        guard let url, let data = try? Data(contentsOf: url) else { return }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let document = try? decoder.decode(Document.self, from: data) else {
-            quarantine(url)
+        guard let url else { return }
+        let document: Document
+        do {
+            guard let loaded = try Self.file(url).load() else { return }
+            document = loaded
+        } catch {
+            sissyLog("sissy: project ledger at \(url.path) was not loaded: \(error)")
             return
         }
         guard document.schemaVersion == Self.currentSchemaVersion else {
             lock.withLock { writable = false }
             sissyLog(
                 "sissy: project ledger at \(url.path) is schema \(document.schemaVersion), "
-                    + "expected \(Self.currentSchemaVersion) — left alone, not written this run")
+                    + "expected \(Self.currentSchemaVersion), left alone and not written this run")
             return
         }
         lock.withLock {
             checkouts = document.checkouts
             cap()
-        }
-    }
-
-    /// A file that will not decode holds nothing this build can use, and the
-    /// write that produced it was atomic — so it is a forensic artifact rather
-    /// than a record, and the run starts empty instead of refusing to write.
-    private func quarantine(_ url: URL) {
-        let stamp = Int(Date().timeIntervalSince1970)
-        let target = url.deletingLastPathComponent()
-            .appendingPathComponent("\(url.lastPathComponent).corrupt-\(stamp).json")
-        do {
-            try fileManager.moveItem(at: url, to: target)
-            sissyLog("sissy: project ledger at \(url.path) did not decode — quarantined")
-        } catch {
-            sissyLog(
-                "sissy: project ledger at \(url.path) did not decode and could not be moved "
-                    + "aside (\(error)) — this run starts empty and will overwrite it")
         }
     }
 

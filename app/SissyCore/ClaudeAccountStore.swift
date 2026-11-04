@@ -204,14 +204,6 @@ struct ClaudeAccountStore: Sendable {
         var activeUUID: String?
     }
 
-    /// Why the store would not do what it was asked.
-    enum StoreError: Error, Equatable {
-        /// The index file is there and does not decode, or cannot be read.
-        /// `reason` is the error's domain and code and never the file's
-        /// bytes, so a log line built from it carries no account.
-        case indexUnreadable(reason: String)
-    }
-
     static let indexFileName = "claude-accounts.json"
     /// What an index that would not read is renamed to, with a timestamp
     /// after it so a second one never replaces the first.
@@ -230,49 +222,28 @@ struct ClaudeAccountStore: Sendable {
     /// atomically and never leaves one, so a file with no bytes is one
     /// something truncated.
     func loadIndex() throws -> Index {
-        let data: Data
-        do {
-            data = try Data(contentsOf: indexURL)
-        } catch CocoaError.fileReadNoSuchFile {
-            return Index()
-        } catch {
-            throw StoreError.indexUnreadable(reason: Self.reason(error))
-        }
-        do {
-            return try JSONDecoder().decode(Index.self, from: data)
-        } catch {
-            throw StoreError.indexUnreadable(reason: "\(data.count) bytes, \(Self.reason(error))")
-        }
-    }
-
-    private static func reason(_ error: Error) -> String {
-        let bridged = error as NSError
-        return "\(bridged.domain) \(bridged.code)"
+        try file.load() ?? Index()
     }
 
     /// Moves an index that will not read out of the way, and answers where it
     /// went. Renamed rather than deleted: a person can still read it.
     func setAsideIndex(now: Date = Date()) throws -> URL {
-        let stamp = Int(now.timeIntervalSince1970)
-        let aside = indexURL.deletingLastPathComponent()
-            .appendingPathComponent("\(Self.setAsidePrefix)\(stamp).json")
-        try FileManager.default.moveItem(at: indexURL, to: aside)
-        return aside
+        try file.setAside(now: now)
     }
 
-    /// Whether an index has ever been set aside beside this one. Read off the
-    /// directory rather than remembered, so the page keeps saying so across a
-    /// relaunch until the file is dealt with.
+    /// Whether an index has ever been set aside beside this one.
     func hasSetAsideIndex() -> Bool {
-        let parent = indexURL.deletingLastPathComponent()
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: parent.path)) ?? []
-        return names.contains { $0.hasPrefix(Self.setAsidePrefix) }
+        file.hasSetAside()
     }
 
     func saveIndex(_ index: Index) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(index).write(to: indexURL, options: .atomic)
+        try file.save(index)
+    }
+
+    private var file: VersionedJSONFile<Index> {
+        VersionedJSONFile(
+            url: indexURL, policy: .refuse, setAsidePrefix: Self.setAsidePrefix,
+            formatting: [.prettyPrinted, .sortedKeys])
     }
 
     /// Records an identity, replacing what was known about that account.

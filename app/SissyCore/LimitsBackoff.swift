@@ -48,22 +48,17 @@ struct LimitsBackoffLedger: Codable, Equatable, Sendable {
     /// answered as empty rather than quarantined: it holds no reading, and
     /// the worst it costs is one refused request.
     static func load(from url: URL) -> Self {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let data = try? Data(contentsOf: url),
-            let decoded = try? decoder.decode(Self.self, from: data),
-            decoded.schemaVersion == currentSchemaVersion
-        else { return Self() }
-        return decoded
+        (try? file(url).load()) ?? Self()
     }
 
     static func save(_ ledger: Self, to url: URL) throws {
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode(ledger).write(to: url, options: [.atomic])
+        try file(url).save(ledger)
+    }
+
+    private static func file(_ url: URL) -> VersionedJSONFile<Self> {
+        VersionedJSONFile(
+            url: url, policy: .replace, iso8601Dates: true,
+            schema: (currentSchemaVersion, \.schemaVersion))
     }
 }
 

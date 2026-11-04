@@ -33,15 +33,11 @@ struct LinkIndex<Link: IndexedLink>: Sendable {
         var links: [String: Link] = [:]
     }
 
-    /// Why the index would not answer. `reason` is the error's domain and
-    /// code and never the file's bytes.
-    enum LoadError: Error, Equatable {
-        /// The file is there and the read itself failed, which says nothing
-        /// about what is in it.
-        case unreadable(reason: String)
-        /// The file read and does not decode, which is the one case its
-        /// contents are known to be bad.
-        case undecodable(reason: String)
+    private var file: VersionedJSONFile<Contents> {
+        VersionedJSONFile(
+            url: url, policy: .refuse,
+            setAsidePrefix: "\(url.deletingPathExtension().lastPathComponent).unreadable-",
+            formatting: [.prettyPrinted, .sortedKeys])
     }
 
     /// Every link, and none when there is no file yet.
@@ -51,7 +47,7 @@ struct LinkIndex<Link: IndexedLink>: Sendable {
     /// the file, losing every other account's name and chosen organisation.
     /// The rule `ForgeConnectionIndex.load` is on, for the same reason.
     func load() throws -> [String: Link] {
-        try linkIndexLock.withLock { try read() }
+        try linkIndexLock.withLock { try file.load()?.links ?? [:] }
     }
 
     /// Every link, with an index that does not decode moved out of the way
@@ -64,25 +60,7 @@ struct LinkIndex<Link: IndexedLink>: Sendable {
     /// that could not be moved, throw.
     func loadSettingAside(now: Date = Date()) throws -> [String: Link] {
         try linkIndexLock.withLock {
-            do {
-                return try read()
-            } catch let failure as LoadError {
-                guard case .undecodable = failure else { throw failure }
-                let aside = url.deletingPathExtension().appendingPathExtension(
-                    "unreadable-\(Int(now.timeIntervalSince1970)).json")
-                do {
-                    try FileManager.default.moveItem(at: url, to: aside)
-                } catch {
-                    sissyLog(
-                        "sissy: \(Link.fileName) would not decode (\(failure)) and could not be "
-                            + "moved (\(Self.reason(error)))")
-                    throw failure
-                }
-                sissyLog(
-                    "sissy: \(Link.fileName) would not decode (\(failure)); kept it as "
-                        + aside.lastPathComponent)
-                return [:]
-            }
+            try file.loadSettingAside(named: Link.fileName, now: now)?.links ?? [:]
         }
     }
 
@@ -130,33 +108,10 @@ struct LinkIndex<Link: IndexedLink>: Sendable {
     /// not read throws before anything is written, so it is never overwritten.
     private func change(_ mutation: (inout [String: Link]) -> Bool) throws {
         try linkIndexLock.withLock {
-            var links = try read()
+            var links = try file.load()?.links ?? [:]
             guard mutation(&links) else { return }
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(Contents(links: links)).write(to: url, options: .atomic)
+            try file.save(Contents(links: links))
         }
-    }
-
-    private func read() throws -> [String: Link] {
-        let data: Data
-        do {
-            data = try Data(contentsOf: url)
-        } catch CocoaError.fileReadNoSuchFile {
-            return [:]
-        } catch {
-            throw LoadError.unreadable(reason: Self.reason(error))
-        }
-        do {
-            return try JSONDecoder().decode(Contents.self, from: data).links
-        } catch {
-            throw LoadError.undecodable(reason: "\(data.count) bytes, \(Self.reason(error))")
-        }
-    }
-
-    private static func reason(_ error: Error) -> String {
-        let bridged = error as NSError
-        return "\(bridged.domain) \(bridged.code)"
     }
 }
 
