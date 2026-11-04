@@ -184,21 +184,12 @@ struct GeneralSettingsView: View {
     /// way — the mark on it sits where even consumption would have got to, and
     /// a fill measured from the other end would put the two on opposite sides.
     private var limitsReading: some View {
-        LabeledContent {
-            Picker("Limits show", selection: limitsReadingBinding) {
-                ForEach(LimitsReading.allCases, id: \.self) { reading in
-                    Text(UsageFormat.limitsReadingTitle(reading)).tag(reading)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
-        } label: {
-            Text("Limits show")
-            Text(
-                "Whether a rate-limit gauge prints what has been spent or what is still "
-                    + "there. The bar fills with what has been spent either way."
-            )
-        }
+        SettingsPickerRow(
+            title: "Limits show",
+            caption: "Whether a rate-limit gauge prints what has been spent or what is still "
+                + "there. The bar fills with what has been spent either way.",
+            selection: limitsReadingBinding,
+            options: LimitsReading.allCases, optionTitle: UsageFormat.limitsReadingTitle)
     }
 
     private var limitsReadingBinding: Binding<LimitsReading> {

@@ -107,18 +107,9 @@ struct PanelSessions: View {
     /// at the end of it, on the label rather than in the panel's header,
     /// which dates the usage reading and carries the app's own switches.
     private var liveLabel: some View {
-        HStack(spacing: 6) {
-            SectionLabel(text: "Now")
-            Spacer(minLength: 8)
-            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
-                if let line = UsageFormat.agentsReading(
-                    observedAt: observedAt, refreshing: refreshing, now: context.date)
-                {
-                    Text(line)
-                        .font(.system(size: Self.captionSize))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
+        SectionHeader("Now", minGap: 8) {
+            PanelAgeText(size: Self.captionSize) { now in
+                UsageFormat.agentsReading(observedAt: observedAt, refreshing: refreshing, now: now)
             }
             Button(action: refresh) {
                 Image(Glyph.refresh01)
@@ -431,20 +422,9 @@ private struct PanelSessionsLive: View {
     }
 
     private var processDisclosure: some View {
-        Button {
+        PanelDisclosureRow(title: UsageFormat.sessionsDisclosure, isOpen: showsAllProcesses) {
             showsAllProcesses.toggle()
-        } label: {
-            HStack(spacing: 4) {
-                Image(showsAllProcesses ? Glyph.arrowDown01 : Glyph.arrowRight01)
-                    .font(.system(size: Chevron.size))
-                Text(UsageFormat.sessionsDisclosure)
-                Spacer(minLength: 0)
-            }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .contentShape(.rect)
         }
-        .buttonStyle(.plain)
     }
 
     private func processRow(_ row: UsagePanelSnapshot.AgentsBlock.Process) -> some View {

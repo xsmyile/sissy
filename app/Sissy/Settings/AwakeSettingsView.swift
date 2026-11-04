@@ -123,33 +123,15 @@ struct AwakeSettingsView: View {
     }
 
     private var mode: some View {
-        LabeledContent {
-            Picker("Keep awake", selection: modeBinding) {
-                ForEach(KeepAwakeMode.allCases, id: \.self) { mode in
-                    Text(UsageFormat.keepAwakeTitle(mode)).tag(mode)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
-        } label: {
-            Text("Keep awake")
-            Text(modeCaption)
-        }
+        SettingsPickerRow(
+            title: "Keep awake", caption: modeCaption, selection: modeBinding,
+            options: KeepAwakeMode.allCases, optionTitle: UsageFormat.keepAwakeTitle)
     }
 
     private var ceiling: some View {
-        LabeledContent {
-            Picker(Self.ceilingLabel, selection: ceilingBinding) {
-                ForEach(KeepAwakeCeiling.allCases, id: \.self) { ceiling in
-                    Text(UsageFormat.keepAwakeCeilingTitle(ceiling)).tag(ceiling)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
-        } label: {
-            Text(Self.ceilingLabel)
-            Text(ceilingCaption)
-        }
+        SettingsPickerRow(
+            title: Self.ceilingLabel, caption: ceilingCaption, selection: ceilingBinding,
+            options: KeepAwakeCeiling.allCases, optionTitle: UsageFormat.keepAwakeCeilingTitle)
     }
 
     private var screen: some View {
@@ -173,18 +155,11 @@ struct AwakeSettingsView: View {
     /// Greyed out with the lid switch off rather than hidden, so the floor can
     /// be read before the lid is ever held.
     private var batteryFloor: some View {
-        LabeledContent {
-            Picker(Self.batteryFloorLabel, selection: batteryFloorBinding) {
-                ForEach(LidBatteryFloor.allCases, id: \.self) { floor in
-                    Text(UsageFormat.lidBatteryFloorTitle(floor)).tag(floor)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
-        } label: {
-            Text(Self.batteryFloorLabel)
-            Text(batteryFloorCaption)
-        }
+        SettingsPickerRow(
+            title: Self.batteryFloorLabel, caption: batteryFloorCaption,
+            selection: batteryFloorBinding,
+            options: LidBatteryFloor.allCases, optionTitle: UsageFormat.lidBatteryFloorTitle
+        )
         .disabled(!model.engine.keepAwakeWithLidClosed)
     }
 

@@ -173,8 +173,15 @@ struct ShareBar: View {
 
     private var share: Double { segments.reduce(0) { $0 + $1.share } }
 
+    /// Green under the mark and red over it, which is the whole reading: the
+    /// bar says where you are, the mark says where even consumption would
+    /// have put you, and the colour says which of the two is ahead.
+    private var marks: [BarMark] {
+        pace.map { [BarMark(share: $0.expectedFraction, tint: $0.isOverPace ? .red : .green)] } ?? []
+    }
+
     var body: some View {
-        BarCanvas(share: share, segments: segments, pace: pace)
+        BarCanvas(share: share, segments: segments, marks: marks)
             .frame(height: PanelMetrics.barHeight)
             .animation(.default, value: share)
     }
@@ -238,6 +245,13 @@ struct BarSegment: Equatable {
     let tint: Color
 }
 
+/// A point punched out of a bar and painted in its own colour, where `share`
+/// of the bar's width falls.
+struct BarMark: Equatable {
+    let share: Double
+    let tint: Color
+}
+
 /// The bar's geometry, apart from its drawing, so the two placements it has to
 /// get right can be asserted without rendering anything.
 enum BarGeometry {
@@ -291,19 +305,16 @@ enum BarGeometry {
 /// `Animatable` on the view is what keeps the fill sliding rather than
 /// snapping — a `Canvas` closure is not interpolated the way a shape's frame
 /// is, so the view itself has to name the value SwiftUI should walk.
-private struct BarCanvas: View, Animatable {
+struct BarCanvas: View, Animatable {
     var share: Double
     var segments: [BarSegment]
-    var pace: UsagePanelSnapshot.Pace?
+    var marks: [BarMark]
 
     nonisolated var animatableData: Double {
         get { share }
         set { share = newValue }
     }
 
-    /// Green under the mark and red over it, which is the whole reading: the
-    /// bar says where you are, the mark says where even consumption would
-    /// have put you, and the colour says which of the two is ahead.
     var body: some View {
         Canvas { context, size in
             context.fill(
@@ -316,22 +327,23 @@ private struct BarCanvas: View, Animatable {
                     into: &context)
             }
 
-            guard let pace else { return }
-            let centre = BarGeometry.markCentre(pace.expectedFraction, in: size.width)
+            for mark in marks {
+                let centre = BarGeometry.markCentre(mark.share, in: size.width)
 
-            context.blendMode = .destinationOut
-            context.fill(
-                Self.capsule(
-                    Self.markRect(
-                        centre: centre, width: BarGeometry.markGap, height: size.height)),
-                with: .color(.white))
+                context.blendMode = .destinationOut
+                context.fill(
+                    Self.capsule(
+                        Self.markRect(
+                            centre: centre, width: BarGeometry.markGap, height: size.height)),
+                    with: .color(.white))
 
-            context.blendMode = .normal
-            context.fill(
-                Self.capsule(
-                    Self.markRect(
-                        centre: centre, width: BarGeometry.markWidth, height: size.height)),
-                with: .color(pace.isOverPace ? .red : .green))
+                context.blendMode = .normal
+                context.fill(
+                    Self.capsule(
+                        Self.markRect(
+                            centre: centre, width: BarGeometry.markWidth, height: size.height)),
+                    with: .color(mark.tint))
+            }
         }
     }
 
@@ -540,6 +552,30 @@ struct SectionLabel: View {
     }
 }
 
+/// A section's label with what it reads at the far end of the same line.
+///
+/// `minGap` is how close the two may come before the end of the line gives
+/// way, which is the one thing the headings differ by.
+struct SectionHeader<Trailing: View>: View {
+    private let title: String
+    private let minGap: CGFloat
+    private let trailing: Trailing
+
+    init(_ title: String, minGap: CGFloat = 0, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.minGap = minGap
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            SectionLabel(text: title)
+            Spacer(minLength: minGap)
+            trailing
+        }
+    }
+}
+
 /// One block of a page, drawn as a platter: an optional label above it and
 /// the rows on it.
 ///
@@ -688,9 +724,7 @@ struct ProjectsSectionLabel: View {
     let count: Int
 
     var body: some View {
-        HStack(spacing: 6) {
-            SectionLabel(text: text)
-            Spacer(minLength: 8)
+        SectionHeader(text, minGap: 8) {
             Text(UsageFormat.projectsCount(count))
                 .font(.system(size: 11))
                 .monospacedDigit()
@@ -1139,13 +1173,54 @@ struct ForgeMark: View {
 /// 4.75 × 8.00 the system chevron it replaced covered at 9 pt semibold.
 struct Chevron: View {
     let isOpen: Bool
+    /// A row whose whole line is one control takes its label's colour.
+    var tint: HierarchicalShapeStyle = .tertiary
 
     static let size: CGFloat = 11
 
     var body: some View {
         Image(isOpen ? Glyph.arrowDown01 : Glyph.arrowRight01)
             .font(.system(size: Self.size))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(tint)
+    }
+}
+
+/// A line that folds what is under it, the chevron and the words one control.
+struct PanelDisclosureRow: View {
+    let title: String
+    let isOpen: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Chevron(isOpen: isOpen, tint: .secondary)
+                Text(title)
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A reading's age, worded again on the panel's clock, and nothing while
+/// `line` has nothing to say.
+struct PanelAgeText: View {
+    let size: CGFloat
+    let line: (Date) -> String?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
+            if let text = line(context.date) {
+                Text(text)
+                    .font(.system(size: size))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -1156,17 +1231,25 @@ struct Chevron: View {
 /// side by side in the tab bar cannot drift a point apart in a row they all
 /// draw. `truncation` is Network's, whose values are an interface's name and
 /// a network's, where the ends say more than the middle.
+///
+/// `emphasizesLabel` turns the row round for a list of named things, an app or
+/// a volume, where the name is what is read and the figure is its caption. A
+/// name can run long, so it is the end that gives way, from the middle.
 struct PanelFigureRow: View {
     let label: String
     let value: String
     var truncation: Text.TruncationMode = .tail
+    var emphasizesLabel = false
 
     var body: some View {
         HStack(spacing: 6) {
             Text(label)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(emphasizesLabel ? .primary : .secondary)
+                .lineLimit(emphasizesLabel ? 1 : nil)
+                .truncationMode(emphasizesLabel ? .middle : .tail)
             Spacer(minLength: 8)
             Text(value)
+                .foregroundStyle(emphasizesLabel ? .secondary : .primary)
                 .monospacedDigit()
                 .lineLimit(1)
                 .truncationMode(truncation)

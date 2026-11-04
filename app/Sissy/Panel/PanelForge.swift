@@ -153,18 +153,11 @@ struct ForgeSectionLabel: View {
                 .lineLimit(1)
                 .layoutPriority(1)
             Spacer(minLength: 8)
-            TimelineView(.periodic(from: .now, by: PanelMetrics.clockTick)) { context in
-                if let notice = UsageFormat.forgeNotice(
-                    failure: row.failure, readAt: row.readAt,
-                    refreshing: refreshing, now: context.date)
-                {
-                    Text(notice)
-                        .font(.system(size: 11))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+            PanelAgeText(size: 11) { now in
+                UsageFormat.forgeNotice(
+                    failure: row.failure, readAt: row.readAt, refreshing: refreshing, now: now)
             }
+            .lineLimit(1)
         }
     }
 }
@@ -199,9 +192,7 @@ struct PanelIdentityLine: View {
 
     var body: some View {
         PanelGroup {
-            HStack(spacing: 6) {
-                SectionLabel(text: UsageFormat.identitySectionLabel)
-                Spacer(minLength: 8)
+            SectionHeader(UsageFormat.identitySectionLabel, minGap: 8) {
                 if let count = line.count {
                     Text(count)
                         .font(.system(size: 11))

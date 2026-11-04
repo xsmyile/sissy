@@ -48,9 +48,7 @@ struct PanelDayBlock: View {
     /// The day's own figure, which the pointer never moves: a figure a reader
     /// came for should not change out from under them on the way to the bars.
     private var headline: some View {
-        HStack(spacing: 6) {
-            SectionLabel(text: "Today")
-            Spacer(minLength: 0)
+        SectionHeader("Today") {
             Text("\(today) · \(todayCost)")
                 .font(.system(size: 12))
                 .monospacedDigit()

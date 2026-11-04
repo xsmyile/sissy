@@ -92,9 +92,7 @@ struct PanelIdentities: View {
 
     var body: some View {
         PanelGroup {
-            HStack(spacing: 6) {
-                SectionLabel(text: UsageFormat.identitySectionLabel)
-                Spacer(minLength: 0)
+            SectionHeader(UsageFormat.identitySectionLabel) {
                 Text(UsageFormat.identityFooter(checked: rows.count))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -170,22 +168,12 @@ struct PanelIdentities: View {
     }
 
     private var disclosure: some View {
-        Button {
+        PanelDisclosureRow(
+            title: showsAll ? "Hide the rest" : UsageFormat.identityDisclosure(all: rows.count),
+            isOpen: showsAll
+        ) {
             showsAll.toggle()
-        } label: {
-            HStack(spacing: 4) {
-                Image(showsAll ? Glyph.arrowDown01 : Glyph.arrowRight01)
-                    .font(.system(size: Chevron.size))
-                Text(
-                    showsAll
-                        ? "Hide the rest" : UsageFormat.identityDisclosure(all: rows.count))
-                Spacer(minLength: 0)
-            }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .contentShape(.rect)
         }
-        .buttonStyle(.plain)
     }
 
     /// The boundary of the reading.
