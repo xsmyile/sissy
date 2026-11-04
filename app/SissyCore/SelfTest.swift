@@ -1218,8 +1218,8 @@ func runClaudeLimitsParseTests() {
 
     let partial: [String: Any] = ["five_hour": ["utilization": 5.0]]
     expect(
-        "a bucket without a reset is dropped", ClaudeLimitsProbe.parse(partial).windows.count,
-        0)
+        "a bucket without a reset is still a window", ClaudeLimitsProbe.parse(partial).windows.count,
+        1)
 }
 
 /// The keychain lookup has to be abandonable: `SecItemCopyMatching` parks for

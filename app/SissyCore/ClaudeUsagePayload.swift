@@ -26,16 +26,26 @@ enum ClaudeUsagePayload {
     /// alone silently drops it.
     private static let limitsKey = "limits"
     private static let spendKey = "spend"
+    /// The one kind that answers for a part of the plan rather than the whole.
+    private static let scopedKind = "weekly_scoped"
 
     /// `kind` to window length. Anything else the vendor lists is skipped
     /// rather than guessed at — a bucket whose period Sissy cannot name is a
     /// gauge with no axis.
     private static let limitKinds: [String: Int] = [
-        "session": 300, "weekly_all": 10_080, "weekly_scoped": 10_080,
+        "session": 300, "weekly_all": 10_080, scopedKind: 10_080,
     ]
 
+    /// Whether a payload that drew nothing has been logged. The poll repeats
+    /// every five minutes and the first line already says all of it.
+    private static let unmappedReported = LockedValue(false)
+
     /// Every window the payload names, from `limits` where the vendor sends
-    /// it and from the flat keys where it does not.
+    /// one Sissy can read and from the flat keys where it does not.
+    ///
+    /// A `limits` that maps to nothing falls back rather than answering: a
+    /// renamed kind otherwise took the gauges down under a quiet, fresh
+    /// reading, with `five_hour` and `seven_day` sitting beside it.
     ///
     /// A bucket with no `utilization` is dropped — there is nothing to draw.
     /// A bucket with no reset is not: the vendor sends a null reset for a
@@ -43,20 +53,52 @@ enum ClaudeUsagePayload {
     /// than a window that does not exist.
     static func windows(_ body: [String: Any]) -> [UsageWindow] {
         let listed = (body[limitsKey] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
-        guard listed.isEmpty else { return listed.compactMap(window(fromLimit:)) }
-        return buckets.compactMap { bucket in
+        let mapped = listed.compactMap(window(fromLimit:))
+        guard mapped.isEmpty else { return mapped }
+        let flat: [UsageWindow] = buckets.compactMap { bucket in
             guard let raw = body[bucket.key] as? [String: Any],
-                let resetsAt = parseReset(raw["resets_at"]),
                 let usedPercent = raw["utilization"] as? Double
             else { return nil }
             return UsageWindow(
-                minutes: bucket.minutes, usedPercent: usedPercent, resetsAt: resetsAt)
+                minutes: bucket.minutes, usedPercent: usedPercent,
+                resetsAt: parseReset(raw["resets_at"]))
         }
+        let unmapped = unmappedNames(listed: listed, flat: flat, body: body)
+        if !listed.isEmpty || !unmapped.isEmpty { reportUnmapped(unmapped) }
+        return flat
+    }
+
+    /// What in a payload looks like a window and did not become one: every
+    /// kind of a `limits` that mapped to nothing, and the keys shaped like a
+    /// bucket when the flat ones drew nothing either. Passed through the token
+    /// sanitizer because the log line is the only place they go and they are
+    /// a vendor's.
+    static func unmappedNames(
+        listed: [[String: Any]], flat: [UsageWindow], body: [String: Any]
+    ) -> [String] {
+        let kinds = listed.compactMap { $0["kind"] as? String }
+        let shaped = body.keys.filter { (body[$0] as? [String: Any])?["utilization"] != nil }
+        let keys = flat.isEmpty ? shaped : []
+        return (kinds + keys).compactMap(UsageReaderShared.sanitizedPlanToken).sorted()
+    }
+
+    private static func reportUnmapped(_ names: [String]) {
+        var first = false
+        unmappedReported.update {
+            first = !$0
+            $0 = true
+        }
+        guard first else { return }
+        sissyLog(
+            "sissy: the Claude usage payload named windows Sissy could not map: "
+                + names.joined(separator: ", "))
     }
 
     /// One entry of `limits`. The scope is the model's display name as the
     /// vendor spells it, which is what keeps a weekly bucket for one model
-    /// from rendering as the weekly bucket for everything.
+    /// from rendering as the weekly bucket for everything: an entry of that
+    /// kind naming no model is skipped, because it would draw as a second
+    /// plan-wide weekly gauge.
     private static func window(fromLimit raw: [String: Any]) -> UsageWindow? {
         guard let kind = raw["kind"] as? String,
             let minutes = limitKinds[kind],
@@ -64,11 +106,13 @@ enum ClaudeUsagePayload {
         else { return nil }
         let resetsAt = parseReset(raw["resets_at"])
         let model = (raw["scope"] as? [String: Any])?["model"] as? [String: Any]
+        let scope = (model?["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        if kind == scopedKind, scope == nil { return nil }
         return UsageWindow(
             minutes: minutes,
             usedPercent: percent,
             resetsAt: resetsAt,
-            scope: (model?["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            scope: scope
         )
     }
 
