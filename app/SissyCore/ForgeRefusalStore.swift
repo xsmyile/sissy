@@ -40,10 +40,11 @@ final class ForgeRefusalStore: @unchecked Sendable {
     /// file lived.
     init(url: URL? = nil, now: Date = Date()) {
         self.url = url
-        entries = Self.live(
-            url.flatMap { try? Data(contentsOf: $0) }
-                .flatMap { try? JSONDecoder().decode([String: Entry].self, from: $0) } ?? [:],
-            now: now)
+        entries = Self.live(url.flatMap { try? Self.file($0).load() } ?? [:], now: now)
+    }
+
+    private static func file(_ url: URL) -> VersionedJSONFile<[String: Entry]> {
+        VersionedJSONFile(url: url, policy: .replace, formatting: [])
     }
 
     /// The entries still in force: every token refusal, and a rate limit only
@@ -93,11 +94,9 @@ final class ForgeRefusalStore: @unchecked Sendable {
             return
         }
         entries = Self.live(entries, now: now)
-        guard let url = self.url, let data = try? JSONEncoder().encode(entries) else { return }
+        guard let url = self.url else { return }
         do {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: url, options: .atomic)
+            try Self.file(url).save(entries)
         } catch { sissyLog("sissy: could not save forge refusal state") }
     }
 

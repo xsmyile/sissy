@@ -340,50 +340,27 @@ enum UsageStatePersistence {
     /// stay until the next schema bump.
     static func load(from url: URL) -> LoadOutcome {
         pruneQuarantined(of: url)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return .missing
-        }
-        let data: Data
         do {
-            data = try Data(contentsOf: url)
+            return try file(url).load().map(LoadOutcome.ok) ?? .missing
         } catch {
-            return .invalid(reason: "read failed: \(error.localizedDescription)")
+            pruneQuarantined(of: url)
+            return .invalid(reason: "\(error)")
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let snapshot: UsageStateSnapshot
-        do {
-            snapshot = try decoder.decode(UsageStateSnapshot.self, from: data)
-        } catch {
-            quarantine(url, reason: "decode")
-            return .invalid(reason: "decode failed: \(error.localizedDescription)")
-        }
-        if snapshot.schemaVersion != UsageStateSnapshot.currentSchemaVersion {
-            quarantine(url, reason: "schema-mismatch")
-            let expected = UsageStateSnapshot.currentSchemaVersion
-            return .invalid(
-                reason: "schemaVersion \(snapshot.schemaVersion) != expected \(expected)"
-            )
-        }
-        return .ok(snapshot)
     }
 
-    /// Atomic save via `Data.write(options: .atomic)`. Foundation writes to a
-    /// temp file beside the target then renames atomically — POSIX rename(2)
-    /// guarantee on APFS. The parent directory is created lazily because
-    /// Sissy may be the first thing to touch
+    /// Foundation's atomic write puts a temp file beside the target then
+    /// renames it, the POSIX rename(2) guarantee on APFS, and the parent is
+    /// created because Sissy may be the first thing to touch
     /// `~/Library/Application Support/Sissy/` on a fresh install.
     static func save(_ snapshot: UsageStateSnapshot, to url: URL) throws {
-        let dir = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: dir,
-            withIntermediateDirectories: true
-        )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(snapshot)
-        try data.write(to: url, options: [.atomic])
+        try file(url).save(snapshot)
+    }
+
+    private static func file(_ url: URL) -> VersionedJSONFile<UsageStateSnapshot> {
+        VersionedJSONFile(
+            url: url, policy: .setAside, setAsidePrefix: quarantinePrefix(for: url),
+            namesFailureInSetAside: true, iso8601Dates: true,
+            schema: (UsageStateSnapshot.currentSchemaVersion, \.schemaVersion))
     }
 
     /// How many copies set aside for one snapshot are kept.
@@ -398,18 +375,6 @@ enum UsageStatePersistence {
 
     static func quarantinePrefix(for url: URL) -> String {
         "\(url.lastPathComponent).corrupt-"
-    }
-
-    private static func quarantine(_ url: URL, reason: String) {
-        let ts = Int(Date().timeIntervalSince1970)
-        let quarantined = url.deletingLastPathComponent()
-            .appendingPathComponent("\(quarantinePrefix(for: url))\(reason)-\(ts).json")
-        do {
-            try FileManager.default.moveItem(at: url, to: quarantined)
-        } catch {
-            sissyLog("sissy: could not set \(url.lastPathComponent) aside (\(reason)): \(error)")
-        }
-        pruneQuarantined(of: url)
     }
 
     /// Drops all but the newest `quarantineKeep` copies set aside for one

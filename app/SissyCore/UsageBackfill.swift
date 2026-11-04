@@ -200,18 +200,15 @@ struct ArchiveBackfillLedger: Codable, Equatable, Sendable {
     /// worst an unreadable one costs is a pass that runs again and rewrites
     /// the same days.
     static func load(from url: URL) -> Self {
-        guard let data = try? Data(contentsOf: url),
-            let decoded = try? JSONDecoder().decode(Self.self, from: data),
-            decoded.schemaVersion == currentSchemaVersion
-        else { return Self() }
-        return decoded
+        (try? file(url).load()) ?? Self()
     }
 
     static func save(_ ledger: Self, to url: URL) throws {
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(ledger).write(to: url, options: [.atomic])
+        try file(url).save(ledger)
+    }
+
+    private static func file(_ url: URL) -> VersionedJSONFile<Self> {
+        VersionedJSONFile(
+            url: url, policy: .replace, schema: (currentSchemaVersion, \.schemaVersion))
     }
 }
