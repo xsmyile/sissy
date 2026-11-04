@@ -382,7 +382,7 @@ struct PanelOverview: View {
                 .foregroundStyle(Self.nameTint(status))
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Text(UsageFormat.accountsCaption(group.rows.count))
+            Text(UsageFormat.accountsCaption(group.rows.first?.accountCount ?? group.rows.count))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

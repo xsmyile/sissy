@@ -563,8 +563,7 @@ selected surface exists — a `TabView` would hold every tab's view graph live,
 which is precisely the cost `UsagePanelController` drops its host on close to
 avoid. A module earns a tab when it has more than a line to say: Sessions
 always, Mac while the frame carries a `MacHealthReading`, Forge while a forge
-is connected. A tab is named for what it reads, and a switcher with one
-destination is not drawn at all. `PanelTabBar` sits on a row of its own
+is connected. A tab is named for what it reads. `PanelTabBar` sits on a row of its own
 under the header, on the level-0 pages only, and a tab carries the one thing
 worth leaving the current page for: the Mac's level past normal, and a
 repository committing under an unexpected name.

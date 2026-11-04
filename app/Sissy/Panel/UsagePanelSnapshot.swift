@@ -589,6 +589,10 @@ struct UsagePanelSnapshot: Equatable {
         /// its page.
         var plan: String?
         var planTier: String?
+        /// How many accounts the vendor's picker lists, for the count over a
+        /// vendor drawing more than one row. Not how many rows it draws: an
+        /// account with no reading has no row and is still one of the vendor's.
+        var accountCount: Int = 1
         let windows: [WindowRow]
         let notice: LimitsNotice?
         let status: StatusRow?
@@ -2169,6 +2173,7 @@ struct UsagePanelSnapshot: Equatable {
                     qualifier: account.label,
                     plan: account.plan,
                     planTier: account.planTier,
+                    accountCount: row.accounts.count,
                     windows: account.windows,
                     notice: account.notice,
                     status: row.status)

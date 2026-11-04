@@ -283,7 +283,7 @@ struct UsagePanelView: View {
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 header(for: page, live: live, readings: readings)
-                if page == .overview, tabs.count > 1, let snapshot {
+                if page == .overview, let snapshot {
                     PanelTabBar(tabs: tabs, selection: $tab) { $0.badge(in: snapshot) }
                 }
             }
