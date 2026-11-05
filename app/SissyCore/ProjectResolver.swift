@@ -203,7 +203,10 @@ final class ProjectResolver {
         return ledger.project(under: start.path).flatMap { Self.isScratch($0) ? nil : $0 }
     }
 
-    private static func isScratch(_ project: String) -> Bool {
+    /// Whether a repository is a throwaway under `/tmp`, for whatever reads the
+    /// ledger without going through the walk: it holds these on any install that
+    /// ran before the walk refused them, and a session's hook can still add one.
+    static func isScratch(_ project: String) -> Bool {
         scratchRoots.contains { project.hasPrefix($0) }
     }
 

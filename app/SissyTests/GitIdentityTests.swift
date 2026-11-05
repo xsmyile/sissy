@@ -43,6 +43,26 @@ final class GitIdentityTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    // MARK: The sweep
+
+    /// The projects list refuses these, and a repository it will not name has
+    /// no business being judged on the identities page.
+    func testARepositoryUnderTmpIsNotSwept() async throws {
+        let real = try makeRepository("real")
+        let scratch = "/private/tmp/sissy-identity-\(UUID().uuidString)"
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: scratch) }
+        try FileManager.default.createDirectory(atPath: scratch, withIntermediateDirectories: true)
+        try run(["-C", scratch, "init", "-q"])
+        let ledger = ProjectLedger()
+        ledger.remember(ProjectCheckout(directory: real, project: real))
+        ledger.remember(ProjectCheckout(directory: scratch, project: scratch))
+        let monitor = GitIdentityMonitor(ledger: ledger, git: git, home: home)
+
+        await monitor.sweepOnce(onRefresh: {})
+
+        XCTAssertEqual(monitor.currentIdentities().map(\.repository), [real])
+    }
+
     // MARK: The reader
 
     func testReadsTheIdentityAGlobalConfigResolves() throws {
