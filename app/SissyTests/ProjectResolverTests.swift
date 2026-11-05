@@ -9,6 +9,7 @@ final class ProjectResolverTests: XCTestCase {
     private var root: URL!
     private var ledger: ProjectLedger!
     private var resolver: ProjectResolver!
+    private var scratchDirectories: [URL] = []
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
@@ -20,6 +21,14 @@ final class ProjectResolverTests: XCTestCase {
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: root)
+        for directory in scratchDirectories { try? FileManager.default.removeItem(at: directory) }
+    }
+
+    private func scratchDirectory() throws -> URL {
+        let directory = URL(fileURLWithPath: "/private/tmp/sissy-scratch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        scratchDirectories.append(directory)
+        return directory
     }
 
     func testARepositoryRootIsItsOwnProject() throws {
@@ -76,6 +85,67 @@ final class ProjectResolverTests: XCTestCase {
         try FileManager.default.createDirectory(at: loose, withIntermediateDirectories: true)
 
         XCTAssertNil(resolver.project(for: loose.path))
+    }
+
+    /// An agent ran `git init` in its scratch directory. The `.git` is real and
+    /// the repository still is not a project.
+    func testARepositoryUnderTmpIsNotAProject() throws {
+        let scratch = try scratchDirectory()
+        let repo = try GitFixture.repository("repo-TERM", in: scratch)
+        let nested = repo.appendingPathComponent("src")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+
+        XCTAssertNil(resolver.project(for: repo.path))
+        XCTAssertNil(resolver.project(for: nested.path), "the walk stops there, it does not go on up")
+        XCTAssertFalse(
+            ledger.all().contains { $0.project == repo.path }, "nothing to remember it by")
+    }
+
+    /// `/tmp` is a link to `/private/tmp`, and both spellings reach the resolver:
+    /// `standardizedFileURL` strips the prefix only while the directory exists.
+    func testBothSpellingsOfTmpAreTheSameDirectory() throws {
+        let scratch = try scratchDirectory()
+        _ = try GitFixture.repository("repo-KILL", in: scratch)
+        let name = "\(scratch.lastPathComponent)/repo-KILL"
+        let long = "/private/tmp/\(name)"
+        let short = "/tmp/\(name)"
+        XCTAssertTrue(FileManager.default.fileExists(atPath: "\(long)/.git"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: "\(short)/.git"))
+
+        XCTAssertNil(resolver.project(for: long))
+        XCTAssertNil(resolver.project(for: short))
+    }
+
+    /// The test is on the repository the walk landed on: the money spent in a
+    /// worktree under `/tmp` belonged to the checkout it was cut from.
+    func testAWorktreeUnderTmpStillBelongsToItsRepository() throws {
+        let main = try GitFixture.repository("sissy", in: root)
+        let scratch = try scratchDirectory()
+        let worktree = try GitFixture.worktree("grampus", of: main, in: scratch)
+
+        XCTAssertEqual(resolver.project(for: worktree.path), main.path)
+
+        let nextRun = try relaunch(after: worktree)
+
+        XCTAssertEqual(nextRun.project(for: worktree.path), main.path)
+    }
+
+    func testAWorktreeOfARepositoryUnderTmpIsNotAProject() throws {
+        let scratch = try scratchDirectory()
+        let main = try GitFixture.repository("repo-TERM", in: scratch)
+        let worktree = try GitFixture.worktree("drill", of: main, in: scratch)
+
+        XCTAssertNil(resolver.project(for: worktree.path))
+    }
+
+    /// The ledger on a real install already holds these, and the archive's
+    /// rows are read back through this resolver, so the days already written
+    /// lose the row with no migration.
+    func testARepositoryUnderTmpTheLedgerAlreadyRemembersIsNotAProject() {
+        let gone = "/private/tmp/sissy-gone-\(UUID().uuidString)/repo-TERM"
+        ledger.remember(ProjectCheckout(directory: gone, project: gone))
+
+        XCTAssertNil(resolver.project(for: gone))
     }
 
     /// The caches are bounded, and a full one starts again rather than

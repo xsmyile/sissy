@@ -39,6 +39,15 @@ struct ProjectRemote: Sendable, Equatable {
 /// calling it a project of its own is a wrong answer wearing a real name.
 /// Unattributed usage still counts in every total; it is only denied a row.
 ///
+/// **A repository under `/tmp` answers nil too.** An agent that runs `git init`
+/// in its scratch directory leaves a real `.git` there, so the walk has a
+/// repository to name and the rule above never fires: measured 2026-11-05, 14
+/// of one week's 24 rows were throwaway repositories from one test drill, $2.78
+/// of $2291.01. The test is on the repository the walk landed on and never on
+/// the working directory, because a worktree kept under `/tmp` still belongs to
+/// the checkout it was cut from. `$TMPDIR` is left out on purpose: nothing in
+/// the archive sits there, and it is where a test builds its fixtures.
+///
 /// The walk does not need the starting directory to exist, so a worktree kept
 /// inside its own repository still resolves after deletion. One kept beside it
 /// has nothing left to walk up to, and that is what `ProjectLedger` is for: a
@@ -104,6 +113,7 @@ final class ProjectResolver {
     private static let webSchemes: Set<String> = ["http", "https"]
     private static let hostBracketOpen = "["
     private static let hostBracketClose = "]"
+    private static let scratchRoots = ["/tmp/", "/private/tmp/"]
 
     /// The most answers either cache holds before it starts again. The
     /// ledger's own bound, so the resolver never remembers more directories
@@ -174,6 +184,7 @@ final class ProjectResolver {
                     isDirectory.boolValue
                     ? directory.path
                     : mainCheckout(ofWorktreePointer: entry) ?? directory.path
+                if Self.isScratch(project) { return nil }
                 ledger.remember(ProjectCheckout(directory: directory.path, project: project))
                 // The main checkout a worktree pointer names is a reading too,
                 // and it is the key a persisted row is looked up under: without
@@ -189,7 +200,14 @@ final class ProjectResolver {
             if parent.path == directory.path { break }
             directory = parent
         }
-        return ledger.project(under: start.path)
+        return ledger.project(under: start.path).flatMap { Self.isScratch($0) ? nil : $0 }
+    }
+
+    /// Whether a repository is a throwaway under `/tmp`, for whatever reads the
+    /// ledger without going through the walk: it holds these on any install that
+    /// ran before the walk refused them, and a session's hook can still add one.
+    static func isScratch(_ project: String) -> Bool {
+        scratchRoots.contains { project.hasPrefix($0) }
     }
 
     /// The checkout a worktree was cut from, or nil for a `.git` file that

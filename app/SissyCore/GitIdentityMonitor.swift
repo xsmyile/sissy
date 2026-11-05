@@ -174,7 +174,8 @@ actor GitIdentityMonitor {
     /// repository and no process at all.
     private func repositories() -> [(String, ProjectRemote?)] {
         let resolver = ProjectResolver(ledger: ledger)
-        return Set(ledger.all().map(\.project)).map { ($0, resolver.repositoryRemote(for: $0)) }
+        return Set(ledger.all().map(\.project).filter { !ProjectResolver.isScratch($0) })
+            .map { ($0, resolver.repositoryRemote(for: $0)) }
     }
 
     /// What one round ended up holding: every repository still in the ledger,
