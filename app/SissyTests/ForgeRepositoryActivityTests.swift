@@ -132,6 +132,19 @@ final class ForgeRepositoryActivityTests: XCTestCase {
         XCTAssertEqual(ForgeRepositoryFeed.onForge(remote, basePath: "/other"), remote)
     }
 
+    func testAVendorsOwnPageDrawsNoCounters() {
+        let id = ForgeRepositoryID(host: "github.com", fullName: "xsmyile/sissy")
+        let reading = ForgeRepositoryReading(
+            kind: .gitHub, host: "github.com", counts: [id: ForgeRepositoryCounts(merged: 4)])
+        let page = { (provider: String?) in
+            UsagePanelSnapshot.ProjectsPage(
+                provider: provider, rows: [self.row("sissy")], residue: nil, subtitle: "")
+        }
+
+        XCTAssertNotNil(UsagePanelSnapshot.projectCounters(page(nil), readings: [reading])["/sissy"])
+        XCTAssertTrue(UsagePanelSnapshot.projectCounters(page("claude-code"), readings: [reading]).isEmpty)
+    }
+
     /// Two instances on one host each answer for every repository on it, so the
     /// row takes the one that actually has the work.
     func testTwoInstancesOnOneHostAnswerWithTheOneThatHasTheRepository() {

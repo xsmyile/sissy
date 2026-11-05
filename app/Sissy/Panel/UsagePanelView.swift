@@ -405,7 +405,7 @@ struct UsagePanelView: View {
         guard let answer = repositoryAnswer, answer.fetch.span == days,
             answer.fetch.repositories == UsagePanelSnapshot.forgeRepositories(projects.rows)
         else { return [:] }
-        return UsagePanelSnapshot.projectCounters(projects.rows, readings: answer.readings)
+        return UsagePanelSnapshot.projectCounters(projects, readings: answer.readings)
     }
 
     /// The days the span reading is fetched for: none under the `Today`

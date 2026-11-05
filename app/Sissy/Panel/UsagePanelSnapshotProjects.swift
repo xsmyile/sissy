@@ -245,6 +245,16 @@ extension UsagePanelSnapshot {
             })
     }
 
+    /// The counters a page draws: none on a vendor's own, which reads that
+    /// vendor's day while forge work has no CLI. An answer the all-CLI page
+    /// fetched can match a vendor's rows too, so it is refused here and not
+    /// only left unasked.
+    static func projectCounters(
+        _ page: ProjectsPage, readings: [ForgeRepositoryReading]
+    ) -> [String: [ProjectCounter]] {
+        page.provider == nil ? projectCounters(page.rows, readings: readings) : [:]
+    }
+
     /// Each row's counters by the row's id.
     ///
     /// **A zero is not drawn, and neither is a counter that would not read.**
