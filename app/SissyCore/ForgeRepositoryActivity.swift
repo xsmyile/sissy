@@ -88,10 +88,7 @@ enum ForgeRepositoryFeed {
     ) async throws -> [ForgeRepositoryID: ForgeRepositoryCounts] {
         guard let bounds = ForgeSpanFeed.bounds(from: query.from, to: query.to, now: query.now)
         else { return [:] }
-        let asked = Dictionary(
-            query.repositories.map { (onForge($0, basePath: connection.basePath), $0) },
-            uniquingKeysWith: { first, _ in first })
-        let names = Set(asked.keys)
+        let names = Set(query.repositories.map { onForge($0, basePath: connection.basePath) })
         let counts =
             switch connection.kind {
             case .gitHub:
@@ -101,9 +98,21 @@ enum ForgeRepositoryFeed {
                 try await readGitLab(
                     connection, token: token, counters: enabled, repositories: names, bounds: bounds)
             }
-        return Dictionary(
-            counts.compactMap { name, figures in asked[name].map { ($0, figures) } },
-            uniquingKeysWith: { first, _ in first })
+        return answers(counts, for: query.repositories, basePath: connection.basePath)
+    }
+
+    /// The figures under the names the rows asked by. Two clones of one project
+    /// on an instance served under a path can spell it two ways, and both rows
+    /// are owed the answer.
+    static func answers(
+        _ counts: [ForgeRepositoryID: ForgeRepositoryCounts], for repositories: Set<ForgeRepositoryID>,
+        basePath: String?
+    ) -> [ForgeRepositoryID: ForgeRepositoryCounts] {
+        var result: [ForgeRepositoryID: ForgeRepositoryCounts] = [:]
+        for repository in repositories {
+            result[repository] = counts[onForge(repository, basePath: basePath)]
+        }
+        return result
     }
 
     /// A repository as its forge's API names it. A remote on an instance served

@@ -132,6 +132,17 @@ final class ForgeRepositoryActivityTests: XCTestCase {
         XCTAssertEqual(ForgeRepositoryFeed.onForge(remote, basePath: "/other"), remote)
     }
 
+    func testTwoSpellingsOfOneProjectBothGetTheAnswer() {
+        let long = ForgeRepositoryID(host: "example.com", fullName: "gitlab/group/proj")
+        let short = ForgeRepositoryID(host: "example.com", fullName: "group/proj")
+        let figures = ForgeRepositoryCounts(merged: 2)
+
+        let answers = ForgeRepositoryFeed.answers(
+            [short: figures], for: [long, short], basePath: "/gitlab")
+
+        XCTAssertEqual(answers, [long: figures, short: figures])
+    }
+
     func testAVendorsOwnPageDrawsNoCounters() {
         let id = ForgeRepositoryID(host: "github.com", fullName: "xsmyile/sissy")
         let reading = ForgeRepositoryReading(
