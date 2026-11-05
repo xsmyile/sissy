@@ -125,6 +125,15 @@ actor ForgeActivityMonitor {
         var waiters: Set<UUID>
     }
     private var spanCache: [SpanKey: ForgeSpanReading] = [:]
+    typealias RepositoryFetch =
+        @Sendable (ForgeConnection, String, Set<ForgeCounter>, ForgeRepositoryQuery) async throws ->
+        [ForgeRepositoryID: ForgeRepositoryCounts]
+    private struct RepositoryKey: Hashable {
+        let span: SpanKey
+        let repositories: Set<ForgeRepositoryID>
+    }
+    private var repositoryCache:
+        [RepositoryKey: (readAt: Date, counts: [ForgeRepositoryID: ForgeRepositoryCounts])] = [:]
     private var spanTasks: [SpanKey: SpanRunning] = [:]
     private var retryUntil: [String: Date] = [:]
     private var spanRefusals: [String: ForgeReadFailure] = [:]
@@ -237,6 +246,95 @@ actor ForgeActivityMonitor {
         releaseSpan(key, waiter: waiter)
         try Task.checkCancellation()
         return reading
+    }
+
+    /// Each connection's counters for the repositories on its host, for the
+    /// projects page. A connection that is parked, refused or out of time
+    /// answers empty, which draws no counters: the page keeps its rows and the
+    /// Forge tab is where a failure is explained.
+    func readRepositories(
+        _ repositories: Set<ForgeRepositoryID>, from: Date, to: Date, now: Date = Date(),
+        deadline: Duration = spanDeadline, fetch: @escaping RepositoryFetch = ForgeRepositoryFeed.read
+    ) async throws -> [ForgeRepositoryReading] {
+        try Task.checkCancellation()
+        let expires = ContinuousClock.now + deadline
+        return try await withThrowingTaskGroup(of: ForgeRepositoryReading.self) { group in
+            for connection in connections {
+                let host = connection.host.lowercased()
+                let own = repositories.filter { $0.host == host }
+                guard !own.isEmpty else { continue }
+                let query = ForgeRepositoryQuery(repositories: own, from: from, to: to, now: now)
+                group.addTask {
+                    let counts = try await self.repositoryCounts(
+                        connection, query: query, expires: expires, fetch: fetch)
+                    return ForgeRepositoryReading(kind: connection.kind, host: host, counts: counts)
+                }
+            }
+            var result: [ForgeRepositoryReading] = []
+            for try await reading in group { result.append(reading) }
+            try Task.checkCancellation()
+            return result
+        }
+    }
+
+    private func repositoryCounts(
+        _ connection: ForgeConnection, query: ForgeRepositoryQuery, expires: ContinuousClock.Instant,
+        fetch: @escaping RepositoryFetch
+    ) async throws -> [ForgeRepositoryID: ForgeRepositoryCounts] {
+        let now = query.now
+        guard let bounds = ForgeSpanFeed.bounds(from: query.from, to: query.to, now: now),
+            spanBlock(connection.id, now: now) == nil
+        else { return [:] }
+        let key = RepositoryKey(
+            span: SpanKey(
+                connection: connection.id, firstDay: bounds.firstDay, lastDay: bounds.lastDay,
+                zone: Calendar.current.timeZone.identifier),
+            repositories: query.repositories)
+        if let cached = repositoryCache[key], now.timeIntervalSince(cached.readAt) < Self.spanCacheTTL {
+            return cached.counts
+        }
+        let started = poll.generation
+        let lookup = await tokenSource(connection.id, false)
+        try Task.checkCancellation()
+        guard started == poll.generation, spanBlock(connection.id, now: now) == nil,
+            case .found(let token) = lookup,
+            ForgeRefusalStore.shared.failure(url: connection.root, token: token, now: now) == nil
+        else { return [:] }
+        let enabled = counters
+        let counts = await withTaskGroup(
+            of: [ForgeRepositoryID: ForgeRepositoryCounts].self
+        ) { group in
+            group.addTask {
+                do {
+                    return try await fetch(connection, token, enabled, query)
+                } catch {
+                    if !Task.isCancelled {
+                        sissyLog("sissy: \(connection.id) repository counters unreadable: \(error)")
+                    }
+                    return [:]
+                }
+            }
+            group.addTask {
+                try? await ContinuousClock().sleep(until: expires)
+                return [:]
+            }
+            let first = await group.next() ?? [:]
+            group.cancelAll()
+            return first
+        }
+        try Task.checkCancellation()
+        guard started == poll.generation else { return [:] }
+        let whole = counts.values.allSatisfy {
+            (!enabled.contains(.merged) || $0.merged != nil)
+                && (!enabled.contains(.issues) || $0.issues != nil)
+        }
+        if !counts.isEmpty, whole {
+            repositoryCache = repositoryCache.filter {
+                now.timeIntervalSince($0.value.readAt) < Self.spanCacheTTL
+            }
+            repositoryCache[key] = (now, counts)
+        }
+        return counts
     }
 
     /// When a rate-limited connection may be asked again. The token is the one
@@ -357,6 +455,7 @@ actor ForgeActivityMonitor {
     func stop() {
         poll.stop()
         spanCache.removeAll()
+        repositoryCache.removeAll()
         spanTasks.values.forEach { $0.task.cancel() }
         spanTasks.removeAll()
         inFlight.values.forEach { $0.task.cancel() }

@@ -778,6 +778,11 @@ struct ProjectRowView: View {
     /// money instead, is two readings in one colour.
     var showsProviders: Bool = false
 
+    /// What the account did in this repository, under the bar. Only the
+    /// projects page hands any over: the folded lists elsewhere draw the share
+    /// as a wash so the row costs one line, and these would double it.
+    var counters: [UsagePanelSnapshot.ProjectCounter] = []
+
     /// Where this surface draws the row's share of the day.
     ///
     /// The bar under the row is the panel's own vocabulary and it says the
@@ -810,6 +815,9 @@ struct ProjectRowView: View {
             VStack(alignment: .leading, spacing: 5) {
                 line
                 ShareBar(segments: segments)
+                if !counters.isEmpty {
+                    countersLine.padding(.top, 1)
+                }
             }
         case .behind:
             line.shareWash(row.share)
@@ -838,6 +846,28 @@ struct ProjectRowView: View {
             Text("\(row.tokens) · \(row.cost)")
                 .font(.system(size: 12))
                 .monospacedDigit()
+        }
+    }
+
+    /// The marks the Forge tab's rows wear, at their size and in their colours,
+    /// because they count the same three things.
+    private var countersLine: some View {
+        HStack(spacing: 9) {
+            ForEach(counters) { counter in
+                HStack(spacing: 3) {
+                    Image(ProviderPalette.forgeGlyph(counter.counter))
+                        .font(.system(size: 10))
+                        .foregroundStyle(ProviderPalette.forgeTint(counter.counter))
+                    Text(counter.figure)
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .help(counter.help)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(counter.help)
+                .accessibilityValue(counter.figure)
+            }
         }
     }
 

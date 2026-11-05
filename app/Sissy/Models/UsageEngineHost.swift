@@ -973,6 +973,16 @@ final class UsageEngineHost {
         return (try? await engine.forgeActivity(from: from, to: to)) ?? []
     }
 
+    /// What the account did in each repository on the projects page, asked
+    /// only while that page is on screen. Empty for the reasons
+    /// `forgeActivity(from:to:)` is, which draws the rows without counters.
+    func forgeRepositories(
+        _ repositories: Set<ForgeRepositoryID>, from: Date, to: Date
+    ) async -> [ForgeRepositoryReading] {
+        guard let engine else { return [] }
+        return (try? await engine.forgeRepositories(repositories, from: from, to: to)) ?? []
+    }
+
     /// Deletes the archive. The engine re-emits once it is gone, which is
     /// what takes the panel's archive line away with it.
     ///

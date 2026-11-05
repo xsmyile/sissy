@@ -1719,6 +1719,14 @@ actor UsageEngine {
         return try await forgeMonitor.readSpan(from: from, to: to)
     }
 
+    /// The counters under each project on the projects page, over its window.
+    func forgeRepositories(
+        _ repositories: Set<ForgeRepositoryID>, from: Date, to: Date
+    ) async throws -> [ForgeRepositoryReading] {
+        guard lifecycle == .running else { return [] }
+        return try await forgeMonitor.readRepositories(repositories, from: from, to: to)
+    }
+
     // MARK: - Forge counter settings
 
     /// Switches one of a forge row's counters on or off, and persists it.
