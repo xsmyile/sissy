@@ -446,21 +446,31 @@ enum ForgeSpanFeed {
     static func commentCount(_ viewer: [String: Any], start: Date, end: Date, inclusiveEnd: Bool = false)
         -> ForgeSpanCounter
     {
+        switch provenComments(viewer, start: start, end: end, inclusiveEnd: inclusiveEnd) {
+        case .success(let nodes): .counted(.exact(nodes.count))
+        case .failure(let absence): .unavailable(absence)
+        }
+    }
+
+    /// The page's comments inside the span, or why the page cannot answer for it.
+    static func provenComments(
+        _ viewer: [String: Any], start: Date, end: Date, inclusiveEnd: Bool = false
+    ) -> Result<[[String: Any]], ForgeSpanAbsence> {
         guard let block = viewer["comments"] as? [String: Any],
             let nodes = block["nodes"] as? [[String: Any]]
-        else { return .unavailable(.failure(.malformed)) }
-        let stamps = nodes.compactMap { node -> (Date, Date)? in
+        else { return .failure(.failure(.malformed)) }
+        var oldestUpdate: Date?
+        var inside: [[String: Any]] = []
+        for node in nodes {
             guard let created = (node["createdAt"] as? String).flatMap(UsageReaderShared.parseTimestamp),
                 let updated = (node["updatedAt"] as? String).flatMap(UsageReaderShared.parseTimestamp)
-            else { return nil }
-            return (created, updated)
+            else { return .failure(.failure(.malformed)) }
+            oldestUpdate = oldestUpdate.map { min($0, updated) } ?? updated
+            if created >= start, inclusiveEnd ? created <= end : created < end { inside.append(node) }
         }
         let unread = (block["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool ?? true
-        guard stamps.count == nodes.count else { return .unavailable(.failure(.malformed)) }
-        guard !unread || (stamps.map(\.1).min().map { $0 < start } ?? false)
-        else { return .unavailable(.incomplete) }
-        return .counted(
-            .exact(stamps.filter { $0.0 >= start && (inclusiveEnd ? $0.0 <= end : $0.0 < end) }.count))
+        guard !unread || (oldestUpdate.map { $0 < start } ?? false) else { return .failure(.incomplete) }
+        return .success(inside)
     }
 
     static func count(
@@ -506,7 +516,7 @@ enum ForgeSpanFeed {
         return (data, failures)
     }
 
-    private static func graphQL(
+    static func graphQL(
         _ url: URL, query: String, variables: [String: String] = [:], token: String, kind: ForgeKind
     ) async throws -> (data: [String: Any], failures: [String: ForgeSpanAbsence]) {
         var request = ForgeActivityFeed.request(

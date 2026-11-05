@@ -83,6 +83,7 @@ struct UsagePanelView: View {
     /// Each forge's counters over a picked window, fetched only while the
     /// Forge tab is on screen over one, and held with the days it answers.
     @State private var forgeSpan: UsagePanelSnapshot.ForgeSpanAnswer?
+    @State private var repositoryAnswer: RepositoryAnswer?
 
     /// What the span fetch is keyed on: the period and its days, and while
     /// they reach today the archive's own total, which moves only when a
@@ -94,6 +95,20 @@ struct UsagePanelView: View {
         let span: UsageDaySpan?
         let tokens: Int?
         let cost: Decimal?
+    }
+
+    /// What the counters under the projects are keyed on. The poll is in the
+    /// key for the reason it is in `ForgeFetch`'s: an answer that came back
+    /// empty is asked again rather than kept for as long as the page is open.
+    private struct RepositoryFetch: Equatable {
+        let span: UsageDaySpan
+        let repositories: Set<ForgeRepositoryID>
+        let polledAt: Date?
+    }
+
+    private struct RepositoryAnswer {
+        let fetch: RepositoryFetch
+        let readings: [ForgeRepositoryReading]
     }
 
     /// What the forge fetch is keyed on: the picked days, the newest poll, and
@@ -276,10 +291,12 @@ struct UsagePanelView: View {
         let readings = PageReadings(
             open: open, services: servicesReading(of: open),
             projects: projectsPage(of: live?.frame, snapshot: snapshot),
-            days: period == .preset(.today) ? nil : days, earliest: earliest, period: period)
+            days: period == .preset(.today) ? nil : days, counterDays: days, earliest: earliest,
+            period: period)
         let spanFetch = Self.spanFetch(
             period, days: drawsSpan(period) ? days : nil, history: history, now: now)
         let forgeFetch = forgeFetch(period, forge: live?.frame.forge ?? [])
+        let repositoryFetch = repositoryFetch(readings.projects, days: days, forge: live?.frame.forge ?? [])
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 header(for: page, live: live, readings: readings)
@@ -357,6 +374,38 @@ struct UsagePanelView: View {
             guard !Task.isCancelled else { return }
             forgeSpan = UsagePanelSnapshot.ForgeSpanAnswer(span: fetch.span, readings: readings)
         }
+        .task(id: repositoryFetch) {
+            guard let fetch = repositoryFetch else { return }
+            let readings = await model.engine.forgeRepositories(
+                fetch.repositories, from: fetch.span.from, to: fetch.span.to)
+            guard !Task.isCancelled else { return }
+            repositoryAnswer = RepositoryAnswer(fetch: fetch, readings: readings)
+        }
+    }
+
+    /// What to ask the forge about for the projects page across every CLI: a
+    /// vendor's own page reads that vendor's day, and what the account did on a
+    /// forge is not split by CLI.
+    private func repositoryFetch(
+        _ projects: UsagePanelSnapshot.ProjectsPage?, days: UsageDaySpan?, forge: [ForgeActivityReading]
+    ) -> RepositoryFetch? {
+        guard let projects, projects.provider == nil, let days, !forge.isEmpty else { return nil }
+        let repositories = UsagePanelSnapshot.forgeRepositories(projects.rows)
+        guard !repositories.isEmpty else { return nil }
+        return RepositoryFetch(
+            span: days, repositories: repositories, polledAt: forge.map(\.readAt).max())
+    }
+
+    /// The counters for what is on screen, and none for an answer about another
+    /// window or another list, which would draw last week's figures under this
+    /// week's money.
+    private func projectCounters(
+        _ projects: UsagePanelSnapshot.ProjectsPage, days: UsageDaySpan?
+    ) -> [String: [UsagePanelSnapshot.ProjectCounter]] {
+        guard let answer = repositoryAnswer, answer.fetch.span == days,
+            answer.fetch.repositories == UsagePanelSnapshot.forgeRepositories(projects.rows)
+        else { return [:] }
+        return UsagePanelSnapshot.projectCounters(projects.rows, readings: answer.readings)
     }
 
     /// The days the span reading is fetched for: none under the `Today`
@@ -411,6 +460,9 @@ struct UsagePanelView: View {
         /// The days the panel reads over, nil under the `Today` preset, for
         /// the calendar's band.
         let days: UsageDaySpan?
+        /// The days the projects page's counters are over, which `Today` has
+        /// too: it only leaves `days` nil to keep the calendar's band off.
+        let counterDays: UsageDaySpan?
         /// The first day the archive holds, which bounds the calendar.
         let earliest: Date?
         /// The period the panel reads over, resolved once for this render.
@@ -494,7 +546,8 @@ struct UsagePanelView: View {
             if let projects = readings.projects {
                 PanelProjectsPage(
                     page: projects,
-                    openIdentities: { page = .identities(focus: $0, from: target) })
+                    openIdentities: { page = .identities(focus: $0, from: target) },
+                    counters: projectCounters(projects, days: readings.counterDays))
             } else {
                 overview(snapshot)
             }

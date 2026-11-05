@@ -34,6 +34,8 @@ struct PanelProjectsPage: View {
     /// here — a right-click that offered the check on the rows it keeps and not
     /// on the rest would put the same row under two different rules.
     let openIdentities: (String) -> Void
+    /// What the account did in each repository over the window, by row id.
+    var counters: [String: [UsagePanelSnapshot.ProjectCounter]] = [:]
 
     var body: some View {
         PanelGroup {
@@ -47,6 +49,7 @@ struct PanelProjectsPage: View {
                 ForEach(page.rows) { row in
                     ProjectRowView(
                         row: row, showsProviders: page.provider == nil,
+                        counters: counters[row.id] ?? [],
                         checkIdentity: row.repository == nil ? nil : { openIdentities(row.id) })
                 }
                 if let residue = page.residue {

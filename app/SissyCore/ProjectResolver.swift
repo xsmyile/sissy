@@ -19,6 +19,17 @@ struct ProjectRemote: Sendable, Equatable {
     /// so that one answers nil and the card shows the repository without a
     /// way out to it.
     let page: URL?
+    /// The whole path on the forge, nested groups included: `group/sub/repo`,
+    /// which is the name a forge's own API knows the repository by.
+    let fullName: String
+
+    init(host: String, owner: String, repository: String, page: URL?, fullName: String? = nil) {
+        self.host = host
+        self.owner = owner
+        self.repository = repository
+        self.page = page
+        self.fullName = fullName ?? "\(owner)/\(repository)"
+    }
 }
 
 /// Resolves a working directory to the project the work belongs to.
@@ -324,7 +335,8 @@ final class ProjectResolver {
             host: host,
             owner: segments[segments.count - 2],
             repository: repository,
-            page: page(scheme: scheme, host: host, port: port, trail: trail)
+            page: page(scheme: scheme, host: host, port: port, trail: trail),
+            fullName: trail
         )
     }
 

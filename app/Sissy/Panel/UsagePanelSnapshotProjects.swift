@@ -150,6 +150,10 @@ extension UsagePanelSnapshot {
     struct RepositoryLink: Equatable {
         let label: String
         let host: String
+        /// The whole path on the forge, which is what the counters under the
+        /// row are looked up by. `label` shortens a nested group to its last
+        /// step, and a forge's API knows the repository only by all of them.
+        let fullName: String
         /// Nil for a remote that names no page — the card then says where the
         /// repository lives without claiming a way there.
         let page: URL?
@@ -224,6 +228,56 @@ extension UsagePanelSnapshot {
         let subtitle: String
     }
 
+    /// One figure under a project's row: its mark, the number, and the sentence
+    /// the mark needs on a hover and for VoiceOver.
+    struct ProjectCounter: Equatable, Identifiable {
+        let counter: ForgeCounter
+        let figure: String
+        let help: String
+        var id: ForgeCounter { counter }
+    }
+
+    /// The repositories the rows name, for the forge to be asked about.
+    static func forgeRepositories(_ rows: [ProjectRow]) -> Set<ForgeRepositoryID> {
+        Set(
+            rows.compactMap { row in
+                row.repository.map { ForgeRepositoryID(host: $0.host, fullName: $0.fullName) }
+            })
+    }
+
+    /// Each row's counters by the row's id.
+    ///
+    /// **A zero is not drawn, and neither is a counter that would not read.**
+    /// Three marks per row is the most a list this long can carry, so only what
+    /// happened gets one, and a repository where nothing did keeps the height
+    /// it has today. The cost is that a figure GitHub could not prove looks
+    /// like a quiet repository: on a window wider than its comment page, every
+    /// GitHub row goes without the comment mark.
+    static func projectCounters(
+        _ rows: [ProjectRow], readings: [ForgeRepositoryReading]
+    ) -> [String: [ProjectCounter]] {
+        var result: [String: [ProjectCounter]] = [:]
+        for row in rows {
+            guard let repository = row.repository else { continue }
+            let id = ForgeRepositoryID(host: repository.host, fullName: repository.fullName)
+            let answers = readings.filter { $0.host == id.host }.compactMap { reading in
+                reading.counts[id].map { (reading.kind, $0) }
+            }
+            guard let (kind, counts) = answers.max(by: { $0.1.total < $1.1.total }) else { continue }
+            let figure = { (counter: ForgeCounter, value: Int?, help: String) -> ProjectCounter? in
+                guard let value, value > 0 else { return nil }
+                return ProjectCounter(counter: counter, figure: String(value), help: help)
+            }
+            let drawn = [
+                figure(.merged, counts.merged, UsageFormat.forgeMergedHelp(kind)),
+                figure(.issues, counts.issues, UsageFormat.forgeIssuesHelp(kind)),
+                figure(.comments, counts.comments, UsageFormat.forgeCommentsHelp(kind)),
+            ].compactMap { $0 }
+            if !drawn.isEmpty { result[row.id] = drawn }
+        }
+        return result
+    }
+
     /// Rows a popover can hold. Past this the answer is a report, and a
     /// report needs more than the two days the tail retains.
     ///
@@ -270,7 +324,8 @@ extension UsagePanelSnapshot {
                 owner: project.remote?.owner,
                 repository: project.remote.map {
                     RepositoryLink(
-                        label: "\($0.owner)/\($0.repository)", host: $0.host, page: $0.page)
+                        label: "\($0.owner)/\($0.repository)", host: $0.host, fullName: $0.fullName,
+                        page: $0.page)
                 },
                 tooltip: project.path,
                 tokens: UsageFormat.tokens(project.tokens),
