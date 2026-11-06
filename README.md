@@ -28,7 +28,7 @@ The menu bar companion for developers.
 - **Rate limits**: a gauge for every account, with a mark showing where even
   pace would be by now.
 - **Accounts**: several Claude and Codex accounts side by side, each with its
-  own limits.
+  own limits and named by its owner or team, or by a name you give it.
 - **Agents**: how many are running now, the memory they hold, and the Mac kept
   awake while they work.
 - **Projects**: where the day went, by repository, with a worktree counted
@@ -70,13 +70,13 @@ number in the menu bar.
 
 **The Overview**
 
-- What the period cost over `Today`, `7 days`, `30 days` or `All`, with the
-  tokens and the burn rate on Today.
+- What the period cost over `Today`, `7 days`, `30 days`, `All` or any span of
+  days picked on the calendar, with the tokens and the burn rate on Today.
 - A rate-limit gauge per account, on its most pressing window. The mark on the
   bar is where even consumption would have reached by now, so being ahead of
   pace is visible instead of calculated.
 - How many agents are running and how much memory they hold.
-- Where the day went, by repository. A worktree counts against the repository it
+- Where the period went, by repository. A worktree counts against the repository it
   was cut from, so one project is one row.
 - What you contributed on each connected forge, over the period you picked. On
   `All`, though, each vendor answers over its own range, not the archive's.
@@ -86,7 +86,8 @@ number in the menu bar.
   the repository when something is.
 
 **Click a row** for the page behind it: an account's plan, windows and credits;
-every repository of the day; the processes running now and how long the day was
+every repository of the period, with what you merged, opened and commented on in
+each; the processes running now and how long the day was
 worked; the commit-identity findings; the vendor's own service tree.
 
 **Commit identity** catches the work repository you are about to push under
@@ -118,7 +119,9 @@ or *Always* (eight hours, then off; Settings makes that one to twelve hours, or
 no limit at all), with the screen and, on a MacBook, *Keep working with the lid
 closed* beside them: the cup's menu and Settings' Awake tab carry both. The lid
 is off until you switch it on, and the first time it says what that costs
-before it does. The hold dies with Sissy: quit and the Mac sleeps normally, lid
+before it does. On battery it lets go below 15%, which Settings can change: a
+closed Mac sleeps then, and the lid sleeps it as usual until it is back on
+power. The hold dies with Sissy: quit and the Mac sleeps normally, lid
 included, with nothing to undo. After a crash the lid stays ignored until Sissy
 is opened again or the Mac restarts.
 
@@ -253,6 +256,7 @@ Settings.
 | `keepAwakeCeiling` | `8h` | how long `on` holds before switching itself off: `1h`, `2h`, `4h`, `8h`, `12h` or `never` ▸ |
 | `keepScreenAwake` | `true` | whether that hold covers the screen ▸ |
 | `keepAwakeWithLidClosed` | `false` | whether that hold survives closing the lid, on battery too ▸ |
+| `lidBatteryFloor` | `15` | the battery percentage below which that lid hold lets go: `10`, `15`, `20`, `30`, or `0` for never ▸ |
 | `agentHooks` | `false` | register the `SessionStart` hook with both CLIs ▸ |
 | `historyRetentionDays` | `90` | days of history kept; `0` records none ▸ |
 | `remotePricing` | `true` | fetch rates at runtime; `false` pins to the built-in snapshot |
