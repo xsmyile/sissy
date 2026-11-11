@@ -82,9 +82,8 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     struct Reading: Sendable, Equatable {
         let windows: [UsageWindow]
         let credits: ProviderCredits?
-        /// The resets the reply offers and the grant a press would spend,
-        /// nil where it offers none.
-        var resets: ClaudeResetGrants.Status?
+        /// The resets the reply offers, nil where it offers none.
+        var resets: LimitResets?
         /// `ClaudeResetGrants.note` of the same reply, for the log.
         var resetsNote: String?
     }
@@ -104,23 +103,34 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
         let requestID: String
         let grantID: String
         let owner: ClaudeResetGrants.Owner
+
+        var held: HeldAttempt { HeldAttempt(owner: owner, grant: grantID) }
     }
 
     var loop = LimitsLoop()
-    /// The grant the last reading names next, which is the one a press spends,
-    /// with the fingerprint of the token that read it: a grant read for one
-    /// account is not one to spend with another's token after a `/login`.
-    private var nextGrant: (id: String, credential: String)?
-    /// The attempts nobody heard an answer to, by whose they are.
+    /// The grants the last reading offers, the vendor's next first, with the
+    /// fingerprint of the token that read them: a grant read for one account
+    /// is not one to spend with another's token after a `/login`.
+    private var offeredGrants: (ids: [String], credential: String)?
+    /// The attempts nobody heard an answer to, by whose they are and the
+    /// grant they spend.
     ///
     /// Keyed by the account rather than by the token, because a Claude access
     /// token rotates every few hours and an attempt dropped with the token
-    /// that sent it is a fresh request id that can spend a second reset. And
-    /// held whatever grant a later reading names: a reading taken after a
-    /// timeout can name the next grant precisely because the first attempt
-    /// landed, and spending that one under `Try again` is the second reset the
-    /// retry promises it cannot spend.
-    private var unanswered: [ClaudeResetGrants.Owner: Attempt] = [:]
+    /// that sent it is a fresh request id that can spend a second reset. A
+    /// press that names no grant resends whichever the account holds, whatever
+    /// grant a later reading names: a reading taken after a timeout can name
+    /// the next grant precisely because the first attempt landed, and spending
+    /// that one under `Try again` is the second reset the retry promises it
+    /// cannot spend. A press that names a grant resends only that grant's
+    /// attempt, because a resend of another kind of reset would spend one the
+    /// user did not choose and answer for it under the one they did.
+    private var unanswered: [HeldAttempt: Attempt] = [:]
+
+    private struct HeldAttempt: Hashable {
+        let owner: ClaudeResetGrants.Owner
+        let grant: String
+    }
     /// Whether a spend is in flight, so a second press cannot resend the same
     /// attempt beside it and read its answer twice.
     private var spending = false
@@ -219,7 +229,7 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
             $0.credential = nil
             if clearingState { $0.signals.limitsState = .quiet }
         }
-        nextGrant = nil
+        offeredGrants = nil
         loop.lastReported = nil
     }
 
@@ -332,13 +342,13 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
             published.update {
                 $0.signals.windows = reading.windows
                 $0.signals.credits = reading.credits
-                $0.signals.resets = reading.resets?.resets
+                $0.signals.resets = reading.resets
                 $0.signals.limitsState = .quiet
                 $0.signals.limitsObservedAt = Date()
                 $0.credential = ClaudeCredentialBlob.fingerprint(of: credentials.accessToken)
             }
-            nextGrant = reading.resets.map {
-                ($0.grantID, ClaudeCredentialBlob.fingerprint(of: credentials.accessToken))
+            offeredGrants = reading.resets.map {
+                ($0.grants.map(\.id), ClaudeCredentialBlob.fingerprint(of: credentials.accessToken))
             }
             let credential = ClaudeCredentialBlob.fingerprint(of: credentials.accessToken)
             if let note = reading.resetsNote,
@@ -390,7 +400,7 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
             $0.signals.limitsObservedAt = nil
             $0.credential = nil
         }
-        nextGrant = nil
+        offeredGrants = nil
     }
 
     private static func fetch(token: String, userAgent: String?) async throws -> Reading {
@@ -432,9 +442,11 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     /// is the same account and spends, a `/login` elsewhere is another account
     /// and spends nothing, whatever that account holds. `account` is the
     /// Anthropic account uuid the page showed the reset under; with none, the
-    /// press spends only with the token the reading was taken with.
+    /// press spends only with the token the reading was taken with. `grant` is
+    /// the one the page offered, nil for whichever the vendor names next.
     func useReset(
-        offeredTo account: String?, onRefresh: @Sendable @escaping () async -> Void
+        offeredTo account: String?, grant wanted: String? = nil,
+        onRefresh: @Sendable @escaping () async -> Void
     ) async -> LimitResetOutcome {
         guard !spending, loop.pollTask != nil else { return .unavailable }
         spending = true
@@ -452,7 +464,9 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
         }
         guard account.map({ $0 == owner.account }) ?? true else { return .offerChanged }
         let (attempt, retrying): (Attempt, Bool)
-        switch await select(for: owner, readWith: credentials, offeredTo: account, onRefresh: onRefresh) {
+        switch await select(
+            for: owner, readWith: credentials, offeredTo: account, grant: wanted, onRefresh: onRefresh)
+        {
         case .send(let chosen, let resend): (attempt, retrying) = (chosen, resend)
         case .stop(let outcome): return outcome
         }
@@ -461,7 +475,9 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
         let outcome = await send(
             attempt, retrying: retrying, token: credentials.accessToken, userAgent: agent)
         if outcome == .reset {
-            published.update { $0.signals.resets = $0.signals.resets?.spendingOne() }
+            published.update {
+                $0.signals.resets = $0.signals.resets?.spendingOne(grant: attempt.grantID)
+            }
         }
         if isCurrent(stamp) { await refresh(onRefresh: onRefresh) }
         return outcome
@@ -480,12 +496,12 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
                     token: token, userAgent: userAgent, organization: attempt.owner.organization,
                     grantID: attempt.grantID, requestID: attempt.requestID))
             let outcome = LimitResetOutcome(answer, retrying: retrying)
-            if outcome != .unconfirmed { unanswered[attempt.owner] = nil }
+            if outcome != .unconfirmed { unanswered[attempt.held] = nil }
             return outcome
         } catch {
             report("spending a Claude reset did not get an answer: \(error)")
             guard Self.isRefusal(error) else { return .unconfirmed }
-            if !retrying { unanswered[attempt.owner] = nil }
+            if !retrying { unanswered[attempt.held] = nil }
             return .refused
         }
     }
@@ -501,17 +517,27 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     /// vendor answers it.
     private func select(
         for owner: ClaudeResetGrants.Owner, readWith credentials: ClaudeCredentials,
-        offeredTo account: String?, onRefresh: @Sendable @escaping () async -> Void
+        offeredTo account: String?, grant wanted: String?,
+        onRefresh: @Sendable @escaping () async -> Void
     ) async -> Selection {
-        if let held = unanswered[owner] { return .send(held, resend: true) }
-        switch await grant(readWith: credentials, offeredTo: account, onRefresh: onRefresh) {
+        if let held = heldAttempt(for: owner, grant: wanted) { return .send(held, resend: true) }
+        switch await grant(
+            readWith: credentials, offeredTo: account, wanted: wanted, onRefresh: onRefresh)
+        {
         case .spend(let grantID):
             let fresh = Attempt(requestID: UUID().uuidString, grantID: grantID, owner: owner)
-            unanswered[owner] = fresh
+            unanswered[fresh.held] = fresh
             return .send(fresh, resend: false)
         case .none: return .stop(.noCredit)
         case .changed: return .stop(.offerChanged)
         }
+    }
+
+    /// The attempt a press resends: the named grant's, or any of the
+    /// account's where the press names none.
+    private func heldAttempt(for owner: ClaudeResetGrants.Owner, grant: String?) -> Attempt? {
+        guard let grant else { return unanswered.first { $0.key.owner == owner }?.value }
+        return unanswered[HeldAttempt(owner: owner, grant: grant)]
     }
 
     /// What a fresh press may spend.
@@ -523,8 +549,11 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
         case changed
     }
 
-    /// The grant to spend with this token: the last reading's when it was read
-    /// with it, and the one a reading made now names when it was not.
+    /// The grant to spend with this token: the one wanted, or the vendor's next
+    /// where none is, out of the last reading's grants when it was read with
+    /// it and out of a reading made now when it was not. A wanted grant the
+    /// reading no longer offers is no grant: spending another in its place is
+    /// a reset the user did not choose.
     ///
     /// The CLI renews its token every few hours, so a reading taken with
     /// another token is usually the same account under a renewed one, which
@@ -533,15 +562,17 @@ actor ClaudeLimitsProbe: SourceSignals, LimitsPolling {
     /// that they had none. Where the page named no account there is nothing
     /// to establish it against, and a changed token spends nothing.
     private func grant(
-        readWith credentials: ClaudeCredentials, offeredTo account: String?,
+        readWith credentials: ClaudeCredentials, offeredTo account: String?, wanted: String?,
         onRefresh: @Sendable @escaping () async -> Void
     ) async -> Offer {
         let fingerprint = ClaudeCredentialBlob.fingerprint(of: credentials.accessToken)
-        if let next = nextGrant, next.credential == fingerprint { return .spend(next.id) }
-        guard account != nil else { return nextGrant == nil ? .none : .changed }
-        await refresh(onRefresh: onRefresh)
-        guard let next = nextGrant, next.credential == fingerprint else { return .none }
-        return .spend(next.id)
+        if offeredGrants?.credential != fingerprint {
+            guard account != nil else { return offeredGrants == nil ? .none : .changed }
+            await refresh(onRefresh: onRefresh)
+        }
+        guard let offered = offeredGrants, offered.credential == fingerprint else { return .none }
+        guard let wanted else { return offered.ids.first.map(Offer.spend) ?? .none }
+        return offered.ids.contains(wanted) ? .spend(wanted) : .none
     }
 
     /// A refusal is a request the vendor never took. On a resend it says

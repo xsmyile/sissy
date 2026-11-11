@@ -291,9 +291,10 @@ struct ClaudeCodeSignals: SourceSignals {
     /// actors, which is what it was missing when it was wrong.
     ///
     /// The resets are the probe's whichever reader wins the windows, because it
-    /// is the one reader that can spend them: claude.ai's reply is not asked
-    /// for them, and a count beside a button that a session could not press is
-    /// a row that fails.
+    /// is the one reader that can spend them: claude.ai's reply carries them
+    /// too, and those are shown on the accounts the CLI is not on, but on the
+    /// signed-in account a count beside a button that a session could not
+    /// press is a row that fails.
     static func merge(
         profile: ProviderSignals,
         web: ProviderSignals?,

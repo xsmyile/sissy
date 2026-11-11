@@ -152,9 +152,9 @@ struct PanelProviderPage: View {
             VStack(alignment: .leading, spacing: PanelMetrics.platterVerticalPadding) {
                 limits
 
-                if let target = shown.resetTarget, shown.resets != nil || hasResetActivity(target) {
+                if shown.resets != nil || shown.resetTarget.map(hasResetActivity) == true {
                     Divider()
-                    resets(shown.resets, target: target)
+                    resets(shown.resets, target: shown.resetTarget)
                 }
 
                 if let credits = shown.credits {
@@ -473,14 +473,17 @@ struct PanelProviderPage: View {
     /// which keeps the block on the page after the last reset is spent and
     /// the count that drew it has gone.
     private func hasResetActivity(_ target: LimitResetTarget) -> Bool {
-        resetSpending == target || resetReport?.target == target
+        target.isSameAccount(resetSpending) || target.isSameAccount(resetReport?.target)
     }
 
     /// Whether this account's last press got no answer, which leaves `Try
-    /// again` as the one control: both would send the same attempt, and two
-    /// buttons for one request read as two different things to do.
+    /// again` as the one control: it resends that press's own grant, and a
+    /// press on any line beside it read as a second thing to do while the
+    /// first is unsettled. Account-wide because a kind's line can change
+    /// grant under it: the first of two Fable grants lands, the answer is
+    /// lost, and the line now names the second.
     private func awaitsRetry(_ target: LimitResetTarget) -> Bool {
-        resetReport?.target == target && resetReport?.outcome == .unconfirmed
+        target.isSameAccount(resetReport?.target) && resetReport?.outcome == .unconfirmed
     }
 
     /// The resets this account holds, and the one control on the
@@ -494,7 +497,7 @@ struct PanelProviderPage: View {
     /// needed yet: whether to spend it is the user's call, and whether it
     /// applies is the vendor's.
     @ViewBuilder
-    private func resets(_ resets: UsagePanelSnapshot.ResetsRow?, target: LimitResetTarget)
+    private func resets(_ resets: UsagePanelSnapshot.ResetsRow?, target: LimitResetTarget?)
         -> some View
     {
         VStack(alignment: .leading, spacing: 3) {
@@ -508,34 +511,71 @@ struct PanelProviderPage: View {
             }
 
             if let resets {
-                HStack(spacing: 6) {
-                    Text(resets.caption)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if resetSpending == nil, confirmingReset != target, !awaitsRetry(target) {
-                        Button(LimitResetCopy.use) { confirmingReset = target }
-                            .controlSize(.small)
-                            .help(LimitResetCopy.useHelp)
+                if resets.grants.isEmpty {
+                    resetLine(
+                        caption: resets.caption, help: nil,
+                        offer: ResetOffer(
+                            available: resets.available, clears: [], givesBackWeekly: nil,
+                            appliesNow: resets.appliesNow),
+                        target: target)
+                } else {
+                    ForEach(resets.grants, id: \.id) { grant in
+                        resetLine(
+                            caption: grant.caption, help: grant.help,
+                            offer: ResetOffer(
+                                available: grant.left, clears: grant.clears,
+                                givesBackWeekly: grant.givesBackWeekly, appliesNow: grant.appliesNow),
+                            target: target?.spending(grant.id))
                     }
                 }
-                if confirmingReset == target, resetSpending == nil {
-                    resetConfirmation(resets, target: target)
+                if target == nil {
+                    identityCaption(LimitResetCopy.spendOnWeb)
                 }
             }
 
-            if resetSpending == target {
+            if let target, target.isSameAccount(resetSpending) {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
                     identityCaption(LimitResetCopy.spending)
                 }
                 .padding(.top, 4)
-            } else if let report = resetReport, report.target == target {
+            } else if let target, let report = resetReport, target.isSameAccount(report.target) {
                 resetOutcome(report)
             }
+        }
+    }
+
+    /// What one press would spend, as its confirmation words it.
+    private struct ResetOffer {
+        let available: Int
+        let clears: [String]
+        let givesBackWeekly: String?
+        let appliesNow: Bool
+    }
+
+    /// One kind of reset: its line, its press, and the question that press
+    /// asks.
+    @ViewBuilder
+    private func resetLine(
+        caption: String, help: String?, offer: ResetOffer, target: LimitResetTarget?
+    ) -> some View {
+        HStack(spacing: 6) {
+            Text(caption)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(help ?? "")
+            if let target, resetSpending == nil, confirmingReset != target, !awaitsRetry(target) {
+                Button(LimitResetCopy.use) { confirmingReset = target }
+                    .controlSize(.small)
+                    .help(LimitResetCopy.useHelp)
+            }
+        }
+        if let target, confirmingReset == target, resetSpending == nil {
+            resetConfirmation(offer, target: target)
         }
     }
 
@@ -543,17 +583,15 @@ struct PanelProviderPage: View {
     /// nothing is the default action, so the spend is reached by aiming at it
     /// and never by a return
     /// key pressed at a panel.
-    private func resetConfirmation(
-        _ resets: UsagePanelSnapshot.ResetsRow, target: LimitResetTarget
-    ) -> some View {
+    private func resetConfirmation(_ offer: ResetOffer, target: LimitResetTarget) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(LimitResetCopy.confirmTitle)
                 .font(.system(size: 12, weight: .medium))
             identityCaption(
                 LimitResetCopy.confirmBody(
-                    available: resets.available, clears: resets.clears,
-                    naturalReset: naturalReset, appliesNow: resets.appliesNow,
-                    provider: target.provider))
+                    available: offer.available, clears: offer.clears,
+                    givesBackWeekly: offer.givesBackWeekly, naturalReset: naturalReset,
+                    appliesNow: offer.appliesNow, provider: target.provider))
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 Button(DialogCopy.cancel) { confirmingReset = nil }

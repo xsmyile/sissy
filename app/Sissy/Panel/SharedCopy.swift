@@ -46,6 +46,9 @@ enum LimitResetCopy {
     static let confirmAction = "Use reset"
     static let retry = "Try again"
     static let spending = "Spending a reset…"
+    /// Under the resets of an account Sissy reads through claude.ai, which
+    /// holds no credential Sissy spends with.
+    static let spendOnWeb = "Use them on claude.ai, under Settings, Usage."
     /// What the vendor calls the only kind of reset measured, when a reset
     /// arrives without a title of its own.
     static let defaultTitle = "Full reset"
@@ -57,6 +60,22 @@ enum LimitResetCopy {
         let name = title ?? defaultTitle
         guard let expiresAt else { return name }
         return "\(name) · expires \(expiresAt.formatted(.dateTime.day().month(.abbreviated)))"
+    }
+
+    /// A kind of reset by what it clears, the way claude.ai names it: one
+    /// that clears the plan-wide week is a full reset, one that clears a
+    /// model's week is that model's, and anything else keeps the vendor's
+    /// words.
+    static func grantName(clearsPlanWeekly: Bool, scope: String?, label: String?) -> String {
+        if clearsPlanWeekly { return defaultTitle }
+        if let scope { return "\(scope) reset" }
+        return label ?? defaultTitle
+    }
+
+    /// One kind of reset's line: its name, how many are left where that is
+    /// more than one, and the day it lapses.
+    static func grantCaption(name: String, left: Int, expiresAt: Date?) -> String {
+        caption(title: left > 1 ? "\(name) · \(left)" : name, expiresAt: expiresAt)
     }
 
     /// Who answers for the reset, by the name the user pays.
@@ -85,10 +104,14 @@ enum LimitResetCopy {
     /// tells a reset worth spending from one that buys an hour. `appliesNow`
     /// false adds that the vendor may decline it.
     static func confirmBody(
-        available: Int, clears: [String] = [], naturalReset: (label: String, countdown: String)?,
-        appliesNow: Bool, provider: String
+        available: Int, clears: [String] = [], givesBackWeekly: String? = nil,
+        naturalReset: (label: String, countdown: String)?, appliesNow: Bool, provider: String
     ) -> String {
-        var sentences = ["\(cleared(clears)) This spends 1 of \(available)."]
+        var sentences = [cleared(clears)]
+        if let givesBackWeekly {
+            sentences.append("What \(givesBackWeekly) used of Weekly comes back too.")
+        }
+        sentences.append("This spends 1 of \(available).")
         if let naturalReset {
             sentences.append("\(naturalReset.label) resets on its own \(naturalReset.countdown).")
         }

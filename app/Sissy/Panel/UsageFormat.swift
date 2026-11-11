@@ -401,7 +401,7 @@ enum UsageFormat {
     }
 
     private static let minutesPerSession = 300
-    private static let minutesPerWeek = 10_080
+    static let minutesPerWeek = 10_080
 
     /// The line under a limit bar: the pace where there is one, and how long
     /// until the window rolls over, joined. Both halves are durations off the

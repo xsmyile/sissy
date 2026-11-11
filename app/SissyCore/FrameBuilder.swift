@@ -411,10 +411,12 @@ struct LimitResets: Sendable, Equatable {
     var nextExpiry: Date?
     /// The vendor's own name for that reset, `Full reset (Weekly + 5 hr)`.
     var title: String?
-    /// The length in minutes of each window the reset puts back to zero,
-    /// empty where the vendor does not say. Codex does not, and its one kind
-    /// of reset clears both windows; Claude names them on every grant.
-    var clears: Set<Int> = []
+    /// Each kind of reset the account holds, in the order the vendor offers
+    /// them, the one it names next first. Empty for Codex, whose one kind of
+    /// reset clears both windows; Claude holds several kinds at once, measured
+    /// 2026-11-11 as a full reset beside a Fable one, and a press spends the
+    /// one it names.
+    var grants: [LimitResetGrant] = []
 
     /// Whether the vendor counts a reset as needed now: its applicable count,
     /// and the whole inventory where the reply names none. It words the
@@ -424,12 +426,58 @@ struct LimitResets: Sendable, Equatable {
     /// it would not apply with `nothing_to_reset`, which spends nothing.
     var appliesNow: Bool { (applicable ?? available) > 0 }
 
-    /// The same count with the reset a press just spent taken off, until the
-    /// next reading says what the vendor now holds.
-    func spendingOne() -> LimitResets {
-        LimitResets(
+    /// The same count with the reset a press just spent taken off, from the
+    /// grant it spent where it named one, until the next reading says what the
+    /// vendor now holds.
+    func spendingOne(grant: String? = nil) -> Self {
+        guard grants.isEmpty || grants.contains(where: { $0.id == grant }) else { return self }
+        return Self(
             available: max(0, available - 1), applicable: applicable.map { max(0, $0 - 1) },
-            nextExpiry: nil, title: nil, clears: clears)
+            nextExpiry: nil, title: nil,
+            grants: grants.compactMap { offered in
+                guard offered.id == grant else { return offered }
+                return offered.left > 1 ? offered.spendingOne() : nil
+            })
+    }
+}
+
+/// One kind of reset a Claude account holds, as the vendor lists it.
+struct LimitResetGrant: Sendable, Equatable {
+    /// The id a press sends to spend it.
+    let id: String
+    /// How many of this kind are left.
+    let left: Int
+    /// Whether the vendor would apply it now.
+    let appliesNow: Bool
+    /// When it lapses, nil when it never does.
+    let expiry: Date?
+    /// The vendor's own words for it, which can run to a sentence:
+    /// `New model launch: one Fable reset for Max, Team Premium and
+    /// Enterprise Premium`.
+    let label: String?
+    /// The windows it puts back to zero, shortest first and the plan-wide one
+    /// before a model's.
+    let clears: [ResetWindow]
+    /// Whether it also gives back what the model it clears used of the
+    /// plan-wide weekly window without clearing that, which is how the vendor
+    /// words a Fable reset.
+    let givesBackWeekly: Bool
+
+    func spendingOne() -> Self {
+        Self(
+            id: id, left: left - 1, appliesNow: appliesNow, expiry: expiry, label: label,
+            clears: clears, givesBackWeekly: givesBackWeekly)
+    }
+}
+
+/// A window a reset clears, by the two things that tell windows apart on the
+/// page: its length and the model it meters, nil for the whole plan.
+struct ResetWindow: Sendable, Hashable, Comparable {
+    let minutes: Int
+    let scope: String?
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        (lhs.minutes, lhs.scope ?? "") < (rhs.minutes, rhs.scope ?? "")
     }
 }
 
