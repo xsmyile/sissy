@@ -108,6 +108,22 @@ final class ClaudeWebSourceTests: XCTestCase {
         XCTAssertNotNil(signals.limitsObservedAt)
     }
 
+    /// A linked account's resets ride its claude.ai reading, and leave with
+    /// the windows when the source stops.
+    func testALinkedAccountsResetsReachTheSignals() async {
+        let resets = LimitResets(available: 3, applicable: 3)
+        let source = source(
+            lookup: { _ in Self.found(Self.session) },
+            fetch: { _, _ in
+                ClaudeWebSource.Reading(
+                    organization: "org", windows: [Self.window(300, 0)], credits: nil, resets: resets)
+            })
+        _ = await source.refreshOnce {}
+        XCTAssertEqual(source.currentSignals().resets, resets)
+        await source.stop()
+        XCTAssertNil(source.currentSignals().resets)
+    }
+
     /// The organization is resolved once and then carried, so the ordinary
     /// poll is one request rather than two.
     func testTheOrganizationIsCarriedIntoTheNextPoll() async {

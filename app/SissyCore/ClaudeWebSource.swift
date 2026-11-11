@@ -61,6 +61,9 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
     /// Organization the windows belong to, kept so the ordinary poll is one
     /// request rather than two. Dropped whenever the session is.
     private var organization: String?
+    /// The last resets note logged, so a reading that says what the one
+    /// before it said adds no line.
+    private var lastResetsNote: String?
     var loop = LimitsLoop()
 
     /// One answer from claude.ai: the windows it drew and what it has billed.
@@ -68,6 +71,10 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
         let organization: String
         let windows: [UsageWindow]
         let credits: ProviderCredits?
+        /// The resets the reply offers, nil where it offers none.
+        var resets: LimitResets?
+        /// `ClaudeResetGrants.note` of the same reply, for the log.
+        var resetsNote: String?
     }
 
     /// Which account's session this reader spends. One reader per stored
@@ -129,9 +136,11 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
         published.update {
             $0.windows = []
             $0.credits = nil
+            $0.resets = nil
             $0.limitsObservedAt = nil
             if clearingState { $0.limitsState = .quiet }
         }
+        lastResetsNote = nil
         loop.lastReported = nil
     }
 
@@ -248,8 +257,13 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
             published.update {
                 $0.windows = reading.windows
                 $0.credits = reading.credits
+                $0.resets = reading.resets
                 $0.limitsState = .quiet
                 $0.limitsObservedAt = Date()
+            }
+            if let note = reading.resetsNote, note != lastResetsNote {
+                lastResetsNote = note
+                sissyLog("sissy: claude.ai resets: \(note)")
             }
             await backoff?.record(nil)
             return Self.refreshInterval
@@ -297,6 +311,7 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
             $0.limitsState = state
             $0.windows = []
             $0.credits = nil
+            $0.resets = nil
             $0.limitsObservedAt = nil
         }
     }
@@ -310,13 +325,16 @@ actor ClaudeWebSource: SourceSignals, LimitsPolling {
             if let organization { organization } else {
                 try await subscriptionOrganization(session: session)
             }
-        let body = try await get("\(organizationsPath)/\(org)/usage", session: session)
+        let body = try await get(
+            "\(organizationsPath)/\(org)/usage?\(ClaudeResetGrants.usageQueryString)", session: session)
         let observedAt = Date()
         let credits = ClaudeUsagePayload.credits(body, observedAt: observedAt)
         return Reading(
             organization: org,
             windows: ClaudeUsagePayload.windows(body),
-            credits: try await withBalance(credits, org: org, session: session)
+            credits: try await withBalance(credits, org: org, session: session),
+            resets: ClaudeResetGrants.status(body, now: observedAt),
+            resetsNote: ClaudeResetGrants.note(body, now: observedAt)
         )
     }
 

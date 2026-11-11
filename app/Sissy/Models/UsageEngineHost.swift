@@ -712,15 +712,16 @@ final class UsageEngineHost {
     /// Spends one of an account's resets, after the page has asked.
     ///
     /// A press after an answer that never arrived sends that attempt again,
-    /// whichever button made it: the reader holds the request id, so no
-    /// state here or on the page can mint a second one.
+    /// whichever button made it for the same kind of reset: the reader holds
+    /// the request id, so no state here or on the page can mint a second one.
     func useReset(_ target: LimitResetTarget) {
         guard let engine, spendingReset == nil else { return }
         spendingReset = target
         resetReport = nil
         Task { [weak self] in
             let outcome = await Self.holdingFloor {
-                await engine.useReset(provider: target.provider, account: target.account)
+                await engine.useReset(
+                    provider: target.provider, account: target.account, grant: target.grant)
             }
             self?.resetReport = LimitResetReport(target: target, outcome: outcome)
             self?.spendingReset = nil
@@ -1433,10 +1434,23 @@ struct OrphanedForgeToken: Identifiable, Equatable {
 /// Which account a reset press is for: the provider's page it was made on,
 /// and for Codex a linked account's id or nil for the CLI's own credential,
 /// which is the reader behind the row. For Claude Code it is the account the
-/// CLI was signed in as when the page offered the reset.
+/// CLI was signed in as when the page offered the reset, and `grant` the kind
+/// of reset pressed, nil for a vendor that offers one kind.
 struct LimitResetTarget: Equatable {
     let provider: String
     let account: String?
+    var grant: String?
+
+    /// The same account's press for one kind of its resets.
+    func spending(_ grant: String) -> Self {
+        Self(provider: provider, account: account, grant: grant)
+    }
+
+    /// Whether two presses are for the same account, whichever kind of reset
+    /// each spends: the account holds one answer at a time.
+    func isSameAccount(_ other: Self?) -> Bool {
+        other?.provider == provider && other?.account == account
+    }
 }
 
 /// How one reset press ended, and for which account, so only the page that

@@ -903,10 +903,13 @@ actor UsageEngine {
     /// own, which is the reader behind the row and behind the signed-in
     /// account's entry. Claude Code has one reader that can spend, the CLI's
     /// own credential, and `account` is the account the page offered the
-    /// reset under, which that credential must still answer for. The frame is
-    /// rebuilt before this returns, so the answer and the cleared windows
-    /// reach the panel together.
-    func useReset(provider: String, account: String?) async -> LimitResetOutcome {
+    /// reset under, which that credential must still answer for, and `grant`
+    /// the kind of reset the page offered there. The frame is rebuilt before
+    /// this returns, so the answer and the cleared windows reach the panel
+    /// together.
+    func useReset(provider: String, account: String?, grant: String? = nil) async
+        -> LimitResetOutcome
+    {
         guard lifecycle == .running else { return .unavailable }
         let me = self
         let outcome: LimitResetOutcome
@@ -918,7 +921,7 @@ actor UsageEngine {
             outcome = await reader.useReset { await me.reemit() }
         case ProviderID.claudeCode:
             guard let probe = claudeOwnLimits else { return .unavailable }
-            outcome = await probe.useReset(offeredTo: account) { await me.reemit() }
+            outcome = await probe.useReset(offeredTo: account, grant: grant) { await me.reemit() }
         default:
             return .unavailable
         }

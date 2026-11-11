@@ -34,15 +34,136 @@ final class ClaudeResetGrantsTests: XCTestCase {
     // MARK: - Reading
 
     func testTheMeasuredGrantIsOneResetClearingBothWindows() throws {
-        let status = try XCTUnwrap(ClaudeResetGrants.status(block(), now: Self.now))
-        XCTAssertEqual(status.grantID, Self.grantID)
-        XCTAssertEqual(status.resets.available, 1)
-        XCTAssertEqual(status.resets.applicable, 1)
-        XCTAssertEqual(status.resets.clears, [300, 10_080])
+        let resets = try XCTUnwrap(ClaudeResetGrants.status(block(), now: Self.now))
+        let expiry = UsageReaderShared.parseTimestamp("2026-10-22T16:00:00+00:00")
+        XCTAssertEqual(resets.available, 1)
+        XCTAssertEqual(resets.applicable, 1)
+        XCTAssertEqual(resets.nextExpiry, expiry)
         XCTAssertEqual(
-            status.resets.title, "Claude Opus 5.5 launch: one usage-limit reset for Team members")
+            resets.grants,
+            [
+                LimitResetGrant(
+                    id: Self.grantID, left: 1, appliesNow: true, expiry: expiry,
+                    label: "Claude Opus 5.5 launch: one usage-limit reset for Team members",
+                    clears: [
+                        ResetWindow(minutes: 300, scope: nil), ResetWindow(minutes: 10_080, scope: nil),
+                    ],
+                    givesBackWeekly: false)
+            ])
+    }
+
+    /// The reply as measured on 2026-11-11 on a Max account: a full reset the
+    /// vendor names next and a Fable one beside it, each its own grant.
+    private func fullAndFable() -> [String: Any] {
+        let grant: (String, [String], Bool, String) -> [String: Any] = { id, clears, givesBack, ends in
+            [
+                "id": id, "label": "label of \(id)", "resets_total": 1, "resets_left": 1,
+                "ends_at": ends, "clears": clears, "paused": false, "usable_now": true,
+                "use_requires_limit": false, "gives_back_weekly": givesBack,
+            ]
+        }
+        return [
+            "limits": [
+                ["kind": "weekly_all", "percent": 30, "resets_at": "2026-11-17T16:00:00+00:00"],
+                [
+                    "kind": "weekly_scoped", "percent": 12, "resets_at": "2026-11-17T16:00:00+00:00",
+                    "scope": ["model": ["id": NSNull(), "display_name": "Fable"]],
+                ],
+            ],
+            "cedar_ember": [
+                "eligible": true, "at_limit": false,
+                "grants": [
+                    grant(
+                        "launch-2610-fable", ["seven_day_overage_included"], true,
+                        "2027-03-09T07:59:00+00:00"),
+                    grant(
+                        "full-reset-2611", ["seven_day", "seven_day_overage_included"], false,
+                        "2026-12-10T22:00:00+00:00"),
+                ],
+                "next_grant_id": "full-reset-2611",
+            ] as [String: Any],
+        ]
+    }
+
+    /// A Fable reset clears the one model-metered weekly window, which the
+    /// reply names `seven_day_overage_included` without naming the model, so
+    /// it is drawn as its own kind next to the full one rather than dropped.
+    func testAFableResetIsAGrantOfItsOwnBesideTheFullOne() throws {
+        let resets = try XCTUnwrap(ClaudeResetGrants.status(fullAndFable(), now: Self.now))
+        let fable = ResetWindow(minutes: 10_080, scope: "Fable")
+        XCTAssertEqual(resets.available, 2)
+        XCTAssertEqual(resets.applicable, 2)
+        XCTAssertEqual(resets.grants.map(\.id), ["full-reset-2611", "launch-2610-fable"])
         XCTAssertEqual(
-            status.resets.nextExpiry, UsageReaderShared.parseTimestamp("2026-10-22T16:00:00+00:00"))
+            resets.grants.map(\.clears), [[ResetWindow(minutes: 10_080, scope: nil), fable], [fable]])
+        XCTAssertEqual(resets.grants.map(\.givesBackWeekly), [false, true])
+        XCTAssertEqual(resets.nextExpiry, UsageReaderShared.parseTimestamp("2026-12-10T22:00:00+00:00"))
+        XCTAssertEqual(ClaudeResetGrants.note(fullAndFable(), now: Self.now), "2 available, 2 usable now")
+    }
+
+    /// Spending one kind leaves the other on the row until the next reading.
+    func testSpendingOneKindKeepsTheOther() throws {
+        let resets = try XCTUnwrap(ClaudeResetGrants.status(fullAndFable(), now: Self.now))
+        let spent = resets.spendingOne(grant: "launch-2610-fable")
+        XCTAssertEqual(spent.available, 1)
+        XCTAssertEqual(spent.grants.map(\.id), ["full-reset-2611"])
+    }
+
+    /// The page names each kind the way claude.ai does, and the confirmation
+    /// says what a Fable reset gives back besides the window it clears.
+    func testThePageNamesEachKindAndWhatItGivesBack() throws {
+        let resets = try XCTUnwrap(ClaudeResetGrants.status(fullAndFable(), now: Self.now))
+        let rows = UsagePanelSnapshot.kinds(resets.grants).map(UsagePanelSnapshot.makeGrant)
+        XCTAssertTrue(rows[0].caption.hasPrefix("Full reset · expires "), rows[0].caption)
+        XCTAssertTrue(rows[1].caption.hasPrefix("Fable reset · expires "), rows[1].caption)
+        XCTAssertEqual(rows[1].clears, ["Weekly · Fable"])
+        XCTAssertEqual(rows[1].help, "label of launch-2610-fable")
+        XCTAssertEqual(
+            LimitResetCopy.confirmBody(
+                available: rows[1].left, clears: rows[1].clears,
+                givesBackWeekly: rows[1].givesBackWeekly, naturalReset: nil, appliesNow: true,
+                provider: ProviderID.claudeCode),
+            "Weekly · Fable goes back to zero. What Fable used of Weekly comes back too. This "
+                + "spends 1 of 1.")
+    }
+
+    /// A Team account's claude.ai reply, measured 2026-11-11: a full reset and
+    /// two Fable grants of one shape, which the page lists as two kinds, the
+    /// Fable one counted twice and pressed through the first of its grants.
+    func testATeamsTwoFableGrantsAreOneKindCountedTwice() throws {
+        var body = fullAndFable()
+        var block = try XCTUnwrap(body["cedar_ember"] as? [String: Any])
+        var grants = try XCTUnwrap(block["grants"] as? [[String: Any]])
+        grants[0]["clears"] = ["five_hour", "seven_day_overage_included"]
+        grants[1]["clears"] = ["five_hour", "seven_day", "seven_day_overage_included"]
+        grants.append(
+            grants[0].merging(["id": "launch-2610-fable-6mo", "label": "label of 6mo"]) { $1 })
+        block["grants"] = grants
+        body["cedar_ember"] = block
+        let resets = try XCTUnwrap(ClaudeResetGrants.status(body, now: Self.now))
+        XCTAssertEqual(resets.available, 3)
+        let rows = UsagePanelSnapshot.kinds(resets.grants).map(UsagePanelSnapshot.makeGrant)
+        XCTAssertEqual(rows.map(\.id), ["full-reset-2611", "launch-2610-fable"])
+        XCTAssertTrue(rows[1].caption.hasPrefix("Fable reset · 2 · expires "), rows[1].caption)
+        XCTAssertEqual(rows[1].left, 2)
+        XCTAssertEqual(rows[1].clears, ["Session", "Weekly · Fable"])
+        XCTAssertEqual(rows[1].help, "label of launch-2610-fable\nlabel of 6mo")
+        XCTAssertEqual(rows[0].clears, ["Session", "Weekly", "Weekly · Fable"])
+    }
+
+    /// With two models metered on their own there is no telling which one a
+    /// reset of `seven_day_overage_included` means, so it clears nothing the
+    /// page can name.
+    func testTwoModelWeeksLeaveTheFableResetUnnamed() throws {
+        var body = fullAndFable()
+        var limits = try XCTUnwrap(body["limits"] as? [[String: Any]])
+        limits.append([
+            "kind": "weekly_scoped", "percent": 3, "scope": ["model": ["display_name": "Opus"]],
+        ])
+        body["limits"] = limits
+        let resets = try XCTUnwrap(ClaudeResetGrants.status(body, now: Self.now))
+        XCTAssertEqual(resets.grants.map(\.id), ["full-reset-2611"])
+        XCTAssertEqual(resets.grants[0].clears, [ResetWindow(minutes: 10_080, scope: nil)])
     }
 
     /// The plain reply carries `cedar_ember: null`, and an account the vendor
@@ -80,7 +201,8 @@ final class ClaudeResetGrantsTests: XCTestCase {
             ClaudeResetGrants.status(block(endsAt: "2026-09-01T00:00:00+00:00"), now: Self.now))
     }
 
-    /// A reset that clears no window the page draws has nothing on it to move.
+    /// A reset that clears no window the page draws has nothing on it to move:
+    /// a reply metering no model's week cannot place the one it names.
     func testAGrantClearingNoDrawnWindowOffersNothing() throws {
         var body = block()
         var status = try XCTUnwrap(body["cedar_ember"] as? [String: Any])
@@ -96,13 +218,14 @@ final class ClaudeResetGrantsTests: XCTestCase {
     func testAGrantForALimitDoesNotApplyBeforeOne() throws {
         let early = try XCTUnwrap(
             ClaudeResetGrants.status(block(requiresLimit: true), now: Self.now))
-        XCTAssertFalse(early.resets.appliesNow)
+        XCTAssertFalse(early.appliesNow)
+        XCTAssertEqual(early.grants.map(\.appliesNow), [false])
         let atLimit = try XCTUnwrap(
             ClaudeResetGrants.status(block(atLimit: true, requiresLimit: true), now: Self.now))
-        XCTAssertTrue(atLimit.resets.appliesNow)
+        XCTAssertTrue(atLimit.appliesNow)
         let unusable = try XCTUnwrap(
             ClaudeResetGrants.status(block(usableNow: false), now: Self.now))
-        XCTAssertFalse(unusable.resets.appliesNow)
+        XCTAssertFalse(unusable.appliesNow)
     }
 
     /// Measured 2026-10-05: no agent, `claude-cli` alone and an old version are
@@ -208,22 +331,23 @@ final class ClaudeResetGrantsTests: XCTestCase {
 
     private static let organization = "1001DDB9-0000-4000-8000-000000000000"
 
-    private func reading(grant: String) -> ClaudeLimitsProbe.Reading {
+    private func reading(grants ids: [String]) -> ClaudeLimitsProbe.Reading {
         var body = block()
         if var status = body["cedar_ember"] as? [String: Any],
-            var grants = status["grants"] as? [[String: Any]]
+            let grants = status["grants"] as? [[String: Any]]
         {
-            grants[0]["id"] = grant
-            status["grants"] = grants
-            status["next_grant_id"] = grant
+            status["grants"] = ids.map { id in grants[0].merging(["id": id]) { $1 } }
+            status["next_grant_id"] = ids[0]
             body["cedar_ember"] = status
         }
         return ClaudeLimitsProbe.parse(body, observedAt: Self.now)
     }
 
-    private func probe(_ spends: Spends, world: World = World()) -> ClaudeLimitsProbe {
-        let first = reading(grant: Self.grantID)
-        let second = reading(grant: "second-grant")
+    private func probe(
+        _ spends: Spends, world: World = World(), offering: [String] = [ClaudeResetGrantsTests.grantID]
+    ) -> ClaudeLimitsProbe {
+        let first = reading(grants: offering)
+        let second = reading(grants: ["second-grant"])
         return ClaudeLimitsProbe(
             credentials: { _ in
                 .found(ClaudeCredentials(accessToken: world.token, expiresAt: .distantFuture))
@@ -287,6 +411,45 @@ final class ClaudeResetGrantsTests: XCTestCase {
         XCTAssertEqual(retried, .reset)
         XCTAssertEqual(spends.requests.map(\.grantID), [Self.grantID, Self.grantID])
         XCTAssertEqual(spends.requests[0].requestID, spends.requests[1].requestID)
+        await probe.stop()
+    }
+
+    /// A press names the kind of reset it spends, and one the reading no
+    /// longer offers spends nothing rather than another kind in its place.
+    func testAPressSpendsTheGrantItNamesAndNoOther() async {
+        let spends = Spends([.success(.reset)])
+        let probe = probe(spends)
+        await probe.refresh {}
+
+        let gone = await probe.useReset(offeredTo: "user-1", grant: "second-grant") {}
+        let named = await probe.useReset(offeredTo: "user-1", grant: Self.grantID) {}
+
+        XCTAssertEqual(gone, .noCredit)
+        XCTAssertEqual(named, .reset)
+        XCTAssertEqual(spends.requests.map(\.grantID), [Self.grantID])
+        await probe.stop()
+    }
+
+    /// An unanswered press for one kind of reset is resent only by a press
+    /// for that kind: a press for another kind is the user's choice of it,
+    /// and resending the first under it would answer for a reset they did not
+    /// pick.
+    func testAnUnansweredAttemptIsResentOnlyForItsOwnGrant() async {
+        let spends = Spends([.failure(URLError(.timedOut)), .success(.reset), .success(.alreadyUsed)])
+        let world = World()
+        let probe = probe(spends, world: world, offering: [Self.grantID, "fable-grant"])
+        await probe.refresh {}
+
+        _ = await probe.useReset(offeredTo: "user-1", grant: Self.grantID) {}
+        let other = await probe.useReset(offeredTo: "user-1", grant: "fable-grant") {}
+        let retried = await probe.useReset(offeredTo: "user-1", grant: Self.grantID) {}
+
+        XCTAssertEqual(other, .reset)
+        XCTAssertEqual(retried, .reset)
+        let sent = spends.requests
+        XCTAssertEqual(sent.map(\.grantID), [Self.grantID, "fable-grant", Self.grantID])
+        XCTAssertEqual(sent[0].requestID, sent[2].requestID)
+        XCTAssertNotEqual(sent[0].requestID, sent[1].requestID)
         await probe.stop()
     }
 
@@ -404,7 +567,16 @@ final class ClaudeResetGrantsTests: XCTestCase {
 
     func testTheClaudeRowSpendsTheCLIsCredentialAndNamesWhatItClears() {
         var signals = ProviderSignals()
-        signals.resets = LimitResets(available: 1, applicable: 1, clears: [10_080, 300])
+        signals.resets = LimitResets(
+            available: 1, applicable: 1,
+            grants: [
+                LimitResetGrant(
+                    id: Self.grantID, left: 1, appliesNow: false, expiry: nil, label: nil,
+                    clears: [
+                        ResetWindow(minutes: 300, scope: nil), ResetWindow(minutes: 10_080, scope: nil),
+                    ],
+                    givesBackWeekly: false)
+            ])
         let slice = ProviderSlice(id: ProviderID.claudeCode, tokens: 0, cost: 0, signals: signals)
         let frame = FrameData(
             tokens: 0, cost: 0, burn: nil, providers: [slice], keepAwake: .off, history: [:],
@@ -412,10 +584,12 @@ final class ClaudeResetGrantsTests: XCTestCase {
         let row = UsagePanelSnapshot.make(frame: frame).providers[0]
         XCTAssertEqual(
             row.reading.resetTarget, LimitResetTarget(provider: ProviderID.claudeCode, account: nil))
-        XCTAssertEqual(row.reading.resets?.clears, ["Session", "Weekly"])
+        let grant = row.reading.resets?.grants.first
+        XCTAssertEqual(grant?.clears, ["Session", "Weekly"])
+        XCTAssertEqual(grant?.caption, "Full reset")
         XCTAssertEqual(
             LimitResetCopy.confirmBody(
-                available: 1, clears: row.reading.resets?.clears ?? [], naturalReset: nil, appliesNow: false,
+                available: 1, clears: grant?.clears ?? [], naturalReset: nil, appliesNow: false,
                 provider: ProviderID.claudeCode),
             "Session and Weekly go back to zero. This spends 1 of 1. Anthropic does not count one "
                 + "as needed yet and may decline it, which spends nothing.")

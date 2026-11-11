@@ -549,10 +549,28 @@ struct UsagePanelSnapshot: Equatable {
         let appliesNow: Bool
         /// How many a press is spending from, for the confirmation's arithmetic.
         let available: Int
-        /// The windows the reset puts back to zero, by the label the page gives
-        /// them, shortest first. Empty where the vendor does not say, which the
-        /// confirmation words as both.
+        /// One line per kind of reset, each with its own press, where the
+        /// vendor holds several kinds; empty for a vendor with one, whose
+        /// caption and press are the row's.
+        let grants: [GrantRow]
+    }
+
+    /// One kind of reset on the resets block.
+    struct GrantRow: Equatable {
+        let id: String
+        /// What it is called, how many are left and when it lapses:
+        /// `Fable reset · 2 · expires 9 Mar`.
+        let caption: String
+        /// The vendor's own words for it, which are too long for the line.
+        let help: String?
+        let appliesNow: Bool
+        let left: Int
+        /// The windows it puts back to zero, by the label the page gives them,
+        /// shortest first.
         let clears: [String]
+        /// The model whose use of the plan-wide weekly window it gives back,
+        /// nil for a reset that gives nothing back.
+        let givesBackWeekly: String?
     }
 
     /// An account as the provider page prints it: its name on its own line,
@@ -1182,7 +1200,63 @@ struct UsagePanelSnapshot: Equatable {
             caption: LimitResetCopy.caption(title: resets.title, expiresAt: resets.nextExpiry),
             appliesNow: resets.appliesNow,
             available: resets.available,
-            clears: resets.clears.sorted().map { UsageFormat.windowLabel(minutes: $0) })
+            grants: kinds(resets.grants).map(makeGrant))
+    }
+
+    /// The grants folded into one per kind, the way claude.ai lists them:
+    /// measured 2026-11-11, a Team account held two Fable grants of
+    /// identical shape under two labels, which it shows as `Fable reset · 2`.
+    /// A kind is what a press does, so the fold counts its grants together
+    /// and presses the one that lapses soonest, whose date the line shows.
+    static func kinds(_ grants: [LimitResetGrant]) -> [ResetKind] {
+        var folded: [ResetKind] = []
+        for grant in grants {
+            guard let index = folded.firstIndex(where: { $0.holds(grant) }) else {
+                folded.append(ResetKind(grant: grant, labels: grant.label.map { [$0] } ?? []))
+                continue
+            }
+            folded[index].absorb(grant)
+        }
+        return folded
+    }
+
+    /// One kind of reset: the grant a press spends, carrying the kind's count,
+    /// and every label its grants came under.
+    struct ResetKind: Equatable {
+        private(set) var grant: LimitResetGrant
+        private(set) var labels: [String]
+
+        func holds(_ other: LimitResetGrant) -> Bool {
+            grant.clears == other.clears && grant.givesBackWeekly == other.givesBackWeekly
+                && grant.appliesNow == other.appliesNow
+        }
+
+        mutating func absorb(_ other: LimitResetGrant) {
+            let soonest = (other.expiry ?? .distantFuture) < (grant.expiry ?? .distantFuture) ? other : grant
+            grant = LimitResetGrant(
+                id: soonest.id, left: grant.left + other.left, appliesNow: grant.appliesNow,
+                expiry: soonest.expiry, label: grant.label, clears: grant.clears,
+                givesBackWeekly: grant.givesBackWeekly)
+            if let label = other.label, !labels.contains(label) { labels.append(label) }
+        }
+    }
+
+    static func makeGrant(_ kind: ResetKind) -> GrantRow {
+        let grant = kind.grant
+        let scope = grant.clears.lazy.compactMap(\.scope).first
+        return GrantRow(
+            id: grant.id,
+            caption: LimitResetCopy.grantCaption(
+                name: LimitResetCopy.grantName(
+                    clearsPlanWeekly: grant.clears.contains(
+                        ResetWindow(minutes: UsageFormat.minutesPerWeek, scope: nil)),
+                    scope: scope, label: grant.label),
+                left: grant.left, expiresAt: grant.expiry),
+            help: kind.labels.isEmpty ? nil : kind.labels.joined(separator: "\n"),
+            appliesNow: grant.appliesNow,
+            left: grant.left,
+            clears: grant.clears.map { UsageFormat.windowLabel(minutes: $0.minutes, scope: $0.scope) },
+            givesBackWeekly: grant.givesBackWeekly ? scope : nil)
     }
 
     /// Whose credential a press on one account's entry spends: that account's

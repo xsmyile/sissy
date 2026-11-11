@@ -24,7 +24,13 @@ enum ClaudeResetGrants {
     /// The query the usage request carries to have the block filled in. The
     /// CLI pairs it with `skip_spend=1`, which would cost the credits row its
     /// `spend` block; measured 2026-10-05, the reply carries both without it.
-    static let usageQuery = URLQueryItem(name: "cedar_ember", value: "1")
+    static let usageQuery = URLQueryItem(name: queryName, value: queryValue)
+    private static let queryName = "cedar_ember"
+    private static let queryValue = "1"
+    /// The same query as claude.ai's paths spell it, which are strings.
+    /// Measured 2026-11-11, a Team account's claude.ai usage reply carries the
+    /// block with it, under `surface: claude_ai`.
+    static let usageQueryString = "\(queryName)=\(queryValue)"
     private static let statusKey = "cedar_ember"
     private static let program = "cedar_ember"
     private static let claimHost = "https://api.anthropic.com/api/organizations/"
@@ -32,22 +38,20 @@ enum ClaudeResetGrants {
     private static let betaHeader = "oauth-2025-04-20"
     private static let requestTimeout: TimeInterval = 25
 
-    /// The two window names this build draws a gauge for, to their length.
-    /// The vendor lists more (`seven_day_overage_included` among them), and
-    /// a reset clearing one the page never draws has nothing to say about it.
-    private static let windowMinutes: [String: Int] = ["five_hour": 300, "seven_day": 10_080]
+    /// The window names this build draws a gauge for, to their length.
+    private static let planWindows: [String: Int] = ["five_hour": 300, "seven_day": 10_080]
+    /// The weekly window of the one model metered on its own. Measured
+    /// 2026-11-11: a Fable reset clears this name alone, and its
+    /// `percent_used` matched the `weekly_scoped` Fable entry of `limits` to
+    /// the point, where the plan-wide weekly read 30 against 12.
+    private static let scopedWeekly = "seven_day_overage_included"
+    private static let weekMinutes = 10_080
 
     /// The shapes the CLI checks a grant id and a request id against before it
     /// sends either: `[a-z0-9_-]{1,40}` and `[A-Za-z0-9_-]{1,64}`.
     private static let grantLimit = 40
     private static let requestLimit = 64
     private static let separators: Set<Character> = ["_", "-"]
-
-    /// The resets on one reading, and the grant a press would spend.
-    struct Status: Sendable, Equatable {
-        let resets: LimitResets
-        let grantID: String
-    }
 
     /// What the vendor said to one spend, in its own words.
     enum Answer: String, Sendable, Equatable {
@@ -71,45 +75,72 @@ enum ClaudeResetGrants {
 
     /// The resets the reply offers, or nil where it offers none.
     ///
-    /// The count is every grant still in date; the caption, the expiry and the
-    /// windows cleared are the one the vendor names next, which is the one a
-    /// press spends. Whether it applies now is the grant's own word for it:
-    /// usable now, not paused, and either usable any time or the account at a
-    /// limit, which is the CLI's own reading of the same fields. An
-    /// account the vendor calls ineligible gets no row, because what it says
-    /// about why is not something the user can act on, and neither does a
-    /// grant that clears no window the page draws: nothing on it would move.
-    static func status(_ body: [String: Any], now: Date) -> Status? {
+    /// One grant per kind of reset the account holds, the one the vendor names
+    /// next first, because a press spends the grant it names and the vendor
+    /// lists a full reset beside a Fable one. Whether one applies now is the
+    /// grant's own word for it: usable now, not paused, and either usable any
+    /// time or the account at a limit, which is the CLI's own reading of the
+    /// same fields. An account the vendor calls ineligible gets no row,
+    /// because what it says about why is not something the user can act on,
+    /// and neither does a grant that moves no window the page draws.
+    static func status(_ body: [String: Any], now: Date) -> LimitResets? {
         guard let block = body[statusKey] as? [String: Any],
             block["eligible"] as? Bool == true,
-            let nextID = block["next_grant_id"] as? String,
-            let grants = block["grants"] as? [Any]
+            let listed = block["grants"] as? [Any]
         else { return nil }
-        let live = grants.compactMap { $0 as? [String: Any] }.filter { grant in
-            guard let left = count(grant["resets_left"]), left > 0 else { return false }
-            guard let endsAt = grant["ends_at"], !(endsAt is NSNull) else { return true }
-            return date(endsAt).map { $0 > now } ?? false
-        }
-        guard let next = live.first(where: { $0["id"] as? String == nextID }),
-            isGrantID(nextID)
-        else { return nil }
-        let available = live.compactMap { count($0["resets_left"]) }.reduce(0, +)
         let atLimit = block["at_limit"] as? Bool == true
-        let usable =
-            next["usable_now"] as? Bool == true && next["paused"] as? Bool != true
-            && (next["use_requires_limit"] as? Bool == false || atLimit)
-        let clears = Set(
-            (next["clears"] as? [Any])?.compactMap { ($0 as? String).flatMap { windowMinutes[$0] } }
-                ?? [])
+        let scope = scopedWeeklyModel(body)
+        let offered = listed.compactMap { raw in
+            (raw as? [String: Any]).flatMap { grant($0, atLimit: atLimit, scope: scope, now: now) }
+        }
+        guard let next = block["next_grant_id"] as? String, offered.contains(where: { $0.id == next })
+        else { return nil }
+        let grants = offered.filter { $0.id == next } + offered.filter { $0.id != next }
+        return LimitResets(
+            available: grants.map(\.left).reduce(0, +),
+            applicable: grants.filter(\.appliesNow).map(\.left).reduce(0, +),
+            nextExpiry: grants.compactMap(\.expiry).min(),
+            grants: grants)
+    }
+
+    /// One grant, or nil for one that is spent, lapsed, misshapen, or moves
+    /// nothing the page draws.
+    private static func grant(
+        _ raw: [String: Any], atLimit: Bool, scope: String?, now: Date
+    ) -> LimitResetGrant? {
+        guard let id = raw["id"] as? String, isGrantID(id),
+            let left = count(raw["resets_left"]), left > 0
+        else { return nil }
+        let expiry = date(raw["ends_at"])
+        if let endsAt = raw["ends_at"], !(endsAt is NSNull) {
+            guard let expiry, expiry > now else { return nil }
+        }
+        let names = (raw["clears"] as? [Any])?.compactMap { $0 as? String } ?? []
+        let clears = Set(names.compactMap { window(named: $0, scope: scope) }).sorted()
         guard !clears.isEmpty else { return nil }
-        return Status(
-            resets: LimitResets(
-                available: available,
-                applicable: usable ? count(next["resets_left"]) : 0,
-                nextExpiry: date(next["ends_at"]),
-                title: UsageReaderShared.sanitizedDisplayText(next["label"] as? String),
-                clears: clears),
-            grantID: nextID)
+        let givesBack = raw["gives_back_weekly"] as? Bool == true && clears.contains { $0.scope != nil }
+        let usable =
+            raw["usable_now"] as? Bool == true && raw["paused"] as? Bool != true
+            && (raw["use_requires_limit"] as? Bool == false || atLimit)
+        return LimitResetGrant(
+            id: id, left: left, appliesNow: usable, expiry: expiry,
+            label: UsageReaderShared.sanitizedDisplayText(raw["label"] as? String),
+            clears: clears, givesBackWeekly: givesBack)
+    }
+
+    private static func window(named name: String, scope: String?) -> ResetWindow? {
+        if let minutes = planWindows[name] { return ResetWindow(minutes: minutes, scope: nil) }
+        guard name == scopedWeekly, let scope else { return nil }
+        return ResetWindow(minutes: weekMinutes, scope: scope)
+    }
+
+    /// The model the reply meters a weekly window of its own for, when it
+    /// meters exactly one: the reset names that window without naming the
+    /// model, and with two of them there is no telling which it means.
+    private static func scopedWeeklyModel(_ body: [String: Any]) -> String? {
+        let models = Set(
+            ClaudeUsagePayload.windows(body).filter { $0.minutes == weekMinutes }.compactMap(\.scope))
+        return models.count == 1 ? models.first : nil
     }
 
     /// What one reply says about the account's resets, for the log: how many
@@ -126,8 +157,8 @@ enum ClaudeResetGrants {
             return "ineligible (\(reason ?? "no reason given"))"
         }
         guard let offered = status(body, now: now) else { return "no grant left that clears a window" }
-        let usable = offered.resets.applicable.map { "\($0) usable now" } ?? "usable now unknown"
-        return "\(offered.resets.available) available, " + usable
+        let usable = offered.applicable.map { "\($0) usable now" } ?? "usable now unknown"
+        return "\(offered.available) available, " + usable
     }
 
     /// Three dot-separated runs of digits, which is every version the CLI
