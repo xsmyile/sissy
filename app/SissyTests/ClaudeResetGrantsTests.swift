@@ -151,6 +151,17 @@ final class ClaudeResetGrantsTests: XCTestCase {
         XCTAssertEqual(rows[0].clears, ["Session", "Weekly", "Weekly · Fable"])
     }
 
+    /// The vendor's next grant only orders the list, so a reply naming one
+    /// this build drops still shows the others.
+    func testANextGrantThatIsDroppedLeavesTheOthers() throws {
+        var body = fullAndFable()
+        var block = try XCTUnwrap(body["cedar_ember"] as? [String: Any])
+        block["next_grant_id"] = "gone"
+        body["cedar_ember"] = block
+        let resets = try XCTUnwrap(ClaudeResetGrants.status(body, now: Self.now))
+        XCTAssertEqual(resets.grants.map(\.id), ["launch-2610-fable", "full-reset-2611"])
+    }
+
     /// With two models metered on their own there is no telling which one a
     /// reset of `seven_day_overage_included` means, so it clears nothing the
     /// page can name.

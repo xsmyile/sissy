@@ -77,7 +77,8 @@ enum ClaudeResetGrants {
     ///
     /// One grant per kind of reset the account holds, the one the vendor names
     /// next first, because a press spends the grant it names and the vendor
-    /// lists a full reset beside a Fable one. Whether one applies now is the
+    /// lists a full reset beside a Fable one. The next grant only orders the
+    /// list: one this build drops, or none named, leaves the others standing. Whether one applies now is the
     /// grant's own word for it: usable now, not paused, and either usable any
     /// time or the account at a limit, which is the CLI's own reading of the
     /// same fields. An account the vendor calls ineligible gets no row,
@@ -93,9 +94,9 @@ enum ClaudeResetGrants {
         let offered = listed.compactMap { raw in
             (raw as? [String: Any]).flatMap { grant($0, atLimit: atLimit, scope: scope, now: now) }
         }
-        guard let next = block["next_grant_id"] as? String, offered.contains(where: { $0.id == next })
-        else { return nil }
+        let next = block["next_grant_id"] as? String
         let grants = offered.filter { $0.id == next } + offered.filter { $0.id != next }
+        guard !grants.isEmpty else { return nil }
         return LimitResets(
             available: grants.map(\.left).reduce(0, +),
             applicable: grants.filter(\.appliesNow).map(\.left).reduce(0, +),
