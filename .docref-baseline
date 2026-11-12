@@ -21,6 +21,7 @@ IgnoreSelf
 LSUIElement
 M
 Material.bar
+NSApp.isActive
 NSPanel
 NSWorkspace.runningApplications
 Optional
@@ -31,6 +32,7 @@ RawRepresentable
 Responses
 RunAtLoad
 SIGTERM
+SettingsLink
 SuspendingClock
 UV_CACHE_DIR
 UserDefaults
@@ -40,6 +42,8 @@ argc
 argv
 caffeinate
 commitComments
+didBecomeActive
+didBecomeKey
 getcwd
 getifaddrs
 gistComments
@@ -53,6 +57,7 @@ onDisappear
 perTurnEffort
 repositoryDiscussionComments
 restrictedContributionsCount
+simultaneousGesture
 sizeThatFits
 statfs
 systemRed

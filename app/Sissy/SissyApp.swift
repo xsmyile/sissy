@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// The `Settings` scene is the app's only window: using the system scene
 /// rather than a hand-built one is what supplies the toolbar-tab chrome and
-/// the ⌘, shortcut. The usage panel's footer opens it through `SettingsLink`.
+/// the ⌘, shortcut. The usage panel opens it through `SettingsActivation`.
 /// `AppDelegate` only bootstraps the runtime objects.
 @main
 struct SissyApp: App {

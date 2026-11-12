@@ -1155,14 +1155,16 @@ struct UsagePanelView: View {
     /// that mean different things in the same place is how a header stops
     /// being read.
     ///
-    /// `SettingsLink` is the only public way to open the `Settings` scene and
-    /// it takes no action closure, so the simultaneous gesture is what aims
-    /// the window at a tab.
+    /// A `Button` rather than `SettingsLink`, because the window has to wait
+    /// for Sissy to be active before it is shown: `SettingsActivation` says
+    /// why, and a link takes no action to make it wait.
     ///
     /// An outline like the cup beside it, which is the one sized to match it,
     /// because its steam leaves less ink per point.
     private var settingsButton: some View {
-        SettingsLink {
+        Button {
+            openSettingsTab(.general)
+        } label: {
             Image(Glyph.settings01)
                 .font(.system(size: 12))
                 .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
@@ -1173,7 +1175,6 @@ struct UsagePanelView: View {
         .glassEffect(.regular.interactive(), in: .circle)
         .help("Settings")
         .accessibilityLabel("Settings")
-        .simultaneousGesture(TapGesture().onEnded { model.settingsTab = .general })
     }
 
     /// The three modes as a radio group, which is what an inline `Picker` in a
@@ -1191,8 +1192,8 @@ struct UsagePanelView: View {
     /// still offers none of it, for the reason `StatusItemController.buildMenu`
     /// gives.
     ///
-    /// `openSettings` rather than `SettingsLink`, which cannot be aimed at a
-    /// tab from inside a menu: `AboutCommand` records why.
+    /// The way to the tab goes through `presentSettings`, like the gear's, so
+    /// the window opens in an active app: `SettingsActivation` records why.
     ///
     /// Both read what the model reports rather than a `@State` copy: the
     /// engine can move the mode on its own, when a manual hold reaches its
@@ -1217,14 +1218,19 @@ struct UsagePanelView: View {
 
     private func openSettingsTab(_ tab: SettingsTab) {
         model.settingsTab = tab
-        openSettings()
+        presentSettings()
+    }
+
+    private func presentSettings() {
+        let openSettings = openSettings
+        SettingsActivation.open { openSettings() }
     }
 
     private var keepAwakeWithLidClosedBinding: Binding<Bool> {
         Binding(
             get: { model.engine.keepAwakeWithLidClosed },
             set: { enabled in
-                if model.setKeepAwakeWithLidClosed(enabled) { openSettings() }
+                if model.setKeepAwakeWithLidClosed(enabled) { presentSettings() }
             }
         )
     }
