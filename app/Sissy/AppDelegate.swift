@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let button = statusController?.statusButton else { return }
             panelController?.toggle(relativeTo: button)
         }
+        SettingsActivation.onFinished = { [weak self] in self?.syncActivationPolicy() }
         onReopen = { [weak statusController, weak panelController] in
             guard let button = statusController?.statusButton else { return }
             panelController?.show(relativeTo: button)
@@ -117,12 +118,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The guard above is what keeps this from stealing focus: the activation
     /// only ever runs on the transition into `.regular`, never on the
     /// notifications that find the policy already correct.
+    ///
+    /// It also stands aside while `SettingsActivation` is opening the window,
+    /// which has promoted the app before any window exists; that type runs
+    /// this again once it is done.
     private func syncActivationPolicy() {
         let hasWindow = NSApp.windows.contains { window in
             window.isVisible && window.canBecomeMain
         }
         let desired: NSApplication.ActivationPolicy = hasWindow ? .regular : .accessory
-        guard NSApp.activationPolicy() != desired else { return }
+        guard NSApp.activationPolicy() != desired, !SettingsActivation.isOpening else { return }
         NSApp.setActivationPolicy(desired)
         if desired == .regular {
             NSApp.activate()
