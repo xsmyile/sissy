@@ -266,10 +266,10 @@ struct PanelProviderPage: View {
                         accountPicker
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    if let inUse = ClaudeAccountCopy.inUseCaption(
+                    if let open = ClaudeAccountCopy.openSessionsCaption(
                         sessions: shown.runningSessions)
                     {
-                        identityCaption(inUse)
+                        identityCaption(open)
                     }
                     if let notice = row.accountsNotice {
                         identityCaption(notice)
