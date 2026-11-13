@@ -789,16 +789,16 @@ final class ClaudeRunningRowsTests: XCTestCase {
         XCTAssertEqual(entries(rows).first { $0.id == "cached" }?.isReadable, true)
     }
 
-    func testTheMenuLabelSaysInUseOnlyWithSessions() {
+    func testTheMenuLabelCountsOpenSessionsOnlyWithSome() {
         XCTAssertEqual(ClaudeAccountCopy.menuLabel("Acme", sessions: 0), "Acme")
-        XCTAssertEqual(ClaudeAccountCopy.menuLabel("Acme", sessions: 1), "Acme · in use · 1 session")
-        XCTAssertEqual(ClaudeAccountCopy.menuLabel("Acme", sessions: 8), "Acme · in use · 8 sessions")
+        XCTAssertEqual(ClaudeAccountCopy.menuLabel("Acme", sessions: 1), "Acme · 1 session open")
+        XCTAssertEqual(ClaudeAccountCopy.menuLabel("Acme", sessions: 8), "Acme · 8 sessions open")
     }
 
     func testTheCaptionIsAbsentWithoutSessions() {
-        XCTAssertNil(ClaudeAccountCopy.inUseCaption(sessions: 0))
-        XCTAssertEqual(ClaudeAccountCopy.inUseCaption(sessions: 1), "In use · 1 session")
-        XCTAssertEqual(ClaudeAccountCopy.inUseCaption(sessions: 3), "In use · 3 sessions")
+        XCTAssertNil(ClaudeAccountCopy.openSessionsCaption(sessions: 0))
+        XCTAssertEqual(ClaudeAccountCopy.openSessionsCaption(sessions: 1), "1 session open")
+        XCTAssertEqual(ClaudeAccountCopy.openSessionsCaption(sessions: 3), "3 sessions open")
     }
 
     // MARK: The row itself
@@ -850,7 +850,7 @@ final class ClaudeRunningRowsTests: XCTestCase {
         XCTAssertNotNil(row.reading.windowsCaption)
         XCTAssertEqual(row.reading.runningSessions, 2)
         XCTAssertEqual(
-            ClaudeAccountCopy.inUseCaption(sessions: row.reading.runningSessions), "In use · 2 sessions")
+            ClaudeAccountCopy.openSessionsCaption(sessions: row.reading.runningSessions), "2 sessions open")
         XCTAssertEqual(made.gaugeRows.first?.reading.windows.map(\.percent), [61])
     }
 

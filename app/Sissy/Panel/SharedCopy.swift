@@ -14,20 +14,21 @@ enum ClaudeAccountCopy {
         "Sissy could not read its list of saved accounts and kept it aside, so some may be "
         + "missing here · they come back as each one signs in"
 
-    /// How many running sessions are on an account.
+    /// How many sessions are open on an account, whether or not one is
+    /// working: the count is of running processes.
     static func sessions(_ count: Int) -> String {
-        UsageFormat.agentCount(count, singular: "session", plural: "sessions")
+        UsageFormat.agentCount(count, singular: "session", plural: "sessions") + " open"
     }
 
-    /// An account in the account menu, which says which ones are in use.
+    /// An account in the account menu, which says which ones have sessions open.
     static func menuLabel(_ label: String, sessions count: Int) -> String {
-        count > 0 ? "\(label) · in use · \(sessions(count))" : label
+        count > 0 ? "\(label) · \(sessions(count))" : label
     }
 
     /// Said under the identity of the account being viewed, nil while no
     /// session is on it.
-    static func inUseCaption(sessions count: Int) -> String? {
-        count > 0 ? "In use · \(sessions(count))" : nil
+    static func openSessionsCaption(sessions count: Int) -> String? {
+        count > 0 ? sessions(count) : nil
     }
 }
 
