@@ -757,13 +757,26 @@ struct UsagePanelView: View {
         .padding(.vertical, Self.headerVerticalPadding)
     }
 
+    /// A glyph in one of the header's round controls, sized by a frame rather
+    /// than a font.
+    ///
+    /// A font places a symbol by its own margins and baseline, which land it
+    /// half a point off inside the circle: invisible on Retina, a whole pixel
+    /// off centre on a 1x display. An even side inside the even circle keeps
+    /// the glyph's origin on a whole point at either scale.
+    private func controlGlyph(_ glyph: Glyph, side: CGFloat) -> some View {
+        Image(glyph)
+            .resizable()
+            .scaledToFit()
+            .frame(width: side, height: side)
+            .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+    }
+
     /// The re-read at the end of a header, on glass beside the page's title
     /// like the home header's switches.
     private func refreshButton(help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(Glyph.refresh01)
-                .font(.system(size: 11))
-                .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+            controlGlyph(.refresh01, side: 12)
                 .contentShape(.circle)
         }
         .buttonStyle(.plain)
@@ -860,9 +873,7 @@ struct UsagePanelView: View {
         return Button {
             page = .calendar
         } label: {
-            Image(Glyph.calendar03)
-                .font(.system(size: 12))
-                .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+            controlGlyph(.calendar03, side: 14)
                 .foregroundStyle(picked ? Color.accentColor : Color.secondary)
                 .contentShape(.circle)
         }
@@ -1118,9 +1129,7 @@ struct UsagePanelView: View {
         Menu {
             keepAwakeMenu
         } label: {
-            Image(Glyph.coffee02)
-                .font(.system(size: 14))
-                .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+            controlGlyph(.coffee02, side: 16)
                 .foregroundStyle(state.mode == .off ? Color.secondary : Color.blue)
                 .contentShape(.circle)
         } primaryAction: {
@@ -1165,9 +1174,7 @@ struct UsagePanelView: View {
         Button {
             openSettingsTab(.general)
         } label: {
-            Image(Glyph.settings01)
-                .font(.system(size: 12))
-                .frame(width: Self.controlButtonSize, height: Self.controlButtonSize)
+            controlGlyph(.settings01, side: 14)
                 .foregroundStyle(.secondary)
                 .contentShape(.circle)
         }
